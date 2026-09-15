@@ -213,7 +213,14 @@ that means for whoever you hand a build to:
   itself done. Without the certificate the bundle is ad-hoc signed
   (required on Apple silicon, where an unsigned binary is refused
   outright) and Gatekeeper asks once; without the profile it is signed
-  but not notarised, and the build warns. Notarisation takes a few
+  but not notarised, and the build warns. **The profile can be
+  unreachable for a stretch** — "No Keychain password item found for
+  profile: vd-notary", from the foreground too, with nothing changed
+  here, twice on 2026-09-12 and 2026-09-15, both times answering again
+  within the hour; the login keychain locking is the likely cause.
+  Retry before concluding anything, and notarise the images the build
+  left behind by hand (`xcrun notarytool submit … --wait`, then
+  `xcrun stapler staple`) rather than rebuilding. Notarisation takes a few
   minutes per submission, twice per image.
 - **Windows** — SmartScreen warns until the signature earns
   reputation. **The plan is SignPath Foundation** (Brandon,

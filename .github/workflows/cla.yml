@@ -42,6 +42,11 @@ jobs:
         with:
           path-to-document: 'https://github.com/visualdynamics/visualdynamics/blob/main/CLA.md'
           path-to-signatures: 'signatures/cla.json'
+          # the branch has to exist before the first pull request: the
+          # action records signatures on it and fails outright, before
+          # consulting the allowlist, when it is not there — which is
+          # what the first gated pull request met (2026-09-15). Made
+          # once, as an orphan holding an empty signatures/cla.json.
           branch: 'cla-signatures'
           allowlist: 'bzwink,dependabot[bot]'
           custom-notsigned-prcomment: >-

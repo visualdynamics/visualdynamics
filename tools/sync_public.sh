@@ -10,6 +10,11 @@
 # it to merge itself when the checks pass — then waits, and reports.
 # A red run leaves the pull request open with the failure on it; fix
 # here, run this again, and the new sync lands on the same branch.
+#
+# One-time settings on the repository this leans on: auto-merge
+# enabled (`gh repo edit --enable-auto-merge` — the first run stopped
+# at "Auto merge is not allowed", 2026-09-15) and rebase merges
+# allowed, so the sync commit lands as itself on a linear main.
 set -e
 cd "$(dirname "$0")/.."
 CLONE="$HOME/visualdynamics-shared"

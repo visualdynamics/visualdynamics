@@ -151,8 +151,11 @@ happens on its own once 6 is done.
    package), the README's licence badge
    follows, and `CLA.md` is published beside `CONTRIBUTING.md`, which
    already names it. Commit.
-4. Sync the shared repository from this tree
-   (`tools/build_public_tree.py <clone> --sync`) and review. Then
+4. Sync the shared repository from this tree — `tools/sync_public.sh
+   "<title>"`, which opens a pull request that merges itself once CI
+   is green; the public `main` takes no direct push, the owner
+   included (2026-09-14) — and review. (The first release's step
+   was:) Then
    **start its history over**: the syncs before release day were
    rehearsals, and the August ones carry wording since removed. In
    the clone, `git checkout --orphan release`, commit everything as

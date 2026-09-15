@@ -43,6 +43,13 @@ fi
 gh pr merge "$branch" --repo "$REPO" --auto --rebase --delete-branch > /dev/null
 url=$(gh pr view "$branch" --repo "$REPO" --json url -q .url)
 echo "pull request $url — waiting on the checks"
+# the checks take a moment to be reported after the pull request opens,
+# and --watch on a pull request with none yet answers "no checks
+# reported" and fails (the second gated sync, 2026-09-15)
+for i in $(seq 1 30); do
+    gh pr checks "$branch" --repo "$REPO" > /dev/null 2>&1 && break
+    sleep 10
+done
 gh pr checks "$branch" --repo "$REPO" --watch --fail-fast > /dev/null || {
     echo "a check failed — the pull request stays open: $url" >&2; exit 1; }
 # GitHub merges on its own once the checks are green; wait for it

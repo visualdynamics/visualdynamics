@@ -32,12 +32,43 @@ if [[ -z $SIGN ]]; then
   SIGN=$(security find-identity -v -p codesigning 2>/dev/null |
          sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
 fi
+# How notarytool is told who we are, in order of preference:
+#
+# 1. A login-keychain item named NOTARY_ITEM (default vd-notary-password)
+#    holding the app-specific password, with the Apple ID as its
+#    account — made once with `security add-generic-password` (see
+#    packaging/README.md, "Signing"). An ordinary keychain item, so a
+#    script reads it without a prompt for as long as the login keychain
+#    is unlocked, which it is whenever Brandon is logged in.
+# 2. The notarytool profile NOTARY_PROFILE (default vd-notary), which
+#    `notarytool store-credentials` keeps in the *data-protection*
+#    keychain under the com.apple.gke.notary access group. macOS opens
+#    that only to an unlocked user session: from an agent's shell it
+#    answered "No Keychain password item found" for hours at a time and
+#    came back the moment Brandon touched it from his own Terminal
+#    (2026-09-12 to 09-15), which is why the item above exists.
 NOTARY_PROFILE=${NOTARY_PROFILE:-vd-notary}
+NOTARY_ITEM=${NOTARY_ITEM:-vd-notary-password}
+NOTARY_TEAM=${NOTARY_TEAM:-2542NQ9D95}
+NOTARY=()
+notary_args() {
+  local account password
+  if password=$(security find-generic-password -s "$NOTARY_ITEM" -w 2>/dev/null) \
+      && [[ -n $password ]]; then
+    account=$(security find-generic-password -s "$NOTARY_ITEM" 2>/dev/null |
+              sed -n 's/.*"acct"<blob>="\(.*\)"/\1/p')
+    NOTARY=(--apple-id "$account" --team-id "$NOTARY_TEAM" --password "$password")
+    echo "notarising as $account (login-keychain item $NOTARY_ITEM)"
+  else
+    NOTARY=(--keychain-profile "$NOTARY_PROFILE")
+  fi
+}
 notary_ready() {
-  # the profile is a keychain item notarytool made; asking it for its
-  # history is the one check that proves the credentials still work
-  [[ -n $SIGN ]] && xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" \
-    >/dev/null 2>&1
+  # asking for the submission history is the one check that proves the
+  # credentials still work
+  [[ -n $SIGN ]] || return 1
+  notary_args
+  xcrun notarytool history "${NOTARY[@]}" >/dev/null 2>&1
 }
 
 rm -rf build dist
@@ -73,14 +104,14 @@ if [[ -n $SIGN ]]; then
     # which fails offline
     ZIP="dist/notarize-$$.zip"
     ditto -c -k --keepParent "$APP" "$ZIP"
-    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" \
-      --wait | tail -3
+    xcrun notarytool submit "$ZIP" "${NOTARY[@]}" --wait | tail -3
     rm -f "$ZIP"
     xcrun stapler staple -q "$APP"
     spctl --assess --type execute -v "$APP"
   else
-    echo "warning: signed but not notarised — no notarytool profile" \
-         "'$NOTARY_PROFILE' in the keychain (packaging/README.md)" >&2
+    echo "warning: signed but not notarised — neither the login-keychain" \
+         "item '$NOTARY_ITEM' nor the notarytool profile '$NOTARY_PROFILE'" \
+         "answers (packaging/README.md, Signing)" >&2
   fi
 else
   # An ad-hoc signature, which is not a real one: it makes the bundle
@@ -138,8 +169,7 @@ if [[ -n $SIGN ]]; then
   # still draws the warning
   codesign --force --timestamp --sign "$SIGN" "$DMG"
   if notary_ready; then
-    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" \
-      --wait | tail -3
+    xcrun notarytool submit "$DMG" "${NOTARY[@]}" --wait | tail -3
     xcrun stapler staple -q "$DMG"
     spctl --assess --type open --context context:primary-signature -v "$DMG"
     echo "notarised and stapled"

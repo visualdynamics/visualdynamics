@@ -216,15 +216,31 @@ that means for whoever you hand a build to:
   but not notarised, and the build warns. **The profile can be
   unreachable for a stretch** — "No Keychain password item found for
   profile: vd-notary", from the foreground too, with nothing changed
-  here — and settled on 2026-09-15: the message means **the login
-  keychain is locked**. An agent's session cannot unlock it (that takes
-  the login password), and it locks again soon after; Brandon running
-  `xcrun notarytool history --keychain-profile vd-notary` in his own
-  Terminal unlocks it, after which a submission from any session goes
-  through for a while. So when a build says "not notarised": Brandon
-  runs that one line, then `xcrun notarytool submit … --wait` and
-  `xcrun stapler staple` on the images the build left behind, one
-  image at a time while it still answers — rather than rebuilding. Notarisation takes a few
+  here — and settled on 2026-09-15: `notarytool store-credentials`
+  keeps the profile in the **data-protection keychain**, under the
+  `com.apple.gke.notary` access group (Keychain Access shows it as
+  "cannot be edited"), and macOS opens that only to an unlocked user
+  session. An agent's shell is not one; Brandon touching the profile
+  from his own Terminal (`xcrun notarytool history --keychain-profile
+  vd-notary`) opens it for a while. **The way round it, so a build
+  needs nobody**: keep the app-specific password as an ordinary
+  login-keychain item, which `build_macos.sh` prefers when it exists
+  (`NOTARY_ITEM`, default `vd-notary-password`; the Apple ID is the
+  item's account, the team is `NOTARY_TEAM`). Made once, by Brandon,
+  with the password typed at the prompt rather than on the command
+  line:
+
+  ```
+  security add-generic-password -a bzwink@gmail.com -s vd-notary-password \
+      -T /usr/bin/security -T "$(xcrun --find notarytool)" -U
+  ```
+
+  (the `-T`s let the build read it without a prompt; the login
+  keychain has no timeout and does not lock on sleep, so it answers
+  whenever Brandon is logged in). Without the item the script falls
+  back to the profile, and when neither answers it says so and leaves
+  the images signed: notarise those by hand rather than rebuilding —
+  `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarisation takes a few
   minutes per submission, twice per image.
 - **Windows** — SmartScreen warns until the signature earns
   reputation. **The plan is SignPath Foundation** (Brandon,

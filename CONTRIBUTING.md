@@ -21,10 +21,13 @@ to community contributions later; it starts small — a person or two,
 by conversation — while the project finds its footing in other
 people's hands.
 
-Working with an AI assistant? [`AGENTS.md`](AGENTS.md) is the same
-set of rules in the form an agent reads first — the hard rules, the
-gate, the verification discipline — and it is what any such tool
-should be pointed at before it touches the tree.
+How the package is put together, and the conventions a change is
+expected to keep — the layers, the one-workflow rule, the docstring
+standard, the test conventions, the tests that hold the rules — is
+[`docs/architecture.md`](docs/architecture.md). Working with an AI
+assistant? [`AGENTS.md`](AGENTS.md) is the same set of rules in the
+form an agent reads first, and it is what any such tool should be
+pointed at before it touches the tree.
 
 Three things any contributed code has to satisfy:
 
@@ -39,13 +42,14 @@ Three things any contributed code has to satisfy:
 - **It has to be yours to give.** Your own work, not something an
   employer already has a claim on, and carrying no third-party code
   with obligations of its own.
-- **No code from sdynpy, rattlesnake or forcefinder.** They are
-  GPL-3.0, and taking their code would put lines in the tree that the
-  Project does not own — the licences would be compatible and the
-  ownership would not be, and that can never be undone. Their file
-  formats and published methods may be reimplemented; their code may
-  not be copied. `tests/test_licence_boundary.py` checks this on
-  every run.
+- **No code from any package whose licence would restrict the
+  Project's licensing.** Copyleft code in particular: taking it would
+  put lines in the tree that the Project does not own — the licences
+  would be compatible and the ownership would not be, and that can
+  never be undone. File formats and published methods may be
+  reimplemented; code may not be copied or derived from.
+  `tests/test_licence_boundary.py` checks this on every run for the
+  packages the Project is closest to.
 
 Help that is not code counts too, and is recorded in
 [`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md) — thanks rather than a

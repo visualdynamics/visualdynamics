@@ -3,10 +3,13 @@
 This file is for any AI assistant — Claude, or anything else that
 reads `AGENTS.md` — working in a checkout of the public Visual
 Dynamics repository. Read it, then **`CONTRIBUTING.md`** (how a
-change reaches the project) and **`PRINCIPLES.md`** (the thirteen
-principles a change is measured against), before doing real work.
-The guides under `docs/` say what the application does; the
-docstrings are the API reference.
+change reaches the project), **`PRINCIPLES.md`** (the thirteen
+principles a change is measured against) and
+**`docs/architecture.md`** (the package by layer, the one-workflow
+rule, the docstring standard, the test conventions and the ratchet
+tests that hold them), before doing real work. The guides under
+`docs/` say what the application does; the docstrings are the API
+reference.
 
 ## What this is
 
@@ -30,17 +33,20 @@ project file — provisional for the alpha, as the README says.
 These are not preferences. Each one exists because breaking it costs
 something that cannot be bought back.
 
-1. **No code copied from sdynpy, rattlesnake or forcefinder.** All
-   three are GPL-3.0. Under this project's own GPL an import would be
-   *legal* — and it would put GPL code the project does not own into
-   the tree, which ends every licensing option the owner keeps. The
-   package must never import them; `tests/test_licence_boundary.py`
-   enforces it by AST walk on every run, and walks `tests/` too. Read
-   them to understand a method; write the method here yourself. No
-   derived code either: never subclass their classes, even in code
-   that is never distributed. Their *numbers* may be compared against
-   as frozen data (a GPL program's output is not a covered work);
-   their code may not travel here.
+1. **No code from any package whose licence would restrict this
+   project's licensing.** Copyleft code — GPL, AGPL, however
+   compatible with this project's own GPL — must never be imported,
+   copied, or derived from (subclassing is deriving, even in code
+   that is never distributed). Under this project's GPL an import
+   would be *legal*; it would also put lines in the tree that the
+   project does not own, which ends every licensing option the owner
+   keeps, and that cannot be undone. Read such a package to
+   understand a method; write the method here yourself. Its
+   *numbers* may be compared against as frozen data (a program's
+   output is not a covered work); its code may not travel here.
+   `tests/test_licence_boundary.py` enforces the rule by AST walk on
+   every run, `tests/` included, for the packages this project is
+   closest to.
 
 2. **Nothing lands without the maintainer.** The public `main`
    accepts no direct push from anyone. A change arrives as a pull

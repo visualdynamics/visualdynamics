@@ -2169,15 +2169,18 @@ def plot_scalogram(history: Any, channel: int = 0, *,
         raise ValueError('no frequencies this record can carry in that '
                          f'range; it reaches {rate / 2.0:g} Hz')
     width = wavelet_maths.OMEGA0 if omega0 is None else omega0
-    magnitude = np.abs(wavelet_maths.scalogram(values, rate, frequencies,
-                                               width))
+    # held to a picture's width, each column its slice's peak — the
+    # app's own reading, and the one a long record survives
+    clock, magnitude = wavelet_maths.scalogram_peaks(
+        values, rate, frequencies, width)
+    clock = clock + float(history.abscissa[0])
     colors = resolve_theme(theme)
 
     def build(widget: Any) -> Any:
         widget.clear()
         scalogram_image(
-            widget.addPlot(row=0, col=0), magnitude,
-            np.asarray(history.abscissa), frequencies, colors,
+            widget.addPlot(row=0, col=0), magnitude, clock, frequencies,
+            colors,
             label=history.ordinate_dim[channel],
             units=history.ordinate_unit[channel] or '', omega0=width)
 

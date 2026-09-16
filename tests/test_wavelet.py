@@ -422,3 +422,90 @@ def test_the_reading_is_honest_close_to_nyquist(fraction):
         np.argmin(np.abs(grid - frequency))]
     centre = (t * row).sum() / row.sum()
     assert centre == pytest.approx(at, abs=0.005), 'when it happened'
+
+
+# ---- a long record: bounded memory, and a picture-sized reading ---------
+
+
+def test_the_peak_reading_is_the_full_transform_where_it_fits():
+    """Under the column budget the reading *is* the magnitude — a
+    small record's amplitudes are drawn exactly, as they always were."""
+    record = tone(100.0, count=4096)
+    frequencies = grid_about(100.0, per_octave=12)
+    times, held = w.scalogram_peaks(record, RATE, frequencies, columns=4096)
+    full = np.abs(w.scalogram(record, RATE, frequencies))
+    assert held.shape == full.shape
+    np.testing.assert_allclose(held, full, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(times, seconds(4096))
+
+
+def test_the_peak_reading_keeps_each_bins_largest_magnitude():
+    """Past the budget, every column is the *largest* magnitude in its
+    slice of time: a stride would land between the samples a burst
+    lives in, and a mean would halve it."""
+    record = np.zeros(8192)
+    record[3000:3010] = 1.0   # ten samples: a stride of 32 mostly misses it
+    frequencies = grid_about(200.0, octaves=0.5, per_octave=12)
+    full = np.abs(w.scalogram(record, RATE, frequencies))
+    times, held = w.scalogram_peaks(record, RATE, frequencies, columns=256)
+    assert held.shape == (len(frequencies), 256)
+    assert times.shape == (256,)
+    expected = full.reshape(len(frequencies), 256, 32).max(axis=2)
+    np.testing.assert_allclose(held, expected, rtol=1e-12, atol=1e-12)
+    # each column's clock is the centre of its slice, so the first and
+    # last columns sit half a slice inside the record's ends
+    np.testing.assert_allclose(times[0], 15.5 / RATE)
+    np.testing.assert_allclose(times[-1], (8192 - 16.5) / RATE)
+    assert held.max() == pytest.approx(full.max()), 'the burst survives'
+
+
+def test_a_ragged_last_slice_is_kept_not_dropped():
+    record = np.zeros(1000)
+    record[995] = 1.0    # in the short final slice
+    frequencies = grid_about(200.0, octaves=0.5, per_octave=12)
+    full = np.abs(w.scalogram(record, RATE, frequencies))
+    _times, held = w.scalogram_peaks(record, RATE, frequencies, columns=300)
+    assert held.shape[1] == 250, '1000 samples in slices of 4'
+    np.testing.assert_allclose(held[:, -1], full[:, 996:].max(axis=1))
+
+
+def test_the_transform_never_holds_every_scale_at_once(monkeypatch):
+    """The whole point of the band budget: a five-minute record at
+    16 kHz is 121 scales of 4.9M complex samples, three of them alive at
+    once in the one-shot form — 27 GB, which is the crash Brandon saw.
+    Pinned with tracemalloc, which sees numpy's allocations: the peak
+    must stay under what one band plus the answer costs, not what every
+    scale at once would."""
+    import tracemalloc
+
+    from scipy.fft import next_fast_len
+
+    record = tone(100.0, count=32768)
+    frequencies = w.log_frequencies(4.0, 900.0, 12)
+    scales = w.scale_for(frequencies)
+    margin = int(np.ceil(np.sqrt(2.0) * scales.max() * RATE))
+    length = next_fast_len(record.size + 2 * margin)
+    one_shot = 3 * len(frequencies) * length * 16   # daughters, product, ifft
+
+    monkeypatch.setattr(w, 'BAND_BYTES', 2 * length * 16)   # two rows a band
+    tracemalloc.start()
+    try:
+        held = w.scalogram_peaks(record, RATE, frequencies, columns=512)[1]
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert held.shape == (len(frequencies), 512)
+    assert peak < one_shot / 4, (
+        f'peak {peak / 2**20:.0f} MB against {one_shot / 2**20:.0f} MB '
+        f'for the one-shot form')
+
+
+def test_a_band_boundary_does_not_change_the_answer(monkeypatch):
+    """The bands are scaffolding: however the scales are cut, the
+    coefficients are the ones the one-shot form gave."""
+    record = tone(100.0, count=4096) + 0.5 * tone(300.0, count=4096)
+    frequencies = w.log_frequencies(50.0, 600.0, 12)
+    whole = w.scalogram(record, RATE, frequencies)
+    monkeypatch.setattr(w, 'BAND_BYTES', 1)   # one row a band
+    banded = w.scalogram(record, RATE, frequencies)
+    np.testing.assert_allclose(banded, whole, rtol=1e-12, atol=1e-12)

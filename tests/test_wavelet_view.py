@@ -368,3 +368,52 @@ def test_the_editor_offers_the_scalogram_a_channel_choice(qt_app):
     editor._operate({'op': 'field', 'at': 0, 'field': 'channel',
                      'value': '104Z+'})
     assert report.blocks[0]['channel'] == '104Z+'
+
+
+# ---- a long record is drawn at a picture's width, never at its own ----
+
+
+def test_the_surface_is_held_to_the_column_budget(showing):
+    """A five-minute record at 16 kHz is 121 rows of 4.9M columns, and
+    building that as a surface is what crashed the app (Brandon,
+    2026-09-15: the flat picture drew, the 3-D one died). The fixture is
+    129 024 samples — already thirty times the budget — so the mesh's
+    vertex count is the pin: rows times `COLUMNS`, not rows times
+    samples."""
+    from visualdynamics.core.wavelet import COLUMNS
+
+    window, history = showing
+    samples = len(history.abscissa)
+    assert samples > COLUMNS, 'the fixture is over budget'
+    actor = window.data_pane.waterfall_plotter.renderer.actors['scalogram']
+    n_points = actor.mapper.dataset.n_points
+    columns = held_columns(samples)
+    rows = n_points / columns
+    assert rows == int(rows) and 10 < rows < 200, (
+        f'{n_points} vertices is not rows x {columns}')
+
+
+def held_columns(samples):
+    """What `scalogram_peaks` holds `samples` to: equal slices of the
+    smallest whole-sample width that fits the budget — at most
+    `COLUMNS`, and a little under it when the slices do not divide."""
+    from visualdynamics.core.wavelet import COLUMNS
+
+    step = -(-samples // COLUMNS)
+    return -(-samples // step)
+
+
+def test_the_flat_picture_is_held_to_the_column_budget(window, pump):
+    from visualdynamics.core.wavelet import COLUMNS
+
+    looking_at(window, pump)
+    window.data_pane.wavelet_action.trigger()
+    window.data_pane.waterfall_action.trigger()
+    pump()
+    plot = window.data_pane.graphics.getItem(0, 0)
+    images = [item for item in plot.items
+              if type(item).__name__ == 'ImageItem']
+    assert len(images) == 1
+    samples = len(window.objects['Time History'].abscissa)
+    assert images[0].image.shape[0] == held_columns(samples) <= COLUMNS, (
+        'time across, held')

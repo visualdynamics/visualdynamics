@@ -112,6 +112,25 @@ OMEGA0 = 6.0
 #: looks continuous without computing scales nobody can see apart.
 PER_OCTAVE = 12
 
+#: bytes one band of the transform may hold in each of its working
+#: arrays. The one-shot form keeps three arrays of (scales, padded
+#: length) complex values alive at once — the daughters, their product
+#: with the spectrum, and the inverse — and on a five-minute record at
+#: 16 kHz that is 121 rows of 4.9M samples, 27 GB, which is how the
+#: desktop app died (Brandon, 2026-09-15). Cut into bands of rows that
+#: fit this budget, the peak is three of these plus the answer,
+#: whatever the record's length; the rows are independent, so the
+#: cut costs nothing but the loop. 256 MB is 3.4M samples a row on
+#: complex128: a minute at 16 kHz is still one band.
+BAND_BYTES = 256 * 2**20
+
+#: columns a picture-sized reading holds time to. A screen is a few
+#: thousand pixels across and a surface of this width is half a million
+#: vertices at the default grid — the 3-D stage's own budget is ten
+#: million — so nothing a reader could see is lost, and a five-minute
+#: record arrives as 60 KB rather than 4 GB.
+COLUMNS = 4096
+
 
 def fourier_factor(omega0: float = OMEGA0) -> float:
     """Seconds of Fourier period per second of wavelet scale.
@@ -199,6 +218,14 @@ def scalogram(values: ArrayLike, sample_rate: float,
     the record's FFT and one inverse, rather than a convolution per
     scale in time.
 
+    Computed a band of scales at a time (`BAND_BYTES`), because every
+    scale at once is three arrays of (scales, padded length) complex
+    values and a long record turns that into tens of gigabytes. The
+    answer here is still the whole thing — one complex row per
+    frequency, as long as the record — which for a long record is
+    itself gigabytes; a picture wants `scalogram_peaks`, which reduces
+    each band as it lands and never holds the whole.
+
     Normalised so that **the magnitude is the record's own amplitude**:
     a 2 g tone reads 2 wherever it sits on the frequency axis, so the
     colour bar carries the record's units and a ridge's height means
@@ -238,8 +265,69 @@ def scalogram(values: ArrayLike, sample_rate: float,
         nothing to keep and a ridge's phase is what an instantaneous
         frequency would be read from.
     """
-    from scipy.fft import fft, ifft, next_fast_len
+    record, wanted, samples = _prepared(values, sample_rate, frequencies)
+    out = np.empty((wanted.size, samples), dtype=complex)
+    for rows, band in _bands(record, sample_rate, wanted, omega0):
+        out[rows] = band
+    return out
 
+
+def scalogram_peaks(values: ArrayLike, sample_rate: float,
+                    frequencies: ArrayLike, omega0: float = OMEGA0, *,
+                    columns: int = COLUMNS) -> tuple[np.ndarray, np.ndarray]:
+    """The scalogram's magnitude, held to at most `columns` of time.
+
+    What a picture is drawn from: the view, the scripting plot and the
+    report all want the magnitude at about a screen's worth of columns,
+    and a million-sample record is not that. Time is cut into equal
+    slices and each column is the **largest** magnitude in its slice —
+    peak-hold, the same reading `decimate.peak_decimate` gives a curve
+    — because a scalogram's story is its ridges and a stride would land
+    between the very samples a transient's energy lives in, while a
+    mean would halve it. Under the budget nothing is held: the reading
+    is the magnitude itself, exactly.
+
+    Computed band by band and reduced as each band lands, so the whole
+    transform is never in memory at once: this is what a long record
+    goes through, and it costs `BAND_BYTES` a working array whatever
+    the length.
+
+    Parameters
+    ----------
+    values, sample_rate, frequencies, omega0
+        As for `scalogram`.
+    columns : int
+        The most columns to hand back.
+
+    Returns
+    -------
+    times, magnitude
+        `times` is each column's clock in seconds from the record's
+        start — the centre of its slice, so the first and last columns
+        sit half a slice inside the record's ends — and `magnitude` is
+        ``(len(frequencies), len(times))``, real.
+    """
+    record, wanted, samples = _prepared(values, sample_rate, frequencies)
+    step = max(1, -(-samples // int(columns)))
+    kept = -(-samples // step)
+    held = np.empty((wanted.size, kept), dtype=float)
+    # the ragged end is a slice like any other, kept rather than dropped:
+    # a burst in the last few samples is still a burst. Padding with
+    # zero cannot win a maximum of magnitudes.
+    pad = kept * step - samples
+    for rows, band in _bands(record, sample_rate, wanted, omega0):
+        magnitude = np.abs(band)
+        if pad:
+            magnitude = np.pad(magnitude, ((0, 0), (0, pad)))
+        held[rows] = magnitude.reshape(len(magnitude), kept, step).max(axis=2)
+    edges = np.arange(kept + 1) * step
+    edges[-1] = samples
+    times = (edges[:-1] + edges[1:] - 1) / 2.0 / float(sample_rate)
+    return times, held
+
+
+def _prepared(values, sample_rate, frequencies):
+    """The record and the frequencies, checked once for both readings."""
     record = np.asarray(values)
     if np.iscomplexobj(record):
         raise ValueError('a scalogram is of a real record; this one is '
@@ -257,7 +345,18 @@ def scalogram(values: ArrayLike, sample_rate: float,
             f'frequencies must lie above zero and below Nyquist '
             f'({nyquist:g} Hz); asked for '
             f'{wanted.min():g} to {wanted.max():g} Hz')
+    return record, wanted, samples
 
+
+def _bands(record, sample_rate, wanted, omega0):
+    """The transform, a band of rows at a time: yields (row slice, coefficients).
+
+    Each band's coefficients are already cut back to the record's
+    length; the caller stacks them or reduces them as it likes.
+    """
+    from scipy.fft import fft, ifft, next_fast_len
+
+    samples = record.size
     step = 1.0 / float(sample_rate)
     scales = scale_for(wanted, omega0)
 
@@ -287,27 +386,40 @@ def scalogram(values: ArrayLike, sample_rate: float,
     # angular frequencies of the FFT bins, negative above Nyquist — the
     # Morlet is analytic, so the negative half is what gets discarded
     omega = 2.0 * np.pi * np.fft.fftfreq(length, step)
+    # the analytic half, taken once: the Gaussian below is zero on the
+    # negative frequencies, so they need not be raised to it at all
+    positive = omega > 0.0
+    omega_pos = omega[positive]
 
-    # (scales, samples), one row per frequency
-    scaled = scales[:, None] * omega[None, :]
-    # The Gaussian, analytic (the negative half of the spectrum is what
-    # makes a wavelet complex), times two. The two is the whole
-    # normalisation: a real tone of amplitude A puts A/2 in each half of
-    # its spectrum, the analytic wavelet keeps one of them, and the peak
-    # of the Morlet's own transform is 1 where it is tuned — so twice
-    # that reads back A. No sqrt(scale) anywhere, which is exactly the
-    # difference from the unit-energy convention.
-    daughters = 2.0 * np.exp(-0.5 * (scaled - omega0) ** 2) * (
-        omega[None, :] > 0.0)
-    # workers=-1: the inverse is one transform per scale along axis 1
-    # and they do not depend on each other, so this is the one place a
-    # thread each is free. Measured 2.7x on a 512 000-sample record at
-    # 97 scales, and bit-identical — scipy.fft takes the argument,
-    # numpy.fft has nowhere to put it, which is most of why the
-    # transform is computed through scipy at all.
-    transformed = ifft(daughters * spectrum[None, :], axis=1, workers=-1)
-    # back to the record: the pad was scaffolding, not signal
-    return transformed[:, :samples]
+    rows_a_band = max(1, BAND_BYTES // (length * 16))
+    for first in range(0, scales.size, rows_a_band):
+        rows = slice(first, min(first + rows_a_band, scales.size))
+        # (band, samples), one row per frequency
+        scaled = scales[rows, None] * omega_pos[None, :]
+        # The Gaussian, analytic (the negative half of the spectrum is
+        # what makes a wavelet complex), times two. The two is the whole
+        # normalisation: a real tone of amplitude A puts A/2 in each
+        # half of its spectrum, the analytic wavelet keeps one of them,
+        # and the peak of the Morlet's own transform is 1 where it is
+        # tuned — so twice that reads back A. No sqrt(scale) anywhere,
+        # which is exactly the difference from the unit-energy
+        # convention.
+        product = np.zeros((rows.stop - rows.start, length), dtype=complex)
+        product[:, positive] = (
+            2.0 * np.exp(-0.5 * (scaled - omega0) ** 2) * spectrum[positive])
+        del scaled
+        # workers=-1: the inverse is one transform per scale along axis
+        # 1 and they do not depend on each other, so this is the one
+        # place a thread each is free. Measured 2.7x on a 512 000-sample
+        # record at 97 scales, and bit-identical — scipy.fft takes the
+        # argument, numpy.fft has nowhere to put it, which is most of
+        # why the transform is computed through scipy at all.
+        # `overwrite_x`: the product is scaffolding, and letting the
+        # inverse work in place is one array fewer a band.
+        transformed = ifft(product, axis=1, workers=-1, overwrite_x=True)
+        del product
+        # back to the record: the pad was scaffolding, not signal
+        yield rows, transformed[:, :samples]
 
 
 def ridge(coefficients: ArrayLike, frequencies: ArrayLike) -> np.ndarray:

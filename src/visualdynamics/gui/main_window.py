@@ -11733,9 +11733,13 @@ class MainWindow(QMainWindow):
         frequencies = frequencies[frequencies < rate / 2.0]
         if frequencies.size < 2:
             return 'no frequencies this record can carry in that range'
-        coefficients = wavelet_maths.scalogram(
+        # the picture-sized reading, never the whole transform: a long
+        # record's coefficients are gigabytes and its surface was what
+        # crashed the app (Brandon, 2026-09-15). Each column is its
+        # slice's peak, so a transient's ridge is not strided past.
+        clock, magnitude = wavelet_maths.scalogram_peaks(
             values, rate, frequencies, settings['omega0'])
-        magnitude = np.abs(coefficients)
+        clock = clock + float(history.abscissa[0])
 
         colors = resolve_theme(self.theme_name)
         us = self.unit_system
@@ -11758,8 +11762,7 @@ class MainWindow(QMainWindow):
             plotter.set_background(colors['scene_background'],
                                    top=colors['scene_background_top'])
             add_scalogram(
-                plotter, magnitude, np.asarray(history.abscissa),
-                frequencies, theme=self.theme_name,
+                plotter, magnitude, clock, frequencies, theme=self.theme_name,
                 omega0=settings['omega0'],
                 time_label=f'time [{us.label_html("time")}]',
                 level_label=f'{history.ordinate_dim[channel]}'
@@ -11774,8 +11777,7 @@ class MainWindow(QMainWindow):
             self.data_pane.graphics.clear()
             plot = self.data_pane.graphics.addPlot(row=0, col=0)
             scalogram_image(
-                plot, magnitude, np.asarray(history.abscissa), frequencies,
-                colors, label=history.ordinate_dim[channel],
+                plot, magnitude, clock, frequencies, colors, label=history.ordinate_dim[channel],
                 units=units, omega0=settings['omega0'],
                 time_label=f'time [{us.label_html("time")}]')
 

@@ -862,21 +862,15 @@ def _scalogram_figure(block, source, us, caption):
     frequencies = frequencies[frequencies < rate / 2.0]
     if frequencies.size < 2:
         return None
-    magnitude = np.abs(wavelet.scalogram(values, rate, frequencies))
-
-    # peak-hold down to the columns a figure can carry: the ridges are
-    # the story, and a stride would land between the very samples a
-    # transient's energy lives in
-    columns = magnitude.shape[1]
+    # peak-held down to the columns a figure can carry, by the reading
+    # the app's view draws from: the ridges are the story, and a stride
+    # would land between the very samples a transient's energy lives in
+    times, magnitude = wavelet.scalogram_peaks(
+        values, rate, frequencies, columns=SCALOGRAM_COLUMNS)
     note = ''
-    if columns > SCALOGRAM_COLUMNS:
-        step = -(-columns // SCALOGRAM_COLUMNS)
-        pad = (-columns) % step
-        held = np.pad(magnitude, ((0, 0), (0, pad)), constant_values=0.0)
-        magnitude = held.reshape(magnitude.shape[0], -1, step).max(axis=2)
+    if magnitude.shape[1] < len(values):
         note = (f'time thinned to {magnitude.shape[1]} columns of '
-                f'{columns}, keeping each bin\'s peak')
-    times = np.linspace(0.0, duration, magnitude.shape[1])
+                f'{len(values)}, keeping each bin\'s peak')
 
     sx, sy, _sz = STAGE
     z1 = float(magnitude.max()) or 1.0

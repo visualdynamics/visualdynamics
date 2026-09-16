@@ -174,8 +174,9 @@ def test_a_fetch_with_no_platform_store_still_reaches_the_site():
     manifest = json.loads(out.stdout.strip())
     if manifest is None:
         online = subprocess.run(
-            [sys.executable, '-c', 'from visualdynamics import update; '
-             'import json; print(json.dumps(update.fetch(timeout=6.0)))'],
+            [sys.executable, '-c', ('from visualdynamics import update; '
+                                    'import json; print(json.dumps('
+                                    'update.fetch(timeout=6.0)))')],
             capture_output=True, text=True, timeout=30,
             check=False).stdout.strip()
         if json.loads(online) is None:

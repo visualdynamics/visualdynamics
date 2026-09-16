@@ -248,3 +248,22 @@ def test_ci_keeps_its_measured_worker_count_and_ceiling():
     assert job['strategy']['fail-fast'] is False
     runs = [s['run'] for s in job['steps'] if 'pytest tests' in s.get('run', '')]
     assert runs and all('-n auto' in run for run in runs)
+
+
+def test_ci_holds_coverage_to_a_floor():
+    """A pull request that adds code without tests goes red (Brandon,
+    2026-09-16). The floor sits under the measured number — 92% on the
+    suite alone the day it was set — and only ever moves up."""
+    import re
+
+    import yaml
+
+    root = os.path.join(os.path.dirname(__file__), '..')
+    with open(os.path.join(root, '.github', 'workflows', 'ci.yml'),
+              encoding='utf-8') as handle:
+        workflow = yaml.safe_load(handle)
+    steps = workflow['jobs']['test']['steps']
+    coverage = next(s for s in steps if s.get('name') == 'Coverage')
+    floor = re.search(r'--fail-under=(\d+)', coverage['run'])
+    assert floor, 'no floor'
+    assert 85 <= int(floor.group(1)) <= 92, floor.group(1)

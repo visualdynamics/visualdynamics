@@ -130,6 +130,12 @@ jobs:
             echo "</details>"
           } >> "$GITHUB_STEP_SUMMARY"
           python -m coverage html
+          # The floor (Brandon, 2026-09-16): a pull request that adds
+          # code without tests goes red the way a licence violation
+          # does. Measured at 92% on the suite alone and a little more
+          # with the demonstration model appended, the day it was set;
+          # raise it when the number rises, never lower it to pass.
+          python -m coverage report --fail-under=90 > /dev/null
 
       - name: Keep the coverage report
         if: matrix.python-version == '3.13'
@@ -138,10 +144,11 @@ jobs:
           name: coverage-html
           path: htmlcov/
 
-  # The documentation site. Built, never published: GitHub Pages and Read
-  # the Docs are both public even from a private repository, and this one
-  # stays private — so the site comes back as an artifact to download,
-  # and `properdocs serve` is how it is read while working. --strict fails on
+  # The documentation site, built here as a check and published only by
+  # the release workflow into visualdynamics.org/documentation/ — GitHub
+  # Pages and Read the Docs are not connected. The site comes back as an
+  # artifact to read, and `properdocs serve` is how it is read while
+  # working. --strict fails on
   # a broken cross-reference, which is what holds the guides to the API
   # reference now that the reference is generated rather than committed.
   docs:

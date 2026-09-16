@@ -23,6 +23,9 @@ from Python, with the same objects and the same verbs behind both.
   [plotting](guide/plotting.md),
   [the modal workflow](guide/workflows/modal-workflow.md),
   [reports](guide/reports.md).
+- **[Architecture and conventions](architecture.md)** — for someone
+  about to change the code: the package by layer, the one-workflow
+  rule, the docstring standard, the test conventions.
 - **API reference** — every module, class, attribute and function in the
   package, generated from the code when the site is built, so it is never
   out of date. It is in the site's navigation rather than in the

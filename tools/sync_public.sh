@@ -22,14 +22,33 @@ REPO=visualdynamics/visualdynamics
 TITLE=${1:?a title for the pull request}
 IDENT=(-c user.email=269075368+bzwink@users.noreply.github.com -c user.name="Brandon Zwink")
 
+# Settle the branch before building into it. The clone is left on a
+# sync branch when a pull request's checks failed, so that the next
+# run commits the fix onto the same branch and the same pull request
+# — but a branch whose pull request is *closed* (or merged, or gone)
+# is spent: committing onto it re-creates a deleted branch and the
+# auto-merge call answers "pull request is closed" (2026-09-16, after
+# #11 was closed by hand). Only an open pull request keeps its branch.
+cd "$CLONE"
+git fetch -q origin main
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [[ $branch != main ]]; then
+    state=$(gh pr view "$branch" --repo "$REPO" --json state -q .state 2>/dev/null || echo NONE)
+    if [[ $state != OPEN ]]; then
+        git checkout -q -f -B main origin/main
+        branch=main
+    fi
+fi
+if [[ $branch == main ]]; then
+    git checkout -q -f -B main origin/main
+fi
+cd - > /dev/null
 ./.venv/bin/python tools/build_public_tree.py "$CLONE" --sync > /dev/null
 cd "$CLONE"
 if git diff --quiet && git diff --cached --quiet && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
     echo 'nothing to sync: the public tree already matches'; exit 0
 fi
-branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ $branch == main ]]; then
-    git fetch -q origin main && git checkout -q -B main origin/main
     branch="sync/$(date -u +%Y%m%d-%H%M)"
     git checkout -q -b "$branch"
 fi

@@ -117,3 +117,69 @@ def test_fetch_tells_offline_from_up_to_date():
     assert fetch(url) == {'version': __version__}
     assert fetch(manifest_server(b'[1, 2, 3]')) is None, (
         'a manifest that is not a mapping is no manifest')
+
+
+def test_the_check_trusts_certifi_when_the_packaged_openssl_trusts_nothing():
+    """The wheels' OpenSSL was built with a certificate directory that
+    exists on nobody's machine, so the default context trusts nothing
+    and every HTTPS request failed: "could not reach visualdynamics.org"
+    on a Mac that was online (Brandon, 2026-09-15). When the default
+    store is empty the Mozilla bundle certifi ships is loaded; when it
+    is not, the platform's own store is left alone."""
+    import ssl
+
+    from visualdynamics import update
+
+    class Bare:
+        def __init__(self):
+            self.loaded = []
+
+        def get_ca_certs(self):
+            return [{'subject': 'x'}] if self.loaded else []
+
+        def load_verify_locations(self, path):
+            self.loaded.append(path)
+
+    empty = Bare()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ssl, 'create_default_context', lambda: empty)
+        context = update.trust_store()
+    assert context is empty
+    assert len(empty.loaded) == 1 and empty.loaded[0].endswith('cacert.pem')
+
+    full = Bare()
+    full.loaded.append('platform')
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ssl, 'create_default_context', lambda: full)
+        update.trust_store()
+    assert full.loaded == ['platform'], 'a store that has certificates is kept'
+
+
+def test_a_fetch_with_no_platform_store_still_reaches_the_site():
+    """The same condition end to end, in a fresh process: OpenSSL told
+    to look for certificates where there are none. Skipped offline."""
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ, SSL_CERT_FILE='/nonexistent',
+               SSL_CERT_DIR='/nonexistent')
+    probe = ('import json, sys\n'
+             'from visualdynamics import update\n'
+             'print(json.dumps(update.fetch(timeout=6.0)))\n')
+    out = subprocess.run([sys.executable, '-c', probe], env=env,
+                         capture_output=True, text=True, timeout=30,
+                         check=False)
+    assert out.returncode == 0, out.stderr[-400:]
+    manifest = json.loads(out.stdout.strip())
+    if manifest is None:
+        online = subprocess.run(
+            [sys.executable, '-c', 'from visualdynamics import update; '
+             'import json; print(json.dumps(update.fetch(timeout=6.0)))'],
+            capture_output=True, text=True, timeout=30,
+            check=False).stdout.strip()
+        if json.loads(online) is None:
+            pytest.skip('visualdynamics.org is not reachable from here')
+        pytest.fail('reachable with the platform store, not without it: '
+                    'the certifi fallback did not engage')
+    assert 'version' in manifest

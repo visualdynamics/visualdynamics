@@ -38,6 +38,13 @@ classifiers = [
 ]
 dependencies = [
     "numpy",
+    # MPL-2.0, which is file-level copyleft on certifi's own files and
+    # nothing more for a program that ships them unmodified; already in
+    # every package as netCDF4's dependency. Declared because the update
+    # check imports it: the packaged OpenSSL's compiled-in certificate
+    # directory exists on nobody's machine, and this is the trust store
+    # it falls back to (2026-09-15).
+    "certifi",
     # BSD-3-Clause. Runtime, not test-only: the low-pass, the
     # integration, the filter view's response curve and the sine matched
     # filter all call it. It was declared a test dependency for a long

@@ -22,6 +22,7 @@ holding page's copy). Its shape:
 from __future__ import annotations
 
 import json
+import ssl
 from typing import Any
 from urllib.request import Request, urlopen
 
@@ -68,6 +69,30 @@ def newer(available: str, running: str = __version__) -> bool:
     return parse_version(available) > parse_version(running)
 
 
+def trust_store() -> ssl.SSLContext:
+    """The TLS context the check verifies visualdynamics.org with.
+
+    A packaged build carries its own OpenSSL, and the one the wheels
+    bring was built elsewhere: its compiled-in certificate directory
+    is a folder in the builder's own home (read off the library with
+    `strings`, 2026-09-15) and exists on nobody else's machine, so the
+    default context trusts nothing and every HTTPS request fails —
+    which the check reported as "could not reach visualdynamics.org"
+    on a Mac that was online (Brandon, 2026-09-15). When the default store is empty, the
+    Mozilla bundle certifi ships is loaded instead; it is already in
+    every package as netCDF4's dependency, and is what the Python
+    ecosystem uses for exactly this.
+    """
+    context = ssl.create_default_context()
+    if not context.get_ca_certs():
+        try:
+            import certifi
+            context.load_verify_locations(certifi.where())
+        except Exception:  # noqa: BLE001, S110 — no bundle either: the fetch fails as before
+            pass
+    return context
+
+
 def fetch(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | None:
     """The manifest as published, or None when it cannot be had.
 
@@ -79,7 +104,8 @@ def fetch(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | Non
     try:
         request = Request(url, headers={
             'User-Agent': f'VisualDynamics/{__version__}'})
-        with urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout,
+                     context=trust_store()) as response:
             manifest = json.loads(response.read(64_000).decode('utf-8'))
     except Exception:      # noqa: BLE001 — see the docstring: every
         return None        # failure here means 'no manifest', never a

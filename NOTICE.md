@@ -8,6 +8,7 @@ here changes those terms.
 | --- | --- | --- |
 | numpy, scipy, h5py, pandas, pint, VTK | BSD-3-Clause | keep the copyright notice |
 | netCDF4, pyvista, pyvistaqt, pyqtgraph, openpyxl | MIT | keep the copyright notice |
+| certifi (Mozilla's CA bundle, as netCDF4's dependency and the update check's trust store) | MPL-2.0 | keep the notice; its files ship unmodified, and its source is at github.com/certifi/python-certifi |
 | properdocs, mkdocs-materialx, mkdocstrings and friends (docs only) | BSD-2 / MIT / ISC | docs build only; nothing ships |
 | pytest, pytest-cov, pytest-xdist, ruff, sdypy-sep005 (dev only) | MIT | test suite only; nothing ships |
 | **PySide6 (Qt for Python)** | **LGPL-3.0** | see below |

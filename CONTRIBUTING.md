@@ -21,6 +21,11 @@ to community contributions later; it starts small — a person or two,
 by conversation — while the project finds its footing in other
 people's hands.
 
+Working with an AI assistant? [`AGENTS.md`](AGENTS.md) is the same
+set of rules in the form an agent reads first — the hard rules, the
+gate, the verification discipline — and it is what any such tool
+should be pointed at before it touches the tree.
+
 Three things any contributed code has to satisfy:
 
 - **The contributor licence agreement** ([`CLA.md`](CLA.md)), signed

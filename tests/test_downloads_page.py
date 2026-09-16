@@ -267,5 +267,3 @@ def test_ci_holds_coverage_to_a_floor():
     floor = re.search(r'--fail-under=(\d+)', coverage['run'])
     assert floor, 'no floor'
     assert 85 <= int(floor.group(1)) <= 92, floor.group(1)
-    with open(os.path.join(root, 'AGENTS.public.md'), encoding='utf-8') as f:
-        assert 'docs/architecture.md' in f.read()

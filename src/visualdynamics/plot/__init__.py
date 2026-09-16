@@ -2127,7 +2127,11 @@ def plot_scalogram(history: Any, channel: int = 0, *,
     up a logarithmic axis, magnitude as colour in the record's own
     units. The cone of influence is shaded, because inside it the
     picture is an artefact of where the record was cut and looks
-    exactly like data.
+    exactly like data. Time is held to `core.wavelet.COLUMNS` columns
+    by peak-hold — each column its slice's largest magnitude, the
+    reading `core.wavelet.scalogram_peaks` gives the app's own view —
+    so a long record draws in bounded memory; a script that wants the
+    transform itself calls `core.wavelet.scalogram`.
 
     Parameters
     ----------
@@ -2138,8 +2142,9 @@ def plot_scalogram(history: Any, channel: int = 0, *,
         two side by side read as noise rather than as two answers.
     low, high : float, optional
         The frequency range, in Hz. Defaults span from where a handful
-        of the longest wavelets still fit inside the record up to a
-        fraction of Nyquist — a range the record can actually carry.
+        of the longest wavelets still fit inside the record up to just
+        under Nyquist — a range the record can actually carry
+        (`core.wavelet.default_range`).
     per_octave : int, optional
         Lines per octave. Defaults to `core.wavelet.PER_OCTAVE`.
     omega0 : float, optional

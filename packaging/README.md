@@ -31,9 +31,9 @@ box, which is also how to repeat it:
 PyInstaller cannot cross-compile, but a Windows *environment* on this
 Mac turned out to be enough: `build_windows_wine.sh` builds the x64
 installer under Wine (see below), and the app launches there too, which
-is the local debug loop for Windows-only failures. Real Windows remains
-unexercised — expect the first tagged run to find something anyway; the
-Linux script failed twice before it worked.
+is the local debug loop for Windows-only failures. Real Windows is
+exercised by the release workflow's smoke test on every tag (row 4),
+which is what caught the 0.1.0a1 launch crash the Wine build did not.
 
 ### Windows under Wine (2026-08-31)
 
@@ -157,7 +157,10 @@ story:
 So the release workflow builds Linux and Windows there, and **leaves
 macOS off by default** — `build_macos.sh` produces the same artefact on
 the maintainer's own machine in about two minutes for nothing. A release
-therefore costs ~55 minutes rather than ~255, out of 2 000 a month.
+therefore costs ~55 minutes rather than ~255 — which mattered while
+the repository was private and metered; public repositories' runner
+minutes are free, and the habit is kept because the desk build is
+also the notarised one.
 `workflow_dispatch` has a `macos` checkbox for a release where that
 machine is not to hand.
 
@@ -330,8 +333,14 @@ identity to verify against; Windows waits on its signing route.
 Sparkle and WinSparkle do this properly and can be adopted when both
 halves are signed.
 
-Publishing a new version therefore means: tag, let the draft release
-build, and publish it. The release workflow's `site` job writes
+Publishing a new version therefore means: sync the public tree
+(`tools/sync_public.sh`), tag `v<version>` there, let the draft
+release build, build and notarise the macOS pair here
+(`build_macos.sh`, `build_macos_intel.sh`, unattended from the
+keychain item above), attach them with `packaging/attach_macos.sh
+v<version>`, read the Windows smoke screenshot, and publish. The
+order in full is REMAINING-TASKS.md "Release". The release
+workflow's `site` job writes
 `web/launch/latest.json` from the published release and redeploys the
 site; nothing is edited by hand. (`web/public/latest.json` is the
 pre-release holding page's copy.)

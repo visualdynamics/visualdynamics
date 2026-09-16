@@ -1,9 +1,17 @@
-"""Importer for Exodus finite element files (.exo/.e).
+"""Reader and writer for Exodus finite element files (.exo/.e).
 
-Exodus is netCDF underneath; we read it directly with netCDF4. Imports nodes
-and element blocks (no tracelines — exodus has none). The format carries no
-units; `length_unit` may be given to declare them at import, otherwise the
-geometry arrives unit-less.
+Exodus is netCDF underneath; both directions go straight through
+netCDF4. Read: nodes, element blocks, the file's coordinate frames
+(as coordinate systems), the node sets that carry which node is placed
+or measured in which frame, and results. Write (`save`): a geometry as
+named blocks with its systems as frames and its assignments as node
+sets, and shapes or records riding that geometry as nodal and global
+variables — damping and modal mass as `Damping`/`ModalMass`, a complex
+part as `<name>_IM` beside the real one — so a modal model round-trips
+lossless (2026-09-12). Tracelines have no exodus form and go out as
+beam elements. The format carries no units; `length_unit` may be
+given to declare them at import, otherwise the geometry arrives
+unit-less.
 
 Beyond the mesh, exodus carries results: `time_whole` is a step axis,
 nodal variables are (steps x nodes) records, global variables scalars
@@ -322,10 +330,9 @@ _ASSIGNMENT_SET = re.compile(r'^(def|disp)_cs_(\d+)$')
 def _read_assignments(v, systems):
     """Restore `node_def_cs` / `node_disp_cs` from the marker node sets,
     for the systems the file's frames defined."""
-    if not systems or 'ns_prop1' not in v:
+    if not systems or 'ns_names' not in v:
         return
-    ids = np.asarray(v['ns_prop1'][()])
-    names = _char_names(v['ns_names']) if 'ns_names' in v else []
+    names = _char_names(v['ns_names'])
     known = set(systems['cs_id'])
     for i, name in enumerate(names, start=1):
         found = _ASSIGNMENT_SET.match(name)
@@ -334,7 +341,6 @@ def _read_assignments(v, systems):
             continue
         local = np.asarray(v[f'node_ns{i}'][()], dtype=np.int64) - 1
         systems[f'node_{found.group(1)}_cs'][local] = int(found.group(2))
-    del ids
 
 
 def _write_assignments(ds, geometry, row_of_node):

@@ -34,8 +34,9 @@ PY
 ```
 
 The colours in the page are the application's own, from
-`visualdynamics.theme`: `#0f1014`/`#31353d` for the background gradient,
-`#e8e8ea` for text, `#ffb020` — the 3-D view's highlight — for the one
+`visualdynamics.theme`: the dark scene's flat `#000000` ground (the
+page's gradient is the site's, not the app's, which draws no
+gradient), `#e8e8ea` for text, `#ffb020` — the 3-D view's highlight — for the one
 accent.
 
 ## Publishing it
@@ -141,18 +142,19 @@ public discussions, and the function is the one place it lives.
 3. On the shared repository, enable Discussions and keep the default
    *Ideas* category; its slug is what the function filters on.
 
-Until the repository is public the query fails and the function
-answers `{open: false}`, which the page reads as "open with the first
-public release". The function caches its answer at the edge for ten
+When the query fails the function answers `{open: false}`, which the
+page reads as "requests could not be loaded" rather than as an empty
+list. The function caches its answer at the edge for ten
 minutes. Previewing locally needs `npx wrangler pages dev web/launch`
 rather than a plain file server, or the page shows the could-not-load
 note.
 
 ## What belongs on the holding page
 
-`public/index.html` is a public page for a project that is not public,
-so the rule is
-narrow: the name, the mark, a way to make contact. **Not what the thing
+`public/index.html` was the page that stood in for a project that was
+not yet public (it has been, since 2026-09-14; `web/launch` is what
+the site serves now), and its rule is kept for the record:
+narrow — the name, the mark, a way to make contact. **Not what the thing
 does** — that is deliberate, and it has to be kept out of the places
 that are read by machines rather than people: `<meta name=description>`,
 `og:description`, and the image's `alt`. A sentence deleted from the
@@ -184,6 +186,16 @@ the locally built installers for the preview. It is gitignored, but
 `wrangler pages deploy` uploads a directory as it stands — run
 `packaging/stage_downloads.py clear` first, or hundreds of megabytes of
 builds go up with the pages.
+
+## The example projects
+
+The downloads page links two zips — the plate and the quadcopter
+projects, one `.vdyn` per workflow — that live on a GitHub release
+of their own, tagged `examples`, so the package stays small.
+`tools/cut_examples.py` builds and uploads them; re-cut them whenever
+the project format moves. That release is created with
+`--latest=false`, so `releases/latest` — which the downloads page's
+tiles and `latest.json` both read — keeps naming the newest version.
 
 ## `latest.json` is the update check's manifest
 

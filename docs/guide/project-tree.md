@@ -95,8 +95,9 @@ Two shape sets together give the **MAC**: the matrix of the two, each
 pair's assurance criterion, with the cross-geometry projection when
 the sets live on different geometries. Click a cell to compare that
 pair; with a geometry selected too, the *Overlay* toggle animates the
-two shapes over each other, phase-aligned. *Match Modes* commits the
-pairs into a matched-modes object.
+two shapes over each other, phase-aligned. *Add Matches* (the **+**
+on the bar) commits the selected squares into the matched-modes
+object for that pair of sets.
 
 ![Two shape sets: the MAC, one pair chosen](images/modal-mac.png)
 

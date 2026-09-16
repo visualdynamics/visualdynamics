@@ -944,3 +944,65 @@ def test_a_controllers_own_file_reads_placeholders_as_autos(tmp_path):
     np.savez(out, f=f, cpsd=cpsd[:, :1, :])
     with pytest.raises(ValueError, match='not \\(lines, n, n\\)'):
         visualdynamics.import_file(str(out))
+
+
+def test_an_exodus_frame_tag_this_reader_does_not_know_reads_as_rectangular(
+        tmp_path):
+    """The tags are R, C and S; a spherical frame comes back spherical,
+    and a tag from a tool with its own vocabulary is read as
+    rectangular rather than refused — the frame's axes are still
+    there to place nodes with."""
+    import netCDF4
+
+    source = visualdynamics.import_file(plate('geometry.exo'))
+    source.add_coordinate_system(origin=[0.1, 0.0, 0.0], cs_type=2)
+    path = str(tmp_path / 'tags.exo')
+    visualdynamics.export_file(source, path, format='exodus')
+    with netCDF4.Dataset(path) as ds:
+        assert [t.decode() for t in ds.variables['frame_tags'][:]] == ['R', 'S']
+    assert list(visualdynamics.import_file(path).cs_type) == [0, 2]
+    with netCDF4.Dataset(path, 'a') as ds:
+        ds.variables['frame_tags'][1] = b'Z'
+    assert list(visualdynamics.import_file(path).cs_type) == [0, 0]
+
+
+def test_an_exodus_frame_with_a_point_on_its_origin_is_refused_by_name(
+        tmp_path):
+    import netCDF4
+
+    source = visualdynamics.import_file(plate('geometry.exo'))
+    frame = source.add_coordinate_system(origin=[0.1, 0.0, 0.0])
+    path = str(tmp_path / 'degenerate.exo')
+    visualdynamics.export_file(source, path, format='exodus')
+    with netCDF4.Dataset(path, 'a') as ds:
+        coords = np.asarray(ds.variables['frame_coordinates'][:]).reshape(-1, 9)
+        coords[1, 3:6] = coords[1, 0:3]          # the Z point on the origin
+        ds.variables['frame_coordinates'][:] = coords.ravel()
+    with pytest.raises(ValueError, match=f'frame {frame} .*on its origin'):
+        visualdynamics.import_file(path)
+    with netCDF4.Dataset(path, 'a') as ds:
+        coords = np.asarray(ds.variables['frame_coordinates'][:]).reshape(-1, 9)
+        coords[1, 3:6] = coords[1, 0:3] + [0, 0, 1]
+        coords[1, 6:9] = coords[1, 0:3] + [0, 0, 2]   # the XZ point on Z
+        ds.variables['frame_coordinates'][:] = coords.ravel()
+    with pytest.raises(ValueError, match=f'frame {frame} .*on its Z axis'):
+        visualdynamics.import_file(path)
+
+
+def test_an_assignment_set_naming_a_frame_that_is_not_there_is_ignored(
+        tmp_path):
+    """A node set called `def_cs_9999` in a file whose frames never
+    defined 9999 is somebody else's set: the nodes stay global."""
+    import netCDF4
+
+    source = visualdynamics.import_file(plate('geometry.exo'))
+    local = source.add_coordinate_system(origin=[0.1, 0.0, 0.0])
+    source.node_def_cs[:3] = local
+    path = str(tmp_path / 'stray.exo')
+    visualdynamics.export_file(source, path, format='exodus')
+    with netCDF4.Dataset(path, 'a') as ds:
+        width = ds.variables['ns_names'].shape[1]
+        ds.variables['ns_names'][0] = np.array(
+            list('def_cs_9999'.ljust(width, '\0')), dtype='S1')
+    back = visualdynamics.import_file(path)
+    assert set(back.node_def_cs) == {1}, 'nobody is placed in a frame the file lacks'

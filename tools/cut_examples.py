@@ -101,8 +101,12 @@ def upload(paths: list[str]) -> None:
                             capture_output=True, check=False).returncode == 0
     if not exists:
         subprocess.run(
+            # never "latest": the downloads page's tiles and the
+            # update check's latest.json both read releases/latest,
+            # and a release of zips would answer them with no
+            # installer at all
             ['gh', 'release', 'create', TAG, '--repo', REPO,
-             '--title', 'Example projects',
+             '--latest=false', '--title', 'Example projects',
              '--notes', ('Example projects for Visual Dynamics, linked from '
                          'https://visualdynamics.org/downloads — synthetic '
                          'runs on the plate and the quadcopter, one project '

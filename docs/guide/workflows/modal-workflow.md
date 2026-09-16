@@ -150,7 +150,7 @@ outlined and narrated in the status bar](../images/modal-mac.png)
 *Generate Report* on the bar, with the project row selected, builds the modal report: every figure
 and table binds symbolically (`@basis:Frf`, not a name), so renaming
 objects later changes nothing. Fill in the prose blocks — test
-summary, conclusions — and *Export HTML* writes one self-contained
+summary, conclusions — and *Export → HTML…* writes one self-contained
 file that opens in any browser.
 
 ![The exported report: the title page, test geometry and

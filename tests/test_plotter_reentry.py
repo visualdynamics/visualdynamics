@@ -38,3 +38,32 @@ def test_a_nested_request_while_building_answers_none(window, monkeypatch):
         pass                    # the fake stops at the first real call
     assert seen['built'] == 1, 'one construction, not one per show'
     assert seen['nested'] is None, 'the nested request was refused'
+    # the guard is for the *duration* of a construction: one that
+    # failed must not leave the pane refusing every later request
+    assert pane._creating_plotter is False, 'a failed construction latched the guard'
+
+    class Anything:
+        """Answers every attribute and call with itself: the rest of
+        `create_plotter` wires the real view up, and none of it is
+        what this test is about."""
+        def __getattr__(self, name):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            return self
+
+    from PySide6.QtWidgets import QWidget
+
+    class Working(QWidget):
+        """A real widget, because the pane puts the view into its
+        layout; everything VTK-shaped answers with `Anything`."""
+        def __init__(self, parent):
+            super().__init__(parent)
+            self.renderers = []
+
+        def __getattr__(self, name):
+            return Anything()
+
+    monkeypatch.setattr('pyvistaqt.QtInteractor', Working)
+    pane.plotter = None
+    assert pane.create_plotter() is not None, 'the next request builds'

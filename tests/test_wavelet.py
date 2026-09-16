@@ -509,3 +509,61 @@ def test_a_band_boundary_does_not_change_the_answer(monkeypatch):
     monkeypatch.setattr(w, 'BAND_BYTES', 1)   # one row a band
     banded = w.scalogram(record, RATE, frequencies)
     np.testing.assert_allclose(banded, whole, rtol=1e-12, atol=1e-12)
+
+
+# ---- the labels a log axis wears -----------------------------------------
+
+
+def test_the_decade_values_are_the_round_ones_inside_the_range():
+    """1, 2, 5 per decade, endpoints included, nothing outside, and
+    ascending — the one list the flat picture, the stage and the
+    report all label from."""
+    assert w.decade_values(8.192, 8028.16) == [
+        10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0]
+    assert w.decade_values(5.0, 50.0) == [5.0, 10.0, 20.0, 50.0], 'ends kept'
+    assert w.decade_values(0.3, 3.0) == [0.5, 1.0, 2.0], 'below 1 Hz too'
+    assert w.decade_values(21.0, 49.0) == [], 'a range with no round value'
+
+
+# ---- the scripting plot ---------------------------------------------------
+
+
+def test_plot_scalogram_holds_a_long_record_to_a_picture(tmp_path, qt_app,
+                                                          monkeypatch):
+    """`plot_scalogram` draws from the same peak-hold reading the app
+    does, on the record's own clock: a stream that began at 10 s is
+    drawn from 10 s, and 40 000 samples arrive as a picture's width."""
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_scalogram
+    from visualdynamics.plot import scalogram as flat
+
+    count, start = 40_000, 10.0
+    t = start + np.arange(count) / RATE
+    history = TimeHistory(t, np.sin(2 * np.pi * 100.0 * t)[None, :],
+                          response_dof=['1Z+'], ordinate_dim='acceleration')
+    drawn = {}
+    real = flat.scalogram_image
+
+    def record(plot, magnitude, times, frequencies, colors, **kwargs):
+        drawn['shape'] = magnitude.shape
+        drawn['first'], drawn['last'] = float(times[0]), float(times[-1])
+        return real(plot, magnitude, times, frequencies, colors, **kwargs)
+
+    monkeypatch.setattr(flat, 'scalogram_image', record)
+    plot_scalogram(history, path=tmp_path / 'long.png')
+    step = -(-count // w.COLUMNS)
+    kept = -(-count // step)
+    assert drawn['shape'][1] == kept <= w.COLUMNS
+    assert drawn['first'] == pytest.approx(start, abs=step / RATE)
+    assert drawn['last'] == pytest.approx(start + count / RATE, abs=step / RATE)
+
+
+def test_plot_scalogram_refuses_a_range_the_record_cannot_carry(qt_app):
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_scalogram
+
+    t = np.arange(2048) / RATE
+    history = TimeHistory(t, np.sin(2 * np.pi * 100.0 * t)[None, :],
+                          response_dof=['1Z+'], ordinate_dim='acceleration')
+    with pytest.raises(ValueError, match='reaches 1024 Hz'):
+        plot_scalogram(history, low=2000.0, high=4000.0, show=False)

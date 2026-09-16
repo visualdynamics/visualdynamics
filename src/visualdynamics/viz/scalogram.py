@@ -182,17 +182,11 @@ def _label_frequencies(plotter, frequencies, rows, colors, sy, f0, f1) -> None:
 
     if f1 <= f0:
         return
-    low, high = float(frequencies[0]), float(frequencies[-1])
     spots, names = [], []
-    decade = 10.0 ** np.floor(np.log10(low))
-    while decade <= high * 10:
-        for step in (1.0, 2.0, 5.0):
-            value = decade * step
-            if low <= value <= high:
-                station = (np.log10(value) - f0) / (f1 - f0) * sy
-                spots.append([-0.04, float(station), 0.0])
-                names.append(f'{value:g}')
-        decade *= 10.0
+    for value in wavelet.decade_values(frequencies[0], frequencies[-1]):
+        station = (np.log10(value) - f0) / (f1 - f0) * sy
+        spots.append([-0.04, float(station), 0.0])
+        names.append(f'{value:g}')
     if names:
         actor = plotter.add_point_labels(
             np.asarray(spots), names, font_size=11, always_visible=True,

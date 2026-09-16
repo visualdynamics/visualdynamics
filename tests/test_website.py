@@ -119,7 +119,7 @@ def test_the_provisional_project_file_is_said_everywhere_a_user_reads():
     does not. The disclaimer says so (test_disclaimer); so must the
     downloads page, the README and the guide, in the same terms."""
     for page in ('web/launch/downloads.html', 'README.md',
-                 'docs/guide/README.md'):
+                 'docs/guide/README.md', 'docs/vdyn-format.md'):
         text = (ROOT_DIR / page).read_text(encoding='utf-8')
         for phrase in ('.vdyn', 'provisional', '.escdf', 'save it again'):
             assert phrase in text, f'{page} does not say {phrase!r}'
@@ -190,7 +190,7 @@ def test_the_requests_page_sends_people_to_github_to_ask_and_vote():
     assert "fetch('api/requests')" in html, 'the ranking, from the function'
     assert 'ghp_' not in html and 'github_pat_' not in html and \
         'api.github.com' not in html, 'the page carries no token and asks GitHub nothing'
-    assert 'open with the first public release' in html
+    assert 'could not be loaded just now' in html
     for name in ('index', 'workflows', 'examples', 'downloads', 'about', 'requests'):
         page = (LAUNCH / f'{name}.html').read_text(encoding='utf-8')
         assert '<a href="requests.html"' in page, f'{name}: on the nav'

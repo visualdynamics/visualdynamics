@@ -155,6 +155,33 @@ def test_the_check_trusts_certifi_when_the_packaged_openssl_trusts_nothing():
     assert full.loaded == ['platform'], 'a store that has certificates is kept'
 
 
+def test_an_empty_store_with_no_certifi_is_returned_not_raised():
+    """A packaged copy that somehow lacks the bundle too: the fetch then
+    fails as it did before, reported as unreachable — never as a
+    traceback out of the menu."""
+    import ssl
+    import sys
+
+    from visualdynamics import update
+
+    class Bare:
+        def __init__(self):
+            self.loaded = []
+
+        def get_ca_certs(self):
+            return []
+
+        def load_verify_locations(self, path):
+            self.loaded.append(path)
+
+    empty = Bare()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(ssl, 'create_default_context', lambda: empty)
+        patch.setitem(sys.modules, 'certifi', None)   # `import certifi` raises
+        assert update.trust_store() is empty
+    assert empty.loaded == []
+
+
 def test_a_fetch_with_no_platform_store_still_reaches_the_site():
     """The same condition end to end, in a fresh process: OpenSSL told
     to look for certificates where there are none. Skipped offline."""

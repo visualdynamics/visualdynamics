@@ -29,8 +29,8 @@ Three things any contributed code has to satisfy:
   is what keeps its future options open. A standard text, adapted from
   Apache's. **Signing happens on your first pull request**: a bot
   comments with the agreement and a sentence to reply with, and the
-  check stays red until that reply is on record — required to merge
-  from the first public release on. Once is enough.
+  check stays red until that reply is on record, and a red check
+  cannot be merged. Once is enough.
 - **It has to be yours to give.** Your own work, not something an
   employer already has a claim on, and carrying no third-party code
   with obligations of its own.
@@ -81,7 +81,11 @@ python -m pytest tests -q -m slow   # the demonstration model, another minute
 properdocs build --strict       # the docs site, if you touched docstrings
 ```
 
-CI runs the same on every pull request.
+CI runs the same on every pull request, on every push to `main`
+and on demand, on both Pythons the package promises. Nothing reaches
+`main` except through a pull request with four green checks — the
+tests on each Python, the documentation build and the CLA — and
+that holds for the owner too.
 
 The `slow` mark is the demonstration airframe
 (`visualdynamics.demo.drone`), which the website, the docs and the

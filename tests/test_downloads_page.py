@@ -201,3 +201,50 @@ def test_ci_runs_on_every_push_to_main_and_both_pythons():
     assert 'schedule' not in on
     matrix = workflow['jobs']['test']['strategy']['matrix']
     assert matrix['python-version'] == ['3.12', '3.13']
+
+
+def test_the_publish_job_waits_for_every_build_and_survives_a_skipped_macos():
+    """Two fixes live in the publish job's gate, and both came back
+    silently once. `needs` names all three builds (2026-08-25: it did
+    not wait for macOS); its `if` keeps `!cancelled()` and accepts a
+    *skipped* macOS build (2026-09-03: GitHub skips a job whose needs
+    include a skipped job, so a tag never published at all). And it
+    downloads the three build artifacts by name — every artifact took
+    the smoke test's empty stdout.log too, which GitHub refuses as an
+    asset (the first tag, 2026-09-14)."""
+    import pathlib
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    workflow = yaml.safe_load(
+        (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
+    publish = workflow['jobs']['publish']
+    assert publish['needs'] == ['linux', 'windows', 'macos']
+    gate = ' '.join(publish['if'].split())
+    assert gate.startswith('!cancelled()')
+    assert "needs.linux.result == 'success'" in gate
+    assert "needs.windows.result == 'success'" in gate
+    assert "needs.macos.result != 'failure'" in gate, 'skipped is fine, failed is not'
+    assert "needs.macos.result == 'success'" not in gate
+    download = next(s for s in publish['steps']
+                    if 'download-artifact' in s.get('uses', ''))
+    assert download['with']['pattern'] == '{linux,windows,macos}'
+
+
+def test_ci_keeps_its_measured_worker_count_and_ceiling():
+    """The suite runs four workers on the runner again (`-n auto`) —
+    after the window leak that grew each to 2.7 GB was fixed — under
+    the sixty-minute ceiling that measurement allows, and one Python's
+    failure does not cancel the other's run."""
+    import yaml
+
+    root = os.path.join(os.path.dirname(__file__), '..')
+    with open(os.path.join(root, '.github', 'workflows', 'ci.yml'),
+              encoding='utf-8') as handle:
+        workflow = yaml.safe_load(handle)
+    job = workflow['jobs']['test']
+    assert job['timeout-minutes'] == 60
+    assert job['strategy']['fail-fast'] is False
+    runs = [s['run'] for s in job['steps'] if 'pytest tests' in s.get('run', '')]
+    assert runs and all('-n auto' in run for run in runs)

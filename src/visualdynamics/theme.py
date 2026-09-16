@@ -1,8 +1,17 @@
-"""Light/dark theme colors shared by the 3D view, 2D plots, and the GUI.
+"""Light/dark theme colors shared by the 3D view, 2D plots, and the GUI —
+and the one answer to "which is it right now".
 
-Qt's native style already follows the OS appearance for widgets; the things
-visualdynamics draws itself (the VTK scene and pyqtgraph plots) have to be told, which
-is what these colors are for.
+The colours are for the things visualdynamics draws itself (the VTK
+scene and the pyqtgraph plots); Qt's own widgets take theirs from the
+application palette. Which scheme applies is decided here too, in
+`system_scheme`: a statement for this launch (`VISUALDYNAMICS_THEME`,
+which the `--theme` flag sets), else what Qt reports, else — on Linux,
+where a packaged build without a platform-theme plugin made Qt answer
+Unknown on a dark desktop (2026-09-14) — the desktop asked directly
+through `desktop_scheme` (the settings portal, then GNOME's key, then
+KDE's file), else the palette's own lightness. The user's remembered
+choice, and telling Qt to *wear* a scheme rather than follow the OS,
+live in `gui/preferences.py`, which is Qt's side of this.
 """
 
 from __future__ import annotations

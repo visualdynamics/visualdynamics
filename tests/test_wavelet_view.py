@@ -417,3 +417,33 @@ def test_the_flat_picture_is_held_to_the_column_budget(window, pump):
     samples = len(window.objects['Time History'].abscissa)
     assert images[0].image.shape[0] == held_columns(samples) <= COLUMNS, (
         'time across, held')
+
+
+def test_a_record_that_starts_late_is_drawn_on_its_own_clock(window, pump):
+    """The peak-hold reading's clock runs from the record's start; the
+    picture has to add the record's own first instant back, or a
+    stream that began at 5 s is drawn as though it began at zero."""
+    from visualdynamics.core.wavelet import COLUMNS
+
+    rate, start, count = 1024.0, 5.0, 8192
+    t = start + np.arange(count) / rate
+    history = TimeHistory(t, np.sin(2 * np.pi * 60.0 * t)[None, :],
+                          response_dof=['7Z+'], ordinate_dim='acceleration')
+    window.add_object('Late', history)
+    item = window._item_for_object('Late')
+    window.tree.clearSelection()
+    item.setSelected(True)
+    window.tree.setCurrentItem(item)
+    window.render_current()
+    pump()
+    window.data_pane.wavelet_action.trigger()
+    window.data_pane.waterfall_action.trigger()
+    pump()
+    plot = window.data_pane.graphics.getItem(0, 0)
+    image = next(i for i in plot.items if type(i).__name__ == 'ImageItem')
+    rect = image.boundingRect()
+    mapped = image.mapRectToParent(rect)
+    assert mapped.left() == pytest.approx(start, abs=2.0 / rate)
+    assert mapped.right() == pytest.approx(start + count / rate,
+                                           abs=2.0 / rate)
+    assert image.image.shape[0] == held_columns(count) <= COLUMNS

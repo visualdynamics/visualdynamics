@@ -61,7 +61,7 @@ runs — most importantly the **cone**, below.
 
 ## What the picture can and cannot say
 
-Three honest limits, each visible in the picture itself:
+Four honest limits, each visible in the picture itself:
 
 **The cone of influence.** A low-frequency wavelet is long, and near
 the record's ends it hangs off the edge — what it reads there is
@@ -86,6 +86,17 @@ apart; tones a hertz apart at hundreds of hertz are inseparable by
 any window short of one that erases the time axis, and their beat is
 the measurement. A single steady tone draws perfectly smooth, which
 is the test that the transform adds no ripple of its own.
+
+**A long record is drawn at a picture's width.** The transform is
+computed for every sample, but the picture holds time to about four
+thousand columns, each one the *largest* magnitude in its slice of
+the record — peak-hold, so a burst a few samples wide is still a
+column, where a stride would land between the very samples it lives
+in. Under that width nothing is held and the picture is the transform
+itself. This is what lets a five-minute record at 16 kHz open in a few
+seconds; the scripting `plot_scalogram` draws the same way, and a
+report figure holds time the same way to a document's width, saying
+so in its note.
 
 ## When to reach for it
 

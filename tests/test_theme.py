@@ -128,10 +128,20 @@ def test_the_linux_desktop_is_asked_when_qt_cannot_say(monkeypatch, tmp_path):
     # the portal says dark, in the shape gdbus prints
     answers['gdbus'] = '(<<uint32 1>>,)\n'
     assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'dark'
+    # ...or light, which is an answer and not a fall-through
+    answers['gdbus'] = '(<<uint32 2>>,)\n'
+    assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'light'
+    # "no preference" (0) is no answer: the next door is asked, and
+    # what it says wins — a portal that answers 0 must not read as light
+    answers['gdbus'] = '(<<uint32 0>>,)\n'
+    answers['gsettings'] = "'prefer-dark'\n"
+    assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'dark'
     # no portal: GNOME's own key
     answers.clear()
     answers['gsettings'] = "'prefer-dark'\n"
     assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'dark'
+    answers['gsettings'] = "'prefer-light'\n"
+    assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'light'
     answers['gsettings'] = "'default'\n"
     assert theme_module.desktop_scheme('linux', run, str(tmp_path)) is None
     # neither tool: KDE's file
@@ -139,6 +149,9 @@ def test_the_linux_desktop_is_asked_when_qt_cannot_say(monkeypatch, tmp_path):
     (tmp_path / '.config' / 'kdeglobals').write_text(
         '[General]\nColorScheme=BreezeDark\n')
     assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'dark'
+    (tmp_path / '.config' / 'kdeglobals').write_text(
+        '[General]\nColorScheme=BreezeLight\n')
+    assert theme_module.desktop_scheme('linux', run, str(tmp_path)) == 'light'
     # not Linux: never asked
     assert theme_module.desktop_scheme('darwin', run, str(tmp_path)) is None
 

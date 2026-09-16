@@ -98,7 +98,7 @@ photographs beside it; link them into the group. Then the project's
 row's *Generate Report* builds the random report — the measured data, the
 specification comparison read three ways (spectra, RMS error bars,
 lines-out bars), the coherence beside the compliance so the reader
-can ask *why* a channel exceeded. *Export HTML* writes one
+can ask *why* a channel exceeded. *Export → HTML…* writes one
 self-contained file.
 
 ![The exported report: control histories with the averaged frames

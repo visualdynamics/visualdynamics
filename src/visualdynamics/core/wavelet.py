@@ -437,6 +437,29 @@ def ridge(coefficients: ArrayLike, frequencies: ArrayLike) -> np.ndarray:
     return wanted[np.argmax(magnitude, axis=0)]
 
 
+def decade_values(low: float, high: float) -> list[float]:
+    """The round frequencies a person would label a log axis with.
+
+    1, 2, 5 per decade, every one inside ``[low, high]``, ascending.
+    The transform's rows are twelfths of an octave and nobody reads
+    158.7 Hz off an axis, so the flat picture, the 3-D stage and the
+    report figure all label these values instead — and they call this
+    one function rather than each carrying the loop, which is how the
+    three drifted apart once (2026-09-16: the three loops were
+    byte-for-byte the same, and the fourth would not have been).
+    """
+    low, high = float(low), float(high)
+    values = []
+    decade = 10.0 ** np.floor(np.log10(low))
+    while decade <= high * 10:
+        for step in (1.0, 2.0, 5.0):
+            value = decade * step
+            if low <= value <= high:
+                values.append(float(value))
+        decade *= 10.0
+    return values
+
+
 def default_range(sample_rate: float, duration: float) -> tuple[float, float]:
     """The frequency range a record can honestly carry, low to high.
 

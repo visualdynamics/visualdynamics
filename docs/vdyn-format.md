@@ -27,11 +27,17 @@ have to change — which has not happened yet. The reader's contract:
 - an **older** stamp always loads — every reader keeps its past, and
   `tests/test_vdyn_corpus.py` opens every frozen era on every run.
 
-Until the first public release the "keeps its past" half is a
-soft promise: the format may drop pre-release eras deliberately, since
-no released file exists to orphan. It has (2026-08-23) — the reader
-holds exactly today's schema 1, with no fallbacks for earlier
-pre-release spellings. From release onward the contract is hard.
+Before the first public release the "keeps its past" half was a
+soft promise, and the format used it: pre-release eras were dropped
+(2026-08-23), so the reader holds exactly schema 1 with no fallbacks
+for earlier spellings. Since the first release (0.1.0a1, 2026-09-14)
+the contract is hard *for as long as the format lives* — and that is
+the caveat this page has to state: **`.vdyn` is provisional, an
+alpha-only format**. The next alpha saves projects in the Engineering
+Sciences Common Data Format (`.escdf`), a public standard, and still
+opens `.vdyn`; the first release that is not an alpha will not. Open
+each `.vdyn` once in that alpha and save it again. Until then every
+`.vdyn` written by any alpha loads in every later alpha.
 
 ## Two shapes of file
 

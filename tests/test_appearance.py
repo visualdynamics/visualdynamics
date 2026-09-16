@@ -168,6 +168,28 @@ def test_wear_appearance_maps_the_choice_onto_qt(qt_app):
     preferences.wear_appearance(app)          # the default: what is chosen
     assert app.hints.set[-1] == Qt.ColorScheme.Dark
 
+    # and every widget is made to re-read the palette the scheme set,
+    # which they do not do on their own (macOS, 2026-09-14)
+    refreshed = []
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(preferences, 'refresh_palettes',
+                      lambda app=None: refreshed.append(app))
+        preferences.wear_appearance(app, 'light')
+    assert refreshed == [app]
+
+
+def test_a_platform_switch_refreshes_the_palettes_too(window, monkeypatch):
+    """The OS-driven switch, not only the menu: without the refresh the
+    status bar and the panes stayed light after the Mac went dark
+    (Brandon's screenshot, 2026-09-14)."""
+    from visualdynamics.gui import main_window
+
+    calls = []
+    monkeypatch.setattr(main_window, 'refresh_palettes',
+                        lambda app=None: calls.append(app))
+    window._scheme_changed(None)
+    assert len(calls) == 1
+
 
 def test_the_scene_is_told_the_theme_not_just_to_repaint(window, pump):
     """Told only to repaint, the 3-D view repainted in the theme it was

@@ -141,7 +141,7 @@ times.
 **12. Track the latest version of everything, and never pin around a
 break.**
 Dependencies are declared by name with no upper bound and no pin —
-all twelve of them, today — and there is no version-gated
+all thirteen of them, today — and there is no version-gated
 compatibility code in the package. When NumPy, Qt or VTK ships a
 release that breaks something here, the fix is to work with the new
 version, not to cap the old one and move on.

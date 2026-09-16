@@ -977,16 +977,11 @@ def _decade_values(frequencies):
     """
     import numpy as np
 
-    ticks = {}
-    low, high = float(frequencies[0]), float(frequencies[-1])
-    decade = 10.0 ** np.floor(np.log10(low))
-    while decade <= high * 10:
-        for step in (1.0, 2.0, 5.0):
-            value = decade * step
-            if low <= value <= high:
-                ticks[int(np.argmin(np.abs(frequencies - value)))] = value
-        decade *= 10.0
-    return ticks
+    from ..core import wavelet
+
+    return {int(np.argmin(np.abs(frequencies - value))): value
+            for value in wavelet.decade_values(frequencies[0],
+                                               frequencies[-1])}
 
 
 def _stage_figures(block, source, objects, us, caption):

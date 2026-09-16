@@ -31,8 +31,8 @@ latest versions rather than pinned.
 
 **[Documentation](https://visualdynamics.org/documentation/)** —
 getting started, guides, and a generated API reference, a page of
-[visualdynamics.org](https://visualdynamics.org) from
-the first release; the [source](docs/README.md) is in the tree and GitHub
+[visualdynamics.org](https://visualdynamics.org) rebuilt with every
+release; the [source](docs/README.md) is in the tree and GitHub
 renders it well enough to read. The application itself, and its
 downloads, are at [visualdynamics.org](https://visualdynamics.org).
 To build the site locally:
@@ -93,9 +93,11 @@ editable installs record it too, so a move wants those rewritten and
 
 ## Install
 
-Nothing is published — the repository is private, and the name on
-PyPI holds only an empty placeholder — so installation is from a
-clone:
+The packaged application — one download per platform, nothing else
+to install — is on the [downloads
+page](https://visualdynamics.org/downloads). The library is on PyPI
+as `visualdynamics` (`pip install visualdynamics`, Python 3.12 or
+newer). To work on it, install from a clone:
 
 ```bash
 pip install -e .
@@ -124,8 +126,8 @@ application: it runs the checkout's own interpreter, so an edit to the
 source is live on the next launch, and it points at that checkout by
 absolute path. Move the repository and run it again.
 
-The distribution name and the import will be the same word whenever
-there is a release. The project was called `vibe` until August 2026,
+The distribution name and the import are the same word. The project
+was called `vibe` until August 2026,
 which could never have been published under that name — `vibe` belongs
 to an unrelated package on PyPI.
 

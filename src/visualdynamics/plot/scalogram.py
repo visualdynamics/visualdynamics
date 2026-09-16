@@ -108,16 +108,10 @@ def _decade_ticks(frequencies: np.ndarray) -> list[tuple[float, str]]:
     1, 2, 5 per decade rather than the row positions: the rows are at
     twelfths of an octave and nobody reads 158.7 Hz off an axis.
     """
-    low, high = float(frequencies[0]), float(frequencies[-1])
     ticks = []
-    decade = 10.0 ** np.floor(np.log10(low))
-    while decade <= high * 10:
-        for step in (1.0, 2.0, 5.0):
-            value = decade * step
-            if low <= value <= high:
-                text = (f'{value:g}' if value >= 1.0 else f'{value:.3g}')
-                ticks.append((float(np.log10(value)), text))
-        decade *= 10.0
+    for value in wavelet.decade_values(frequencies[0], frequencies[-1]):
+        text = f'{value:g}' if value >= 1.0 else f'{value:.3g}'
+        ticks.append((float(np.log10(value)), text))
     return ticks
 
 

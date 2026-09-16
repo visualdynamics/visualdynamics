@@ -62,6 +62,14 @@ geometry.plot()                         # the 3D scene, with its bar
 geometry.plot_dofs(frf, 'force')        # labelled DOF arrows
 ```
 
+The readings on a time history's bar have calls of their own, in
+`visualdynamics.plot`: `plot_scalogram(history)` (the wavelet reading,
+drawn at a picture's width whatever the record's length — the
+[wavelet guide](wavelet.md) says how), `plot_kurtosis(history)`, and
+for a specification comparison `plot_bars(measured, specification)`,
+`plot_comparison(...)`, `plot_ratio(...)` and `plot_replication(...)`
+— each the figure the app shows, each taking `path=`.
+
 ## A plot from a script is the app's own pane
 
 Shown rather than written to a file, a plot comes up in the same widget

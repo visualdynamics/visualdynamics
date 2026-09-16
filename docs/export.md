@@ -8,8 +8,10 @@ are other programs' outputs, and writing one would mean impersonating
 the program that makes them.
 
 **`.vdyn` (HDF5) is the native format**, and the only one that keeps
-everything — units included. Save and Load use it. It is standard,
-documented HDF5 — the layout is [its own page](vdyn-format.md), and
+everything — units included. Save and Load use it. It is provisional
+for the alpha (the next alpha saves `.escdf`; [its own
+page](vdyn-format.md) says what that means for a file you have). It
+is standard, documented HDF5 — the layout is that page, and
 any HDF5 tool reads one without this package. The foreign formats
 below exist to exchange data with other tools, and each loses whatever
 it has no way to record.
@@ -187,8 +189,9 @@ variant.
 
 `export_file(obj, path)` picks the exporter by suffix; `format=` names one
 outright. The GUI offers only the formats the selected object can be
-written as — a mode shape has no exodus form, and saying so in the dialog
-beats saying it in an error afterwards.
+written as — mode shapes with no geometry beside them have no exodus
+form, and saying so in the dialog beats saying it in an error
+afterwards.
 
 ## Units
 
@@ -233,13 +236,14 @@ mode-shape record, carrying frequency, modal mass and damping ratio with
 the vector at each node. Exodus stores them the way it stores any nodal
 result: one "time step" per mode, with the mode's frequency as the step's
 time value, and nodal variables `DispX`/`DispY`/`DispZ` (plus `RotX`/`RotY`
-/`RotZ` when the shape carries rotations). Damping and modal mass have
-nowhere to go in exodus and are lost.
+/`RotZ` when the shape carries rotations). Damping and modal mass ride
+as the file's *global variables* `Damping` and `ModalMass`, one value
+per step, so a modal file comes back with everything it left with.
 
 Dataset 55 stores a whole vector per node, so a shape covering only some
 directions is padded with zeros and comes back covering all of them.
 
-### UNV keeps local frames; exodus cannot
+### UNV keeps local frames; exodus keeps them beside the values
 
 The two formats differ in what they can say, so they are treated
 differently rather than uniformly.
@@ -262,13 +266,20 @@ the spec, drop it in `docs/uff_spec/` and it can be verified.
 
 ### Exodus results are written in the global frame
 
-Exodus has no coordinate systems at all, so a shape value left in a node's
-own displacement frame would be read back as though it were global — wrong,
+Exodus can hold coordinate frames — and since 2026-09-12 the geometry's
+systems go out as them — but nothing in the format lets a node or a
+variable *refer* to one, so a shape value left in a node's own
+displacement frame would be read back as though it were global — wrong,
 silently. Values are rotated into global on the way out, translations as a
 triple and rotations as another, using the same convention the animator
 uses. That needs the geometry, since the shapes alone do not say what frame
 they are in: pass `geometry=` to `exodus.save`, which also writes the mesh
-alongside. Without it the values go out as they stand.
+alongside. Without it the values go out as they stand. Which node was
+placed or measured in which frame is not lost: it rides as the
+`def_cs_<id>` / `disp_cs_<id>` node sets described above, and the
+reader restores the assignment from them, so the systems, the
+assignments and the (global) values together round-trip the model
+exactly.
 
 ### Element blocks survive the round trip
 
@@ -299,11 +310,13 @@ without saying why, and Visual Dynamics refuses the duplicate ids
 outright. `vtkExodusIIReader` read it happily, so only the IOSS reader
 catches this.
 
-**exodus** has no traceline and no coordinate system. Tracelines are
-written as runs of two-node beam elements rather than dropped, which is
-lossy in one direction: they read back as elements, because nothing in the
-file says a beam was ever a traceline. Pass `tracelines_as_beams=False` to
-leave them out. Coordinate systems are lost.
+**exodus** has no traceline. Tracelines are written as runs of
+two-node beam elements rather than dropped, which is lossy in one
+direction: they read back as elements, because nothing in the file
+says a beam was ever a traceline. Pass `tracelines_as_beams=False` to
+leave them out. Coordinate systems survive — as frames, with their
+assignments riding as node sets (above) — but their *names* do not: a
+frame is an id, three points and a tag.
 
 **UNV** writes geometry as datasets 2411, 82, 2412 and 2420, and data as
 one dataset 58 per record. Both coherence types keep their own function

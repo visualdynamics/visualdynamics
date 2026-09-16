@@ -2048,3 +2048,39 @@ def test_the_front_matter_draws_a_dof_scene_per_quantity_the_run_holds():
             if b.get('dofs')]
     assert [b['dofs'] for b in bare] == ['voltage', 'force', 'acceleration'], \
         'nothing to ask: the slots stay'
+
+
+def test_the_scalogram_figure_says_when_it_thinned_time():
+    """The figure holds time to `SCALOGRAM_COLUMNS` by peak-hold — the
+    reading the app draws from — and says so in its note, with the
+    count it kept and the count it had; a record that fits is drawn
+    whole and carries no note."""
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.report import SCALOGRAM_COLUMNS
+
+    def figure(count):
+        fs = 1024.0
+        t = np.arange(count) / fs
+        history = TimeHistory(
+            t, np.sin(2 * np.pi * 100.0 * t)[None, :],
+            response_dof=['101Z+'], ordinate_dim='acceleration')
+        report = Report('R', [
+            {'kind': 'plot', 'source': 'Time History', 'mode': 'scalogram',
+             'select': 'dim:acceleration', 'caption': 'Scalogram'}])
+        payload = json.loads(render_html(
+            report, {'Time History': history}).split(
+            'type="application/json">')[1].split('</script>')[0])
+        return payload['blocks'][0]
+
+    long = figure(8192)
+    step = -(-8192 // SCALOGRAM_COLUMNS)
+    kept = -(-8192 // step)
+    assert kept < 8192
+    assert long['note'] == (f'time thinned to {kept} columns of 8192, '
+                            f'keeping each bin\'s peak')
+    assert len(long['sheet']['xs']) == kept
+    assert all(len(row) == kept for row in long['sheet']['levels'])
+
+    short = figure(200)
+    assert 'note' not in short
+    assert len(short['sheet']['xs']) == 200

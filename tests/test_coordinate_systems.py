@@ -90,10 +90,21 @@ def test_a_system_is_named_only_when_it_is_singled_out():
 
 
 def test_an_unknown_type_falls_back_to_x_y_z():
+    """A type this drawer has no names for is drawn with the cartesian
+    ones rather than refused — the arrows are still where they are."""
     plotter = pv.Plotter(off_screen=True)
+    written = []
+    real = plotter.add_point_labels
+
+    def record(points, labels, **kwargs):
+        written.append(list(labels))
+        return real(points, labels, **kwargs)
+
+    plotter.add_point_labels = record
     add_coordinate_system(plotter, identity_frame()[3], identity_frame(), 99,
                           1.0, label=1)
-    plotter.close()      # must not raise
+    plotter.close()
+    assert ['$X$', '$Y$', '$Z$'] in written, written
 
 
 def test_arc_proportions_track_pyvistas_own_arrow():

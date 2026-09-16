@@ -20,8 +20,8 @@ desktop.
 pip install visualdynamics
 ```
 
-(On PyPI from the first release; until then the name is held by an
-empty placeholder.)
+(Every release goes to PyPI the moment it is published, so `pip` and
+the downloads page never disagree about the latest version.)
 
 **A contributor install** — take the repository and install it in
 place, so your edits are live without reinstalling:
@@ -34,7 +34,7 @@ pip install -e .
 
 Python 3.12 or newer, whichever way. The dependencies come with the
 package: numpy, scipy, pandas, h5py, netCDF4, pint, vtk, pyvista,
-pyvistaqt, PySide6, pyqtgraph, openpyxl. One is optional: the
+pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi. One is optional: the
 STEP/IGES importer's geometry kernel, which the compiled packages
 include and a Python install adds with
 `pip install "visualdynamics[step]"`.

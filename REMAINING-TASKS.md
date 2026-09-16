@@ -60,16 +60,15 @@ marks, bands, report definitions, photos) in a group of its own.
 
 ## The website
 
-- **`web/launch/` is the version for the day the switch is flipped**:
-  a downloads page with one tile per build (macOS Apple silicon,
-  macOS Intel, Windows, Linux), links to the source, the
-  documentation and the principles. Staged, not deployed —
-  `web/public/` is what visualdynamics.org actually serves, and it
-  still says "coming soon".
-- **The download tiles need a release to point at.** Deployed, they
-  fall back to the releases page and upgrade themselves to the real
-  assets by asking the GitHub API — but until a release exists they
-  lead to an empty page. Previewed locally they hand out the builds
+- **`web/launch/` is what visualdynamics.org serves** (since the
+  first release, 2026-09-14; `web/public/` was the holding page): a
+  downloads page with one tile per build (macOS Apple silicon, macOS
+  Intel, Windows, Linux), the example projects, links to the source,
+  the documentation and the principles. The release workflow's
+  `site` job deploys it on every published release.
+- **The download tiles point at the latest release.** They fall back
+  to the releases page and upgrade themselves to the real assets by
+  asking the GitHub API. Previewed locally they hand out the builds
   `packaging/stage_downloads.py` staged (gitignored; run `clear`
   before any wrangler deploy of `web/launch`, which uploads the
   directory as it stands).
@@ -99,12 +98,13 @@ both: eight windows made and destroyed leave nothing. After it, four
 workers peak at 7.4 GB together (measured in an 8 GB container) and a
 full run takes 12 minutes on four cores.
 
-What is left is peaks, not leaks, and each is a real computation: the
-wavelet scalogram of a long record (about 1.4 GB in the view tests,
-`core/wavelet.py` pads to the cone's width and transforms every scale
-at once), and one local-only fixture that CI never sees. The
-scalogram could transform in bands of scales if the peak ever
-matters; it does not today.
+What is left is peaks, not leaks, and each is a real computation.
+The largest was the wavelet scalogram of a long record, which
+transformed every scale at once; it transforms in bands under
+`core.wavelet.BAND_BYTES` now and draws from a peak-held reading
+(2026-09-15), so the view tests' peak is a few hundred megabytes and
+a five-minute record at 16 kHz is 6.5 GB end to end, most of it the
+import. One local-only fixture CI never sees remains.
 
 ## Graphics without a GPU
 
@@ -138,7 +138,10 @@ happens on its own once 6 is done.
    certificate and the `vd-notary` profile are in the keychain
    (packaging/README.md, "Signing") — do those two one-time steps
    before this one, and check the build printed "notarised and
-   stapled" twice.
+   stapled" twice. Unattended, the build reads the app-specific
+   password from the login-keychain item `vd-notary-password`
+   (packaging/README.md; the command that makes it ends in `-w`),
+   so nobody needs to be at the Mac.
 3. Swap the grant (the copyleft licence with a CLA — decided
    2026-09-03, PLAN.md "Open source, revisited"; **done — merged
    into `main` 2026-09-13**): `LICENSE` becomes
@@ -154,30 +157,28 @@ happens on its own once 6 is done.
 4. Sync the shared repository from this tree — `tools/sync_public.sh
    "<title>"`, which opens a pull request that merges itself once CI
    is green; the public `main` takes no direct push, the owner
-   included (2026-09-14) — and review. (The first release's step
-   was:) Then
-   **start its history over**: the syncs before release day were
-   rehearsals, and the August ones carry wording since removed. In
-   the clone, `git checkout --orphan release`, commit everything as
-   the one first commit, rename it `main`, and force-push — nobody
-   else holds that history (no forks, one collaborator, 2026-09-01).
-   Commit **with the GitHub noreply address**; the account blocks
-   command-line pushes that carry the private one. The public
-   history begins with the release and holds nothing older.
-5. Tag `v<version>` on the shared repository. The release workflow
+   included (2026-09-14) — and review. (The first release also
+   started the public history over from an orphan commit, so that it
+   begins with the release and holds nothing older; that was once,
+   and is not a step now.) Commits there carry **the GitHub noreply
+   address**; the account blocks pushes that carry the private one.
+5. Tag `v<version>` on the shared repository — an *annotated* tag,
+   `git tag -a v<version> -m "Visual Dynamics <version>"` in
+   `~/visualdynamics-shared` at `origin/main`, then push the tag: a
+   bare `git tag` there stops at "no tag message?" and creates
+   nothing (2026-09-16). The release workflow
    builds Linux and Windows there and opens a **draft** release with
    them and a `SHA256SUMS` attached; then `packaging/attach_macos.sh
    v<version>` uploads the two macOS images built here and adds their
    lines to that file, and read the Windows smoke-test screenshots
    before going further.
-6. Make the shared repository public and publish the draft release.
-   This is the step that cannot be walked back. **Then branch
-   protection on `main`**, which the free plan allows only once the
-   repository is public: Settings → Branches → add a rule for `main`
-   — require a pull request before merging, require the `cla` status
-   check to pass, and restrict who can push to the owner. That is
-   what makes the CLA bot (`.github/workflows/cla.yml`) a gate rather
-   than a comment.
+6. Publish the draft release. This is the step that cannot be walked
+   back. (The first release also made the repository public and put
+   branch protection on `main` — a pull request with four green
+   checks, `test (3.12)`, `test (3.13)`, `docs` and `cla`,
+   administrators enforced, linear history — which is what makes the
+   CLA bot a gate rather than a comment and what `tools/sync_public.sh`
+   leans on. Both are done and stay done.)
 7. **The site deploys itself when the release is published** (Brandon,
    2026-09-01, "option 1"): the release workflow's `site` job builds
    the documentation into `web/launch/documentation/`, writes
@@ -214,6 +215,4 @@ happens on its own once 6 is done.
   signing identity to verify against — Sparkle on macOS, WinSparkle
   on Windows, an AppImage swap on Linux — because an updater that
   runs what it fetched unverified is remote code execution with a
-  friendly name (`update.py` says so). Also gated on public releases:
-  a private repo's assets need the user's own login, which the app
-  cannot carry.
+  friendly name (`update.py` says so).

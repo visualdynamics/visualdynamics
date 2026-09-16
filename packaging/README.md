@@ -232,10 +232,13 @@ that means for whoever you hand a build to:
 
   ```
   security add-generic-password -a bzwink@gmail.com -s vd-notary-password \
-      -T /usr/bin/security -T "$(xcrun --find notarytool)" -U
+      -T /usr/bin/security -T "$(xcrun --find notarytool)" -U -w
   ```
 
-  (the `-T`s let the build read it without a prompt; the login
+  (`-w` with nothing after it is what makes `security` ask for the
+  password — without it the item is created empty, silently, which
+  happened once (2026-09-15); the build treats an empty item as
+  absent. The `-T`s let the build read it without a prompt; the login
   keychain has no timeout and does not lock on sleep, so it answers
   whenever Brandon is logged in). Without the item the script falls
   back to the profile, and when neither answers it says so and leaves

@@ -62,12 +62,81 @@ _BARE_MIL = re.compile(r'(?<![A-Za-z0-9_])mils?(?![A-Za-z0-9_])')
 _BARE_LBM = re.compile(r'\blbm\b')
 
 
+def _spell(unit: str) -> str:
+    """The three substitutions above, applied to a string as written."""
+    unit = _BARE_LBM.sub('lb', unit)
+    return _BARE_MIL.sub('thou', _BARE_G.sub('standard_gravity', unit))
+
+
+# The spellings the toolset speaks, for reading a unit whose case is not
+# pint's. A controller's channel table holds whatever was typed into it,
+# and `G`, `LBF` and `Volts` are typed all day: pint reads `G` as gauss
+# and refuses the other two, so a run's accelerometers arrived unit-less
+# while its `V` channels came through (Brandon, 2026-09-17, on a real
+# import). The rule is that the string as written wins whenever it names
+# a quantity this toolset tracks — `mV` and `MV` are different voltages
+# and stay so — and only a string that means nothing here is re-read
+# token by token against this list, ignoring case. No prefix arithmetic:
+# a token folds to one of these spellings or is left alone.
+_UNIT_SPELLINGS = (
+    'g', 'gn', 'standard_gravity',
+    'in', 'inch', 'inches', 'ft', 'foot', 'feet', 'm', 'meter', 'meters',
+    'mm', 'cm', 'km', 'um', 'mil', 'mils', 'thou',
+    's', 'sec', 'second', 'seconds', 'ms', 'us', 'min', 'minute', 'hr', 'hour',
+    'kg', 'gram', 'slinch', 'slug', 'lbm', 'lb', 'tonne',
+    'lbf', 'N', 'kN', 'newton', 'newtons',
+    'psi', 'Pa', 'kPa', 'MPa',
+    'V', 'mV', 'volt', 'volts',
+    'strain', 'microstrain', 'dimensionless',
+    'degC', 'degF', 'K', 'degR',
+    'rad', 'radian', 'radians', 'deg', 'degree', 'degrees',
+    'Hz', 'kHz',
+)
+_FOLD = {spelling.lower(): spelling for spelling in _UNIT_SPELLINGS}
+_UNIT_TOKEN = re.compile(r'[A-Za-z_]+')
+
+
+@lru_cache(maxsize=4096)
+def fold_unit_case(unit: str) -> str:
+    """`unit` respelled in the case this toolset knows, when that is the
+    only reading that means anything.
+
+    `'G'` becomes `'g'`, `'LBF/IN'` becomes `'lbf/in'`, `'Volts'` becomes
+    `'volts'`. A string that already names a quantity is returned as it
+    came — `'mV'` stays millivolts, and so does `'MV'` stay megavolts —
+    and so is one that no respelling rescues, so a caller can still
+    tell "unknown" from "known".
+    """
+    if not isinstance(unit, str) or _reading(unit) == 2:
+        return unit
+    folded = _UNIT_TOKEN.sub(
+        lambda m: _FOLD.get(m.group(0).lower(), m.group(0)), unit)
+    if folded != unit and _reading(folded) > _reading(unit):
+        return folded
+    return unit
+
+
+def _reading(unit: str) -> int:
+    """How much a spelling means here: 2 names a dimension this toolset
+    tracks, 1 is a unit pint can at least parse (a stiffness in lbf/in,
+    say — a compound a reference unit may carry), 0 is nothing. The fold
+    above trades up and never sideways: `G`, gauss as written, is a 1
+    that `g` makes a 2, while `MV` is a 2 as it stands."""
+    spelled = _spell(unit)
+    if _dimension_of_spelled(spelled):
+        return 2
+    try:
+        unit_registry().Quantity(1.0, spelled)
+    except Exception:  # noqa: BLE001 - unparseable is simply nothing
+        return 0
+    return 1
+
+
 def normalize_unit(unit: str) -> str:
     """A unit string as visualdynamics reads it, before pint sees it."""
     if not isinstance(unit, str):
         return unit
-    unit = _BARE_LBM.sub('lb', unit)
-    return _BARE_MIL.sub('thou', _BARE_G.sub('standard_gravity', unit))
+    return _spell(fold_unit_case(unit))
 
 
 # Dimensionality strings pint should report for each visualdynamics dimension tag
@@ -344,8 +413,14 @@ def dimension_of(unit: str) -> str | None:
     Only single base dimensions are recognized ('m/s**2' -> 'acceleration');
     compound quantities like FRFs carry their dimension expression explicitly.
     """
+    return _dimension_of_spelled(normalize_unit(unit))
+
+
+def _dimension_of_spelled(unit: str) -> str | None:
+    """`dimension_of` for a string that has already been through
+    `normalize_unit` — the half that asks pint, kept apart so the case
+    fold above can ask it without normalizing again."""
     ureg = unit_registry()
-    unit = normalize_unit(unit)
     try:
         dimensionality = ureg.Quantity(1.0, unit).dimensionality
     except Exception:  # noqa: BLE001 - any unparseable unit is simply unknown

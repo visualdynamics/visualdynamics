@@ -446,10 +446,11 @@ def test_those_rows_really_are_trivial():
 # ---- a stack of captures is not a recording ---------------------------------
 
 def write_nc4(path, samples, *, spectral, per_frame=None, averages=None,
-              channels=2):
+              channels=2, units=None):
     """A minimal Rattlesnake-shaped file, to isolate what the split keys on."""
     import netCDF4
 
+    units = units or ['m/s^2'] * channels
     with netCDF4.Dataset(path, 'w', format='NETCDF4') as ds:
         ds.sample_rate = 256.0
         ds.createDimension('response_channels', channels)
@@ -460,7 +461,7 @@ def write_nc4(path, samples, *, spectral, per_frame=None, averages=None,
         group = ds.createGroup('channels')
         for name, values in (('node_number', [str(100 + i) for i in range(channels)]),
                              ('node_direction', ['Z+'] * channels),
-                             ('unit', ['m/s^2'] * channels)):
+                             ('unit', units)):
             group.createVariable(name, str, ('response_channels',))[:] = \
                 np.array(values, dtype=object)
         env = ds.createGroup('Modal')
@@ -559,6 +560,22 @@ def test_a_streamed_recording_is_left_whole(tmp_path):
     data = visualdynamics.import_file(path)['time_data']
     assert data.num_records == 2 and len(data.abscissa) == 40
     assert data.block is None
+
+
+def test_a_channel_tables_units_are_read_in_the_case_they_were_typed(tmp_path):
+    """A real run's table said `G` for its accelerometers and `V` for its
+    voltage channels; the accelerometers arrived unit-less and the
+    voltages did not (Brandon, 2026-09-17). pint reads `G` as gauss.
+    The importer reads the table's case as the typist's, and the record
+    carries the toolset's own spelling."""
+    path = write_nc4(str(tmp_path / 'typed.nc4'), 40, spectral=False,
+                     units=['G', 'Volts'])
+    data = visualdynamics.import_file(path)['time_data']
+    assert data.ordinate_dim == ['acceleration', 'voltage']
+    assert data.ordinate_unit == ['g', 'volts']
+    raw = np.arange(2 * 40, dtype=float).reshape(2, 40)
+    assert np.allclose(data.ordinate[0].real, raw[0] * 9.80665)
+    assert np.allclose(data.ordinate[1].real, raw[1])
 
 
 def test_a_sample_count_that_divides_by_luck_is_not_a_stack(tmp_path):

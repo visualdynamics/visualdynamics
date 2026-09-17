@@ -1,7 +1,8 @@
 """Importer for Rattlesnake vibration controller output files (.nc4).
 
 Rattlesnake streams results to netCDF4 with a channel table that includes
-engineering units, so imports are fully unit-aware — no unit declaration
+engineering units (read in whatever case they were typed), so imports
+are fully unit-aware — no unit declaration
 needed. Layout (file_version 3.x):
 
 - root attrs: sample_rate, hardware, file_version, ...
@@ -64,7 +65,7 @@ from ..core.data import (
     TransientSpecification,
 )
 from ..core.sine import SineSweepSpecification, SineTone
-from ..units import UNKNOWN, dimension_of, si_factor
+from ..units import UNKNOWN, dimension_of, fold_unit_case, si_factor
 
 
 def sniff(path: str | os.PathLike) -> bool:
@@ -423,9 +424,12 @@ def _unit_scale(unit):
     """(SI scale factor, dimension tag, normalized unit) for a channel unit.
 
     Channels whose unit string visualdynamics cannot interpret import unit-less rather
-    than being silently treated as dimensionless.
+    than being silently treated as dimensionless. The case is the
+    controller's user's, not pint's: a table typed `G` or `LBF` is read
+    as g and lbf, and the record carries that spelling
+    (`units.fold_unit_case`).
     """
-    normalized = unit.replace('^', '**').strip()
+    normalized = fold_unit_case(unit.replace('^', '**').strip())
     dim = dimension_of(normalized) if normalized else None
     if dim is None:
         return 1.0, UNKNOWN, None

@@ -47,3 +47,12 @@ inch, never the angular one. Unit strings are normalized before pint
 sees them, because pint reads a bare `g` as 0.001 kg and `mil` as
 1/6400 of a turn — both wrong, both silent. `kg`, `mg` and `gram`
 still mean mass; grams are not offered as a mass unit anywhere.
+
+Case is forgiven where it can be. A controller's channel table holds
+whatever was typed into it, and `G`, `LBF` and `Volts` are typed all
+the time; pint reads `G` as gauss and refuses the other two, so those
+channels used to arrive unit-less. A unit string that means nothing as
+written is re-read against the spellings the toolset knows, ignoring
+case, and the record carries the corrected spelling (`g`, `lbf`,
+`volts`). A string that already names a quantity is never respelled:
+`mV` is millivolts and `MV` is megavolts, as written.

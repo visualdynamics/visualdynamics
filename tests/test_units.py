@@ -216,3 +216,51 @@ def test_a_dimensionless_value_can_be_shown():
     assert units.si_transform('', 'strain') == (1.0, 0.0), 'strain too'
     with pytest.raises(units.UnitError):
         units.si_transform('m', 'dimensionless')
+
+
+# ---- the case of a unit is the typist's, not pint's -------------------------
+
+def test_a_units_case_is_read_the_way_it_was_typed():
+    """A controller's channel table holds what was typed into it, and `G`
+    is typed for g all day. pint reads `G` as gauss and refuses `LBF` and
+    `Volts` outright, which imported a real run's accelerometers unit-less
+    while its `V` channels came through (2026-09-17)."""
+    assert units.dimension_of('G') == 'acceleration'
+    assert units.si_factor('G') == pytest.approx(9.80665)
+    assert units.dimension_of('LBF') == 'force'
+    assert units.si_factor('LBF') == pytest.approx(4.4482216152605)
+    assert units.dimension_of('Volts') == 'voltage'
+    assert units.dimension_of('IN/S**2') == 'acceleration'
+    assert units.si_factor('IN/S**2') == pytest.approx(0.0254)
+    assert units.fold_unit_case('G') == 'g'
+    assert units.fold_unit_case('LBF/IN') == 'lbf/in'
+
+
+def test_a_spelling_that_already_means_something_is_left_alone():
+    """The fold is a rescue, not a rewrite: `mV` and `MV` are different
+    voltages, and a string as written wins whenever it names a quantity
+    this toolset tracks. A string nothing rescues stays unknown, so a
+    caller can still tell the two apart."""
+    assert units.si_factor('mV') == pytest.approx(1e-3)
+    assert units.si_factor('MV') == pytest.approx(1e6)
+    assert units.fold_unit_case('mV') == 'mV'
+    assert units.fold_unit_case('MV') == 'MV'
+    assert units.fold_unit_case('gauss') == 'gauss'
+    assert units.dimension_of('gauss') is None
+    assert units.fold_unit_case('') == ''
+
+
+def test_every_offered_unit_folds_back_to_itself_from_upper_case():
+    """The spellings the fold knows must cover the shortlists the
+    interface offers, or a typed `KPA` would land as unknown while `kPa`
+    is one click away. Two upper-case spellings are units in their own
+    right and stay as written, which is the rule the test above pins:
+    `MV` is megavolts and `M/M` is molar over molar — the same dimension
+    either way, so nothing downstream reads them differently."""
+    from visualdynamics.core.unit_choices import ALL_ORDINATE_UNITS, LENGTH_UNITS, MASS_UNITS
+
+    their_own = {'mV': 'MV', 'm/m': 'M/M'}
+    for unit in [*ALL_ORDINATE_UNITS, *LENGTH_UNITS, *MASS_UNITS]:
+        upper = unit.upper()
+        assert units.dimension_of(upper) == units.dimension_of(unit), unit
+        assert units.fold_unit_case(upper) == their_own.get(unit, unit), unit

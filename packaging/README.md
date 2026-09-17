@@ -4,10 +4,10 @@ One PyInstaller spec, four thin platform wrappers, and a workflow that
 runs **only on a tag, a button press, or a published release** (the
 last is what deploys the site and publishes to PyPI).
 
-| platform | script | artefact | verified |
+| platform | script | artifact | verified |
 | --- | --- | --- | --- |
-| macOS, Apple silicon | `build_macos.sh` | `.dmg` around a `.app`, signed and notarised | **yes** — 486 MB, launched from the mounted image |
-| macOS, Intel | `build_macos_intel.sh` | the same, built under Rosetta | **yes** — 539 MB, notarised |
+| macOS, Apple silicon | `build_macos.sh` | `.dmg` around a `.app`, signed and notarized | **yes** — 486 MB, launched from the mounted image |
+| macOS, Intel | `build_macos_intel.sh` | the same, built under Rosetta | **yes** — 539 MB, notarized |
 | Linux | `build_linux.sh` | `.AppImage` | **yes** — 476 MB, x86_64, launched under Xvfb |
 | Windows | `build_windows.ps1` | Inno Setup `.exe` installer | **yes** — installed and launched on a `windows-latest` runner by the release workflow's smoke test (2026-09-01); `build_windows_wine.sh` is the local loop |
 
@@ -40,7 +40,7 @@ which is what caught the 0.1.0a1 launch crash the Wine build did not.
 `build_windows_wine.sh setup` once, then `build`; `run` launches what
 was built. Windows x64 Python + PyInstaller + Inno Setup all run under
 Wine (via Rosetta), so the installer in `dist/` is a real Windows
-artefact made without a Windows machine, licence, or Actions minutes.
+artifact made without a Windows machine, license, or Actions minutes.
 The traps, each found the hard way and remembered in the script:
 
 - **Wine devel, not stable**: Qt 6.7+ links Windows' native ICU DLLs
@@ -131,7 +131,7 @@ measurements support and what they do not:
   the same day: same error, plus a segmentation fault. They stay.
 
 The general lesson is that building on the oldest distribution you
-support is necessary but not sufficient: an artefact also has to be
+support is necessary but not sufficient: an artifact also has to be
 *launched* somewhere newer, because this failure appears nowhere else.
 
 ## Why --onedir, always
@@ -155,12 +155,12 @@ story:
 | macOS | **10x** | ~20 min | **200** |
 
 So the release workflow builds Linux and Windows there, and **leaves
-macOS off by default** — `build_macos.sh` produces the same artefact on
+macOS off by default** — `build_macos.sh` produces the same artifact on
 the maintainer's own machine in about two minutes for nothing. A release
 therefore costs ~55 minutes rather than ~255 — which mattered while
 the repository was private and metered; public repositories' runner
 minutes are free, and the habit is kept because the desk build is
-also the notarised one.
+also the notarized one.
 `workflow_dispatch` has a `macos` checkbox for a release where that
 machine is not to hand.
 
@@ -172,7 +172,7 @@ separate and effectively unlimited store.
 ## No nightly builds
 
 A nightly build of a project with one author spends the year's minutes
-on artefacts nobody downloads, and produces a version number that means
+on artifacts nobody downloads, and produces a version number that means
 nothing. Tag when there is something worth handing over:
 
     git tag v0.1.0 && git push origin v0.1.0
@@ -182,10 +182,10 @@ world sees it.
 
 ## Signing, and what it costs to skip
 
-Signed and notarised on macOS; unsigned on Windows and Linux. What
+Signed and notarized on macOS; unsigned on Windows and Linux. What
 that means for whoever you hand a build to:
 
-- **macOS** — **signed and notarised from this desk** (Brandon joined
+- **macOS** — **signed and notarized from this desk** (Brandon joined
   the Apple Developer Program 2026-09-02, both one-time steps below
   were done the same evening, and `build_macos.sh` does the rest
   unasked, on both the arm64 and the Intel image). The two steps, for
@@ -196,7 +196,7 @@ that means for whoever you hand a build to:
      codesigning` then lists it, and the build picks it up. (The
      *Apple Development* certificate already there is for running on
      your own Macs and does not satisfy Gatekeeper.)
-  2. **The notarisation credentials**, stored once in the keychain so
+  2. **The notarization credentials**, stored once in the keychain so
      no password ever sits in a file or a shell history:
      ```bash
      xcrun notarytool store-credentials vd-notary --apple-id bzwink@gmail.com --team-id 2542NQ9D95
@@ -210,13 +210,13 @@ that means for whoever you hand a build to:
      2026-09-02).
 
   With both in place a build signs every dylib and the bundle with the
-  hardened runtime and `entitlements.plist`, notarises the app and
-  staples its ticket into the bundle, then signs, notarises and
+  hardened runtime and `entitlements.plist`, notarizes the app and
+  staples its ticket into the bundle, then signs, notarizes and
   staples the image — and `spctl` assesses both before the build calls
   itself done. Without the certificate the bundle is ad-hoc signed
   (required on Apple silicon, where an unsigned binary is refused
   outright) and Gatekeeper asks once; without the profile it is signed
-  but not notarised, and the build warns. **The profile can be
+  but not notarized, and the build warns. **The profile can be
   unreachable for a stretch** — "No Keychain password item found for
   profile: vd-notary", from the foreground too, with nothing changed
   here — and settled on 2026-09-15: `notarytool store-credentials`
@@ -245,8 +245,8 @@ that means for whoever you hand a build to:
   keychain has no timeout and does not lock on sleep, so it answers
   whenever Brandon is logged in). Without the item the script falls
   back to the profile, and when neither answers it says so and leaves
-  the images signed: notarise those by hand rather than rebuilding —
-  `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarisation takes a few
+  the images signed: notarize those by hand rather than rebuilding —
+  `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarization takes a few
   minutes per submission, twice per image.
 - **Windows** — SmartScreen warns until the signature earns
   reputation. **The plan is SignPath Foundation** (Brandon,
@@ -259,8 +259,8 @@ that means for whoever you hand a build to:
     SmartScreen and the installer reads **"SignPath Foundation"** —
     not the author's name. Accepted as the price of free; the macOS
     side still carries the author's own Apple identity.
-  - They require an OSI licence **without commercial dual-licensing**
-    — a plain copyleft licence qualifies; a copyleft-plus-commercial
+  - They require an OSI license **without commercial dual-licensing**
+    — a plain copyleft license qualifies; a copyleft-plus-commercial
     plan would not, which is why no commercial terms are offered.
   - They sign projects that are *already released*, so the sequence
     is: public grant → first Windows release unsigned → apply at
@@ -335,7 +335,7 @@ halves are signed.
 
 Publishing a new version therefore means: sync the public tree
 (`tools/sync_public.sh`), tag `v<version>` there, let the draft
-release build, build and notarise the macOS pair here
+release build, build and notarize the macOS pair here
 (`build_macos.sh`, `build_macos_intel.sh`, unattended from the
 keychain item above), attach them with `packaging/attach_macos.sh
 v<version>`, read the Windows smoke screenshot, and publish. The

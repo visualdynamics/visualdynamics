@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/visualdynamics/visualdynamics/actions/workflows/ci.yml/badge.svg)](https://github.com/visualdynamics/visualdynamics/actions/workflows/ci.yml)
 [![ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![license: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![python: 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
 
 Units-aware structural dynamics analysis toolset. Geometry, test data (time
@@ -62,7 +62,7 @@ What it does today: import sdynpy/exodus/UNV/Rattlesnake files (declaring
 units where the source is silent), write a specification back out as
 the target Rattlesnake loads, view everything as grids, plots, CMIF
 and coherence maps, animate shapes and time data on geometry, mark
-measurement DOFs with labelled axis-colored arrows, **fit modal models to
+measurement DOFs with labeled axis-colored arrows, **fit modal models to
 FRFs interactively** (residual CMIF, one mode at a time, MAC beside the
 table), compare shape sets by cross-MAC with phase-aligned overlay
 animation, compute averaged spectra and PSDs from multi-average time
@@ -150,10 +150,10 @@ satisfy.
 
 Help that is not code is welcome too — advice, review, measurements, a
 bug report that turns out to be a real one. It is recorded in
-[ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md), which is thanks rather
+[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), which is thanks rather
 than authorship.
 
-## Licence
+## License
 
 Copyright (c) 2026 Brandon Zwink. Visual Dynamics is free software
 under the [GNU General Public License, version 3 or any later
@@ -166,5 +166,5 @@ or in what the software tells you about it.
 Other terms are available from the copyright holder
 (contact@visualdynamics.org). Contributions are accepted under
 [CLA.md](CLA.md), which is what keeps that possible; see
-[CONTRIBUTING.md](CONTRIBUTING.md). Third-party licences are listed in
+[CONTRIBUTING.md](CONTRIBUTING.md). Third-party licenses are listed in
 [NOTICE.md](NOTICE.md).

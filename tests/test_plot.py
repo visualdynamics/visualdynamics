@@ -165,7 +165,7 @@ def test_the_bounds_stay_out_of_the_legend(qt_app, spec):
 def test_the_legend_sits_below_the_plot_in_a_row(qt_app, spec):
     """Inside the view a legend lands on the data — a specification's
     bands, an FRF's peaks — and neither can be read (Brandon,
-    2026-09-01). It goes below, horizontal, centred on the axes, and
+    2026-09-01). It goes below, horizontal, centered on the axes, and
     no wider than its entries; the plot keeps its whole area."""
     import pyqtgraph as pg
 
@@ -182,14 +182,14 @@ def test_the_legend_sits_below_the_plot_in_a_row(qt_app, spec):
     assert legend.columnCount > 1, 'horizontal'
     assert box.width() < 0.8 * view.width(), 'sized to its entries, not the strip'
     assert abs(box.center().x() - view.center().x()) < 1, (
-        'centred on the axes — the strip also spans the left axis, so '
-        'centring on that sat the names right of the data')
+        'centered on the axes — the strip also spans the left axis, so '
+        'centering on that sat the names right of the data')
 
 
 def test_the_legend_wraps_to_the_width_of_the_axes(qt_app, spec):
-    """His second look: the names started at the centre and ran off to
+    """His second look: the names started at the center and ran off to
     the right. Two faults — the box froze at the first entry's width,
-    and it was centred on the strip rather than the axes. Now the row
+    and it was centered on the strip rather than the axes. Now the row
     holds as many entries as the axes are wide, wraps past that, and
     unwraps when the room comes back."""
     plot, layout = drawn_plot(qt_app, spec)
@@ -207,7 +207,7 @@ def test_the_legend_wraps_to_the_width_of_the_axes(qt_app, spec):
     assert legend.columnCount < entries and legend.rowCount > 1, 'wrapped'
     assert box.width() <= view.width() + 1, 'never wider than the axes'
     assert box.height() > wide.height(), 'the rows stack'
-    assert abs(box.center().x() - view.center().x()) < 1, 'still centred'
+    assert abs(box.center().x() - view.center().x()) < 1, 'still centered'
     assert box.top() >= view.bottom()
 
     layout.resize(1200, 600)

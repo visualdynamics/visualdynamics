@@ -46,7 +46,7 @@ def a_psd(lines=None, level=1e-3):
 
 def test_a_psd_is_drawn_flat_across_each_bin(qt_app):
     """What is summed when it is integrated, so the area drawn is the
-    area counted. A line between bin centres draws a ramp inside each
+    area counted. A line between bin centers draws a ramp inside each
     bin that the estimate does not contain."""
     curves, _plot = drawn(qt_app, a_psd())
     x, y = curves[0]
@@ -266,19 +266,19 @@ def test_the_reports_specification_follows_the_power_law():
 
 
 def test_the_report_steps_on_the_bands_own_edges():
-    """An octave band's centre is the geometric mean of its edges, so
-    midpoints between centres — which the JS used to guess — miss them.
+    """An octave band's center is the geometric mean of its edges, so
+    midpoints between centers — which the JS used to guess — miss them.
     The payload carries the real edges now."""
     from visualdynamics.core.octave import bin_bounds
 
-    centres = np.array([100.0, 125.0, 160.0])
+    centers = np.array([100.0, 125.0, 160.0])
     widths = np.array([23.0, 29.0, 36.0])
-    banded = Psd(centres, np.ones((1, 3)), response_dof=['1Z+'],
+    banded = Psd(centers, np.ones((1, 3)), response_dof=['1Z+'],
                  ordinate_dim=['acceleration**2/frequency'],
                  ordinate_unit=['(m/s**2)**2/Hz'], bandwidth=widths)
     built = _report_block(banded)
     assert built.get('steps') is True
-    lower, upper = bin_bounds(centres, widths)
+    lower, upper = bin_bounds(centers, widths)
     expected = np.concatenate([lower, [upper[-1]]])
     assert np.allclose(built['edges'], expected), \
-        'the bands, not the midpoints between their centres'
+        'the bands, not the midpoints between their centers'

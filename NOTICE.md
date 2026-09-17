@@ -1,10 +1,10 @@
 # Third-party notices
 
 Visual Dynamics depends on these packages. It does not include them: a
-normal install fetches each from PyPI under its own licence, and nothing
+normal install fetches each from PyPI under its own license, and nothing
 here changes those terms.
 
-| Package | Licence | Obligation if this is redistributed |
+| Package | License | Obligation if this is redistributed |
 | --- | --- | --- |
 | numpy, scipy, h5py, pandas, pint, VTK | BSD-3-Clause | keep the copyright notice |
 | netCDF4, pyvista, pyvistaqt, pyqtgraph, openpyxl | MIT | keep the copyright notice |
@@ -51,7 +51,7 @@ None of this touches the rule about sdynpy, rattlesnake and
 forcefinder. That one is about *source* copied into this tree, where
 the copyleft would attach to Visual Dynamics' own code; depending on a
 BSD library that links a GPL-with-exception runtime is a different
-question with a different answer, and `tests/test_licence_boundary.py`
+question with a different answer, and `tests/test_license_boundary.py`
 still enforces the first one on every run.
 
 
@@ -91,7 +91,7 @@ cadquery-ocp wheels) are Apache-2.0 and impose nothing further. The
 per-platform swap mechanics in `qt-replacement.md` apply to these
 libraries the same way — they live beside the Qt ones in the bundle.
 
-The alternative is a commercial Qt licence from the Qt Company, which
+The alternative is a commercial Qt license from the Qt Company, which
 removes the obligation and is priced accordingly. Worth pricing before
 any plan depends on a single-file distributable.
 
@@ -119,7 +119,7 @@ already self-contained (816 kB, no external references) and opens in any
 browser today, so that fallback is always available — it is just not an
 improvement.
 
-**The middle path, when it is worth two days.** Check its licence
+**The middle path, when it is worth two days.** Check its license
 first — swapping one Qt module for another is exactly the move the rule
 above exists for, and a saving in megabytes is no bargain if it costs
 the LGPL. `PySide6.QtWebView` is

@@ -717,11 +717,11 @@ class Project(dict):
         derived from it (double-click a row or reference column of the
         grid and type).
 
-        The channel, not the point: a force labelled at the wrong node
+        The channel, not the point: a force labeled at the wrong node
         moves without taking the accelerometer at that node with it
         (Brandon, 2026-09-06 — the other is changed explicitly if it
         should be). The spectra computed from a time history inherited
-        its channels, so one found mislabelled is mislabelled in every
+        its channels, so one found mislabeled is mislabeled in every
         one of them; the correction follows the derivation chain rather
         than leaving each derived object to be fixed by hand or
         recomputed. An object downstream that does not carry the
@@ -734,7 +734,7 @@ class Project(dict):
         old : str
             The coordinate as it is, '101Z+'.
         new : str
-            The coordinate to give it, normalised the way every DOF is.
+            The coordinate to give it, normalized the way every DOF is.
         quantity : str, optional
             Which channel at `old` — 'acceleration', 'force' …; every
             channel at the coordinate when omitted.
@@ -960,7 +960,7 @@ class Project(dict):
         """{role: [members]} — which objects are in each *named* group.
 
         Nothing is guessed here. An object nobody has placed is in no
-        named group, which is what makes the tree's grey slots mean
+        named group, which is what makes the tree's gray slots mean
         anything: a slot is filled by an object in its own group, so a
         modal test whose only geometry is the model's still shows a
         slot for the measured one.
@@ -1058,7 +1058,7 @@ class Project(dict):
         Parameters
         ----------
         name : str
-            The object whose group is being labelled.
+            The object whose group is being labeled.
         role : str or None
             The role, or None to clear it.
 
@@ -1867,7 +1867,7 @@ class Project(dict):
         about its reference point, as a shape set in the geometry's
         group.
 
-        The point, and the mass and inertia that mass-normalise the
+        The point, and the mass and inertia that mass-normalize the
         set, are the geometry's own `mass_properties`, set in the
         rigid-body view. With none set the centroid is adopted, unit
         shapes about the middle of the model — a real answer, unlike
@@ -1911,14 +1911,14 @@ class Project(dict):
 
         The screen's loop, scripted: confirm the suggestion, take the
         next, `limit` times. The session's own suggestion logic is the
-        whole judgement — a confirmed peak is spoken for unless the
+        whole judgment — a confirmed peak is spoken for unless the
         shape standing there is somebody else's — so the loop adds no
         second opinion. It used to: a proximity guard here vetoed any
         suggestion within 1 Hz of a confirmed mode, which was the same
         ridge-trap bandaid the session has since outgrown, and it
         silently skipped the repeated pair's second tooth that
         `suggest` had deliberately offered. On the screen the person
-        stops the loop; scripted, `limit` is that judgement, and the
+        stops the loop; scripted, `limit` is that judgment, and the
         plate demo's own cap is the worked example of choosing it.
 
         On the screen the equivalent of `bounds` is the zoom — what is
@@ -2691,7 +2691,7 @@ class Project(dict):
         """Record a stretch of front-end work as one replaying line.
 
         The GUI imports a file by building the objects itself and
-        adding them one by one; journalled verb by verb, that stretch
+        adding them one by one; journaled verb by verb, that stretch
         is a pile of not-replayable comments — when the honest record
         is the single `import_file` call a script would make. Inside
         the stretch every verb stays quiet, exactly as verbs nested in
@@ -2717,7 +2717,7 @@ class Project(dict):
 
     def record_setting(self, target: Any, attribute: str,
                        value: Any) -> None:
-        """A settings write, journalled the way a script would make it.
+        """A settings write, journaled the way a script would make it.
 
         The front ends' funnel: the GUI stores analysis settings by
         assignment — a dragged averaging span, a filter corner, the
@@ -2753,7 +2753,7 @@ class Project(dict):
 
     def record_call(self, target: Any, method: str, *args: Any,
                     **kwargs: Any) -> None:
-        """A method call on an object, journalled as a script makes it.
+        """A method call on an object, journaled as a script makes it.
 
         The front ends' funnel for object verbs that are not Project
         verbs — a traceline added to a geometry, a photo renamed —
@@ -3173,11 +3173,11 @@ def _named_state(kind, value):
     The values then go through the class itself, because a *rename* is
     the other way a fingerprint drifts without the settings moving:
     'rectangle' became 'boxcar' (2026-08-29, the scipy spelling), the
-    loader normalises the object's own averaging through `Averaging`,
+    loader normalizes the object's own averaging through `Averaging`,
     and a fingerprint recorded before the rename compared unequal to
     the identical computation — every older project opened with a
     refresh badge over a story that named the same window twice
-    (Brandon, 2026-08-30). One implementation of the normalisation:
+    (Brandon, 2026-08-30). One implementation of the normalization:
     the class's, here as at load.
     """
     import importlib

@@ -1,7 +1,7 @@
 """The application's icon: four FRFs on the waterfall stage.
 
 The 3-D reading of data is what this application looks like — the
-waterfall stage, channels receding, level-coloured — so that is what
+waterfall stage, channels receding, level-colored — so that is what
 the tile shows (Brandon, 2026-08-23; it was a plate carrying a mode
 before). The curves are real: accelerances synthesized from the
 demonstration plate's own eigensolution, noiseless on purpose, drawn
@@ -16,7 +16,7 @@ its icon once.
 
 Two deliberate departures from the honest plot, both because a tile
 is not a plot: the vertical is stretched to fill the tile (the
-stage's view projects wide and short), and the colour/height range is
+stage's view projects wide and short), and the color/height range is
 clipped to the top `DECADES` decades — unclipped, one deep
 antiresonance eats the whole range and every peak reads flat green.
 """
@@ -41,7 +41,7 @@ DRIVE = '101Z+'
 BAND = (60.0, 1500.0)
 POINTS = 480
 DAMPING = 0.02
-#: colour and height read the top decades only — see the module note
+#: color and height read the top decades only — see the module note
 DECADES = 2.4
 
 #: the tile's inset from the icon square — macOS insets its own
@@ -73,7 +73,7 @@ def colormap(values: ArrayLike) -> np.ndarray:
 
 @cache
 def synthesized_levels() -> np.ndarray:
-    """The four curves, as levels in 0..1: colour and height alike.
+    """The four curves, as levels in 0..1: color and height alike.
 
     Noiseless accelerances from the demonstration plate's own modes
     (`ShapeSet.synthesize_frf`), log magnitude, clipped to the top
@@ -136,8 +136,8 @@ def screen_curves(size: int) -> list[np.ndarray]:
               + size * THICKNESS / 2.0)
     scale = np.array([(size - 2 * margin) / (high[0] - low[0]),
                       (size - 2 * margin) / (high[1] - low[1])])
-    centre = (low + high) / 2.0
-    return [(screen - centre) * scale + size / 2.0 for screen in screens]
+    center = (low + high) / 2.0
+    return [(screen - center) * scale + size / 2.0 for screen in screens]
 
 
 @cache

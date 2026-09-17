@@ -35,7 +35,7 @@ class ConsolePanel(QWidget):
 
     The panel holds only the scrollback, so collapsed it is zero rows
     tall — the first cut reserved a full-width strip for the tab and
-    the empty strip read as a grey bar across the window (Brandon,
+    the empty strip read as a gray bar across the window (Brandon,
     2026-08-31). The tab is not in any layout: `float_over` overlays
     it on the bottom edge of whatever the console expands under, the
     way a drawer handle sits on the drawer. Nothing built in does
@@ -50,7 +50,7 @@ class ConsolePanel(QWidget):
         column.setSpacing(0)
         self._host: QWidget | None = None
 
-        # A tab, drawn as one: a flared handle centred on the edge with
+        # A tab, drawn as one: a flared handle centered on the edge with
         # a chevron either side of the word, to the design Brandon had
         # made (2026-09-03) — the first cut was a styled button with a
         # font triangle, and before that a full-width bar that read as
@@ -76,7 +76,7 @@ class ConsolePanel(QWidget):
         self._toggled(False)
 
     def float_over(self, host: QWidget) -> None:
-        """Overlay the tab on `host`'s bottom edge, centred, and keep
+        """Overlay the tab on `host`'s bottom edge, centered, and keep
         it there through resizes.
 
         Parameters

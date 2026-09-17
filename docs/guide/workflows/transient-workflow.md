@@ -77,7 +77,7 @@ channel and every playing below](../images/transient-overlay.png)
 The **waveform error** view reads the same grid as bars: the
 difference between the two waveforms against the size of the target,
 per channel per playing. Amplitude, phase and shape all move it, and
-it is what the controller was minimising.
+it is what the controller was minimizing.
 
 ![The waveform error by channel: two shakers replicating an
 eight-channel motion land in the 6-26% band, and the bars say which
@@ -104,7 +104,7 @@ photographs, link the group. The transient report is deliberately
 shorter than the random one: there is no settled numerical compliance
 measure for two transients, so the waveforms lead — the target, the
 measured response, the overlay, the error bars — the level follows,
-and the judgement is written in the conclusions.
+and the judgment is written in the conclusions.
 
 ![The exported report: the target waveform and the measured control
 response, with the playings marked](../images/transient-report.png)
@@ -145,7 +145,7 @@ project.export_report(project.report, 'transient_report.html')
 project.save('transient.vdyn')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 - **Whether the reproduction is close enough.** There is no band to
   fall outside: the overlay is the evidence, and the waveform and RMS

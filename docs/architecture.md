@@ -13,7 +13,7 @@ and the last section says which.
 ## The package, by layer
 
 Half the codebase imports no Qt, and that is a rule rather than an
-accident: the data model, the maths, the file formats and the 3-D
+accident: the data model, the math, the file formats and the 3-D
 scene are a library; the desktop app sits on it. A change that puts
 Qt into the wrong layer is refused in review whatever else it does.
 
@@ -24,11 +24,11 @@ Qt into the wrong layer is refused in review whatever else it does.
 | Project | `project.py` | no | The `Project`: named objects, links, roles, the **verbs** (below) and the **journal** — the one workflow the app and a script both drive. |
 | Formats | `io/` | no | One module per format, each a reader and (nearly always) a writer, registered in a small registry so a new format touches nothing else. `native.py` is `.vdyn`. |
 | Geometry motion | `deform.py`, `rotate.py`, `decimate.py` | no | Data at DOFs turned into node motion; a coordinate system dragged by its ring; peak-keeping thinning. |
-| 3-D | `viz/` | no | PyVista over VTK: the scene, the waterfall, the scalogram surface, the MAC bars, picking, animation — built on a fixed stage and relabelled with real ranges. |
+| 3-D | `viz/` | no | PyVista over VTK: the scene, the waterfall, the scalogram surface, the MAC bars, picking, animation — built on a fixed stage and relabeled with real ranges. |
 | 2-D | `plot/` | yes | pyqtgraph: one renderer serves the window and a script, so a figure in a file is the figure on screen. |
 | App | `gui/` | yes | The window, the tree, the panes, the settings panels, the console, the report editor. Displays what the project does; decides nothing on its own. |
 | Reports | `report/` | no | A `Report` rendered to one self-contained HTML file, viewers included. |
-| Theme | `theme.py` | yes | The colours the package draws with, and which scheme applies. |
+| Theme | `theme.py` | yes | The colors the package draws with, and which scheme applies. |
 
 ## One workflow, two front ends
 
@@ -37,9 +37,9 @@ Everything the app can do, a script can do, with the same call
 `visualdynamics.Project` drive one workflow, and every act in the
 window is a verb on the project.
 
-- **Behaviour goes on the project, or in `core`; the GUI displays
+- **Behavior goes on the project, or in `core`; the GUI displays
   it.** A new computation is a project verb (`compute_srs`,
-  `filter_data`, `transform`…) with its maths in a `core` module. The
+  `filter_data`, `transform`…) with its math in a `core` module. The
   window's bar and menus are a *presentation* of `Project.verbs()` —
   the one applicability table, whose summaries are the first line of
   each verb's docstring, so the bar, the API and the reference cannot
@@ -107,7 +107,7 @@ The suite is the specification. About 3 300 tests run headless in
 three minutes on four workers, most of them through a real
 `MainWindow` built off screen. The conventions:
 
-- **A test is named as a sentence about behaviour**, read from the
+- **A test is named as a sentence about behavior**, read from the
   user's side: `test_a_time_history_offers_the_wavelet`,
   `test_the_flat_picture_is_a_toggle_away`,
   `test_a_record_that_starts_late_is_drawn_on_its_own_clock`. The name
@@ -120,7 +120,7 @@ three minutes on four workers, most of them through a real
   the named test fail; a test that passes with the fix reverted is
   testing nothing. Clear `__pycache__` between the break and the
   restore, or the interpreter keeps running the broken bytecode.
-- **GUI behaviour is pinned by a named headless test, not a script.**
+- **GUI behavior is pinned by a named headless test, not a script.**
   `tests/conftest.py` gives `window` (a `MainWindow` with an offscreen
   3-D view), `pump` (drain the event loop), `fixture_path`, `project`
   and `survey`. Claims about the GUI are measured — the 3-D view
@@ -130,15 +130,15 @@ three minutes on four workers, most of them through a real
   survey and the drone run at sizes the suite can afford; nothing
   large is committed.
 - **An intermittent failure is a bug until proved otherwise.**
-  Capture the assertion's values before theorising; the one dismissed
+  Capture the assertion's values before theorizing; the one dismissed
   as a flake was a real latch both times.
 - **Own a bad test.** When a failure was the test and not the code,
   say so plainly.
 
 Coverage is measured on every pull request and held to a floor by
-CI; a change that adds code without tests goes red the way a licence
+CI; a change that adds code without tests goes red the way a license
 violation does. The number is not the goal — the falsified,
-behaviour-named test is — but the floor is what stops the number
+behavior-named test is — but the floor is what stops the number
 sliding while nobody is looking.
 
 ## The ratchets
@@ -148,7 +148,7 @@ and are why the rules above are not merely preferences:
 
 | Test | What it holds |
 |---|---|
-| `test_licence_boundary.py` | The package, and the tests, import no code whose licence would restrict the project's licensing; the detector finds a planted violation. |
+| `test_license_boundary.py` | The package, and the tests, import no code whose license would restrict the project's licensing; the detector finds a planted violation. |
 | `test_principles.py` | The thirteen principles are numbered, stated, counted the same everywhere, reachable from every audience; no dependency is capped or pinned. |
 | `test_docstrings.py` | The two docstring standards above. |
 | `test_verbs.py` | `Project.verbs` is the one applicability table the bar reads. |

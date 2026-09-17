@@ -174,7 +174,7 @@ format it found and stops. The spec is mirrored at
 ⁶ B-rep CAD, tessellated on import by the bundled OpenCASCADE kernel
 (LGPL-2.1 with exception — one more replaceable library, see
 NOTICE.md): named parts become named blocks, coordinates convert to
-metres from whatever the file declares. Import only — Visual Dynamics
+meters from whatever the file declares. Import only — Visual Dynamics
 holds meshes, not surfaces, so writing B-rep back would be an
 invention. A pip install keeps the kernel optional
 (`pip install 'visualdynamics[step]'`); the packaged application

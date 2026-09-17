@@ -107,7 +107,7 @@ def test_the_whole_application_wears_the_choice(window, pump, monkeypatch):
     widget follows; System hands the decision back to the platform.
     The offscreen platform the tests run on ignores the request, so
     the call is what is pinned here — the effect was watched on macOS:
-    the widget palette's window colour went from lightness 50 to 236
+    the widget palette's window color went from lightness 50 to 236
     and back."""
     from visualdynamics.gui import main_window
 
@@ -208,7 +208,7 @@ def test_the_scene_is_told_the_theme_not_just_to_repaint(window, pump):
 def test_a_refresh_leaves_the_themed_widgets_their_own_palette(window, pump):
     """`refresh_palettes` makes widgets re-read the application palette
     (macOS widgets keep a stale one after a scheme switch) and must not
-    take the tree's and the tables' own theme colours away with it."""
+    take the tree's and the tables' own theme colors away with it."""
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QPalette
 

@@ -1,14 +1,14 @@
 """A frame of animation must not cost the size of the model.
 
 Measured on a 202 500-node, 201 601-quad plate: a frame is 2.2 ms, which
-is seven per cent of the 33 ms a 30 fps timer has to spend. That headroom
+is seven percent of the 33 ms a 30 fps timer has to spend. That headroom
 is the *size ceiling* — it is what makes a real FE model animate at all —
 and it comes from three structural properties rather than from anything
 being fast:
 
 - a frame is **one write** into a shared point buffer and one into a
   shared scalar buffer, seen by every mesh at once;
-- meshes are grouped by **colour**, so a scene has a dozen of them
+- meshes are grouped by **color**, so a scene has a dozen of them
   whatever the model size, and a dozen draw calls;
 - nothing derived is rebuilt per frame — no actor added, no mesh
   replaced, no array reallocated.
@@ -69,7 +69,7 @@ def larger():
     return plate(60)          # 3 600 nodes, nine times the first
 
 
-def test_the_scene_has_a_mesh_per_colour_not_per_entity(small, larger,
+def test_the_scene_has_a_mesh_per_color_not_per_entity(small, larger,
                                                         qt_app):
     """Nine times the nodes, the same number of meshes — which is the
     whole reason a large model draws at all."""
@@ -108,7 +108,7 @@ def test_a_frame_writes_into_the_buffer_the_meshes_already_share(small,
     assert not np.array_equal(view, at_rest), 'but the nodes did move'
 
 
-def test_colouring_by_displacement_reuses_one_array_for_every_mesh(small,
+def test_coloring_by_displacement_reuses_one_array_for_every_mesh(small,
                                                                    qt_app):
     moving = animator_for(small, colormap=True)
     scalars = moving.scalars_source

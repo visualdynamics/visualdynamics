@@ -52,7 +52,7 @@ def test_every_quantity_asked_for_has_an_icon():
                                'modal_acceleration', 'modal_force'}
 
 
-def test_a_modal_response_through_mass_normalised_shapes_wears_the_m(qt_app):
+def test_a_modal_response_through_mass_normalized_shapes_wears_the_m(qt_app):
     from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
     from visualdynamics.core.transform import to_modal
     from visualdynamics.gui.icons import record_icon
@@ -78,7 +78,7 @@ def test_a_modal_response_through_mass_normalised_shapes_wears_the_m(qt_app):
 def test_a_virtual_points_rotations_wear_their_own_glyphs(qt_app):
     """The rotational records of a modal response used to fall back to
     the object's icon; each now has a glyph, the linear counterpart's
-    colour with an arc for the trace and a twist for the force."""
+    color with an arc for the trace and a twist for the force."""
     from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
     from visualdynamics.core.transform import to_modal
     from visualdynamics.gui.icons import record_icon
@@ -273,10 +273,10 @@ def test_the_derivative_dots_survive_being_shrunk_to_the_tree(qt_app):
 
 
 def test_length_is_shown_as_displacement_but_stored_as_length(qt_app):
-    """The dimension is derived from the unit, and metres cannot say
+    """The dimension is derived from the unit, and meters cannot say
     whether they are a coordinate or a motion — a geometry's nodes, a
     plate's thickness and a proximity probe's output are all `length`,
-    so that is what a record stores. But a channel measured in metres is
+    so that is what a record stores. But a channel measured in meters is
     a *displacement*, and 'length' in a Type cell reads as a mistake to
     anyone who has run a survey. The dimension keeps its name; the
     interface uses the word."""

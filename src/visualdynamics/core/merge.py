@@ -27,7 +27,7 @@ The ground rules, per Brandon:
   (see `_time_refusal`).
 - Units gate per object where units are object-wide (geometry, shapes):
   everything defined, or everything raw — mixing SI values with raw ones
-  would add metres to numbers. Data-array units are per record and simply
+  would add meters to numbers. Data-array units are per record and simply
   ride along.
 """
 

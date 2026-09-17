@@ -35,12 +35,12 @@ The map first, then each path in full.
 
 Drag the controller's spectra save and the test display geometry
 anywhere onto the window. The run says what it was — the project type
-switches to *Modal Test* by itself — and the tree grows grey slots
+switches to *Modal Test* by itself — and the tree grows gray slots
 for everything a modal report draws from. The slots are the to-do
 list: each disappears as the real object arrives.
 
 ![The window after the import: the tree holding the measured objects
-with the type's remaining slots in grey, and the FRF's 22 records
+with the type's remaining slots in gray, and the FRF's 22 records
 drawn — the plate's four modes standing clear, and the survey's one
 in-plane channel reading eight orders down, which is what a channel
 pointed where nothing moves looks
@@ -60,7 +60,7 @@ sits in the same group as context.
 
 ![The Imported Units pane for the geometry: one row, Coordinates /
 length, the Unit cell waiting to be told
-metres](../images/modal-units.png)
+meters](../images/modal-units.png)
 
 ### 3. Link the measured side, and call it the Basis
 
@@ -121,10 +121,10 @@ Fit* later and the session reopens exactly where it stood.
 ### 6. Look at a shape
 
 Select the fitted shape set beside its geometry and the modes animate
-on the survey panels, deflected and coloured by displacement.
+on the survey panels, deflected and colored by displacement.
 
 ![The first identified mode — the plate's twist at 439 Hz — drawn on
-the survey geometry, corners up and centre
+the survey geometry, corners up and center
 still](../images/modal-mode.png)
 
 ### 7. Correlate against the model
@@ -215,7 +215,7 @@ project.plot_mac(basis.shapes, project.other.shapes, path='crossmac.png')
 project.animate(basis.shapes, mode=0, screenshot='mode1.png')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 Two steps ask you to look and decide:
 
@@ -225,7 +225,7 @@ Two steps ask you to look and decide:
   `limit` — the plate's demo caps at five, because eleven channels
   cannot honestly distinguish more in that band, and left uncapped
   the loop will dredge the noise floor. A rule that stands in for the
-  eye, and worth checking against the CMIF. And the judgement, once
+  eye, and worth checking against the CMIF. And the judgment, once
   made, travels: an interactive session journals to the console as
   `fit_modes(at=[(frequency, damping), ...])` — the confirmed picks
   themselves, in the order taken — so the fit you shaped by eye

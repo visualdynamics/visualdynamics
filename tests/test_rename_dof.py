@@ -4,7 +4,7 @@ The rows of every data object are coordinates, and the columns of a
 matrix are coordinates too. A channel assigned to the wrong point at the
 instrument is corrected here: double-click the label, type the
 coordinate, and the object — and everything derived from it — carries the
-correction. The channel moves, not the point: a force labelled at the
+correction. The channel moves, not the point: a force labeled at the
 wrong node goes without the accelerometer at that node, which is changed
 explicitly if it should be. `Project.rename_dof` is the verb; the grid
 is its front.
@@ -40,7 +40,7 @@ def _frf():
 
 
 def test_the_channel_moves_not_the_point():
-    """Brandon, 2026-09-06: a force labelled at the wrong node moves
+    """Brandon, 2026-09-06: a force labeled at the wrong node moves
     without taking the accelerometer at that node with it. The drive
     point's accelerometer (a response) and its load cell (a reference)
     share 101Z+ and are two channels."""
@@ -178,7 +178,7 @@ def test_a_row_coordinate_is_typed_over_in_the_grid(window, pump):
     pump()
     grid = window.record_grids['Run']
     assert grid.editable_rows and not grid.editable_columns, \
-        'rows are coordinates; the one unlabelled column is not'
+        'rows are coordinates; the one unlabeled column is not'
     editor = _open_editor(grid.verticalHeader(), 1)
     assert editor is not None and editor.text() == '102Z+'
     editor.setText('202Z+')
@@ -236,7 +236,7 @@ def test_a_drive_points_row_and_column_are_two_channels_in_the_grid(window, pump
     frf = window.objects['FRF']
     assert frf.response_dof == ['201Z+', '102Z+', '201Z+', '102Z+']
     assert frf.reference_dof == ['101Z+', '101Z+', '105X+', '105X+'], \
-        'the load cell stays where it was labelled'
+        'the load cell stays where it was labeled'
     grid = window.record_grids['FRF']
     editor = _open_editor(grid.horizontalHeader(), 0)
     assert editor.text() == '101Z+'

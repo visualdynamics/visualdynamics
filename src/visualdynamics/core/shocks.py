@@ -1,4 +1,4 @@
-"""Finding the shocks in a recording, and the window to analyse each in.
+"""Finding the shocks in a recording, and the window to analyze each in.
 
 A shock test is a series of events in one continuous stream: the
 article sits quiet, something hits it, it rings down, and it sits quiet
@@ -56,7 +56,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 #: how finely the record is chopped before anything is decided, in
 #: seconds. A shock pulse is milliseconds, so the hop has to be a
 #: fraction of one — but every hop is a point in the series every later
-#: judgement walks, so it cannot be a single sample either.
+#: judgment walks, so it cannot be a single sample either.
 HOP_SECONDS = 0.001
 
 #: where the quiet is, as a percentile of the levels. Low enough to sit
@@ -72,7 +72,7 @@ RELEASE = 6.0
 
 #: events closer than this, in seconds, are one event. A double hit and
 #: a ringdown that dips through the release level for a moment look the
-#: same from here, and treating them as two windows would analyse the
+#: same from here, and treating them as two windows would analyze the
 #: second half of one shock as though it were a shock.
 MERGE = 0.05
 
@@ -117,7 +117,7 @@ RING_HOP = 0.025
 #: in the stress and test sets reads exact.
 SETTLED = 30.0
 
-#: whether every event in one record is analysed in a window of the
+#: whether every event in one record is analyzed in a window of the
 #: same length.
 #:
 #: The default, and the reason is comparability rather than accuracy.
@@ -307,7 +307,7 @@ def _merged(runs: list[tuple[int, int]],
 def _windowed(runs: list[tuple[int, int]], hops: int, loud: np.ndarray,
               scale: float, lead: float = LEAD, tail: float = TAIL,
               settled: float = SETTLED) -> list[tuple[int, int]]:
-    """Each run opened out into the window it should be analysed in,
+    """Each run opened out into the window it should be analyzed in,
     in detection hops.
 
     The front reaches back into the quiet ahead of the rise, a
@@ -319,7 +319,7 @@ def _windowed(runs: list[tuple[int, int]], hops: int, loud: np.ndarray,
     that comes first, so a fast event is not chased into its noise.
     The follow reads the *first* settled hop, not the last loud one:
     the loudest channel jumps at the next event before the median
-    arms, so a last-exceedance read walks into the neighbour and calls
+    arms, so a last-exceedance read walks into the neighbor and calls
     the whole gap ringdown. The tail fraction stands underneath as a
     floor, so an event whose ringing dies inside its own run keeps the
     margin it always had.
@@ -377,7 +377,7 @@ def with_added(shocks: Sequence[Shock],
 
     The Add button's rule (Brandon, 2026-08-24): the detector misses
     events the user knows about — below the arm threshold, or close
-    under a louder neighbour — and Remove's rationale cuts both ways.
+    under a louder neighbor — and Remove's rationale cuts both ways.
     The new window takes the series' own length (they are usually
     uniform; the median otherwise, a tenth of the record when there
     is nothing to copy), and stands in the middle of the largest
@@ -415,7 +415,7 @@ def drag_settled(shocks: Sequence[Shock], index: int, low: float,
     always just the dragged one; what can be shared is the *length*
     (an analysis choice, not a measurement), so a resize under a
     shared length regrows every window, while a move never resizes a
-    neighbour. Either way the result is stopped at its neighbours.
+    neighbor. Either way the result is stopped at its neighbors.
 
     Returns the settled series, or None when the drag changed nothing
     or asked for something the series has no room for — the caller
@@ -443,13 +443,13 @@ def held_apart(shocks: Sequence[Shock],
     `_windowed` guarantees this at detection, but a window can also be
     dragged on the plot or typed into the table, and neither of those
     went through it — so one shock's window could be pulled over its
-    neighbour and its spectrum computed from the neighbour's ringdown.
+    neighbor and its spectrum computed from the neighbor's ringdown.
     This is where that invariant is restated, once, for every path that
     can break it.
 
     `moved` is which window the edit was aimed at, and it decides who
     yields. Given it, that window is held inside the gap its untouched
-    neighbours leave: drag an edge into the next event and it stops at
+    neighbors leave: drag an edge into the next event and it stops at
     the edge, which is what a person pulling it expects to happen and
     would not expect of the event they did not touch. Without it — a
     list arriving from somewhere with no single author — the earlier
@@ -489,7 +489,7 @@ def same_length(shocks: Sequence[Shock], length: float,
     the cap is shared too.
 
     The starts are not touched, and that is the whole division of
-    labour: a start belongs to the event it was measured from, so
+    labor: a start belongs to the event it was measured from, so
     moving one window is moving one window, and only the length — the
     part that is an analysis choice rather than a measurement — is held
     in common.
@@ -515,7 +515,7 @@ def find(history: TimeHistory, hop_seconds: float = HOP_SECONDS,
          minimum: float = MIN_DURATION,
          most: int = MAX_EVENTS,
          common: bool = COMMON_LENGTH) -> tuple[Shock, ...]:
-    """The shocks in a record, as the windows to analyse them in.
+    """The shocks in a record, as the windows to analyze them in.
 
     Empty when there are none — which is the right answer for a random
     vibration run, where the level never rises `arm` dB over its own
@@ -560,7 +560,7 @@ def find(history: TimeHistory, hop_seconds: float = HOP_SECONDS,
 def suggest(history: TimeHistory, **kwargs: Any) -> tuple[Shock, ...]:
     """`find`, or the whole record when it finds nothing.
 
-    What a caller wanting *something* to analyse asks for. A record with
+    What a caller wanting *something* to analyze asks for. A record with
     no quiet in it has no shock the detector can point at, but it is
     still a transient somebody wants a spectrum of, and the honest
     fallback is the record itself rather than nothing.

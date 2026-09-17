@@ -37,7 +37,7 @@ def band_edges(draft: Any, channel: int, unit_system: Any
     two pieces meet at one frequency at two levels, exactly as the
     shading does. Taken at the breakpoints instead, a corner belongs
     to the section on its right and the left section's line slanted
-    to its neighbour's level (Brandon, 2026-09-06)."""
+    to its neighbor's level (Brandon, 2026-09-06)."""
     f = np.asarray(draft.frequencies, dtype=float)
     density = f'{draft.dims[channel]}**2/frequency'
     target = np.asarray(unit_system.from_si(
@@ -73,22 +73,22 @@ def add_band_handles(plot: Any, draft: Any, channel: int, unit_system: Any,
     for (kind, side), pieces in edges.items():
         for run, x, y in pieces:
             below, above = draft.bands[channel][kind][run[0]]
-            colour = QColor(colors['limit_warning' if kind == 'warning'
+            color = QColor(colors['limit_warning' if kind == 'warning'
                                    else 'exceed_over'])
-            colour.setAlpha(160)
+            color.setAlpha(160)
             handle = BandHandle(
                 np.log10(x) if log_x else x, np.log10(y) if log_y else y,
                 kind, side, list(run), log_y,
                 below if side == 'lower' else above,
                 on_release, on_menu,
-                pen=pg.mkPen(colour, width=3,
+                pen=pg.mkPen(color, width=3,
                              style=Qt.PenStyle.DashLine))
             handle.setZValue(30)
             plot.addItem(handle, ignoreBounds=True)
             # the value, said on the plot: at the run's start, riding
             # with the handle (Brandon, 2026-09-06: the dB levels were
             # shown nowhere)
-            label = pg.TextItem(handle.said(), color=colour,
+            label = pg.TextItem(handle.said(), color=color,
                                 anchor=(0.0, 1.0 if side == 'upper' else 0.0))
             label.setZValue(31)
             label.setPos(float(handle.xData[0]), float(handle.yData[0]))

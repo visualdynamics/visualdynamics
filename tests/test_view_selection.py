@@ -11,7 +11,7 @@ Two details that are easy to lose and were covered only by the
 end-to-end script: a pick made in the 3D view selects rows in the table
 while the *focus* stays in the 3D pane, so the delete shortcut has to
 reach that pane and the selection must not be drawn as an inactive
-(greyed) one. Both were bugs.
+(grayed) one. Both were bugs.
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def test_delete_reaches_the_pane_that_holds_the_focus(plate, window, pump):
     assert QKeySequence(Qt.Key.Key_Backspace) in window.delete_action.shortcuts()
 
 
-def test_a_selection_made_from_the_view_is_not_drawn_greyed_out():
+def test_a_selection_made_from_the_view_is_not_drawn_grayed_out():
     """Qt draws a selection in a widget without focus as 'inactive',
     which for rows selected by clicking the model reads as disabled."""
     from PySide6.QtGui import QColor, QPalette

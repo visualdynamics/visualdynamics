@@ -78,7 +78,7 @@ class Geometry:
     Attributes:
         node_id: Every node's id. Unique, because connectivity and
             placement refer to nodes by id.
-        node_xyz: `(nodes, 3)` coordinates, in metres once
+        node_xyz: `(nodes, 3)` coordinates, in meters once
             `length_unit` is declared and the file's raw numbers before
             that.
         node_def_cs: The coordinate system each node is *placed* in.
@@ -106,7 +106,7 @@ class Geometry:
         block_id: The declared blocks. Unique, since elements name them.
         block_name: A name per block — `'wing'`, `'arm front left'`. This
             is where a mesh records that a region is a different part
-            from its neighbour, and `fem.Model.from_geometry` reads a
+            from its neighbor, and `fem.Model.from_geometry` reads a
             member's section from it.
         length_unit: What the coordinates are in, or `None` while that
             has not been declared — in which case they are the file's own
@@ -180,7 +180,7 @@ class Geometry:
         # called. This is how a mesh says "these elements are the wing and
         # those are the tail": exodus calls them element blocks, and it is
         # the only place a file records that a region is made of something
-        # different from its neighbour. Read without keeping it, a
+        # different from its neighbor. Read without keeping it, a
         # two-block file comes back as one anonymous block on the way out.
         self.elem_block: IdArray = (
             _ids(elem_block, 'element block ids') if elem_block is not None
@@ -422,7 +422,7 @@ class Geometry:
         node_id : int, optional
             Its identifier. The next free one when omitted.
         color : int, default 1
-            Its display colour index.
+            Its display color index.
         def_cs : int, optional
             The coordinate system the position is given in.
         disp_cs : int, optional
@@ -491,7 +491,7 @@ class Geometry:
         node_ids : int or sequence of int
             The nodes the line passes through, in order.
         color : int, default 1
-            Its display colour index.
+            Its display color index.
         description : str, optional
             A label for it.
 
@@ -593,7 +593,7 @@ class Geometry:
             The element type code. Inferred from the node
             count when omitted.
         color : int, default 1
-            Its display colour index.
+            Its display color index.
         block : int, optional
             Which block it belongs to.
 
@@ -720,7 +720,7 @@ class Geometry:
         -------
         dict of str to int
             How many of each kind were removed, including the
-            dependants that went with them.
+            dependents that went with them.
         """
         wanted = {int(node) for node in node_ids}
         keep = ~np.isin(self.node_id, list(wanted))
@@ -759,7 +759,7 @@ class Geometry:
         -------
         dict of str to int
             How many of each kind were removed, including the
-            dependants that went with them.
+            dependents that went with them.
         """
         wanted = {int(cs) for cs in cs_ids}
         keep = ~np.isin(self.cs_id, list(wanted))
@@ -807,7 +807,7 @@ class Geometry:
         -------
         dict of str to int
             How many of each kind were removed, including the
-            dependants that went with them.
+            dependents that went with them.
         """
         rows = self._rows_for(traceline_ids, self.traceline_id)
         for row in rows:
@@ -838,7 +838,7 @@ class Geometry:
         -------
         dict of str to int
             How many of each kind were removed, including the
-            dependants that went with them.
+            dependents that went with them.
         """
         wanted = {int(block) for block in block_ids}
         keep = ~np.isin(self.block_id, list(wanted))
@@ -870,7 +870,7 @@ class Geometry:
         -------
         dict of str to int
             How many of each kind were removed, including the
-            dependants that went with them.
+            dependents that went with them.
         """
         rows = self._rows_for(elem_ids, self.elem_id)
         for row in rows:
@@ -957,7 +957,7 @@ class Geometry:
     def plot_dofs(self, source: Any, quantity: str,
                   unit_system: UnitSystem | None = None,
                   **kwargs: Any) -> Any:
-        """This geometry with labelled arrows at every DOF `source`
+        """This geometry with labeled arrows at every DOF `source`
         measures as `quantity` — the GUI's DOF arrows.
 
         Parameters

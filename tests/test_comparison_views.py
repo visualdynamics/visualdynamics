@@ -251,7 +251,7 @@ def test_the_chart_fits_the_pane_however_many_channels(qt_app):
     sizes its figure from ROW_HEIGHT itself, and a page scrolls."""
     small, large = many(6), many(70)
     assert large.plot.minimumHeight() == small.plot.minimumHeight(), \
-        'no per-row height demand the pane cannot honour'
+        'no per-row height demand the pane cannot honor'
 
 
 def test_dragging_the_threshold_recounts_every_channel(qt_app):
@@ -283,7 +283,7 @@ def test_past_a_threshold_is_shaded_rather_than_lined(qt_app):
 
 
 def test_over_is_red_and_under_is_blue(qt_app):
-    """The same two colours, at the same weight, the specification plot
+    """The same two colors, at the same weight, the specification plot
     shades its abort zones with."""
     from visualdynamics.plot.bars import ZONE_ALPHA
 

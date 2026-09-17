@@ -41,7 +41,7 @@ def qt_binding() -> str | None:
     """Which Qt pyqtgraph is bound to, or None if it is still free.
 
     None means nothing has imported pyqtgraph yet, so importing visualdynamics's
-    own widgets first will decide it in our favour.
+    own widgets first will decide it in our favor.
     """
     import sys
 
@@ -62,7 +62,7 @@ def check_qt_binding() -> None:
     `QSplitter.addWidget called with wrong argument types` from deep inside
     the main window, naming nothing useful.
 
-    So: import PySide6 first, which decides it in our favour whenever
+    So: import PySide6 first, which decides it in our favor whenever
     pyqtgraph has not yet been imported. When it has — sdynpy imports it
     with PyQt5 at `import sdynpy` — the choice cannot be undone, and all
     that is left is to say so before a window is built out of the mismatch.

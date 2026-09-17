@@ -61,7 +61,7 @@ theme:
     - content.code.copy
     - content.action.edit
   # Follows the reader's system the way the app follows the OS, with the
-  # same two schemes and a toggle either way. The colours themselves are
+  # same two schemes and a toggle either way. The colors themselves are
   # in assets/theme.css; `custom` keeps Material's own palettes out of it.
   palette:
     - media: "(prefers-color-scheme: light)"
@@ -103,7 +103,7 @@ plugins:
             # say that (PRINCIPLES.md, 6).
             #
             # The parser is backward compatible either way: griffe
-            # treats unrecognised text as the description, so a
+            # treats unrecognized text as the description, so a
             # prose-only docstring renders exactly as it did under the
             # google parser. Verified by building both, 2026-08-25.
             docstring_style: numpy

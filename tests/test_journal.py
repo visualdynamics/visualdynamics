@@ -17,7 +17,7 @@ import visualdynamics
 
 
 def _worked_up():
-    project = visualdynamics.Project('Journalled')
+    project = visualdynamics.Project('Journaled')
     project.import_file(fixture_path('plate', 'modal.nc4'))
     project.compute_psds('Time History')
     project.rename('Time History PSDs', 'PSDs')
@@ -26,7 +26,7 @@ def _worked_up():
 
 def test_each_verb_records_one_runnable_line():
     project = _worked_up()
-    assert project.journal[0] == "project = visualdynamics.Project('Journalled')"
+    assert project.journal[0] == "project = visualdynamics.Project('Journaled')"
     assert project.journal[1] == \
         f"project.import_file({fixture_path('plate', 'modal.nc4')!r})"
     assert "project.compute_psds('Time History')" in project.journal
@@ -181,7 +181,7 @@ def test_the_gui_panels_write_through_the_funnel(window, pump):
 
 def test_a_gui_import_journals_as_import_file(window, pump):
     """The window imports a file by building the objects and adding
-    them one by one; journalled verb by verb that was a pile of
+    them one by one; journaled verb by verb that was a pile of
     not-replayable comments (Brandon, 2026-08-30, asking why anything
     is not replayable) — when the honest record is the one call a
     script would make."""
@@ -624,7 +624,7 @@ def test_a_drag_trial_journals_nothing_and_the_landing_settles(window,
                                                                pump):
     """One drag wrote eighty relink lines (Brandon, 2026-08-30): the
     per-tick would-this-land trial really moves and rolls back, and
-    every tick journalled. The trial is a question and stays quiet;
+    every tick journaled. The trial is a question and stays quiet;
     the landing's record is the one verb line."""
     window.import_paths([fixture_path('plate', 'modal_spectra.nc4'),
                          fixture_path('plate', 'test_geometry.npz')])

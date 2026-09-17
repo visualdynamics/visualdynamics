@@ -38,7 +38,7 @@ clear, and the bar carries the project's one act, *Generate Report*.
 | Photos | The photographs, one at a time; a name is edited in the grid. |
 | Channel table | The spreadsheet: every column typed, the drop-downs and check boxes live ([The channel table](channel-table.md)). |
 | Time history | The record against time, with the averaging frames or the shock windows shaded when they are set, and the readings a record offers on its bar: averaging, filter, truncate, kurtosis, shocks, wavelet. |
-| Spectrum, PSD | The curves, or the 3-D stage with the channels receding, coloured by level — the stage is the default and *3D* on the bar switches. An octave-band PSD draws as steps. |
+| Spectrum, PSD | The curves, or the 3-D stage with the channels receding, colored by level — the stage is the default and *3D* on the bar switches. An octave-band PSD draws as steps. |
 | Specification | Each channel's target with its warning and abort bands, one channel at a time from the drop-down; *RMS* on the bar reads the levels as bars over a table; *Edit* opens the sheet ([The objects](objects.md#the-data-arrays-coredata)). |
 | FRF | The curves, filtered to the drive points or one component from the bar, the CMIF, or the stage. |
 | Coherence | The map: frequency across, channel down, pinned 0 to 1. |
@@ -72,7 +72,7 @@ follows.
 | a shape set | The mode shape animating; the mode box picks which. Every mode's DOFs that are on the geometry move; the rest are named in the status line. |
 | a time history | The geometry deflecting sample by sample, proportional to what each channel measured; drag the cursor on the record or press Play. DOF arrows mark where each channel is. |
 | an FRF or a spectrum | The **operating deflection shape** at one frequency line — magnitude and phase per channel — moving; the cursor on the plot picks the line. |
-| a PSD of autospectra | The **envelope**: the geometry deflected ±√PSD, coloured by decibels below the loudest node at the cursor's line — where the article is loudest, without the phase a PSD does not have. |
+| a PSD of autospectra | The **envelope**: the geometry deflected ±√PSD, colored by decibels below the loudest node at the cursor's line — where the article is loudest, without the phase a PSD does not have. |
 | a whole CPSD | The **principal shape**: the dominant eigenvector of the cross-spectral matrix at each line, each channel's phase relative to the others. |
 | a picked reference column of a CPSD | The operating deflection shape relative to that reference — the same shape the FRF gives, from operating data. |
 | a second geometry | Both overlaid — a test geometry over the model it was built from. |
@@ -83,7 +83,7 @@ follows.
 
 ![An FRF's operating deflection shape on the geometry](images/tree-geometry-ods.png)
 
-![A PSD's envelope on the geometry, coloured by level](images/tree-geometry-envelope.png)
+![A PSD's envelope on the geometry, colored by level](images/tree-geometry-envelope.png)
 
 Picking records in the data object's grid restricts the animation to
 them; picking a quantity for the DOF arrows on the bar marks every DOF

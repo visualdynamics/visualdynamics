@@ -1,10 +1,10 @@
 """The packaging scripts' one testable decision each.
 
-`build_macos.sh` decides how to notarise: from a login-keychain item
+`build_macos.sh` decides how to notarize: from a login-keychain item
 when one holds a password, else from the notarytool profile. The
 item was created empty once (2026-09-15: the command lacked its
 trailing `-w`), and the script's answer to an empty item is what kept
-that build notarising. The function is lifted out of the script and
+that build notarizing. The function is lifted out of the script and
 run against a stub `security` on PATH — the script itself is not
 sourceable (it signs and wipes dist/ at the top level).
 
@@ -53,7 +53,7 @@ def test_an_empty_keychain_item_falls_back_to_the_profile(tmp_path):
 
 
 @pytest.mark.skipif(os.name != 'posix', reason='a bash function')
-def test_a_keychain_item_with_a_password_notarises_as_its_account(tmp_path):
+def test_a_keychain_item_with_a_password_notarizes_as_its_account(tmp_path):
     security = ('case " $* " in *" -w "*) echo "s3cret";; '
                 '*) echo \'    "acct"<blob>="someone@example.com"\';; esac\n')
     assert notary_args(tmp_path, security) == [

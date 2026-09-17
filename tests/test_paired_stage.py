@@ -2,7 +2,7 @@
 
 The 3-D reading of two selected PSDs (Brandon, 2026-08-25): matched
 stations recede along the depth axis, the louder wears the level
-colouring, the quieter the compared grey — and the Ratio reading
+coloring, the quieter the compared gray — and the Ratio reading
 divides through `density_ratio`, in decibels, so the stage and the
 flat plot cannot disagree."""
 
@@ -187,7 +187,7 @@ def test_the_resynthesis_overlay_comes_up_on_the_stage(window, pump, survey):
     assert pane._waterfall_page is not None and \
         pane._waterfall_page.isVisible(), 'the overlay comes up in 3-D'
     actors = pane.waterfall_plotter.actors
-    assert 'paired-loud' in actors, 'the measurement, level-coloured'
+    assert 'paired-loud' in actors, 'the measurement, level-colored'
     assert 'paired-quiet' in actors, 'the synthesis, stood back'
     assert 'on the stage' in window.statusBar().currentMessage()
 
@@ -201,7 +201,7 @@ def _levels(pane, name):
 
 def test_the_stage_stands_the_synthesis_back_not_the_measurement(
         window, pump, survey):
-    """Which of the two wears the level colouring is the whole reading,
+    """Which of the two wears the level coloring is the whole reading,
     and it must match the flat plot: measurement solid, synthesis drawn
     over it. Truncated to one mode on purpose — the fixtures were born
     from this very model, so a full-mode synthesis *is* the measurement
@@ -218,7 +218,7 @@ def test_the_stage_stands_the_synthesis_back_not_the_measurement(
         _levels(pane, 'paired-quiet')
     assert measured.max() > synthesized.max() + 1.0, (
         'one mode of twenty-two cannot reach the measurement\'s peaks, '
-        f'so the level-coloured mesh is the measurement: '
+        f'so the level-colored mesh is the measurement: '
         f'{measured.max():.3f} against {synthesized.max():.3f}')
     assert measured.mean() > synthesized.mean() + 1.0, \
         'and it stands above it almost everywhere, not just at a peak'

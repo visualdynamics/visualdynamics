@@ -48,7 +48,7 @@ project.other.shapes.define_units('kg')
 # ---- 3. process and identify ------------------------------------------------
 # a verb takes the object as readily as its name
 project.compute_psds(project.basis.time_history)   # Compute PSDs
-# limit is the judgement a person makes on the screen by stopping:
+# limit is the judgment a person makes on the screen by stopping:
 # the plate has five modes in this band — four distinct peaks and the
 # repeated pair's second tooth — and left uncapped the loop would go
 # on dredging the noise floor

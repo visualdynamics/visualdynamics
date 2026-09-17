@@ -33,7 +33,7 @@ class Report:
       {'kind': 'scene', 'geometry': name, 'shapes': name-or-'',
                         'dofs': quantity, 'dofs_source': name,
                         'caption': str}
-        ('dofs' + 'dofs_source' make a DOFs scene: labelled arrows at
+        ('dofs' + 'dofs_source' make a DOFs scene: labeled arrows at
         every DOF that one data object measures as that quantity)
       {'kind': 'table', 'source': name, 'caption': str}
       {'kind': 'photo', 'source': Photos-name, 'photo': photo-name,
@@ -72,7 +72,7 @@ class Report:
         #: no banner at all.
         self.marking: str = str(marking)
         #: 'ink' draws the banner in the page's own black-or-white;
-        #: 'red' is the conventional colour for the levels that demand
+        #: 'red' is the conventional color for the levels that demand
         #: attention
         self.marking_color: str = (marking_color
                                    if marking_color in ('ink', 'red')
@@ -532,7 +532,7 @@ def project_expectations(
         project_type: str
         ) -> list[tuple[str, type, str, int, bool, str | None]]:
     """[(label, class, icon key, count, optional, side)] a report of
-    this type draws from — the grey slots a typed project shows until
+    this type draws from — the gray slots a typed project shows until
     filled.
 
     The label is the type's own name and nothing more (Brandon,
@@ -551,7 +551,7 @@ def project_expectations(
     Every type ends with the report itself. It is the one object the
     others exist to produce, and a project that has everything a report
     needs but no report is not finished — so it is a slot like the rest,
-    grey until it is generated. It carries no link group: a report reads
+    gray until it is generated. It carries no link group: a report reads
     the whole project and belongs to no one side of it.
     """
     from ..names import display_name
@@ -942,8 +942,8 @@ def kurtosis_block(source: str = '@basis:TimeHistory',
     channels whatever they measure — kurtosis is dimensionless, so
     this is the one reading here where mixing quantities is honest.
 
-    A computed judgement of the record, so it sits with the other
-    judgements rather than beside the traces (the standing order:
+    A computed judgment of the record, so it sits with the other
+    judgments rather than beside the traces (the standing order:
     geometry, table, time data, spectra, then what was computed).
     """
     return {'kind': 'bars', 'mode': 'kurtosis', 'source': source,
@@ -1240,7 +1240,7 @@ def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'with.\n\n'
             'A mode identified in a band where the coherence is poor, '
             'or one whose shape correlates strongly with its '
-            'neighbour, is one to re-examine before it is used — in a '
+            'neighbor, is one to re-examine before it is used — in a '
             'correlation against a model, or as the basis of anything '
             'downstream.'},
     ])
@@ -1348,7 +1348,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
                'high-pass after each integration: a sensor bias '
                'integrates to a ramp that would dwarf the motion, and '
                'nothing below the drift corner can tell bias from '
-               'true motion, so the corner is a declared judgement '
+               'true motion, so the corner is a declared judgment '
                'rather than a detection. The shock windows carry over '
                'unchanged — the events numbered here are the events '
                'numbered on the measured traces. Velocity and '
@@ -1365,7 +1365,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
     # a PSD of a transient recording carries a level that depends on
     # how much quiet air was recorded around the events — energy per
     # unit time, over a duration that is an accident of the capture —
-    # and nothing in the shock judgement reads it. What the density
+    # and nothing in the shock judgment reads it. What the density
     # was kept for (naming the source of an unexpected SRS peak — a
     # fixture resonance, a programmer ringing, a bolt buzzing) the
     # scalogram answers better, with *when* still attached: each
@@ -1461,7 +1461,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'transient. It is shown alone before anything is compared '
             'against it, because it is the requirement rather than a '
             'result — and reading it first is what makes the '
-            'comparison that follows a judgement instead of a '
+            'comparison that follows a judgment instead of a '
             'picture.'},
         {'kind': 'plot', 'source': '@basis:ShockSpecification',
          'mode': 'curves', 'caption': 'Shock specification, with its '
@@ -1491,7 +1491,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
          'specification': '@basis:ShockSpecification',
          'caption': 'Measured shock response spectra against the '
          'specification'},
-        # the judgement, not just the picture: RMS deviation across the
+        # the judgment, not just the picture: RMS deviation across the
         # band in decibels, one bar per channel. This block lived in
         # the transient template until the SRS pair left that type —
         # the SRS is how a *shock* is judged, so its deviation reads
@@ -1505,7 +1505,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
         # so a band drawn at 2 to 4 would mark every channel of every
         # shock test in red and say nothing anyone could act on. The
         # toolbar toggle still offers the reading to anyone who wants
-        # to look; what a *report* asserts is the judgement.
+        # to look; what a *report* asserts is the judgment.
         {'kind': 'text', 'text':
             '## Conclusions\n\n'
             f'{ref(time, "num_shocks")} events were delivered and are '
@@ -1517,7 +1517,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'in which direction where it did not. The traces in '
             '{{figure:Measured}} are what a disputed channel is '
             'settled against — a spectrum computed over a window that '
-            'caught a neighbouring event, or over a channel that '
+            'caught a neighboring event, or over a channel that '
             'clipped, will sit wrong in a way no spectral figure can '
             'reveal on its own.'},
     ])
@@ -1638,7 +1638,7 @@ def sine_template(objects: Mapping[str, Any],
             'not meant to be: a pure tone reads 1.5, and a sweep '
             'mixed with a random background sits between. What the '
             'figure is watched for is a channel far from its '
-            'neighbours, which is a channel that clipped or rattled '
+            'neighbors, which is a channel that clipped or rattled '
             'while the tracked level was extracted from it '
             'regardless.'},
         {'kind': 'text', 'text':
@@ -1689,7 +1689,7 @@ def sysid_template(objects: Mapping[str, Any],
     Ordered the way every report here is (Brandon, 2026-08-23): the
     front matter — geometry, DOF scenes, photographs, channel table —
     then the time data, then the spectra, then the computed
-    judgements: coherence and signal-to-noise. The time data is the
+    judgments: coherence and signal-to-noise. The time data is the
     ambient (noise) stream first and the driven one after it, each
     drawn under its own averaging frames; a spectral package has no
     streams, and the block stays an unbound slot that does not render.
@@ -1780,7 +1780,7 @@ def sysid_template(objects: Mapping[str, Any],
             f'{ref(frf, "num_channels")} response channels, at a '
             f'resolution of {ref(frf, "frequency_resolution")} out to '
             f'{ref(frf, "max_frequency")}. The recordings were taken '
-            f'at {ref(time, "sample_rate")} and each analysed over '
+            f'at {ref(time, "sample_rate")} and each analyzed over '
             f'{ref(time, "num_frames")} frames of '
             f'{ref(time, "frame_length")} samples with a '
             f'{ref(time, "window")} window at {ref(time, "overlap")} '
@@ -1825,8 +1825,8 @@ def sysid_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text':
             '## The Measured Plant\n\n'
             'The densities of the two recordings are drawn together '
-            'per channel, the driven level coloured and the ambient '
-            'one stood back in grey behind it: the distance between '
+            'per channel, the driven level colored and the ambient '
+            'one stood back in gray behind it: the distance between '
             'them at any frequency is the margin the identification '
             'had to work with there, and where they meet there was '
             'nothing to measure. The plant itself follows — every '
@@ -1837,11 +1837,11 @@ def sysid_template(objects: Mapping[str, Any],
             loud_density, quiet_density, objects,
             'Excitation and ambient densities overlaid, per channel',
             'Excitation and ambient {quantity} densities on the '
-            'stage, channel by channel — the driven level coloured, '
-            'the ambient one stood back in grey behind it'),
+            'stage, channel by channel — the driven level colored, '
+            'the ambient one stood back in gray behind it'),
         {'kind': 'plot', 'source': '@basis:Frf', 'mode': 'stage',
          'caption': 'The measured plant: every FRF on the stage, '
-         'channels receding, coloured by level'},
+         'channels receding, colored by level'},
         {'kind': 'text', 'text':
             '## Whether To Believe It\n\n'
             'Two readings judge the identification, and they fail in '
@@ -1888,7 +1888,7 @@ def sysid_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text':
             '## Conclusions\n\n'
             'What this identification is good for is read off the '
-            'three judgements above. The band it covers is the band '
+            'three judgments above. The band it covers is the band '
             'the plant was measured over, out to '
             f'{ref(frf, "max_frequency")} at '
             f'{ref(frf, "frequency_resolution")}; within that band it '
@@ -2029,7 +2029,7 @@ def transient_template(objects: Mapping[str, Any],
             '({{figure:Waveform error by control channel}}): the '
             'difference between the two waveforms against the size of '
             'the target. Amplitude, phase and shape all move it, and '
-            'it is what the controller is minimising — the level above '
+            'it is what the controller is minimizing — the level above '
             'is the scale alone; this is everything at once.\n\nOne '
             'bar per channel per playing of the waveform, and none of '
             'them singled out — which repeat was the bad one depends '
@@ -2051,7 +2051,7 @@ def transient_template(objects: Mapping[str, Any],
             'is not Gaussian and is not meant to be: it is a waveform '
             'played over and over, so the reading sits well above '
             'three and is expected to. What it is watched for is '
-            'change: a channel far from its neighbours, or a run far '
+            'change: a channel far from its neighbors, or a run far '
             'from the last one, is a channel where something clipped '
             'or rattled rather than reproduced.'},
         {'kind': 'text', 'text':
@@ -2064,7 +2064,7 @@ def transient_template(objects: Mapping[str, Any],
             'follow the waveform badly. {{figure:Waveform error by '
             'control channel}} is everything at once — amplitude, '
             'phase and shape — which is what the controller was '
-            'minimising, and it is reported per playing because which '
+            'minimizing, and it is reported per playing because which '
             'repeat was the bad one depends on what the article is '
             'for.\n\n'
             'There is no accepted tolerance on how closely a '
@@ -2084,10 +2084,10 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
     Ordered the standing way (Brandon, 2026-08-23): the front matter —
     geometry, the DOF scenes excitation-first, photographs, the
     channel table — then the time data, then the spectra, then the
-    computed judgements. Within the spectra the specification still
+    computed judgments. Within the spectra the specification still
     leads: it is what the article was required to see, and the control
     PSDs against it are the whole claim. Coherence stays last among
-    the judgements — it is how you tell a real exceedance from a bad
+    the judgments — it is how you tell a real exceedance from a bad
     channel, a question asked only once the comparison has raised it.
 
     Sources bind symbolically, like the modal template's, so the report
@@ -2126,7 +2126,7 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             '## Measured Data\n\nThe measured time histories, one '
             'figure per quantity, with the frames a PSD is averaged '
             'over marked on them ({{figure:Measured}}) — which part '
-            'of the run was analysed, and under what window.'},
+            'of the run was analyzed, and under what window.'},
         *time_data_blocks(
             time, objects, links,
             'Measured time histories, with the frames the spectra '

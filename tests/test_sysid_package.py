@@ -631,7 +631,7 @@ def test_the_sysid_slots_serve_both_save_forms(window, pump):
 
 def test_a_specification_never_fills_a_density_slot(tmp_path):
     """Delete both PSDs from a System ID project holding the stream's
-    imported specification, and both PSD slots must come back grey —
+    imported specification, and both PSD slots must come back gray —
     the spec slid past the per-type narrowing into the noise slot,
     because the type expects no Specification for the narrowing to
     key on (Brandon caught it deleting the demo's PSDs)."""
@@ -647,7 +647,7 @@ def test_a_specification_never_fills_a_density_slot(tmp_path):
     }
     missing = [name for name, *_rest in missing_expectations(
         'System ID', objects)]
-    assert missing.count('PSD') == 2, 'both density slots stay grey'
+    assert missing.count('PSD') == 2, 'both density slots stay gray'
     # and a real density still fills its slot
     objects['PSDs'] = Psd(
         abscissa=freq, ordinate=np.full((2, 50), 1e-4),
@@ -719,7 +719,7 @@ def test_a_mixed_stream_splits_into_one_figure_per_type():
 def test_the_densities_overlay_per_quantity_and_pair_by_channel():
     """The noise and excitation densities read together, one figure
     per quantity (Brandon, 2026-08-23) — the driven level solid and
-    the ambient one dashed in the same colour, so a channel and its
+    the ambient one dashed in the same color, so a channel and its
     own floor are one pair. No CMIF: a system ID identifies a plant,
     it does not count modes."""
     from visualdynamics.core.data import Psd

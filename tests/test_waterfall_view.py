@@ -1,6 +1,6 @@
 """The 2D/3D toggle: the default, what it swaps, what the camera keeps.
 
-The scene's own claims — one mesh, one colour scale, log mapping — are
+The scene's own claims — one mesh, one color scale, log mapping — are
 `test_waterfall.py`'s. This file holds the window's half: the 3-D
 reading is the default wherever plain curves draw (a single record
 included), unchecking asks for the flat plot, the surfaces swap without
@@ -61,7 +61,7 @@ def test_the_waterfall_is_the_default_reading(window, pump):
 
 
 def test_a_single_record_is_a_waterfall_too(window, pump):
-    """One line on the stage, colour by level — offered and default,
+    """One line on the stage, color by level — offered and default,
     like any other record count."""
     window.add_object('Solo', psd(rows=1))
     select(window, pump, 'Solo')

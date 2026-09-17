@@ -22,7 +22,7 @@ There used to be a deliberate exception. Three generators under
 produce the fixtures the suite reads, and the argument for them was
 that they are not distributed — true, and checked, but an argument
 nonetheless, and one that would have had to be made again in public
-with a licence note beside it. They live in the
+with a license note beside it. They live in the
 `visualdynamics-generators` repository now. The exception is retired
 rather than defended: no file in this tree combines with a GPL-3
 package at runtime.
@@ -39,7 +39,7 @@ import pathlib
 
 import pytest
 
-#: the packages whose licence would reach into visualdynamics: the three
+#: the packages whose license would reach into visualdynamics: the three
 #: structural-dynamics libraries this code is likeliest to reach for, every
 #: one of them GPL-3.0.
 COPYLEFT = frozenset({'sdynpy', 'rattlesnake', 'forcefinder'})
@@ -120,7 +120,7 @@ def offending(pairs):
 
 
 def test_no_module_under_visualdynamics_imports_a_copyleft_package():
-    """The whole point. The licence stays a decision, not an inheritance."""
+    """The whole point. The license stays a decision, not an inheritance."""
     trespasses = []
     for path in package_files():
         for line, module in offending(imports_in(path)):
@@ -129,7 +129,7 @@ def test_no_module_under_visualdynamics_imports_a_copyleft_package():
     assert not trespasses, (
         'these are GPL-3.0, and importing one carries its copyleft into '
         'everything distributed with visualdynamics — which would settle the '
-        'licence question permanently, in one direction. '
+        'license question permanently, in one direction. '
         'Use the file format, never the code:\n  '
         + '\n  '.join(trespasses))
 
@@ -178,7 +178,7 @@ def test_no_file_in_the_repository_imports_one():
     live in their own repository now, which retires the exception
     rather than arguing it: there is no file in this tree that combines
     with a GPL-3 package at runtime, so there is none to explain, note
-    or licence differently when this is published.
+    or license differently when this is published.
     """
     trespasses = []
     for directory in OURS:
@@ -210,7 +210,7 @@ def test_the_generators_are_not_distributed():
     are not shipped.
 
     Read from `pyproject.toml` rather than by asking setuptools to
-    discover packages: the declaration is what a build honours, it is
+    discover packages: the declaration is what a build honors, it is
     what a reviewer reads, and checking it needs nothing installed
     beyond the standard library.
     """

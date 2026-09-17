@@ -130,7 +130,7 @@ def test_matched_modes_expand_into_a_grid_like_everything_else(window, pump):
     assert grid.rowCount() == 2
 
 
-def test_a_pair_is_labelled_by_the_two_modes_it_joins(window, pump):
+def test_a_pair_is_labeled_by_the_two_modes_it_joins(window, pump):
     """The same 1-based numbering the matched-modes table shows."""
     from visualdynamics.core.matches import MatchedModes
 

@@ -2,14 +2,14 @@
 
 Two instants are set here — where the kept stretch starts and where it
 stops — and the record on the plot shows the cut as it is made: the
-discarded ends greyed over, the kept span between two draggable edges
+discarded ends grayed over, the kept span between two draggable edges
 (`plot.truncation`), the same span-editing grammar as the averaging
 region because it is the same kind of gesture.
 
 The panel says what the settings are, reports when they move, and
 its Apply Truncation button makes the truncated record with whatever
 is set at that moment — the project verb a script calls, the same
-division of labour as the averaging and filter panels, because it is
+division of labor as the averaging and filter panels, because it is
 the same kind of thing: parameters that ride the record.
 """
 

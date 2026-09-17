@@ -34,9 +34,9 @@ their source has moved beneath them.
 **3. Show only what applies.**
 The interface offers what the current selection can actually do, and
 nothing else. Select a time history and the averaging, shock and
-filter views appear; select a spectrum and they are gone, not greyed.
+filter views appear; select a spectrum and they are gone, not grayed.
 An option that cannot be used is a question the user has to answer
-before they can get on, and a greyed control still costs a glance.
+before they can get on, and a grayed control still costs a glance.
 The corollaries: say a thing once, refuse invalid state at entry
 rather than reporting it afterwards, and make every table the same
 table.
@@ -89,7 +89,7 @@ and the list of what must carry sections only ever grows.
 The scientific mainstream — NumPy, SciPy, and the established readers
 for the formats involved — plus Qt for the interface. A new
 dependency has to earn its place against the cost of everyone
-installing it, of it going unmaintained, and of its licence
+installing it, of it going unmaintained, and of its license
 constraining what this project may do. Reimplementing a well-defined
 method in fifty lines is usually the better trade.
 
@@ -98,7 +98,7 @@ Effort is spent where the user is waiting. What is under the hand —
 a dragged filter corner, a dragged averaging span, a rotating
 scene — updates immediately; heavy work that nobody is watching yet
 is deferred or coalesced until the gesture settles. Slowness is
-measured before it is optimised, and the fix is nearly always
+measured before it is optimized, and the fix is nearly always
 algorithmic rather than clever.
 
 **9. One implementation of a rule.**

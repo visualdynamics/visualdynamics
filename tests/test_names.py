@@ -38,7 +38,7 @@ def test_a_key_reads_as_a_name(key, expected):
     ('Psd', 'PSD'),
 ])
 def test_the_acronyms_this_field_uses_stay_acronyms(key, expected):
-    """'Frf' is not a word and reads as one. Capitalising the first letter of
+    """'Frf' is not a word and reads as one. Capitalizing the first letter of
     each word is the rule; these are the exceptions."""
     assert display_name(key) == expected
 

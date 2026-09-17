@@ -52,14 +52,14 @@ def overlay(qt_app, averaging, samples=SAMPLES, locked=False, theme='light'):
                             resolve_theme(theme), locked=locked), plot
 
 
-def fill_colour(item):
+def fill_color(item):
     return item.opts['fillBrush'].color()
 
 
 def band_gradient(band):
     """([0..1 across the frame], alpha at each) for a band's shading."""
     stops = band.opts['fillBrush'].gradient().stops()
-    return [at for at, _colour in stops], [c.alpha() for _at, c in stops]
+    return [at for at, _color in stops], [c.alpha() for _at, c in stops]
 
 
 def bands_of(overlaid):
@@ -173,7 +173,7 @@ def test_a_flat_tops_shoulders_come_out_clear(qt_app):
     """It weights them slightly negatively, which is a fact about the
     window rather than a drawable alpha. Too little to round to one, so
     they shade as nothing — and the peak is what the gradient is
-    normalised by, a flat top not reaching one."""
+    normalized by, a flat top not reaching one."""
     overlaid, _plot = overlay(
         qt_app, Averaging(frame_length=1024, window='flattop', frames=1))
     _across, alphas = band_gradient(overlaid.bands[0])
@@ -182,16 +182,16 @@ def test_a_flat_tops_shoulders_come_out_clear(qt_app):
         'the peak still reaches the full shade')
 
 
-def test_every_frame_is_shaded_the_same_colour(qt_app):
-    """The shape carries the frame now; a second colour would be one
+def test_every_frame_is_shaded_the_same_color(qt_app):
+    """The shape carries the frame now; a second color would be one
     encoding too many."""
     overlaid, _plot = overlay(
         qt_app, Averaging(frame_length=256, overlap=0.0, frames=20))
-    colours = set()
+    colors = set()
     for band in overlaid.bands:
         for _at, stop in band.opts['fillBrush'].gradient().stops():
-            colours.add(stop.rgb())
-    assert len(colours) == 1
+            colors.add(stop.rgb())
+    assert len(colors) == 1
 
 
 def test_the_bands_are_translucent_enough_to_read_through(qt_app):
@@ -250,18 +250,18 @@ def test_the_area_under_the_window_is_filled(qt_app):
     overlaid, _plot = overlay(
         qt_app, Averaging(frame_length=1024, window='hann', frames=2))
     for glyph in overlaid.glyphs:
-        colour = fill_colour(glyph)
-        assert 0 < colour.alpha() < 255, 'filled, and not opaque'
+        color = fill_color(glyph)
+        assert 0 < color.alpha() < 255, 'filled, and not opaque'
         assert glyph.opts['fillLevel'] == pytest.approx(
             float(glyph.getData()[1].min())), 'filled down to its baseline'
 
 
 def test_every_window_in_the_rail_is_the_same_shade(qt_app):
-    """One colour throughout. What separates one window from the next is
+    """One color throughout. What separates one window from the next is
     its outline and the ticks under its ends, not a change of shade."""
     overlaid, _plot = overlay(
         qt_app, Averaging(frame_length=512, overlap=0.0, frames=6))
-    assert len({fill_colour(glyph).rgba() for glyph in overlaid.glyphs}) == 1
+    assert len({fill_color(glyph).rgba() for glyph in overlaid.glyphs}) == 1
 
 
 def test_a_tick_marks_where_each_frame_starts_and_stops(qt_app):

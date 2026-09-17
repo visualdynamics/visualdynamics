@@ -4,7 +4,7 @@ The active geometry is what an object *not* linked to a geometry of its
 own is drawn on, checked against, and projected onto — so in a project
 with two of them it decides what a great deal of the window is showing.
 Bold was the only mark it wore, and in a tree where the real objects are
-already darker than the grey slots around them, a bolder weight among
+already darker than the gray slots around them, a bolder weight among
 them is not a mark anyone can find.
 
 The bullet is painted rather than put in the row: the row's text is the
@@ -70,10 +70,10 @@ def _bullet_drawn(window, name):
     The **viewport**, not the tree: `visualItemRect` is in viewport
     coordinates and grabbing the tree includes its header and frame, so
     a pixel read at face value lands twenty rows off — on the branch
-    arrow, as it happens, which is grey and reads as "nothing was
+    arrow, as it happens, which is gray and reads as "nothing was
     drawn".
 
-    The band stops just past the bullet's centre, short of where the
+    The band stops just past the bullet's center, short of where the
     icon's ink begins — the geometry icon is this very blue, so a scan
     that reached it would pass whether or not anything was painted.
     (The icon starts a few pixels inside the rect; the bullet sits at
@@ -105,8 +105,8 @@ def test_the_bullet_is_actually_drawn_and_only_on_that_row(two_geometries,
 
 
 def test_it_wears_the_geometry_icons_own_blue(two_geometries):
-    """One statement, not two: a second colour would be a third
-    vocabulary in a tree that already says a lot with colour."""
+    """One statement, not two: a second color would be a third
+    vocabulary in a tree that already says a lot with color."""
     from visualdynamics.gui.icons import COLORS
 
     assert ACTIVE_MARK == COLORS['Geometry']

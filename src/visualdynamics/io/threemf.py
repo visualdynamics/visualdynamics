@@ -29,7 +29,7 @@ from .stl import faces_as_triangles, mesh_geometry
 
 CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'
 
-#: metres per one of each unit the 3MF core spec allows
+#: meters per one of each unit the 3MF core spec allows
 UNITS = {'micron': 1e-6, 'millimeter': 1e-3, 'centimeter': 1e-2,
          'inch': 0.0254, 'foot': 0.3048, 'meter': 1.0}
 
@@ -75,7 +75,7 @@ def load(path: str | os.PathLike) -> Geometry:
     Returns
     -------
     Geometry
-        Triangle face elements in metres (the file's declared unit is
+        Triangle face elements in meters (the file's declared unit is
         converted, so `length_unit` arrives set) — one block per part
         instance the build places, carrying the part's own name.
     """
@@ -143,7 +143,7 @@ RELS = """<?xml version="1.0" encoding="UTF-8"?>
 def save(obj: Geometry, path: str | os.PathLike,
          unit_system: Any = None) -> None:
     """Write the geometry's face elements as 3MF — one named object
-    per block, in metres (3MF can say so, so nothing is lost to an
+    per block, in meters (3MF can say so, so nothing is lost to an
     assumed unit; `unit_system` is accepted for the exporter registry
     and unused, because the file declares its own).
 

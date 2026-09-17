@@ -1,6 +1,6 @@
 """The scalogram as a view: a button, a panel, and a picture drawn.
 
-The maths has its own tests (`test_wavelet`). This is the half those
+The math has its own tests (`test_wavelet`). This is the half those
 cannot see — that the button reaches it, that the panel says what the
 picture is of, and that a reader can get back out again.
 
@@ -91,7 +91,7 @@ def test_the_status_line_says_what_was_computed(showing):
 
 def test_the_range_it_opens_on_is_one_the_record_can_carry(showing):
     """A default whose bottom is all cone would be a default that draws
-    an artefact."""
+    an artifact."""
     window, history = showing
     settings = window.data_pane.wavelet_settings
     assert settings['high'] < history.sample_rate / 2.0
@@ -238,7 +238,7 @@ def test_a_multi_record_selection_collapses_to_the_first(showing, pump):
 
 
 def test_the_magnitudes_drawn_are_the_records_own_amplitudes(showing):
-    """The normalisation reaching the picture: the colour bar carries
+    """The normalization reaching the picture: the color bar carries
     the record's units, so its top has to be an amplitude the record
     actually contains rather than an arbitrary scale."""
     window, history = showing
@@ -356,7 +356,7 @@ def test_the_editor_offers_the_scalogram_a_channel_choice(qt_app):
         'the force channel is outside the select, so it is not offered'
 
     # the pick lands on the block through the editor's own op, and
-    # the figure honours it
+    # the figure honors it
     from visualdynamics.core.report import Report
     from visualdynamics.gui.report_editor import ReportEditor
     from visualdynamics.units import DEFAULT_SYSTEM

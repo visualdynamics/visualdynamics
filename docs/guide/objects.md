@@ -24,7 +24,7 @@ Two rules hold across all of them:
 ## Geometry — [`core.geometry`](../api/visualdynamics.core.geometry.md)
 
 Kind `geometry`. Nodes, coordinate systems, tracelines, elements and
-blocks, held as flat arrays: `node_id`, `node_xyz` (metres), the
+blocks, held as flat arrays: `node_id`, `node_xyz` (meters), the
 placement and measurement system of each node, `cs_matrix` (three
 direction rows and an origin per system), one connectivity array per
 traceline and per element, and the block each element belongs to with
@@ -40,7 +40,7 @@ IGES, 3MF and STL meshes, sdynpy arrays and `.vdyn` files. Does:
 `missing_dofs` against a data object; `extent`; `validate`; `save`.
 
 A geometry also carries `mass_properties` — the reference point its
-rigid-body modes pivot on and, when the set is to be mass-normalised,
+rigid-body modes pivot on and, when the set is to be mass-normalized,
 the mass and inertia tensor about it
 ([`core.rigid.MassProperties`](../api/visualdynamics.core.rigid.md)).
 They ride the geometry the way averaging rides a time history: set in
@@ -92,7 +92,7 @@ CPSD's accelerometer is on both sides of its cross terms and moves as
 one sensor, while an FRF's drive-point accelerometer (a row) and load
 cell (a column) are two channels, and moving one leaves the other to
 be moved explicitly. Everything derived from the object follows,
-because a PSD computed from a mislabelled channel is mislabelled the
+because a PSD computed from a mislabeled channel is mislabeled the
 same way (`project.rename_dof`; without a quantity it moves every
 channel at the point). A rename that would give two records one
 coordinate and one quantity is refused: a load cell and an
@@ -138,7 +138,7 @@ set is also the record of its fit, which is what *Edit Fit* reopens.
 A geometry's rigid-body set (three translations, three rotations
 about its reference point, `frequency` exactly zero) is `unscaled`
 too unless mass and inertia were given, in which case it is
-mass-normalised about the inertia's principal axes.
+mass-normalized about the inertia's principal axes.
 
 Any set carries data through itself: `project.transform` fits a
 record's motions to the modes (`q = Φ⁺u`) and projects its forces
@@ -243,7 +243,7 @@ set has every mode it names — and both carry the record's averaging
 frames and shock windows, which land on the same instants. The unit rule is
 `[q] = [u]/[Φ]`:
 unit rigid shapes give the virtual point's rotations in rad/s² and its
-moments in lbf·in, mass-normalised shapes give the half-power mass
+moments in lbf·in, mass-normalized shapes give the half-power mass
 units (`modal_acceleration`, in/s²·slinch½), and a set with no mass
 unit gives responses to declare. In the window, select the record and
 the set together and press *Transform to Modal Responses* on the

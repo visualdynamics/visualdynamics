@@ -351,7 +351,7 @@ def test_confirm_suggests_only_inside_the_view(fitting, pump):
         pump()
 
 
-def test_confirmed_modes_leave_labelled_markers_on_the_plot(fitting, pump):
+def test_confirmed_modes_leave_labeled_markers_on_the_plot(fitting, pump):
     import pyqtgraph as pg
 
     window = fitting
@@ -370,7 +370,7 @@ def test_confirmed_modes_leave_labelled_markers_on_the_plot(fitting, pump):
     assert [m.label.format for m in markers()] == [
         f'{m.value():.2f}' for m in markers()], 'each line names its mode'
     pen = markers()[0].pen
-    assert pen.color().name() == '#8b949e', 'grey, not green'
+    assert pen.color().name() == '#8b949e', 'gray, not green'
     assert pen.color().alpha() < 255, 'and half-transparent — bookmarks'
     window.table.rows_deleted.emit([0])
     pump()
@@ -1327,7 +1327,7 @@ def test_the_damping_estimate_is_a_pure_function_of_the_line(survey):
 def test_overridden_damping_survives_the_drag(survey):
     """The second axis of the search in the user's hand: where two
     solutions sit at nearly the same frequency they are told apart by
-    damping, and holding it says which neighbourhood the fit lands in."""
+    damping, and holding it says which neighborhood the fit lands in."""
     _truth, frfs = survey
     session = ModalFitSession(frfs)
     session.override_damping(0.03)
@@ -1516,7 +1516,7 @@ def test_the_parabola_follows_even_when_the_fit_cannot(fitting, pump):
         'the cursor still moves the pending mode')
     xs, _values = window._fit_parabola.getData()
     middle = window.fit.pending['frequency']
-    assert xs[0] < middle < xs[-1], 'the parabola recentred on the cursor'
+    assert xs[0] < middle < xs[-1], 'the parabola recentered on the cursor'
     assert window.fit.pending['damping'] == damping_before, (
         'the dear tier stayed off: no damping search ran')
 
@@ -1575,7 +1575,7 @@ def _alignment(fitted, phi):
 def test_refine_all_stops_close_modes_borrowing():
     """Sequential peeling fits the first of a close pair on data still
     containing the second, so its residues absorb a piece of the
-    neighbour — the pair's *sum* tracks the measurement while each
+    neighbor — the pair's *sum* tracks the measurement while each
     shape is contaminated. Refine holds the poles and re-fits every
     mode's residues in one least squares with all the terms present,
     and the shapes come back to the truth."""
@@ -1642,19 +1642,19 @@ def test_the_residual_toggle_draws_and_drops_the_curves(fitting, pump):
 
     window = fitting
 
-    def dashed_grey():
+    def dashed_gray():
         return [item for item in window._fit_plot.items
                 if isinstance(item, pg.PlotDataItem)
                 and item.opts.get('pen') is not None
                 and item.opts['pen'].color().name() == '#8a8a92']
 
-    assert dashed_grey() == [], 'off by default'
+    assert dashed_gray() == [], 'off by default'
     window.data_pane.residual_action.setChecked(True)
     pump()
-    assert len(dashed_grey()) >= 1, 'the residual CMIF appears'
+    assert len(dashed_gray()) >= 1, 'the residual CMIF appears'
     window.data_pane.residual_action.setChecked(False)
     pump()
-    assert dashed_grey() == [], 'and goes away'
+    assert dashed_gray() == [], 'and goes away'
 
 
 # ---- the damping span's corner fields ---------------------------------------
@@ -1976,7 +1976,7 @@ def test_the_fit_keeps_the_parabolas_promise():
 
 def test_an_automatic_fit_never_pins():
     """The pin only knows what the user meant; an automatic fit has no
-    user meaning to honour, and pinning it was the runaway that stacked
+    user meaning to honor, and pinning it was the runaway that stacked
     fourteen inflated modes at one frequency of a dense cluster. Without
     a held damping, the least squares answer stands — under a
     deliberately wrong damping it undershoots, and that honesty is the
@@ -2050,11 +2050,11 @@ def test_a_confirmed_peak_is_not_offered_again():
 
 def test_a_repeated_roots_second_mode_is_still_offered():
     """The half-power exclusion cannot tell the ridge a subtraction
-    leaves from a genuine neighbour standing at the same frequency — a
+    leaves from a genuine neighbor standing at the same frequency — a
     symmetric structure's repeated root is exactly that, and the plate
     demo's 1142 Hz pair was shadowed by its own first half. Shape can
     tell them apart: ridge lies in the span of the confirmed modes, a
-    real neighbour does not. The loop must take both teeth of the pair
+    real neighbor does not. The loop must take both teeth of the pair
     and then leave — not skip the second, and not stack a third.
 
     The pair is *exactly* repeated, which is the regime that matters: a
@@ -2354,7 +2354,7 @@ def test_no_usable_vote_publishes_unscaled():
     assert not scaled, 'a convention, not physics — and it says so'
 
 
-def test_fit_modes_trusts_the_sessions_own_judgement():
+def test_fit_modes_trusts_the_sessions_own_judgment():
     """The scripted loop adds no second opinion: a proximity guard here
     once vetoed any suggestion within 1 Hz of a confirmed mode, which
     silently skipped the repeated pair's second tooth the session had
@@ -2470,8 +2470,8 @@ def test_refine_all_appears_without_moving_the_other_buttons(window, pump,
 # ---- the factored synthesis CMIF -----------------------------------------
 
 
-def test_the_factored_cmif_equals_the_materialised_one(survey):
-    """The dashed synthesis CMIF used to be drawn by materialising the
+def test_the_factored_cmif_equals_the_materialized_one(survey):
+    """The dashed synthesis CMIF used to be drawn by materializing the
     whole synthesis — a two-gigabyte array on the hard drone survey,
     6.5 s per redraw — and decomposing every line. The factored path
     computes the same singular values from the QR of the shape
@@ -2492,11 +2492,11 @@ def test_the_factored_cmif_equals_the_materialised_one(survey):
     assert fast.shape == reference.shape
     scale = reference.max()
     assert np.allclose(fast, reference, atol=1e-9 * scale), (
-        'the factored singular values are not the materialised ones')
+        'the factored singular values are not the materialized ones')
 
 
 def test_the_factored_cmif_pads_a_thin_fit_to_full_width(survey):
-    """One confirmed mode is rank one, but the materialised SVD reports
+    """One confirmed mode is rank one, but the materialized SVD reports
     min(responses, references) singular values — the extras exactly
     zero. The plot counts rows, so the factored path pads."""
     _truth, frfs = survey

@@ -131,7 +131,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           python -m coverage html
           # The floor (Brandon, 2026-09-16): a pull request that adds
-          # code without tests goes red the way a licence violation
+          # code without tests goes red the way a license violation
           # does. Measured at 92% on the suite alone and a little more
           # with the demonstration model appended, the day it was set;
           # raise it when the number rises, never lower it to pass.

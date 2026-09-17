@@ -184,7 +184,7 @@ def test_picked_cross_terms_are_stationed_as_their_magnitudes():
     """Brandon, 2026-09-07: nine records of a virtual point's target
     picked, and the stage showed three, "never a cross-term label". A
     picked cross term is its own station — the magnitude, no bands,
-    labelled by its pair — beside the autos with theirs."""
+    labeled by its pair — beside the autos with theirs."""
     from visualdynamics.viz.banded import banded_stage_arrays
 
     spec, _autos = _cross_term_target()
@@ -205,7 +205,7 @@ def test_picked_cross_terms_are_stationed_as_their_magnitudes():
     whole = banded_stage_arrays(spec)
     assert [s['dof'] for s in whole['stations']] == ['M1', 'M2', 'M3']
     # a pair stated as zero coherence is zero at every line: stationed,
-    # labelled, and nothing to draw on a log axis
+    # labeled, and nothing to draw on a log axis
     zero, _autos = _cross_term_target(coherence=0.0)
     blank = banded_stage_arrays(zero, specification_records=[1])['stations'][0]
     assert blank['dof'] == 'M1/M2' and blank['cross']

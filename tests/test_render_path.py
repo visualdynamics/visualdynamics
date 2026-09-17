@@ -48,7 +48,7 @@ def test_an_undeferred_plotter_renders_on_the_calling_thread():
 def test_every_qt_plotter_this_application_builds_is_undeferred():
     """The helper only helps at the construction site, and the fixture
     windows are offscreen so no test ever runs those sites — an AST
-    walk is what holds them, the way the licence boundary is held."""
+    walk is what holds them, the way the license boundary is held."""
     makers = {'QtInteractor', 'BackgroundPlotter'}
     bare = []
     for path in SOURCES.rglob('*.py'):

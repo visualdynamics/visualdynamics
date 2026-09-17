@@ -37,7 +37,7 @@ def run(window, pump):
 def report_of(window):
     return random_template(window.project, links=window.project.links)
 def test_every_block_binds_to_a_real_run(run):
-    """An unbound block renders as a grey slot. On a run that carries a
+    """An unbound block renders as a gray slot. On a run that carries a
     specification, its PSDs, coherence, time data and a channel table,
     none of them should be."""
     page = render_html(report_of(run), run.project, unit_system=visualdynamics.SI)
@@ -96,7 +96,7 @@ def test_the_comparison_figure_carries_every_channel(run):
         'warning', 'abort', 'warning', 'abort']
 def test_the_time_history_carries_the_frames_it_was_averaged_over(run):
     """A time history in a report is not read for its values. It is
-    read for what part of the run was analysed and how, which a bare
+    read for what part of the run was analyzed and how, which a bare
     trace leaves out."""
     from visualdynamics.report import _plot_block
 
@@ -106,7 +106,7 @@ def test_the_time_history_carries_the_frames_it_was_averaged_over(run):
                          'select': 'dim:acceleration'}, history, {}, visualdynamics.SI)
     marks = built['averaging']
     assert len(marks['frames']) == history.averaging.frames
-    assert max(marks['window']) == pytest.approx(1.0), 'normalised'
+    assert max(marks['window']) == pytest.approx(1.0), 'normalized'
     assert history.averaging.window in marks['label']
 
 
@@ -140,8 +140,8 @@ def test_the_figure_is_told_the_rail_rather_than_knowing_it(run):
             f'{literal!r} is the rail knowing what it should be told'
 
 
-def test_the_page_is_told_its_colours_too():
-    """One colour scale and one pair of mark colours, from the app's
+def test_the_page_is_told_its_colors_too():
+    """One color scale and one pair of mark colors, from the app's
     own theme — carried in the payload rather than copied into the
     JavaScript, where a change to the theme could not reach them."""
     import json
@@ -361,7 +361,7 @@ def test_the_marked_lines_are_the_lines_the_table_counts():
 
 
 def test_a_density_is_drawn_flat_across_its_own_bin():
-    """A polyline through the line centres draws a slope that is not in
+    """A polyline through the line centers draws a slope that is not in
     the data. The app steps a density; so does the report.
 
     And only a density. A written specification's points are
@@ -387,8 +387,8 @@ def test_a_density_is_drawn_flat_across_its_own_bin():
     assert alone.get('steps', False) is False
 
 
-def test_the_reference_is_grey_and_the_measurement_is_the_page_ink():
-    """The app's own reading of the pair: grey behind because it is the
+def test_the_reference_is_gray_and_the_measurement_is_the_page_ink():
+    """The app's own reading of the pair: gray behind because it is the
     reference, the page's ink in front because it is what is being
     looked at."""
     from visualdynamics.report import _plot_block
@@ -400,8 +400,8 @@ def test_the_reference_is_grey_and_the_measurement_is_the_page_ink():
         {'kind': 'plot', 'source': 'P', 'specification': 'S',
          'mode': 'curves'}, psds, {'S': spec, 'P': psds}, visualdynamics.SI)
     target, measured = built['curves']
-    assert target.get('grey') and not target.get('ink')
-    assert measured.get('ink') and not measured.get('grey')
+    assert target.get('gray') and not target.get('ink')
+    assert measured.get('ink') and not measured.get('gray')
 
 
 # ---- the comparison as bars ---------------------------------------------

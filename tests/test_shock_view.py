@@ -252,7 +252,7 @@ def test_an_unevenly_sampled_record_puts_nothing_up(window, pump):
 
 def test_the_two_views_are_exclusive(shown):
     """They mark the same record with different readings of it — frames
-    to average against events to analyse. A record is being read one way
+    to average against events to analyze. A record is being read one way
     or the other, and overlaid they are two sets of shading on one
     trace."""
     window, _history = shown
@@ -428,7 +428,7 @@ def test_moving_a_window_moves_only_that_one(shown):
     close = was[2].start - was[1].duration / 2.0
     overlay.regions[1].setRegion((close, close + was[1].duration))
     now = history.shocks
-    assert now[1].stop <= now[2].start + 1e-9, 'held off its neighbour'
+    assert now[1].stop <= now[2].start + 1e-9, 'held off its neighbor'
     assert now[1].duration < was[1].duration, 'the one that moved gave way'
     assert now[0].duration == pytest.approx(was[0].duration, abs=1e-9), \
         'and no other window was shortened by it'
@@ -489,7 +489,7 @@ def test_ticking_the_box_makes_the_windows_agree(shown):
 # ---- windows are held off each other ------------------------------------
 
 
-def test_a_dragged_window_cannot_be_pulled_over_its_neighbour(shown):
+def test_a_dragged_window_cannot_be_pulled_over_its_neighbor(shown):
     """`_windowed` promised no two windows share a sample, and until
     now nothing kept that promise once the plot could edit them: a
     window pulled back over the event before it would have had its
@@ -584,7 +584,7 @@ def test_figure_3_is_the_events_over_the_specification():
     assert channel['zones'], 'the band rides behind them'
     assert 'over' not in channel and 'under' not in channel, \
         'no outside marks over stacked events'
-    assert built['curves'][0].get('grey'), 'the target is the reference'
+    assert built['curves'][0].get('gray'), 'the target is the reference'
 
 
 def test_the_shock_template_names_the_specification():
@@ -620,7 +620,7 @@ def test_with_added_places_a_window_in_the_largest_gap():
     assert new.duration == pytest.approx(0.5), "the series' own length"
     assert 4.5 < new.start and new.stop < 10.0, \
         'in the stretch after the last window — the largest gap'
-    assert new.start == pytest.approx(4.5 + (5.5 - 0.5) / 2), 'centred'
+    assert new.start == pytest.approx(4.5 + (5.5 - 0.5) / 2), 'centered'
 
 
 def test_with_added_serves_the_empty_list():
@@ -628,7 +628,7 @@ def test_with_added_serves_the_empty_list():
 
     (only,) = with_added((), 20.0)
     assert only.duration == pytest.approx(2.0), 'a tenth of the record'
-    assert (only.start + only.stop) / 2 == pytest.approx(10.0), 'centred'
+    assert (only.start + only.stop) / 2 == pytest.approx(10.0), 'centered'
 
 
 def test_with_added_shrinks_into_a_tight_gap():

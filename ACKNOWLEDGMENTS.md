@@ -1,4 +1,4 @@
-# Acknowledgements
+# Acknowledgments
 
 **Thanks, not authorship.** Nothing on this page confers a copyright
 interest, an authorship claim, or any right in Visual Dynamics. It is
@@ -12,8 +12,8 @@ records are kept apart on purpose:
 | --- | --- | --- |
 | this page | thanks, freely given, at the author's discretion | here |
 | the terms of the work itself | GPL-3.0-or-later | [`LICENSE`](LICENSE) |
-| what a contribution is given under | the contributor licence agreement | [`CLA.md`](CLA.md) |
-| third-party licences | attribution the dependencies *require* | [`NOTICE.md`](NOTICE.md) |
+| what a contribution is given under | the contributor license agreement | [`CLA.md`](CLA.md) |
+| third-party licenses | attribution the dependencies *require* | [`NOTICE.md`](NOTICE.md) |
 
 Being thanked here is not a claim on anything — authorship, ownership or otherwise. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for how code is actually taken.
@@ -53,7 +53,7 @@ decided about a particular person.*
 <!-- The same, for groups. Naming a group rather than its individual
      members is often the better choice: some organizations have
      policies about staff being named in outside products, and a
-     collective acknowledgement carries the thanks without asking
+     collective acknowledgment carries the thanks without asking
      anyone to clear it.
 
      Worth a deliberate decision rather than a default, and one to
@@ -66,7 +66,7 @@ decided about a particular person.*
 
 Not people, but worth naming: Visual Dynamics is written against a
 body of work it does not include and could not replace. The
-dependencies it actually ships with — and what their licences ask in
+dependencies it actually ships with — and what their licenses ask in
 return — are in [`NOTICE.md`](NOTICE.md); this is the shorter list of
 what shaped it.
 
@@ -79,5 +79,5 @@ what shaped it.
   these tools should do. Nothing is taken from them: all three are
   GPL-3.0, and taking their code would have settled this project's
   licensing by accident — so their methods were read and then written
-  from scratch here. `tests/test_licence_boundary.py`
+  from scratch here. `tests/test_license_boundary.py`
   enforces that on every run, and `AGENTS.md` rule 1 says why.

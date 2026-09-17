@@ -48,13 +48,13 @@ def zones(qt_app, data, theme='light'):
             if isinstance(item, pg.FillBetweenItem)]
 
 
-def colour_of(fill):
+def color_of(fill):
     return fill.brush().color().name()
 
 
 def test_both_limits_give_four_zones(qt_app):
     """Warning-to-abort and beyond-abort, each way — and past abort the
-    colour says which way.
+    color says which way.
 
     Both were red, which said "out of tolerance" and left the direction
     to be read off the geometry, where every other mark on this plot
@@ -63,9 +63,9 @@ def test_both_limits_give_four_zones(qt_app):
     filled = zones(qt_app, spec(warning_lower=0.5, warning_upper=2.0,
                                 abort_lower=0.25, abort_upper=4.0))
     assert len(filled) == 4
-    colours = sorted(colour_of(fill) for fill in filled)
+    colors = sorted(color_of(fill) for fill in filled)
     light = resolve_theme('light')
-    assert colours == sorted([light['exceed_over'], light['exceed_under'],
+    assert colors == sorted([light['exceed_over'], light['exceed_under'],
                               light['limit_warning'],
                               light['limit_warning']])
 
@@ -75,14 +75,14 @@ def test_warning_alone_shades_to_the_edge(qt_app):
     filled = zones(qt_app, spec(warning_lower=0.5, warning_upper=2.0))
     assert len(filled) == 2
     warning = resolve_theme('light')['limit_warning']
-    assert {colour_of(fill) for fill in filled} == {warning}
+    assert {color_of(fill) for fill in filled} == {warning}
 
 
 def test_abort_alone_shades_over_in_red_and_under_in_blue(qt_app):
     filled = zones(qt_app, spec(abort_lower=0.25, abort_upper=4.0))
     assert len(filled) == 2
     light = resolve_theme('light')
-    assert {colour_of(fill) for fill in filled} == \
+    assert {color_of(fill) for fill in filled} == \
         {light['exceed_over'], light['exceed_under']}
 
 
@@ -118,10 +118,10 @@ def test_a_record_with_no_limits_of_its_own_is_not_shaded(qt_app):
 
 
 @pytest.mark.parametrize('name', ['light', 'dark'])
-def test_each_theme_brings_its_own_zone_colours(qt_app, name):
+def test_each_theme_brings_its_own_zone_colors(qt_app, name):
     filled = zones(qt_app, spec(warning_lower=0.5, warning_upper=2.0),
                    theme=name)
-    assert {colour_of(fill)
+    assert {color_of(fill)
             for fill in filled} == {resolve_theme(name)['limit_warning']}
 
 
@@ -164,7 +164,7 @@ def test_the_yellow_stops_at_the_abort_line(qt_app):
                 abort_lower=0.25, abort_upper=4.0)
     warning = resolve_theme('light')['limit_warning']
     upper = [fill for fill in zones(qt_app, data)
-             if colour_of(fill) == warning
+             if color_of(fill) == warning
              and np.allclose(bounds_of(fill)[0],
                              shown(data, 'warning_upper', edge_x(fill)))]
     assert len(upper) == 1, 'one yellow zone starts at the upper warning'
@@ -178,7 +178,7 @@ def test_the_lower_yellow_stops_at_the_lower_abort_line(qt_app):
                 abort_lower=0.25, abort_upper=4.0)
     warning = resolve_theme('light')['limit_warning']
     lower = [fill for fill in zones(qt_app, data)
-             if colour_of(fill) == warning
+             if color_of(fill) == warning
              and np.allclose(bounds_of(fill)[1],
                              shown(data, 'warning_lower', edge_x(fill)))]
     assert len(lower) == 1

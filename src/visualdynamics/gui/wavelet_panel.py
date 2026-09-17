@@ -15,7 +15,7 @@ cannot say.
 
 The derived three are not decoration. A scalogram is the one reading in
 this toolset where the *settings* decide whether the picture is mostly
-artefact: ask for 1 Hz on a two-second record and the bottom of the
+artifact: ask for 1 Hz on a two-second record and the bottom of the
 axis is nothing but cone, and the picture will look perfectly plausible
 while saying nothing about the measurement. So the panel says it before
 the transform runs.
@@ -173,7 +173,7 @@ class WaveletPanel(QWidget):
         couple of samples long — and the bottom is where a handful of
         the longest wavelets still fit inside the record rather than
         hanging off both ends of it. Opening on a range that is mostly
-        cone would be opening on an artefact.
+        cone would be opening on an artifact.
         """
         low, high = wavelet.default_range(self.sample_rate or 1.0,
                                           self.duration)
@@ -241,7 +241,7 @@ class WaveletPanel(QWidget):
         return settled
 
     def _restate(self, settings: dict[str, Any]) -> None:
-        """What follows from the four, including what will be artefact."""
+        """What follows from the four, including what will be artifact."""
         rate = self.sample_rate or 1.0
         low = settings['low']
         cone = float(wavelet.cone_of_influence([low], rate,

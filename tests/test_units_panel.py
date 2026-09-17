@@ -95,7 +95,7 @@ def test_opening_the_list_is_not_a_choice(window, opened, time_data,
     so nothing on screen said what had happened.
 
     Here showPopup is made to behave that way on every platform, so
-    the defence is testable off a Mac too.
+    the defense is testable off a Mac too.
     """
     model, _item = opened(time_data)
     table = window.units_table

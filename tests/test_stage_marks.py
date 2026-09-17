@@ -69,7 +69,7 @@ def test_the_band_shading_carries_the_windows_own_weight():
     """The 2-D bands fade with the window — the shading is the weight
     each moment carries — and the stage bands say the same thing: the
     band mesh holds the window's value per point, hann's zero at the
-    frame edges and its one at the centre."""
+    frame edges and its one at the center."""
     import pyvista as pv
 
     from visualdynamics.viz.marks import add_averaging_marks
@@ -88,9 +88,9 @@ def test_the_band_shading_carries_the_windows_own_weight():
     per_frame = weight.reshape(5, -1)
     assert (per_frame[:, 0] < per_frame[:, per_frame.shape[1] // 2]).all()
     # and the shading is translucency: the alpha channel carries the
-    # weight, the colour stays one colour
+    # weight, the color stays one color
     fade = np.asarray(bands.point_data['fade'])
-    assert (np.unique(fade[:, :3], axis=0).shape[0] == 1), 'one colour'
+    assert (np.unique(fade[:, :3], axis=0).shape[0] == 1), 'one color'
     assert np.corrcoef(fade[:, 3], weight)[0, 1] > 0.999, \
         'the alpha rides the window'
     plotter.close()
@@ -170,7 +170,7 @@ def _drawn_x_labels(pane):
 def test_the_marks_do_not_stretch_the_axes(window, pump):
     """The rail rides above the ceiling and the wall stands behind the
     stations; counted in the scene's bounds they stretched the cube
-    axes' box while its labelled ranges stayed put — the time axis
+    axes' box while its labeled ranges stayed put — the time axis
     read wrong values the moment the averaging view opened (Brandon,
     2026-08-24)."""
     from visualdynamics.core.data import TimeHistory
@@ -199,7 +199,7 @@ def test_the_marks_do_not_stretch_the_axes(window, pump):
     assert after == pytest.approx(before, abs=1e-6), \
         'the marks joined the stage without resizing its axes'
     # and the labels still read seconds, not stage units: pyvista's
-    # SetBounds rewrites the labelled ranges, which the first fix
+    # SetBounds rewrites the labeled ranges, which the first fix
     # tripped over — the bounds held while the time axis went 0..1.6
     x_range = tuple(pane.waterfall_plotter.renderer
                     .cube_axes_actor.GetXAxisRange())
@@ -509,8 +509,8 @@ def test_a_drag_preview_renders_one_frame(window, pump, monkeypatch):
 
 
 def test_the_handles_are_engraved_disks():
-    """Grey disks, not spheres: an arrow on each edge handle pointing
-    the way that edge extends, a three-line grip on the centre — and
+    """Gray disks, not spheres: an arrow on each edge handle pointing
+    the way that edge extends, a three-line grip on the center — and
     the engravings are not pickable, so a click on one grabs the
     disk under it (Brandon, 2026-08-24)."""
     import pyvista as pv
@@ -538,7 +538,7 @@ def test_the_handles_are_engraved_disks():
     def points_toward(icon_actor):
         """The arrow's direction: its apex is the lone vertex, on the
         other side of the centroid from the two base corners —
-        comparing extremes against the centre let a swapped arrow
+        comparing extremes against the center let a swapped arrow
         pass on its base corners, which is exactly what happened."""
         triangle = np.asarray(icon_actor.mapper.dataset.points)[:, 0]
         centroid = triangle.mean()

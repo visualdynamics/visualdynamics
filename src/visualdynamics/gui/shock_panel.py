@@ -43,7 +43,7 @@ WIDTH = 250
 
 #: how many decimals a time is shown and edited to. Milliseconds:
 #: shock windows are tens to hundreds of them, and a microsecond of
-#: precision in a draggable edge is a pretence.
+#: precision in a draggable edge is a pretense.
 PLACES = 4
 
 
@@ -57,7 +57,7 @@ class ShockPanel(QWidget):
 
     changed = Signal(object)
     detect_asked = Signal()
-    #: the user asked for the SRS these windows parameterise
+    #: the user asked for the SRS these windows parameterize
     srs_asked = Signal()
     #: the Add button: a window the detector missed; the owner places it
     add_asked = Signal()
@@ -97,7 +97,7 @@ class ShockPanel(QWidget):
 
         self.same_length: QCheckBox = QCheckBox('Same length for all')
         self.same_length.setToolTip(
-            'Analyse every event in a window of one length, so what '
+            'Analyze every event in a window of one length, so what '
             'differs between their spectra is the events.\n'
             'Dragging any edge then sets the length for all of them.')
         self.same_length.toggled.connect(self._length_mode)
@@ -176,7 +176,7 @@ class ShockPanel(QWidget):
         layout.addLayout(grid)
         commit_on_enter(self.q_box, self.per_octave_box)
 
-        # the act these windows parameterise, right where they are set
+        # the act these windows parameterize, right where they are set
         self.srs_button: QPushButton = QPushButton('Compute SRS')
         self.srs_button.setToolTip(
             'A shock response spectrum over each of these windows, '
@@ -224,9 +224,9 @@ class ShockPanel(QWidget):
         finally:
             self._writing = False
         self.same_length.setEnabled(not locked and len(shocks) > 1)
-        self._summarise(shocks, locked)
+        self._summarize(shocks, locked)
 
-    def _summarise(self, shocks, locked):
+    def _summarize(self, shocks, locked):
         if locked:
             self.summary.setText('The file already cut this record into '
                                  'captures, so the events are settled.')
@@ -237,7 +237,7 @@ class ShockPanel(QWidget):
             covered = sum(s.duration for s in shocks)
             self.summary.setText(
                 f'{len(shocks)} shock{"s" * (len(shocks) != 1)}, '
-                f'{covered:.3f} s of record analysed. One spectrum per '
+                f'{covered:.3f} s of record analyzed. One spectrum per '
                 f'channel per shock.')
 
     # ---- edits ------------------------------------------------------------

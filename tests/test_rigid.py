@@ -3,7 +3,7 @@
 The shapes are kinematic and checked kinematically: every node of a
 translation mode moves the same way, a rotation mode moves a node by
 the cross product of the axis with its offset from the point, and the
-node *at* the point does not turn at all. Mass normalisation is
+node *at* the point does not turn at all. Mass normalization is
 checked the way the definition says — `φ M φᵀ = I` against a lumped
 mass matrix whose mass, centroid and inertia tensor were computed from
 the same masses — so a coupled tensor proves the principal-axis
@@ -11,7 +11,7 @@ handling rather than taking it on trust. The FEM's own rigid vectors,
 written independently, agree on a beam.
 
 Through the project, the verb behaves like every other derivation:
-linked into the geometry's group, journalled, fingerprinted, refreshed,
+linked into the geometry's group, journaled, fingerprinted, refreshed,
 and saved with its settings.
 """
 
@@ -129,11 +129,11 @@ def test_the_fem_writes_the_same_vectors():
         assert np.allclose(ours.shape_matrix[:, j], theirs[row, :]), dof
 
 
-# ---- mass normalisation ------------------------------------------------------
+# ---- mass normalization ------------------------------------------------------
 
 
 @pytest.mark.parametrize('seed', [1, 2, 3])
-def test_mass_normalised_against_the_lumped_masses(seed):
+def test_mass_normalized_against_the_lumped_masses(seed):
     """The definition itself: point masses at the nodes give a mass,
     a centroid and a tensor; the shapes built from those three are
     orthonormal in the lumped mass matrix. A random cloud's tensor is
@@ -250,7 +250,7 @@ def test_describe_is_the_one_wording():
     scaled = MassProperties((0.1, 0, 0.05), mass=2.4,
                             inertia=(1, 1, 1, 0, 0, 0))
     assert scaled.describe() == \
-        'about (0.1, 0, 0.05) m, mass-normalised (2.4 kg)'
+        'about (0.1, 0, 0.05) m, mass-normalized (2.4 kg)'
 
 
 def test_refusals_by_name():

@@ -1,14 +1,14 @@
-"""The geometry tables' own columns: units, colours, ids and references.
+"""The geometry tables' own columns: units, colors, ids and references.
 
 `test_table_conventions.py` checks that every table *behaves* the same;
 this is what these particular columns mean. Four of them refuse rather
 than write — an id that is taken, a coordinate system that does not
-exist, a colour outside the palette, a frame type that is not one of the
+exist, a color outside the palette, a frame type that is not one of the
 three — and a refusal that quietly wrote would leave a geometry that
 cannot be validated.
 
 Coordinates are the other half: they read and write in the *display*
-system, so typing 25 into a millimetre view has to arrive as 0.025 m and
+system, so typing 25 into a millimeter view has to arrive as 0.025 m and
 come back as 25.
 """
 
@@ -43,12 +43,12 @@ def test_coordinates_read_and_write_in_the_display_system(plate):
     model = node_table_model(plate, mmks)
     x = column_of(model, next(c.title for c in model.columns
                               if c.title.startswith('X [')))
-    metres = float(plate.node_xyz[0, 0])
+    meters = float(plate.node_xyz[0, 0])
     assert float(model.data(model.index(0, x))) == pytest.approx(
-        metres * 1000.0), 'shown in millimetres'
+        meters * 1000.0), 'shown in millimeters'
     assert model.setData(model.index(0, x), '25')
     assert float(plate.node_xyz[0, 0]) == pytest.approx(0.025), (
-        'and stored in metres')
+        'and stored in meters')
 
 
 def test_an_id_that_is_taken_is_refused(plate):
@@ -73,7 +73,7 @@ def test_a_node_can_only_point_at_a_coordinate_system_that_exists(plate):
     assert model.setData(model.index(0, column), str(int(plate.cs_id[0])))
 
 
-def test_a_colour_is_a_palette_name_or_its_index(plate):
+def test_a_color_is_a_palette_name_or_its_index(plate):
     model = element_table_model(plate, SYSTEMS['m-kg-N-s'])
     column = column_of(model, 'Color')
     assert model.setData(model.index(0, column), 'red')

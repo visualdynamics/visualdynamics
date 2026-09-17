@@ -5,7 +5,7 @@ is what sdynpy uses — so the numbers below are sdynpy's own, recorded
 by running `nth_octave_freqs` once and written down here. Numbers are
 facts and not expression: the implementation was written from the
 standard, and these pin it to the same grid without the package ever
-importing a GPL library. See `tests/test_licence_boundary.py`.
+importing a GPL library. See `tests/test_license_boundary.py`.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import visualdynamics
 from visualdynamics.core import octave
 from visualdynamics.core.data import Psd
 
-#: (per_octave: (first five lower edges, first five centres, band count,
+#: (per_octave: (first five lower edges, first five centers, band count,
 #: last upper edge)) over 20-2000 Hz, from sdynpy.
 SDYNPY = {
     1: ([11.220184543, 22.387211386, 44.668359215, 89.125093813,
@@ -41,11 +41,11 @@ SDYNPY = {
 
 @pytest.mark.parametrize('per_octave', sorted(SDYNPY))
 def test_the_bands_are_the_ones_sdynpy_uses(per_octave):
-    lower, centres, count, last = SDYNPY[per_octave]
-    got_centres, _widths, bounds = octave.bands(20.0, 2000.0, per_octave)
-    assert len(got_centres) == count
+    lower, centers, count, last = SDYNPY[per_octave]
+    got_centers, _widths, bounds = octave.bands(20.0, 2000.0, per_octave)
+    assert len(got_centers) == count
     assert bounds[:5] == pytest.approx(lower, rel=1e-9)
-    assert got_centres[:5] == pytest.approx(centres, rel=1e-9)
+    assert got_centers[:5] == pytest.approx(centers, rel=1e-9)
     assert bounds[-1] == pytest.approx(last, rel=1e-9)
 
 
@@ -60,17 +60,17 @@ def test_an_octave_is_ten_to_the_three_tenths_not_two():
 @pytest.mark.parametrize('per_octave', [1, 2, 3, 6, 12, 24])
 def test_a_thousand_hertz_anchors_every_fraction(per_octave):
     """What makes it a standard grid rather than an arbitrary one."""
-    centres, _widths, bounds = octave.bands(20.0, 5000.0, per_octave)
+    centers, _widths, bounds = octave.bands(20.0, 5000.0, per_octave)
     assert (np.any(np.isclose(bounds, 1000.0))
-            or np.any(np.isclose(centres, 1000.0)))
+            or np.any(np.isclose(centers, 1000.0)))
 
 
-def test_odd_fractions_put_the_centres_on_the_grid_and_even_the_edges():
+def test_odd_fractions_put_the_centers_on_the_grid_and_even_the_edges():
     """Getting this backwards puts every band half a step out, which is
     a real disagreement and not a rounding one."""
     for per_octave in (1, 3):
-        centres, _w, _b = octave.bands(20.0, 2000.0, per_octave)
-        steps = np.log10(centres) * 10 * per_octave / 3
+        centers, _w, _b = octave.bands(20.0, 2000.0, per_octave)
+        steps = np.log10(centers) * 10 * per_octave / 3
         assert np.allclose(steps, np.round(steps)), per_octave
     for per_octave in (2, 6, 12):
         _c, _w, bounds = octave.bands(20.0, 2000.0, per_octave)
@@ -90,10 +90,10 @@ def test_the_grid_does_not_move_with_the_range_asked_for():
     assert len(shared) == len(narrow)
 
 
-def test_bands_tile_and_centre_on_their_own_edges():
-    centres, widths, bounds = octave.bands(20.0, 2000.0, 6)
+def test_bands_tile_and_center_on_their_own_edges():
+    centers, widths, bounds = octave.bands(20.0, 2000.0, 6)
     assert bounds[1:] == pytest.approx(bounds[:-1] + widths)
-    assert centres == pytest.approx(np.sqrt(bounds[:-1] * bounds[1:]))
+    assert centers == pytest.approx(np.sqrt(bounds[:-1] * bounds[1:]))
 
 
 def test_a_range_that_is_not_a_range_is_refused():
@@ -114,8 +114,8 @@ def flat(level=1e-3, df=0.5, top=2000.0):
 
 def test_banding_keeps_the_area_under_the_spectrum():
     """It is an integration, not a resampling: reading the narrowband
-    curve at each band centre would throw away everything between the
-    centres and conserve nothing."""
+    curve at each band center would throw away everything between the
+    centers and conserve nothing."""
     narrow = flat()
     banded = narrow.to_octave(6)
     before = float(np.sum(np.real(narrow.ordinate[0]) * narrow.bin_widths()))
@@ -134,7 +134,7 @@ def test_a_flat_spectrum_stays_flat():
 
 def test_a_band_carries_its_own_width():
     """Its bins are geometric and come from a standard, so reading them
-    off the centres would be a hair out at every band and plainly wrong
+    off the centers would be a hair out at every band and plainly wrong
     at the two ends."""
     banded = flat().to_octave(6)
     assert banded.bandwidth is not None
@@ -151,7 +151,7 @@ def test_a_narrowband_spectrum_infers_its_bins_as_before():
 
 
 def test_the_bands_come_back_as_the_standard_edges():
-    """The plot reconstructs the edges from centre and width, and has
+    """The plot reconstructs the edges from center and width, and has
     to land back on the grid or a step plot draws gaps."""
     from visualdynamics.plot import bin_edges
 
@@ -256,10 +256,10 @@ def test_banding_the_same_way_twice_changes_nothing():
     """It has to be idempotent, and it was not.
 
     Two faults, both worth keeping. `resample` inferred the source's
-    bins from the midpoints between its centres, which is exact for
+    bins from the midpoints between its centers, which is exact for
     evenly spaced FFT lines and wrong for a spectrum already on
     geometric bands — the guess ran 0.17% wide through the middle and
-    5.9% wide at the first band, smearing content into its neighbours.
+    5.9% wide at the first band, smearing content into its neighbors.
     And the grid grew a band each time: a band edge comes back from
     ten-to-the-power and a logarithm a float's breadth adrift, and
     flooring that reached one step further down.

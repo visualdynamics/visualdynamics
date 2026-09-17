@@ -27,7 +27,7 @@ ratio, a magnitude without phase — and the refusal says to transform
 the time history and recompute.
 
 **Records match shape columns by (DOF, quantity)**, with the sign
-honoured: a `101Z-` channel against a `101Z+` column negates. Every
+honored: a `101Z-` channel against a `101Z+` column negates. Every
 column is a displacement quantity today; matching by quantity as well
 is what lets a later set carry strain at gauge DOFs beside
 displacement at accelerometer DOFs and slot into the same transform.
@@ -45,7 +45,7 @@ virtual point would be a fiction.
 dimensionless translations and length-per-radian rotations, so the
 translational responses keep the data's quantity and the rotational
 ones come out per radian (rad/s², or lbf·in for a force). A
-mass-normalised set is in 1/√kg, so its modal responses carry a half
+mass-normalized set is in 1/√kg, so its modal responses carry a half
 power of mass — the `modal_*` dimension tags. A set with no declared
 mass unit gives responses with no unit, hinted with the modal tag for
 Define Units to declare. The expansion applies the same rule the
@@ -88,7 +88,7 @@ MOTIONS = ('acceleration', 'velocity', 'length')
 #: the quantities that transform as their work-conjugates, `Φᵀf`
 FORCES = ('force',)
 #: what a physical quantity becomes through a unit rigid rotation
-#: shape — per radian — and through a mass-normalised shape
+#: shape — per radian — and through a mass-normalized shape
 ROTATIONAL = {'acceleration': 'angular_acceleration',
               'velocity': 'angular_velocity', 'length': 'angle',
               'force': 'moment'}

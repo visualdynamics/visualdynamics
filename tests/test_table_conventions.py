@@ -295,7 +295,7 @@ def test_double_clicking_the_handle_fills_all_the_way_down(qt_app):
 
 
 def test_the_fill_handle_stands_out_from_the_selection(qt_app):
-    """It sat in the selection colour, which made it invisible against the
+    """It sat in the selection color, which made it invisible against the
     selected cell it sits on the corner of."""
     _data, model, view = _units_view(qt_app)
     view.setCurrentIndex(model.index(1, 2))
@@ -387,7 +387,7 @@ def test_a_filled_unit_carries_its_type_down(qt_app):
     view.fill_from_selection(4)
     assert data.ordinate_unit[:5] == ['V'] * 5
     assert [model.data(model.index(r, 1)) for r in range(5)] == \
-        ['voltage'] * 5, 'the type travelled with its unit'
+        ['voltage'] * 5, 'the type traveled with its unit'
 
 
 def test_a_chosen_unit_stamps_its_type_on_the_row(qt_app):
@@ -413,13 +413,13 @@ def test_a_chosen_unit_stamps_its_type_on_the_row(qt_app):
 def test_every_editable_column_journals(models):
     """Brandon's rule (2026-08-30), held structurally: an edit the
     interface can make is an act the console must speak. A column
-    journalled by another surface (the units pane) declares itself so;
+    journaled by another surface (the units pane) declares itself so;
     a new editable column cannot quietly skip the journal."""
     for name, model in models:
         for spec in model.columns:
             if spec.editable:
                 assert spec.journal is not None, (
-                    f'{name} / {spec.title} edits without journalling')
+                    f'{name} / {spec.title} edits without journaling')
 
 
 def test_every_editable_cell_actually_journals(models):
@@ -427,19 +427,19 @@ def test_every_editable_cell_actually_journals(models):
     the sweep — rightly): declaring a journal hook is not producing a
     line. Every editable cell of every model is edited with its own
     current value, and either a replay suffix comes out or the column
-    is explicitly declared journalled elsewhere. A hook that returns
+    is explicitly declared journaled elsewhere. A hook that returns
     nothing is a silent edit, and this refuses it."""
-    from visualdynamics.gui.object_tables import JOURNALLED_ELSEWHERE
+    from visualdynamics.gui.object_tables import JOURNALED_ELSEWHERE
 
     for name, model in models:
         if not model.rowCount():
             continue
         heard = []
-        model.edit_journalled.connect(heard.append)
+        model.edit_journaled.connect(heard.append)
         for column, spec in enumerate(model.columns):
             if not spec.editable:
                 continue
-            if getattr(spec.journal, 'tag', None) == JOURNALLED_ELSEWHERE:
+            if getattr(spec.journal, 'tag', None) == JOURNALED_ELSEWHERE:
                 continue
             index = model.index(0, column)
             current = model.data(index, EDIT)

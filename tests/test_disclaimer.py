@@ -12,7 +12,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QDialog
 
 from visualdynamics import __version__
-from visualdynamics.gui.disclaimer import ACKNOWLEDGEMENT, TEXT, Disclaimer
+from visualdynamics.gui.disclaimer import ACKNOWLEDGMENT, TEXT, Disclaimer
 
 
 def test_the_version_says_alpha():
@@ -32,13 +32,13 @@ def test_the_notice_says_the_project_file_is_provisional():
     assert '.escdf' in TEXT and 'save it again' in TEXT
 
 
-def test_continue_needs_the_acknowledgement(qt_app):
+def test_continue_needs_the_acknowledgment(qt_app):
     dialog = Disclaimer()
-    assert dialog.acknowledged.text() == ACKNOWLEDGEMENT
+    assert dialog.acknowledged.text() == ACKNOWLEDGMENT
     assert not dialog.continue_button.isEnabled()
     assert dialog.quit_button.isEnabled(), 'the one way out without reading'
     # Enter reaches the default button whether or not it is enabled:
-    # the acknowledgement is what admits, not the button's state
+    # the acknowledgment is what admits, not the button's state
     dialog.accept()
     assert dialog.result() != QDialog.DialogCode.Accepted
     dialog.acknowledged.setChecked(True)

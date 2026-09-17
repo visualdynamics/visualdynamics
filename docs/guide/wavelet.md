@@ -5,7 +5,7 @@ A PSD says what frequencies a record contains and says nothing about
 else — a rattle that comes and goes, a shock's ring-down, a resonance
 a sweep excites on its way through — *when* is the story, and the
 spectrum has already averaged it away. The wavelet reading answers it:
-time across, frequency up a logarithmic axis, amplitude as colour —
+time across, frequency up a logarithmic axis, amplitude as color —
 and in three dimensions, amplitude standing up out of the floor.
 
 ![The wavelet reading of a four-tone sweep: two sweeps crossing, a
@@ -72,7 +72,7 @@ all cone is a picture of the recording's edges; the panel warns
 before drawing one.
 
 **Amplitude is the record's own.** A 2 g tone reads 2, wherever it
-sits on the frequency axis, so the colour bar carries the channel's
+sits on the frequency axis, so the color bar carries the channel's
 units and a number can be read off the picture. (The other
 convention in the literature — unit energy — draws the same tone four
 times taller at 50 Hz than at 800; this toolset does not use it.)

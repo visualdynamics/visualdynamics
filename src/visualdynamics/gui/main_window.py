@@ -358,7 +358,7 @@ def _keep_selection_vivid(view):
     """Draw selected rows the same whether or not the view holds focus.
 
     Rows also get selected by picking in the 3D view, which keeps the focus;
-    Qt would grey those out as an inactive selection and make a live
+    Qt would gray those out as an inactive selection and make a live
     selection look disabled.
     """
     palette = view.palette()
@@ -877,14 +877,14 @@ class MainWindow(QMainWindow):
         self.mode_table_action.triggered.connect(
             lambda checked: self.table.setVisible(checked))
         # the MAC's own 3-D reading: the matrix as bars, height and
-        # colour both the value, and the default here too (Brandon's
+        # color both the value, and the default here too (Brandon's
         # call, made once the bars could be picked like the grid)
         self.mac_bars_action: QAction = QAction(control_icon('waterfall'),
                                        '3D', self)
         self.mac_bars_action.setCheckable(True)
         self.mac_bars_action.setChecked(True)
         self.mac_bars_action.setToolTip(
-            'The MAC as 3-D bars, height and colour the value — '
+            'The MAC as 3-D bars, height and color the value — '
             'click picks a pair, Shift adds it, exactly as on the grid')
         self.mac_bars_action.triggered.connect(self._rerender_mac)
         # the 2D/3D toggle leads this bar, as it leads the data pane's
@@ -957,7 +957,7 @@ class MainWindow(QMainWindow):
         self.table_bar.hide()
         table_layout.addWidget(self.table_bar)
         # a splitter, not a row: how much of the pane the mode list wants
-        # against how big the MAC should be is a judgement about the data
+        # against how big the MAC should be is a judgment about the data
         # in front of you, so it is a divider to drag rather than a ratio
         # we picked
         self.tables_row: QSplitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1108,8 +1108,8 @@ class MainWindow(QMainWindow):
         # session's journal, one to put it away — no menu to find
         from .console import ConsolePanel
 
-        centre = QWidget()
-        column = QVBoxLayout(centre)
+        center = QWidget()
+        column = QVBoxLayout(center)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         column.addWidget(self.main_split, 1)
@@ -1117,12 +1117,12 @@ class MainWindow(QMainWindow):
         column.addWidget(self.console)
         # the tab is not a layout row: floated over the views' bottom
         # edge, so collapsed the console claims no strip at all
-        self.console.float_over(centre)
+        self.console.float_over(center)
         # what the tab covers, the 2-D plots leave empty: legend row
         # and bottom axis end above it, whichever pane it lands on
         self.data_pane.reserve_bottom(
             self.console.tab.sizeHint().height() + 4)
-        self.setCentralWidget(centre)
+        self.setCentralWidget(center)
 
         # Dragging the divider between the tree and the views has to
         # track the cursor. AnimatedDocks — on by default — eases every
@@ -1423,9 +1423,9 @@ class MainWindow(QMainWindow):
             # (2026-09-13). PySide drops a bound-method connection when
             # its receiver is destroyed.
             hints.colorSchemeChanged.connect(self._scheme_changed)
-        # and once now: the panes coloured themselves at construction,
+        # and once now: the panes colored themselves at construction,
         # but the tree's palette only exists in apply_theme — without
-        # this it wore the platform's grey until the OS switched theme
+        # this it wore the platform's gray until the OS switched theme
         self.apply_theme(self.theme_name)
 
     def _stepper(self, toolbar, box, what):
@@ -1603,12 +1603,12 @@ class MainWindow(QMainWindow):
         plays — all reads the project or the selection, so it belongs to
         the window and not to a view.
         """
-        # labelled arrows at the DOFs the project measures; the
+        # labeled arrows at the DOFs the project measures; the
         # drop-down picks which quantity's DOFs are marked
         self.dofs_action: QAction = QAction(control_icon('dofs'), 'DOF arrows', self)
         self.dofs_action.setCheckable(True)
         self.dofs_action.setToolTip(
-            "Mark measurement DOFs with labelled arrows; the drop-down "
+            "Mark measurement DOFs with labeled arrows; the drop-down "
             "picks which quantity's DOFs to show")
         self.dofs_action.toggled.connect(self._dofs_toggled)
         toolbar.addAction(self.dofs_action)
@@ -1636,7 +1636,7 @@ class MainWindow(QMainWindow):
         self.project_action.setVisible(False)
 
         # Every action below appears only when it is a real option — see
-        # the interface note in PLAN.md. A toolbar of greyed-out buttons is
+        # the interface note in PLAN.md. A toolbar of grayed-out buttons is
         # clutter; one that only offers what applies is a menu of the
         # possible.
         # Editing lives on the tree: each geometry category row wears a
@@ -1704,9 +1704,9 @@ class MainWindow(QMainWindow):
         self._animation_actions = [toolbar.addSeparator()]
         self.colormap_action: QAction = QAction(control_icon('colormap'), '', self)
         self.colormap_action.setCheckable(True)
-        self.colormap_action.setChecked(True)   # deflection is coloured by
+        self.colormap_action.setChecked(True)   # deflection is colored by
         self.colormap_action.setToolTip(        # default; the toggle is off
-            'Colour the model by how far each node moves')
+            'Color the model by how far each node moves')
         self.colormap_action.toggled.connect(self._colormap_toggled)
         toolbar.addAction(self.colormap_action)
         self._animation_actions.append(self.colormap_action)
@@ -1805,7 +1805,7 @@ class MainWindow(QMainWindow):
                 name='scene-caption')
 
     def _colormap_toggled(self, _checked):
-        """Colouring is built into the scene, so switching rebuilds it."""
+        """Coloring is built into the scene, so switching rebuilds it."""
         if self.animator is not None:
             self.render_current()
 
@@ -2164,7 +2164,7 @@ class MainWindow(QMainWindow):
         # screenshot, 2026-09-14)
         self.scene.apply_theme(self.theme_name)
         # the tree wears the scene's own ground — one theme for every
-        # surface, black or white, never the platform's grey (Brandon,
+        # surface, black or white, never the platform's gray (Brandon,
         # 2026-08-23)
         palette = self.tree.palette()
         palette.setColor(QPalette.ColorRole.Base,
@@ -2547,7 +2547,7 @@ class MainWindow(QMainWindow):
             if reference is None:
                 continue
             kind, name, detail = reference
-            if kind == 'placeholder':   # a grey slot holds nothing yet
+            if kind == 'placeholder':   # a gray slot holds nothing yet
                 continue
             if kind == 'test':  # the whole test: everything it holds
                 out.extend(('object', key, value, None)
@@ -2633,7 +2633,7 @@ class MainWindow(QMainWindow):
         if doomed:
             # One selection change for the whole batch, not one per
             # removal: taking rows out one at a time promotes a
-            # neighbour to current each time, and the handler
+            # neighbor to current each time, and the handler
             # re-rendered each survivor's view only for the next
             # removal to kill it — the specification plot blinked once
             # per object on a delete-all (Brandon, 2026-08-31). The
@@ -2651,7 +2651,7 @@ class MainWindow(QMainWindow):
         self._show_status('Removed ' + ', '.join(removed))
 
     def _journal_geometry_delete(self, geometry, component, keys):
-        """A geometry deletion, journalled by the ids a script names —
+        """A geometry deletion, journaled by the ids a script names —
         stable across a replay where row numbers are not."""
         method = {'nodes': 'delete_nodes',
                   'coordinate_systems': 'delete_coordinate_systems',
@@ -2662,7 +2662,7 @@ class MainWindow(QMainWindow):
                                  sorted(int(k) for k in keys))
 
     def _journal_view(self, prefix, line):
-        """A parameterized view, journalled as its headless plot call.
+        """A parameterized view, journaled as its headless plot call.
 
         Brandon's call (2026-08-30): the console speaks views as well
         as acts — every reading with parameters records the
@@ -2680,7 +2680,7 @@ class MainWindow(QMainWindow):
             journal.append(line)
 
     def _journal_report_edit(self):
-        """A report edit, journalled as the state that stands.
+        """A report edit, journaled as the state that stands.
 
         The editor's ops — a caption typed, a block inserted, moved or
         removed, the title or the marking changed — all land on the
@@ -2848,7 +2848,7 @@ class MainWindow(QMainWindow):
     #: the project's own answer — `Project.selection_verbs` holds the
     #: one applicability table, so a verb the API lists is the verb
     #: the bar offers and neither can drift. Everything a view
-    #: parameterises stays on that view's pane, principle 13.
+    #: parameterizes stays on that view's pane, principle 13.
     ACTS: ClassVar[tuple] = (
         ('integrate', 'Integrate', 'integrate', 'integrate_history'),
         ('differentiate', 'Differentiate', 'differentiate',
@@ -3195,7 +3195,7 @@ class MainWindow(QMainWindow):
         try:
             # quiet: this is a question, asked once per mouse tick
             # while a drag is over the tree, and it answers itself by
-            # doing the move and rolling it back. Journalled, one drag
+            # doing the move and rolling it back. Journaled, one drag
             # wrote eighty relink lines (Brandon, 2026-08-30); the
             # act's record is _apply_move's settling links echo.
             with self.project.journal_as(None):
@@ -3394,7 +3394,7 @@ class MainWindow(QMainWindow):
 
     def _reorder_tree(self):
         """Linked groups first, members adjacent; unlinked objects
-        after; the grey placeholders keep the bottom. Everywhere —
+        after; the gray placeholders keep the bottom. Everywhere —
         inside a group and out — types keep the canonical order, and
         objects of one type keep their arrival order."""
         wanted = self._object_order(self.links)
@@ -3505,7 +3505,7 @@ class MainWindow(QMainWindow):
                 basis = tag == 'Basis'
                 spans.append((self.LINK_ROLE_COLORS['Basis'] if basis
                               else '#6a6a72', items, basis))
-        # top-down, because the painter offsets neighbouring brackets by
+        # top-down, because the painter offsets neighboring brackets by
         # their position in this list: out of order, two brackets that
         # meet on screen are drawn in the same column and read as one
         self.tree.link_spans = sorted(spans, key=self._span_top)
@@ -3526,7 +3526,7 @@ class MainWindow(QMainWindow):
 
         One object is placed as readily as several. It used to take two
         before a group existed at all, which left a lone FRF sitting
-        in no group while the grey slot beside it still said an FRF was
+        in no group while the gray slot beside it still said an FRF was
         wanted — the object was in the tree and the skeleton denied it.
         """
         if not self.project_type:
@@ -3558,7 +3558,7 @@ class MainWindow(QMainWindow):
         if changed:
             # the slots are computed from the placement, so they are
             # stale until the placing is done: an FRF placed here after
-            # the tree was built left its own grey slot showing beside it
+            # the tree was built left its own gray slot showing beside it
             self._reorder_tree()
         self._paint_links()
 
@@ -3585,13 +3585,13 @@ class MainWindow(QMainWindow):
 
     def set_project_type(self, project_type: str | None) -> None:
         """Declare what kind of test this project is — the tree then
-        shows a grey slot for everything that kind of report expects.
+        shows a gray slot for everything that kind of report expects.
 
         The type never pre-selects a reading: a time history opens
         plain whatever the project is (Brandon, 2026-08-30).
         """
         self.project_type = project_type or None
-        # an act like any other, journalled as the assignment a script
+        # an act like any other, journaled as the assignment a script
         # makes — settling in place, since imports may restate it
         journal = self.project.journal
         line = f'project.project_type = {self.project_type!r}'
@@ -3625,7 +3625,7 @@ class MainWindow(QMainWindow):
         return sides
 
     def _refresh_placeholders(self):
-        """Grey slots under the project for whatever its type still
+        """Gray slots under the project for whatever its type still
         expects, removed as the real objects arrive."""
         for i in reversed(range(self.test_item.childCount())):
             child = self.test_item.child(i)
@@ -3636,13 +3636,13 @@ class MainWindow(QMainWindow):
         if not self.project_type:
             self._paint_links()
             return
-        grey = QBrush(QColor('#6a6a72'))
+        gray = QBrush(QColor('#6a6a72'))
         for name, _cls, icon, _count, optional, group in \
                 missing_expectations(self.project_type, self.objects,
                                      self._sides()):
             item = QTreeWidgetItem([name])
             item.setIcon(0, placeholder_icon(icon))
-            item.setForeground(0, grey)
+            item.setForeground(0, gray)
             item.setToolTip(
                 0, (f'Optional for a {self.project_type} report: a '
                     'second geometry and shape set — a model, or '
@@ -3937,7 +3937,7 @@ class MainWindow(QMainWindow):
         """Bold, and a bullet beside the icon.
 
         Bold alone said nothing: the real objects in this tree are
-        already darker than the grey slots around them, so a bolder
+        already darker than the gray slots around them, so a bolder
         weight among them is not a mark anyone can find. The bullet is
         painted by the tree — see `ROLE_ACTIVE` — because the row's text
         is the object's name and anything prepended to it would be
@@ -4205,7 +4205,7 @@ class MainWindow(QMainWindow):
         """The row holding the named object.
 
         Matched on being an object *and* on the name, never on the name
-        alone: the type's grey slots carry names too, and a project
+        alone: the type's gray slots carry names too, and a project
         whose model geometry is called "FEM Geometry" has a slot of that
         exact name sitting beside it. Answering with the slot moved the
         slot instead of the object when the tree reordered, and drew the
@@ -4904,7 +4904,7 @@ class MainWindow(QMainWindow):
     def _label_nodes(self, name, rows, labels, color):
         """Caption these node rows in the scene, or clear the captions.
 
-        Coordinates come from the scene's own point array, so labelling a
+        Coordinates come from the scene's own point array, so labeling a
         handful of nodes costs a handful of points, not a copy of the model.
         """
         self.scene.plotter.remove_actor(name, render=False)
@@ -5587,7 +5587,7 @@ class MainWindow(QMainWindow):
                 try:
                     # an exodus file with results cannot say what its
                     # own step axis means; the reading is asked, not
-                    # guessed — and cancelling skips the file
+                    # guessed — and canceling skips the file
                     options = self._exodus_import_choices(path)
                     if options is None:
                         continue
@@ -5819,7 +5819,7 @@ class MainWindow(QMainWindow):
         and 'drive cpsd' are both a PSD — so it goes on the tooltip beside
         the file, rather than into the name.
         """
-        # journalled as the one line a script would say — the adds
+        # journaled as the one line a script would say — the adds
         # inside are this front end doing import_file's job by hand,
         # and a pile of not-replayable comments was the journal being
         # honest about a hole this wrapper closes (Brandon,
@@ -6156,7 +6156,7 @@ class MainWindow(QMainWindow):
         # A grid whose owner is no longer selected does not keep its
         # rows lit. The rows only count while the owner is selected
         # (`selected_references`), so a highlight without the owner is
-        # a selection the plot will never honour — and it lied twice:
+        # a selection the plot will never honor — and it lied twice:
         # a record giving way to a plain click in another grid kept
         # its blue row, so the tree showed two selected sub-items
         # whose plot held one, and the record still drawn read as its
@@ -7019,7 +7019,7 @@ class MainWindow(QMainWindow):
         """The picked pair of modes overlaid, each set deflecting its
         own linked geometry — basis shapes on the basis mesh, the
         other set on its own — with the second phase-aligned to the
-        first so they move together, drawn in one flat colour each to
+        first so they move together, drawn in one flat color each to
         stay tellable apart. When the geometries differ the alignment
         is measured through the projection (the sets themselves share
         no DOFs) and applied to the raw second set. `fallback` hosts a
@@ -7943,7 +7943,7 @@ class MainWindow(QMainWindow):
     def _deflect_envelope(self, geometry, name, data, records,
                           showing=None):
         """A PSD's envelope: two copies of the geometry deflected
-        ±sqrt(PSD) at the cursor line, coloured dB below the loudest
+        ±sqrt(PSD) at the cursor line, colored dB below the loudest
         node at any line.
 
         No phase is claimed — the pair shows every extreme every DOF
@@ -7993,7 +7993,7 @@ class MainWindow(QMainWindow):
         self._show_animation_controls(True)
         self.play_action.setEnabled(True)
         return (f'{name} — the {quantity} envelope, both extremes of '
-                f'every channel at the cursor frequency, colour dB '
+                f'every channel at the cursor frequency, color dB '
                 f'below the loudest; drag the cursor or press '
                 f'Play{fit}{notes}')
 
@@ -8032,7 +8032,7 @@ class MainWindow(QMainWindow):
             'cross-spectral matrix’s dominant shape (a grid column '
             'reads against one reference instead)', '', showing)
 
-    def _arm_ods(self, geometry, name, data, dofs, ordinate, flavour,
+    def _arm_ods(self, geometry, name, data, dofs, ordinate, flavor,
                  notes, showing):
         fit = self._fit_note(geometry, dofs)
         if fit is None:
@@ -8057,7 +8057,7 @@ class MainWindow(QMainWindow):
         self.phase_slider.blockSignals(False)
         self._show_animation_controls(True, phase=True)
         self.play_action.setEnabled(True)
-        return (f'{name} — {flavour}; drag the cursor to pick the '
+        return (f'{name} — {flavor}; drag the cursor to pick the '
                 f'frequency, Play sweeps the phase{fit}{notes}')
 
     def _add_dof_arrows(self, geometries):
@@ -8229,8 +8229,8 @@ class MainWindow(QMainWindow):
     def _render_pair_stage(self, series):
         """Two densities on the stage — overlaid, or divided in dB.
 
-        The louder is the numerator and wears the level colouring;
-        the quieter stands back in grey, exactly as a compared
+        The louder is the numerator and wears the level coloring;
+        the quieter stands back in gray, exactly as a compared
         reference does on the banded stage. Returns None when the
         pair cannot pair (no shared channels, or for the ratio no
         shared lines); the caller falls back to the flat readings
@@ -8248,7 +8248,7 @@ class MainWindow(QMainWindow):
         if info is None:
             return None
         told = ('divided, in decibels' if mode == 'ratio'
-                else f'overlaid, {quiet[0]} in grey')
+                else f'overlaid, {quiet[0]} in gray')
         return (f'{loud[0]} over {quiet[0]}: {info["drawn"]} shared '
                 f'channel{"s" * (info["drawn"] != 1)}, {told}')
 
@@ -8259,7 +8259,7 @@ class MainWindow(QMainWindow):
 
         Shared by the density pair and the resynthesis overlay, which
         are the same picture of two different things: objects holding
-        the same channels, one drawn level-coloured and the other stood
+        the same channels, one drawn level-colored and the other stood
         back. Two copies of this would be two stages that could drift
         apart (PRINCIPLES.md, 9).
         """
@@ -8374,7 +8374,7 @@ class MainWindow(QMainWindow):
         frame per average. What the controller wrote is what it averaged
         and it is the right default, but it is not the only reading of
         the record: a burst-random capture is half excitation and half
-        ringdown, and analysing the burst alone is an ordinary thing to
+        ringdown, and analyzing the burst alone is an ordinary thing to
         want.
         """
         import pyqtgraph as pg
@@ -8459,7 +8459,7 @@ class MainWindow(QMainWindow):
 
         Recomputed whole on every draw — banding is a resample and an
         integration, cheap at any spacing — and drawn in the preview
-        colour on the plot rows whose quantity matches, so a mixed
+        color on the plot rows whose quantity matches, so a mixed
         object's forces never step across its accelerations' axes.
         `records` restricts to what is on the plot: a sub-item picked
         in the tree draws one curve, and the preview stepping every
@@ -8523,7 +8523,7 @@ class MainWindow(QMainWindow):
         self.octave_previews = []
 
     def _draw_truncation(self, history):
-        """Grey the ends being cut away and put the span beside it.
+        """Gray the ends being cut away and put the span beside it.
 
         One overlay per plot, like the averaging marks: a history
         holding force and acceleration is drawn as a row each, and
@@ -8649,7 +8649,7 @@ class MainWindow(QMainWindow):
         """Put the events on the history and restate the marks.
 
         Whatever route an edit arrived by, it is held inside the record
-        and off its neighbours here — the last place every path passes
+        and off its neighbors here — the last place every path passes
         through, so the invariant is stated once rather than in each of
         the three callers that can break it.
 
@@ -9044,7 +9044,7 @@ class MainWindow(QMainWindow):
             series = only_pairs(series, picked)
         # the plain-curves path is the one place the 3-D reading applies:
         # one object, no comparison machinery holding the plot — a single
-        # record spreads to a single line, and the colour still reads.
+        # record spreads to a single line, and the color still reads.
         # The toggle is offered here rather than in show_controls because
         # only this point knows the render came all the way down — the
         # same reason show_pairs raises the bar itself. Anything that is
@@ -9074,7 +9074,7 @@ class MainWindow(QMainWindow):
                     return (f'{measured[0]} with {synthesized[0]} '
                             f'over it: {info["drawn"]} '
                             f'channel{"s" * (info["drawn"] != 1)} on the '
-                            f'stage, the synthesis in grey{note}')
+                            f'stage, the synthesis in gray{note}')
         entry = series[0] if len(series) == 1 else None
         if entry is None and series and not pairs and not lone_fed \
                 and not any(getattr(data, 'synthesized', False)
@@ -9287,7 +9287,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _waterfall_count(entry) -> int:
         """How many records this drawing would put on the stage. A
-        single record is a legitimate waterfall — one line, colour by
+        single record is a legitimate waterfall — one line, color by
         level — so this guards only the empty case."""
         _name, data, records = entry
         return len(records) if records is not None else data.num_records
@@ -9343,8 +9343,8 @@ class MainWindow(QMainWindow):
         page = pane.chosen_page() if self._paged_object == name else 0
         self._paged_object = name
         # under the filter view the raw record is the reference, not
-        # the reading: it stands back in grey and the filtered twin
-        # drawn over it carries the colour (Brandon, 2026-08-25)
+        # the reading: it stands back in gray and the filtered twin
+        # drawn over it carries the color (Brandon, 2026-08-25)
         stood_back = (colors['specification_curve']
                       if pane.showing_filter and isinstance(data, TimeHistory)
                       else None)
@@ -9756,7 +9756,7 @@ class MainWindow(QMainWindow):
         self.generate_report(PROJECT_TEMPLATES[self.project_type])
 
     def _show_placeholder_menu(self, item, position):
-        """A grey slot's options: compute it from what the project has,
+        """A gray slot's options: compute it from what the project has,
         when that is possible; otherwise say how to fill it."""
         label = item.data(0, ROLE_REFERENCE)[1]
         menu = QMenu(self.tree)
@@ -10443,7 +10443,7 @@ class MainWindow(QMainWindow):
         self.fit = ModalFitSession(obj, records)
         # the measurement's own statement of which channel to believe
         # where: with a coherence in the project covering these
-        # responses, Refine All weights its solve and its judgement by
+        # responses, Refine All weights its solve and its judgment by
         # it — a channel the coherence distrusts cannot vote noise into
         # every mode's residues
         self._fit_coherence_name = None
@@ -10560,8 +10560,8 @@ class MainWindow(QMainWindow):
         self._move_fit_parabola()
         self._build_fit_range_edits(plot)
         plot.getViewBox().sigXRangeChanged.connect(self._fit_view_moved)
-        # each confirmed mode leaves a labelled marker where it was
-        # fitted — quiet grey, half-transparent: bookmarks under the
+        # each confirmed mode leaves a labeled marker where it was
+        # fitted — quiet gray, half-transparent: bookmarks under the
         # curves, not more curves.
         add_mode_markers(plot,
                          [mode['frequency'] for mode in session.modes])
@@ -10653,7 +10653,7 @@ class MainWindow(QMainWindow):
 
         This is the second axis of the search put in the user's hand:
         where two solutions sit at nearly the same frequency they are
-        told apart by damping, and holding it says which neighbourhood
+        told apart by damping, and holding it says which neighborhood
         the fit is meant to land in. Find Mode lets go again.
         """
         if self.fit is None or self._fit_plot is None:
@@ -10884,7 +10884,7 @@ class MainWindow(QMainWindow):
         self._render_fit()
 
     def _draw_fit_residual(self, plot):
-        """The residual's own CMIF, grey and dashed under the rest.
+        """The residual's own CMIF, gray and dashed under the rest.
 
         What is *left* after the confirmed modes are taken out — the
         curve Find Mode hunts and the parabola's crown rides. Usually
@@ -11055,7 +11055,7 @@ class MainWindow(QMainWindow):
             # mode — which grows the grid — reframes for the new
             # extent. Keyed per session alone, the camera was placed
             # for the opening 1x1 and never again, so a grown MAC came
-            # up out of frame with the view centred on its first corner
+            # up out of frame with the view centered on its first corner
             # (Brandon, 2026-08-30).
             self._draw_mac_bars(frequencies, matrix,
                                 key=('fit', self.fit_name, len(shown)))
@@ -11148,7 +11148,7 @@ class MainWindow(QMainWindow):
             x = session.frf.display_abscissa(self.unit_system)
         else:
             # mixed dimensions have per-record factors, which do not
-            # move through an SVD — the materialised path stands
+            # move through an SVD — the materialized path stands
             records = session.synthesis_records()
             synthesis = self._fit_source_frf(records)
             singular, x = cmif_curves(synthesis, None, self.unit_system)
@@ -11188,7 +11188,7 @@ class MainWindow(QMainWindow):
         # a quarter-second from now and put the resting message back
         # over the one below — and the gesture before this one is
         # almost always the zoom that said where to look, since the
-        # zoom carries the cursor. Cancelled rather than raced: this
+        # zoom carries the cursor. Canceled rather than raced: this
         # has already done the settle's work by rendering, and Find
         # Mode is a look rather than a drag catching up.
         self._fit_settle.stop()
@@ -11459,7 +11459,7 @@ class MainWindow(QMainWindow):
 
         Held on the object rather than the view, like the averaging —
         so the report compares exactly what the screen compares, and a
-        saved project remembers the judgement. A refused entry changes
+        saved project remembers the judgment. A refused entry changes
         nothing and says why; the redraw restates what still holds.
         """
         if self._scaling_pair is None:
@@ -11643,7 +11643,7 @@ class MainWindow(QMainWindow):
         from ..core.kurtosis import (
             HIGH,
             LOW,
-            analysed_span,
+            analyzed_span,
             channel_kurtosis,
         )
         from ..plot.bars import kurtosis_chart
@@ -11672,9 +11672,9 @@ class MainWindow(QMainWindow):
             plot, rows, colors, low=low, high=high,
             changed=self._kurtosis_bounds_moved)
         # which stretch it read: the same record answers 4.23 whole
-        # and 2.92 over its analysed frames, so the status bar says
+        # and 2.92 over its analyzed frames, so the status bar says
         # which one this is rather than leaving it to be guessed
-        _spans, phrase = analysed_span(history)
+        _spans, phrase = analyzed_span(history)
         return f'{self.bar_chart.summary.toPlainText()}, {phrase}'
 
     def _render_wavelet(self, history, name=None, records=None):
@@ -11690,10 +11690,10 @@ class MainWindow(QMainWindow):
 
         The transform is over what the record actually holds, and the
         panel says what of that is cone of influence — inside the cone
-        the picture is an artefact of where the record was cut, and it
+        the picture is an artifact of where the record was cut, and it
         looks exactly like data.
         """
-        from ..core import wavelet as wavelet_maths
+        from ..core import wavelet as wavelet_math
         from ..plot.scalogram import scalogram_image
 
         panel = self.data_pane.wavelet_panel
@@ -11725,7 +11725,7 @@ class MainWindow(QMainWindow):
         if not 0.0 < settings['low'] < settings['high']:
             return ('no frequencies this record can carry in that range '
                     f'— it reaches {rate / 2.0:.4g} Hz')
-        frequencies = wavelet_maths.log_frequencies(
+        frequencies = wavelet_math.log_frequencies(
             settings['low'], settings['high'], settings['per_octave'])
         # the panel clamps to Nyquist, but a record swapped underneath a
         # sticky setting has its own; refuse to draw rather than to
@@ -11737,7 +11737,7 @@ class MainWindow(QMainWindow):
         # record's coefficients are gigabytes and its surface was what
         # crashed the app (Brandon, 2026-09-15). Each column is its
         # slice's peak, so a transient's ridge is not strided past.
-        clock, magnitude = wavelet_maths.scalogram_peaks(
+        clock, magnitude = wavelet_math.scalogram_peaks(
             values, rate, frequencies, settings['omega0'])
         clock = clock + float(history.abscissa[0])
 
@@ -11789,7 +11789,7 @@ class MainWindow(QMainWindow):
                 f"high={settings['high']!r}, "
                 f"per_octave={settings['per_octave']}, "
                 f"omega0={settings['omega0']!r}, path='scalogram.png')")
-        cone = float(wavelet_maths.cone_of_influence(
+        cone = float(wavelet_math.cone_of_influence(
             [frequencies[0]], rate, settings['omega0'])[0])
         return (f'{history.record_label(channel)}: '
                 f'{frequencies[0]:.3g} to {frequencies[-1]:.3g} Hz in '
@@ -11877,7 +11877,7 @@ class MainWindow(QMainWindow):
             [f'Event {p["frame"] + 1} of {len(found)}' for p in found])
         bounds = found
         # what the record holds past the last whole playing. Not
-        # analysed — a waveform error over part of a window is taken
+        # analyzed — a waveform error over part of a window is taken
         # against a different stretch of the target — but said, because
         # a run that recorded two seconds of a further event should not
         # have it vanish between a frame count and a file size
@@ -11885,7 +11885,7 @@ class MainWindow(QMainWindow):
         trailing = ('' if spare is None else
                     f'; {spare[0] / measured.sample_rate:.2f} s of a '
                     f'further event ({spare[1]:.0%}) was recorded and is '
-                    'too short to analyse')
+                    'too short to analyze')
         held = self.data_pane.chosen_event()
         event = held if held is not None and held < len(bounds) else 0
         which = self.data_pane.replication_view
@@ -12168,7 +12168,7 @@ class MainWindow(QMainWindow):
                          or (-SRS_ERROR_DB, SRS_ERROR_DB))
             # signed and bounded both sides: red past the ceiling is a
             # shock that hit too hard, blue past the floor one that
-            # under-hit — the same reading, colours and unit the random
+            # under-hit — the same reading, colors and unit the random
             # project's level error gives
             self.bar_chart = replication_chart(
                 plot, shown, resolve_theme(self.theme_name), 'srs_rms',
@@ -12685,7 +12685,7 @@ class MainWindow(QMainWindow):
         # through the model's own suffix (Brandon, 2026-08-30: adding a
         # traceline said nothing, and the sweep found the whole edit
         # surface silent)
-        model.edit_journalled.connect(
+        model.edit_journaled.connect(
             lambda suffix, m=model: self._journal_table_edit(m, suffix))
         editing = self.editing is not None
         # while editing, the table is a working surface, not something to

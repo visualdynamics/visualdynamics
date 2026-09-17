@@ -30,8 +30,8 @@ def _points(icon, size=64):
     span_x, span_y = max(xs) - min(xs), max(ys) - min(ys)
     cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
 
-    def spread(pixels, centre):
-        return sum(abs(p - centre) for p in pixels) / len(pixels)
+    def spread(pixels, center):
+        return sum(abs(p - center) for p in pixels) / len(pixels)
 
     if span_x > span_y:                 # wider than tall: up or down
         top = [x for x, y in inked if y < min(ys) + span_y / 4]
@@ -81,10 +81,10 @@ def test_a_closed_drawer_points_away_from_its_edge(qt_app, edge,
     assert direction(True) == opposite[closed_towards]
 
 
-def test_the_glyph_is_drawn_in_the_colour_asked_for(qt_app):
+def test_the_glyph_is_drawn_in_the_color_asked_for(qt_app):
     # drawn large: at 16 px the stroke is about a pixel and a half
     # wide and no pixel is fully covered, and a part-covered pixel's
-    # colour comes back through premultiplication rounding
+    # color comes back through premultiplication rounding
     image = _image(glyph('drawer-tab', QColor('#c02020'), 64), 64)
     covered = {image.pixelColor(x, y).name()
                for y in range(image.height()) for x in range(image.width())

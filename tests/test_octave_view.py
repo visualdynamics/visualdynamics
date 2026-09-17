@@ -91,7 +91,7 @@ def test_no_act_offers_it_beside_the_reading(window, pump):
         'the act lives on the reading\'s pane (Brandon, 2026-08-29)'
 
 
-def test_the_preview_honours_a_record_selection(window, pump):
+def test_the_preview_honors_a_record_selection(window, pump):
     """One sub-item picked, one curve on the plot — and one banded
     step over it. The preview used to band every channel across the
     lone selected curve (Brandon, 2026-08-30): the selection said one

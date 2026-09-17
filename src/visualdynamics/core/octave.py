@@ -16,20 +16,20 @@ what sdynpy uses and therefore what a result has to agree with:
 - the grid is **absolute**. It does not depend on the frequency range
   asked for, or on any specification: the range only chooses which
   bands of the one fixed grid are returned. 1000 Hz anchors it.
-- and which of edges or centres lands on `10 ** (3 k / (10 n))`
+- and which of edges or centers lands on `10 ** (3 k / (10 n))`
   depends on whether `n` is odd or even. For **odd** fractions — whole
-  octaves, thirds — the band *centres* sit on the grid; for **even**
-  ones — sixths, twelfths — the *edges* do, and the centres fall half
+  octaves, thirds — the band *centers* sit on the grid; for **even**
+  ones — sixths, twelfths — the *edges* do, and the centers fall half
   a step between. Getting this backwards puts every band half a step
   out, which is a real disagreement and not a rounding one.
 - bands tile — each one's upper edge is the next one's lower — and a
-  band's centre is the geometric mean of its edges.
+  band's center is the geometric mean of its edges.
 
 Converting a spectrum is an integration, not a resampling. The value in
 a band is the mean-square content of that band divided by its width, so
 the area under the spectrum is unchanged and the RMS it carries is the
-RMS it carried before. Reading the narrowband curve at each band centre
-instead would throw away everything between the centres, and would not
+RMS it carried before. Reading the narrowband curve at each band center
+instead would throw away everything between the centers, and would not
 conserve anything.
 """
 
@@ -74,7 +74,7 @@ def edges(low: float, high: float,
         raise ValueError(f'band range {low} to {high} is not a range')
     per_octave = int(per_octave)
     step = DECADE_FRACTION / per_octave
-    # odd fractions put the centres on the grid, so their edges fall
+    # odd fractions put the centers on the grid, so their edges fall
     # half a step off it; even fractions put the edges on it
     offset = 0.5 if per_octave % 2 else 0.0
     # snapped before rounding: an edge that is already a grid point
@@ -89,11 +89,11 @@ def edges(low: float, high: float,
 
 def bands(low: float, high: float, per_octave: int = PER_OCTAVE
           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(centres, widths, edges) for every band overlapping the range.
+    """(centers, widths, edges) for every band overlapping the range.
 
-    The centre is the geometric mean of the band's own edges — the
+    The center is the geometric mean of the band's own edges — the
     arithmetic mean would sit above it, and on a log axis a band would
-    then be drawn off-centre from the number naming it.
+    then be drawn off-center from the number naming it.
     """
     bounds = edges(low, high, per_octave)
     lower, upper = bounds[:-1], bounds[1:]
@@ -108,11 +108,11 @@ def bands(low: float, high: float, per_octave: int = PER_OCTAVE
 SNAP = 1e-9
 
 
-def bin_bounds(centres: ArrayLike, widths: ArrayLike | None = None
+def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
                ) -> tuple[np.ndarray, np.ndarray]:
     """(left, right) of the bin each line stands for.
 
-    With no widths the bins are the midpoints between neighbours, which
+    With no widths the bins are the midpoints between neighbors, which
     is exact for evenly spaced FFT lines. With them the edges follow
     from `c = sqrt(l u)` and `w = u - l`:
 
@@ -120,16 +120,16 @@ def bin_bounds(centres: ArrayLike, widths: ArrayLike | None = None
 
     the positive root, which is where a proportional band's edges
     actually are. Taking `c +/- w/2` instead would be assuming the
-    centre is the arithmetic mean of the edges, and it is not.
+    center is the arithmetic mean of the edges, and it is not.
     """
-    centres = np.asarray(centres, dtype=float)
+    centers = np.asarray(centers, dtype=float)
     if widths is not None:
         widths = np.asarray(widths, dtype=float)
         upper = (widths + np.sqrt(widths * widths
-                                  + 4.0 * centres * centres)) / 2.0
+                                  + 4.0 * centers * centers)) / 2.0
         return upper - widths, upper
-    spacing = np.gradient(centres)
-    return centres - spacing / 2.0, centres + spacing / 2.0
+    spacing = np.gradient(centers)
+    return centers - spacing / 2.0, centers + spacing / 2.0
 
 
 def resample(frequencies: ArrayLike, values: ArrayLike, bounds: ArrayLike,
@@ -152,11 +152,11 @@ def resample(frequencies: ArrayLike, values: ArrayLike, bounds: ArrayLike,
     if frequencies.size < 2:
         raise ValueError('a spectrum needs at least two lines to be banded')
 
-    # the bins the source actually has. Inferring them from the centres
+    # the bins the source actually has. Inferring them from the centers
     # is exact for evenly spaced lines and wrong for a spectrum that is
     # already banded — the guess runs a fraction of a percent wide
     # through the middle and six percent wide at the first band, which
-    # smears content into its neighbours every time one is re-banded.
+    # smears content into its neighbors every time one is re-banded.
     left, right = source if source is not None else bin_bounds(frequencies)
     lower, upper = bounds[:-1], bounds[1:]
 

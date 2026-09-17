@@ -73,7 +73,7 @@ def manifest_for(entries: list[tuple[str, int]]) -> dict:
     disk, but only the newest version's files are listed, because the
     page takes the first file matching a platform and a name-sorted
     list put 0.0.1 ahead of 0.1.0 — Brandon downloaded the old,
-    unsigned image from the preview the evening the notarised one
+    unsigned image from the preview the evening the notarized one
     landed (2026-09-02).
     """
     newest = max((version_of(name) for name, _size in entries),

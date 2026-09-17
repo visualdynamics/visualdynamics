@@ -72,7 +72,7 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     _write_ragged(group, 'traceline_conn', geom.traceline_conn)
     _write_ragged(group, 'elem_conn', geom.elem_conn)
     # the rigid-body settings, when set — the point always, the mass
-    # and inertia only when the set is to be mass-normalised, so an
+    # and inertia only when the set is to be mass-normalized, so an
     # unscaled setting and a file from before the setting existed read
     # back the same way (absent, not sentinel-valued)
     properties = getattr(geom, 'mass_properties', None)
@@ -169,7 +169,7 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
         import json
 
         group.attrs['band_constraints'] = json.dumps(data.band_constraints)
-    # a held comparison scale is the user's judgement, not a derivable
+    # a held comparison scale is the user's judgment, not a derivable
     # number — auto-detected scaling is None here and re-detected on
     # every comparison, so only a hand-set value travels
     if getattr(data, 'scale_db', None) is not None:
@@ -239,7 +239,7 @@ def _load_averaging(group):
         frames=int(group.attrs['averaging_frames']),
         start=float(group.attrs['averaging_start']),
         # absent in every file written before 2026-08-29: the
-        # default is the behaviour those files were computed with
+        # default is the behavior those files were computed with
         detrend=str(group.attrs.get('averaging_detrend', 'none')),
         window_parameter=(
             float(group.attrs['averaging_window_parameter'])

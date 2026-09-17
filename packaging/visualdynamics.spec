@@ -2,7 +2,7 @@
 #
 #     pyinstaller packaging/visualdynamics.spec --noconfirm
 #
-# **--onedir, never --onefile**, and that is a licence requirement rather
+# **--onedir, never --onefile**, and that is a license requirement rather
 # than a preference. PySide6 is LGPL-3.0, which permits a closed-source
 # application only if the recipient can replace the Qt libraries with
 # their own build (see NOTICE.md). A directory bundle keeps them as
@@ -75,7 +75,7 @@ datas = [
     (str(ROOT / 'src' / 'visualdynamics' / 'gui' / 'icons'),
      'visualdynamics/gui/icons'),
     # The LGPL paper trail, in every package: the third-party notices,
-    # the licence texts, and the how-to-replace-Qt page. Shipping Qt
+    # the license texts, and the how-to-replace-Qt page. Shipping Qt
     # as replaceable libraries (--onedir) is only half the obligation;
     # the recipient also has to be told, in the package they received.
     (str(ROOT / 'NOTICE.md'), '.'),

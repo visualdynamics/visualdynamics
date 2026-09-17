@@ -31,7 +31,7 @@ def curves(window):
 
 
 def test_a_grid_pick_replaces_another_on_its_own(window, pump):
-    """The behaviour that makes a single click predictable: one grid at
+    """The behavior that makes a single click predictable: one grid at
     a time unless asked otherwise."""
     spec, psd = prepare(window, pump)
     window.tree.clearSelection()

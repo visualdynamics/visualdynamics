@@ -46,7 +46,7 @@ to settled ringdown — because events windowed alike are compared
 alike; the *Same length for all* box on the panel releases them.
 Dragging a window's body moves that one event; dragging an edge
 resizes it, and under the shared length resizing one resizes the
-series, stopping before any window would swallow a neighbour.
+series, stopping before any window would swallow a neighbor.
 
 ![The imported series: four events on one recording, each shaded
 where it was found, the quiet between them
@@ -146,7 +146,7 @@ project.export_report(project.report, 'shock_report.html')
 project.save('shock.vdyn')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 - **Which events count.** The generator walked this series up to
   level, and a real one is walked up too: the report shows every
@@ -164,6 +164,6 @@ project.save('shock.vdyn')
 - **The window length.** Above a knee — a window long enough to hold
   the peak and its ringdown — the SRS barely moves with further
   length, which is what makes one shared length safe as the default.
-  The judgement is whether a window *reached* the knee: a ringdown
+  The judgment is whether a window *reached* the knee: a ringdown
   cut short reads low at the article's own frequencies, and the
   shaded windows on the trace are where to look.

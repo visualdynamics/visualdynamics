@@ -56,7 +56,7 @@ OUT = HERE / 'plate'
 #: a few fixed drive points. All on grid nodes, so every drive point is
 #: measured and a fit from this data comes out scaled. One corner and
 #: three edge points at the quarter stations — the generic positions.
-#: Not the interior: the grid's interior stations all lie on a centre
+#: Not the interior: the grid's interior stations all lie on a center
 #: line or a diagonal of the square, and a reference there is blind to
 #: whichever mode family nulls that line (see plate_layout.DRIVES).
 REFERENCES = ['101Z+', '110Z+', '1304Z+', '1310Z+']
@@ -193,7 +193,7 @@ NOISE = 0.004             #: noise floor, fraction of the peak
 MODES = ((439.2, 0.02), (647.2, 0.015), (823.5, 0.03))
 
 #: measured channels: corners answer hardest on a free plate, the
-#: centre sits closer to the node lines of the low modes
+#: center sits closer to the node lines of the low modes
 SHOCK_CHANNELS = (
     (101, 'Z+', 1.80),
     (107, 'Z+', 1.10),

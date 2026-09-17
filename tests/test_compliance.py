@@ -102,7 +102,7 @@ def test_an_uneven_axis_gets_bins_of_its_own():
 
 
 def test_a_line_that_says_nothing_contributes_nothing():
-    """Not bridged. Widening a bin onto its neighbours to cover a gap
+    """Not bridged. Widening a bin onto its neighbors to cover a gap
     is assuming what is in the gap, and a spectrum with a hole in it
     holds less than one without."""
     frequencies = np.linspace(10.0, 110.0, 101)        # df = 1 Hz
@@ -290,9 +290,9 @@ def test_a_limit_reaching_past_the_specification_counts_only_inside():
 def test_a_bin_the_band_edge_cuts_is_judged_on_the_part_inside():
     """At the two ends a measured bin hangs over the edge, covered by
     the specification for part of its width and by nothing for the
-    rest. Reading the limit at the bin's centre answers the wrong
-    question twice: a bin centred just outside is dropped though most
-    of it is in, and a bin centred just inside is judged over width the
+    rest. Reading the limit at the bin's center answers the wrong
+    question twice: a bin centered just outside is dropped though most
+    of it is in, and a bin centered just inside is judged over width the
     specification never covered.
 
     So a cut bin is compared over the covered part alone — the power
@@ -302,7 +302,7 @@ def test_a_bin_the_band_edge_cuts_is_judged_on_the_part_inside():
     that does not depend on where the lines happened to land.
     """
     target = spec(frequencies=[10.0, 20.0], level=1.0, abort_upper=2.0)
-    lines = np.arange(9.1, 21.0, 1.0)      # centres straddle both edges
+    lines = np.arange(9.1, 21.0, 1.0)      # centers straddle both edges
     measured = psd(lines, np.full(lines.size, 3.0))
     _start, _stop, width, cut = compliance.covered(lines, 10.0, 20.0)
     assert cut.sum() == 2, 'one bin cut at each end'
@@ -331,7 +331,7 @@ def test_the_cut_bin_at_the_edge_is_counted_where_it_is_compared():
     assert lines[past] == pytest.approx(20.1)
     assert not np.isfinite(compliance.log_interpolate(
         lines[past:past + 1], target.abscissa,
-        target.limits['abort_upper'][0])[0]), 'the centre is outside'
+        target.limits['abort_upper'][0])[0]), 'the center is outside'
     assert over[past], 'but 0.4 Hz of its bin is inside, and that part is out'
     assert not over[0], 'a bin wholly outside stays out of it'
 
@@ -575,7 +575,7 @@ def test_the_area_survives_a_steep_segment():
     """A specification is not always a handful of breakpoints.
 
     The PSD of a transient target is a Specification with thousands of
-    lines a fraction of a hertz apart, and neighbouring lines two
+    lines a fraction of a hertz apart, and neighboring lines two
     decades apart over a frequency ratio of 1.00025 give a power-law
     exponent near twenty thousand. Worked out as `a**n` that overflowed,
     the subtraction went inf - inf, and every channel's RMS error came
@@ -691,7 +691,7 @@ def test_the_exported_report_steps_where_the_app_steps(tmp_path):
 
     `steps` used to be set only for a specification *with limits*,
     which was wrong both ways round: a measured PSD drew as a polyline
-    through its own bin centres, and a written specification — whose
+    through its own bin centers, and a written specification — whose
     points are breakpoints of a curve — drew as a staircase it is not.
     """
     from conftest import fixture_path

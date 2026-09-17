@@ -190,7 +190,7 @@ def test_a_split_capture_is_still_the_users_to_read(window, pump):
 
     They were locked once, on the argument that the file had settled
     them. But a burst-random capture is half excitation and half
-    ringdown, and analysing the burst alone — or putting an exponential
+    ringdown, and analyzing the burst alone — or putting an exponential
     window on the decay — is an ordinary thing to want and was
     impossible. Every parameter is editable; the machinery underneath
     always supported it.
@@ -357,7 +357,7 @@ def test_detect_reaches_the_object_and_the_shading(window, pump):
 
 
 def test_detect_keeps_the_window_the_user_chose(window, pump):
-    """Which window to apply is a judgement about the measurement, not
+    """Which window to apply is a judgment about the measurement, not
     something to read off the record; the button settles where and how
     many, and leaves that alone."""
     looking_at(window, pump, MODAL)
@@ -435,7 +435,7 @@ def test_the_stage_toggle_survives_the_marks_views(window, pump):
     assert pane.shock_panel.isVisible()
 
 
-# ---- the acts these frames parameterise ----------------------------------
+# ---- the acts these frames parameterize ----------------------------------
 
 
 def test_the_panel_computes_psds_over_exactly_these_frames(window, pump):
@@ -535,7 +535,7 @@ def test_the_panel_computes_spectra_too(window, pump):
                for n in window.project.provenance)
 
 
-def test_a_parameterised_window_brings_its_one_box(window, pump):
+def test_a_parameterized_window_brings_its_one_box(window, pump):
     """Tukey and kaiser each take a number; the row for it appears
     only while such a window is chosen, wearing the parameter's own
     name — the UI stays minimal for the windows that take none

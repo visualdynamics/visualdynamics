@@ -106,7 +106,7 @@ def test_a_slow_host_gives_up_rather_than_hanging():
                           delay=3.0)
     started = time.monotonic()
     assert check(url, timeout=0.5) is None
-    assert time.monotonic() - started < 2.0, 'the timeout was not honoured'
+    assert time.monotonic() - started < 2.0, 'the timeout was not honored'
 
 
 def test_fetch_tells_offline_from_up_to_date():

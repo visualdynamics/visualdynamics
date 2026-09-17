@@ -94,7 +94,7 @@ table { border-collapse: collapse; font-size: .85rem; width: 100%; }
 th, td { border: 1px solid var(--line); padding: .25rem .55rem;
          text-align: left; }
 th { background: color-mix(in srgb, var(--line) 30%, transparent); }
-/* a cell the app marks is marked here too, in the same two colours the
+/* a cell the app marks is marked here too, in the same two colors the
    plots shade an exceedance with: a channel red on screen is red on the
    page. Both read on either theme, which is why they are translucent
    rather than flat. */
@@ -173,7 +173,7 @@ function sized(canvas, height) {
   const g = canvas.getContext('2d'); g.scale(scale, scale);
   return [g, width, height];
 }
-/* the one colour scale, handed over rather than carried: DATA.viridis
+/* the one color scale, handed over rather than carried: DATA.viridis
    is `theme.VIRIDIS`, the very stops the app paints a moving model by
    and draws its MAC grids on */
 const viridis = t => {
@@ -184,7 +184,7 @@ const viridis = t => {
     Math.round(v + f * (stops[i + 1][k] - v))).join(',') + ')';
 };
 
-/* The averaging marks' two colours: the app's own theme values, sent
+/* The averaging marks' two colors: the app's own theme values, sent
    with the page (`DATA.marks_color`) rather than restated here. Read
    per draw and per side, so a theme flip repaints them — and shared
    by the flat figure and the stage, which draw the same marks. */
@@ -193,10 +193,10 @@ const darkPage = () => (document.documentElement.dataset.theme
       ? 'dark' : 'light')) === 'dark';
 const rgbOf = hex => [1, 3, 5].map(
   at => parseInt(hex.slice(at, at + 2), 16)).join(', ');
-const markColour = which => rgbOf(
+const markColor = which => rgbOf(
   DATA.marks_color[darkPage() ? 'dark' : 'light'][which]);
-const markOrange = () => markColour('window');
-const markBlue = () => markColour('band');
+const markOrange = () => markColor('window');
+const markBlue = () => markColor('band');
 
 /* ---- the view a 3-D figure is looked at from ---------------------------
    An orthographic basis plus the gestures that move it: drag to rotate,
@@ -216,7 +216,7 @@ function orbitView(canvas, homeBasis, redraw) {
     home() { view.basis = home.map(v => v.slice()); view.zoom = 1; },
     /* the view normal: what depth sorting and flat shading read */
     normal: () => cross3(view.basis[0], view.basis[1]),
-    /* one point, world to canvas, about a centre and at a scale the
+    /* one point, world to canvas, about a center and at a scale the
        caller owns — a scene fits its model, a stage fits its box */
     project: (p, center, scale, width, height) => {
       const d = [p[0] - center[0], p[1] - center[1], p[2] - center[2]];
@@ -272,7 +272,7 @@ function ticks(lo, hi, log) {
    two decades of range there are no whole ones to put ticks on and
    `ticks` steps by fifths of a decade instead — those are real
    positions and get their real values, because rounding them to the
-   nearest exponent labelled four different heights '1e-9' (Brandon,
+   nearest exponent labeled four different heights '1e-9' (Brandon,
    2026-08-23, on the system ID densities). */
 const label = (v, log) => log
   ? (Math.abs(v - Math.round(v)) < 1e-9 ? '1e' + Math.round(v)
@@ -361,7 +361,7 @@ function barsBlock(block) {
 
       /* the thresholds as shaded ground rather than as lines: past here
          is out, and a filled region says it where a line leaves it to be
-         inferred. Red above, blue below — the same two colours, at the
+         inferred. Red above, blue below — the same two colors, at the
          same weight, the specification plot shades its abort zones with.
          A one-sided chart has only a ceiling, so its one threshold is
          the red one. */
@@ -427,9 +427,9 @@ function barsBlock(block) {
     canvas.dataset.bars = values.length;
   }
 
-  /* No dragging here. A threshold is a judgement, and the place to
+  /* No dragging here. A threshold is a judgment, and the place to
      make it is the app, where the data is in front of you; a report is
-     what that judgement produced, and a reader who could quietly move
+     what that judgment produced, and a reader who could quietly move
      the line would be reading a different document from the one that
      was written. */
   REDRAWS.push(draw);
@@ -592,7 +592,7 @@ function plotBlock(block) {
     g.rect(margin.left, margin.top, plotW, plotH); g.clip();
     /* the frames a PSD would be averaged over, drawn the way the app
        draws them: a column per frame under the window that shapes it,
-       so the figure says which part of the run was analysed and how.
+       so the figure says which part of the run was analyzed and how.
        A trace on its own says neither. */
     if (block.averaging) {
       const a = block.averaging;
@@ -656,9 +656,9 @@ function plotBlock(block) {
        trace is four bumps in a noise floor; without these it says
        nothing about which stretches the spectra downstream came from,
        and the numbers are the only way 'shock 2' points at anything.
-       Colours and numbering copy `plot/shocks.py` deliberately — the
+       Colors and numbering copy `plot/shocks.py` deliberately — the
        reader has just been looking at the same bands in the app, and
-       a report that recolours them reads as a different measurement.
+       a report that recolors them reads as a different measurement.
        Full height rather than the averaging view's rows: shock
        windows never overlap (`suggest` holds them apart), so there is
        nothing to stack. */
@@ -729,10 +729,10 @@ function plotBlock(block) {
       const top = margin.top, bottom = margin.top + plotH;
       [['over', 'rgba(229, 83, 75, 0.60)', top],
        ['under', 'rgba(76, 146, 217, 0.60)', bottom]].forEach(
-        ([key, colour, edge]) => {
+        ([key, color, edge]) => {
           const marks = ch[key];
           if (!marks) return;
-          g.fillStyle = colour;
+          g.fillStyle = color;
           for (let i = 0; i < marks.length; i++) {
             if (!finite(marks[i]) || !finite(xs[i])) continue;
             /* the bin this line stands for, half a width either side */
@@ -748,10 +748,10 @@ function plotBlock(block) {
     block.curves.forEach((curve, index) => {
       const xs = curve.x || block.x;
       const which = curve.color === undefined ? index : curve.color;
-      /* the reference is grey and what is being looked at is the page's
-         own ink, exactly as the app colours the pair */
+      /* the reference is gray and what is being looked at is the page's
+         own ink, exactly as the app colors the pair */
       g.strokeStyle = curve.ink ? ink
-                    : curve.grey ? '#9a9aa2'
+                    : curve.gray ? '#9a9aa2'
                     : COLORS[which % COLORS.length];
       g.setLineDash(curve.dash ? [6, 4] : []);
       g.lineWidth = 1.2; g.beginPath();
@@ -761,14 +761,14 @@ function plotBlock(block) {
         const Y = py(curve.y[i]);
         if (block.steps) {
           /* A density is flat across its own bin: a polyline through
-             the line centres draws a slope that is not in the data,
+             the line centers draws a slope that is not in the data,
              and the area drawn stops being the area summed.
 
              The edges come from the payload, computed by the same
              `bin_edges` the app steps on. They used to be guessed here
-             as midpoints between neighbouring centres, which is right
+             as midpoints between neighboring centers, which is right
              only for a spectrum that does not know its own widths — an
-             octave band's centre is the geometric mean of its edges,
+             octave band's center is the geometric mean of its edges,
              so midpoints missed them by several percent of a band, and
              the first and last bins came out half width. */
           const e = block.edges;
@@ -1424,12 +1424,12 @@ function sceneBlock(block) {
   draw();
 }
 
-/* ---- the 3-D stage: every record receding, coloured by level ----------
+/* ---- the 3-D stage: every record receding, colored by level ----------
    The app's own reading of a data object, in the document. Many
    channels on one 2-D axis hide each other exactly where it matters —
    resonances line up and the tenth curve lands on the first nine — so
    a whole FRF matrix is drawn the way the screen draws it: one curve
-   per record at its own station, on one colour scale for the scene.
+   per record at its own station, on one color scale for the scene.
 
    The stage arrives normalized (`viz.waterfall.stage_curves`, the same
    normalization the app's stage uses) with the real ranges it stands
@@ -1452,7 +1452,7 @@ function stageBlock(block) {
   const [x0, x1, z0, z1] = block.extents;
   /* the marks stand outside the stage box on purpose — the rail
      above its ceiling, on a wall set back behind the last station —
-     so the figure is centred and fitted on everything it draws,
+     so the figure is centered and fitted on everything it draws,
      never on the box alone, or the window weights would be framed
      out of the picture that was asked for */
   let topZ = sz, backY = sy;
@@ -1464,8 +1464,8 @@ function stageBlock(block) {
   const center = [sx / 2, backY / 2, topZ / 2];
   const view = orbitView(canvas, block.home, () => draw());
   resetView.onclick = () => { view.home(); draw(); };
-  /* how many colours a curve is cut into. The level along a curve is
-     what the colour says, and canvas strokes one colour at a time —
+  /* how many colors a curve is cut into. The level along a curve is
+     what the color says, and canvas strokes one color at a time —
      so consecutive points sharing a bucket share a stroke, which
      turns twenty thousand segments into a few thousand paths. */
   const BUCKETS = 32;
@@ -1528,7 +1528,7 @@ function stageBlock(block) {
        surface stays, the choppiness does not). A strip sorts against
        the box and marks by its own middle, exact for parallel
        strips; inside a strip the painter below walks its columns
-       far-to-near and merges same-coloured runs of quads into single
+       far-to-near and merges same-colored runs of quads into single
        polygons, so a quiet floor costs a handful of fills instead of
        thousands. */
     if (block.sheet) {
@@ -1552,18 +1552,18 @@ function stageBlock(block) {
           items.push({
             face: [[a, rows[r], 0], [b, rows[r + 1], 0],
                    [b, rows[r + 1], sz], [a, rows[r], sz]],
-            colour: '128, 128, 128', alpha: 0.22,
+            color: '128, 128, 128', alpha: 0.22,
             z: depth([(a + b) / 2, (rows[r] + rows[r + 1]) / 2,
                       sz / 2])});
         }
     }
-    /* the marks the flat figure carries, given depth: the analysed
+    /* the marks the flat figure carries, given depth: the analyzed
        span as a slab across every channel — because the analysis
        covers every channel — and, on the back wall, the rail of
        window weights. Sorted in with everything else, so the slab
        tints the curves inside it and not the ones in front. */
     const marks = block.marks || {};
-    const slab = (x0, x1, colour, alpha) => {
+    const slab = (x0, x1, color, alpha) => {
       // the four upright faces of the box, each its own item: a
       // translucent solid read through is what the app draws, and a
       // face at a time is what a painter's algorithm can order
@@ -1572,7 +1572,7 @@ function stageBlock(block) {
        [[x0, 0, 0], [x0, sy, 0], [x0, sy, sz], [x0, 0, sz]],
        [[x1, 0, 0], [x1, sy, 0], [x1, sy, sz], [x1, 0, sz]]].forEach(
         face => items.push({
-          face: face, colour: colour, alpha: alpha,
+          face: face, color: color, alpha: alpha,
           z: face.reduce((t, p) => t + depth(p), 0) / face.length}));
       // and the rims that say exactly where it starts and stops
       [x0, x1].forEach(x => items.push({
@@ -1606,19 +1606,19 @@ function stageBlock(block) {
         /* one row strip of the scalogram's surface. Columns walk
            far-to-near (smaller depth first, matching the global
            sort's own convention), and consecutive quads sharing a
-           quantized colour and cone state merge into one polygon —
+           quantized color and cone state merge into one polygon —
            its top edge the row-r profile, its bottom the row-r+1
            profile walked back. A half-pixel stroke in the fill's own
-           colour closes the antialiasing seams between spans. */
+           color closes the antialiasing seams between spans. */
         const sheet = item.sheet, r = item.strip;
         const xs = sheet.xs, rows = sheet.stations, lv = sheet.levels;
         const last = xs.length - 2;
         const forward = depth([xs[0], rows[r], 0])
                       <= depth([xs[last + 1], rows[r], 0]);
         const flush = (c0, c1, key) => {
-          const colour = viridis(key / 31);
+          const color = viridis(key / 31);
           g.globalAlpha = 1;
-          g.fillStyle = colour; g.strokeStyle = colour;
+          g.fillStyle = color; g.strokeStyle = color;
           g.lineWidth = 0.5;
           g.beginPath();
           g.moveTo(...at([xs[c0], rows[r], lv[r][c0] * sz]));
@@ -1650,7 +1650,7 @@ function stageBlock(block) {
         // the slab, read through: the stretch of the record the
         // analysis covers, across every channel
         const path = item.face.map(at);
-        g.fillStyle = 'rgba(' + item.colour + ', ' + item.alpha + ')';
+        g.fillStyle = 'rgba(' + item.color + ', ' + item.alpha + ')';
         g.beginPath(); g.moveTo(path[0][0], path[0][1]);
         path.slice(1).forEach(q => g.lineTo(q[0], q[1]));
         g.closePath(); g.fill();
@@ -1721,10 +1721,10 @@ function stageBlock(block) {
       const run = item.run, xz = run.xz, levels = run.levels;
       if (xz.length < 2) return;
       g.lineWidth = 1.4;
-      /* the stood-back object of a pair: the muted grey a compared
-         reference wears, off the colour scale entirely — present,
+      /* the stood-back object of a pair: the muted gray a compared
+         reference wears, off the color scale entirely — present,
          never competing. Drawn from the page's own ink so it follows
-         a theme flip, where a baked colour would not. */
+         a theme flip, where a baked color would not. */
       if (run.quiet) {
         g.strokeStyle = ink; g.globalAlpha = 0.55;
         g.beginPath();
@@ -1737,18 +1737,18 @@ function stageBlock(block) {
         g.stroke(); g.globalAlpha = 1;
         return;
       }
-      /* The colour runs *along* each segment, never in blocks. VTK
+      /* The color runs *along* each segment, never in blocks. VTK
          interpolates the level between a line's two ends, so a
          segment from a peak down to a trough shades from one to the
-         other; painting it in the colour of the end it started at
+         other; painting it in the color of the end it started at
          streaked bright ink clean across the swing of a time history
          (Brandon, 2026-08-24).
 
-         Drawn as VTK draws it — quantized to the colour scale, which
+         Drawn as VTK draws it — quantized to the color scale, which
          is what a lookup table does anyway. A segment spanning
          several buckets is cut into that many pieces, each flat at
          its own level, and the pieces are collected per bucket so one
-         stroke paints all of a curve's ink in that colour. The
+         stroke paints all of a curve's ink in that color. The
          honest reading, a true canvas gradient per segment, costs a
          gradient object each: measured at 91 ms a frame on the
          32-FRF stage against 9 for flat, where this is 12. Cut per
@@ -1920,7 +1920,7 @@ DATA.blocks.forEach(block => {
     block.headers.forEach(h => { const th = document.createElement('th');
       th.textContent = h; head.appendChild(th); });
     const body = table.createTBody();
-    /* a cell the app marks is marked here too, in the same two colours
+    /* a cell the app marks is marked here too, in the same two colors
        it shades an exceedance with: a channel red on screen is red on
        the page */
     block.rows.forEach((r, ri) => { const row = body.insertRow();

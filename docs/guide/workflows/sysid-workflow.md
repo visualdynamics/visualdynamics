@@ -135,7 +135,7 @@ project.export_report(project.report, 'sysid_report.html')
 project.save('sysid.vdyn')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 - **The question at import is a question because the file cannot
   answer it.** Two streams, quiet then loud, is also what a

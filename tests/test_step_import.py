@@ -19,7 +19,7 @@ from visualdynamics.io import import_file
 
 
 def _write_box(path, dx=100.0, dy=50.0, dz=25.0):
-    """A named box, written in millimetres."""
+    """A named box, written in millimeters."""
     pytest.importorskip('OCP')
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.IFSelect import IFSelect_RetDone
@@ -29,7 +29,7 @@ def _write_box(path, dx=100.0, dy=50.0, dz=25.0):
     writer = STEPControl_Writer()
     # both statics, AFTER a writer exists to register them, and both
     # checked: the writer converts from the process-global cascade
-    # unit to the write unit, so a leftover metres cascade (any prior
+    # unit to the write unit, so a leftover meters cascade (any prior
     # load() in this worker) turned this fixture's 100 into a
     # 100000 mm box — the intermittent gate failure was this fixture,
     # not the importer (2026-09-01, values: SI_UNIT MILLI, 100000.0)
@@ -40,7 +40,7 @@ def _write_box(path, dx=100.0, dy=50.0, dz=25.0):
     assert writer.Write(str(path)) == IFSelect_RetDone
 
 
-def test_a_step_box_arrives_as_metre_triangles(tmp_path):
+def test_a_step_box_arrives_as_meter_triangles(tmp_path):
     path = tmp_path / 'bracket.step'
     _write_box(path)
     geometry = import_file(path)
@@ -73,11 +73,11 @@ def test_iges_reads_through_the_same_door(tmp_path):
     assert np.allclose(sorted(extent), [0.025, 0.05, 0.1], atol=1e-6)
 
 
-def test_a_fresh_process_still_converts_to_metres(tmp_path):
+def test_a_fresh_process_still_converts_to_meters(tmp_path):
     """The bug this pins: the kernel's unit parameter is unregistered
     until a reader or writer exists, and setting it before that
-    silently no-ops — millimetre magnitudes then arrive labelled
-    metres, and the first real import read a McMaster motor as 8470
+    silently no-ops — millimeter magnitudes then arrive labeled
+    meters, and the first real import read a McMaster motor as 8470
     inches wide. Every other test here is contaminated by its own
     fixture *writer* registering the parameter, so this one imports
     in a subprocess where nothing has."""
@@ -107,7 +107,7 @@ def test_a_fresh_process_still_converts_to_metres(tmp_path):
     assert 'dist' not in pathlib.Path(where).parts, (
         f'the probe imported a frozen snapshot: {where}')
     assert abs(extent[2] - 0.1) < 1e-6, (
-        f'a 100 mm box read {extent[2]} "metres" in a fresh process '
+        f'a 100 mm box read {extent[2]} "meters" in a fresh process '
         f'(imported from {where})')
 
 

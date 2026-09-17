@@ -253,9 +253,9 @@ def test_a_specification_with_no_limits_is_still_drawn():
     assert len(built['curves']) == 1
 
 
-def test_a_lone_specification_takes_the_foreground_colour(showing):
-    """Beside a response it is grey, because it is the reference for
-    something. Alone it *is* what is being looked at, and grey would be
+def test_a_lone_specification_takes_the_foreground_color(showing):
+    """Beside a response it is gray, because it is the reference for
+    something. Alone it *is* what is being looked at, and gray would be
     saying it is the reference for nothing."""
     from visualdynamics.theme import theme as resolve_theme
 
@@ -265,7 +265,7 @@ def test_a_lone_specification_takes_the_foreground_colour(showing):
     assert curve.opts['pen'].color().name().lower() == wanted.lower()
 
 
-def test_beside_a_response_it_goes_back_to_grey(window, pump):
+def test_beside_a_response_it_goes_back_to_gray(window, pump):
     """The other half of the rule, so neither can drift."""
     from PySide6.QtCore import QItemSelectionModel
 
@@ -298,7 +298,7 @@ def test_beside_a_response_it_goes_back_to_grey(window, pump):
 
 
 def _spec_and_response_colors(limits):
-    """The colours drawn for a specification and a response of one DOF.
+    """The colors drawn for a specification and a response of one DOF.
 
     Built rather than imported: the case that broke is a specification
     carrying no limits, and the only fixture that has one is a transient
@@ -330,7 +330,7 @@ def _spec_and_response_colors(limits):
 
 
 def test_a_specification_with_no_limits_still_reads_as_the_reference(qt_app):
-    """The colours say which curve is the measurement and which is the
+    """The colors say which curve is the measurement and which is the
     target, and that is true of a target with no bounds written on it —
     a transient run's, say, where a tolerance on a waveform is not a
     settled convention. Deciding it from the presence of limit curves
@@ -341,7 +341,7 @@ def test_a_specification_with_no_limits_still_reads_as_the_reference(qt_app):
     assert colors['specification_curve'].lower() in drawn
 
 
-def test_the_bounded_case_is_coloured_the_same_way(qt_app):
+def test_the_bounded_case_is_colored_the_same_way(qt_app):
     """The other half, so the two cannot drift apart — which is the whole
     complaint: a random run and a transient run drew the same selection
     differently."""

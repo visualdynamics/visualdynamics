@@ -63,7 +63,7 @@ def legend_below(layout: Any, plot: Any, row: int,
         itself from its entries and never asks how wide its host is.
         Below the plot the width matters twice over — a grid cell
         re-sets the geometry to the full strip, so the maximum has to
-        be pinned to the content for the cell's alignment to centre
+        be pinned to the content for the cell's alignment to center
         it; and the names should wrap to the axes' width rather than
         run in one row past it (Brandon, 2026-09-01). The pin is
         lifted before each re-measure — kept, it froze the box at the
@@ -102,8 +102,8 @@ def legend_below(layout: Any, plot: Any, row: int,
             self.updateGeometry()
 
         def setGeometry(self, *args):
-            """Centred on the axes, not on the strip: the cell spans the
-            left axis too, so its own centre sits right of the data."""
+            """Centered on the axes, not on the strip: the cell spans the
+            left axis too, so its own center sits right of the data."""
             from PySide6.QtCore import QRectF
 
             rect = args[0] if len(args) == 1 else QRectF(*args)
@@ -150,7 +150,7 @@ def legend_below(layout: Any, plot: Any, row: int,
 # How lopsided a MAC grid may be before it stops being drawn with square
 # cells. A cross-MAC's shape is the two sets' mode counts, and 139 modes
 # against 8 is a grid 17 times taller than it is wide: held to that shape
-# it is a sliver too narrow to read a colour out of, let alone click a
+# it is a sliver too narrow to read a color out of, let alone click a
 # cell in. Past the clamp the grid fills the frame instead and the cells
 # stretch — the only alternative that keeps every column on screen.
 MAC_ASPECT_CLAMP = 3.0
@@ -187,8 +187,8 @@ CURVE_COLORS = [
 
 
 def curve_color(index: int) -> str:
-    """The nth curve's colour, wrapping. The same cycle everywhere a
-    curve is drawn, so a record keeps its colour between the app, a
+    """The nth curve's color, wrapping. The same cycle everywhere a
+    curve is drawn, so a record keeps its color between the app, a
     standalone plot and the report."""
     return CURVE_COLORS[index % len(CURVE_COLORS)]
 
@@ -201,7 +201,7 @@ def axis_label(dimension: str, unit_system: UnitSystem,
     stacked fraction rather than '(in/s**2)/lbf'.
 
     A `hint` is what the source said the quantity was without saying what
-    scale it was on. The axis names it, since an unlabelled axis of
+    scale it was on. The axis names it, since an unlabeled axis of
     accelerations is less use than one that at least says 'acceleration'.
     """
     if dimension == UNKNOWN:
@@ -481,7 +481,7 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
     map the same data answers "which channels are bad, and where" in one
     look — a poor channel is a dark row, a poor band is a dark column.
 
-    Coherence is a bounded ratio, so the colour scale is pinned to 0..1
+    Coherence is a bounded ratio, so the color scale is pinned to 0..1
     rather than fitted to the data: a map whose scale moved with the
     selection would make a good channel look bad next to a better one.
 
@@ -512,7 +512,7 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
 
     plot = layout.addPlot(row=0, col=0)
     # the same reason as build_plots: an axis reads the global foreground when
-    # it is built, so a theme switch would leave old axes in the old colour
+    # it is built, so a theme switch would leave old axes in the old color
     foreground = pg.mkPen(colors['plot_foreground'])
     for edge in ('left', 'bottom', 'top', 'right'):
         axis = plot.getAxis(edge)
@@ -537,7 +537,7 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
     plot.setLabel('bottom', f'frequency [{us.label_html("frequency")}]')
     plot.setLabel('left', 'channel')
     plot.getAxis('left').setTicks([_map_ticks(labels)])
-    # the bar is what makes the colours readable as numbers
+    # the bar is what makes the colors readable as numbers
     bar = pg.ColorBarItem(values=(0.0, 1.0), colorMap=pg.colormap.get('viridis'),
                           label='coherence', interactive=False)
     bar.setImageItem(image, insert_in=plot)
@@ -547,7 +547,7 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
 def _map_ticks(labels):
     """(position, text) for a channel axis, thinned so they do not collide.
 
-    Every label at 339 channels is a grey smear; one in every nth is a scale.
+    Every label at 339 channels is a gray smear; one in every nth is a scale.
     Each sits at the middle of its row, which is where its data is.
     """
     stride = max(1, -(-len(labels) // MAP_LABELS))
@@ -584,11 +584,11 @@ def cmif_curves(data: Any, records: Sequence[int] | None = None,
 
 
 def _mode_axis(orientation, frequencies, height=None):
-    """An axis ticked one mode at a time, labelled with its frequency.
+    """An axis ticked one mode at a time, labeled with its frequency.
 
     The ticks are the grid's cells rather than round numbers, so they
     cannot be computed the way a frequency axis's are: tick *i* sits at
-    the centre of cell *i* and reads mode *i*'s own frequency. Handing
+    the center of cell *i* and reads mode *i*'s own frequency. Handing
     pyqtgraph the whole list through `setTicks` is what drew all 139 of
     the drone's modes on top of one another — it drops a tick *level*
     that will not fit, never the individual labels inside one — so the
@@ -599,7 +599,7 @@ def _mode_axis(orientation, frequencies, height=None):
     A bottom axis additionally stands its labels on end, since one
     frequency per mode overlaps horizontally by a dozen modes and
     pyqtgraph has no rotated-tick option — it redraws the text of the
-    stock `drawPicture` rotated 90° about each label's centre, and
+    stock `drawPicture` rotated 90° about each label's center, and
     reserves `height` for them to stand in.
     """
     import pyqtgraph as pg
@@ -608,7 +608,7 @@ def _mode_axis(orientation, frequencies, height=None):
     values = np.asarray(frequencies, dtype=float)
 
     class ModeAxis(pg.AxisItem):
-        """Cell-centred ticks, thinned to the labels that fit."""
+        """Cell-centered ticks, thinned to the labels that fit."""
 
         def tickValues(self, minVal: float, maxVal: float,
                        size: float) -> list[tuple[float, list[float]]]:
@@ -655,7 +655,7 @@ def _mode_axis(orientation, frequencies, height=None):
                 painter.save()
                 # rotate about a point far enough down that the label
                 # hangs entirely below the axis line — spinning about
-                # the stock rect's centre pokes long labels up into
+                # the stock rect's center pokes long labels up into
                 # the plot area
                 painter.translate(rect.center().x(),
                                   rect.top() + rect.width() / 2)
@@ -681,11 +681,11 @@ def build_mac(view: Any, frequencies: ArrayLike, matrix: ArrayLike,
               ) -> tuple[int, int]:
     """A MAC matrix as a viridis grid.
 
-    Rows and columns are modes, labelled by their frequencies; with
+    Rows and columns are modes, labeled by their frequencies; with
     `column_frequencies` the grid is a cross-MAC — rows one set, columns
     the other — and rectangular when the counts differ. The scale is
     pinned 0..1 like the coherence map, because a MAC is a bounded
-    ratio. The colour is the reading — per-cell numbers were tried and
+    ratio. The color is the reading — per-cell numbers were tried and
     made the grid too busy to read at a glance.
     """
     import pyqtgraph as pg
@@ -803,7 +803,7 @@ def add_mode_markers(plot: Any, frequencies: ArrayLike,
     clusters stay readable — the fitting screen's markers, wherever a
     modal synthesis is drawn.
 
-    The fitting screen keeps its subtle grey (the default); the
+    The fitting screen keeps its subtle gray (the default); the
     resynthesis overlays pass the theme foreground instead — white on
     the dark theme, black on the light — so the markers read apart
     from the grid."""
@@ -1040,7 +1040,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             pair = (*data.record_pair(i), data.known_dim(i))
             # a spectrum that knows its own bin widths says so, and a
             # step plot then lands on the bands the standard defines
-            # rather than on the midpoints between their centres
+            # rather than on the midpoints between their centers
             own = getattr(data, 'bin_widths', None)
             widths = own() if own is not None and getattr(
                 data, 'bandwidth', None) is not None else None
@@ -1066,9 +1066,9 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         # the envelope's cursor has to ride the plot of the quantity it
         # deflects, not whichever row happens to be first
         plot.series_key = key
-        # set the axis colours here rather than leaning on pyqtgraph's
+        # set the axis colors here rather than leaning on pyqtgraph's
         # global foreground option: that is read when an axis is built, so
-        # a theme switch would leave old axes in the old theme's colour
+        # a theme switch would leave old axes in the old theme's color
         foreground = pg.mkPen(colors['plot_foreground'])
         for edge in ('left', 'bottom', 'top', 'right'):
             axis = plot.getAxis(edge)
@@ -1125,13 +1125,13 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         # A specification is a follower that is not a synthesis — those
         # are the only two kinds of follower there are. What it is *not*
         # is "a follower carrying limit curves", which is what this asked
-        # before: that made the colours depend on whether bounds happened
+        # before: that made the colors depend on whether bounds happened
         # to be written, so one selection drew two ways. A random run's
-        # target came out grey behind its response, and a transient run's
+        # target came out gray behind its response, and a transient run's
         # target — same objects, same gesture, but no limits, because a
         # tolerance on a waveform is not a settled convention — fell
-        # through to the ordinary colour cycle and took its response's
-        # colour as an undistinguished follower.
+        # through to the ordinary color cycle and took its response's
+        # color as an undistinguished follower.
         with_spec = {c[5] for c in ordered if c[6] and not c[7]}
         with_measurement = {c[5] for c in ordered if not c[6]}
         bounded_pairs = with_spec & with_measurement
@@ -1141,12 +1141,12 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                          and np.iscomplexobj(values) else values.real)
             # A specification and the response it bounds are a pair, and
             # only one pair is ever drawn, so there is nothing to tell
-            # apart by colour: the response takes the foreground because
-            # it is what is being looked at, the specification grey
+            # apart by color: the response takes the foreground because
+            # it is what is being looked at, the specification gray
             # behind it because it is the reference.
             #
             # Alone, the specification *is* what is being looked at, so
-            # it takes the foreground itself. Grey would be saying "this
+            # it takes the foreground itself. Gray would be saying "this
             # is the reference for something", and there is nothing here
             # for it to be the reference for.
             paired = follower and pair in pair_colors
@@ -1227,7 +1227,7 @@ def _shade_exceedances(plot, x, y, spec_x, written, colors, reach):
     `reach` is (floor, ceiling) in data units — where the plot's own
     edges will be, which is what the stripe runs to. Not some multiple
     of the limit: a polygon reaching a million times past everything
-    else on the plot is a thing Qt has to rasterise, and it crashed
+    else on the plot is a thing Qt has to rasterize, and it crashed
     doing it about one run in three.
 
     One fill for each direction rather than one per violation. The fill
@@ -1258,7 +1258,7 @@ def _shade_exceedances(plot, x, y, spec_x, written, colors, reach):
             continue
         # Only the band is drawn over. Nothing outside it can be an
         # exceedance, so carrying those bins along adds thousands of
-        # flat segments to a polygon Qt has to rasterise for nothing —
+        # flat segments to a polygon Qt has to rasterize for nothing —
         # and the two bins the edge cuts are clipped to the part the
         # specification covers, which is the part that was judged.
         band = written_band(spec_x, written_values)
@@ -1276,15 +1276,15 @@ def _shade_exceedances(plot, x, y, spec_x, written, colors, reach):
         # itself except over the bins that went outside
         edge = reach[1] if over else reach[0]
         far = np.where(out, edge, base)[keep]
-        colour = QColor(colors[key])
-        colour.setAlpha(EXCEED_ALPHA)
+        color = QColor(colors[key])
+        color.setAlpha(EXCEED_ALPHA)
         curves = []
         for values in (base[keep], far):
             curve = plot.plot(edges, values, stepMode='center',
                               pen=pg.mkPen(None))
             curve.is_zone_edge = True     # an edge, not a measurement
             curves.append(curve)
-        fill = pg.FillBetweenItem(*curves, brush=pg.mkBrush(colour))
+        fill = pg.FillBetweenItem(*curves, brush=pg.mkBrush(color))
         fill.setZValue(-5)     # over the zone shading, under the curves
         fill.is_exceedance = True
         plot.addItem(fill)
@@ -1374,7 +1374,7 @@ def drawing_shape(data: Any, tagged: bool = False) -> str:
         getattr(data, 'interpolation', None), 'line')
 
 
-def step_outline(centres: ArrayLike, values: ArrayLike,
+def step_outline(centers: ArrayLike, values: ArrayLike,
                  widths: ArrayLike | None = None
                  ) -> tuple[np.ndarray, np.ndarray]:
     """The flat-across-each-bin trace as explicit points.
@@ -1386,19 +1386,19 @@ def step_outline(centres: ArrayLike, values: ArrayLike,
     trace is exactly `sum(value * width)`: the RMS is the area drawn.
     `values` may be (records, lines); the outline is per row.
     """
-    centres = np.asarray(centres, dtype=float)
+    centers = np.asarray(centers, dtype=float)
     values = np.atleast_2d(np.asarray(values))
-    if centres.size < 2:
-        return centres, values[0] if values.shape[0] == 1 else values
-    edges = bin_edges(centres, widths)
+    if centers.size < 2:
+        return centers, values[0] if values.shape[0] == 1 else values
+    edges = bin_edges(centers, widths)
     x = np.repeat(edges, 2)[1:-1]
     expanded = np.repeat(values, 2, axis=1)
     return x, expanded[0] if expanded.shape[0] == 1 else expanded
 
 
-def bin_edges(centres: ArrayLike,
+def bin_edges(centers: ArrayLike,
               widths: ArrayLike | None = None) -> np.ndarray:
-    """The boundaries of the bins a set of line centres stands for.
+    """The boundaries of the bins a set of line centers stands for.
 
     A line of a discrete spectrum is a density over its own bin, so
     without more to go on the bin runs to the midpoint of the gap
@@ -1406,9 +1406,9 @@ def bin_edges(centres: ArrayLike,
     spaced in frequency.
 
     `widths` is for a spectrum that knows better. An octave band's
-    centre is the *geometric* mean of its own edges, so neither the
-    midpoints between neighbours nor the centre plus and minus half a
-    width lands on them. Given the centre and the width both, the edges
+    center is the *geometric* mean of its own edges, so neither the
+    midpoints between neighbors nor the center plus and minus half a
+    width lands on them. Given the center and the width both, the edges
     follow exactly: with `c = sqrt(l u)` and `w = u - l`,
 
         u = (w + sqrt(w^2 + 4 c^2)) / 2,   l = u - w
@@ -1416,17 +1416,17 @@ def bin_edges(centres: ArrayLike,
     which is the positive root and needs no assumption about the bands
     tiling — though these do, so one edge array serves them all.
     """
-    centres = np.asarray(centres, dtype=float)
-    if centres.size < 2:
-        return centres
+    centers = np.asarray(centers, dtype=float)
+    if centers.size < 2:
+        return centers
     if widths is not None:
         from ..core.octave import bin_bounds
 
-        lower, upper = bin_bounds(centres, widths)
+        lower, upper = bin_bounds(centers, widths)
         return np.concatenate([lower, [upper[-1]]])
-    mids = 0.5 * (centres[:-1] + centres[1:])
-    return np.concatenate([[2 * centres[0] - mids[0]], mids,
-                           [2 * centres[-1] - mids[-1]]])
+    mids = 0.5 * (centers[:-1] + centers[1:])
+    return np.concatenate([[2 * centers[0] - mids[0]], mids,
+                           [2 * centers[-1] - mids[-1]]])
 
 
 def as_power_law(frequencies: ArrayLike, values: ArrayLike,
@@ -1476,7 +1476,7 @@ def gapless(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     pyqtgraph builds a `QPainterPath` two ways. With no gaps it fills a
     `QPolygonF`, which is Qt's own API. With gaps — more than 2% of the
     points non-finite — it packs a byte buffer by hand and has Qt
-    deserialise it, against a private binary layout its own docstring
+    deserialize it, against a private binary layout its own docstring
     warns "may change in future versions of Qt". That is the path the
     intermittent Bus error was raised from, and the only curve on the
     plot taking it was a specification: 404 non-finite points in 1083,
@@ -1767,7 +1767,7 @@ def plot_mac(shapes: ShapeSet, other: ShapeSet | None = None, *,
     square. Pass `size` to say otherwise.
 
     `bars=True` is the plot bar's 3-D reading: the matrix as bars,
-    height and colour both the value. A scene renders through its own
+    height and color both the value. A scene renders through its own
     plotter, so it takes `screenshot=` rather than `path=`, like every
     other 3-D view.
     """
@@ -2124,9 +2124,9 @@ def plot_scalogram(history: Any, channel: int = 0, *,
         plot_scalogram(history, path='scalogram.png')
 
     The flat form of the app's wavelet reading: time across, frequency
-    up a logarithmic axis, magnitude as colour in the record's own
+    up a logarithmic axis, magnitude as color in the record's own
     units. The cone of influence is shaded, because inside it the
-    picture is an artefact of where the record was cut and looks
+    picture is an artifact of where the record was cut and looks
     exactly like data. Time is held to `core.wavelet.COLUMNS` columns
     by peak-hold — each column its slice's largest magnitude, the
     reading `core.wavelet.scalogram_peaks` gives the app's own view —
@@ -2157,26 +2157,26 @@ def plot_scalogram(history: Any, channel: int = 0, *,
     -------
     The pane, or the path written.
     """
-    from ..core import wavelet as wavelet_maths
+    from ..core import wavelet as wavelet_math
     from .scalogram import scalogram_image
 
     rate = history.sample_rate
     values = np.real(np.asarray(history.ordinate)[channel])
     duration = len(history.abscissa) / rate
-    default_low, default_high = wavelet_maths.default_range(rate, duration)
+    default_low, default_high = wavelet_math.default_range(rate, duration)
     top = high if high is not None else default_high
     bottom = low if low is not None else default_low
-    frequencies = wavelet_maths.log_frequencies(
+    frequencies = wavelet_math.log_frequencies(
         bottom, top,
-        wavelet_maths.PER_OCTAVE if per_octave is None else per_octave)
+        wavelet_math.PER_OCTAVE if per_octave is None else per_octave)
     frequencies = frequencies[frequencies < rate / 2.0]
     if frequencies.size < 2:
         raise ValueError('no frequencies this record can carry in that '
                          f'range; it reaches {rate / 2.0:g} Hz')
-    width = wavelet_maths.OMEGA0 if omega0 is None else omega0
+    width = wavelet_math.OMEGA0 if omega0 is None else omega0
     # held to a picture's width, each column its slice's peak — the
     # app's own reading, and the one a long record survives
-    clock, magnitude = wavelet_maths.scalogram_peaks(
+    clock, magnitude = wavelet_math.scalogram_peaks(
         values, rate, frequencies, width)
     clock = clock + float(history.abscissa[0])
     colors = resolve_theme(theme)
@@ -2296,13 +2296,13 @@ def plot_replication(measured: Any, specification: Any,
 
     `event` is which repeat, counting from zero; left out, the bars
     report every repeat and the overlay draws the first. No repeat is
-    singled out as the worst one — that is a judgement about what the
+    singled out as the worst one — that is a judgment about what the
     article is for, not a measurement, and the numbers are all returned
     for the caller to make it with.
 
     `channel` is which control DOF the overlay draws, defaulting to the
     first. One at a time and not all of them: six measured curves over
-    six targets share one set of colours, and nothing on the plot then
+    six targets share one set of colors, and nothing on the plot then
     says which curve is the target.
     """
     from ..core.compliance import ERROR_DB

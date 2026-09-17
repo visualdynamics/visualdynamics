@@ -187,7 +187,7 @@ def test_the_3d_toggle_leads_the_table_bar(window):
 def test_confirming_a_mode_reframes_the_fit_mac(window, pump):
     """Keyed per session alone, the camera was placed for the opening
     1x1 matrix and never again — a grown MAC came up out of frame with
-    the view centred on its first corner (Brandon, 2026-08-30). A
+    the view centered on its first corner (Brandon, 2026-08-30). A
     growth reframes; a same-size redraw still keeps the user's view."""
     from conftest import fixture_path
 

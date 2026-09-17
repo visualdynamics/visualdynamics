@@ -10,7 +10,7 @@ and this module refuses with the install command when it is absent.
 
 What comes out matches the 3MF importer's contract: the assembly's
 named parts become named blocks, each instance placed by its own
-transform, coordinates in metres. This is the importer that takes a
+transform, coordinates in meters. This is the importer that takes a
 McMaster-Carr download directly — their STEP and IGES both land here.
 """
 
@@ -108,12 +108,12 @@ def _document(path: str):
     reader = (IGESCAFControl_Reader() if iges
               else STEPCAFControl_Reader())
     reader.SetNameMode(True)
-    # Metres at the kernel boundary, whatever the file counted in —
+    # Meters at the kernel boundary, whatever the file counted in —
     # the same one-unit-inside rule the rest of the package lives by.
     # Set AFTER the reader exists and CHECKED: in a fresh process the
     # parameter is unregistered until a reader or writer constructs
     # the controller, and SetCVal before that returns False and does
-    # nothing — millimetre magnitudes then arrive labelled metres. The
+    # nothing — millimeter magnitudes then arrive labeled meters. The
     # first real import did exactly that (a McMaster motor read 8470
     # inches wide); the test missed it because its own fixture writer
     # had already registered the parameter (Brandon, 2026-09-01).
@@ -139,7 +139,7 @@ def load(path: str | os.PathLike) -> Geometry:
     Returns
     -------
     Geometry
-        Triangle face elements in metres, tessellated by the kernel —
+        Triangle face elements in meters, tessellated by the kernel —
         one named block per free shape the file holds.
     """
     _require_kernel()

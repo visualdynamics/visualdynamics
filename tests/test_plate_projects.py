@@ -34,7 +34,7 @@ def builders():
     ('sine_project', 'Sine Sweep'),
     ('sysid_project', 'System ID'),
 ])
-def test_the_project_builds_with_no_grey_slots(builders, name,
+def test_the_project_builds_with_no_gray_slots(builders, name,
                                                project_type):
     """The builders assert completeness themselves before returning —
     this holds that they still do, for every type, whenever the
@@ -76,7 +76,7 @@ def test_a_saved_project_reloads_complete(builders, tmp_path):
                in missing_expectations(back.project_type, back,
                                        placed=back.placed())]
     # every slot, optional ones included: the shock demo exists to
-    # show the recommended workflow, and a workflow with grey slots in
+    # show the recommended workflow, and a workflow with gray slots in
     # it is not a demonstration of anything (Brandon, 2026-08-25)
     assert missing == [], f'unfilled: {missing}'
 

@@ -1,7 +1,7 @@
 """Shared fixtures.
 
 The GUI ones matter most: a `MainWindow` built here runs in-process and
-headless, so a GUI behaviour can have a named test that runs in
+headless, so a GUI behavior can have a named test that runs in
 milliseconds instead of living inside `gui_smoke_script.py` — which is one
 subprocess, all-or-nothing, and reports failures as a line number.
 
@@ -36,7 +36,7 @@ def fixture_path(*parts):
 
 
 def plate_geometry_and_shapes():
-    """The plate's geometry in metres and its truth shapes — the pair
+    """The plate's geometry in meters and its truth shapes — the pair
     every animation and deflection test starts from."""
     import visualdynamics
 

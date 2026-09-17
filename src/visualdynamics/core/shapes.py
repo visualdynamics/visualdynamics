@@ -298,7 +298,7 @@ def compare_scaling(a: ShapeSet, b: ShapeSet,
     """`ScaleComparison` of two shape sets over their matched pairs.
 
     The set-wide reading of `scale_ratios`: the pairs that have an
-    answer, summarised into one factor and a spread. See that function
+    answer, summarized into one factor and a spread. See that function
     for what a ratio is and when there is none.
     """
     return ScaleComparison(
@@ -490,7 +490,7 @@ class ShapeSet:
         Parameters
         ----------
         frequencies : array_like
-            The lines to synthesise at, in Hz.
+            The lines to synthesize at, in Hz.
         response_dof : sequence of str
             The response degrees of freedom.
         reference_dof : sequence of str
@@ -503,7 +503,7 @@ class ShapeSet:
         Returns
         -------
         numpy.ndarray
-            The synthesised FRFs, one row per response and drive pair.
+            The synthesized FRFs, one row per response and drive pair.
         """
         frequencies = np.asarray(frequencies, dtype=np.float64)
         picked = (np.arange(self.num_shapes) if modes is None

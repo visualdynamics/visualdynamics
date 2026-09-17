@@ -189,7 +189,7 @@ def _key(cell):
     The schema's own `canonical_name`, not a second table beside it.
     This file used to alias the four core columns only, on the reasoning
     that guessing at the rest would invent meaning the file did not
-    carry. With a fixed schema an unrecognised column is *dropped*
+    carry. With a fixed schema an unrecognized column is *dropped*
     rather than kept under its own name, so the two spellings had to
     agree — and they did not: this end turned the exported header
     'Sensitivity (mV/Unit)' into a column nobody had heard of, and a

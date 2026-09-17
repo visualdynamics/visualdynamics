@@ -7,7 +7,7 @@ from typing import Any
 # itself must pick the same one. Left alone in an environment that
 # also has PyQt5/PyQt6, pyqtgraph binds to one of those and every
 # brush and widget visualdynamics hands it is a foreign object — which is how
-# `data.plot()` from a plain script died on a colour it could not
+# `data.plot()` from a plain script died on a color it could not
 # read. `QT_API` is the same question asked by qtpy, which is how
 # pyvistaqt picks. Both are set *only if unset*: a session that has
 # already chosen (sdynpy sets QT_API=pyqt5 at import) is left alone
@@ -16,7 +16,7 @@ from typing import Any
 _os.environ.setdefault('PYQTGRAPH_QT_LIB', 'PySide6')
 _os.environ.setdefault('QT_API', 'pyside6')
 
-# Qt Data Visualization is offered under GPLv3 or a commercial licence
+# Qt Data Visualization is offered under GPLv3 or a commercial license
 # and nothing else — no LGPL (its own licensing page, read 2026-08-20).
 # Nothing here uses it, but qtpy imports it at startup for a
 # Windows-Qt5 compatibility alias, inside a suppress(ImportError) — so
@@ -125,7 +125,7 @@ def _spawn_gui(paths=(), spawn=None):
     # the child is a fresh interpreter, but it inherits this one's
     # environment — including whatever chose a Qt here. Both are
     # overridden, not defaulted: sdynpy sets QT_API=pyqt5 at import,
-    # and a child that honours it crashes mixing bindings.
+    # and a child that honors it crashes mixing bindings.
     environment = dict(_os.environ, PYQTGRAPH_QT_LIB='PySide6',
                        QT_API='pyside6')
     launcher = ('import sys, visualdynamics; '

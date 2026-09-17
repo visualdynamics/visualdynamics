@@ -328,7 +328,7 @@ def test_the_estimator_it_was_told_is_the_one_it_used(window, pump,
     assert 'H1 FRFs' in window.statusBar().currentMessage()
 
 
-def test_cancelling_the_dialog_computes_nothing(window, pump, monkeypatch):
+def test_canceling_the_dialog_computes_nothing(window, pump, monkeypatch):
     window.import_paths([fixture_path('plate', 'modal_spectra.nc4')])
     pump()
     name = next(n for n, obj in window.objects.items()

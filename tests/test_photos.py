@@ -261,7 +261,7 @@ def test_an_abandoned_edit_changes_nothing(window, pump, tmp_path):
 
 
 def test_a_mode_grid_does_not_offer_to_rename_a_row(window, pump):
-    """A mode is labelled by what it is. Names and coordinates are the
+    """A mode is labeled by what it is. Names and coordinates are the
     user's to type over (test_rename_dof); a mode's label is not."""
     from PySide6.QtWidgets import QLineEdit
 

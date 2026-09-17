@@ -171,7 +171,7 @@ def save(obj: Geometry, path: str | os.PathLike,
     """Write the geometry's face elements as binary STL.
 
     STL cannot name parts or declare units: the blocks flatten into
-    one solid, and the numbers are metres (the stored SI) unless a
+    one solid, and the numbers are meters (the stored SI) unless a
     `unit_system` says to write its own length unit instead. A
     geometry with no face elements is refused — there is nothing an
     STL can hold of it.

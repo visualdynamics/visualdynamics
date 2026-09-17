@@ -135,7 +135,7 @@ def test_integration_walks_the_chain_to_displacement():
 
 def test_a_bias_does_not_become_a_ramp():
     """The drift control is the whole reason the corner exists: a
-    0.05 m/s**2 offset walked the design measurement past a metre of
+    0.05 m/s**2 offset walked the design measurement past a meter of
     displacement, and the reading is meaningless with it in."""
     rng = np.random.default_rng(11)
     biased = _sine(80.0, 2.0) + 0.05 + rng.standard_normal(SAMPLES) * 0.1

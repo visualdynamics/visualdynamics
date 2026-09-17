@@ -37,7 +37,7 @@ echo '== the project and its build tools, as x86_64 wheels'
 "$VENV/bin/python" -m pip install -q --prefer-binary '.[step]' pyinstaller pillow
 
 # The x86_64 PyInstaller thins its bootloader with lipo, and the
-# signing and notarising that follow call codesign, notarytool and
+# signing and notarizing that follow call codesign, notarytool and
 # stapler — all through xcrun. The Command Line Tools' xcrun library
 # is arm64-only, so under Rosetta it cannot even load (the machine's
 # selection fell back to the CLT when Xcode became Xcode-beta,

@@ -32,7 +32,7 @@ def undeferred(plotter):
 
     Bound on the instance at construction rather than patched on the
     class, so a pyvistaqt used by anything else in the process keeps
-    its own behaviour.
+    its own behavior.
     """
     unthreaded = plotter._render
 

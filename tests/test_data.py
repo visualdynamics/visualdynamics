@@ -283,9 +283,9 @@ def test_a_dof_that_is_wrong_is_refused_where_one_that_is_missing_is_not():
     assert TimeHistory(t, values, response_dof=['101']).response_dof == ['101']
 
 
-def test_a_dof_written_by_hand_is_normalised():
+def test_a_dof_written_by_hand_is_normalized():
     """An unsigned direction is the positive one, which is how people
-    write them — and it comes back normalised so everything downstream
+    write them — and it comes back normalized so everything downstream
     compares like with like."""
     import numpy as np
 

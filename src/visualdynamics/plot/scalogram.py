@@ -1,4 +1,4 @@
-"""The scalogram, drawn: time across, frequency up, magnitude as colour.
+"""The scalogram, drawn: time across, frequency up, magnitude as color.
 
 One channel at a time, because the picture is dense — a second one
 beside it at this size reads as noise rather than as a second answer.
@@ -10,12 +10,12 @@ rather than four lines beside the coherence map.
 a constant fraction of its frequency: the rows *are* evenly spaced in
 log frequency, so drawing them evenly spaced in linear frequency would
 put the image's own rows where they do not belong. The image is drawn
-in log space and the axis is labelled back in Hz.
+in log space and the axis is labeled back in Hz.
 
 **The cone of influence is drawn over the picture**, shaded, because
-inside it a scalogram is an artefact of where the record was cut rather
+inside it a scalogram is an artifact of where the record was cut rather
 than a reading of the record. It looks exactly like data — that is the
-whole problem — and a reading that cannot be told from an artefact is
+whole problem — and a reading that cannot be told from an artifact is
 worse than no reading.
 """
 
@@ -50,8 +50,8 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
     colors : mapping
         The theme.
     label, units : str
-        What the colour bar is of — the record's own quantity and unit,
-        which the amplitude normalisation is what makes meaningful.
+        What the color bar is of — the record's own quantity and unit,
+        which the amplitude normalization is what makes meaningful.
     omega0 : float
         The wavelet's width, for working out the cone.
     time_label : str
@@ -78,7 +78,7 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
 
     left, right = float(times[0]), float(times[-1])
     # drawn in log frequency, which is where the rows are actually
-    # evenly spaced; the axis is labelled back in Hz below
+    # evenly spaced; the axis is labeled back in Hz below
     low, high = np.log10(frequencies[0]), np.log10(frequencies[-1])
     image.setRect(left, float(low), right - left, float(high - low))
     plot.addItem(image)

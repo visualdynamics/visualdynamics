@@ -40,7 +40,7 @@ def test_a_report_round_trips_as_a_template(tmp_path):
     assert report_template.sniff(path)
     as_json = tmp_path / 'house.json'
     as_json.write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
-    assert report_template.sniff(as_json), 'recognised by its marker too'
+    assert report_template.sniff(as_json), 'recognized by its marker too'
     other = tmp_path / 'other.json'
     other.write_text('{"blocks": []}', encoding='utf-8')
     assert not report_template.sniff(other)

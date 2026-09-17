@@ -100,7 +100,7 @@ def test_the_manifest_is_one_release_the_newest():
     """Staging is cumulative, so two versions can sit in the folder;
     the page takes the first file matching a platform, and a
     name-sorted list handed out 0.0.1 ahead of 0.1.0 — the old,
-    unsigned image, the evening the notarised one landed (Brandon,
+    unsigned image, the evening the notarized one landed (Brandon,
     2026-09-02). A manifest is one release: the newest version's
     files, and nothing older."""
     manifest = manifest_for([

@@ -1,4 +1,4 @@
-"""The site wears the application's own mark and colours.
+"""The site wears the application's own mark and colors.
 
 Documentation that looks like a different product than the one it
 documents is a small thing that reads as carelessness, and the way it
@@ -29,7 +29,7 @@ def test_the_assets_match_the_app(qt_app):
         'python tools/make_docs_assets.py')
 
 
-def test_the_stylesheet_carries_the_apps_own_colours():
+def test_the_stylesheet_carries_the_apps_own_colors():
     """Not a copy of them: the values in the file are the values in
     `theme.py`, so there is no second palette to keep in step."""
     import make_docs_assets

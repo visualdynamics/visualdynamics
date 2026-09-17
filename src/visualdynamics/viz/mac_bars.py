@@ -1,14 +1,14 @@
-"""The MAC matrix as 3-D bars: height and colour are both the value.
+"""The MAC matrix as 3-D bars: height and color are both the value.
 
 The flat grid answers "which pairs match" at a glance; the bars answer
 the follow-up the grid is poor at — *how much* the near-misses differ,
-which as colour alone is a judgement of shade. Height makes a 0.6
+which as color alone is a judgment of shade. Height makes a 0.6
 against a 0.9 a visible step. The reading is pinned 0..1 exactly like
 the flat grid and the coherence map, because a MAC is a bounded ratio.
 
 One mesh whatever the mode count, like the waterfall: a 139×139
 cross-MAC is 19 321 boxes and still one actor. Rows are the first
-set's modes and columns the second's, labelled by frequency the way
+set's modes and columns the second's, labeled by frequency the way
 the flat grid's axes are, and thinned past the same label limit.
 Row 0 sits nearest the viewer — the flat grid reads downward from the
 top-left, and the camera puts the same first mode in front.
@@ -26,7 +26,7 @@ from .waterfall import LABEL_LIMIT
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-#: bar footprint within its unit cell. The gap between neighbours is
+#: bar footprint within its unit cell. The gap between neighbors is
 #: what lets a row of near-1.0 bars read as bars rather than a wall.
 FOOTPRINT = 0.78
 
@@ -40,13 +40,13 @@ HEIGHT = 0.4
 PLINTH = 0.004
 
 #: the committed-match red — the same literal in both readings, so a
-#: match reads the same colour on the grid and on the bars
+#: match reads the same color on the grid and on the bars
 MARK_RED = '#e5534b'
 
 #: the picked-pair blue, for the outlines in both readings. It used to
 #: be the same red as the checker, and a red outline on a red-checkered
 #: bar could not be seen — the two marks answer different questions
-#: (picked now vs committed already) and now wear different colours
+#: (picked now vs committed already) and now wear different colors
 PICK_BLUE = '#0a84ff'
 
 #: checker squares across a face's short side. Committed matches wear
@@ -60,8 +60,8 @@ CHECKER = 4
 MARK_LIFT = 0.02
 
 #: the outline every bar wears. A field of near-1.0 MACs is a field of
-#: one colour — viridis has nowhere left to go above 0.95 — and the
-#: gap between neighbours hides behind the bars themselves at any
+#: one color — viridis has nowhere left to go above 0.95 — and the
+#: gap between neighbors hides behind the bars themselves at any
 #: camera but straight down, so a well-correlated pair read as a solid
 #: yellow slab with the answer somewhere inside it (Brandon,
 #: 2026-08-26). The outline is what puts the bars back.
@@ -80,7 +80,7 @@ EDGE_LIFT = MARK_LIFT / 2.0
 #: the largest grid that gets outlined. Past this a bar is a pixel or
 #: two wide and the outlines close over the field into a dark mat —
 #: the opposite of the point. Measured on a 139x139 cross-MAC, where
-#: even hairlines swallowed the colour (Brandon, 2026-08-26).
+#: even hairlines swallowed the color (Brandon, 2026-08-26).
 OUTLINE_LIMIT = 40
 
 
@@ -148,7 +148,7 @@ def add_mac_bars(plotter: Any, frequencies: Sequence[float],
     quads = (8 * np.arange(boxes)[:, None, None] + sides[None]).reshape(-1, 4)
     faces = np.hstack([np.full((len(quads), 1), 4), quads]).ravel()
     mesh = pv.PolyData(corners.reshape(-1, 3), faces=faces)
-    # the value colours every face of its box — pinned 0..1, the same
+    # the value colors every face of its box — pinned 0..1, the same
     # scale as the flat grid, never the matrix's own extremes
     mesh.cell_data['mac'] = np.repeat(matrix.ravel(), 6)
     plotter.add_mesh(mesh, scalars='mac', cmap='viridis', clim=(0.0, 1.0),
@@ -227,7 +227,7 @@ def add_mac_bars(plotter: Any, frequencies: Sequence[float],
     # committed matches wear the flat grid's red checker — on every
     # face, so the mark reads from whatever side the camera looks: an
     # outline alone vanished against the viridis field there, and a
-    # top-only mark vanished behind a taller neighbour here
+    # top-only mark vanished behind a taller neighbor here
     checker_points, checker_faces = [], []
 
     def checker_face(origin, along, up):

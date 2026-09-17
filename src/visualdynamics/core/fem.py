@@ -1,7 +1,7 @@
 """A beam finite element model, and the eigensolution it gives.
 
 visualdynamics is an analysis toolset, so this is deliberately the smallest
-modelling capability that produces something worth analysing: three-dimensional
+modeling capability that produces something worth analyzing: three-dimensional
 two-node beams and lumped masses, assembled into mass and stiffness matrices
 and solved for real normal modes. It exists because a demonstration needs a
 *truth* model — a dense analytical answer the measured one can be compared
@@ -16,28 +16,28 @@ modes, and `visualdynamics.demo.drone` is built that way throughout.
 
 What it is not: a general finite element code. There are no shells, no
 solids, no constraints beyond fixing degrees of freedom, and no static
-solution. A plate is modelled the way a frame is, as a grillage of beams,
-which is a real modelling choice with a known cost rather than an
+solution. A plate is modeled the way a frame is, as a grillage of beams,
+which is a real modeling choice with a known cost rather than an
 approximation hidden inside an element. Wiring a surface mesh's edges is the
 same bargain: it answers what order of mode density and what mode families a
 shape has, and it does not pretend to be shell theory.
 
 Everything here is SI, because the mass and stiffness matrices are the one
 place in visualdynamics where several dimensions have to be consistent with each
-other at once — a length in millimetres beside a modulus in pascals is not
+other at once — a length in millimeters beside a modulus in pascals is not
 wrong in any single entry, it is wrong only in the answer. The objects that
 come out (`Geometry`, `ShapeSet`) carry their units declared, so the
 conversion happens once, at the boundary, as it does everywhere else.
 
     from visualdynamics import fem
 
-    aluminium = fem.Material('aluminium', youngs_modulus=70e9, density=2700)
+    aluminum = fem.Material('aluminum', youngs_modulus=70e9, density=2700)
     tube = fem.Section.round_tube('16 mm tube', outer=0.016, wall=0.001)
 
     model = fem.Model('cantilever')
     for i in range(11):
         model.add_node(100 + i, i * 0.1, 0.0, 0.0)
-    model.add_chain(range(100, 111), aluminium, tube)
+    model.add_chain(range(100, 111), aluminum, tube)
     shapes = model.eigensolution(maximum_frequency=2000,
                                  fixed=['100'], damping=0.01)
 
@@ -93,7 +93,7 @@ class Material:
     """An isotropic elastic material.
 
     Shear modulus is derived from the modulus and Poisson's ratio unless it
-    is given: for carbon fibre laminates the isotropic relation is a poor
+    is given: for carbon fiber laminates the isotropic relation is a poor
     guess and the torsional stiffness it implies can be out by a factor of
     two, so the door is left open to state it.
     """
@@ -261,7 +261,7 @@ class Face:
     group: str = ''
 
 
-def connected_pieces(neighbours: dict[int, set[int]]) -> list[list[int]]:
+def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
     """The connected components of an adjacency map, largest first.
 
     One piece is a structure; more than one is that many free bodies,
@@ -272,7 +272,7 @@ def connected_pieces(neighbours: dict[int, set[int]]) -> list[list[int]]:
     """
     seen: set[int] = set()
     found: list[list[int]] = []
-    for start in neighbours:
+    for start in neighbors:
         if start in seen:
             continue
         stack, piece = [start], []
@@ -282,7 +282,7 @@ def connected_pieces(neighbours: dict[int, set[int]]) -> list[list[int]]:
                 continue
             seen.add(node)
             piece.append(node)
-            stack.extend(neighbours[node] - seen)
+            stack.extend(neighbors[node] - seen)
         found.append(sorted(piece))
     return sorted(found, key=len, reverse=True)
 
@@ -520,17 +520,17 @@ class Model:
         fixture, meshed and wired through its own tracelines, turned out
         to be three: the fuselage, a wing and the tail, none joined.
         """
-        neighbours: dict[int, set[int]] = {n: set() for n in self.node_ids}
+        neighbors: dict[int, set[int]] = {n: set() for n in self.node_ids}
         for beam in self.beams:
-            if beam.node_a in neighbours and beam.node_b in neighbours:
-                neighbours[beam.node_a].add(beam.node_b)
-                neighbours[beam.node_b].add(beam.node_a)
+            if beam.node_a in neighbors and beam.node_b in neighbors:
+                neighbors[beam.node_a].add(beam.node_b)
+                neighbors[beam.node_b].add(beam.node_a)
         for plate in self.plates:
             for k, node in enumerate(plate.nodes):
                 other = plate.nodes[(k + 1) % 4]
-                neighbours[node].add(other)
-                neighbours[other].add(node)
-        return connected_pieces(neighbours)
+                neighbors[node].add(other)
+                neighbors[other].add(node)
+        return connected_pieces(neighbors)
 
     def wire_faces(self, material: Material, section: Section,
                    color: int = 1, group: str = '') -> int:
@@ -640,7 +640,7 @@ class Model:
     def group(self, node: int) -> str:
         """What this node was added as part of — 'arm 2', 'top deck'.
 
-        A label for the modeller's own use: nothing here reads it, but
+        A label for the modeler's own use: nothing here reads it, but
         working out which part of a structure a mode lives in is the first
         question asked of any result, and reconstructing it from
         coordinates afterwards is guesswork.
@@ -735,14 +735,14 @@ class Model:
         Written down from the node positions rather than found from the
         matrices: they are what the null space of an unconstrained
         stiffness matrix *is*, and knowing them in advance is what lets a
-        rigid mode be recognised as rigid rather than as a very soft one.
+        rigid mode be recognized as rigid rather than as a very soft one.
         """
         n = self.num_dof
         solved = self.node_ids
         vectors = np.zeros((n, 6), dtype=np.float64)
-        centre = np.mean(np.array([self._nodes[k] for k in solved]), axis=0)
+        center = np.mean(np.array([self._nodes[k] for k in solved]), axis=0)
         for i, node in enumerate(solved):
-            offset = self._nodes[node] - centre
+            offset = self._nodes[node] - center
             for axis in range(3):
                 vectors[6 * i + axis, axis] = 1.0            # translations
                 # a small rotation about `axis` moves a point by the cross
@@ -952,7 +952,7 @@ def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
     something — and a genuine mechanism (a node nothing connects to, a
     hinge built by accident) is found on the same footing as rigid-body
     motion. Both really are at zero frequency; the distinction between
-    them is a modelling question, not a numerical one.
+    them is a modeling question, not a numerical one.
     """
     energy = np.sum(shapes * (stiffness @ shapes), axis=0)
     # the same sum with every cancellation removed: how big the terms were

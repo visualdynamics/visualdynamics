@@ -631,7 +631,7 @@ def test_the_164_says_which_system_the_file_is_in(tmp_path):
     assert 'Inch' in header
     factors = text.split('   164')[1].splitlines()[2].replace('D', 'E').split()
     assert float(factors[0]) == pytest.approx(1 / 0.0254, rel=1e-9), \
-        'inches per metre'
+        'inches per meter'
     assert float(factors[1]) == pytest.approx(1 / 4.4482216152605, rel=1e-9), \
         'pounds force per newton'
 

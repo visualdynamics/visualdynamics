@@ -230,7 +230,7 @@ def _stage_meshes(window, prefix):
 def test_the_stage_keeps_its_3d_reading_under_the_filter(window, pump):
     """Brandon selected the filter with 3-D up and the view dropped to
     2-D (2026-08-25). That was my override forcing the drawing flat —
-    a judgement about occlusion made without drawing it, and a view
+    a judgment about occlusion made without drawing it, and a view
     choice silently overruling another view choice, which this
     interface does not do. Both readings stand now."""
     _record(window, pump)
@@ -283,15 +283,15 @@ def test_the_filtered_data_takes_the_ink_and_the_raw_stands_back(window,
                                                                 pump):
     """Brandon, 2026-08-25: the filtered record is what is being
     decided, so it carries the level colormap on the stage and the
-    channel colours flat, while the raw record — the reference —
-    stands back in grey. The first pass had it inverted."""
+    channel colors flat, while the raw record — the reference —
+    stands back in gray. The first pass had it inverted."""
     from visualdynamics.theme import theme as resolve_theme
 
     _record(window, pump)
     pane = window.data_pane
-    grey = resolve_theme(window.theme_name)['specification_curve']
+    gray = resolve_theme(window.theme_name)['specification_curve']
 
-    # on the stage: the raw ribbon is flat grey, the twin is scalared
+    # on the stage: the raw ribbon is flat gray, the twin is scalared
     _toggle_filter(window, pump)
     plotter = pane.waterfall_plotter
     twin = plotter.actors['marks-filter'].mapper.dataset
@@ -299,14 +299,14 @@ def test_the_filtered_data_takes_the_ink_and_the_raw_stands_back(window,
         'the twin is drawn on the level colormap'
     raw = plotter.actors['waterfall'].mapper
     assert raw.scalar_visibility in (0, False), \
-        'the raw ribbon stands back in one colour, off the colormap'
+        'the raw ribbon stands back in one color, off the colormap'
 
-    # and flat: the sources go grey, the previews take the palette
+    # and flat: the sources go gray, the previews take the palette
     _flat(window, pump)
     overlay = window.filter_overlays[0]
-    assert overlay._sources[0].opts['pen'].color().name() == grey
-    preview_colour = overlay._previews[0].opts['pen'].color().name()
-    assert preview_colour != grey, 'the filtered curve keeps its colour'
+    assert overlay._sources[0].opts['pen'].color().name() == gray
+    preview_color = overlay._previews[0].opts['pen'].color().name()
+    assert preview_color != gray, 'the filtered curve keeps its color'
 
 
 def test_putting_the_filter_away_takes_the_twins_with_it(window, pump):
@@ -320,9 +320,9 @@ def test_putting_the_filter_away_takes_the_twins_with_it(window, pump):
         'a preview cannot outlive the view that asked for it'
 
 
-def test_the_preview_colour_is_outside_the_colormap_it_overlays():
+def test_the_preview_color_is_outside_the_colormap_it_overlays():
     """Measured, not judged by eye (Brandon, 2026-08-25): the first
-    preview colour was green, chosen against the 2-D palette, and on
+    preview color was green, chosen against the 2-D palette, and on
     the stage it disappeared — viridis runs purple, teal, *green*,
     yellow, so the twin sat inside the very colormap it had to stand
     out from. Pinned as a distance so a future palette edit cannot
@@ -549,7 +549,7 @@ def test_a_discrete_change_still_rebuilds_at_once(window, pump):
 
 def test_the_kind_choice_shows_only_what_applies(window, pump):
     """Principle 3: a low-pass shows one corner, a band-pass its two
-    edges — never a greyed pair of controls that cannot be used."""
+    edges — never a grayed pair of controls that cannot be used."""
     _record(window, pump)
     panel = _toggle_filter(window, pump).filter_panel
     assert panel.kind_box.currentText() == 'Low-pass'
@@ -633,7 +633,7 @@ def test_a_band_pass_cannot_state_crossed_edges(window, pump):
 
 def test_the_panel_applies_the_filter_it_is_drawing(window, pump):
     """The act where its settings are set (Brandon, 2026-08-28): the
-    button replaced a note apologising that the record was made
+    button replaced a note apologizing that the record was made
     elsewhere, and makes exactly the filter on show."""
     _record(window, pump)
     panel = _toggle_filter(window, pump).filter_panel

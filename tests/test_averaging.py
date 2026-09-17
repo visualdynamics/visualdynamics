@@ -1,7 +1,7 @@
 """Cutting a time history into frames before averaging it.
 
 Five independent numbers — start, frame length, overlap, window, frame
-count — and everything else derived from them. The maths is held to
+count — and everything else derived from them. The math is held to
 scipy's Welch, which is the reference every text agrees on; the rest of
 these hold the derivations and the refusals.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from visualdynamics.core.averaging import Averaging, normalise_window, window_shape
+from visualdynamics.core.averaging import Averaging, normalize_window, window_shape
 from visualdynamics.core.data import TimeHistory
 
 RATE = 1024.0
@@ -54,8 +54,8 @@ def test_no_averaging_is_every_record_its_own_frame():
     an average, so the two spellings have to agree exactly."""
     history = noisy_tone()
     implied = history.compute_psds()
-    spelt = history.compute_psds(Averaging.for_records(SAMPLES))
-    assert np.allclose(implied.ordinate, spelt.ordinate)
+    spelled = history.compute_psds(Averaging.for_records(SAMPLES))
+    assert np.allclose(implied.ordinate, spelled.ordinate)
 
 
 def test_frames_are_pooled_across_records():
@@ -84,15 +84,15 @@ def test_a_window_is_periodic_not_symmetric():
 
 
 def test_a_window_is_named_however_a_file_names_it():
-    assert normalise_window('Hann') == 'hann'
-    assert normalise_window('hanning') == 'hann'
+    assert normalize_window('Hann') == 'hann'
+    assert normalize_window('hanning') == 'hann'
     # scipy's spelling is the canonical one since 2026-08-28; the
     # engineering spelling stays an alias
-    assert normalise_window('rectangle') == 'boxcar'
-    assert normalise_window('boxcar') == 'boxcar'
-    assert normalise_window(None) == 'boxcar', 'no window is no window'
+    assert normalize_window('rectangle') == 'boxcar'
+    assert normalize_window('boxcar') == 'boxcar'
+    assert normalize_window(None) == 'boxcar', 'no window is no window'
     with pytest.raises(ValueError, match='unknown window'):
-        normalise_window('gaussian')
+        normalize_window('gaussian')
 
 
 def test_the_hop_and_the_span_follow_from_the_rest():
@@ -196,7 +196,7 @@ def test_a_modal_run_brings_its_own_averaging():
 
 
 def test_a_random_run_brings_the_control_loop_settings():
-    """frames_in_cpsd, cpsd_overlap, cpsd_window — and 'Hann' normalised."""
+    """frames_in_cpsd, cpsd_overlap, cpsd_window — and 'Hann' normalized."""
     averaging = imported('random.nc4').averaging
     assert averaging.frame_length == 2048
     assert averaging.frames == 10
@@ -245,7 +245,7 @@ def test_computing_uses_what_the_file_said():
 # ---- a capture that is already cut into frames --------------------------
 
 
-def test_a_frame_per_record_run_is_recognised_as_already_split():
+def test_a_frame_per_record_run_is_recognized_as_already_split():
     """The controller saved each average as its own record, so the frame
     length and the count are the file's, not the user's."""
     history = imported('modal_spectra.nc4')
@@ -321,7 +321,7 @@ def test_the_window_is_still_the_users_when_the_frames_are_fixed():
     plain = history.compute_psds(Averaging.for_records(samples))
     hann = history.compute_psds(Averaging.for_records(samples, 'hann'))
     assert not np.allclose(plain.ordinate, hann.ordinate), (
-        'the window reached the maths')
+        'the window reached the math')
 
 
 def test_a_record_shaped_averaging_leaves_nothing_else_to_choose():
@@ -489,7 +489,7 @@ def test_detrend_levels_each_frame_before_its_window():
 
 def test_detrend_mean_matches_scipy_welch():
     """The whole point of offering it under scipy's meaning: same
-    frames, same window, same levelling, same numbers."""
+    frames, same window, same leveling, same numbers."""
     from scipy.signal import welch
 
     from visualdynamics.core.data import TimeHistory
@@ -515,7 +515,7 @@ def test_detrend_mean_matches_scipy_welch():
 def test_the_blackman_harris_window_joined_under_scipys_name():
     from scipy.signal import get_window
 
-    assert normalise_window('blackman-harris') == 'blackmanharris'
+    assert normalize_window('blackman-harris') == 'blackmanharris'
     assert np.array_equal(window_shape('blackmanharris', 512),
                           get_window('blackmanharris', 512, fftbins=True))
 

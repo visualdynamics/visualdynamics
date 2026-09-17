@@ -88,7 +88,7 @@ arrays under plural names, and a row under its singular — so both of
 these move a node:
 
 ```python
-geometry.nodes.xyz[:, 2] += 0.5      # every node up half a metre
+geometry.nodes.xyz[:, 2] += 0.5      # every node up half a meter
 geometry.nodes[0].xyz = [0, 0.1, 0]  # one of them, in place
 ```
 
@@ -151,7 +151,7 @@ of the settings it read (the averaging, the shock windows, or a digest
 of the source's own content). Change the settings afterwards and the
 derived objects report themselves stale, each with the reason. (A
 modal fit, a projection onto the Basis and a sine extraction are
-judgement calls rather than recomputations, and record none.)
+judgment calls rather than recomputations, and record none.)
 
 ```python
 history.averaging = replace(history.averaging, frames=8)
@@ -275,7 +275,7 @@ Select objects in the tree and press **Cmd+C** (Mac) or **Ctrl+C**
 - **Paste back into the tree** (Cmd+V / Ctrl+V) and each object is
   duplicated beside its original, named `… copy`, numbered if that is
   taken. A copy is its own object — its arrays are independent — and
-  it is journalled as `project.duplicate(...)`, the verb a script calls.
+  it is journaled as `project.duplicate(...)`, the verb a script calls.
 - **Paste into a folder** in Finder or Explorer and each object lands
   as its own file, named for the object — an export with no dialog. A
   channel table lands as a spreadsheet and a photo set as a folder of

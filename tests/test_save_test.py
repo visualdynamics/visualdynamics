@@ -193,7 +193,7 @@ def test_no_row_is_lost_when_the_links_overlap(window, pump):
     line, for the failure that is silent data loss.
     """
     _modal_project(window, pump)
-    # A *complete* project, which the real one was: with grey slots
+    # A *complete* project, which the real one was: with gray slots
     # still showing there are spare rows for the doubled positions to
     # land on, and the loss does not show. Forty-five objects and
     # nothing missing is exactly the case with no slack in it.

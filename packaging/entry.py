@@ -2,7 +2,7 @@
 
 A frozen build has no console script, so `visualdynamics-gui` — the entry
 point in `pyproject.toml` — is not available to it. This is the same
-call, reachable as a file for PyInstaller to analyse.
+call, reachable as a file for PyInstaller to analyze.
 
 `freeze_support` first and unconditionally: anything here that starts a
 process (VTK does, on some paths) re-executes this file in the child,

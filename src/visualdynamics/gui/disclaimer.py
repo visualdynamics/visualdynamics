@@ -45,7 +45,7 @@ TEXT = (
     '<a href="mailto:contact@visualdynamics.org">contact@visualdynamics.org</a>.</p>'
 )
 
-ACKNOWLEDGEMENT = 'I understand that results are to be checked'
+ACKNOWLEDGMENT = 'I understand that results are to be checked'
 
 
 class Disclaimer(QDialog):
@@ -65,7 +65,7 @@ class Disclaimer(QDialog):
             Qt.TextInteractionFlag.TextBrowserInteraction)
         self.notice.setMaximumWidth(520)
         layout.addWidget(self.notice)
-        self.acknowledged: QCheckBox = QCheckBox(ACKNOWLEDGEMENT)
+        self.acknowledged: QCheckBox = QCheckBox(ACKNOWLEDGMENT)
         layout.addWidget(self.acknowledged)
         self.buttons: QDialogButtonBox = QDialogButtonBox()
         self.continue_button: QPushButton = self.buttons.addButton(
@@ -81,7 +81,7 @@ class Disclaimer(QDialog):
 
     def accept(self) -> None:
         # the keyboard can reach Continue while it is disabled (Enter on
-        # the default button); the acknowledgement is what admits
+        # the default button); the acknowledgment is what admits
         if not self.acknowledged.isChecked():
             return
         super().accept()

@@ -511,7 +511,7 @@ def test_picked_tones_restrict_the_plot(window, pump):
     window.render_current()
     pump()
     assert _curve_count(window) == 1, \
-        'the flat reading honours the same pick'
+        'the flat reading honors the same pick'
 
 
 def test_the_comparison_stage_aligns_the_two_clocks():
@@ -554,7 +554,7 @@ def test_the_comparison_stage_aligns_the_two_clocks():
         'measured and required share the clock'
 
 
-def test_exceeding_lines_wear_the_abort_colours_on_the_stage():
+def test_exceeding_lines_wear_the_abort_colors_on_the_stage():
     """A level driven over the upper abort marks those lines red on
     the stage, exactly as the 2-D comparison boxes them — and a level
     inside the band marks nothing."""

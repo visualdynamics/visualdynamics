@@ -18,7 +18,7 @@ tests are run (Brandon, 2026-09-05). So a pair the specification
 does not hold is written as the controller's own targets carry it,
 a zero, and the file says which those were: `held`, an `(n, n)`
 mask of the cross terms the specification actually held, which the
-controller ignores and this reader honours, so a zero that was
+controller ignores and this reader honors, so a zero that was
 never stated does not come back as a statement of independence. A
 Hermitian half is completed, as the transform allows. The file has
 nowhere to record units, so values go out in the unit system asked

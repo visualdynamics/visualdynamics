@@ -124,10 +124,10 @@ def test_colormap_shares_one_scalar_array_across_every_mesh(model):
     assert moving.magnitude is not None
     assert len(moving.meshes) > 1
     assert all(mesh.GetPointData().GetScalars() is moving.scalars_source
-               for mesh in moving.meshes), 'one write must recolour them all'
+               for mesh in moving.meshes), 'one write must recolor them all'
 
 
-def test_colours_follow_the_phase_and_go_dark_at_the_crossing(model):
+def test_colors_follow_the_phase_and_go_dark_at_the_crossing(model):
     geometry, deflection = _mode(model)
     moving = animator(geometry, deflection, colormap=True)
 
@@ -141,10 +141,10 @@ def test_colours_follow_the_phase_and_go_dark_at_the_crossing(model):
 
     moving.set_parameter(np.pi / 3)
     part_way = float(moving.magnitude.max())
-    assert 0 < part_way < at_peak, 'the colours pulse with the animation'
+    assert 0 < part_way < at_peak, 'the colors pulse with the animation'
 
 
-def test_the_colour_scale_is_fixed_to_the_furthest_the_model_ever_moves(model):
+def test_the_color_scale_is_fixed_to_the_furthest_the_model_ever_moves(model):
     geometry, deflection = _mode(model)
     moving = animator(geometry, deflection, colormap=True)
     assert deflection.peak_magnitude > 0

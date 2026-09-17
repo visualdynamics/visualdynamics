@@ -649,16 +649,16 @@ def frf_units_models(data: DataArray, records: Sequence[int] | None = None,
 
 # ---- geometry entities ------------------------------------------------------
 
-#: a column journalled by another surface — the units pane — declares
+#: a column journaled by another surface — the units pane — declares
 #: this: editable, and deliberately quiet here
-JOURNALLED_ELSEWHERE = 'elsewhere'
+JOURNALED_ELSEWHERE = 'elsewhere'
 
 
 def _elsewhere(_obj, _row, _text):
     return None
 
 
-_elsewhere.tag = JOURNALLED_ELSEWHERE
+_elsewhere.tag = JOURNALED_ELSEWHERE
 
 
 def _coordinate_setter(axis, unit_system):

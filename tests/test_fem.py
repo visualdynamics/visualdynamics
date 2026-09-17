@@ -45,7 +45,7 @@ def straight_beam(length, section, elements, material=STEEL, axis=(1.0, 0.0, 0.0
 
 
 def test_round_tube_reduces_to_a_rod():
-    """A tube whose wall reaches the centre is a solid rod: pi d^4 / 64."""
+    """A tube whose wall reaches the center is a solid rod: pi d^4 / 64."""
     rod = fem.Section.rod('rod', 0.02)
     assert rod.area == pytest.approx(math.pi * 0.01 ** 2)
     assert rod.iy == pytest.approx(math.pi * 0.02 ** 4 / 64)
@@ -120,12 +120,12 @@ def test_cantilever_axial_and_torsional_series():
     torsion = math.sqrt(STEEL.shear_modulus / STEEL.density) / (4 * length)
 
     # Identify them by what moves. On a round rod both are uncoupled from
-    # bending, so each is recognisable without comparing a metre against a
+    # bending, so each is recognizable without comparing a meter against a
     # radian: the axial mode translates along X and hardly at all across
     # it, and the torsional one twists about X while translating nothing.
-    def find(recognise):
+    def find(recognize):
         for frequency, shape in zip(shapes.frequency, shapes.shape_matrix):
-            if recognise(_participation(model, shape)):
+            if recognize(_participation(model, shape)):
                 return frequency
         return None
 
@@ -181,7 +181,7 @@ def test_a_rigid_body_mode_is_exactly_zero_not_merely_small():
     assert list(frequency[:6]) == [0.0] * 6
 
 
-def test_the_rigid_modes_are_recognised_on_a_soft_structure_too():
+def test_the_rigid_modes_are_recognized_on_a_soft_structure_too():
     """The test is projection onto the null space, not a threshold on the
     frequency: a floppy model's first elastic mode can be lower than a
     stiff one's numerical zero, and a frequency cutoff would confuse them."""
@@ -441,7 +441,7 @@ def _participation(model, shape):
     """How much of the shape lies in each of the six directions.
 
     Kept as six numbers rather than reduced to a winner, because the first
-    three are metres and the last three radians: comparing across that
+    three are meters and the last three radians: comparing across that
     divide is meaningless, and a helper that did it silently called a
     cantilever's first bending mode a rotation."""
     total = np.zeros(6)
@@ -656,7 +656,7 @@ def test_a_member_takes_its_section_from_the_block_of_its_element():
              if b.section.name == 'blade'}
     assert stiff == {frozenset(e) for e in ((5, 7), (7, 8), (8, 6), (6, 5))}, (
         'the prop quad\'s own edges — including the two that touch the '
-        'seam, whose end nodes are labelled frame')
+        'seam, whose end nodes are labeled frame')
     # 5-6 is in both quads and can only be one member, so it keeps the
     # section of whichever element wired it first — the prop here. An
     # edge, unlike a node, is at least never split between two answers.
@@ -669,7 +669,7 @@ def test_a_seam_node_belongs_to_the_block_holding_most_of_its_elements():
     """The label names the part a node is *in* — what a mode is read
     against and where a sensor goes. First claim rather than a majority
     emptied the parts that sit between others: the drone's canopy is
-    ringed by six neighbours and came back with a single node in it."""
+    ringed by six neighbors and came back with a single node in it."""
     model = fem.Model.from_geometry(two_block_strip(), MASSLESS, MEMBER,
                                     total_mass=1.0)
     groups = {node: model.group(node) for node in model.node_ids}
@@ -712,7 +712,7 @@ def test_a_saved_geometry_alone_rebuilds_the_model(tmp_path):
 def test_a_geometry_with_no_blocks_still_rebuilds_as_one_part():
     """Most formats do not record the question, so the mesh arrives as one
     unnamed block — and the model must still build, every member on the
-    one section and every node unlabelled. Nothing invents a division."""
+    one section and every node unlabeled. Nothing invents a division."""
     strip = two_block_strip()
     plain = Geometry(node_id=strip.node_id, node_xyz=strip.node_xyz,
                      elem_id=strip.elem_id, elem_conn=strip.elem_conn,

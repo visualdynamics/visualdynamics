@@ -4,7 +4,7 @@ Many channels on one 2-D axis hide each other exactly where it matters
 most — resonances line up, and the tenth curve lands on the first nine.
 The waterfall spreads the records along a depth axis instead: one
 polyline per record at its own station, wearing the same label the
-grids and the legend use, coloured by level so a peak reads across the
+grids and the legend use, colored by level so a peak reads across the
 whole set at once.
 
 numpy and PyVista only — no Qt, like the rest of `viz`. Two decisions
@@ -21,7 +21,7 @@ carry the size ceiling:
 The scene is drawn on a fixed stage (`STAGE`) rather than in data
 coordinates — a PSD spans decades while its frequency axis spans
 kilohertz, and raw coordinates would draw a needle — and the axes are
-relabelled with the real ranges (`axes_ranges`), the vertical one in
+relabeled with the real ranges (`axes_ranges`), the vertical one in
 log10 for data that reads on a log axis, which the axis title says.
 """
 
@@ -482,7 +482,7 @@ def add_waterfall(plotter: Any, data: DataArray,
     vertices the scene got — the number a size-ceiling test pins) and
     ``named`` (which drawn positions got a channel label) added.
 
-    `color` draws the ribbons flat in one colour instead of on the
+    `color` draws the ribbons flat in one color instead of on the
     level colormap: the stood-back reading, for a record shown as the
     reference for something else drawn over it — what the filter
     preview does with the raw record (Brandon, 2026-08-25). The
@@ -533,7 +533,7 @@ def add_waterfall(plotter: Any, data: DataArray,
             plotter.add_mesh(mesh, color=color, line_width=2,
                              show_scalar_bar=False, name='waterfall')
         else:
-            # clim is the stage's own range, so the colour scale and the
+            # clim is the stage's own range, so the color scale and the
             # vertical axis are one scale — for pinned data (a
             # coherence's 0..1.05) as much as for data spanning its own
             # extremes
@@ -547,7 +547,7 @@ def add_waterfall(plotter: Any, data: DataArray,
             shape=None, fill_shape=False, show_points=False,
             name='waterfall-labels')
     if total:
-        # the stage relabelled with the real ranges. The depth axis
+        # the stage relabeled with the real ranges. The depth axis
         # keeps its grid but not its numbers: the channel names on the
         # curves are its labels
         # use_3d_text=False: the default vector text is ASCII-only and

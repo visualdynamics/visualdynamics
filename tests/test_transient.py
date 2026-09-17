@@ -116,7 +116,7 @@ def test_the_report_compares_two_waveforms():
 
     What stays absent: the share of a band outside abort limits (that
     wants limits, and a target waveform carries none), and any SRS —
-    that is the shock report's judgement, and its deviation bars live
+    that is the shock report's judgment, and its deviation bars live
     there now.
     """
     report = transient_template({})
@@ -128,7 +128,7 @@ def test_the_report_compares_two_waveforms():
     modes = [block.get('mode') for block in report.blocks
              if block.get('kind') == 'bars']
     # the level's RMS reading follows its spectra, and the waveform
-    # bars come after — spectral data before computed judgements
+    # bars come after — spectral data before computed judgments
     # (Brandon, 2026-08-23)
     # and the kurtosis of the record itself, which every report
     # carries now (Brandon, 2026-08-24)

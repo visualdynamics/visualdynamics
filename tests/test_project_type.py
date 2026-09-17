@@ -1,7 +1,7 @@
-"""Project types: grey slots for what a report of that kind expects.
+"""Project types: gray slots for what a report of that kind expects.
 
 Setting a project type lists every object the report needs; missing
-ones show as grey placeholders that disappear as the real objects
+ones show as gray placeholders that disappear as the real objects
 arrive, offer to compute themselves where the data allows, and ride
 the project file so a reopened project remembers what it is.
 """
@@ -84,7 +84,7 @@ def test_every_type_expects_the_report_itself_last(project_type):
 
     A project holding everything a report draws from and no report is
     not a finished project, so the report is a slot like the others —
-    grey until it is generated, and last, because it is what the others
+    gray until it is generated, and last, because it is what the others
     add up to.
     """
     expectations = project_expectations(project_type)
@@ -255,7 +255,7 @@ def test_a_typed_project_generates_its_own_report(window, pump):
 
 
 def test_the_report_slot_fills_itself(window, pump):
-    """The grey Report slot is the one click that makes the report.
+    """The gray Report slot is the one click that makes the report.
 
     The type already says which report, so there is nothing to choose —
     the slot names what is missing and offers to be it.
@@ -296,7 +296,7 @@ def test_placeholders_never_pollute_the_selection(window, pump):
     references = window.selected_references()
     assert all(kind != 'placeholder' for kind, *_rest in references)
     window.render_current()
-    pump()     # nothing to assert beyond not crashing on grey slots
+    pump()     # nothing to assert beyond not crashing on gray slots
 
 
 def test_a_random_report_is_not_finished_without_the_octave_bands():

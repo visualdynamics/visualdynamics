@@ -13,7 +13,7 @@ Coherence, Spectra) — each calling the project verb a script calls,
 with whatever is set at that moment (principle 13).
 
 A capture the controller already cut into frames arrives with its frame
-length and count settled by the file. The panel shows them, greyed, and
+length and count settled by the file. The panel shows them, grayed, and
 leaves only the window live — there is no second frame inside a record
 to overlap with, and nowhere for the start to go.
 """
@@ -46,7 +46,7 @@ class AveragingPanel(QWidget):
     #: a parameter moved; here is the averaging that describes it now
     changed = Signal(object)
 
-    #: the user asked for the spectra these frames parameterise —
+    #: the user asked for the spectra these frames parameterize —
     #: the act lives where its settings are set (Brandon, 2026-08-28)
     psds_asked = Signal()
     cpsds_asked = Signal()
@@ -99,7 +99,7 @@ class AveragingPanel(QWidget):
         self.window_box.setToolTip(
             'The shape each frame is multiplied by before its FFT')
 
-        # the one box a parameterised window brings with it — tukey's
+        # the one box a parameterized window brings with it — tukey's
         # alpha, kaiser's beta — shown only while such a window is
         # chosen (principle 3), its label restated to the parameter's
         # own name so the row never needs a second glance
@@ -115,7 +115,7 @@ class AveragingPanel(QWidget):
         for key in DETRENDS:
             self.detrend_box.addItem(key.capitalize(), key)
         self.detrend_box.setToolTip(
-            'How each frame is levelled before its window: nothing '
+            'How each frame is leveled before its window: nothing '
             '(the convention here and in sdynpy), its own mean '
             'removed (what scipy’s welch does by default), or a '
             'least-squares line taken out — for a record whose drift '
@@ -163,7 +163,7 @@ class AveragingPanel(QWidget):
         grid.addWidget(self.detect_button, len(rows) + 2 + len(derived),
                        0, 1, 2)
 
-        # the acts these frames parameterise, right where they are
+        # the acts these frames parameterize, right where they are
         # set — deciding the framing and computing from it are one
         # intent, not a trip through the tree (Brandon, 2026-08-28)
         self.psds_button: QPushButton = QPushButton('Compute PSDs')
@@ -325,7 +325,7 @@ class AveragingPanel(QWidget):
         the parameter's own name, the range its documented span, and
         the row is absent entirely for the windows that take none
         (principle 3). `adopt_default` seeds the documented value —
-        for the moment a parameterised window is *chosen*, never for a
+        for the moment a parameterized window is *chosen*, never for a
         restate of one already set."""
         settings = WINDOW_PARAMETERS.get(self.window_box.currentData())
         offered = settings is not None
@@ -393,7 +393,7 @@ class AveragingPanel(QWidget):
         # much as on a stream. The frames the controller wrote are what
         # it averaged, and they are the right default — but they are not
         # the only reading of the record. A burst-random capture is half
-        # excitation and half ringdown, and analysing the burst alone,
+        # excitation and half ringdown, and analyzing the burst alone,
         # or putting an exponential window on the decay, is an ordinary
         # thing to want and used to be impossible here.
         #
@@ -423,7 +423,7 @@ class AveragingPanel(QWidget):
             self.note.setText(
                 f'The file saved each average as its own record: '
                 f'{self.records} records of {self.samples} samples'
-                + ('. Shorten the frame or move its start to analyse '
+                + ('. Shorten the frame or move its start to analyze '
                    'part of each one.' if whole else
                    f', read {averaging.frame_length} samples at a time.'))
         elif self.records > 1:

@@ -1,7 +1,7 @@
 """Light/dark theme colors shared by the 3D view, 2D plots, and the GUI —
 and the one answer to "which is it right now".
 
-The colours are for the things visualdynamics draws itself (the VTK
+The colors are for the things visualdynamics draws itself (the VTK
 scene and the pyqtgraph plots); Qt's own widgets take theirs from the
 application palette. Which scheme applies is decided here too, in
 `system_scheme`: a statement for this launch (`VISUALDYNAMICS_THEME`,
@@ -36,21 +36,21 @@ LIGHT = {
     'row_error': '#c02a1f',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so
-    # these are the colours before alpha.
+    # these are the colors before alpha.
     'limit_warning': '#e6b800',
     'limit_abort': '#d13b2e',
     # the frames a PSD will be averaged over, shaded on the time
     # history they are cut from. The band is translucent, so that is the
-    # colour before alpha; the window drawn over each frame is warm on
+    # color before alpha; the window drawn over each frame is warm on
     # purpose — a blue mark over blue traces reads as another channel
     # a measured line that went outside an abort limit, shaded over its
     # own bin: red where it went over, blue where it fell under. Two
-    # colours because which way it went is the first thing to know,
+    # colors because which way it went is the first thing to know,
     # and stronger than the zone shading they sit inside
     # a specification and the response it bounds, drawn as a pair: the
-    # response in the foreground colour because it is what is being
-    # looked at, the specification in grey behind it because it is the
-    # reference. Neither takes a palette colour — there is only ever
+    # response in the foreground color because it is what is being
+    # looked at, the specification in gray behind it because it is the
+    # reference. Neither takes a palette color — there is only ever
     # one pair on the plot, so there is nothing to tell apart.
     'response_curve': '#1c1c1e',
     'specification_curve': '#8a8a8f',
@@ -64,7 +64,7 @@ LIGHT = {
     # on the stage — viridis runs purple, teal, *green*, yellow, so a
     # green twin sat inside the very colormap it had to stand out
     # from (49 units from the nearest stop, against magenta's 203).
-    # Magenta is in neither the colormap nor the mark colours.
+    # Magenta is in neither the colormap nor the mark colors.
     'filter_preview': '#b5179e',
 }
 
@@ -83,21 +83,21 @@ DARK = {
     'row_error': '#ff6b61',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so
-    # these are the colours before alpha.
+    # these are the colors before alpha.
     'limit_warning': '#ffcc33',
     'limit_abort': '#ff6b61',
     # the frames a PSD will be averaged over, shaded on the time
     # history they are cut from. The band is translucent, so that is the
-    # colour before alpha; the window drawn over each frame is warm on
+    # color before alpha; the window drawn over each frame is warm on
     # purpose — a blue mark over blue traces reads as another channel
     # a measured line that went outside an abort limit, shaded over its
     # own bin: red where it went over, blue where it fell under. Two
-    # colours because which way it went is the first thing to know,
+    # colors because which way it went is the first thing to know,
     # and stronger than the zone shading they sit inside
     # a specification and the response it bounds, drawn as a pair: the
-    # response in the foreground colour because it is what is being
-    # looked at, the specification in grey behind it because it is the
-    # reference. Neither takes a palette colour — there is only ever
+    # response in the foreground color because it is what is being
+    # looked at, the specification in gray behind it because it is the
+    # reference. Neither takes a palette color — there is only ever
     # one pair on the plot, so there is nothing to tell apart.
     'response_curve': '#ffffff',
     'specification_curve': '#9a9aa2',
@@ -136,11 +136,11 @@ def theme(name: str | Mapping[str, str] | None = None) -> dict[str, str]:
 
 
 #: viridis, as the nine stops everything interpolates between. One
-#: colour scale, one set of numbers: the app paints a moving model by
+#: color scale, one set of numbers: the app paints a moving model by
 #: displacement on it, pyqtgraph draws its MAC grids and coherence
 #: maps on it, the app icon is drawn with it, and the report is handed
 #: these very stops rather than carrying a second copy in JavaScript —
-#: so a colour means one thing wherever it appears.
+#: so a color means one thing wherever it appears.
 VIRIDIS = ((68, 1, 84), (71, 44, 122), (59, 81, 139), (44, 113, 142),
            (33, 144, 141), (39, 173, 129), (92, 200, 99),
            (170, 220, 50), (253, 231, 37))

@@ -1,8 +1,8 @@
 """The cut, drawn on the record it will be made from.
 
 Two numbers do not tell you whether the kept stretch sits on the part
-of the record you meant. Drawn, it does: the discarded ends are greyed
-over — grey because cut-away data is reference, not subject — and the
+of the record you meant. Drawn, it does: the discarded ends are grayed
+over — gray because cut-away data is reference, not subject — and the
 span between them is the control, the averaging region's own grammar:
 take it by an edge to move that instant, by the middle to slide the
 whole window along the record.
@@ -24,7 +24,7 @@ from PySide6.QtGui import QColor
 
 from ..core.truncate import Truncation
 
-#: how solid the greyed-out ends are. Enough to read as "going away",
+#: how solid the grayed-out ends are. Enough to read as "going away",
 #: light enough that the trace under them can still be judged — the
 #: decision of where to cut is made by looking at exactly that data
 SHADE_ALPHA = 46

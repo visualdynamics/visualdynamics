@@ -11,8 +11,8 @@ actually reach.
 The frequency test is the one that earns its keep. The grid is 96 lines
 per octave — 0.72% apart — and the tone sits exactly on one of them, so
 the widely quoted `omega0 / 2*pi*s` approximation for the Morlet's
-centre frequency would put the peak nearly two lines out. At a coarser
-grid that bias hides inside the quantisation, which is exactly how it
+center frequency would put the peak nearly two lines out. At a coarser
+grid that bias hides inside the quantization, which is exactly how it
 survives in other people's code.
 """
 
@@ -34,10 +34,10 @@ def tone(frequency, count=8192, amplitude=1.0):
     return amplitude * np.sin(2 * np.pi * frequency * seconds(count))
 
 
-def grid_about(centre, octaves=1.0, per_octave=96):
-    """A frequency grid with `centre` exactly on a line."""
+def grid_about(center, octaves=1.0, per_octave=96):
+    """A frequency grid with `center` exactly on a line."""
     reach = int(octaves * per_octave)
-    return centre * 2.0 ** (np.arange(-reach, reach + 1) / per_octave)
+    return center * 2.0 ** (np.arange(-reach, reach + 1) / per_octave)
 
 
 # ---- the frequency a peak is reported at --------------------------------
@@ -59,14 +59,14 @@ def test_it_lands_there_wherever_the_tone_is(frequency):
     assert frequencies[middle.argmax()] == pytest.approx(frequency, rel=1e-9)
 
 
-def test_the_frequency_mapping_is_the_one_this_normalisation_needs():
+def test_the_frequency_mapping_is_the_one_this_normalization_needs():
     """The pairing, which is a single decision and not two.
 
-    This module normalises for amplitude, whose exact relation is
+    This module normalizes for amplitude, whose exact relation is
     `2*pi/omega0`. Torrence and Compo's `4*pi/(omega0 + sqrt(2+omega0**2))`
     is exact for unit *energy* — it is the one quoted everywhere, and
     it was in this file's first draft alongside the amplitude
-    normalisation, which is the mismatch the test below measures.
+    normalization, which is the mismatch the test below measures.
     """
     assert w.fourier_factor(6.0) == pytest.approx(2 * np.pi / 6.0, rel=1e-12)
 
@@ -98,9 +98,9 @@ def test_borrowing_the_other_conventions_mapping_would_bias_every_reading():
             omega[None, :] > 0.0)
     magnitude = np.abs(ifft(daughters * spectrum[None, :], axis=1))[:, 4096]
 
-    # the row labelled f would hold a *longer* wavelet than it should,
+    # the row labeled f would hold a *longer* wavelet than it should,
     # and a longer wavelet listens lower — so the tone is found on a row
-    # labelled above where it really is
+    # labeled above where it really is
     reported = frequencies[magnitude.argmax()]
     assert reported == pytest.approx(100.0 * w.fourier_factor() / energy_factor,
                                      rel=0.005)
@@ -176,8 +176,8 @@ def test_two_bursts_at_different_times_and_frequencies_are_told_apart():
 
 
 def test_the_magnitude_is_the_records_own_amplitude():
-    """The normalisation choice, pinned as a number. A 2 g tone reads 2,
-    so the colour bar can carry the record's units.
+    """The normalization choice, pinned as a number. A 2 g tone reads 2,
+    so the color bar can carry the record's units.
 
     Under the unit-energy convention this would read proportional to
     sqrt(scale) instead — the same tone four times taller at 50 Hz than
@@ -343,7 +343,7 @@ def test_two_tones_in_one_band_beat_at_their_difference(spacing):
     It is not the transform. A wavelet has a finite bandwidth — about
     `f/omega0` either side — and two tones inside it sum to an
     amplitude-modulated signal, exactly as they would through any
-    analogue filter of the same width. The ripple is at their
+    analog filter of the same width. The ripple is at their
     difference frequency, and it is in the record: band-passing that
     run at 380-420 Hz with no wavelet anywhere gives the same 50%
     modulation at the same 1.00 Hz.
@@ -363,9 +363,9 @@ def test_two_tones_in_one_band_beat_at_their_difference(spacing):
 
     middle = row[2000:-2000]
     assert middle.std() / middle.mean() > 0.1, 'it ripples'
-    centred = middle - middle.mean()
-    spectrum = np.abs(np.fft.rfft(centred * np.hanning(len(centred))))
-    found = np.fft.rfftfreq(len(centred), 1.0 / RATE)[spectrum.argmax()]
+    centered = middle - middle.mean()
+    spectrum = np.abs(np.fft.rfft(centered * np.hanning(len(centered))))
+    found = np.fft.rfftfreq(len(centered), 1.0 / RATE)[spectrum.argmax()]
     assert found == pytest.approx(spacing, rel=0.05), 'at their difference'
 
 
@@ -398,7 +398,7 @@ def test_the_reading_is_honest_close_to_nyquist(fraction):
     measured it (Brandon asked why his sweep stopped at 800 Hz,
     2026-08-28).
 
-    Amplitude, frequency and time localisation, because a defect could
+    Amplitude, frequency and time localization, because a defect could
     hide in any one of them: the Gaussian *is* truncated by the Nyquist
     edge up there, and what needed checking was whether the truncation
     takes anything but tail. It does not.
@@ -420,8 +420,8 @@ def test_the_reading_is_honest_close_to_nyquist(fraction):
         2 * np.pi * frequency * t)
     row = np.abs(w.scalogram(burst, RATE, grid))[
         np.argmin(np.abs(grid - frequency))]
-    centre = (t * row).sum() / row.sum()
-    assert centre == pytest.approx(at, abs=0.005), 'when it happened'
+    center = (t * row).sum() / row.sum()
+    assert center == pytest.approx(at, abs=0.005), 'when it happened'
 
 
 # ---- a long record: bounded memory, and a picture-sized reading ---------
@@ -452,7 +452,7 @@ def test_the_peak_reading_keeps_each_bins_largest_magnitude():
     assert times.shape == (256,)
     expected = full.reshape(len(frequencies), 256, 32).max(axis=2)
     np.testing.assert_allclose(held, expected, rtol=1e-12, atol=1e-12)
-    # each column's clock is the centre of its slice, so the first and
+    # each column's clock is the center of its slice, so the first and
     # last columns sit half a slice inside the record's ends
     np.testing.assert_allclose(times[0], 15.5 / RATE)
     np.testing.assert_allclose(times[-1], (8192 - 16.5) / RATE)

@@ -44,7 +44,7 @@ FADE_OPACITY = 0.45
 GLYPH_POINTS = 64
 #: the tick under each end of every window, as a fraction of the
 #: glyph height — the 2-D rail's own caps, telling a tapering
-#: window's stop from its neighbour's start
+#: window's stop from its neighbor's start
 CAP_SHARE = 0.35
 #: the grab disks on a window's floor edge, as a fraction of the
 #: stage width — small enough to leave the stage draggable for the
@@ -62,7 +62,7 @@ TILT = np.deg2rad(40.0)
 def _tilted(x, local, seat, forward=0.0):
     """Points in a disk's own plane, leaned back by TILT about x.
 
-    `local` rows are (dx, dy, dz) around the disk centre; the disk
+    `local` rows are (dx, dy, dz) around the disk center; the disk
     sits with its lowest rim grazing the floor, pushed `forward`
     (negative y) so it stands clear of the slab it adjusts — half a
     disk buried in the translucent box was half a disk that could
@@ -81,7 +81,7 @@ def _handle_icon(role, x, radius, lift, seat, forward):
     """The engraving on a handle's disk, in the disk's own plane.
 
     An arrow on an edge handle, pointing the way that edge extends
-    the window; a three-line grip on the centre, the classic 'this
+    the window; a three-line grip on the center, the classic 'this
     slides' glyph (Brandon, 2026-08-24).
     """
     import pyvista as pv
@@ -106,8 +106,8 @@ def _handle_icon(role, x, radius, lift, seat, forward):
 def _handles(plotter, xl, xh, colors, prefix, roles=('start', 'move',
                                                      'stop')):
     """Three grab disks on the slab's front floor edge: left edge,
-    centre, right edge — resize, move, resize, exactly the 2-D
-    region's own grammar. Grey buttons with engraved icons rather
+    center, right edge — resize, move, resize, exactly the 2-D
+    region's own grammar. Gray buttons with engraved icons rather
     than bare spheres (Brandon, 2026-08-24); the icons are not
     pickable, so a click on the engraving grabs the disk under it.
     """
@@ -144,7 +144,7 @@ def _add(plotter, mesh, **kwargs):
     The rail rides above the stage ceiling and the wall stands behind
     the last station, and pyvista refits the cube axes to the scene
     every time an actor arrives — so the first mark stretched the
-    axes' box while their labelled ranges stayed put, and the time
+    axes' box while their labeled ranges stayed put, and the time
     axis read wrong values (Brandon, 2026-08-24). Marks describe the
     stage; they must never resize it. The exclusion lands after the
     add (the refit inside `add_mesh` has already seen the actor), so
@@ -169,7 +169,7 @@ def _add(plotter, mesh, **kwargs):
 
 def _repin_axes(plotter, extents):
     """Refit the cube axes to the actors that still count, and restate
-    the labelled ranges from the extents the stage was drawn with.
+    the labeled ranges from the extents the stage was drawn with.
 
     `ComputeVisiblePropBounds` skips everything `UseBoundsOff` marked,
     so this undoes the stretch the adds above caused — pyvista's own
@@ -214,7 +214,7 @@ def _hold(plotter, mesh):
     ``add_mesh`` call collects it, leaving the actor drawing an empty
     dataset. Found the hard way — a debugging spy that captured the
     call's arguments fixed the bug by accidentally keeping this very
-    reference. Plain-colour meshes are unaffected.
+    reference. Plain-color meshes are unaffected.
     """
     held = getattr(plotter, '_marks_held', None)
     if held is None:
@@ -252,7 +252,7 @@ def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
     """The averaging as plain stage geometry — no VTK, no Qt.
 
     The numbers `add_averaging_marks` puts into a plotter and the
-    report's canvas figure draws for itself: the analysed span, and
+    report's canvas figure draws for itself: the analyzed span, and
     per frame the rail's baseline, the window's sampled weights, the
     glyph height at each and the two end caps. Extracted so the two
     views cannot disagree about where a frame is, which is the whole
@@ -312,7 +312,7 @@ def add_averaging_marks(plotter: Any, averaging: Averaging,
 
     The analysis span is one filled slab with rimmed edges — the same
     reading as a shock's window, because both answer 'which stretch of
-    the record is analysed' (Brandon, 2026-08-24; two lone edge
+    the record is analyzed' (Brandon, 2026-08-24; two lone edge
     planes read as different objects). Returns counts a test can
     hold: ``frames`` drawn on the rail and ``edges`` (always two —
     the span's start and stop rims).
@@ -373,7 +373,7 @@ def add_averaging_marks(plotter: Any, averaging: Averaging,
                             faces=band_faces)
         weight = np.asarray(band_weights)
         bands.point_data['weight'] = weight
-        # one colour, translucency by weight: zero vanishes, the
+        # one color, translucency by weight: zero vanishes, the
         # window's full value stands at the fade ceiling. Baked as
         # per-point RGBA rather than a cmap + opacity transfer —
         # that path leaves the mapper without ownership of the mesh,
@@ -412,10 +412,10 @@ def add_truncation_marks(plotter: Any, truncation: Any,
                          first: float, last: float,
                          extents: Sequence[float],
                          theme: Any = None) -> dict[str, int]:
-    """The truncation as stage geometry: the discarded ends greyed,
+    """The truncation as stage geometry: the discarded ends grayed,
     the kept stretch clear, handles on its edges.
 
-    The greying is a slab over each end that will be cut — grey
+    The graying is a slab over each end that will be cut — gray
     because cut-away data is reference, not subject, the flat
     overlay's own reading — with a rim at each cut instant and the
     span-editing handles on the kept stretch (`_handles`, the same
@@ -506,13 +506,13 @@ def add_filter_preview(plotter: Any, arrays: dict[str, Any],
     """The low-pass previewed on the stage: each record's filtered
     twin, drawn over the raw ribbon at that record's own station.
 
-    **The filtered data is what carries the colour** — the level
+    **The filtered data is what carries the color** — the level
     colormap, exactly as an unfiltered stage draws — and the raw
-    record stands back in grey behind it (`add_waterfall`'s `color`).
+    record stands back in gray behind it (`add_waterfall`'s `color`).
     That is the way round the paired stage already reads: the thing
     being decided takes the ink and its reference stands back. The
     first pass here had it inverted, raw in viridis and the twin in
-    one flat colour, which asked the reader to judge the filtered
+    one flat color, which asked the reader to judge the filtered
     record from the drabber of the two lines (Brandon, 2026-08-25).
 
     **Normalized against the raw stage's own extents**, passed in
@@ -523,7 +523,7 @@ def add_filter_preview(plotter: Any, arrays: dict[str, Any],
     stretched to the same height as what it is being compared against
     and the comparison would say nothing. The banded stage taught
     this the hard way (Brandon, 2026-08-25): two things drawn
-    together must be normalized together. The colour scale is pinned
+    together must be normalized together. The color scale is pinned
     to those extents for the same reason, so a level means the same
     height and the same hue whichever ribbon it is on.
 
@@ -635,7 +635,7 @@ def add_octave_preview(plotter: Any, curves: Sequence[tuple[Any, Any]],
                        theme: Any = None) -> dict[str, int]:
     """The banded conversion previewed on the stage: each drawn
     record's steps at that record's own station, in the preview
-    colour the flat plot uses — one flat colour, because the steps
+    color the flat plot uses — one flat color, because the steps
     are a proposal over the data rather than data.
 
     `curves` is one ``(x, z)`` pair per drawn record, already in the

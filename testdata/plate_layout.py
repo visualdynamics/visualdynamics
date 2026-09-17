@@ -10,7 +10,7 @@ by both, so they cannot drift.
 
 #: two shakers: the corner, and an edge point that sits on no node
 #: line of the low modes. The grid's interior stations all lie on a
-#: centre line or a diagonal — the plate's own symmetry — and a
+#: center line or a diagonal — the plate's own symmetry — and a
 #: shaker there goes blind to whichever mode family nulls that line:
 #: the first reference set had three of four references unable to
 #: see the 647 Hz mode at all, and its fitted shape could not
@@ -38,7 +38,7 @@ RANDOM_DRIVES = ['101Z+', '110Z+', '1304Z+', '1310Z+']
 #: the four corners and the four quarter-edge stations, which are the
 #: shakers' own points. The first control set put four channels on
 #: the grid's interior stations, and every interior station sits on a
-#: centre line or a diagonal of the square: there the edge drives'
+#: center line or a diagonal of the square: there the edge drives'
 #: responses are nearly linearly dependent, the reachable response
 #: space cannot hold the flat target, and no controller — at any
 #: pseudoinverse truncation, both were tried — could level them. The

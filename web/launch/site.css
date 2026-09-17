@@ -1,5 +1,5 @@
 /* The application's own palette, from visualdynamics.theme — the site
-   and the program it announces wear one set of colours. One stylesheet
+   and the program it announces wear one set of colors. One stylesheet
    for every page, so a change lands everywhere rather than in three of
    four places (PRINCIPLES.md, 9). */
 :root {
@@ -80,7 +80,7 @@ h3 { font-size: 1.05rem; margin: 2em 0 .4em; }
 .downloads { display: grid; gap: 1rem;
              grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (min-width: 52.01rem) {
-  /* four across, the tiles are narrow: icon above text, centred, so
+  /* four across, the tiles are narrow: icon above text, centered, so
      "Apple silicon · .dmg · 392 MB" wraps inside the card instead of
      spilling out of it (Brandon, 2026-08-31) */
   .dl { flex-direction: column; text-align: center;
@@ -114,7 +114,7 @@ h3 { font-size: 1.05rem; margin: 2em 0 .4em; }
             margin-top: .25em; font-variant-numeric: tabular-nums; }
 .dl[data-yours="1"] { border-color: var(--accent); }
 /* short, and never broken across lines: "your system" wrapped the
-   card onto a third line and left the icon looking uncentred */
+   card onto a third line and left the icon looking uncentered */
 .dl[data-yours="1"] .os::after { content: " — yours";
   color: var(--accent); font-weight: 400; font-size: .8em;
   white-space: nowrap; }

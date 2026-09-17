@@ -101,7 +101,7 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
               else sorted({int(i) for i in specification_records}))
     if measured is None and picked is not None:
         # the records picked, each its own station: an auto with its
-        # bands, a cross term as the magnitude it is, labelled by its
+        # bands, a cross term as the magnitude it is, labeled by its
         # pair — nine picked of a virtual point's target showed three
         # (Brandon, 2026-09-07: "never a cross-term label"). Compared,
         # the stations stay the channels, since a measurement is
@@ -205,9 +205,9 @@ def add_banded_stage(plotter: Any, specification: Any,
                      ) -> dict[str, Any]:
     """Draw the stage into a plotter.
 
-    Alone, each channel's requirement wears its own colour with its
+    Alone, each channel's requirement wears its own color with its
     zones; compared, the requirements step back to the specification
-    grey and the measured curves take the colours — the 2-D pairing
+    gray and the measured curves take the colors — the 2-D pairing
     rule — with the exceedance rectangles over their own bins.
     Returns the arrays dict with ``points`` added.
     """
@@ -289,7 +289,7 @@ def add_banded_stage(plotter: Any, specification: Any,
             # alone, the requirement wears the 2-D reading's own pen —
             # the flat plot draws it in response_curve, and a stage
             # that recolored it blue read as a different object
-            # (Brandon, 2026-08-23); compared, it stands back in grey
+            # (Brandon, 2026-08-23); compared, it stands back in gray
             # behind the tone-colored measurements, as the sine stage
             # does
             color = (colors['specification_curve'] if compared

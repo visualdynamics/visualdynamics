@@ -36,7 +36,7 @@ def panel_grid(panel: QWidget, title: QLabel) -> QGridLayout:
 
 def add_derived(grid: QGridLayout, derived, first_row: int
                 ) -> dict[str, tuple[QLabel, QLabel]]:
-    """The read-only rows under the editable ones: a greyed name and a
+    """The read-only rows under the editable ones: a grayed name and a
     right-aligned value per `(key, label)`, from `first_row` down.
     Returns key → (name label, value label)."""
     made = {}

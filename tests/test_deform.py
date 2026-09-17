@@ -17,7 +17,7 @@ from visualdynamics.deform import (
 
 
 def simple_geometry(**kwargs):
-    """Three nodes in a line, one metre apart."""
+    """Three nodes in a line, one meter apart."""
     return visualdynamics.Geometry(node_id=[1, 2, 3],
                          node_xyz=[[0, 0, 0], [1, 0, 0], [2, 0, 0]],
                          length_unit='m', **kwargs)
@@ -116,7 +116,7 @@ class TestShapeDeflection:
         assert deflection.offsets(0.0).shape == (len(deflection.rows), 3)
 
     def test_offsets_reuse_one_buffer(self):
-        """Documented behaviour: a frame allocates nothing."""
+        """Documented behavior: a frame allocates nothing."""
         geometry, shapes = self.geometry_and_shapes()
         deflection = ShapeDeflection(geometry, shapes.coordinate,
                                      shapes.shape_matrix[8])
@@ -294,8 +294,8 @@ def test_envelope_offsets_are_sqrt_psd_at_full_scale():
     assert np.allclose(envelope.offsets(0.0)[:, 2], [1.0, 1.0])
 
 
-def test_envelope_colour_is_absolute():
-    """Length answers where the energy sits at this line; colour answers
+def test_envelope_color_is_absolute():
+    """Length answers where the energy sits at this line; color answers
     how loud this line is anywhere: dB below the loudest node at any
     line, floored at -40."""
     geometry = simple_geometry()
@@ -304,7 +304,7 @@ def test_envelope_colour_is_absolute():
     envelope = EnvelopeDeflection(geometry, ['1Z+', '2Z+'], ordinate)
     assert np.allclose(envelope.node_decibels(), [0.0, -20.0])
     envelope.line = 1
-    # full length (per-line normalization), quiet colour (absolute)
+    # full length (per-line normalization), quiet color (absolute)
     assert np.allclose(envelope.offsets(0.0)[:, 2], [1.0, 0.0])
     assert np.allclose(envelope.node_decibels(), [-20.0, -40.0]), (
         'a silent channel sits on the floor, not at -infinity')

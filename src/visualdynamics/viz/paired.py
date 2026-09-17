@@ -3,7 +3,7 @@
 The 3-D reading of two selected PSDs (Brandon, 2026-08-25), in the
 banded stage's own idiom: each shared channel is a station along the
 depth axis, and at each station the two objects meet — the louder
-drawn level-coloured, the quieter stood back in the muted grey a
+drawn level-colored, the quieter stood back in the muted gray a
 compared reference wears. The Ratio reading divides instead: one
 curve per station, in decibels, linear — the number being read *is*
 the decibel.
@@ -228,7 +228,7 @@ def add_paired_stage(plotter: Any, loud: Any, quiet: Any,
                          name='paired-ratio' if mode == 'ratio'
                          else 'paired-loud')
     if quiet_mesh is not None:
-        # the quieter object stood back in the muted grey a compared
+        # the quieter object stood back in the muted gray a compared
         # reference wears — present, never competing
         plotter.add_mesh(quiet_mesh, color=colors['specification_curve'],
                          opacity=QUIET_OPACITY, line_width=2,

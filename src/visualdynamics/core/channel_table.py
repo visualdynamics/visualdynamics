@@ -483,7 +483,7 @@ class ChannelTable:
             The coordinate as the table has it, '101Z+'.
         new : str
             The coordinate to give it: a node number then a direction,
-            normalised the way every DOF is, and refused when it is not
+            normalized the way every DOF is, and refused when it is not
             one — a table row may lack a node or a direction, but a
             correction typed by a person is whole.
         quantity : str, optional

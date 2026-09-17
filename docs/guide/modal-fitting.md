@@ -44,12 +44,12 @@ match what an engineer would pick rather than what a ruler would:
   is somebody else's.** Subtracting a fitted mode is exact only when
   the mode is alone; in a cluster it leaves enough ridge that the same
   line can stay the tallest, and a naive loop will confirm the same
-  frequency forever. So a confirmed mode's half-power neighbourhood is
+  frequency forever. So a confirmed mode's half-power neighborhood is
   excluded from suggestion — but frequency alone cannot tell that
-  ridge from a genuine neighbour, and a symmetric structure's repeated
+  ridge from a genuine neighbor, and a symmetric structure's repeated
   pair puts its second mode at exactly the confirmed frequency. Shape
   can tell: ridge lies in the span of the confirmed shapes, a real
-  neighbour does not, so a residual peak inside the neighbourhood is
+  neighbor does not, so a residual peak inside the neighborhood is
   offered anyway when the confirmed modes explain almost none of the
   direction standing there. The cursor can still be dragged anywhere
   by hand — the exclusion binds the automatic loop, not the person.
@@ -211,7 +211,7 @@ to the same answer.
 Find Mode walks both axes: a 5×5 grid over half a frequency line
 either side and a damping span seeded from the half-power width, then
 the same grid again around the winner at a fifth the span, then a
-parabola through the winner and its neighbours in each direction
+parabola through the winner and its neighbors in each direction
 independently. About fifty cheap evaluations reach what a 25×25 grid
 would, and the parabola lands *between* grid points, where the surface
 really is quadratic and interpolating it is unbiased. Dragging the
@@ -272,7 +272,7 @@ frequency order (the order they were confirmed in is not kept).
 
 Sequential peeling never goes back: the first of a close pair is fit
 on data still containing the second's tail, so its residues absorb a
-piece of the neighbour. The pair's *sum* tracks the measurement — the
+piece of the neighbor. The pair's *sum* tracks the measurement — the
 error is in the decomposition, invisible on the one curve the screen
 shows, and it surfaces as MAC leakage between the pair or modal masses
 that depend on fitting order.
@@ -298,7 +298,7 @@ learned on real data:
   bar says so.
 - **A cluster of one is not refit.** A lone mode has nobody to borrow
   from, and re-fitting it can only chase noise and the smooth tails of
-  louder neighbours. Its sequential fit stands.
+  louder neighbors. Its sequential fit stands.
 - **Coherence weights the whole thing.** If the project holds a
   coherence covering the fit's response DOFs, the fit picks it up
   automatically (the status line says so). The variance of an FRF
@@ -316,7 +316,7 @@ Honesty about the trade against the polynomial methods:
   still serviceable.
 - **No global pole search.** Poles are where you (or Find Mode) put
   them, refined locally. A stabilization diagram can dig repeated
-  roots out of a peak that looks like one mode; here that judgement is
+  roots out of a peak that looks like one mode; here that judgment is
   yours, made by watching what the residual does after each confirm —
   if a peak survives a confirm, there is another mode under it.
 - **One mode per fit step.** Close pairs are handled by fitting both

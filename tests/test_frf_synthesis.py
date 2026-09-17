@@ -183,7 +183,7 @@ def test_the_overlay_carries_mode_markers_in_the_theme_ink(shown, pump):
     """The fitting screen's bookmarks follow the synthesis to the FRF
     overlay — one dashed line per synthesized mode, in the theme's
     foreground (white on dark, black on light) so they read apart from
-    the grey grid."""
+    the gray grid."""
     import pyqtgraph as pg
 
     from visualdynamics.plot import resolve_theme
@@ -208,9 +208,9 @@ def test_the_overlay_carries_mode_markers_in_the_theme_ink(shown, pump):
 
 def test_a_specification_and_its_response_are_a_pair(window, pump):
     """One comparison is drawn at a time, so there is nothing to tell
-    apart by colour: the response takes the foreground because it is
-    what is being looked at, the specification grey behind it because it
-    is the reference. They used to share a palette colour, which is what
+    apart by color: the response takes the foreground because it is
+    what is being looked at, the specification gray behind it because it
+    is the reference. They used to share a palette color, which is what
     a plot of six comparisons at once needed and this is not."""
     from PySide6.QtCore import Qt
 

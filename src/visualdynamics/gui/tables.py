@@ -80,7 +80,7 @@ class Column:
     #: and pasting are unaffected — the picker is an easier way in, not
     #: a different value.
     date: bool = False
-    affects_row: bool = False          # setting it can restate its neighbours
+    affects_row: bool = False          # setting it can restate its neighbors
     #: titles of columns that must fill along when this one is filled
     #: down — a unit dragged over rows carries its Type, because a unit
     #: without its quantity is half a statement (Brandon, 2026-08-30:
@@ -89,7 +89,7 @@ class Column:
     #: (obj, row, text) -> the replay line's suffix after `project[name]`
     #: — '.set_cell(...)', '.node_xyz[3, 0] = 0.1' — run AFTER a
     #: successful set, so a post-state echo reads the converted value.
-    #: None on a read-only column; a column journalled elsewhere (the
+    #: None on a read-only column; a column journaled elsewhere (the
     #: units pane) declares a closure returning None. The meta-test in
     #: test_table_conventions holds every editable column to this.
     journal: Callable | None = None
@@ -125,7 +125,7 @@ class TableModel(QAbstractTableModel):
     edit_rejected = Signal(str)         # why a cell refused a value
     #: a successful edit's replay-line suffix — the window prepends
     #: `project[name]` and appends it to the session journal
-    edit_journalled = Signal(str)
+    edit_journaled = Signal(str)
 
     def __init__(self, obj: Any, columns: Sequence[Column],
                  row_count: Callable[[Any], int],
@@ -232,7 +232,7 @@ class TableModel(QAbstractTableModel):
             return
         suffix = column.journal(self.obj, row, text)
         if suffix:
-            self.edit_journalled.emit(suffix)
+            self.edit_journaled.emit(suffix)
 
     def set_cells(self, cells: Sequence[tuple[int, int, str]]
                   ) -> tuple[int, int, str]:
@@ -282,8 +282,8 @@ class TableModel(QAbstractTableModel):
 class ChoiceDialog(QDialog):
     """Pick one of a column's choices, shown the way its cells show them.
 
-    Batch editing a column of colours should offer the same list of colours
-    as editing one cell of it, not a box to type a colour name into.
+    Batch editing a column of colors should offer the same list of colors
+    as editing one cell of it, not a box to type a color name into.
     """
 
     def __init__(self, parent: QWidget | None, prompt: str,
@@ -518,7 +518,7 @@ class ChoiceDelegate(QStyledItemDelegate):
 
 
 class CopyPasteTableView(QTableView):
-    """A table view with spreadsheet clipboard behaviour."""
+    """A table view with spreadsheet clipboard behavior."""
 
     # cells written, cells refused, why the first refusal happened
     edits_applied = Signal(int, int, str)
@@ -634,7 +634,7 @@ class CopyPasteTableView(QTableView):
                        indexes: Sequence[QModelIndex]) -> Column | None:
         """The Column the selection shares, when they all offer one list.
 
-        A selection spanning a colour column and a coordinate column has no
+        A selection spanning a color column and a coordinate column has no
         common list, so it falls back to typing a value.
         """
         model = self.model()
@@ -823,8 +823,8 @@ class CopyPasteTableView(QTableView):
             painter.drawRect(area.adjusted(0, 0, -1, -1))
         elif (handle := self.fill_handle_rect()) is not None:
             # It straddles the corner of the selection, so it has to read
-            # against the selection colour on one side and the table
-            # background on the other. The palette's highlighted-text colour
+            # against the selection color on one side and the table
+            # background on the other. The palette's highlighted-text color
             # is the one guaranteed to contrast with the selection, and the
             # outline is what keeps it from vanishing into a light
             # background where those two are both near-white.

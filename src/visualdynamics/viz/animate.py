@@ -24,11 +24,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
 
 
-def _colour_range(deflection: Deflection) -> float:
-    """The top of the colour scale: the furthest any node ever travels.
+def _color_range(deflection: Deflection) -> float:
+    """The top of the color scale: the furthest any node ever travels.
 
     Fixed for the whole animation rather than rescaled per frame, so the
-    top colour marks the one instant the model is at its furthest — a scale
+    top color marks the one instant the model is at its furthest — a scale
     that followed each frame would paint some node yellow in every frame,
     including the ones where nothing is moving.
     """
@@ -100,15 +100,15 @@ class GeometryAnimator:
         self.base: np.ndarray = np.ascontiguousarray(base, dtype=np.float64)
         self.points_source, self.view = shared_points(self.base)
         self.meshes: list[Any] = []
-        #: per-node deflection magnitude for the colour map, and the
-        #: one VTK array every mesh shares — None when not colouring
+        #: per-node deflection magnitude for the color map, and the
+        #: one VTK array every mesh shares — None when not coloring
         self.magnitude: np.ndarray | None = None
         self.scalars_source: Any = None
         if colormap:
             self.magnitude, self.scalars_source = shared_scalars(
                 len(self.base), scalar_name)
             draw = {**draw, 'scalars': self.scalars_source,
-                    'clim': clim or (0.0, _colour_range(deflection))}
+                    'clim': clim or (0.0, _color_range(deflection))}
         add_geometry(plotter, geometry, unit_system=self.unit_system,
                      points_source=self.points_source, meshes=self.meshes,
                      **draw)
@@ -170,7 +170,7 @@ class EnvelopeAnimator(GeometryAnimator):
     `sign` mirrors the pattern through the scale, so the window's one
     Scale control still drives both copies through `PairedAnimator`.
     The parameter is the abscissa line — the envelope has no phase to
-    sweep — and colour is absolute: dB below the loudest node at any
+    sweep — and color is absolute: dB below the loudest node at any
     line, the one channel left to carry level once every line deflects
     at full size.
     """
@@ -273,9 +273,9 @@ def animate_envelope(geometry: Geometry, data: Any,
                      screenshot: str | None = None,
                      show: bool = True) -> Any:
     """A PSD's envelope on a geometry, as the GUI shows it: two copies
-    deflected ±sqrt(PSD) at one line, coloured dB below the loudest.
+    deflected ±sqrt(PSD) at one line, colored dB below the loudest.
 
-    One quantity at a time — newtons and metres per second squared
+    One quantity at a time — newtons and meters per second squared
     cannot share a normalization — defaulting to the commonest among
     the records. Cross records are left out: their phase belongs to an
     operating deflection shape, not an envelope.

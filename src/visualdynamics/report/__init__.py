@@ -114,9 +114,9 @@ def render_html(report: Report, objects: Mapping[str, Any],
     payload = {'title': report.title, 'edit': bool(edit),
                'marking': report.marking,
                'marking_color': report.marking_color,
-               # the page is told the colours it draws with rather
-               # than carrying its own copies: one colour scale and
-               # one pair of mark colours, from the app's own theme.
+               # the page is told the colors it draws with rather
+               # than carrying its own copies: one color scale and
+               # one pair of mark colors, from the app's own theme.
                # Both themes ride along because the reader can flip
                # between them in the page.
                'viridis': [list(stop) for stop in VIRIDIS],
@@ -591,7 +591,7 @@ def _stage_page(block, source, objects, us, caption, page):
     nothing to draw.
     """
     # the app's 3-D reading, in the document: every record on the
-    # stage, receding, coloured by level (Brandon, 2026-08-23).
+    # stage, receding, colored by level (Brandon, 2026-08-23).
     # Many channels on one 2-D axis hide each other exactly where
     # it matters — the tenth curve lands on the first nine — and
     # a system ID's whole plant is thirty-two of them.
@@ -731,7 +731,7 @@ def _stage_page(block, source, objects, us, caption, page):
     if thinning:
         note = (note + ' ' if note else '') + thinning
     x0, x1, z0, z1 = staged['extents']
-    # levels normalized to the stage's own range, so the colour
+    # levels normalized to the stage's own range, so the color
     # scale and the vertical axis are one scale — the app pins
     # `clim` to exactly this pair for the same reason
     span = (z1 - z0) or 1.0
@@ -751,13 +751,13 @@ def _stage_page(block, source, objects, us, caption, page):
             'levels': [round((float(v) - z0) / span, 3)
                        for v in run['levels']]}
         if run.get('quiet'):
-            # the stood-back object: grey, not on the colour
+            # the stood-back object: gray, not on the color
             # scale, exactly as the app stands it back
             built_run['quiet'] = True
             del built_run['levels']
         runs.append(built_run)
     # the marks the flat figure carries, given depth: the
-    # analysed span as a slab across every channel, and the rail
+    # analyzed span as a slab across every channel, and the rail
     # of window weights on the back wall — the app's own stage
     # marks, from `viz.marks`' shared geometry, so the two views
     # cannot disagree about where a frame is
@@ -813,7 +813,7 @@ def _stage_page(block, source, objects, us, caption, page):
 
 def _scalogram_figure(block, source, us, caption):
     """One channel's scalogram as a stage figure: time across,
-    frequency receding, amplitude up and in colour.
+    frequency receding, amplitude up and in color.
 
     The app's wavelet reading, in the document (Brandon, 2026-08-28:
     the transient report should carry the 3-D plot). One channel, as
@@ -822,7 +822,7 @@ def _scalogram_figure(block, source, us, caption):
     first channel the `select` admits is drawn, the panel's own
     default. The rows ride a `sheet` payload the page fills as a
     surface, cell by cell on the level colormap, stationed by log
-    frequency with the decade rows labelled in Hz — a surface, not a
+    frequency with the decade rows labeled in Hz — a surface, not a
     fan of lines, because that is what the app's own stage draws
     (Brandon, 2026-08-29).
 
@@ -972,7 +972,7 @@ def _decade_values(frequencies):
     The rows are twelfths of an octave and nobody reads 158.7 Hz off
     an axis — the same choice the app\'s 3-D scalogram makes. The
     label carries the round value, not the row\'s own frequency: a
-    row within a twelfth of an octave of 5 Hz labelled "5.04 Hz"
+    row within a twelfth of an octave of 5 Hz labeled "5.04 Hz"
     reads as a measurement where it is a ruling.
     """
     import numpy as np
@@ -1169,7 +1169,7 @@ def _plot_block(block, source, objects, us):
             return built_curve
 
         # the quieter set follows the louder one the way every
-        # follower curve here does: the same colour as the channel it
+        # follower curve here does: the same color as the channel it
         # belongs to, dashed — so a channel and its own noise floor
         # read as one pair rather than as two unrelated curves
         loud_name = block.get('source', '')
@@ -1253,7 +1253,7 @@ def _plot_block(block, source, objects, us):
             if freqs.size:
                 built['home_x'] = [0.8 * float(freqs.min()),
                                    1.2 * float(freqs.max())]
-                # the fitting screen's grey bookmarks, in the report
+                # the fitting screen's gray bookmarks, in the report
                 # too; coincident frequencies collapse to one line
                 built['marks'] = list(
                     dict.fromkeys(float(f) for f in freqs))
@@ -1276,7 +1276,7 @@ def _plot_block(block, source, objects, us):
                 'rows': [[float(v) for v in row] for row in values]}
         if stride > 1:
             # a map strides its columns where a curve keeps extremes:
-            # a colour field is read across, so the honest note names
+            # a color field is read across, so the honest note names
             # what it is rather than borrowing the curve's sentence
             built_map['note'] = (
                 f'Thinned for the file: every {stride}th frequency '
@@ -1453,13 +1453,13 @@ def _plot_block(block, source, objects, us):
     # the same field its area is worked out from, so the exported file
     # shows the number it would compute. This used to be set only for a
     # specification *with limits*, which was wrong both ways round: a
-    # measured PSD drew as a polyline through its bin centres, and a
+    # measured PSD drew as a polyline through its bin centers, and a
     # written specification — whose points are breakpoints of a curve —
     # drew as the staircase it is not.
     if shape == 'steps':
         built['steps'] = True
-        # the object's *own* edges, not midpoints between centres: an
-        # octave band's centre is the geometric mean of its edges, so
+        # the object's *own* edges, not midpoints between centers: an
+        # octave band's center is the geometric mean of its edges, so
         # midpoints miss them by several percent of a band. The JS
         # cannot work these out — it never sees `bandwidth`.
         own = getattr(source, 'bin_widths', None)
@@ -1568,7 +1568,7 @@ def _scene_block(block, geometry, shapes, us, objects):
              'lines': lines, 'faces': faces, 'modes': []}
     quantity = block.get('dofs', '')
     if quantity:
-        # a DOFs scene: labelled arrows where its one named data
+        # a DOFs scene: labeled arrows where its one named data
         # object measures that quantity
         from ..core.data import parse_dof
         from ..core.report import (
@@ -1791,7 +1791,7 @@ def _averaging_marks(source):
 
     A time history in a report is not read for its values — nobody
     measures a volt off a printed trace. It is read for what part of
-    the run was analysed and how, which is exactly what the app draws
+    the run was analyzed and how, which is exactly what the app draws
     over it and what a bare trace leaves out.
 
     One window shape for all of them, because they share one: it is the
@@ -1840,7 +1840,7 @@ def _shock_marks(source):
 
     The same argument as `_averaging_marks`, applied to the other way
     a record gets cut up: a time history in a report is read for what
-    part of the run was analysed, and for a shock test that is exactly
+    part of the run was analyzed, and for a shock test that is exactly
     where the events were found. A bare trace of a four-shock run
     shows four bumps and says nothing about which stretches the
     spectra came from — and the SRS figures beside it are one curve
@@ -2052,7 +2052,7 @@ def _srs_comparison_block(block, measured, specification, us, caption):
              'ylabel': axis_label(measured.ordinate_dim[0], us,
                                   measured.dimension_hint[0]),
              'curves': [{'label': first['label'], 'x': None,
-                         'y': first['y'], 'grey': True}],
+                         'y': first['y'], 'gray': True}],
              'channels': channels, 'label': block.get('label')}
     return built
 
@@ -2139,7 +2139,7 @@ def _comparison_block(block, measured, specification, us, caption,
         channel = {'label': _channel_label(specification, record),
                    'y': mapped(target), 'response': mapped(response),
                    'zones': zones}
-        # and where it went outside abort, in the app's own two colours.
+        # and where it went outside abort, in the app's own two colors.
         # Both sides in display units: the response comes back converted
         # and the raw limits do not, so comparing one against the other
         # was comparing m/s^2 against whatever the report was set to.
@@ -2152,13 +2152,13 @@ def _comparison_block(block, measured, specification, us, caption,
         channels.append(channel)
 
     first = channels[0]
-    # the app's own reading: the specification grey behind, because it
+    # the app's own reading: the specification gray behind, because it
     # is the reference, and the response in the page's ink because it is
     # what is being looked at
     measured_label = (f'measured ({scale_db:+d} dB)' if scale_db
                       else 'measured')
     curves = [{'label': first['label'], 'x': None, 'y': first['y'],
-               'grey': True},
+               'gray': True},
               {'label': measured_label, 'x': None, 'y': first['response'],
                'ink': True}]
     if scale_db:
@@ -2172,7 +2172,7 @@ def _comparison_block(block, measured, specification, us, caption,
              'xlabel': f'frequency [{us.label_text("frequency")}]',
              'ylabel': _axis_text(specification, us, shared[0]),
              # a density is flat across its own bin, and drawing it as a
-             # polyline through the line centres draws a slope that is not
+             # polyline through the line centers draws a slope that is not
              # in the data. The app steps them; so does this.
              'steps': True,
              'curves': curves, 'channels': channels}
@@ -2244,7 +2244,7 @@ def _kurtosis_bars(block, source):
         HIGH,
         LOW,
         NOMINAL,
-        analysed_span,
+        analyzed_span,
         channel_kurtosis,
     )
 
@@ -2259,10 +2259,10 @@ def _kurtosis_bars(block, source):
     # twelve-channel record otherwise reads as a chart of everything
     silent = len(read) - len(rows)
     # which stretch was read, said outright: the same record answers
-    # 4.23 whole and 2.92 over its analysed frames, and a reader
+    # 4.23 whole and 2.92 over its analyzed frames, and a reader
     # cannot reconcile the number with the spectra beside it unless
     # the figure says which one it is
-    _spans, phrase = analysed_span(source)
+    _spans, phrase = analyzed_span(source)
     caption = f"{block.get('caption', '')}, {phrase}".strip(', ')
     if silent:
         caption += (f' — {silent} channel{"s" * (silent != 1)} recorded '
@@ -2412,7 +2412,7 @@ def _replication_bars(block, specification, measured):
     """How far each control channel is from its target waveform.
 
     One bar per channel per repeat, and no repeat singled out. Which
-    playing of the waveform was the bad one is a judgement about what
+    playing of the waveform was the bad one is a judgment about what
     the article is for rather than a measurement, so every one is here
     and the reader makes it.
 
@@ -2497,7 +2497,7 @@ def _replication_overlay_block(block, measured, specification, us):
             'x': x, 'xlabel': f'time [{us.label_text("time")}]',
             'ylabel': _axis_text(specification, us),
             'curves': [{'label': first['label'], 'x': None,
-                        'y': first['y'], 'grey': True},
+                        'y': first['y'], 'gray': True},
                        {'label': f'playing 1 of {count}', 'x': None,
                         'y': first['response'], 'ink': True}],
             'channels': channels}

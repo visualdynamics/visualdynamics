@@ -27,15 +27,15 @@ def add_reference_point(plotter: Any, point: ArrayLike, model_size: float,
     """Draw the marker at `point`, in the scene's display units."""
     import pyvista as pv
 
-    centre = np.asarray(point, dtype=np.float64)
+    center = np.asarray(point, dtype=np.float64)
     radius = max(float(model_size) * RADIUS_FRACTION, 1e-9)
     reach = radius * TICK_RADII
-    ends = np.array([centre - reach * axis for axis in np.eye(3)]
-                    + [centre + reach * axis for axis in np.eye(3)])
+    ends = np.array([center - reach * axis for axis in np.eye(3)]
+                    + [center + reach * axis for axis in np.eye(3)])
     ticks = pv.PolyData(ends, lines=np.array([[2, 0, 3], [2, 1, 4],
                                               [2, 2, 5]]).ravel())
     for name, mesh, extra in (
-            (NAME, pv.Sphere(radius=radius, center=centre), {}),
+            (NAME, pv.Sphere(radius=radius, center=center), {}),
             (NAME + '-axes', ticks, {'line_width': 2.0})):
         actor = plotter.add_mesh(mesh, color=color, name=name,
                                  render=False, pickable=False, **extra)

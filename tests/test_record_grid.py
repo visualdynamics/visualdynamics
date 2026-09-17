@@ -46,7 +46,7 @@ def test_a_cpsd_is_a_square_matrix(spectra):
 
 def test_coherence_grids_one_column_wide(spectra):
     """Nothing but the row tells its records apart, so the grid is a single
-    unlabelled column — the same format as everything else, one habit."""
+    unlabeled column — the same format as everything else, one habit."""
     rows, columns = grid_axes(spectra['Modal_coherence'])
     assert columns == ['']
     assert len(rows) == spectra['Modal_coherence'].num_records
@@ -283,7 +283,7 @@ def test_the_cells_still_point_at_the_right_records(qt_app):
 
 
 def three_types_at_one_dof():
-    """A volt, a newton and a metre per second squared, all at 5Z+."""
+    """A volt, a newton and a meter per second squared, all at 5Z+."""
     from visualdynamics.core.data import TimeHistory
 
     dofs, dims, units, blocks = [], [], [], []
@@ -325,7 +325,7 @@ def test_the_row_identity_is_the_dof_and_the_type():
 
 def test_two_channels_at_one_dof_and_one_type_fall_back_to_channel_order():
     """Same DOF, same quantity — nothing in the measurement separates them, so
-    the channel's position does. It is an artefact of the file rather than a
+    the channel's position does. It is an artifact of the file rather than a
     property of the test, and using it is worse than using the quantity but
     better than refusing to lay the data out at all."""
     from visualdynamics.core.data import TimeHistory
@@ -418,7 +418,7 @@ def test_with_no_units_the_channel_order_arranges_it_anyway(window, pump):
 
 def test_the_channel_marker_goes_away_once_units_are_declared():
     """It is a last resort, and it stops being used the moment it is not
-    needed — a channel index is an artefact of the file, not of the test."""
+    needed — a channel index is an artifact of the file, not of the test."""
     from visualdynamics.gui.record_grid import row_labels
 
     vague = repeated()
@@ -453,7 +453,7 @@ def test_declaring_the_units_separates_them_too():
 def test_the_row_key_and_the_icon_read_the_same_field(qt_app):
     """They disagreed once. (`qt_app`: painting an icon needs the
     application to exist — without it this test only passed when a
-    neighbour in the same worker had already made one.) If one of them ever stops reading `known_dim` the
+    neighbor in the same worker had already made one.) If one of them ever stops reading `known_dim` the
     grid and its cells describe different rows."""
     from visualdynamics.gui.icons import quantity_of, record_icon
     from visualdynamics.gui.record_grid import row_keys

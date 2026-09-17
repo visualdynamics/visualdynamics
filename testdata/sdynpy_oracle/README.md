@@ -10,7 +10,7 @@ already trusts.
 
 sdynpy is GPL-3.0, and Visual Dynamics keeps every licensing option
 open by never importing it (`AGENTS.md` hard rule 1;
-`tests/test_licence_boundary.py` enforces it over the package *and*
+`tests/test_license_boundary.py` enforces it over the package *and*
 the tests). Running a GPL program privately carries no conditions
 (GPLv3 §2), and a program's numerical output is not a covered work
 (GPLv3 §0: output is covered only if it constitutes a covered work) —
@@ -31,7 +31,7 @@ the seed, and the date it was made.
 `rigid.npz` is the same arrangement for rigid-body mode shapes
 (`generate_rigid_oracle.py`): a five-node geometry with one node
 measured in a turned frame, unit shapes about a point off the
-centroid, and mass-normalised shapes with a *diagonal* inertia tensor.
+centroid, and mass-normalized shapes with a *diagonal* inertia tensor.
 A coupled tensor is deliberately not frozen — sdynpy takes its
 diagonal unless asked for principal axes, and Visual Dynamics always
 takes the principal axes (`tests/test_rigid.py` proves which is

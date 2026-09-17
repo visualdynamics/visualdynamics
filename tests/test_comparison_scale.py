@@ -169,7 +169,7 @@ def test_a_held_scale_rides_the_project_file(tmp_path):
     project.add('PSDs', psds)
     project.save(tmp_path / 'scaled.vdyn')
     back = visualdynamics.Project.open(tmp_path / 'scaled.vdyn')
-    assert back['PSDs'].scale_db == 3, 'a held scale is a judgement'
+    assert back['PSDs'].scale_db == 3, 'a held scale is a judgment'
     assert back['Spec'].scale_db is None
     psds.scale_db = None
     project.save(tmp_path / 'auto.vdyn')
@@ -235,7 +235,7 @@ def test_a_refused_scaling_changes_nothing(comparing, pump):
 
 
 def test_a_lone_psd_offers_no_scaling(window, pump):
-    """No specification, no comparison, no control — not greyed, absent."""
+    """No specification, no comparison, no control — not grayed, absent."""
     spec = _spec()
     window.add_object('PSDs', _measured(spec, [6.0]))
     window.tree.setCurrentItem(window._item_for_object('PSDs'))
@@ -283,7 +283,7 @@ def test_an_unscaled_comparison_claims_no_scaling():
 
 
 def test_banding_carries_the_held_scale():
-    """The report bands the narrowband PSD itself, so a judgement held
+    """The report bands the narrowband PSD itself, so a judgment held
     on it has to ride into the octave comparison."""
     spec = _spec()
     psds = _measured(spec, [6.0])

@@ -188,7 +188,7 @@ def test_a_record_pick_never_deletes_a_co_selected_object(window, pump):
 
 def test_a_delete_all_renders_once_not_once_per_object(window, pump,
                                                        monkeypatch):
-    """Deleting N selected objects used to promote a neighbour to
+    """Deleting N selected objects used to promote a neighbor to
     current on every row removal, and the handler re-rendered each
     survivor's view only for the next removal to kill it — the
     specification plot blinked once per object and a delete-all read

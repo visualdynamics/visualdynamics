@@ -43,7 +43,7 @@ PALETTE = [
 COLOR_NAMES = ['gray', 'blue', 'orange', 'green', 'red',
                'purple', 'brown', 'pink', 'olive', 'cyan']
 
-# Colouring by displacement. Perceptually uniform and readable on both
+# Coloring by displacement. Perceptually uniform and readable on both
 # scene backgrounds; matplotlib-native, so it needs nothing pyvista does
 # not already require.
 COLORMAP = 'viridis'
@@ -58,7 +58,7 @@ def color_rgb(index: int) -> tuple[float, float, float]:
 
 
 def axis_unit_text(geometry: Geometry, unit_system: UnitSystem) -> str:
-    """What the labelled axes say. A geometry whose units are undefined
+    """What the labeled axes say. A geometry whose units are undefined
     says so rather than naming one."""
     if not geometry.units_defined:
         return '[units undefined]'
@@ -129,7 +129,7 @@ def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
                    orientation: bool = True) -> None:
     """Scene annotations, each independently switchable.
 
-    `bounds` is the labelled box drawn around the geometry; `orientation` is
+    `bounds` is the labeled box drawn around the geometry; `orientation` is
     the small triad in the corner. The 3D view toolbar toggles them
     separately.
     """
@@ -165,7 +165,7 @@ def shared_points(points: ArrayLike) -> tuple[Any, np.ndarray]:
 # What each coordinate system's three directions are called, and which of
 # them are angles. A radius is a straight direction; an angle is drawn as an
 # arc about the axis it turns around.
-# Written as maths so the Greek letters appear at all: VTK's own font has
+# Written as math so the Greek letters appear at all: VTK's own font has
 # no glyph for them and draws nothing, while matplotlib's mathtext — which
 # pyvista requires anyway — renders them properly.
 CS_AXIS_LABELS = {
@@ -225,7 +225,7 @@ def dof_axis(direction: str) -> int | None:
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:
     """One length for every arrow on a plot: 12% of the geometry's
     extent, shrunk to the closest spacing of the arrowed nodes so a
-    dense set of arrows never overlaps its neighbours."""
+    dense set of arrows never overlaps its neighbors."""
     length = 0.12 * extent
     unique = np.unique(np.asarray(points, dtype=float), axis=0)
     if len(unique) > 1:
@@ -242,7 +242,7 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    unit_system: UnitSystem | None = None,
                    incoming: bool = False,
                    name: str | None = None) -> int:
-    """Labelled arrows marking DOFs on the geometry.
+    """Labeled arrows marking DOFs on the geometry.
 
     One arrow per DOF, colored by the axis it points along — X red,
     Y green, Z blue, the orientation marker's own convention. Response
@@ -379,8 +379,8 @@ def add_coordinate_system(plotter: Any, origin: ArrayLike, matrix: ArrayLike,
 def shared_scalars(count: int, name: str) -> tuple[np.ndarray, Any]:
     """A VTK point-data array every mesh can share, and a numpy view of it.
 
-    The colour twin of `shared_points`: one array, written once per frame,
-    recolours every mesh in the scene at once.
+    The color twin of `shared_points`: one array, written once per frame,
+    recolors every mesh in the scene at once.
     """
     import pyvista as pv
     from vtkmodules.util.numpy_support import vtk_to_numpy
@@ -402,7 +402,7 @@ def shared_scalars(count: int, name: str) -> tuple[np.ndarray, Any]:
 #: What bites is `label_spots` itself, and only for the kinds whose
 #: caption sits at a centroid — that is a Python loop over ragged
 #: connectivity. On a square plate: 1 k elements 5 ms, 10 k 48 ms, 40 k
-#: 217 ms, 200 k 1.0 s. Nodes are vectorised and cost 37 ms at 200 k.
+#: 217 ms, 200 k 1.0 s. Nodes are vectorized and cost 37 ms at 200 k.
 #:
 #: 5 000 puts the worst of those at about 25 ms, which no one feels on a
 #: selection change, and is far above anything worth reading — the
@@ -473,7 +473,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
         return np.empty((0, 3)), []
     row_of = {int(node): row for row, node in enumerate(geometry.node_id)}
 
-    def centre(node_ids: Sequence[int]) -> np.ndarray | None:
+    def center(node_ids: Sequence[int]) -> np.ndarray | None:
         rows = [row_of[int(n)] for n in node_ids if int(n) in row_of]
         return points[rows].mean(axis=0) if rows else None
 
@@ -489,7 +489,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
         wanted = (list(chosen) if chosen is not None
                   else range(len(geometry.traceline_conn)))
         for i in wanted:
-            spot = centre(geometry.traceline_conn[int(i)])
+            spot = center(geometry.traceline_conn[int(i)])
             if spot is not None:
                 spots.append(spot)
                 texts.append(str(int(geometry.traceline_id[int(i)])))
@@ -498,7 +498,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
         wanted = (list(chosen) if chosen is not None
                   else range(len(geometry.elem_conn)))
         for i in wanted:
-            spot = centre(geometry.elem_conn[int(i)])
+            spot = center(geometry.elem_conn[int(i)])
             if spot is not None:
                 spots.append(spot)
                 texts.append(str(int(geometry.elem_id[int(i)])))
@@ -515,7 +515,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
                 continue
             members = np.flatnonzero(blocks == int(block))
             nodes = [n for i in members for n in geometry.elem_conn[int(i)]]
-            spot = centre(nodes)
+            spot = center(nodes)
             if spot is not None:
                 spots.append(spot)
                 name = str(geometry.block_name[row]).strip()
@@ -547,14 +547,14 @@ def add_geometry(plotter: Any, geometry: Geometry,
 
     `labels` names the kinds to caption with their ids — any of 'nodes',
     'coordinate_systems', 'tracelines', 'elements', 'blocks'. Captions
-    follow `entities` when it restricts the drawing, so labelling a
+    follow `entities` when it restricts the drawing, so labeling a
     picked traceline names that one and not all of them, and a kind with
     more than `ENTITY_LABEL_LIMIT` of them is left uncaptioned (see
     `labels_fit`).
 
-    `scalars` is a VTK point-data array shared by every mesh, colouring the
-    whole geometry by value instead of by the geometry's own colour indices;
-    `clim` fixes what the ends of the colour map mean. One array serves all
+    `scalars` is a VTK point-data array shared by every mesh, coloring the
+    whole geometry by value instead of by the geometry's own color indices;
+    `clim` fixes what the ends of the color map mean. One array serves all
     the meshes, so a frame writes it once. Returns the axis unit text.
     """
     import pyvista as pv
@@ -565,7 +565,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
         points_source, _ = shared_points(points)
 
     def new_mesh() -> Any:
-        """An empty mesh sharing the scene's points, and their colours."""
+        """An empty mesh sharing the scene's points, and their colors."""
         mesh = pv.PolyData()
         mesh.SetPoints(points_source)
         if scalars is not None:
@@ -578,7 +578,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
         return color_override if color_override else color_rgb(index)
 
     def painted(index: int) -> dict[str, Any]:
-        """How to colour one mesh: by value, or by its colour index."""
+        """How to color one mesh: by value, or by its color index."""
         if scalars is None:
             return {'color': paint(index)}
         return {'scalars': scalars.GetName(), 'cmap': COLORMAP,
@@ -587,7 +587,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
     picked = entities or {}
     # a caption follows what is drawn: told nothing more specific, a
     # kind is captioned over exactly the entities the pick restricted
-    # it to, so labelling a picked traceline names that one alone
+    # it to, so labeling a picked traceline names that one alone
     wanted_labels = {kind: (picked.get(kind) if chosen is None else chosen)
                      for kind, chosen in label_choices(labels).items()}
     if components:
@@ -708,7 +708,7 @@ def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
                   show: bool = True, **kwargs: Any) -> Any:
     """Show the geometry interactively, or render to `screenshot` headlessly.
 
-    Shown, it comes up in the app's own 3-D pane — the labelled axes and
+    Shown, it comes up in the app's own 3-D pane — the labeled axes and
     the orientation triad are toggles on the bar over it, exactly as in
     the window. Returns the pane (its `.plotter` is the PyVista one), or
     the image array when rendering to a file.
@@ -734,7 +734,7 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
               unit_system: UnitSystem | None = None,
               screenshot: str | None = None, theme: Any = None,
               show: bool = True, **kwargs: Any) -> Any:
-    """The geometry with labelled arrows at every DOF `source` measures
+    """The geometry with labeled arrows at every DOF `source` measures
     as `quantity` — the GUI's DOF-arrows toggle, from a script.
 
     Forces end on their node with the label at the base, responses

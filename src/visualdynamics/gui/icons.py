@@ -63,7 +63,7 @@ COLORS = {
     # signal over noise: the driven line riding high over the ambient
     # one — a ratio, so it borrows the coherences' olive
     'ShapeSet': '#d94f8a',      # magenta
-    # sky. Not grey: grey is what an *unfilled* slot wears
+    # sky. Not gray: gray is what an *unfilled* slot wears
     # (`EMPTY_COLOR`), so a real channel table drawn in it read as a
     # placeholder for one. Lighter and brighter than Geometry's blue,
     # which is the only other blue and sits a row or two away.
@@ -92,14 +92,14 @@ QUANTITY_COLORS = {
     # — the blue trace below was unreachable for real data.
     'length': '#1f77b4',         # blue — displacement
     'strain': '#8c564b',         # brown
-    'pressure': '#7f7f7f',       # grey
+    'pressure': '#7f7f7f',       # gray
     'velocity': '#17becf',       # cyan
     'acceleration': '#9467bd',   # purple
     'force': '#2ca02c',          # green
     'temperature': '#d62728',    # red
     'voltage': '#e8a33d',        # gold
     # the rotations at a virtual point (core.transform) wear the
-    # colour of their linear counterpart — the colour says the kind
+    # color of their linear counterpart — the color says the kind
     # of quantity, the shape says it turns: an arc where the linear
     # one is a trace, with the same dot notation over it, and a twist
     # about an axis where the force is an arrow into a surface
@@ -107,7 +107,7 @@ QUANTITY_COLORS = {
     'angular_velocity': '#17becf',
     'angular_acceleration': '#9467bd',
     'moment': '#2ca02c',
-    # modal responses through mass-normalised shapes (units.py's modal
+    # modal responses through mass-normalized shapes (units.py's modal
     # family): the linear glyph, since a modal acceleration is still
     # an acceleration to the eye, drawn smaller with an M in the corner
     'modal_length': '#1f77b4',
@@ -147,7 +147,7 @@ def _draw_geometry(painter, color):
 #: A pulse and its ringdown. The shape a time history wears, and the
 #: shape its *target* wears — a transient specification is a waveform
 #: wanted sample by sample, so the two say the same thing and differ by
-#: colour and by the tolerance band around the target.
+#: color and by the tolerance band around the target.
 _RINGDOWN = [(8, 32), (17, 32), (21, 12), (26, 48), (31, 25), (36, 38),
              (41, 29), (46, 34), (51, 32), (56, 32)]
 
@@ -227,7 +227,7 @@ def _draw_octave_psd(painter, color):
     # Four bands, each half again as wide as the one before, drawn edge
     # to edge. The widening is the whole glyph: evenly spaced bars are
     # what `Spectrum` already draws, and a banded PSD that looked like
-    # one would be told apart only by its colour.
+    # one would be told apart only by its color.
     left = 9.0
     for width, top in ((5.8, 17), (8.7, 30), (13.0, 40), (19.5, 24)):
         painter.drawRect(QRectF(left, 52 - top, width - 1.2, top))
@@ -276,7 +276,7 @@ def _draw_shock_specification(painter, color):
 
     Three curves of the SRS shape rather than the concentric rings a
     random specification wears — both are targets, and this says which
-    kind without needing the colour to.
+    kind without needing the color to.
     """
     painter.setBrush(Qt.BrushStyle.NoBrush)
     # the SRS shape, lifted a little to leave the lower tolerance curve
@@ -293,7 +293,7 @@ def _draw_sine_sweep_specification(painter, color):
     """A sine sweep target: a chirp, the cycles tightening rightward.
 
     The other targets wear this red too; the accelerating wave is what
-    says *swept sine* without needing the colour to.
+    says *swept sine* without needing the color to.
     """
     import math
 
@@ -401,7 +401,7 @@ def _draw_octave(painter, color):
 
 
 def _draw_truncate(painter, color):
-    """A trace with its ends greyed away behind two cut lines.
+    """A trace with its ends grayed away behind two cut lines.
 
     What the button puts on the plot, in miniature: the kept stretch
     at full strength between two edges, the discarded lead-in and tail
@@ -516,7 +516,7 @@ def _draw_wavelet(painter, color):
     Not a spectrum glyph and not a trace glyph, because the reading is
     neither — it is what the record contains *and when*. The Morlet's
     own shape says that in one mark: a sinusoid under a Gaussian, so
-    the eye reads a burst localised in time rather than a tone running
+    the eye reads a burst localized in time rather than a tone running
     the width of the button.
     """
     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -726,7 +726,7 @@ def _draw_curves(painter, color):
 
 
 def _draw_map(painter, color):
-    """Banded rows: every channel at once, coherence as colour."""
+    """Banded rows: every channel at once, coherence as color."""
     painter.setPen(Qt.PenStyle.NoPen)
     for row, alphas in enumerate((
             (255, 170, 90, 200), (120, 255, 200, 60), (200, 70, 255, 150))):
@@ -1077,10 +1077,10 @@ def _draw_reset(painter, color):
 
 
 def _draw_colormap(painter, color):
-    """A viridis strip: the control colours the model by displacement.
+    """A viridis strip: the control colors the model by displacement.
 
     The map itself, not a copy of five of its stops — the swatch and the
-    thing it stands for have to be the same colours."""
+    thing it stands for have to be the same colors."""
     painter.setPen(Qt.PenStyle.NoPen)
     steps = 22
     width = 44 / steps
@@ -1162,7 +1162,7 @@ _DRAW = {
     # wears — what that button makes is exactly this object, so the
     # glyph the user pressed is the glyph they get back. It also stops
     # a report reading as a channel table, which it did while the two
-    # shared a grid and were told apart by colour alone.
+    # shared a grid and were told apart by color alone.
     'Report': _draw_report,
     'Photos': _draw_photos,
     'ShapeSet': _draw_shape_set,
@@ -1275,10 +1275,10 @@ def _draw_acceleration(painter, color):
     _dots(painter, color, 2)
 
 
-def _arc_arrow(painter, color, centre, radius, start, sweep, width=6):
+def _arc_arrow(painter, color, center, radius, start, sweep, width=6):
     """A ring segment with an arrowhead at its end, turning
     clockwise on screen from `start` degrees through `sweep`."""
-    cx, cy = centre
+    cx, cy = center
     painter.setPen(_pen(color, width))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawArc(QRectF(cx - radius, cy - radius, 2 * radius, 2 * radius),
@@ -1638,7 +1638,7 @@ def object_icon(obj: Any, units_defined: bool = True) -> QIcon:
 
 @cache
 def placeholder_icon(type_name: str) -> QIcon:
-    """The type's glyph in grey: expected by the project's type, not
+    """The type's glyph in gray: expected by the project's type, not
     yet in the project."""
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -1652,7 +1652,7 @@ def placeholder_icon(type_name: str) -> QIcon:
 # The application's own icon is rendered rather than painted — a plate
 # carrying a mode, through a small z-buffer — so it lives next door.
 # Re-exported because this is where icons are looked for.
-from ..theme import VIRIDIS  # noqa: F401  (the one colour scale)
+from ..theme import VIRIDIS  # noqa: F401  (the one color scale)
 from .app_icon import (  # noqa: F401
     app_icon,
     colormap,
@@ -1661,5 +1661,5 @@ from .app_icon import (  # noqa: F401
 
 
 def viridis(t: float) -> QColor:
-    """The colour at `t` in 0..1 on viridis, clamped."""
+    """The color at `t` in 0..1 on viridis, clamped."""
     return QColor(*[round(v) for v in colormap(float(t))])

@@ -22,7 +22,7 @@ regenerates them).
 A computed PSD is a density per analysis bin: each line's value holds
 flat across its bin, the area is the sum of value times width, and it
 draws as steps. For a narrowband spectrum the bins are the midpoints
-between neighbours — inferring them is exact. This example's ten
+between neighbors — inferring them is exact. This example's ten
 coarse lines have values summing to 10 over 10 Hz bins, so the area
 is exactly 100 (m/s²)² and the RMS is exactly 10 m/s² — and the steps
 are that sum, visibly.
@@ -38,8 +38,8 @@ reading and its *Apply Octave Bands* button; `project.compute_octave`
 in a script) conserves
 the area — the same power, arranged the way it is read. An
 octave-band spectrum sets `bandwidth`, because its bins are geometric
-and its edges are a standard's, not its neighbours': reading them off
-the centres would be a hair out at every band and wrong at the two
+and its edges are a standard's, not its neighbors': reading them off
+the centers would be a hair out at every band and wrong at the two
 ends. The steps land on the standard's own edges, and the RMS is
 still exactly 10 m/s².
 
@@ -82,7 +82,7 @@ nothing outside the object chooses.
 In the window, a specification on its own opens as its spectra. **RMS**
 on the plot bar is the other reading: a bar per channel of the level
 it asks for — the root of that same area — with the table of the
-numbers beneath, and nothing coloured, since a specification alone has
+numbers beneath, and nothing colored, since a specification alone has
 nothing to be out of. Records picked in the tree restrict both. A
 specification with a measurement beside it has the comparison's three
 readings instead.

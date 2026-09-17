@@ -44,7 +44,7 @@ each `.vdyn` once in that alpha and save it again. Until then every
 **A single object** saved on its own is one group at the root, named
 for its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/` or `sine_levels/`.
-The loader recognises the file by which group it finds.
+The loader recognizes the file by which group it finds.
 
 **A whole project** is an `objects/` container of numbered groups —
 `0000`, `0001`, … for order — each carrying two attributes, `name`

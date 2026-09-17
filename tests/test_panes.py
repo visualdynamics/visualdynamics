@@ -85,7 +85,7 @@ def test_the_bar_goes_away_when_nothing_applies(pane):
     pane.show_controls(map_wanted=None, diagonal=None, cmif=False,
                        complex_data=False, pair=False)
     assert not pane.toolbar.isVisible(), (
-        'a control that is not a live option is absent, not greyed')
+        'a control that is not a live option is absent, not grayed')
 
 
 def test_the_cmif_takes_the_component_box_with_it(pane):
@@ -162,7 +162,7 @@ def scene(qt_app):
 
 def test_the_scene_stands_up_with_no_window(scene):
     assert scene.plotter is not None, 'offscreen builds its plotter at once'
-    assert not scene.bounds_visible, 'the labelled box is clutter until asked'
+    assert not scene.bounds_visible, 'the labeled box is clutter until asked'
     assert scene.orientation_visible, 'the triad is useful at a glance'
 
 

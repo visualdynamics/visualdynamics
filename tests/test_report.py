@@ -119,8 +119,8 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
 
     view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~30 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~30 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()
@@ -700,7 +700,7 @@ def test_a_cmif_block_overlays_the_modal_synthesis(project):
     freqs = project['Shape Set'].frequency
     assert payload['blocks'][0]['home_x'] == pytest.approx(
         [0.8 * float(np.min(freqs)), 1.2 * float(np.max(freqs))])
-    # and carries the fitting screen's grey bookmarks, coincident
+    # and carries the fitting screen's gray bookmarks, coincident
     # frequencies collapsed to one
     assert payload['blocks'][0]['marks'] == pytest.approx(
         list(dict.fromkeys(float(f) for f in freqs)))
@@ -945,7 +945,7 @@ def test_the_page_carries_one_marking_for_both_banners():
 
 def test_editing_either_banner_edits_the_marking(building, pump):
     """The editor's op writes the one value both banners read, and the
-    colour keeps to the two offered — the page's own ink, or red."""
+    color keeps to the two offered — the page's own ink, or red."""
     window, report = building
     editor = window.report_editor
     editor._operate({'op': 'marking', 'value': '  OFFICIAL USE ONLY  '})
@@ -953,7 +953,7 @@ def test_editing_either_banner_edits_the_marking(building, pump):
     editor._operate({'op': 'marking_color', 'value': 'red'})
     assert report.marking_color == 'red'
     editor._operate({'op': 'marking_color', 'value': 'chartreuse'})
-    assert report.marking_color == 'ink', 'two colours, not many'
+    assert report.marking_color == 'ink', 'two colors, not many'
     editor._operate({'op': 'marking', 'value': ''})
     assert report.marking == '', 'blank clears the banner'
 
@@ -994,7 +994,7 @@ def _stage(block):
     'sine_template', 'sysid_template', 'transient_template'])
 def test_every_template_opens_its_stages_in_the_standing_order(build):
     """Geometry, channel table, time data, spectral data, then the
-    computed judgements — the order every report reads in (Brandon,
+    computed judgments — the order every report reads in (Brandon,
     2026-08-23). Pinned on where each stage *opens*: a later section
     may re-read spectra (the modal CMIF resynthesis, the octave-band
     comparison) without the skeleton changing shape."""
@@ -1014,7 +1014,7 @@ def test_every_template_opens_its_stages_in_the_standing_order(build):
 def test_a_narrow_log_axis_labels_its_real_values(tmp_path, project):
     """A log tick's value is its exponent, and under two decades of
     range the ticks fall on fifths of one. Rounding those to the
-    nearest exponent labelled four different heights '1e-9' on the
+    nearest exponent labeled four different heights '1e-9' on the
     system ID densities (Brandon, 2026-08-23), so a fractional tick
     now carries the value it actually stands at.
 
@@ -1068,8 +1068,8 @@ def test_a_narrow_log_axis_labels_its_real_values(tmp_path, project):
 
     view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~30 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~30 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()
@@ -1142,7 +1142,7 @@ def test_the_stage_payload_is_the_apps_own_stage(project):
     assert np.allclose(built['home'][1], up)
 
     # every point stands inside the stage box, and the levels are the
-    # stage's own range normalized — the colour scale and the vertical
+    # stage's own range normalized — the color scale and the vertical
     # axis are one scale, exactly as the app pins its `clim`
     for run in built['runs']:
         assert 0.0 <= run['station'] <= STAGE[1] + 1e-9
@@ -1306,8 +1306,8 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
 
     view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~30 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~30 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()
@@ -1339,7 +1339,7 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
 
 def test_a_paired_stage_stands_the_quieter_object_back():
     """Two objects on one stage, met station by station: the louder
-    coloured by level, the quieter stood back off the colour scale —
+    colored by level, the quieter stood back off the color scale —
     the app's own overlay reading, in the document (Brandon,
     2026-08-23)."""
     import numpy as np
@@ -1366,7 +1366,7 @@ def test_a_paired_stage_stands_the_quieter_object_back():
     assert len(loud) == len(quiet) == 2, 'both objects, both channels'
     assert all('levels' in r for r in loud), 'the louder is on the scale'
     assert all('levels' not in r for r in quiet), \
-        'the quieter is off it — grey, never competing'
+        'the quieter is off it — gray, never competing'
     for a, b in zip(loud, quiet):
         assert a['station'] == b['station'], 'the pair meets at one station'
     assert built['labels'][0] in ('101Z+', '101Z+ acceleration'), \
@@ -1423,9 +1423,9 @@ def test_a_dimensionless_axis_names_what_it_measures():
 
 def test_a_time_history_stage_carries_its_analysis_marks():
     """A trace in a report is read for what part of the run was
-    analysed and how — the reason the flat figure carries its frames
+    analyzed and how — the reason the flat figure carries its frames
     (Brandon, 2026-08-23). The stage carries the same marks: the
-    analysed span, and the rail of window weights on the back wall,
+    analyzed span, and the rail of window weights on the back wall,
     from `viz.marks`' own geometry so the two views cannot disagree
     about where a frame is."""
     import numpy as np
@@ -1478,7 +1478,7 @@ def test_a_time_history_stage_carries_its_analysis_marks():
 
 def test_a_shock_stage_carries_its_numbered_windows():
     """A shock trace's whole character is which stretches were
-    analysed; the slabs say so, and the numbers are what 'shock 2'
+    analyzed; the slabs say so, and the numbers are what 'shock 2'
     points at."""
     import numpy as np
 
@@ -1517,13 +1517,13 @@ def test_a_shock_stage_carries_its_numbered_windows():
 def test_a_stage_curve_shades_along_each_segment(tmp_path):
     """VTK interpolates the level between a line's two ends, so a
     segment running from a trough to a peak shades from one to the
-    other. Painting each segment in the colour of the end it started
+    other. Painting each segment in the color of the end it started
     at streaked bright ink clean across the swing of a time history
     (Brandon, 2026-08-24).
 
     Read off the pixels, because that is where the claim lives: one
     record of two points, the level running 0 to 1, drawn as a single
-    long segment. Flat-coloured it would put one colour on the canvas;
+    long segment. Flat-colored it would put one color on the canvas;
     shaded it walks the whole scale.
     """
     import os
@@ -1567,8 +1567,8 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
 
     view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~30 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~30 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()
@@ -1592,7 +1592,7 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
     nearest, how_far = distance.argmin(axis=1), distance.min(axis=1)
     reached = set(nearest[how_far < 30].tolist())
     assert len(reached) >= 6, \
-        f'the segment walks the colour scale, not one step of it: {reached}'
+        f'the segment walks the color scale, not one step of it: {reached}'
     assert 0 in reached, 'the trough end is at the bottom of the scale'
     assert len(stops) - 1 in reached, 'and the peak end at the top'
 
@@ -1606,11 +1606,11 @@ def test_a_hidden_node_is_hidden(tmp_path):
     the near side and the drone read as translucent glass (Brandon,
     2026-08-25).
 
-    A closed box with a ninth node at its own centre makes the claim
+    A closed box with a ninth node at its own center makes the claim
     checkable: `center` is the mean of the points, so that interior
     node projects to the middle of the canvas exactly, and the pixel
     there says which of the two is in front. Nodes are drawn in the
-    palette colour flat; a face is the same colour shaded by its tilt
+    palette color flat; a face is the same color shaded by its tilt
     to the view, so the two are told apart by the shading rather than
     by the hue.
     """
@@ -1691,8 +1691,8 @@ def test_a_hidden_node_is_hidden(tmp_path):
 
     view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~30 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~30 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()
@@ -1713,8 +1713,8 @@ def test_a_hidden_node_is_hidden(tmp_path):
         'the corner dots on the near side are still drawn — a test that '
         'passed by drawing no nodes at all would be testing nothing')
     assert middle != ink, (
-        f'the node at the centre of a closed box painted through it: '
-        f'the middle pixel is {middle}, the flat node colour')
+        f'the node at the center of a closed box painted through it: '
+        f'the middle pixel is {middle}, the flat node color')
     assert sum(middle) < sum(ink), (
         f'and what is there instead is a shaded face, not something '
         f'brighter than the dot: {middle} against {ink}')
@@ -1902,10 +1902,10 @@ def test_every_thinned_figure_says_so_and_no_other_one_does():
     objects['C'] = MultipleCoherence(
         psd.abscissa, rng.random((channels, lines)),
         response_dof=list(psd.response_dof))
-    colours = {'kind': 'plot', 'mode': 'map', 'source': 'C'}
+    colors = {'kind': 'plot', 'mode': 'map', 'source': 'C'}
     assert ('every 25th frequency line drawn of 1024'
-            in note(colours, MAX_MAP_COLUMNS=40))
-    assert 'Thinned' not in note(colours)
+            in note(colors, MAX_MAP_COLUMNS=40))
+    assert 'Thinned' not in note(colors)
 
 def test_captions_carry_live_references_and_leave_figure_refs_alone():
     """A filtered-transients figure names its corner in the caption,
@@ -1999,8 +1999,8 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
     view.page().loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()
-    # a *cancelled* guard, never a bare singleShot: an
-    # uncancelled quit fired ~15 s after its own test
+    # a *canceled* guard, never a bare singleShot: an
+    # uncanceled quit fired ~15 s after its own test
     # finished, into whichever exec was running by then — the
     # intermittent that killed unrelated WebEngine tests under -n 4
     guard = QTimer()

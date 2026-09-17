@@ -10,7 +10,7 @@ entered at all, and frame length behaved the same way (Brandon,
 The panel tests below pin the two fields that were reported. The sweep
 at the end is the one that matters afterwards: it walks every spin box
 the application builds, so a tenth one added next year cannot quietly
-arrive with the old behaviour.
+arrive with the old behavior.
 """
 
 from __future__ import annotations

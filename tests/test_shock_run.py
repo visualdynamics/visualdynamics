@@ -108,10 +108,10 @@ def test_a_shock_spectrum_comes_off_the_record(shock_file):
         assert row[-1] == pytest.approx(np.abs(record).max(), rel=0.05)
 
 
-def test_the_corner_answers_harder_than_the_centre(shock_file):
-    """A sanity check on the record rather than on the maths: a free
-    plate's corners amplify and its centre sits nearer the low modes'
-    node lines, so the corner's spectrum sits above the centre's
+def test_the_corner_answers_harder_than_the_center(shock_file):
+    """A sanity check on the record rather than on the math: a free
+    plate's corners amplify and its center sits nearer the low modes'
+    node lines, so the corner's spectrum sits above the center's
     everywhere."""
     history = visualdynamics.import_file(shock_file)['time_data']
     rows = {dof: i for i, dof in enumerate(history.response_dof)}
@@ -201,7 +201,7 @@ def test_the_motion_chain_joins_the_report_when_present():
 def test_the_shock_report_reads_frequency_through_the_scalogram():
     """The density left the shock report (Brandon, 2026-08-29): a PSD
     of a transient recording carries a level set by how much quiet
-    air was captured, and nothing in the shock judgement reads it.
+    air was captured, and nothing in the shock judgment reads it.
     The scalogram stands where it stood — where in frequency each
     event's energy sat, with *when* still attached."""
     import numpy as np

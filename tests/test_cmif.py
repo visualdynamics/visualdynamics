@@ -123,7 +123,7 @@ def test_a_modal_model_overlays_its_cmif_dashed(shown, pump):
     assert ([p.opts['pen'].color().name() for p in solid]
             == [p.opts['pen'].color().name() for p in dashed]), (
         'singular value for singular value, same color')
-    # the fitting screen's grey bookmarks ride along with the synthesis
+    # the fitting screen's gray bookmarks ride along with the synthesis
     import pyqtgraph as pg
     plots = [item for item in window.data_pane.graphics.ci.items
              if hasattr(item, 'listDataItems')]

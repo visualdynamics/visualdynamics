@@ -3,7 +3,7 @@
 One format for every object that expands into sub-items means one set of
 habits: the same selection, the same deletion, the same icons. Rows are DOFs
 (modes for a shape set), columns are references or captures, and a single
-unlabelled column when the row alone is the identity. Geometry keeps its
+unlabeled column when the row alone is the identity. Geometry keeps its
 category list, on request.
 """
 

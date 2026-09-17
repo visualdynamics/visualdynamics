@@ -33,7 +33,7 @@ for size, name in ((512, 'web/public/mark.png'),
 PY
 ```
 
-The colours in the page are the application's own, from
+The colors in the page are the application's own, from
 `visualdynamics.theme`: the dark scene's flat `#000000` ground (the
 page's gradient is the site's, not the app's, which draws no
 gradient), `#e8e8ea` for text, `#ffb020` — the 3-D view's highlight — for the one
@@ -88,8 +88,8 @@ Where they live, settled 2026-09-11: the token is an *account* API
 token (Manage account → Account API tokens), not a user token under
 My Profile — an older user token from the first pass was deleted —
 and the two secrets are *repository* secrets on the shared
-repository, not organisation secrets. An organisation copy from the
-first pass was removed too: the free plan scopes organisation secrets
+repository, not organization secrets. An organization copy from the
+first pass was removed too: the free plan scopes organization secrets
 to all repositories or to public ones, so one scoped to public would
 have left the workflow blind while the repository is still private,
 and a token in two places is two to rotate.
@@ -169,7 +169,7 @@ body while it still sits in a meta tag has not been deleted.
   and remade in Email Routing the day it is buried in spam; a personal
   address on a public page cannot be taken back. Catch-all stays off
   for the same reason — it turns every dictionary attack into inbox.
-  The rule generalised on 2026-08-27: the domain now also carries
+  The rule generalized on 2026-08-27: the domain now also carries
   `quickbooks-dev@`, forwarding to the same inbox, so that the Intuit
   developer app's public pages could stop printing a personal address.
   Both are literal rules in Cloudflare Email Routing; adding another

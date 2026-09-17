@@ -228,8 +228,8 @@ def test_a_stepped_spectrum_is_still_one_mesh():
     plotter.close()
 
 
-def test_one_colour_scale_for_the_whole_scene():
-    """Colour is the level itself, point for point on one shared scale —
+def test_one_color_scale_for_the_whole_scene():
+    """Color is the level itself, point for point on one shared scale —
     never re-scaled per channel, which would paint every channel as if
     it peaked alike and hide exactly the comparison a waterfall is for.
     Point-for-point, not endpoints: a per-channel rescaling that kept
@@ -298,7 +298,7 @@ def test_the_object_method_is_the_same_renderer(tmp_path):
 
 def test_one_record_still_stands_on_the_stage():
     """A single record is a legitimate waterfall — one line at station
-    zero, coloured by level — since the reading is the default now and
+    zero, colored by level — since the reading is the default now and
     a lone channel must not be the case that breaks it."""
     plotter, info = scene(psd(rows=1))
     mesh = plotter.renderer.actors['waterfall'].mapper.dataset
@@ -311,7 +311,7 @@ def test_one_record_still_stands_on_the_stage():
 def test_a_pinned_axis_pins_the_stage():
     """A coherence's wall of ones must read as the wall it is — too few
     averages — not as mountains. The object's own `ordinate_limits`
-    pin the stage and the colour scale exactly as they pin the 2-D
+    pin the stage and the color scale exactly as they pin the 2-D
     axis, so a 0.94..0.96 band sits high and flat, not full-height."""
     from visualdynamics.core.data import MultipleCoherence
     from visualdynamics.viz.waterfall import STAGE
@@ -352,18 +352,18 @@ def test_the_area_under_the_drawn_psd_is_its_own_integral():
 
 def test_an_octave_psd_steps_on_its_own_band_edges():
     """A banded spectrum carries its own bin widths, and the trace must
-    land on those exact edges — midpoints between centres are wrong for
-    bands whose centres are geometric means."""
+    land on those exact edges — midpoints between centers are wrong for
+    bands whose centers are geometric means."""
     from visualdynamics.core.octave import bin_bounds
 
-    centres = np.array([10.0, 20.0, 40.0])
+    centers = np.array([10.0, 20.0, 40.0])
     widths = np.array([7.0, 14.0, 28.0])
-    data = Psd(centres, np.ones((1, 3)), response_dof=['1Z+'],
+    data = Psd(centers, np.ones((1, 3)), response_dof=['1Z+'],
                ordinate_dim=[PSD_DIM], ordinate_unit=[PSD_UNIT],
                bandwidth=widths)
     arrays = waterfall_arrays(data)
     cx, _cz = arrays['curves'][0]
-    lower, upper = bin_bounds(centres, widths)
+    lower, upper = bin_bounds(centers, widths)
     expected = np.repeat(np.concatenate([lower, [upper[-1]]]), 2)[1:-1]
     assert np.allclose(cx, expected), 'the bands, not the midpoints'
 

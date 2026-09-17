@@ -87,7 +87,7 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
     survey uses, dense enough that the sixth elastic mode (three
     half-waves) is unaliased — and the drive point at a corner,
     because a corner of a free plate moves in every low mode while
-    the centre sits on the node lines of all the antisymmetric ones.
+    the center sits on the node lines of all the antisymmetric ones.
     Found from the model rather than written down, for the same
     reason the drone's are: numbering follows the mesh.
     """

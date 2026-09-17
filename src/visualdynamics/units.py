@@ -97,7 +97,7 @@ _DIMENSIONALITY = {
     'angular_velocity': '1 / [time]',
     'angular_acceleration': '1 / [time] ** 2',
     'moment': '[length] ** 2 * [mass] / [time] ** 2',
-    # Modal responses through mass-normalised shapes, which are in
+    # Modal responses through mass-normalized shapes, which are in
     # 1/√mass: `[q] = [u]/[Φ]` puts a half power of mass on the
     # response. The dimension algebra below is integer-powered by
     # design — these are base tags precisely because the half power

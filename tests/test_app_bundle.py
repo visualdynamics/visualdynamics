@@ -57,9 +57,9 @@ def test_the_icon_has_ink_on_it(qt_app):
     assert middle.alpha() == 255
 
 
-def test_it_is_coloured_by_amplitude(qt_app):
+def test_it_is_colored_by_amplitude(qt_app):
     """The curves wear viridis by level, which is what the waterfall
-    stage colours data with — so the icon is the 3-D reading and not
+    stage colors data with — so the icon is the 3-D reading and not
     a picture of one. Both ends of the map: peaks reach the top,
     antiresonance notches the bottom — the decade clip exists so one
     deep notch cannot flatten every peak into green."""
@@ -255,7 +255,7 @@ def test_the_launcher_starts_the_app(qt_app, maker, tmp_path):
 
 def test_the_packages_carry_the_lgpl_paper_trail():
     """--onedir makes Qt replaceable; the paper half of the LGPL is
-    that the recipient is *told* — the notices, the licence texts and
+    that the recipient is *told* — the notices, the license texts and
     the replacement instructions must travel inside every package.
     The spec's datas list is where that is or is not true."""
     import pathlib

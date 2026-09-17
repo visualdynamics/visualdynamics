@@ -9,10 +9,10 @@ The preview filters the y-data already on the plot. That is the whole
 record in the units on screen, and filtering commutes with a unit
 scale, so this is exactly what `core.filters.filtered` will produce —
 no second implementation of the rule, just scipy called on what is
-drawn. One colour for every preview rather than each channel's own:
+drawn. One color for every preview rather than each channel's own:
 the question this view answers is "what does the filter do", and a
 preview dressed as another channel answers a different one. The
-colour is `theme`'s `filter_preview`, shared with the stage's twin.
+color is `theme`'s `filter_preview`, shared with the stage's twin.
 """
 
 from __future__ import annotations
@@ -59,11 +59,11 @@ class FilterOverlay:
         except ValueError:
             return                    # out of range mid-edit: draw nothing
         # The filtered record takes the ink and the raw one stands
-        # back in grey behind it (Brandon, 2026-08-25). The first pass
-        # had it the other way round — raw in the channel colours, the
-        # twin in one flat colour — which asked the reader to judge
+        # back in gray behind it (Brandon, 2026-08-25). The first pass
+        # had it the other way round — raw in the channel colors, the
+        # twin in one flat color — which asked the reader to judge
         # the filtered record, the thing actually being decided, from
-        # the drabber of the two lines. Grey-for-the-reference is what
+        # the drabber of the two lines. Gray-for-the-reference is what
         # a specification and its response already do here.
         stood_back = pg.mkPen(self.colors['specification_curve'], width=1)
         for index, curve in enumerate(self._sources):

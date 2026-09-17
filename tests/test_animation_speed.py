@@ -74,7 +74,7 @@ def playing(window, pump):
     return window
 
 
-def _travelled(window, frames, position, wrap):
+def _traveled(window, frames, position, wrap):
     """How far the animation moved over `frames`, wraps counted in."""
     setattr(window, position, 0.0)
     moved = 0.0
@@ -144,7 +144,7 @@ def test_a_mode_shape_sweeps_at_the_speed_asked_for(shaking, speed):
     window = shaking
     window.set_playing(True)
     window._speed_index = SPEEDS.index(speed)
-    moved = _travelled(window, FRAMES, '_phase_position', PHASE_STEPS)
+    moved = _traveled(window, FRAMES, '_phase_position', PHASE_STEPS)
     wanted = FRAMES * PHASE_STEPS / (SECONDS_PER_CYCLE * FRAMES_PER_SECOND)
     assert moved == pytest.approx(wanted * speed)
 
@@ -155,7 +155,7 @@ def test_a_time_history_walks_at_the_speed_asked_for(playing, speed):
     assert not window._shape_mode
     total = len(window._cursor_abscissa)
     window._speed_index = SPEEDS.index(speed)
-    moved = _travelled(window, FRAMES, '_frame_position', total)
+    moved = _traveled(window, FRAMES, '_frame_position', total)
     wanted = FRAMES * total / (SECONDS_PER_RECORD * FRAMES_PER_SECOND)
     assert moved == pytest.approx(wanted * speed)
 
@@ -170,13 +170,13 @@ def test_a_slow_speed_is_slower_and_not_merely_the_same(shaking):
     """
     window = shaking
     window.set_playing(True)
-    travelled = []
+    traveled = []
     for speed in (0.125, 0.25, 0.5, 1.0):
         window._speed_index = SPEEDS.index(speed)
-        travelled.append(_travelled(window, FRAMES, '_phase_position',
+        traveled.append(_traveled(window, FRAMES, '_phase_position',
                                     PHASE_STEPS))
-    assert all(b > a for a, b in itertools.pairwise(travelled)), travelled
-    assert travelled[-1] == pytest.approx(8 * travelled[0])
+    assert all(b > a for a, b in itertools.pairwise(traveled)), traveled
+    assert traveled[-1] == pytest.approx(8 * traveled[0])
 
 
 def test_dragging_the_cursor_moves_the_playback_position(playing):

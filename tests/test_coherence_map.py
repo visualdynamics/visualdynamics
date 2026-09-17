@@ -51,7 +51,7 @@ def test_the_image_is_channels_by_frequency(qt_app):
     assert image_of(plot).image.shape == (32, 7)
 
 
-def test_the_colour_scale_is_pinned_to_nought_and_one(qt_app):
+def test_the_color_scale_is_pinned_to_nought_and_one(qt_app):
     """Coherence is a bounded ratio. A scale fitted to the selection would
     make a good channel look bad beside a better one."""
     poor = channels(3)
@@ -75,7 +75,7 @@ def test_the_channel_axis_reads_downward(qt_app):
     assert plot.getViewBox().yInverted()
 
 
-def test_the_channels_are_labelled_by_dof(qt_app):
+def test_the_channels_are_labeled_by_dof(qt_app):
     data = channels(6)
     _layout, plot, _d, _r = built(data)
     labels = [text for _position, text in plot.getAxis('left')._tickLevels[0]]
@@ -83,7 +83,7 @@ def test_the_channels_are_labelled_by_dof(qt_app):
 
 
 def test_the_labels_thin_out_rather_than_collide(qt_app):
-    """339 labels is a grey smear; one in every nth is a scale."""
+    """339 labels is a gray smear; one in every nth is a scale."""
     _layout, plot, _d, _r = built(channels(339))
     ticks = plot.getAxis('left')._tickLevels[0]
     assert 0 < len(ticks) <= MAP_LABELS
@@ -91,8 +91,8 @@ def test_the_labels_thin_out_rather_than_collide(qt_app):
     assert positions[0] == 0.5, 'sits at the middle of its row'
 
 
-def test_a_colour_bar_is_drawn(qt_app):
-    """Without it the colours are not numbers. It is nested inside the plot
+def test_a_color_bar_is_drawn(qt_app):
+    """Without it the colors are not numbers. It is nested inside the plot
     rather than added to the layout, so look in the scene."""
     layout, _plot, _d, _r = built(channels(4))
     bars = [item for item in layout.scene().items()

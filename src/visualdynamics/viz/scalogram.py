@@ -1,10 +1,10 @@
 """The scalogram as a surface: time across, frequency back, amplitude up.
 
-The flat picture puts magnitude in colour, which is the honest way to
+The flat picture puts magnitude in color, which is the honest way to
 draw three quantities on two axes and is also the way a level is hardest
 to read — a viridis square is a number only as accurately as the eye can
 match it against a bar. A surface puts the third quantity on a third
-axis, where a ridge is a ridge and a floor is flat, and keeps the colour
+axis, where a ridge is a ridge and a floor is flat, and keeps the color
 as well, so the same value is said twice.
 
 That is principle 1's rule, and it is why 3-D is what this reading opens
@@ -13,10 +13,10 @@ gets one, and a scalogram's is about as natural as they come — it is
 already a function of two variables.
 
 The depth axis is **log frequency**, spaced as the transform's own rows
-are: a wavelet's bandwidth is a constant fraction of its centre
+are: a wavelet's bandwidth is a constant fraction of its center
 frequency, so the rows are evenly spaced by octave and drawing them
 evenly spaced in linear frequency would put the surface's own rows where
-they do not belong. The axis is labelled back in Hz.
+they do not belong. The axis is labeled back in Hz.
 
 The cone of influence is drawn here too, as a translucent wall standing
 where the edges reach in. On the flat picture it is a veil over the
@@ -113,7 +113,7 @@ def add_scalogram(plotter: Any, magnitude: np.ndarray, times: np.ndarray,
     _label_frequencies(plotter, frequencies, rows, colors, sy, f0, f1)
 
     # **Last**, and that is not a style choice: every actor added after
-    # `show_bounds` refits the cube axes and rewrites their labelled
+    # `show_bounds` refits the cube axes and rewrites their labeled
     # ranges back to the raw bounds, so a scene built in the other order
     # reads its stage coordinates out as seconds — 0 to 1.6 s on a
     # four-second record (STATUS.md records the same trap for the

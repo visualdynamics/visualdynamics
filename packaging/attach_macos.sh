@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Release day, step 5: the two macOS images built and notarised on
+# Release day, step 5: the two macOS images built and notarized on
 # this Mac go onto the draft release the workflow opened, and their
 # checksums join the SHA256SUMS the workflow wrote for the runner
 # builds — so one file verifies every asset (2026-09-11).

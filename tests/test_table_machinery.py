@@ -140,8 +140,8 @@ def choice_model(parent=None):
 
 
 def test_a_choice_column_offers_its_list_to_the_batch_dialog(qt_app):
-    """Batch editing a column of colours offers the same list as editing
-    one cell of it, rather than a box to type a colour name into."""
+    """Batch editing a column of colors offers the same list as editing
+    one cell of it, rather than a box to type a color name into."""
     from visualdynamics.gui.tables import ChoiceDialog
 
     sheet, model = choice_model()

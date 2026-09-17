@@ -1,7 +1,7 @@
 # Replacing the Qt libraries
 
 Visual Dynamics is built on Qt through PySide6, which is licensed
-under the LGPL-3.0. That licence grants you, the person who received
+under the LGPL-3.0. That license grants you, the person who received
 a packaged build, the right to replace the Qt libraries inside it
 with your own build of Qt — and this page is how. The packaged
 application is deliberately a *folder* of separate shared libraries
@@ -16,7 +16,7 @@ the same major.minor series (for example, any 6.11.x for a 6.11
 bundle). Sources: [Qt's own source releases](https://download.qt.io/official_releases/qt/)
 and [PySide6 on PyPI](https://pypi.org/project/PySide6/#files)
 (the sdist is the corresponding source for the bindings). The full
-licence texts ship in the package beside this file.
+license texts ship in the package beside this file.
 
 ## Where the libraries live
 

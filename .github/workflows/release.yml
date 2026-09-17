@@ -4,11 +4,11 @@ name: release
 # on Linux and Windows and 200 more if macOS runs here, against 2 000 a
 # month — see packaging/README.md for the arithmetic. Nightly builds of
 # a project with one author would spend the year's allowance on
-# artefacts nobody downloads.
+# artifacts nobody downloads.
 #
 # The macos job is `if: inputs.macos` and defaults to **off**, because
 # GitHub bills macOS minutes at 10x and the maintainer's own Mac builds
-# the same artefact in two minutes for nothing. Turn it on for a release
+# the same artifact in two minutes for nothing. Turn it on for a release
 # where that machine is not to hand.
 on:
   push:
@@ -130,7 +130,7 @@ jobs:
     # the first anyone knew (2026-08-25).
     #
     # The macos job is off by default (the Mac on the desk builds and
-    # notarises both images), so on a tag it is *skipped* — and GitHub
+    # notarizes both images), so on a tag it is *skipped* — and GitHub
     # skips a job whose `needs` include a skipped job unless its `if`
     # says otherwise. As first written, the tag path never published
     # (2026-09-03). `!cancelled()` keeps the job eligible; the result

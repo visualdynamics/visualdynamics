@@ -1,7 +1,7 @@
 """Every object type is tellable apart in the tree.
 
 Icons are drawn rather than shipped, so the thing to guard is that each type
-actually has one — a type with no entry falls back to a grey circle, which
+actually has one — a type with no entry falls back to a gray circle, which
 is what `Specification` and `Coherence` did until someone noticed — and that
 no two of them come out the same.
 """
@@ -34,11 +34,11 @@ TYPES = showable_types()
 
 
 def test_every_object_type_has_an_icon_of_its_own():
-    """A type missing from the table silently gets a grey circle."""
+    """A type missing from the table silently gets a gray circle."""
     assert not [name for name in TYPES if name not in _DRAW]
 
 
-def test_every_drawn_type_has_a_colour():
+def test_every_drawn_type_has_a_color():
     assert not [name for name in _DRAW if name not in COLORS]
 
 
@@ -53,7 +53,7 @@ def test_a_type_gets_its_own_icon_and_not_the_fallback(qt_app, name):
 
 def test_no_two_types_look_the_same(qt_app):
     """Shape carries the meaning, so two types sharing one would be a bug
-    even if their colours differed."""
+    even if their colors differed."""
     seen = {}
     for name in TYPES:
         image = type_icon(name).pixmap(QSize(64, 64)).toImage()

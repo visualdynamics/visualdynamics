@@ -1,7 +1,7 @@
 """Dragging the stage's averaging span and shock windows.
 
 The handles are spheres `viz.marks` puts on each slab's floor edge —
-left edge, centre, right edge: resize, move, resize, the 2-D region's
+left edge, center, right edge: resize, move, resize, the 2-D region's
 own grammar. This class turns interactor events into those drags and
 commits them through the same rules the 2-D overlays use
 (`core.averaging.from_span`, `core.shocks.drag_settled`), so the two

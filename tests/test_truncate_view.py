@@ -1,7 +1,7 @@
 """The truncate view: the cut drawn where it is decided.
 
-The flat plot greys the ends being discarded and hands the span's
-edges to the mouse; the stage draws the same cut as grey slabs with
+The flat plot grays the ends being discarded and hands the span's
+edges to the mouse; the stage draws the same cut as gray slabs with
 the averaging span's own handles; the panel holds the numbers. All
 three commit through one place, so they cannot disagree about what a
 drag means — and a drag settles before it is said, the filter
@@ -56,7 +56,7 @@ def _flat(window, pump):
 # ---- the flat view -------------------------------------------------------
 
 
-def test_the_toggle_greys_the_ends_and_shows_the_panel(window, pump):
+def test_the_toggle_grays_the_ends_and_shows_the_panel(window, pump):
     _record(window, pump)
     _toggle_truncate(window, pump)
     pane = _flat(window, pump)
@@ -136,7 +136,7 @@ def test_the_boxes_cannot_state_a_backwards_span(window, pump):
 
 
 def test_the_bar_does_not_offer_what_cannot_act(window, pump):
-    """Every verb a view parameterises lives on that view's panel
+    """Every verb a view parameterizes lives on that view's panel
     (Brandon, 2026-08-28): Filter and Truncate left first — a blind
     suggestion and an outright refusal — and Compute SRS followed to
     the shock view, where a whole-record spectrum is one window set
@@ -194,7 +194,7 @@ def test_the_truncation_marks_the_stage(window, pump):
 
 
 def test_a_whole_record_span_sheds_its_slabs(window, pump):
-    """Nothing is being discarded, so nothing is greyed — a zero-width
+    """Nothing is being discarded, so nothing is grayed — a zero-width
     slab would still draw a seam at the wall."""
     _history, pane = _stage(window, pump)
     window.render_current()

@@ -170,9 +170,9 @@ def test_toggling_it_draws_a_bar_per_channel(window, pump):
     assert window.data_pane.graphics.scene() is not None
 
 
-def test_the_ordinary_channels_stand_back_in_grey(window, pump):
+def test_the_ordinary_channels_stand_back_in_gray(window, pump):
     """The chart is about the exceptions, so a channel inside the band
-    is grey rather than ink — which is also what the report has always
+    is gray rather than ink — which is also what the report has always
     drawn there (Brandon, 2026-08-24)."""
     from visualdynamics.theme import theme as resolve_theme
 
@@ -242,7 +242,7 @@ def test_the_shock_and_modal_reports_do_not_claim_a_band_they_cannot_use():
     modal report (Brandon, 2026-09-08): a modal test is driven with
     burst random, whose kurtosis read whole is about three over its
     duty and says nothing about the article. The toolbar toggle still
-    offers the reading; what a report asserts is the judgement."""
+    offers the reading; what a report asserts is the judgment."""
     from visualdynamics.core.report import modal_template, shock_template
 
     for template in (shock_template, modal_template):
@@ -260,15 +260,15 @@ def test_every_other_report_carries_the_reading():
         kurtosis = [b for b in blocks if b.get('mode') == 'kurtosis']
         assert len(kurtosis) == 1, name
         assert kurtosis[0]['source'] == '@basis:TimeHistory', name
-        # a computed judgement, so it sits with the others rather than
+        # a computed judgment, so it sits with the others rather than
         # beside the traces — the standing order
         assert blocks.index(kurtosis[0]) > max(
             (i for i, b in enumerate(blocks)
              if b.get('mode') == 'stage'), default=-1), name
 
 
-def test_the_report_figure_bands_and_colours_the_bars():
-    """Grey inside the band, red above, blue below, with the ground
+def test_the_report_figure_bands_and_colors_the_bars():
+    """Gray inside the band, red above, blue below, with the ground
     past each threshold shaded to match — the same reading the app
     gives and the same one every other bar chart here gives."""
     from visualdynamics.core.kurtosis import HIGH, LOW
@@ -322,17 +322,17 @@ def _quiet_headed(rate=2048.0, seconds=8.0, live=(3.0, 6.0)):
 def test_the_reading_covers_what_the_spectra_cover():
     """A system-ID excitation read whole came out at 4.23 where every
     steady frame of it read 2.92 (Brandon, 2026-08-24). Nothing was
-    wrong with the arithmetic: the record is only a quarter analysed,
+    wrong with the arithmetic: the record is only a quarter analyzed,
     and whole it is a mixture of a loud distribution and a quiet one,
     which genuinely is not Gaussian. A number that disagrees with the
     PSD printed beside it is worse than no number."""
-    from visualdynamics.core.kurtosis import analysed_span
+    from visualdynamics.core.kurtosis import analyzed_span
 
     history = _quiet_headed()
     whole = kurtosis(np.real(history.ordinate[0]))
     assert whole > HIGH, 'read whole, the silence dominates the shape'
 
-    spans, phrase = analysed_span(history)
+    spans, phrase = analyzed_span(history)
     assert len(spans) == 1 and spans[0][0] > 0
     assert 'averaged over' in phrase
     (_label, value), = channel_kurtosis(history)
@@ -345,8 +345,8 @@ def test_a_shock_record_is_read_over_its_windows():
     """All of them, pooled: the shape of a distribution does not care
     what order its samples arrived in, and the chart is one bar per
     channel (Brandon, 2026-08-24). The silence between events is not
-    part of what was analysed, and read whole it swamps everything."""
-    from visualdynamics.core.kurtosis import analysed_span
+    part of what was analyzed, and read whole it swamps everything."""
+    from visualdynamics.core.kurtosis import analyzed_span
     from visualdynamics.core.shocks import Shock
 
     rng = np.random.default_rng(8)
@@ -360,7 +360,7 @@ def test_a_shock_record_is_read_over_its_windows():
         ordinate_dim='acceleration', ordinate_unit='m/s**2')
     history.shocks = tuple(Shock(start, 400 / rate)
                            for start in (0.5, 1.5, 2.5))
-    spans, phrase = analysed_span(history)
+    spans, phrase = analyzed_span(history)
     assert len(spans) == 3, 'every window, not just the first'
     assert 'shock windows' in phrase
     (_label, value), = channel_kurtosis(history)
@@ -372,14 +372,14 @@ def test_a_shock_record_is_read_over_its_windows():
 
 def test_a_record_with_neither_is_read_whole():
     """Nothing has said which part matters, so all of it does."""
-    from visualdynamics.core.kurtosis import analysed_span
+    from visualdynamics.core.kurtosis import analyzed_span
 
     rng = np.random.default_rng(6)
     history = visualdynamics.TimeHistory(
         np.arange(2048) / 1024.0, rng.standard_normal((1, 2048)),
         response_dof=['101Z+'], ordinate_dim='acceleration',
         ordinate_unit='m/s**2')
-    spans, phrase = analysed_span(history)
+    spans, phrase = analyzed_span(history)
     assert spans == [(0, 2048)] and phrase == 'over the record'
 
 
@@ -410,7 +410,7 @@ def test_the_axis_is_measured_from_the_baseline(qt_app):
     error_chart(other, [('101Z+', -1.2, 4.0), ('104Z+', 2.5, 1.0)],
                 colors)
     lo, hi = other.viewRange()[0]
-    assert lo == pytest.approx(-hi), 'still centred on zero'
+    assert lo == pytest.approx(-hi), 'still centered on zero'
 
 
 def test_the_system_id_reads_both_of_its_streams():

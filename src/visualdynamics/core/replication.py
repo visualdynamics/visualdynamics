@@ -26,7 +26,7 @@ inverts. Read as the averaging parameters they are wrong three ways.
 Three metrics, and they answer different questions:
 
 `waveform` is ||m - s|| / ||s||, and it is the honest one. Amplitude,
-phase and shape all move it, it is what the controller is minimising,
+phase and shape all move it, it is what the controller is minimizing,
 and it has no way to look good by accident.
 
 `srs` asks whether the shock is equivalent, which is the question the
@@ -40,7 +40,7 @@ that is how a level is read. Paired with `waveform` it separates "too
 small" from "wrong", which one number cannot do.
 
 TRAC and a complex-spectrum FRAC are deliberately absent. They are the
-same number: both are normalised inner products and the DFT is unitary,
+same number: both are normalized inner products and the DFT is unitary,
 so Parseval makes a complex FRAC equal to TRAC to within the half-bin
 the real FFT keeps at DC and Nyquist. Reporting both would present one
 measurement as two pieces of evidence.
@@ -116,10 +116,10 @@ def averaging_for(measured: TimeHistory,
     # otherwise the shading on the time history says three and every
     # number beside it is still worked out from six.
     #
-    # Recognised by the frame length. Anything else is describing some
+    # Recognized by the frame length. Anything else is describing some
     # other cutting-up of the record: a frame that is not the
     # specification's length does not line up with a playing of it, and
-    # honouring it would compare each event against a slice of the
+    # honoring it would compare each event against a slice of the
     # target chosen by accident.
     held = getattr(measured, 'averaging', None)
     if held is not None and held.frame_length == frame:
@@ -143,12 +143,12 @@ def playings(measured: TimeHistory, specification: DataArray,
     Whole ones only. A record rarely stops on a boundary — Rattlesnake
     repeats until it is told to stop, and streaming often ends before
     the environment does — so there is usually a fragment on the end.
-    It is not analysed: a waveform error over part of a window is taken
+    It is not analyzed: a waveform error over part of a window is taken
     against a different stretch of the target and is not the same
     measurement as the ones beside it, which makes a column of them an
     invitation to compare things that do not compare.
 
-    Not analysed is not the same as not mentioned, which is where this
+    Not analyzed is not the same as not mentioned, which is where this
     started. `leftover` says what was recorded past the last whole
     playing so it can be reported rather than quietly dropped.
     """
@@ -191,7 +191,7 @@ def leftover(measured: TimeHistory, specification: DataArray,
     n = averaging.frame_length
     total = measured.ordinate.shape[1]
     # measured against how many whole playings the record *could* hold,
-    # not against how many are being analysed. Choosing to look at three
+    # not against how many are being analyzed. Choosing to look at three
     # of six is a decision and needs no announcing; a recording that
     # stopped part way through one is a fact about the file.
     left = (total - lag) - ((total - lag) // n) * n
@@ -223,7 +223,7 @@ def lag_of(measured: TimeHistory, specification: DataArray,
     channel choose its own shift would let a poorly replicated one hunt
     for its most flattering alignment and report the error it found
     there. Estimated on the first repeat, over every control channel at
-    once, by the shift that minimises total squared difference.
+    once, by the shift that minimizes total squared difference.
     """
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:
@@ -331,15 +331,15 @@ def compare(measured: TimeHistory, specification: DataArray,
     replicated, and which playing of the waveform it was.
 
     Every repeat is reported and none is singled out. An earlier
-    version reduced these to the worst repeat per channel and labelled
-    it so, which is a judgement rather than a measurement — what counts
+    version reduced these to the worst repeat per channel and labeled
+    it so, which is a judgment rather than a measurement — what counts
     as the bad event depends on which reading you care about and on
     what the article is for, and the numbers are all here for the
     reader to decide with. `frame` narrows the answer to one repeat
     when the caller already knows which one it is asking about.
 
     `metrics` narrows *which* readings are taken, and a row carries
-    only the ones asked for. This is not a micro-optimisation: the SRS
+    only the ones asked for. This is not a micro-optimization: the SRS
     costs a ramp-invariant filter per band per cell, and a screen
     showing a grid of waveform errors was spending two seconds an
     update on sixty shock spectra nobody had asked to see.

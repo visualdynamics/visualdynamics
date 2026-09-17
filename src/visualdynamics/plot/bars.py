@@ -16,9 +16,9 @@ that is 2 dB low everywhere may never cross an abort limit at all.
 A threshold is drawn as shaded ground rather than as a line: what is
 being said is "past here is out", and a filled region says it where a
 line leaves it to be inferred — red past the upper, blue past the
-lower, the same two colours the specification plot shades its abort
+lower, the same two colors the specification plot shades its abort
 zones with. The shading is the handle, and dragging it snaps to a tenth
-of a dB or of a percent. A tolerance is a judgement — ±3 dB and a tenth
+of a dB or of a percent. A tolerance is a judgment — ±3 dB and a tenth
 of the band are where most specifications land, not where they all do —
 so those are a starting point, and everything reads off wherever they
 are put. In a report they are drawn and not moved: there is nobody on
@@ -48,7 +48,7 @@ BAR_ALPHA = 210
 SUMMARY_HEIGHT = 0.97
 
 #: how solid a threshold's shading is. The same alpha the specification
-#: plot shades its abort zones with, and the same two colours, so "past
+#: plot shades its abort zones with, and the same two colors, so "past
 #: the limit" looks the same wherever it is said.
 ZONE_ALPHA = 38
 
@@ -100,7 +100,7 @@ class BarChart:
         self.rows: list[Any] = list(rows)
         self.colors: dict[str, str] = colors
         #: the thresholds; `low` None is a chart with none at all — a
-        #: level chart, where nothing is out and nothing is coloured
+        #: level chart, where nothing is out and nothing is colored
         self.low: float | None = None if low is None else float(low)
         self.high: float | None = None if high is None else float(high)
         self.changed: Callable[..., None] | None = changed
@@ -109,7 +109,7 @@ class BarChart:
         #: what a bar inside the thresholds is painted. The ink by
         #: default — a comparison's in-tolerance channels are the
         #: subject of the chart — but a reading whose whole point is
-        #: the *exception* stands its ordinary channels back in grey
+        #: the *exception* stands its ordinary channels back in gray
         #: (the kurtosis chart, Brandon 2026-08-24), which is also
         #: what the report has always drawn there.
         self.neutral: str = neutral
@@ -179,7 +179,7 @@ class BarChart:
     def _zone_brush(self, which, hover=False):
         """Red past the upper threshold, blue past the lower.
 
-        The same two colours, at the same alpha, that a specification
+        The same two colors, at the same alpha, that a specification
         plot shades its abort zones with — "past the limit" should look
         the same wherever it is said.
 
@@ -189,11 +189,11 @@ class BarChart:
         import pyqtgraph as pg
         from PySide6.QtGui import QColor
 
-        colour = QColor(
+        color = QColor(
             self.colors['exceed_over' if self._over(which)
                         else 'exceed_under'])
-        colour.setAlpha(ZONE_ALPHA * (2 if hover else 1))
-        return pg.mkBrush(colour)
+        color.setAlpha(ZONE_ALPHA * (2 if hover else 1))
+        return pg.mkBrush(color)
 
     def _brush(self, value):
         import pyqtgraph as pg
@@ -202,9 +202,9 @@ class BarChart:
         which = self.beyond(value)
         key = {'over': 'exceed_over', 'under': 'exceed_under'}.get(
             which, self.neutral)
-        colour = QColor(self.colors[key])
-        colour.setAlpha(BAR_ALPHA)
-        return pg.mkBrush(colour)
+        color = QColor(self.colors[key])
+        color.setAlpha(BAR_ALPHA)
+        return pg.mkBrush(color)
 
     def _draw(self):
         """Bars along the y axis, all of them on one set of axes.
@@ -281,7 +281,7 @@ class BarChart:
         self._restate()
 
     def _restate(self):
-        """The bars in their colours and the count over them."""
+        """The bars in their colors and the count over them."""
         values = self.values()
         if self.bars is not None:
             self.bars.setOpts(brushes=[self._brush(v) for v in values])
@@ -435,7 +435,7 @@ def level_chart(plot: Any, rows: Sequence[tuple[str, float]],
     apiece — the table's column as a picture, so which channel is
     loudest is seen before anything is read. No thresholds: a
     specification on its own has nothing to be out of (Brandon,
-    2026-09-06: the RMS error reading without the ±3 dB colouring).
+    2026-09-06: the RMS error reading without the ±3 dB coloring).
     """
     return BarChart(plot, list(rows), colors, low=None, high=None,
                     label='RMS level', units=units,
@@ -451,7 +451,7 @@ def kurtosis_chart(plot: Any, rows: Sequence[tuple[str, float]],
     Two thresholds around the nominal three, because both directions
     say something — above, peaks the spectrum never predicted; below,
     a record that has been clipped or was never random. The ordinary
-    channels stand back in grey so the exceptions are the chart.
+    channels stand back in gray so the exceptions are the chart.
 
     Every channel whatever it measures: kurtosis is dimensionless, so
     this is the one reading here where accelerations and forces share

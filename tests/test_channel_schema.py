@@ -46,7 +46,7 @@ def test_foreign_columns_are_dropped():
 
 def test_a_column_spelled_differently_lands_in_its_own():
     """Dropping the extras only works because what belongs is
-    recognised: 'Serial Number', 'serial-number' and 'SN' are one
+    recognized: 'Serial Number', 'serial-number' and 'SN' are one
     column, and 'Cal Due' is the expiration."""
     from visualdynamics.core.channel_table import canonical_name
 

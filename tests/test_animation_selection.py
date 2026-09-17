@@ -56,7 +56,7 @@ def test_an_unblocked_object_is_untouched():
 
 
 def test_a_repeated_dof_is_dropped_with_a_note():
-    """A drive point carries a load cell beside its accelerometer; metres per
+    """A drive point carries a load cell beside its accelerometer; meters per
     second squared plus newtons is not a deflection."""
     data = TimeHistory(abscissa=np.arange(4.0),
                        ordinate=np.arange(8.0).reshape(2, 4),
@@ -190,7 +190,7 @@ def test_the_ods_cursor_moves_the_line(window, pump):
 
 
 def test_geometry_plus_psd_shows_the_envelope(window, pump):
-    """Two mirrored copies at the cursor line, colour absolute; the
+    """Two mirrored copies at the cursor line, color absolute; the
     cursor starts on the strongest line."""
     from visualdynamics.deform import EnvelopeDeflection
     from visualdynamics.viz.animate import PairedAnimator
@@ -503,10 +503,10 @@ def test_a_grid_that_gives_way_clears_its_rows(window, pump):
     history, then a record in the specification, and the plot showed
     'the time history without the specification'. What actually
     happened: the plain click made the history give way — but only its
-    *tree item* went grey, its grid rows stayed lit, so the tree
+    *tree item* went gray, its grid rows stayed lit, so the tree
     showed two selected sub-items whose effective selection was one,
     and the spec's lone waveform read as the record. A selection the
-    plot will never honour must not stay highlighted."""
+    plot will never honor must not stay highlighted."""
     history, spec = _transient_pair(window, pump)
     _click_record(window, history, 0)
     pump()

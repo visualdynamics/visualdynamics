@@ -4,7 +4,7 @@ The sanctioned Qt modules stop short of QtSvg (AGENTS.md rule 3), and
 the one glyph so far — the drawer tab's chevron, drawn in Claude Design
 (Brandon, 2026-09-03) — is a six-vertex outline that needs no renderer:
 its vertices are read straight out of the path and painted as a
-polygon, in whatever colour the palette says, at whatever pixel ratio
+polygon, in whatever color the palette says, at whatever pixel ratio
 the screen has. A file replaces a file when the design changes.
 
 The parser takes exactly the dialect the files are asked for: absolute
@@ -68,7 +68,7 @@ def _load(name: str) -> tuple[list[tuple[float, float]], float]:
 def glyph(name: str, color: QColor, size: int = 16,
           turn: float = 0) -> QIcon:
     """An icon of a packaged glyph, filled with `color`, turned
-    `turn` degrees clockwise about its centre, `size` pixels a side.
+    `turn` degrees clockwise about its center, `size` pixels a side.
 
     Rendered at one and two device pixels per point so a Retina
     screen gets a sharp edge; the icon hands out whichever fits.

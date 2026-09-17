@@ -2,7 +2,7 @@
 
 Each is the plate's own data assembled the way the workflow guides
 assemble it — modal, random vibration, transient, shock — with every
-grey slot of its project type filled: geometry, photos, channel
+gray slot of its project type filled: geometry, photos, channel
 table, the data, the derived spectra, the report. They exist to be
 dropped onto the window for workflow testing, and to sit behind the
 documentation's screenshots.
@@ -22,7 +22,7 @@ photographs — this article has never been photographed, having never
 existed — captioned as what they are.
 
 Every project is checked against `missing_expectations` before it is
-saved: a generator whose output opens with grey slots would be
+saved: a generator whose output opens with gray slots would be
 writing the very thing it exists to prevent.
 """
 
@@ -54,7 +54,7 @@ def photos(*scenes) -> Photos:
     drawn offscreen and kept as PNG bytes, exactly as imported photos
     would be.
 
-    Rendered on a neutral grey — a photograph belongs to neither app
+    Rendered on a neutral gray — a photograph belongs to neither app
     theme, and the first cut used the light plot palette, which read
     as one broken light-mode figure in a dark-mode report rather than
     as a picture of hardware."""
@@ -177,7 +177,7 @@ def transient_project():
     project.set_basis(*[name for name in project.names])
     # the spectral pair: the target's own PSD arrives as a
     # specification, the measurement's as data — see the workflow
-    # guide. No SRS: that judgement belongs to the shock type
+    # guide. No SRS: that judgment belongs to the shock type
     project.compute_psds(project.transient_specification)
     project.compute_psds(project.time_history)
     return finish(project, 'transient', (

@@ -1,7 +1,7 @@
 """A pane in a window of its own.
 
 `geometry.plot()` from a script opens the same 3-D view the app shows,
-with the same bar over it — the labelled axes and the orientation triad
+with the same bar over it — the labeled axes and the orientation triad
 are toggles rather than arguments you have to know about beforehand.
 That is the whole point of the panes owning their own controls: the
 window and a one-line script put up the same thing.
@@ -36,7 +36,7 @@ def scene_window(draw: Callable[[Any], Any], *, theme: Any = None,
     """Draw into a ScenePane of its own and put it on screen.
 
     `draw(plotter)` adds whatever is being shown. `axis_unit` is what the
-    labelled axes say, which the pane needs to re-annotate when the bar's
+    labeled axes say, which the pane needs to re-annotate when the bar's
     toggles move. Returns the pane; its `.plotter` is the PyVista one.
     """
     app = _application()

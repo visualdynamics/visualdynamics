@@ -94,7 +94,7 @@ SELF_MIME = 'application/x-visualdynamics-from-this-tree'
 #: draggable too.
 ROLE_DRAGGABLE = Qt.ItemDataRole.UserRole + 9
 
-#: on a project type's grey placeholder row, which side of the skeleton
+#: on a project type's gray placeholder row, which side of the skeleton
 #: it is a slot for. A slot is a drop target like an object row is: the
 #: side a group belongs to is the one thing no type rule can derive, and
 #: dropping onto the side is how it gets said.
@@ -107,7 +107,7 @@ ROLE_WHOLE_PROJECT = Qt.ItemDataRole.UserRole + 11
 
 #: The geometry everything unlinked is drawn on and checked against.
 #: Bold was the only mark it wore, and against a tree where the real
-#: objects are already darker than the grey slots, bold is not a mark at
+#: objects are already darker than the gray slots, bold is not a mark at
 #: all — nobody could tell which geometry was active by looking.
 ROLE_ACTIVE = Qt.ItemDataRole.UserRole + 12
 
@@ -372,7 +372,7 @@ class ProjectTree(QTreeWidget):
         reaches is the top of that subtree, and asking the user to hit it
         exactly would be a precision game with no purpose. A drop on a
         bracket means the group it draws — an object of it where it has
-        one, and the side it stands for where it is only grey slots.
+        one, and the side it stands for where it is only gray slots.
         """
         span = self.span_at(position)
         if span is not None:
@@ -561,9 +561,9 @@ class ProjectTree(QTreeWidget):
             rects = [rect for rect in rects if rect.height() > 0]
             if len(rects) < 2:
                 continue
-            x = 3 + 3 * (offset % 2)    # neighbouring groups interleave
+            x = 3 + 3 * (offset % 2)    # neighboring groups interleave
             # the Basis bracket is bold as well as blue, so it still
-            # stands out without relying on colour alone
+            # stands out without relying on color alone
             painter.setPen(QPen(QColor(color), 4 if bold else 2))
             top = min(rect.center().y() for rect in rects)
             bottom = max(rect.center().y() for rect in rects)
@@ -584,14 +584,14 @@ class ProjectTree(QTreeWidget):
         It sits in the gap between the branch arrow and the icon,
         which is narrow: a full-sized dot there touched the collapsed
         triangle and the two read as one glyph, a little flag. Hence a
-        smaller dot, centred in what room there is. Both edges are
+        smaller dot, centered in what room there is. Both edges are
         measured rather than written down, because the indentation and
         the arrow are a style's to choose and neither is the same width
         on every platform.
 
-        The colour is the geometry icon's own blue — the mark and the
-        thing it marks are one statement, and a second colour in a tree
-        that already says a great deal with colour would be a third
+        The color is the geometry icon's own blue — the mark and the
+        thing it marks are one statement, and a second color in a tree
+        that already says a great deal with color would be a third
         vocabulary to learn.
 
         Further left is not available. That is the link brackets'

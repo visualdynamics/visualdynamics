@@ -156,7 +156,7 @@ def test_the_bar_offers_the_acts_an_object_can_take(window, pump, survey):
     assert [label for _v, label, *_rest in window.acts_for(['Time'])] == \
         ['Integrate'], \
         'record-level transforms only: every verb a view '\
-        'parameterises lives on that view (Brandon, 2026-08-28)'
+        'parameterizes lives on that view (Brandon, 2026-08-28)'
     assert [label for _v, label, *_rest in window.acts_for(['FRF'])] == \
         ['Fit Modal Model']
     assert window.acts_for(['Spec']) == [], \
@@ -179,7 +179,7 @@ def test_spectra_blocks_split_by_quantity_like_time_blocks(window, pump):
     assert block['logy'] is True, 'a spectrum reads in log magnitude'
     # the axis wears the units of the records actually plotted — the
     # acceleration channel sits first in the object, and a force block
-    # labelled with its units is exactly the bug this pins down
+    # labeled with its units is exactly the bug this pins down
     from visualdynamics.units import DEFAULT_SYSTEM
     assert block['ylabel'] == DEFAULT_SYSTEM.label_text('force')
     # the inserts bind to the right kind of data: a Spectra insert

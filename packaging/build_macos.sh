@@ -3,14 +3,14 @@
 #
 #     packaging/build_macos.sh [--sign "Developer ID Application: ..."]
 #
-# Signed and notarised when the machine can: a "Developer ID
+# Signed and notarized when the machine can: a "Developer ID
 # Application" identity in the keychain is used without being asked
 # for (or name one with --sign, or VD_SIGN), and a notarytool keychain
 # profile (NOTARY_PROFILE, default vd-notary) sends the app and then
 # the image to Apple, waits, and staples the tickets — so the download
 # opens with no right-click anywhere. Without the identity the bundle
 # is ad-hoc signed and Gatekeeper asks once; without the profile it is
-# signed but not notarised, and the build says so. Brandon joined the
+# signed but not notarized, and the build says so. Brandon joined the
 # Apple Developer Program 2026-09-02; packaging/README.md has the two
 # one-time steps (the certificate, the stored credentials).
 set -euo pipefail
@@ -58,7 +58,7 @@ notary_args() {
     account=$(security find-generic-password -s "$NOTARY_ITEM" 2>/dev/null |
               sed -n 's/.*"acct"<blob>="\(.*\)"/\1/p')
     NOTARY=(--apple-id "$account" --team-id "$NOTARY_TEAM" --password "$password")
-    echo "notarising as $account (login-keychain item $NOTARY_ITEM)"
+    echo "notarizing as $account (login-keychain item $NOTARY_ITEM)"
   else
     NOTARY=(--keychain-profile "$NOTARY_PROFILE")
   fi
@@ -77,7 +77,7 @@ rm -rf build dist
 
 if [[ -n $SIGN ]]; then
   # --deep is deprecated and unreliable for nested code; sign inside
-  # out. Every Mach-O *by content*, not by name: the first notarised
+  # out. Every Mach-O *by content*, not by name: the first notarized
   # build signed *.dylib and *.so and Apple refused it 125 times over,
   # once per Qt framework binary (no extension) and once for the
   # WebEngine helper app, all still carrying Qt's own signature
@@ -109,7 +109,7 @@ if [[ -n $SIGN ]]; then
     xcrun stapler staple -q "$APP"
     spctl --assess --type execute -v "$APP"
   else
-    echo "warning: signed but not notarised — neither the login-keychain" \
+    echo "warning: signed but not notarized — neither the login-keychain" \
          "item '$NOTARY_ITEM' nor the notarytool profile '$NOTARY_PROFILE'" \
          "answers (packaging/README.md, Signing)" >&2
   fi
@@ -165,14 +165,14 @@ hdiutil convert "$RW" -format UDZO -o "$DMG" -quiet
 rm -f "$RW"
 if [[ -n $SIGN ]]; then
   # the image itself, then its own ticket: what Gatekeeper sees first
-  # is the disk image, and an unsigned one around a notarised app
+  # is the disk image, and an unsigned one around a notarized app
   # still draws the warning
   codesign --force --timestamp --sign "$SIGN" "$DMG"
   if notary_ready; then
     xcrun notarytool submit "$DMG" "${NOTARY[@]}" --wait | tail -3
     xcrun stapler staple -q "$DMG"
     spctl --assess --type open --context context:primary-signature -v "$DMG"
-    echo "notarised and stapled"
+    echo "notarized and stapled"
   fi
 fi
 echo "built $DMG ($(du -sh "$DMG" | cut -f1))"

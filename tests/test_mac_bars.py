@@ -37,9 +37,9 @@ def test_every_cell_is_a_box_on_one_mesh():
     plotter.close()
 
 
-def test_height_and_colour_are_both_the_value():
+def test_height_and_color_are_both_the_value():
     """The bar for 0.6 must stand at 0.6 of full height exactly, and
-    carry 0.6 as its colour scalar — the two readings of one number."""
+    carry 0.6 as its color scalar — the two readings of one number."""
     matrix = np.array([[1.0, 0.6], [0.0, 0.25]])
     plotter, _info = scene(matrix)
     mesh = plotter.renderer.actors['mac-bars'].mapper.dataset
@@ -55,7 +55,7 @@ def test_height_and_colour_are_both_the_value():
 
 def test_the_scale_is_pinned_zero_to_one():
     """Like the flat grid and the coherence map: a MAC is a bounded
-    ratio, and a matrix topping out at 0.4 must not be recoloured as
+    ratio, and a matrix topping out at 0.4 must not be recolored as
     if 0.4 were a match."""
     matrix = np.full((3, 3), 0.4)
     plotter, _info = scene(matrix)
@@ -64,7 +64,7 @@ def test_the_scale_is_pinned_zero_to_one():
     plotter.close()
 
 
-def test_bars_leave_a_gap_between_neighbours():
+def test_bars_leave_a_gap_between_neighbors():
     """A row of near-ones must read as bars, not a wall."""
     assert FOOTPRINT < 1.0
     matrix = np.ones((1, 2))
@@ -73,7 +73,7 @@ def test_bars_leave_a_gap_between_neighbours():
     x = np.asarray(mesh.points)[:, 0]
     first_right = x[:8].max()
     second_left = x[8:].min()
-    assert second_left > first_right, 'neighbouring boxes must not touch'
+    assert second_left > first_right, 'neighboring boxes must not touch'
     plotter.close()
 
 
@@ -141,7 +141,7 @@ def test_marks_trace_selected_active_and_matched():
     """The grid's marks, in the same red: outlines for the picked
     pairs, the boldest for the animated one, a checker over every face
     of a committed match — alternating, so half of each face stays the
-    value's own colour."""
+    value's own color."""
     from visualdynamics.viz.mac_bars import CHECKER, MARK_LIFT
 
     matrix = np.eye(3)
@@ -188,7 +188,7 @@ def test_marks_yield_the_pick_to_the_bar_beneath():
     plotter.close()
 
 
-def test_picked_and_committed_wear_different_colours():
+def test_picked_and_committed_wear_different_colors():
     """A blue outline on a red-checkered bar can be seen; the red one
     it used to be could not. Committed stays the grid's red."""
     import pyvista as pv
@@ -223,7 +223,7 @@ def test_marks_outside_the_grid_are_dropped():
 
 
 def test_every_bar_wears_an_outline():
-    """A field of near-1.0 MACs is a field of one colour — viridis has
+    """A field of near-1.0 MACs is a field of one color — viridis has
     nowhere to go above 0.95 — and without an outline the bars merge
     into a slab (Brandon, 2026-08-26). Twelve edges per bar, on every
     bar, not only the marked ones.

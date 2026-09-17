@@ -250,7 +250,7 @@ def spectra(request):
     return visualdynamics.import_file(request.param), request.param
 
 
-def test_a_spectral_save_is_recognised_without_any_time_data():
+def test_a_spectral_save_is_recognized_without_any_time_data():
     """A sniffer that insists on time data rejects half of what rattlesnake
     writes. The random environment's spectral save has none — it carries a
     `time_samples` dimension of zero, which its metadata writer puts there,

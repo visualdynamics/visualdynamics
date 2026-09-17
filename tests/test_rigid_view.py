@@ -151,7 +151,7 @@ def test_an_edit_lands_on_the_geometry_and_moves_the_preview(window, pump):
     assert _marker_up(window)
 
 
-def test_mass_normalising_reveals_the_terms_and_refuses_a_bad_tensor(
+def test_mass_normalizing_reveals_the_terms_and_refuses_a_bad_tensor(
         window, pump):
     geometry = _plate(window, pump)
     scene = _toggle(window, pump)
@@ -164,7 +164,7 @@ def test_mass_normalising_reveals_the_terms_and_refuses_a_bad_tensor(
     assert geometry.mass_properties.scaled
     assert geometry.mass_properties.mass == pytest.approx(
         float(window.unit_system.to_si(1.0, 'mass')))
-    assert panel.derived['scaling'].text() == 'mass-normalised'
+    assert panel.derived['scaling'].text() == 'mass-normalized'
     assert panel.mass_box.suffix().strip() == \
         window.unit_system.label_text('mass')
     assert 'slinch' in panel.inertia_boxes['Ixx'].suffix()
@@ -182,7 +182,7 @@ def test_mass_normalising_reveals_the_terms_and_refuses_a_bad_tensor(
     assert panel.apply_button.isEnabled()
 
 
-def test_undeclared_units_cannot_mass_normalise(window, pump):
+def test_undeclared_units_cannot_mass_normalize(window, pump):
     _plate(window, pump, unit=None)
     scene = _toggle(window, pump)
     panel = scene.rigid_panel

@@ -191,7 +191,7 @@ def test_what_the_trim_refuses():
 def test_one_hot_channel_does_not_become_the_answer():
     """A set whose levels span orders of magnitude — a stiff mount and a
     panel — is compressed to a consensus, not to a portrait of the
-    loudest channel. Each channel is normalised by its own median first.
+    loudest channel. Each channel is normalized by its own median first.
     """
     data = history([(0.1, 20), (1.0, 60), (0.1, 20)], channels=8, seed=3)
     wanted = detect.analysis_window(data)
@@ -261,7 +261,7 @@ def test_the_real_run_lands_on_its_full_level_stretch():
     assert averaging.frame_length == 256, 'one second at 256 Hz'
     assert averaging.window == 'hann' and averaging.overlap == 0.5
     # inside the full-level stretch, not on either edge of it. Which 
-    # part of it is a judgement the numbers should not be pinned to;
+    # part of it is a judgment the numbers should not be pinned to;
     # that it is all of one level, and enough of it, is the claim.
     assert averaging.start >= 61.0, averaging.start
     assert averaging.stop(rate) <= 160.0, averaging.stop(rate)

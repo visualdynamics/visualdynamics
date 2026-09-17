@@ -58,7 +58,7 @@ def shaded(qt_app, specification, psd, theme='light'):
     return fills, plot
 
 
-def colour_of(fill):
+def color_of(fill):
     return fill.brush().color().name()
 
 
@@ -85,7 +85,7 @@ def test_a_line_over_the_abort_limit_is_boxed_in_red(qt_app):
     fills, _plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
                           measured(lines, over))
     reds = [f for f in fills
-            if colour_of(f) == resolve_theme('light')['exceed_over']]
+            if color_of(f) == resolve_theme('light')['exceed_over']]
     assert len(reds) == 1
     assert span(reds[0]) is not None
 
@@ -102,7 +102,7 @@ def test_a_line_under_the_abort_limit_is_boxed_in_blue(qt_app):
     fills, _plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
                           measured(lines, under))
     blues = [f for f in fills
-             if colour_of(f) == resolve_theme('light')['exceed_under']]
+             if color_of(f) == resolve_theme('light')['exceed_under']]
     assert len(blues) == 1
     assert span(blues[0]) is not None
 
@@ -167,7 +167,7 @@ def test_the_stripe_runs_from_the_limit_off_the_top(qt_app):
     is barely over, which is exactly when it most needs seeing. The
     stripe runs to the plot's own edge instead. Exactly to it, and not
     a millionfold past: a polygon reaching that far is a thing Qt has to
-    rasterise, and it crashed doing so about one run in three."""
+    rasterize, and it crashed doing so about one run in three."""
     lines = np.linspace(20.0, 2000.0, 100)
 
     def over(v):
@@ -287,4 +287,4 @@ def test_each_theme_brings_its_own(qt_app, name):
 
     fills, _plot = shaded(qt_app, spec(abort_upper=4.0),
                           measured(lines, over), theme=name)
-    assert colour_of(fills[0]) == resolve_theme(name)['exceed_over']
+    assert color_of(fills[0]) == resolve_theme(name)['exceed_over']

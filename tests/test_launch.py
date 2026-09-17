@@ -59,7 +59,7 @@ def _bound_to(monkeypatch, binding):
     `sys.modules['pyqtgraph'].Qt.QT_LIB` and nothing else, so a stub
     stages the poisoned session without PyQt5 being installed at all.
     Installing a GPL Qt to test a package that never imports one would
-    be staging the third party's behaviour, not ours — that is what the
+    be staging the third party's behavior, not ours — that is what the
     end-to-end probe below is for, on a machine that has sdynpy.
     """
     import types

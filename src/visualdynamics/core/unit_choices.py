@@ -55,7 +55,7 @@ ORDINATE_UNITS = {
     'angular_velocity': ['rad/s', 'deg/s'],
     'angular_acceleration': ['rad/s**2', 'deg/s**2'],
     'moment': ['lbf*in', 'N*m', 'lbf*ft'],
-    # modal responses through mass-normalised shapes: the response's
+    # modal responses through mass-normalized shapes: the response's
     # unit times the square root of the mass unit the shapes carry
     'modal_acceleration': ['in/s**2*slinch**0.5', 'm/s**2*kg**0.5',
                            'g*slinch**0.5'],
@@ -72,10 +72,10 @@ ALL_ORDINATE_UNITS = [unit for units in ORDINATE_UNITS.values()
 #: What a dimension is called where a person reads it.
 #:
 #: The stored dimension is the physical one, and it has to be: it is
-#: derived from the unit, and metres cannot say whether they are a
+#: derived from the unit, and meters cannot say whether they are a
 #: coordinate or a motion — a geometry's nodes, a plate's thickness and
 #: a proximity probe's output are all `length`. But a *channel* measured
-#: in metres is a displacement, and 'length' offered in a Type cell
+#: in meters is a displacement, and 'length' offered in a Type cell
 #: reads as a mistake to anyone who has ever run a survey. So the
 #: dimension keeps its name and the interface uses this one.
 DISPLAY_DIMENSIONS = {'length': 'displacement',

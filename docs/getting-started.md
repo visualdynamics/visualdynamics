@@ -8,7 +8,7 @@ in full.
 
 **A compiled package** — nothing to set up: download, open, and the
 application is on your desktop. Builds for macOS (Apple silicon and
-Intel, signed and notarised), a Windows installer and a Linux
+Intel, signed and notarized), a Windows installer and a Linux
 AppImage. This is the one to take unless you already work in Python.
 
 **The Python package** — the desktop application and the scripting API
@@ -87,7 +87,7 @@ source .venv/bin/activate && visualdynamics-gui   # from the clone
 ```
 
 ![The main window, holding a plate modal survey: the project tree at
-the left with the type's remaining slots in grey, the selected FRF
+the left with the type's remaining slots in gray, the selected FRF
 drawn in display units, the console tab
 on the bottom edge, and the display-unit selector in the status
 bar](guide/images/modal-import.png)
@@ -171,7 +171,7 @@ picking; a script is faster for repeating. They share the objects,
 the rules and the file, so a project can move between them mid-job:
 save from the app, load in a notebook, save again, reopen.
 
-The one thing a script cannot do is the judgement calls the screen
+The one thing a script cannot do is the judgment calls the screen
 asks you for — which residual peak is a real mode, which MAC squares
 are a match. Scripted, those become rules (a frequency band, a MAC
 threshold), and it is worth being deliberate about that.
@@ -179,6 +179,6 @@ threshold), and it is worth being deliberate about that.
 And the bridge between the two is built in: the **console tab** along
 the bottom of the window writes the session as Python while you work —
 every import, every setting, every computation as the line that
-replays it, judgement calls included (an interactive mode fit journals
+replays it, judgment calls included (an interactive mode fit journals
 as its confirmed picks). Expand the tab, copy the stretch you want,
 and yesterday's session is today's script.

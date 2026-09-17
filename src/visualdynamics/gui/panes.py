@@ -47,7 +47,7 @@ def offer_acts(toolbar: Any, state: dict, acts: Sequence[tuple]) -> None:
     group at its end — an icon each, like every other button on a
     bar, the verb and its meaning in the tooltip (Brandon, 2026-09-12:
     "none should [carry text] and the user should rely on tool tips to
-    learn icons they don't recognize"; this reverses the labelled
+    learn icons they don't recognize"; this reverses the labeled
     buttons of 2026-09-04). Every act on the bar, none behind a menu.
 
     `acts` is [(verb, label, icon name, callback, tooltip)], in the
@@ -101,7 +101,7 @@ class DataPane(QWidget):
     which records an FRF is filtered to, and how an FRF beside a shape
     set is used — and shows only what the data in front of it can
     actually use, because a control that is not a live option is absent
-    rather than greyed.
+    rather than grayed.
 
     The pane keeps the choice and announces it. What a choice *means*
     stays outside: filtering to the diagonal moves the tree selection,
@@ -297,7 +297,7 @@ class DataPane(QWidget):
             control_icon('waterfall'), '3D', self)
         self.waterfall_action.setCheckable(True)
         self.waterfall_action.setToolTip(
-            'Spread the channels along a depth axis, coloured by level')
+            'Spread the channels along a depth axis, colored by level')
         self.waterfall_action.setChecked(True)
         self.waterfall_action.triggered.connect(
             lambda _checked: self.reread.emit())
@@ -323,7 +323,7 @@ class DataPane(QWidget):
         self.map_action: QAction = QAction(control_icon('map'), 'Map', self)
         self.map_action.setToolTip(
             'Every channel at once: frequency across, channel down, '
-            'coherence as colour')
+            'coherence as color')
         for action, mode in ((self.curves_action, 'curves'),
                              (self.map_action, 'map')):
             action.setCheckable(True)
@@ -405,7 +405,7 @@ class DataPane(QWidget):
         self.comparison_actions['curves'].setChecked(True)
         # a specification on its own: its spectra, or the RMS level each
         # channel asks for as a bar apiece with the table beneath —
-        # the comparison's RMS reading without the colouring (Brandon,
+        # the comparison's RMS reading without the coloring (Brandon,
         # 2026-09-06). A toggle rather than a third group: it is one
         # other reading, and unchecking is the way back to the spectra
         self.rms_action: QAction = QAction(control_icon('bars'), 'RMS', self)
@@ -606,7 +606,7 @@ class DataPane(QWidget):
         self.filter_action.triggered.connect(self._choose_filter)
         toolbar.addAction(self.filter_action)
         # the stretch a record would be cut to: start and stop beside
-        # the plot, the discarded ends greyed over on it — the
+        # the plot, the discarded ends grayed over on it — the
         # averaging span's editing grammar with nothing computed
         # (Brandon, 2026-08-28)
         self.truncate_action: QAction = QAction(control_icon('truncate'),
@@ -647,7 +647,7 @@ class DataPane(QWidget):
         self.wavelet_action.setCheckable(True)
         self.wavelet_action.setToolTip(
             'The scalogram: time across, frequency up, magnitude as '
-            'colour — where a rattle, a ring-down or a sweep actually '
+            'color — where a rattle, a ring-down or a sweep actually '
             'is in the record')
         self.wavelet_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.wavelet_action)
@@ -760,7 +760,7 @@ class DataPane(QWidget):
 
         Turning one reading on turns the others off. They mark the same
         record differently — frames to average against events to
-        analyse — and a record is being read one way or the other, never
+        analyze — and a record is being read one way or the other, never
         both. Overlaid they are just two sets of shading on one trace.
         """
         self._readings_settled()
@@ -921,7 +921,7 @@ class DataPane(QWidget):
 
         No repeat is marked out. Which one is the bad one depends on
         which reading you care about and on what the article is for,
-        and naming one here would be putting a judgement in a list of
+        and naming one here would be putting a judgment in a list of
         facts — the numbers beside the plot are what to decide with.
         """
         wanted = list(labels)
@@ -1034,7 +1034,7 @@ class DataPane(QWidget):
         window offered it, which is why the caller checks that first.
 
         The filter view used to outrank this and force the drawing
-        flat — my judgement that two overlaid ribbons would occlude
+        flat — my judgment that two overlaid ribbons would occlude
         each other, made without drawing them. Wrong twice over
         (Brandon, 2026-08-25): the stage already draws paired data at
         one station, and a view choice that silently overrides another
@@ -1471,7 +1471,7 @@ class DataPane(QWidget):
     def apply_theme(self, name: str, colors: dict) -> None:
         self.theme_name = name
         self.graphics.setBackground(background_brush(colors))
-        # the same theme dict carries the scene colours, so the 3-D
+        # the same theme dict carries the scene colors, so the 3-D
         # surface follows the switch without a second lookup
         if self.waterfall_plotter is not None:
             self.waterfall_plotter.set_background(
@@ -1506,7 +1506,7 @@ class ScenePane(QWidget):
         #: the wish survives the selection, the data pane's rule: pick
         #: another geometry and the reading comes back up
         self.rigid_wanted: bool = False
-        # the orientation triad is useful at a glance; the labelled box
+        # the orientation triad is useful at a glance; the labeled box
         # around the geometry is clutter until asked for
         self.bounds_visible: bool = False
         self.orientation_visible: bool = True
@@ -1551,7 +1551,7 @@ class ScenePane(QWidget):
         self.bounds_action.setCheckable(True)
         self.bounds_action.setChecked(False)
         self.bounds_action.setToolTip(
-            'Show the labelled axes drawn around the geometry')
+            'Show the labeled axes drawn around the geometry')
         self.bounds_action.toggled.connect(self.set_bounds_visible)
         toolbar.addAction(self.bounds_action)
 
@@ -1664,7 +1664,7 @@ class ScenePane(QWidget):
     # ---- how the scene is dressed ----------------------------------------
 
     def set_bounds_visible(self, visible: bool) -> None:
-        """Toggle the labelled axes drawn around the geometry."""
+        """Toggle the labeled axes drawn around the geometry."""
         self.bounds_visible = bool(visible)
         self.apply_annotations()
 

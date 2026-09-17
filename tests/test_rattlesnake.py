@@ -11,7 +11,7 @@ import visualdynamics
 # A real controller run, wherever this machine keeps it. Read from the
 # environment rather than written in: a path under someone's home
 # directory is that machine's business and not the repository's, and
-# it travelled into the public tree when it was hard-coded here
+# it traveled into the public tree when it was hard-coded here
 # (found by the public-tree sweep, 2026-08-25).
 REAL_NC4 = os.environ.get(
     'VISUALDYNAMICS_RATTLESNAKE_NC4',

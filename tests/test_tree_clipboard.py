@@ -70,7 +70,7 @@ def test_copy_puts_names_and_files_on_the_clipboard(window, pump, survey,
 
 def test_paste_duplicates_the_copied_objects(window, pump, survey):
     """A paste back into the tree is a duplicate: its own arrays, its
-    own name, journalled as the verb a script would call."""
+    own name, journaled as the verb a script would call."""
     _two_objects(window, survey)
     _select(window, 'Geometry', 'FRF')
     window.copy_action.trigger()

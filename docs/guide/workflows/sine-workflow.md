@@ -49,7 +49,7 @@ bands](../images/sine-spec.png)
 
 Before any number is extracted, the record can be *looked at* the way
 a sweep actually is: the time history's **wavelet** reading draws
-frequency against time with amplitude as colour, and a multi-tone
+frequency against time with amplitude as color, and a multi-tone
 sweep is its natural subject — four tones are four ridges, each
 walking its own path, crossing where they cross. The spectra a random
 workflow leans on would average all of that away.
@@ -86,7 +86,7 @@ clocks aligned — on the stage by default, flat with the 3-D toggle
 off; the signed deviation bars judge the whole run tone by tone.
 
 ![The extracted levels against the specification: measured paths in
-tone colours over the targets and their
+tone colors over the targets and their
 bands](../images/sine-levels.png)
 
 ### 4. Geometry, photos, report
@@ -128,7 +128,7 @@ project.export_report(project.report, 'sine_report.html')
 project.save('sine.vdyn')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 - **A mixed run imports both specifications.** A random environment
   over a quiet sweep — the qualification-with-a-tracked-tone case —

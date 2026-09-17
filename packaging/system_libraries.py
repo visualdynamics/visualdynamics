@@ -18,7 +18,7 @@ before it has drawn anything. Measured on 2026-08-27: the 0.0.1 AppImage
 started on bookworm, died on trixie, and deleting these two files from
 the bundle by hand made it start there in four seconds. The whole point
 of an AppImage is that it runs on distributions newer than the one that
-built it, so this is the difference between a portable artefact and one
+built it, so this is the difference between a portable artifact and one
 that only works where it was made.
 
 The list is deliberately these two and no more. AppImage's own

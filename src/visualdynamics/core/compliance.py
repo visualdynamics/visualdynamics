@@ -129,7 +129,7 @@ def log_log_area(frequencies: ArrayLike, values: ArrayLike,
             # It matters because a specification is no longer always a
             # handful of breakpoints spanning decades. The PSD of a
             # transient target is a Specification with four thousand
-            # lines a quarter-hertz apart, and neighbouring lines two
+            # lines a quarter-hertz apart, and neighboring lines two
             # decades apart over a frequency ratio of 1.00025 give an
             # exponent near twenty thousand: a**n overflowed, the
             # subtraction went inf - inf, and every channel's RMS error
@@ -215,7 +215,7 @@ def outside(lines: ArrayLike, values: ArrayLike,
 
     At the two ends it cannot be. A bin straddling the edge is covered
     by the specification for part of its width and by nothing for the
-    rest, and reading the limit at the bin's centre either invents a
+    rest, and reading the limit at the bin's center either invents a
     requirement past the edge or drops a bin that is mostly inside. So
     a cut bin is judged on the part that is covered: the power the
     measurement holds over that stretch, `G` times the covered width,
@@ -275,7 +275,7 @@ def rms(frequencies: ArrayLike, values: ArrayLike) -> float:
 
     The widths come from the whole axis before any line is dropped, so
     a line that says nothing contributes nothing rather than having its
-    bin quietly widened onto its neighbours. Bridging a gap would be
+    bin quietly widened onto its neighbors. Bridging a gap would be
     assuming what is in it.
     """
     frequencies = np.asarray(frequencies, dtype=float)
@@ -417,7 +417,7 @@ def detect_scale_db(specification: Specification, measured: DataArray,
     # not a statement about the commanded level — the broken-channel
     # test pins that such a channel cannot answer alone, and it must
     # not veto alone either. 2 dB of slack both ways lets a slightly
-    # hot control sit under the commanded level without cancelling a
+    # hot control sit under the commanded level without canceling a
     # real run-up.
     plausible = [value for value in per_channel if value >= -2]
     if plausible and min(plausible) < candidate - 2:
@@ -546,7 +546,7 @@ def compare(specification: Specification, measured: DataArray,
         return {'lines': 0}
     # the bins the spectrum actually has. An octave-band one carries
     # its own — geometric, from a standard — and reading them off the
-    # centres would be a hair out at every band and wrong at the ends.
+    # centers would be a hair out at every band and wrong at the ends.
     own = getattr(measured, 'bin_widths', None)
 
     # A measured line stands for its whole bin, half a width either
@@ -684,7 +684,7 @@ def compare_all(specification: Specification, measured: DataArray,
 
 #: The RMS dB deviation an SRS comparison is shaded past, either side.
 #: The same three decibels the level error either side of a
-#: specification uses, because it is the same judgement in the same
+#: specification uses, because it is the same judgment in the same
 #: unit — how far a spectrum sits from what was asked for, and
 #: over-testing and under-testing are not the same fault.
 SRS_ERROR_DB = 3.0

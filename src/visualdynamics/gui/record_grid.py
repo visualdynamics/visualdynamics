@@ -4,7 +4,7 @@ Every object that expands into records, channels or modes expands into a
 grid — even one column wide. Rows are DOFs (modes for a shape set), columns
 are whatever tells records apart besides their row: reference DOFs for a
 matrix of measurements, the capture for repeated averages, or a single
-unlabelled column when the row alone is the identity. One format for every
+unlabeled column when the row alone is the identity. One format for every
 object means one set of habits: the same selection, the same deletion, the
 same icons.
 
@@ -66,7 +66,7 @@ def row_keys(data: DataArray) -> list[RowKey]:
     A row is a DOF *and* a data type. Two channels can sit at one point — a
     shaker's load cell and the accelerometer beside it share a node and a
     direction — so a DOF may repeat, but never within a quantity, and a volt,
-    a newton and a metre per second squared never belong on one row whatever
+    a newton and a meter per second squared never belong on one row whatever
     their DOF says.
 
     The quantity comes from `known_dim`, not `ordinate_dim`: a source can name
@@ -80,11 +80,11 @@ def row_keys(data: DataArray) -> list[RowKey]:
     When even that is not enough — an import that says nothing about units, so
     every channel at a DOF reads 'unknown' — `occurrence` breaks the tie by
     channel order. That is deliberately the last resort. A channel index is an
-    artefact of how a file was written rather than a property of a
+    artifact of how a file was written rather than a property of a
     measurement, and reordering the table would rename the row; but the
     alternative is refusing the grid and losing an arrangement we *do* know,
     which is worse. Declare the units and the quantities separate, every
-    occurrence falls back to 0, and the artefact stops being used.
+    occurrence falls back to 0, and the artifact stops being used.
     """
     factors = [channel_quantities(data.known_dim(i))
                for i in range(data.num_records)]
@@ -126,7 +126,7 @@ def short_labels(columns: Sequence[str]) -> list[str]:
     """Column headers narrow enough that a 20-average grid is usable.
 
     A block reads as 'avg 7' in a record label, where it is prose. As a
-    column header it only has to be told from its neighbours, and the word
+    column header it only has to be told from its neighbors, and the word
     is the same on all twenty — so where every column shares one prefix, the
     prefix goes. Reference DOFs have no common prefix and are left alone.
     """
@@ -144,7 +144,7 @@ def grid_axes(data: DataArray
 
     The columns are whatever tells records apart besides their row — the
     reference DOF for a matrix of measurements, the capture for repeated
-    averages — and a single unlabelled column when the row alone is the
+    averages — and a single unlabeled column when the row alone is the
     identity: multiple coherence, a plain time history, a channel table, a
     shape set. A specification whose every record is a channel against
     itself collapses its reference column too, because a diagonal spelled
@@ -213,7 +213,7 @@ class GridPlan(NamedTuple):
     #: rows wear in their cells — and None where the DOF alone tells
     column_marks: list | None = None
     #: whether the columns are reference coordinates — editable, as the
-    #: rows are — rather than captures or the one unlabelled column
+    #: rows are — rather than captures or the one unlabeled column
     column_dofs: bool = False
     #: the reference channel each column is, (dof, quantity), where the
     #: columns are coordinates — a rename is the channel's, not the
@@ -291,7 +291,7 @@ def _data_plan(data):
             column_keys.append(tuple(identity) if column_dofs else None)
         cells[(row_index[key], column_index[identity])] = i
     # labels come from the unique rows, not the per-record keys: a 12 x 2
-    # FRF has 24 keys but 12 rows, and labelling rows by the first 12 keys
+    # FRF has 24 keys but 12 rows, and labeling rows by the first 12 keys
     # silently shifted every header after the first repeat
     return GridPlan('record', rows, row_labels(rows), columns, cells,
                     column_marks=marks, column_dofs=column_dofs,
@@ -351,7 +351,7 @@ def _tone_plan(grouped):
 
 
 def _match_plan(matched):
-    """One row per matched pair, labelled by the two mode numbers it
+    """One row per matched pair, labeled by the two mode numbers it
     joins — the same 1-based numbering the matched-modes table shows.
 
     Mode labels would need both shape sets, and a MatchedModes holds
@@ -428,7 +428,7 @@ class RecordGrid(QTableWidget):
                 item.setToolTip(f'{plan.columns[column]} — {mark}')
             except KeyError:     # a quantity with no icon: say the word
                 item.setText(f'{plan.columns[column]} ({mark})')
-        # a single unlabelled column has no header worth a strip of pixels
+        # a single unlabeled column has no header worth a strip of pixels
         self.horizontalHeader().setVisible(plan.columns != [''])
         self.setVerticalHeaderLabels(self.responses)
         # A qualified row label — '101Z+ [acceleration]' — is twice the width
@@ -484,7 +484,7 @@ class RecordGrid(QTableWidget):
         # photograph's name, and the coordinate of a record or a
         # channel — where the wrong assignment was made at the
         # instrument and is corrected here. A mode, a matched pair and a
-        # tone are labelled by what they are and stay so. The columns of
+        # tone are labeled by what they are and stay so. The columns of
         # a matrix are coordinates too, and edit the same way.
         # Double-clicking a label to change it is what the tree already
         # does for objects; this is the same gesture on a grid's edges.

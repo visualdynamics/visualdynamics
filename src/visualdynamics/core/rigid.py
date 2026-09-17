@@ -13,14 +13,14 @@ of one radian about an axis `e` through the point `c` moves a node at
 `r` by `e × (r − c)`. No mass enters. The point is what a test
 engineer calls the CG, and the geometry's centroid is the default.
 
-**Mass and inertia only scale.** `ShapeSet` holds mass-normalised
+**Mass and inertia only scale.** `ShapeSet` holds mass-normalized
 shapes, `φᵀMφ = I`. A rigid body's 6×6 mass matrix about its CG is
 diagonal in its principal axes — the mass three times, then the three
-principal moments — so normalising divides each translation by `√m`
+principal moments — so normalizing divides each translation by `√m`
 and each rotation by `√I` about its own axis. That is all the mass
 properties do, and it is why they come as one optional group: mass
 without inertia could scale three rows and not the other three, and a
-set normalised by halves carries modal masses nobody can read. Without
+set normalized by halves carries modal masses nobody can read. Without
 them the set is exactly what a fit without a drive point is,
 `unscaled` — unit shapes, modal mass a convention.
 
@@ -32,9 +32,9 @@ principal decomposition is always taken: a diagonal tensor's principal
 axes are the global axes and the user who typed three numbers gets X,
 Y and Z back; a coupled one gets its own axes, named in the mode
 descriptions. Taking the diagonal of a coupled tensor and calling the
-result mass-normalised is a wrong answer that looks right.
+result mass-normalized is a wrong answer that looks right.
 
-Mass normalisation is only meaningful about the CG — about any other
+Mass normalization is only meaningful about the CG — about any other
 point the rigid mass matrix couples translation to rotation and the
 six are not orthogonal — so the mass properties, when given, are taken
 to be about the point. Unscaled shapes about *any* point span the same
@@ -70,7 +70,7 @@ def is_rigid_set(shapes: ShapeSet) -> bool:
     writes: six modes at exactly 0 Hz, described as such.
 
     Read off the set rather than flagged on it, so a rigid set that
-    travelled through a file, a copy or a script is still one.
+    traveled through a file, a copy or a script is still one.
     """
     return (shapes.num_shapes == 6
             and bool(np.all(shapes.frequency == 0.0))
@@ -84,7 +84,7 @@ def is_rigid_set(shapes: ShapeSet) -> bool:
 class MassProperties:
     """The reference point, and optionally the mass and inertia about it.
 
-    `point` is in metres, `mass` in kilograms, `inertia` in kg·m² —
+    `point` is in meters, `mass` in kilograms, `inertia` in kg·m² —
     SI, like every stored value here — and the six inertia terms are
     the tensor's `Ixx, Iyy, Izz, Ixy, Ixz, Iyz` (`INERTIA_TERMS`).
 
@@ -111,7 +111,7 @@ class MassProperties:
         if (self.mass is None) != (self.inertia is None):
             raise ValueError(
                 'mass and inertia scale the set together: give both, '
-                'for mass-normalised shapes, or neither, for unit shapes')
+                'for mass-normalized shapes, or neither, for unit shapes')
         if self.mass is None:
             return
         mass = float(self.mass)
@@ -131,7 +131,7 @@ class MassProperties:
 
     @property
     def scaled(self) -> bool:
-        """Whether the shapes are mass-normalised (mass and inertia
+        """Whether the shapes are mass-normalized (mass and inertia
         given) or unit shapes."""
         return self.mass is not None
 
@@ -179,7 +179,7 @@ class MassProperties:
         In SI by default — the journal's and the staleness story's
         units — or in a unit system's display units when one is given.
         `defined=False` says the geometry's coordinates are raw, so the
-        point is labelled as such rather than as metres.
+        point is labeled as such rather than as meters.
         """
         import numpy as np
 
@@ -195,7 +195,7 @@ class MassProperties:
             if mass is not None:
                 mass = float(unit_system.from_si(mass, 'mass'))
         coordinates = ', '.join(f'{v:.4g}' for v in point)
-        scaling = (f'mass-normalised ({mass:.4g} {mass_unit})' if self.scaled
+        scaling = (f'mass-normalized ({mass:.4g} {mass_unit})' if self.scaled
                    else 'unit shapes')
         return f'about ({coordinates}) {length}, {scaling}'
 
@@ -223,7 +223,7 @@ def rigid_body_shapes(geometry: Geometry,
     are not carried: nothing here measures them.
 
     Frequencies are exactly 0.0, the convention the FRF synthesis
-    relies on to recognise a rigid mode, and damping is 0.0.
+    relies on to recognize a rigid mode, and damping is 0.0.
 
     Parameters
     ----------
@@ -231,7 +231,7 @@ def rigid_body_shapes(geometry: Geometry,
         The nodes the shapes are written over.
     properties : MassProperties
         The reference point and, optionally, the mass and inertia
-        that mass-normalise the set. Mass properties on a geometry
+        that mass-normalize the set. Mass properties on a geometry
         whose length unit is undeclared are refused: an inertia in
         kg·m² against coordinates in nothing is not a number.
 
@@ -259,8 +259,8 @@ def rigid_body_shapes(geometry: Geometry,
     # dof_directions cannot silently thin the set
     assert used.all(), 'a translational DOF of the geometry was dropped'
 
-    centre = np.asarray(properties.point, dtype=np.float64)
-    offsets = geometry.node_xyz[rows] - centre
+    center = np.asarray(properties.point, dtype=np.float64)
+    offsets = geometry.node_xyz[rows] - center
     moments, axes = properties.principal_axes()
     shapes = np.empty((6, len(dofs)), dtype=np.float64)
     for k in range(3):
@@ -268,7 +268,7 @@ def rigid_body_shapes(geometry: Geometry,
         unit[k] = 1.0
         shapes[k] = directions @ unit
         # a small rotation about the axis moves a point by the cross
-        # product of the axis with its offset from the centre
+        # product of the axis with its offset from the center
         motion = np.cross(axes[k], offsets)
         shapes[3 + k] = np.einsum('ij,ij->i', directions, motion)
     if properties.scaled:

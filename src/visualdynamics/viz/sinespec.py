@@ -26,8 +26,8 @@ from ..units import DEFAULT_SYSTEM, UNKNOWN, UnitSystem
 from ._quiet import one_render
 from .waterfall import STAGE, finish_scene, place_camera, ribbon
 
-#: matplotlib's tab10, the same cycle the 2-D curves use — one colour
-#: per tone, the limit curves in the zone colours whatever the tone
+#: matplotlib's tab10, the same cycle the 2-D curves use — one color
+#: per tone, the limit curves in the zone colors whatever the tone
 _TONE_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                 '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf')
 
@@ -100,12 +100,12 @@ def add_sine_stage(plotter: Any, specification: Any = None,
     """Draw the specification's stage into a plotter.
 
     The stage takes either half or both: a specification's tones
-    (target curves, one colour per tone, the warning and abort limits
+    (target curves, one color per tone, the warning and abort limits
     as thin lines *and* as the translucent zone ribbons the 2-D
     comparison shades, with its fallbacks), and measured levels —
-    each tone's extracted path in the tone's colour, timed by its own
+    each tone's extracted path in the tone's color, timed by its own
     per-line clock. With both drawn the targets step back to the
-    specification grey the 2-D comparison uses, because the
+    specification gray the 2-D comparison uses, because the
     measurement is what is being looked at. A level's clock is
     aligned to the specification's (its onset to the tone's start
     time) when the tone is known, and left in recording seconds
@@ -215,7 +215,7 @@ def add_sine_stage(plotter: Any, specification: Any = None,
 
         # the zones, exactly as the 2-D comparison shades them:
         # yellow between warning and abort, and past abort *which
-        # way* — red above, blue below, the same over/under colours
+        # way* — red above, blue below, the same over/under colors
         # every other mark uses
         zones = []
         for warning, abort, edge, beyond in (
@@ -240,8 +240,8 @@ def add_sine_stage(plotter: Any, specification: Any = None,
             run = np.column_stack([xn[good], yn[good], zn[good]])
             if name == 'target':
                 # with measurements on the stage the target steps back
-                # to the specification grey; alone it carries the
-                # tone's own colour, exactly the 2-D pairing rule
+                # to the specification gray; alone it carries the
+                # tone's own color, exactly the 2-D pairing rule
                 color = (colors['specification_curve'] if paths
                          else _TONE_COLORS[k % len(_TONE_COLORS)])
                 width = 2 if paths else 4
@@ -287,7 +287,7 @@ def add_sine_stage(plotter: Any, specification: Any = None,
         # the zone shading it sits in, for the 2-D's own reason.
         amplitude = path['amplitude'][good]
         # bin edges along the path, in stage coordinates: midpoints
-        # between neighbouring lines, the ends extended half a bin
+        # between neighboring lines, the ends extended half a bin
         def edges_of(values):
             mids = (values[:-1] + values[1:]) / 2.0
             first = values[0] - (mids[0] - values[0])

@@ -187,7 +187,7 @@ def test_steps_and_power_laws_are_built_in_hertz_then_put_in_decades():
 # ---- the stage's decades -----------------------------------------------------
 
 
-def test_the_decades_are_labelled_as_the_flat_plot_labels_them():
+def test_the_decades_are_labeled_as_the_flat_plot_labels_them():
     from visualdynamics.viz.marks import decade_labels
 
     assert decade_labels(1.301, 3.311) == [(2.0, '10²'), (3.0, '10³')]

@@ -6,7 +6,7 @@ them the only feedback the user gets in their situation:
 - a file that will not import at all, dropped among files that will. The
   ones that work still arrive; the ones that do not are named together in
   one dialog rather than silently missing.
-- a row painted incompatible. The colour says *that* something is wrong;
+- a row painted incompatible. The color says *that* something is wrong;
   hovering it is where the reason lives, and moving off has to put back
   whatever the status bar was saying before.
 """

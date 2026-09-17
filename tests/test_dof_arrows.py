@@ -1,4 +1,4 @@
-"""DOF arrows: labelled direction markers on the geometry.
+"""DOF arrows: labeled direction markers on the geometry.
 
 Force DOFs come from wherever the project says force was applied —
 including an FRF's reference DOFs — and acceleration DOFs from every
@@ -71,7 +71,7 @@ def test_arrows_land_on_the_scene(project):
     plotter.close()
 
 
-def test_a_dofs_scene_carries_labelled_arrows(project):
+def test_a_dofs_scene_carries_labeled_arrows(project):
     report = Report('R', [
         {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
          'dofs': 'force', 'dofs_source': 'FRF',
@@ -113,7 +113,7 @@ def test_a_dofs_scene_carries_labelled_arrows(project):
 
 def test_dense_arrows_shrink_below_the_cap():
     """The rule the scenes rely on: arrows never overlap a close
-    neighbour, however coarse the 12%-of-extent default would be."""
+    neighbor, however coarse the 12%-of-extent default would be."""
     from visualdynamics.viz.geometry import dof_arrow_length
 
     sparse = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]

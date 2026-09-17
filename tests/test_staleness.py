@@ -289,11 +289,11 @@ def test_the_open_report_follows_a_refresh(window, pump, monkeypatch):
 def test_a_fingerprint_from_before_a_rename_compares_clean(worked_up):
     """The other way a fingerprint drifts without the settings moving:
     a *rename*. 'rectangle' became 'boxcar' (the scipy spelling), the
-    loader normalises the object's averaging through the class, and
+    loader normalizes the object's averaging through the class, and
     every project saved before the rename opened with a refresh badge
     whose story named the same window twice (Brandon, 2026-08-30 —
     modal.vdyn did exactly this). Legacy fingerprints go through the
-    class's own normalisation, positional shape and old spelling both."""
+    class's own normalization, positional shape and old spelling both."""
     project, psds = worked_up
     averaging = project['Time History'].averaging
     # what an old file recorded: positional values, pre-rename spelling,
@@ -301,6 +301,6 @@ def test_a_fingerprint_from_before_a_rename_compares_clean(worked_up):
     project.provenance[psds]['state'] = [
         'averaging', [averaging.frame_length, averaging.overlap,
                       'rectangle', averaging.frames, averaging.start]]
-    assert averaging.window == 'boxcar', 'the live object is normalised'
+    assert averaging.window == 'boxcar', 'the live object is normalized'
     assert project.stale() == {}, \
         'same computation, older vocabulary: no badge'

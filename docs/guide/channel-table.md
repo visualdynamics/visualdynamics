@@ -38,7 +38,7 @@ its coupling, excitation and feedback wiring along — how the controller
 ran, rather than what was measured — and carrying columns nothing
 interprets made this object a place data went to be ignored.
 
-That is only safe because what *does* belong is recognised however it
+That is only safe because what *does* belong is recognized however it
 was spelled. Case, spaces, hyphens, a trailing colon and a parenthetical
 unit are all tidied away first, then the words that genuinely differ are
 mapped: `Cal Due` is the expiration, `Point` is the node, `SN` and

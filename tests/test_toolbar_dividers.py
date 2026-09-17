@@ -83,8 +83,8 @@ def test_a_group_hidden_away_leaves_no_fence_around_nothing(bar):
 
     Its two dividers collapse to one rather than to none — the same
     collapsing rule as two groups meeting. What is left is a single
-    divider between the neighbours, not a gap where a group used to be;
-    on the real bar those neighbours are themselves different groups,
+    divider between the neighbors, not a gap where a group used to be;
+    on the real bar those neighbors are themselves different groups,
     so it is doing an honest job.
     """
     toolbar, actions = bar

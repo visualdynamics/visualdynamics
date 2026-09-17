@@ -121,8 +121,8 @@ class ScreenProjector:
         """The model's plane normal, if it is essentially flat."""
         if len(self.points) < 3:
             return None
-        centred = self.points - self.points.mean(axis=0)
-        _u, singular, vectors = np.linalg.svd(centred, full_matrices=False)
+        centered = self.points - self.points.mean(axis=0)
+        _u, singular, vectors = np.linalg.svd(centered, full_matrices=False)
         if singular[1] <= 0 or singular[2] / singular[1] > flatness:
             return None                          # genuinely three-dimensional
         return vectors[2]
@@ -212,7 +212,7 @@ class EntityPicker:
             rows = [row_of[int(node)] for node in nodes if int(node) in row_of]
             if len(rows) < 2:
                 if rows:                      # a point element: a degenerate
-                    starts.append(rows[0])    # segment keeps the maths uniform
+                    starts.append(rows[0])    # segment keeps the math uniform
                     ends.append(rows[0])
                     owners.append(index)
                 continue
@@ -292,8 +292,8 @@ class EntityPicker:
         hits = np.flatnonzero(inside)
         if not len(hits):
             return None
-        centre_depth = depth[self.triangles[hits]].mean(axis=1)
-        return int(self.triangle_owner[hits[np.argmin(centre_depth)]])
+        center_depth = depth[self.triangles[hits]].mean(axis=1)
+        return int(self.triangle_owner[hits[np.argmin(center_depth)]])
 
     def _pick_origin(self, cursor, tolerance):
         origins = np.asarray(self.geometry.cs_matrix[:, 3, :], dtype=np.float64)

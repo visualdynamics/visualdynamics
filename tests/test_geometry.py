@@ -8,7 +8,7 @@ import visualdynamics
 PLATE_NPZ = fixture_path('plate', 'geometry.npz')
 PLATE_EXO = fixture_path('plate', 'geometry.exo')
 #: the survey display model: the modal run's nodes and tracelines —
-#: the traceline-flavoured tests use it, since the meshed plate has
+#: the traceline-flavored tests use it, since the meshed plate has
 #: elements instead
 SURVEY_NPZ = fixture_path('plate', 'test_geometry.npz')
 

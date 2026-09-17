@@ -39,7 +39,7 @@ marks, bands, report definitions, photos) in a group of its own.
 1. When the format's repository is public, read the specification.
    Write the reader and the writer here from it, on h5py, the way every
    other format in the matrix is done; the reference library is a
-   dependency only if its licence allows (rule 3), and never a source.
+   dependency only if its license allows (rule 3), and never a source.
 2. Decide from the spec where the extras live — a vendor group inside
    the file, ideally — and whether every object kind maps. What does
    not map stays in the vendor group.
@@ -134,24 +134,24 @@ happens on its own once 6 is done.
    `pyproject.toml` reads it from there.
 2. Rebuild all four packages from that version
    (`packaging/refresh_builds.sh`) and open each one once. The two
-   macOS images come out signed and notarised when the Developer ID
+   macOS images come out signed and notarized when the Developer ID
    certificate and the `vd-notary` profile are in the keychain
    (packaging/README.md, "Signing") — do those two one-time steps
-   before this one, and check the build printed "notarised and
+   before this one, and check the build printed "notarized and
    stapled" twice. Unattended, the build reads the app-specific
    password from the login-keychain item `vd-notary-password`
    (packaging/README.md; the command that makes it ends in `-w`),
    so nobody needs to be at the Mac.
-3. Swap the grant (the copyleft licence with a CLA — decided
+3. Swap the grant (the copyleft license with a CLA — decided
    2026-09-03, PLAN.md "Open source, revisited"; **done — merged
    into `main` 2026-09-13**): `LICENSE` becomes
-   the licence text (`packaging/licenses/` holds a copy) with
+   the license text (`packaging/licenses/` holds a copy) with
    the "or any later version" statement at its head, `license` in
    `pyproject.toml` becomes the matching SPDX expression (it reads
    `"LicenseRef-Proprietary"` until then), the `Private :: Do Not
    Upload` classifier comes out of `pyproject.toml` (PyPI refuses an
    upload that carries it, and the `pypi` job uploads the real
-   package), the README's licence badge
+   package), the README's license badge
    follows, and `CLA.md` is published beside `CONTRIBUTING.md`, which
    already names it. Commit.
 4. Sync the shared repository from this tree — `tools/sync_public.sh
@@ -202,9 +202,9 @@ happens on its own once 6 is done.
    commercial dual-licensing, and today nothing is sold under other
    terms, so the project is a plain copyleft project in practice. If they
    accept, wire their GitHub Action into the release workflow's
-   Windows job; the day a commercial licence is actually sold, move to
+   Windows job; the day a commercial license is actually sold, move to
    Azure Artifact Signing (about $10 a month, packaging/README.md)
-   rather than keep a subsidy on false pretences. If they decline,
+   rather than keep a subsidy on false pretenses. If they decline,
    the paid signer from the start. (The Apple side is done: Brandon
    joined the Developer Program on 2026-09-02.)
 

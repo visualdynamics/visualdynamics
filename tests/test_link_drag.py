@@ -312,7 +312,7 @@ def _modal_fem_pair(window, pump, survey):
     """The reported case: a model's geometry and its mode shapes
     imported into a Modal Test, which sorts both into the Basis — from
     the outside they satisfy the Basis slots exactly as well as
-    measured objects would. Returns the other side's first grey slot:
+    measured objects would. Returns the other side's first gray slot:
     that side has no name (Brandon, 2026-09-02), so its slots are keyed
     by OTHER_SIDE, which is also the tag a drop reads."""
     shapes, _frfs = survey
@@ -330,8 +330,8 @@ def _slot_point(window, item):
     return QPoint(rect.center().x(), rect.center().y())
 
 
-def test_a_grey_slot_is_a_drop_target(window, pump, survey):
-    """The type's empty group is drawn as grey slots and nothing else,
+def test_a_gray_slot_is_a_drop_target(window, pump, survey):
+    """The type's empty group is drawn as gray slots and nothing else,
     so the slots are what there is to drop on. Reading them as no target
     was the first version, and dropping on the skeleton did nothing."""
     slot = _modal_fem_pair(window, pump, survey)
@@ -444,7 +444,7 @@ def test_a_group_is_built_up_one_drag_at_a_time(window, pump, survey):
 
 def test_a_lone_object_still_lands_in_a_group(window, pump, survey):
     """Counting per group is only right if one object is placed as
-    readily as two: an FRF that sits in no group leaves its own grey
+    readily as two: an FRF that sits in no group leaves its own gray
     slot showing beside it, which is the skeleton denying an object
     that is plainly in the tree."""
     _shapes, frfs = survey
@@ -510,7 +510,7 @@ def test_the_drag_survives_qt_delivering_it(window, pump, survey):
 
     Aimed at an object row with different rows above and below it, so an
     offset of the frame's own size lands somewhere that answers
-    differently. Aiming at a slot could not fail: its neighbour is
+    differently. Aiming at a slot could not fail: its neighbor is
     another slot of the same group, and both give the same target.
     """
     from PySide6.QtWidgets import QApplication
@@ -589,7 +589,7 @@ def test_a_placeholder_of_the_same_name_is_not_the_object(window, pump,
     model slot is called, and the objects imported *before* the type is
     set.
 
-    Rows were found by their text alone. Setting the type lays the grey
+    Rows were found by their text alone. Setting the type lays the gray
     slots down before anything is linked, so the slot named "Geometry"
     came to sit above the object of that name — and `_item_for_object`
     then answered with the slot. The reorder moved the slot instead of

@@ -111,7 +111,7 @@ class ShockOverlay:
         return text
 
     def _place(self, text, shock):
-        """Centre the number over its own window, near the top."""
+        """Center the number over its own window, near the top."""
         low, high = self.plot.getViewBox().viewRange()[1]
         text.setPos((shock.start + shock.stop) / 2.0,
                     low + (high - low) * LABEL_HEIGHT)
@@ -130,7 +130,7 @@ class ShockOverlay:
         held at one length, the new length goes to all of them and they
         grow together until the closest pair runs out of room.
 
-        Either way the result is stopped at its neighbours rather than
+        Either way the result is stopped at its neighbors rather than
         allowed through them. `_windowed` promised no two windows share
         a sample and nothing but this was keeping that promise once the
         plot could edit them.

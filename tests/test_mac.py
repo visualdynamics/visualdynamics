@@ -68,7 +68,7 @@ def test_selecting_a_shape_set_shows_its_auto_mac(window, pump):
     show_shapes(window, pump, shapes)
     assert window.mac_view.isVisible()
     assert _mac_labels(window) == [], (
-        'the colour is the reading; per-cell numbers made it too busy')
+        'the color is the reading; per-cell numbers made it too busy')
 
 
 def test_a_channel_table_shows_no_mac(window, pump):
@@ -252,7 +252,7 @@ def test_a_squarish_cross_mac_still_has_square_cells(window, pump):
 
 def test_the_rendered_cross_mac_has_the_shape_it_has_on_screen(tmp_path):
     """Rendered to a file it is the same panel: 700 tall by the clamped
-    shape, not stretched into a square nobody would recognise."""
+    shape, not stretched into a square nobody would recognize."""
     from PySide6.QtGui import QImage
 
     from visualdynamics.core.shapes import ShapeSet
@@ -351,7 +351,7 @@ def test_the_bottom_tick_labels_stand_on_end(window, pump):
 
 def test_the_table_and_the_mac_have_a_divider_to_drag(window, pump):
     """How much of the pane the mode list wants against how big the MAC
-    should be is a judgement about the data in front of you. It used to
+    should be is a judgment about the data in front of you. It used to
     be a fixed half-and-half row with nothing to grab."""
     from PySide6.QtCore import Qt
 

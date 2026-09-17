@@ -92,7 +92,7 @@ visualdynamics-gui = "visualdynamics.gui:main"
 [project.optional-dependencies]
 # scipy is also a runtime dependency (see `dependencies`); the suite
 # additionally uses it as an independent cross-check of the spectral
-# maths, which is a different job from calling it — where a method is
+# math, which is a different job from calling it — where a method is
 # checked against scipy rather than delegated to it, the check is only
 # worth having because the implementation is our own.
 # sdypy-sep005 is the sdypy project's own SEP 005 validator (MIT),

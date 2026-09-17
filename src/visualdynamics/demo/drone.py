@@ -64,7 +64,7 @@ from visualdynamics.core.geometry import Geometry
 
 #: Carbon, and massless: every gram is at a node. The shear modulus is stated
 #: rather than derived because a woven tube's is set by the matrix, not the
-#: fibres, and Poisson's ratio would overstate torsion several times over.
+#: fibers, and Poisson's ratio would overstate torsion several times over.
 FRAME = fem.Material('carbon frame', youngs_modulus=70e9, density=0.0,
                      modulus_of_rigidity=5e9)
 
@@ -100,7 +100,7 @@ BODY_R = 0.058          #: the body's widest radius
 BODY_TOP = 0.034        #: canopy apex above the datum
 BODY_FLOOR = -0.030     #: belly pan below it
 WAIST = 0.026           #: the open truss band between canopy and belly
-ARM_R = 0.235           #: motor centres from the middle
+ARM_R = 0.235           #: motor centers from the middle
 ARM_THICK = 0.0064      #: a quarter inch of carbon, the slab the truss is cut from
 ARM_DEEP = 0.042        #: the girder's depth at the body
 ARM_SHALLOW = 0.022     #: and at the motor: a taper, as a real arm has
@@ -127,7 +127,7 @@ ARMS = (
     ('front right', 302.0, ARM_R),
 )
 
-#: colours: 0 gray 1 blue 2 orange 3 green 4 red 5 purple 6 brown 7 pink
+#: colors: 0 gray 1 blue 2 orange 3 green 4 red 5 purple 6 brown 7 pink
 BODY_COLOR, ARM_COLOR, NACELLE_COLOR = 0, 1, 4
 LEG_COLOR, BATTERY_COLOR, CAMERA_COLOR = 8, 2, 7
 PROP_COLOR, HUB_COLOR = 5, 0
@@ -151,7 +151,7 @@ def ring(radius: float, sides: int,
 def _frames(path):
     """A cross-section frame at every station of a polyline path.
 
-    Tangents come from the neighbours, so a curved path gets a frame that
+    Tangents come from the neighbors, so a curved path gets a frame that
     turns with it — which is what lets an arched leg and a tapered arm be
     swept the same way as a straight tube. The reference direction is held
     fixed along the run so the section cannot spiral round it.
@@ -194,21 +194,21 @@ def sweep(shape: Shape, path: Sequence[ArrayLike],
     else:
         stations = profiles                                 # type: ignore[assignment]
     rings = []
-    for (centre, side, up), profile in zip(_frames(path), stations):
+    for (center, side, up), profile in zip(_frames(path), stations):
         row = []
         for a, b in profile:
-            point = centre + a * side + b * up
+            point = center + a * side + b * up
             row.append(shape.node(point, group))
         rings.append(row)
     for lower, upper in pairwise(rings):
         for s in range(len(lower)):
             t = (s + 1) % len(lower)
             shape.face([lower[s], lower[t], upper[t], upper[s]], color, group)
-    for wanted, row, centre in ((cap_start, rings[0], path[0]),
+    for wanted, row, center in ((cap_start, rings[0], path[0]),
                                 (cap_end, rings[-1], path[-1])):
         if not wanted:
             continue
-        hub = shape.node(np.asarray(centre, dtype=float), group)
+        hub = shape.node(np.asarray(center, dtype=float), group)
         for s in range(len(row)):
             shape.face([hub, row[s], row[(s + 1) % len(row)]], color, group)
     return rings
@@ -247,7 +247,7 @@ def bar(shape: Shape, start: ArrayLike, end: ArrayLike, thick: float, depth: flo
         t = (k + 1) % 4
         shape.face([rings[0][k], rings[0][t], rings[1][t], rings[1][k]], color)
     # the ends are closed onto the joint itself, which is a node the
-    # neighbouring bars also close onto — so the joint is shared, not
+    # neighboring bars also close onto — so the joint is shared, not
     # stitched, and the truss is one surface rather than a pile of sticks
     for row, point in ((rings[0], start), (rings[1], end)):
         hub = shape.node(point, group)
@@ -276,7 +276,7 @@ def blade_profile(chord: float, thick: float,
     return out
 
 
-def _propeller(shape, nlo, nhi, centre, sides, name, blades=2, handed=1.0):
+def _propeller(shape, nlo, nhi, center, sides, name, blades=2, handed=1.0):
     """A hub on the motor, and blades radiating from it.
 
     The hub grows off the nacelle's own rim through a flat shoulder rather
@@ -287,7 +287,7 @@ def _propeller(shape, nlo, nhi, centre, sides, name, blades=2, handed=1.0):
     can be seen.
     """
     group = f'prop {name}'
-    base = np.asarray(centre, dtype=float)
+    base = np.asarray(center, dtype=float)
     # the hub is one more box on the stack, closing the tower's open top
     rim = [nlo[-1][0], nlo[-1][1], nhi[-1][1], nhi[-1][0]]
     upper = [shape.node(np.asarray(shape.position(n))
@@ -384,7 +384,7 @@ class Shape:
     def drop_face(self, nodes: Sequence[int]) -> bool:
         """Remove a face by the nodes it spans, if it is there."""
         wanted = set(nodes)
-        for index, (existing, _colour) in enumerate(self.faces):
+        for index, (existing, _color) in enumerate(self.faces):
             if set(existing) == wanted:
                 self.faces.pop(index)
                 return True
@@ -402,13 +402,13 @@ class Shape:
         cost of finding out later is six zero-frequency modes per loose
         piece with nothing on screen to say which.
         """
-        neighbours: dict[int, set[int]] = {n: set() for n in self.xyz}
+        neighbors: dict[int, set[int]] = {n: set() for n in self.xyz}
         for nodes, _color in self.faces:
             for k, node in enumerate(nodes):
                 other = nodes[(k + 1) % len(nodes)]
-                neighbours[node].add(other)
-                neighbours[other].add(node)
-        return fem.connected_pieces(neighbours)
+                neighbors[node].add(other)
+                neighbors[other].add(node)
+        return fem.connected_pieces(neighbors)
 
     def orient(self) -> int:
         """Wind every face the same way round, and turn the lot outward.
@@ -418,16 +418,16 @@ class Shape:
         and it never came right, because a part's winding depends on how
         it was *built* and the answer wanted is a property of the finished
         surface. So this asks the surface instead: walk face to face over
-        shared edges, and where two neighbours traverse their shared edge
+        shared edges, and where two neighbors traverse their shared edge
         the same way round, one of them is inside out. Then check the
         signed volume and turn everything over if the whole shell ended up
         pointing in.
 
         Faces whose normals point into the solid show as dark patches, and
-        would colour by displacement from the wrong side.
+        would color by displacement from the wrong side.
         """
         edges: dict[frozenset, list[int]] = {}
-        for index, (nodes, _colour) in enumerate(self.faces):
+        for index, (nodes, _color) in enumerate(self.faces):
             for k, node in enumerate(nodes):
                 edges.setdefault(
                     frozenset((node, nodes[(k + 1) % len(nodes)])),
@@ -452,27 +452,27 @@ class Shape:
                 nodes = self.faces[index][0]
                 for k, node in enumerate(nodes):
                     other = nodes[(k + 1) % len(nodes)]
-                    for neighbour in edges[frozenset((node, other))]:
-                        if neighbour in seen:
+                    for neighbor in edges[frozenset((node, other))]:
+                        if neighbor in seen:
                             continue
-                        seen.add(neighbour)
-                        # neighbours agree when they cross the shared edge
+                        seen.add(neighbor)
+                        # neighbors agree when they cross the shared edge
                         # in opposite directions; agreeing means one is
                         # wound the wrong way round
-                        if runs(neighbour, node, other):
-                            face, colour = self.faces[neighbour]
-                            self.faces[neighbour] = (face[::-1], colour)
+                        if runs(neighbor, node, other):
+                            face, color = self.faces[neighbor]
+                            self.faces[neighbor] = (face[::-1], color)
                             flipped += 1
-                        stack.append(neighbour)
+                        stack.append(neighbor)
 
         volume = 0.0
-        for nodes, _colour in self.faces:
+        for nodes, _color in self.faces:
             points = [self.xyz[n] for n in nodes]
             for k in range(1, len(points) - 1):
                 volume += float(np.dot(points[0],
                                        np.cross(points[k], points[k + 1])))
         if volume < 0.0:
-            self.faces = [(nodes[::-1], colour) for nodes, colour in self.faces]
+            self.faces = [(nodes[::-1], color) for nodes, color in self.faces]
             flipped += len(self.faces)
         return flipped
 
@@ -529,7 +529,7 @@ class Shape:
 
 
 def _body(shape, sides, rings_up, rows):
-    """The centre: a curved canopy over a curved belly, on a waist band.
+    """The center: a curved canopy over a curved belly, on a waist band.
 
     The waist is a grid of nodes rather than a ring — `rows` of them up its
     height — because the arms grow straight out of it. An arm takes one
@@ -610,8 +610,8 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
     a cap at the far end, and a wall round every window joining one side to
     the other. Nothing overlaps anything and there is no face inside the
     solid — which is the whole point. Built as separate bars welded at
-    their centres, as this was first, a truss is a heap of interpenetrating
-    boxes with their end caps buried in the joints, and colouring it by
+    their centers, as this was first, a truss is a heap of interpenetrating
+    boxes with their end caps buried in the joints, and coloring it by
     displacement shows the insides through the skin.
 
     `left` and `right` are the rows of nodes the root starts from, so a
@@ -662,7 +662,7 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
     climbs = (1.0 if float(np.dot(np.cross(seam0, overall), rise)) >= 0.0
               else -1.0)
     for k in range(1, len(path)):
-        centre = np.asarray(path[k], dtype=float)
+        center = np.asarray(path[k], dtype=float)
         tangent = np.asarray(path[k], dtype=float) - np.asarray(path[k - 1],
                                                                 dtype=float)
         tangent = tangent / np.linalg.norm(tangent)
@@ -695,11 +695,11 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
             hi.append(sorted(near[half:], key=lambda n: placed(n)[1]))
             continue
         lean = shear * (1.0 if k % 2 else -1.0)
-        lo.append([shape.node(centre - across * t
+        lo.append([shape.node(center - across * t
                               + up * climbs * (-h + 2 * h * j / rows)
                               + tangent * lean * _bulge(j, rows), group)
                    for j in range(rows + 1)])
-        hi.append([shape.node(centre + across * t
+        hi.append([shape.node(center + across * t
                               + up * climbs * (-h + 2 * h * j / rows)
                               + tangent * lean * _bulge(j, rows), group)
                    for j in range(rows + 1)])
@@ -707,12 +707,12 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
     # Flipping the frame reverses which way round a quad runs, so the
     # faces that follow it have to be reversed too or their normals point
     # into the solid — which renders as a dark band at the join and would
-    # colour by displacement from the inside.
-    def face(nodes: Sequence[int], colour: int | None = None) -> None:
+    # color by displacement from the inside.
+    def face(nodes: Sequence[int], own_color: int | None = None) -> None:
         # Wound however it comes out; Shape.orient() settles the whole
         # surface afterwards, which is the only level at which the answer
         # is well defined.
-        shape.face(nodes, color if colour is None else colour, group)
+        shape.face(nodes, color if own_color is None else own_color, group)
 
     holes = {(k, j) for k in range(len(path) - 1) for j in range(rows)
              if windows(k, j)}
@@ -728,11 +728,11 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
     # every window is walled from one side to the other, so the hole is a
     # hole through a solid rather than two gaps in two skins
     for k, j in holes:
-        for a, b, neighbour in (((k, j), (k, j + 1), (k - 1, j)),
+        for a, b, neighbor in (((k, j), (k, j + 1), (k - 1, j)),
                                 ((k + 1, j + 1), (k + 1, j), (k + 1, j)),
                                 ((k + 1, j), (k, j), (k, j - 1)),
                                 ((k, j + 1), (k + 1, j + 1), (k, j + 1))):
-            if neighbour in holes:
+            if neighbor in holes:
                 continue
             face([lo[a[0]][a[1]], lo[b[0]][b[1]],
                   hi[b[0]][b[1]], hi[a[0]][a[1]]])
@@ -768,7 +768,7 @@ def _arm(shape, waist, sides, rows, index, radius, bays, name):
         # the girder's in one bay. Jumping puts a steeply tilted facet
         # where the arm meets the body -- |nz| 0.37 against 0.12 along the
         # rest of the arm -- which reads as a fault in the mesh and is only
-        # a section change too abrupt to shade like its neighbours.
+        # a section change too abrupt to shade like its neighbors.
         blend = min(1.0, t / 0.40)
         eased = blend * blend * (3.0 - 2.0 * blend)
         span = (ARM_DEEP + (ARM_SHALLOW - ARM_DEEP) * t) / 2
@@ -791,7 +791,7 @@ def _arm(shape, waist, sides, rows, index, radius, bays, name):
     # the same four nodes -- and the hub rises from the tower's own top.
     # Nothing is parked on anything: a cylinder standing on a capped box
     # end shares no node with it, which is four loose nacelles in the
-    # check, and welding them by a centre node only buries two caps in
+    # check, and welding them by a center node only buries two caps in
     # each other.
     left = [lo[-2][rows], lo[-1][rows]]
     right = [hi[-2][rows], hi[-1][rows]]
@@ -918,8 +918,8 @@ def _bridge_quads(shape, start, end, group, color, waist=0.85):
             angle = a0 + turn * f
             radius = (r0 + (r1 - r0) * f) * waist
             along = s0 + (s1 - s0) * f
-            centre = begin + axis * (length * f)
-            row.append(shape.node(centre + radius * (math.cos(angle) * e1
+            center = begin + axis * (length * f)
+            row.append(shape.node(center + radius * (math.cos(angle) * e1
                                                      + math.sin(angle) * e2)
                                   + along * axis, group))
         rings.append(row)
@@ -947,8 +947,8 @@ def _graft(shape, belly, sides, left, right, group, color):
         for a in range(sides):
             b = (a + 1) % sides
             quad = [belly[r][a], belly[r + 1][a], belly[r + 1][b], belly[r][b]]
-            centre = np.mean([shape.position(n) for n in quad], axis=0)
-            span = float(np.linalg.norm(centre - here))
+            center = np.mean([shape.position(n) for n in quad], axis=0)
+            span = float(np.linalg.norm(center - here))
             # Prefer a panel that faces this one, not merely the closest.
             # Two panels tilted differently cannot be joined by a tube that
             # does not twist somewhere, however the corners are paired --
@@ -1162,12 +1162,12 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
     # The shell, not the canopy block: the canopy is the apex cap alone —
     # eight triangles — and the ring at 0.9 of the body radius is the
     # waist below it. Asking one block for both put all four body sensors
-    # and the centre one on the same node.
+    # and the center one on the same node.
     body = [n for n in model.node_ids if part_of(model, n) == 'body']
     found['body'] = [nearest(body, (BODY_R * 0.9 * math.cos(math.radians(a)),
                                     BODY_R * 0.9 * math.sin(math.radians(a))))
                      for a in (0, 90, 180, 270)]
-    found['centre'] = [max(body, key=lambda n: model.position(n)[2])]
+    found['center'] = [max(body, key=lambda n: model.position(n)[2])]
     found['payload'] = [
         min(groups.get('battery', [0]), key=lambda n: model.position(n)[2]),
         min(groups.get('camera', [0]), key=lambda n: model.position(n)[0]),

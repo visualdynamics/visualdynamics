@@ -38,7 +38,7 @@ from ..core.averaging import from_span
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.averaging import Averaging
 
-#: how many colour stops the gradient carries. The window is smooth,
+#: how many color stops the gradient carries. The window is smooth,
 #: so this only has to be finer than the eye at plot width.
 BAND_STOPS = 48
 
@@ -156,7 +156,7 @@ class AveragingOverlay(QObject):
         self._make_marks()
 
         # the span's edges are the handles, so they take the band's own
-        # colour at full strength: those are the parts you grab
+        # color at full strength: those are the parts you grab
         edge = QColor(self.colors['averaging_band'])
         self.region = pg.LinearRegionItem(
             values=self._span(), movable=not self.locked,
@@ -186,8 +186,8 @@ class AveragingOverlay(QObject):
         n = self.averaging.frame_length
         shape = self.averaging.shape()
         offsets = np.arange(n) / self.sample_rate
-        glyph_colour = QColor(self.colors['averaging_window'])
-        glyph_colour.setAlpha(round(self.averaging.rail(
+        glyph_color = QColor(self.colors['averaging_window'])
+        glyph_color.setAlpha(round(self.averaging.rail(
             self.sample_rate)['glyph_alpha'] * 255))
 
         for (low, high), baseline in zip(bounds, baselines):
@@ -211,7 +211,7 @@ class AveragingOverlay(QObject):
                 low + offsets, baseline + shape * height,
                 pen=pg.mkPen(self.colors['averaging_window'], width=1),
                 fillLevel=baseline,
-                fillBrush=pg.mkBrush(QColor(glyph_colour)))
+                fillBrush=pg.mkBrush(QColor(glyph_color)))
             curve.setZValue(MARK_Z)
             curve.is_zone_edge = True
             self.plot.addItem(curve, ignoreBounds=True)
@@ -234,7 +234,7 @@ class AveragingOverlay(QObject):
         stops rather than once per sample: the window is smooth, and a
         thousand stops would say nothing a few dozen do not.
 
-        Normalised by the peak rather than assumed to reach one: a flat
+        Normalized by the peak rather than assumed to reach one: a flat
         top does not. Its shoulders dip slightly below zero — a real
         negative weight — but far too little to round to a visible
         alpha, so they come out clear and nothing has to clamp them.
@@ -242,14 +242,14 @@ class AveragingOverlay(QObject):
         from PySide6.QtCore import QPointF
         from PySide6.QtGui import QBrush, QLinearGradient
 
-        colour = QColor(self.colors['averaging_band'])
+        color = QColor(self.colors['averaging_band'])
         peak_alpha = self.averaging.rail(
             self.sample_rate)['band_alpha'] * 255
         weights = shape / np.max(np.abs(shape))
         across = np.linspace(0.0, 1.0, len(weights))
         gradient = QLinearGradient(QPointF(low, 0.0), QPointF(high, 0.0))
         for at in np.linspace(0.0, 1.0, BAND_STOPS):
-            stop = QColor(colour)
+            stop = QColor(color)
             stop.setAlpha(round(peak_alpha
                                 * float(np.interp(at, across, weights))))
             gradient.setColorAt(float(at), stop)

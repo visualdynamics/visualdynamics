@@ -8,8 +8,8 @@ its edge when the cost minimum lay just outside, and answered the edge
 as though converged — on the plate\'s own recording the 823 Hz mode
 came back 0.29 Hz low from an unpadded FRF and right from a padded
 one. Zero padding appeared to help mode fitting and was only ever
-shortening that leash. The search now re-centres while its winner sits
-on the frequency edge, bounded by the neighbouring line\'s territory
+shortening that leash. The search now re-centers while its winner sits
+on the frequency edge, bounded by the neighboring line\'s territory
 and by confirmed modes\' half-power claims; on the plate the fit no
 longer depends on the grid the FRF was computed on — which is what let
 the zero-padding feature be removed entirely the same day.
@@ -78,10 +78,10 @@ def test_the_exact_model_is_recovered_exactly(grid):
 
 
 @pytest.mark.parametrize('offset', [-1, 1])
-def test_the_search_walks_home_from_a_neighbouring_line(grid, offset):
+def test_the_search_walks_home_from_a_neighboring_line(grid, offset):
     """Started one line from the peak, the truth is a full line spacing
     away — beyond the old fixed schedule\'s reach, which stopped on its
-    grid edge and answered it as though converged. The walk re-centres
+    grid edge and answered it as though converged. The walk re-centers
     and arrives."""
     s = session(continuous(grid), grid)
     index = int(np.argmin(np.abs(grid - F_TRUE))) + offset
@@ -124,7 +124,7 @@ def test_the_plate_fit_is_grid_stable():
 # ---- the documented limitation, pinned with its size --------------------
 
 
-def test_uncancelled_phase_still_moves_the_pole_boundedly(grid):
+def test_uncanceled_phase_still_moves_the_pole_boundedly(grid):
     """Data whose broadband phase the real-residue model cannot express
     — here an IIR plant whose shape is genuinely not a continuous
     SDOF\'s — biases the pole, and the walk\'s cap is what bounds the

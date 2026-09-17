@@ -45,7 +45,7 @@ def test_the_tab_wears_a_chevron_each_side_of_the_word(window, pump):
     """To the design (Brandon, 2026-09-03): a flared tab, the word in
     the middle, a chevron either side pointing where a click will move
     the edge — up while closed, down once open — in the palette's text
-    colour so a theme change recolours them."""
+    color so a theme change recolors them."""
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QColor, QPalette
 
@@ -106,13 +106,13 @@ def test_the_tab_wears_a_chevron_each_side_of_the_word(window, pump):
     image = tab.grab().toImage()
     red = _flank_ink(tab, image, 'left',
                      lambda c: c.red() > c.green() + 60)
-    assert red, 'recoloured with the palette'
+    assert red, 'recolored with the palette'
 
 
 def test_the_tab_is_a_tab_and_not_a_bar(window, pump):
-    """Centred, its own width, and no reserved strip: the first cut
+    """Centered, its own width, and no reserved strip: the first cut
     kept a full-width layout row for the tab and the empty row read
-    as a grey bar across the window (Brandon, 2026-08-31). The tab
+    as a gray bar across the window (Brandon, 2026-08-31). The tab
     floats over the views' bottom edge instead."""
     window.show()
     window.resize(900, 700)
@@ -123,14 +123,14 @@ def test_the_tab_is_a_tab_and_not_a_bar(window, pump):
     assert tab.parent() is host, 'floated over the views, not a row'
     assert window.console.height() == 0, 'collapsed, the console is no rows'
     assert tab.width() < host.width() / 2, 'a tab, not a bar'
-    centre_off = abs((tab.x() + tab.width() / 2) - host.width() / 2)
-    assert centre_off <= 2, f'centred, not parked at an edge ({centre_off})'
+    center_off = abs((tab.x() + tab.width() / 2) - host.width() / 2)
+    assert center_off <= 2, f'centered, not parked at an edge ({center_off})'
     assert tab.y() + tab.height() == host.height(), 'riding the bottom edge'
     assert tab.height() == tab.HEIGHT, 'drawn to the design, not styled'
     window.resize(700, 600)
     pump()
-    centre_off = abs((tab.x() + tab.width() / 2) - host.width() / 2)
-    assert centre_off <= 2, 'the handle follows the resize'
+    center_off = abs((tab.x() + tab.width() / 2) - host.width() / 2)
+    assert center_off <= 2, 'the handle follows the resize'
     window.console.tab.setChecked(True)
     pump()
     assert tab.y() + tab.height() + window.console.height() \
@@ -205,8 +205,8 @@ def test_the_tab_never_covers_the_plots(window, pump):
 def test_the_tab_is_translucent_before_it_goes_native(window):
     """The VTK view's `winId()` makes every sibling up the tree native,
     the tab included — and a native child paints on its own surface,
-    filled with the window colour unless it was declared translucent
-    when the surface was made. A grey box around the flared shape on
+    filled with the window color unless it was declared translucent
+    when the surface was made. A gray box around the flared shape on
     a black scene (Brandon, 2026-09-04) is what the attribute
     prevents; it is set in the tab's constructor, ahead of any native
     creation, which is why it is pinned on a fresh tab."""
@@ -226,7 +226,7 @@ def test_the_tab_erases_what_was_under_it_before_it_paints(window, pump):
     image at its own place and Qt copies that patch to the child's
     surface, and a translucent widget gets no background erase — so
     once the host's relayout (the console opening, closing) painted
-    the window colour through the tab's rectangle, every later paint
+    the window color through the tab's rectangle, every later paint
     drew the tab over a filled box and left the fill. Measured on the
     tab's own CALayer surface, 2026-09-12: filled after one
     `setFixedHeight` on the console, and neither update nor repaint

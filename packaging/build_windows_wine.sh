@@ -1,6 +1,6 @@
 #!/bin/zsh
 # The Windows installer, built on this Mac under Wine — no Windows
-# machine, no licence, no Actions minutes.
+# machine, no license, no Actions minutes.
 #
 #     packaging/build_windows_wine.sh setup    # once: Wine, Python, tools
 #     packaging/build_windows_wine.sh build    # the installer, into dist/

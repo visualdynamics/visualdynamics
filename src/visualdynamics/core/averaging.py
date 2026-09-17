@@ -43,7 +43,7 @@ _ALIASES = {'uniform': 'boxcar', 'rectangle': 'boxcar', 'none': 'boxcar',
             'blackman harris': 'blackmanharris'}
 
 
-#: how a frame is levelled before it is windowed. 'none' is the
+#: how a frame is leveled before it is windowed. 'none' is the
 #: convention here and in sdynpy — the oracle pins it — while scipy's
 #: welch removes each segment's mean by default; offering the choice
 #: is scipy parity (Brandon, 2026-08-29). 'mean' subtracts the
@@ -54,7 +54,7 @@ DETRENDS = ('none', 'mean', 'linear')
 _DETREND_ALIASES = {'constant': 'mean', 'off': 'none'}
 
 
-def normalise_detrend(name: str | None) -> str:
+def normalize_detrend(name: str | None) -> str:
     """The key for a detrend named any of the ways it might be."""
     if name is None:
         return 'none'
@@ -67,7 +67,7 @@ def normalise_detrend(name: str | None) -> str:
     return key
 
 
-def normalise_window(name: str | None) -> str:
+def normalize_window(name: str | None) -> str:
     """The key for a window named any of the ways a file might name it."""
     if name is None:
         return 'boxcar'
@@ -114,14 +114,14 @@ def window_shape(name: str | None, length: int,
     trade reversed: the tables were verified identical to scipy's to
     machine epsilon at every length that can hold a frame before being
     deleted, and the sdynpy oracle now checks the windows through the
-    whole spectral pipeline on every run. The one behavioural change is
+    whole spectral pipeline on every run. The one behavioral change is
     a one-sample window, which reads 1.0 where the old taper read its
     own first point — and a one-sample frame cannot exist
     (`Averaging` requires two).
     """
     from scipy.signal import get_window
 
-    key = normalise_window(name)
+    key = normalize_window(name)
     if length < 1:
         raise ValueError('a window needs at least one sample')
     if key in WINDOW_PARAMETERS:
@@ -186,8 +186,8 @@ class Averaging:
     frames: int = 1
     start: float = 0.0
     detrend: str = 'none'
-    #: the parameterised windows' own number — tukey's alpha, kaiser's
-    #: beta — None for every window that takes none. A parameterised
+    #: the parameterized windows' own number — tukey's alpha, kaiser's
+    #: beta — None for every window that takes none. A parameterized
     #: window given None adopts its documented default, so a stored
     #: Averaging always carries the number it was computed with.
     window_parameter: float | None = None
@@ -206,9 +206,9 @@ class Averaging:
         object.__setattr__(self, 'overlap', float(self.overlap))
         object.__setattr__(self, 'frames', int(self.frames))
         object.__setattr__(self, 'start', float(self.start))
-        object.__setattr__(self, 'window', normalise_window(self.window))
+        object.__setattr__(self, 'window', normalize_window(self.window))
         object.__setattr__(self, 'detrend',
-                           normalise_detrend(self.detrend))
+                           normalize_detrend(self.detrend))
         settings = WINDOW_PARAMETERS.get(self.window)
         if settings is None:
             if self.window_parameter is not None:

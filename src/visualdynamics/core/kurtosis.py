@@ -64,21 +64,21 @@ def kurtosis(values: ArrayLike) -> float:
     x = x[np.isfinite(x)]
     if x.size < 2:
         return float('nan')
-    centred = x - x.mean()
-    m2 = float(np.mean(centred ** 2))
+    centered = x - x.mean()
+    m2 = float(np.mean(centered ** 2))
     if m2 <= 0.0:
         return float('nan')
-    return float(np.mean(centred ** 4) / m2 ** 2)
+    return float(np.mean(centered ** 4) / m2 ** 2)
 
 
-def analysed_span(data: Any) -> tuple[list[tuple[int, int]], str]:
+def analyzed_span(data: Any) -> tuple[list[tuple[int, int]], str]:
     """Which stretch of a record the analysis reads, and its name.
 
     The same stretch the spectra beside it are computed from, and for
     a reason found the hard way (Brandon, 2026-08-24): a system-ID
     excitation read whole came out at 4.23 where every steady frame of
     it read 2.92. Nothing was wrong with the arithmetic — the record
-    is only a quarter analysed, and the silent lead-in and tail make
+    is only a quarter analyzed, and the silent lead-in and tail make
     the *whole* record a mixture of a loud distribution and a quiet
     one, which genuinely is not Gaussian. A number that disagrees with
     the PSD printed beside it is worse than no number, so the reading
@@ -121,7 +121,7 @@ def channel_kurtosis(data: Any, records: Sequence[int] | None = None
                      ) -> list[tuple[str, float]]:
     """[(channel label, Pearson kurtosis)] for a time history.
 
-    Read over `analysed_span` — the stretch the spectra beside it are
+    Read over `analyzed_span` — the stretch the spectra beside it are
     computed from — so the two readings describe one thing.
 
     Every channel on one chart whatever it measures (Brandon,
@@ -134,7 +134,7 @@ def channel_kurtosis(data: Any, records: Sequence[int] | None = None
     wanted = (range(data.num_records) if records is None
               else [int(i) for i in records])
     ordinate = np.asarray(data.ordinate)
-    spans, _phrase = analysed_span(data)
+    spans, _phrase = analyzed_span(data)
     return [(data.record_label(i),
              kurtosis(np.concatenate(
                  [np.real(ordinate[i][low:high]) for low, high in spans])))

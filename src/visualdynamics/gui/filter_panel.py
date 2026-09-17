@@ -14,7 +14,7 @@ because `core.filters.Filtering` derives it from which edges exist.
 The panel says what the settings are, reports when they move, and
 its Apply Filter button turns the history into a filtered one with
 whatever is set at that moment — the project verb a script calls,
-the same division of labour as the averaging panel, because it is the
+the same division of labor as the averaging panel, because it is the
 same kind of thing: parameters that ride the record.
 """
 
@@ -283,7 +283,7 @@ class FilterPanel(QWidget):
 
         # every row is built and the kind decides which are on screen
         # — show only what applies (principle 3): a low-pass with a
-        # greyed pair of band edges would be a question, not a control
+        # grayed pair of band edges would be a question, not a control
         self._labels: dict[str, QLabel] = {}
         self._editors: dict[str, QWidget] = {}
         rows = (('kind', 'Type', self.kind_box),
@@ -330,7 +330,7 @@ class FilterPanel(QWidget):
         # boxes and the drag lines reach every value.
 
         # the act itself, where its settings are set — this used to
-        # be a note apologising that the record was made elsewhere,
+        # be a note apologizing that the record was made elsewhere,
         # and a note explaining that the act lives somewhere else is
         # the interface admitting the act is in the wrong place
         # (Brandon, 2026-08-28).

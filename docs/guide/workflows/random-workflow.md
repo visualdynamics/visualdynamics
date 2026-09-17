@@ -32,12 +32,12 @@ Drag the controller's save onto the window. A Rattlesnake random run
 brings the control time histories, the specification with its warning
 and abort lines, and the channel table in one file — and says which
 environment drove it, so the project type switches to *Random
-Vibration* by itself. The tree's grey slots then say what a finished
+Vibration* by itself. The tree's gray slots then say what a finished
 report still needs.
 
 ![The imported run: the control time histories drawn, the
 specification and channel table beside them in the tree, and the
-type's remaining slots in grey](../images/random-import.png)
+type's remaining slots in gray](../images/random-import.png)
 
 ### 2. Compute the control PSDs
 
@@ -68,7 +68,7 @@ same frames. This is the figure that later separates
 explain (coherence near one) exceeded because the article did.
 
 ![The multiple coherence map: frequency across, channel down,
-coherence as colour](../images/random-coherence.png)
+coherence as color](../images/random-coherence.png)
 
 ### 5. Compare against the specification
 
@@ -153,7 +153,7 @@ project.export_report(project.report, 'random_report.html')
 project.save('random.vdyn')
 ```
 
-## Where judgement lives
+## Where judgment lives
 
 - **Whether an exceedance is the article or the instrumentation.**
   The multiple coherence map answers it: a channel whose response the

@@ -1,6 +1,6 @@
 """What an object reads as, as a table: headers and rows of text.
 
-The app has table *models* — editable, coloured, unit-aware, and Qt to
+The app has table *models* — editable, colored, unit-aware, and Qt to
 the core. This is the other kind: the read-only rendering that goes in a
 report, and that a script wants when it asks what is in a channel table
 without opening a window.

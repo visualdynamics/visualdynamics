@@ -53,7 +53,7 @@ plate/            visualdynamics.demo.plate — 12x12x0.5 in 6061, free
 References 101Z+, 110Z+, 1304Z+, 1310Z+ — one corner and three edge
 stations at the quarter points, which are the *generic* positions on a
 square plate. Not the grid's interior: every interior survey station
-lies on a centre line or a diagonal — the plate's own symmetry — and a
+lies on a center line or a diagonal — the plate's own symmetry — and a
 reference there is blind to whichever mode family nulls that line. The
 first reference set had three of four references unable to see the
 647 Hz mode at all, and its fitted shape could not resynthesize the

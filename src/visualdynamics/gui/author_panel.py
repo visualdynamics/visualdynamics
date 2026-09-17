@@ -168,7 +168,7 @@ def sheet_models(sheet: Sheet, parent: Any = None
     """(breakpoints, pairs): the sheet's two grids as the ordinary
     table models — the conventions test holds them to the contract.
     The cells journal through the verb the window calls on every edit,
-    so each column is declared journalled elsewhere."""
+    so each column is declared journaled elsewhere."""
     unit_system = sheet.unit_system
     points = [Column('Hz', lambda s, r: s.frequencies[r], set=_set_frequency,
                      format=lambda v: f'{v:g}', journal=_elsewhere)]
@@ -470,7 +470,7 @@ class AuthorPanel(QWidget):
 
     def _add_point(self) -> None:
         """A breakpoint after the selected one — halfway to the next
-        in log frequency, its levels the neighbours' — or past the end."""
+        in log frequency, its levels the neighbors' — or past the end."""
         sheet = self._sheet
         if sheet is None:
             return

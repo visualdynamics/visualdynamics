@@ -426,7 +426,7 @@ class DataArray:
 
         A channel is a coordinate *and* a quantity — a drive point
         carries a load cell and an accelerometer at one DOF — and the
-        rename is the channel's: a force labelled at the wrong node
+        rename is the channel's: a force labeled at the wrong node
         moves without taking the accelerometer at that node with it,
         and the other is changed explicitly if it should be (Brandon,
         2026-09-06). The channel moves wherever a record wears it, as
@@ -441,7 +441,7 @@ class DataArray:
         old : str
             The coordinate as it is, '101Z+'.
         new : str
-            The coordinate to give it; normalised the way every DOF is
+            The coordinate to give it; normalized the way every DOF is
             ('101Z' is '101Z+'), and refused when it is not one.
         quantity : str, optional
             Which channel at `old`: 'acceleration', 'force' … as
@@ -764,7 +764,7 @@ class DataArray:
         Returns
         -------
         str
-            The record's DOF, plus whatever tells it from its neighbours.
+            The record's DOF, plus whatever tells it from its neighbors.
         """
         if self.reference_dof is not None:
             return f'{self.response_dof[i]}/{self.reference_dof[i]}'
@@ -946,7 +946,7 @@ class DataArray:
 
     def plot_waterfall(self, records: Sequence[int] | None = None,
                        **kwargs: Any) -> Any:
-        """The records spread along a depth axis, coloured by level —
+        """The records spread along a depth axis, colored by level —
         the plot bar's 3-D reading, scripted. `screenshot=` renders
         headless to a file; without it a window of the app's own 3-D
         pane opens.
@@ -1166,7 +1166,7 @@ class TimeHistory(DataArray):
                 for f in range(averaging.frames):
                     at = first + f * averaging.hop
                     frame = self.ordinate[i][at:at + n]
-                    # levelled before it is windowed, exactly where
+                    # leveled before it is windowed, exactly where
                     # scipy's welch does it; 'none' is the default and
                     # the sdynpy convention, which the oracle pins
                     if averaging.detrend == 'mean':
@@ -1267,7 +1267,7 @@ class TimeHistory(DataArray):
         above the content is the reach-for-first case; the filter view
         offers high- and band-pass beside it.
 
-        A judgement, not a detection — nothing in the record says where
+        A judgment, not a detection — nothing in the record says where
         its content stops being signal. A tenth of the rate is where
         the integrate/differentiate round trip was measured at ~2% RMS
         (core.filters), and it sits below the mounted-resonance range a
@@ -2122,7 +2122,7 @@ class Frf(DataArray):
         Parameters
         ----------
         shapes : ShapeSet, optional
-            A modal fit, drawn as the synthesised CMIF over the measured one.
+            A modal fit, drawn as the synthesized CMIF over the measured one.
         **kwargs
             Passed through to the plotting layer.
 
@@ -2281,10 +2281,10 @@ def density_ratio(signal: Any, floor: Any):
 class Psd(DataArray):
     #: the width of the band each line stands for, when the lines are
     #: not evenly spaced. `None` for a narrowband spectrum, where the
-    #: bins are the midpoints between neighbours and inferring them is
+    #: bins are the midpoints between neighbors and inferring them is
     #: exact. An octave-band spectrum sets it: its bins are geometric,
-    #: its edges are a standard's and not its neighbours', and reading
-    #: them off the centres would be a hair out at every band and wrong
+    #: its edges are a standard's and not its neighbors', and reading
+    #: them off the centers would be a hair out at every band and wrong
     #: at the two ends.
     """Power spectral density: the declared unit is the engineering unit
     whose square-per-Hz the values are in (declare 'g' for g^2/Hz).
@@ -2405,7 +2405,7 @@ class Psd(DataArray):
         operating deflection shape: the dominant eigenvector of the
         cross-spectral matrix per line, each channel's phase relative
         to the others. An autospectrum set has no phase, so it shows
-        the envelope instead: two copies deflected ±sqrt(PSD), colour
+        the envelope instead: two copies deflected ±sqrt(PSD), color
         reading dB below the loudest node at any line. Defaults to the
         strongest line; `frequency` picks another, `quantity` which
         measurement deflects.
@@ -2483,10 +2483,10 @@ class Psd(DataArray):
 
     #: the width of the band each line stands for, when the lines are
     #: not evenly spaced. None for a narrowband spectrum, whose bins
-    #: are the midpoints between neighbours and exactly inferable. An
+    #: are the midpoints between neighbors and exactly inferable. An
     #: octave-band spectrum sets it: its bins are geometric, its edges
-    #: are a standard's rather than its neighbours', and reading them
-    #: off the centres is a hair out at every band and plainly wrong at
+    #: are a standard's rather than its neighbors', and reading them
+    #: off the centers is a hair out at every band and plainly wrong at
     #: the two ends.
     bandwidth: np.ndarray | None = None
 
@@ -2512,7 +2512,7 @@ class Psd(DataArray):
         mean-square content that falls in it, divided by its own width,
         so the area under the spectrum — and therefore the RMS it
         carries — is unchanged. Reading the narrowband curve at each
-        band centre would throw away everything between the centres.
+        band center would throw away everything between the centers.
 
         The band grid is absolute (see `visualdynamics.core.octave`), so this
         needs no specification to be told about: the frequency range
@@ -2544,7 +2544,7 @@ class Psd(DataArray):
                 'octave bands need a spectrum with frequency lines above '
                 'zero; this one has ' + str(positive.size))
         # the range the bands have to span is the range the *bins*
-        # cover, not the range the centres do. A line at 0.5 Hz stands
+        # cover, not the range the centers do. A line at 0.5 Hz stands
         # for a bin reaching down to 0.25, and a grid that started at
         # the line would leave that half outside every band — which is
         # a small loss of area and an unnecessary one.
@@ -2554,10 +2554,10 @@ class Psd(DataArray):
             if low is None else float(low)
         high = float(beyond.max()) if high is None else float(high)
         per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
-        centres, widths, bounds = bands(low, high, per_octave)
+        centers, widths, bounds = bands(low, high, per_octave)
         banded = resample(frequencies, self.ordinate, bounds, widths,
                           source=self.bin_bounds())
-        out = Psd(centres, banded,
+        out = Psd(centers, banded,
                   response_dof=list(self.response_dof),
                   reference_dof=(None if self.reference_dof is None
                                  else list(self.reference_dof)),
@@ -2577,7 +2577,7 @@ class Psd(DataArray):
     def bin_widths(self) -> np.ndarray:
         """The width of every line's own bin.
 
-        Its own when it has one, the midpoints between neighbours when
+        Its own when it has one, the midpoints between neighbors when
         it does not — so a caller integrating a spectrum never has to
         ask which kind it is holding.
         """

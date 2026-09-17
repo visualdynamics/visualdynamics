@@ -31,8 +31,8 @@ pointed at before it touches the tree.
 
 Three things any contributed code has to satisfy:
 
-- **The contributor licence agreement** ([`CLA.md`](CLA.md)), signed
-  once. You keep your copyright; the Project gets a licence broad
+- **The contributor license agreement** ([`CLA.md`](CLA.md)), signed
+  once. You keep your copyright; the Project gets a license broad
   enough that every line in it stays licensable by one person, which
   is what keeps its future options open. A standard text, adapted from
   Apache's. **Signing happens on your first pull request**: a bot
@@ -42,17 +42,17 @@ Three things any contributed code has to satisfy:
 - **It has to be yours to give.** Your own work, not something an
   employer already has a claim on, and carrying no third-party code
   with obligations of its own.
-- **No code from any package whose licence would restrict the
+- **No code from any package whose license would restrict the
   Project's licensing.** Copyleft code in particular: taking it would
-  put lines in the tree that the Project does not own — the licences
+  put lines in the tree that the Project does not own — the licenses
   would be compatible and the ownership would not be, and that can
   never be undone. File formats and published methods may be
   reimplemented; code may not be copied or derived from.
-  `tests/test_licence_boundary.py` checks this on every run for the
+  `tests/test_license_boundary.py` checks this on every run for the
   packages the Project is closest to.
 
 Help that is not code counts too, and is recorded in
-[`ACKNOWLEDGEMENTS.md`](ACKNOWLEDGEMENTS.md) — thanks rather than a
+[`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md) — thanks rather than a
 rights record.
 
 ## Licensing
@@ -107,21 +107,21 @@ to the toolset are stated on a three-quad strip in `tests/test_fem.py`.
 ## What the project expects of a change
 
 - **One implementation of a rule.** The desktop app and `visualdynamics.Project`
-  are two front ends over one workflow: put behaviour in the project (or
+  are two front ends over one workflow: put behavior in the project (or
   in `core`) and let the GUI display it. A rule written twice is a rule
   that will disagree with itself.
 - **Tests that would fail without the change.** Prefer a test that
-  encodes the behaviour to one that pins the implementation.
+  encodes the behavior to one that pins the implementation.
 - **Docstrings that say why.** Reference documentation is generated from
   them (`docs/api`), and the guides in `docs/guide` explain reasoning.
   Comments earn their place by stating a constraint the code cannot.
 - **No code the Project does not own in the package.** sdynpy,
   rattlesnake and forcefinder are GPL-3.0, and importing one from the
   package would put every future licensing choice out of reach —
-  not because the licences clash, but because the lines would not be
+  not because the licenses clash, but because the lines would not be
   the owner's to relicense. File formats are read as
   the documented formats they are, and the methods are written here.
-  `tests/test_licence_boundary.py` checks this on every run rather than
+  `tests/test_license_boundary.py` checks this on every run rather than
   trusting anyone to remember it.
 
   There is no exception. The three generators that drove the real
@@ -129,7 +129,7 @@ to the toolset are stated on a three-quad strip in `tests/test_fem.py`.
   `generate_drone.py` — used to be one, justified by never being
   distributed. They live in the `visualdynamics-generators` repository
   now, so no file here combines with a GPL-3 package at runtime and
-  none needs a licence note when this is published. The generators
+  none needs a license note when this is published. The generators
   that remain under `testdata/` import nothing copyleft; what the
   suite reads is their committed output.
 

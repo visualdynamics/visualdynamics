@@ -11,7 +11,7 @@ converts objects rather than registering a file importer:
 `TimeHistory` objects, and `TimeHistory.to_sep005` goes the other way.
 
 Nothing here imports anything from sdypy — the standard *is* the dict,
-and staying import-free is what keeps the licence boundary trivial.
+and staying import-free is what keeps the license boundary trivial.
 
 Timeseries are the standard's whole scope, which is why only
 `TimeHistory` converts: sdypy has no richer exchange form for FRFs,

@@ -3,7 +3,7 @@
 pyqtgraph builds a `QPainterPath` two ways. With no gaps it fills a
 `QPolygonF` and lets Qt build the path — Qt's own API. With gaps, and
 `arrayToQPath` draws the line at 2% of the points being non-finite, it
-packs a byte buffer by hand and has Qt deserialise it, against a
+packs a byte buffer by hand and has Qt deserialize it, against a
 private binary layout its own docstring warns "may change in future
 versions of Qt".
 

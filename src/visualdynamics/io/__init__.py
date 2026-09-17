@@ -82,7 +82,7 @@ def project_type_of(path: str | os.PathLike) -> str | None:
     A controller's own save knows whether it was a modal test or a
     random vibration run; asked before or after importing it, this is
     how it says so. Anything else — a geometry, a photo, a file no
-    importer recognises — answers None rather than raising: not knowing
+    importer recognizes — answers None rather than raising: not knowing
     is the ordinary case, not a failure.
     """
     path = str(path)
@@ -105,7 +105,7 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     carry them; without a declaration the object imports unit-less, holding
     the file's raw values until `define_units()` is called.
     `format` forces a specific importer by name. `progress` is a
-    (done, total) callable, honoured where the reader can count — a
+    (done, total) callable, honored where the reader can count — a
     project file's objects — and quietly unused where it cannot: a
     foreign file is one read, and nothing inside netCDF or UFF parsing
     reports fractions worth relaying.

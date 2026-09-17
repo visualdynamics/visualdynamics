@@ -532,7 +532,7 @@ def _smooth(values: np.ndarray, half_windows: np.ndarray) -> np.ndarray:
     return (sums[hi] - sums[lo]) / np.maximum(hi - lo, 1)
 
 
-#: the -3 dB bandwidth of a centred average over L samples is 0.443 fs/L;
+#: the -3 dB bandwidth of a centered average over L samples is 0.443 fs/L;
 #: the Vold-Kalman penalty is tuned to the same bandwidth for the same
 #: `cycles`, so the setting means what it meant under the moving average
 _AVERAGE_BANDWIDTH = 0.443
@@ -547,7 +547,7 @@ def vold_kalman(signal: np.ndarray, arguments: Sequence[np.ndarray],
                 cycles: float = 10.0) -> list[np.ndarray]:
     """Every tone's complex envelope at every sample, solved jointly.
 
-    The second-order Vold-Kalman filter: the record is modelled as the
+    The second-order Vold-Kalman filter: the record is modeled as the
     sum of the tones, each a slowly varying complex amplitude on its
     own known sweep argument, and the amplitudes are found by least
     squares — the data equation pulling the sum onto the record, a
@@ -562,7 +562,7 @@ def vold_kalman(signal: np.ndarray, arguments: Sequence[np.ndarray],
 
     The penalty weight follows each tone's instantaneous frequency so
     the envelope is smoothed over `cycles` cycles everywhere — the
-    filter's -3 dB bandwidth matched to the centred average of the
+    filter's -3 dB bandwidth matched to the centered average of the
     same span, so the setting keeps its meaning. Outside a tone's own
     span its envelope is pinned to zero.
 
@@ -646,12 +646,12 @@ def vold_kalman(signal: np.ndarray, arguments: Sequence[np.ndarray],
             # (x[n-1] - 2x[n] + x[n+1]) for n = 1..N-2, weighted by w[n]
             m = np.arange(1, N - 1)
             wm = w2[m]
-            centre = m * W + 2 * k + comp
-            left, right = centre - W, centre + W
-            for (r, c, v) in ((left, left, wm), (centre, centre, 4 * wm),
-                              (right, right, wm), (left, centre, -2 * wm),
-                              (centre, left, -2 * wm), (centre, right, -2 * wm),
-                              (right, centre, -2 * wm), (left, right, wm),
+            center = m * W + 2 * k + comp
+            left, right = center - W, center + W
+            for (r, c, v) in ((left, left, wm), (center, center, 4 * wm),
+                              (right, right, wm), (left, center, -2 * wm),
+                              (center, left, -2 * wm), (center, right, -2 * wm),
+                              (right, center, -2 * wm), (left, right, wm),
                               (right, left, wm)):
                 rows.append(r); cols.append(c); vals.append(v)
     matrix = coo_matrix((np.concatenate(vals),
@@ -679,7 +679,7 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     per tone name, and the found value rides the result as `.onset`),
     then solve for every tone's complex envelope on every control
     channel at once with the second-order **Vold-Kalman filter**
-    (`vold_kalman`): the record modelled as the sum of the tones on
+    (`vold_kalman`): the record modeled as the sum of the tones on
     their known sweeps, each envelope held to a slow curve over
     `cycles` cycles of its own instantaneous frequency. Joint, so
     crossing sweeps are separated by their frequency histories rather

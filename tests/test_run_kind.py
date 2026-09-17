@@ -82,7 +82,7 @@ def test_the_type_comes_from_the_controller_not_the_group_name(tmp_path):
 # ---- the kinds visualdynamics has nowhere to put yet ------------------------------
 
 
-def test_a_transient_run_is_recognised_as_one(tmp_path):
+def test_a_transient_run_is_recognized_as_one(tmp_path):
     """A transient run replicates a *waveform*, which is what the
     controller can do; a shock test meets an *SRS*, which it cannot. The
     two were one project type here, and calling a transient run a shock
@@ -147,7 +147,7 @@ def test_an_unknown_type_number_is_not_invented(tmp_path):
 
 def test_any_file_can_be_asked(tmp_path):
     """The caller has a path, not a format. A geometry, a photo and a
-    file nothing recognises all answer None rather than raising: not
+    file nothing recognizes all answer None rather than raising: not
     knowing is the ordinary case."""
     assert io.project_type_of(
         fixture_path('plate', 'modal.nc4')) == 'Modal Test'

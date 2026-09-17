@@ -105,7 +105,7 @@ def test_nothing_is_found_in_a_stationary_record():
 
 
 def test_a_record_with_no_shocks_still_offers_the_whole_of_itself():
-    """`suggest` is for the caller that needs something to analyse. The
+    """`suggest` is for the caller that needs something to analyze. The
     honest fallback is the record, not nothing."""
     rng = np.random.default_rng(1)
     samples = round(2.0 * RATE)
@@ -154,7 +154,7 @@ def test_one_dead_channel_does_not_hide_the_shocks():
 
 def test_one_screaming_channel_does_not_invent_them():
     """And the same median the other way: a channel forty dB over its
-    neighbours does not get to answer for the record."""
+    neighbors does not get to answer for the record."""
     quiet = record(events=(), channels=3)
     values = np.array(quiet.ordinate)
     values[0] *= 100.0
@@ -200,7 +200,7 @@ def test_digital_silence_between_events_still_gives_a_usable_floor():
 
 def test_two_hits_close_together_are_one_window():
     """A double hit, and a ringdown that dips through the release for a
-    moment, look the same from here. Two windows would analyse the
+    moment, look the same from here. Two windows would analyze the
     second half of one shock as though it were a shock of its own."""
     close = record(events=(1.0, 1.01))
     assert len(shocks.find(close)) == 1
@@ -306,7 +306,7 @@ def test_a_history_that_was_never_looked_at_has_no_shocks(run, tmp_path):
 # ---- one length for the series ------------------------------------------
 
 
-def _levelled(peaks=(0.25, 0.55, 1.0)):
+def _leveled(peaks=(0.25, 0.55, 1.0)):
     """A series walked up in level, which is how shock tests are run.
 
     Same pulse, same ringdown, different amplitude — so the events are
@@ -334,7 +334,7 @@ def test_a_series_walked_up_in_level_gets_windows_of_one_length():
     against the floor, so a harder hit takes longer to fall back even
     though the damping that sets the ringdown never changed — leaving
     window length tracking level instead of physics."""
-    history = _levelled()
+    history = _leveled()
     per_event = shocks.find(history, common=False)
     assert len(per_event) == 3
     spread = max(s.duration for s in per_event) \
@@ -350,7 +350,7 @@ def test_the_common_length_is_the_longest_event_never_the_shortest():
     """A shared length that truncates any event is strictly worse than
     per-event windows: the event it cuts is the one whose spectrum then
     reads low at the bottom of the band."""
-    history = _levelled()
+    history = _leveled()
     per_event = shocks.find(history, common=False)
     together = shocks.find(history, common=True)
     assert together[0].duration >= max(s.duration for s in per_event)
@@ -359,12 +359,12 @@ def test_the_common_length_is_the_longest_event_never_the_shortest():
 def test_each_window_still_opens_before_its_own_shock():
     """One length is shared; the starts stay with their events."""
     events = (0.3, 1.0, 1.7)
-    for window, at in zip(shocks.find(_levelled(), common=True), events):
+    for window, at in zip(shocks.find(_leveled(), common=True), events):
         assert window.start < at < window.stop
 
 
 def test_windows_of_one_length_still_do_not_overlap():
-    history = _levelled()
+    history = _leveled()
     found = shocks.find(history, common=True)
     for one, next_one in pairwise(found):
         assert one.stop <= next_one.start
@@ -375,7 +375,7 @@ def test_close_events_cap_the_length_for_all_of_them():
     that collided would put the series back where it started."""
     # sized against the detector rather than guessed: an isolated event
     # of this shape wants a window wider than the spacing below, so the
-    # neighbours are what decides the length
+    # neighbors are what decides the length
     alone = shocks.find(record(events=(1.0,), decay=0.03, span=2.4))
     wanted = alone[0].duration
     events = (0.3, 1.3, round(1.3 + wanted * 0.93, 4))
@@ -391,13 +391,13 @@ def test_close_events_cap_the_length_for_all_of_them():
 # ---- holding them apart --------------------------------------------------
 
 
-def test_a_moved_window_is_stopped_at_its_neighbour():
+def test_a_moved_window_is_stopped_at_its_neighbor():
     """Drag an edge into the next event and it stops at the edge. The
     event nobody touched does not move."""
     was = (Shock(0.0, 0.2), Shock(0.5, 0.2), Shock(1.0, 0.2))
     pulled = (was[0], Shock(0.1, 0.6), was[2])     # left edge back into #1
     held = shocks.held_apart(pulled, moved=1)
-    assert held[0] == was[0], 'the untouched neighbour stayed put'
+    assert held[0] == was[0], 'the untouched neighbor stayed put'
     assert held[1].start == pytest.approx(0.2), 'stopped at the edge'
     assert held[1].stop == pytest.approx(0.7)
 

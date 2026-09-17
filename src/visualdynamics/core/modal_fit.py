@@ -221,7 +221,7 @@ class ModalFitSession:
     def synthesis_singular_values(self, include_preview: bool = True
                                   ) -> np.ndarray | None:
         """The synthesis CMIF's singular values, (k, freqs), exactly —
-        without ever materialising the synthesis.
+        without ever materializing the synthesis.
 
         The modal synthesis is rank-`m` by construction: every mode
         contributes `q_k(w) * outer(shape, participation)`, so the
@@ -236,11 +236,11 @@ class ModalFitSession:
         for bit-identical curves.
 
         Padded with zero rows up to min(responses, references), which
-        is what the materialised SVD reports: the extra singular
+        is what the materialized SVD reports: the extra singular
         values of a rank-m matrix are zero, and the plot's floor test
         counts rows.
 
-        None with nothing to synthesise.
+        None with nothing to synthesize.
         """
         modes = list(self.modes)
         if include_preview and self.preview is not None:
@@ -336,10 +336,10 @@ class ModalFitSession:
         it leaves ridge enough that the same line stays the tallest, and
         the loop confirmed fourteen modes at one frequency without ever
         moving on. But frequency alone cannot tell that ridge from a
-        genuine neighbour — a repeated pair's second mode stands at the
+        genuine neighbor — a repeated pair's second mode stands at the
         confirmed frequency and was shadowed for exactly that reason —
         and shape can: ridge keeps the shape of the mode that left it,
-        a real neighbour has its own (`_another_mode_at`). The cursor
+        a real neighbor has its own (`_another_mode_at`). The cursor
         can still be dragged anywhere by hand.
         """
         s1 = self._residual_cmif()
@@ -385,7 +385,7 @@ class ModalFitSession:
     #: below the *blends*, not merely below pure ridge: measured on the
     #: plate's repeated pair, leftover ridge projects 0.99 onto the mode
     #: that left it and the pair's second tooth 0.002 — but in a dense
-    #: worked-over cluster, an unfit neighbour's skirt mixed with fit
+    #: worked-over cluster, an unfit neighbor's skirt mixed with fit
     #: error projects 0.25-0.30, and at 0.5 the loop fit one of those
     #: 0.26 Hz from a confirmed mode. 0.1 passes only what the confirmed
     #: modes explain almost none of, which is what a genuinely new mode
@@ -430,7 +430,7 @@ class ModalFitSession:
         search over a couple of dozen lines.
 
         A caller that cannot afford even that — a drag already running
-        behind — passes False and gets the old behaviour.
+        behind — passes False and gets the old behavior.
         """
         self.pending['frequency'] = float(frequency)
         if damping and not self.pending['overridden']:
@@ -453,7 +453,7 @@ class ModalFitSession:
         This is the second axis of the search put in the user's hand.
         Where two solutions sit at nearly the same frequency they are
         told apart by their damping, and the automatic estimate can
-        only pick one; holding the damping says which neighbourhood the
+        only pick one; holding the damping says which neighborhood the
         fit is meant to land in.
         """
         self.pending['damping'] = float(np.clip(damping, 1e-4, 0.5))
@@ -880,7 +880,7 @@ class ModalFitSession:
             if len(members) == 1:
                 # A cluster of one has nobody to borrow from, and
                 # refining it can only chase what is not the mode:
-                # noise, and the smooth tails of louder neighbours —
+                # noise, and the smooth tails of louder neighbors —
                 # a quiet fundamental under a loud cluster came back
                 # fourfold inflated from its own locally-judged refit,
                 # because absorbing the cluster's stiffness-line tail
@@ -976,8 +976,8 @@ class ModalFitSession:
         the frequency and the damping are nonlinear. Given them, the
         residues are a linear least squares, so the two-parameter
         surface can be walked directly rather than handed to an
-        optimiser that would have to rediscover the same structure.
-        Returns a cost normalised by the projected residual's own size,
+        optimizer that would have to rediscover the same structure.
+        Returns a cost normalized by the projected residual's own size,
         so 0 is a perfect mode and 1 is having explained nothing.
         """
         residual = self.residual_matrix()
@@ -1060,7 +1060,7 @@ class ModalFitSession:
         Coarse to fine: a small grid over half a line either side and a
         wide span of damping, then the same grid again around the
         winner at a fifth the span, then a parabola through the best
-        and its neighbours in each direction. Fifty cheap evaluations
+        and its neighbors in each direction. Fifty cheap evaluations
         reach what a twenty-five-by-twenty-five grid would, and the
         parabola lands between grid points, where the surface really is
         quadratic and interpolating it is unbiased.
@@ -1092,12 +1092,12 @@ class ModalFitSession:
         # just outside and answer the edge as though converged — on the
         # plate's own recording the 823 Hz mode came back 0.29 Hz low
         # from an unpadded FRF and right from a padded one, which is a
-        # grid artefact in an estimator that should not have one. So a
-        # pass whose winner sits on the frequency edge re-centres and
+        # grid artifact in an estimator that should not have one. So a
+        # pass whose winner sits on the frequency edge re-centers and
         # looks again rather than shrinking around a point that only
         # won by being nearest the door. Bounded twice: never further
         # than `farthest` from the picked line (a search that can
-        # wander past the next line can slide onto a neighbouring
+        # wander past the next line can slide onto a neighboring
         # mode), and never into a confirmed mode's own half-power span
         # — the rule `suggest` already speaks about its motion, spoken
         # here about this one, because a cluster's imperfect
@@ -1106,7 +1106,7 @@ class ModalFitSession:
         #
         # The damping axis is different: in a cluster a fatter mode
         # always explains more of the band, so a walking damping
-        # inflated fits into blends that swallowed their neighbours —
+        # inflated fits into blends that swallowed their neighbors —
         # measured, not feared: the four-mode cluster in
         # test_a_confirmed_peak_is_not_offered_again came back as one
         # z=0.027 blend the moment damping could roam.
@@ -1133,7 +1133,7 @@ class ModalFitSession:
                                1e-4, 0.5)
             grid = [[cost(f, z) for z in dampings] for f in frequencies]
             i, j = np.unravel_index(int(np.argmin(grid)), (steps, steps))
-            # a parabola through the winner and its neighbours, in each
+            # a parabola through the winner and its neighbors, in each
             # direction independently — the surface is separable enough
             # near its minimum for that, and it costs nothing
             step_f = frequencies[1] - frequencies[0]

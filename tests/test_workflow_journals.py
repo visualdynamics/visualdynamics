@@ -50,7 +50,7 @@ def _replay(window):
 
 def test_the_modal_workflow_replays(window, pump, tmp_path, monkeypatch):
     """Import, declare, fit interactively, refine, report, save — the
-    modal guide's own arc, journalled and replayed."""
+    modal guide's own arc, journaled and replayed."""
     window.import_paths([fixture_path('plate', 'modal_spectra.nc4'),
                          fixture_path('plate', 'test_geometry.npz')])
     pump()

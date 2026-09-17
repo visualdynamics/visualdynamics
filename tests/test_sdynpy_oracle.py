@@ -1,7 +1,7 @@
 """Visual Dynamics' spectral answers, checked against sdynpy's — as data.
 
 sdynpy is the tool this package's audience already trusts, and this
-package will be scrutinised precisely because it was built with AI
+package will be scrutinized precisely because it was built with AI
 assistance, so agreement is worth demonstrating (Brandon, 2026-08-28).
 What must never happen is an import: sdynpy is GPL-3.0, and one import
 from anything distributed with Visual Dynamics would settle its
@@ -11,7 +11,7 @@ repository, and its *numbers* are frozen into
 `testdata/sdynpy_oracle/oracle.npz` beside the exact input signals.
 Running a GPL program privately carries no conditions, and a program's
 numerical output is not a covered work; nothing here imports sdynpy,
-and `test_licence_boundary` now checks the tests as well as the
+and `test_license_boundary` now checks the tests as well as the
 package.
 
 **An agreement oracle, not a truth oracle.** sdynpy has around 13% test
@@ -311,7 +311,7 @@ def test_the_cmif_agrees_with_sdynpy(oracle):
     first comparison came back off by exactly 0.45359237 — a
     kilogram's worth of pounds — because the default display is
     in-slinch-lbf-s (g) and the oracle's matrix is unitless SI. The
-    conversion is correct behaviour, not error, and naming the system
+    conversion is correct behavior, not error, and naming the system
     is what makes the comparison about the SVD."""
     from visualdynamics.plot import cmif_curves
     from visualdynamics.units import SI

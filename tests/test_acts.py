@@ -2,7 +2,7 @@
 
 An act with no settings — Integrate, Transform, Merge, Generate Report,
 Recompute — is a push button on the bar of the pane showing what it
-changes, labelled, in its own fenced group; a reading with settings
+changes, labeled, in its own fenced group; a reading with settings
 keeps its toggle and its pane. The bar follows the selection: one
 object's own acts, or the acts a combination can take and nothing that
 applies to one of its members alone. The tree's column carries the

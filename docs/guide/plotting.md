@@ -36,7 +36,7 @@ the line — it starts on the strongest one — and Play sweeps the phase.
 A PSD has no phase, so it gets the *envelope* instead: two translucent
 copies of the geometry deflected `+sqrt(PSD)` and `-sqrt(PSD)` at the
 cursor line — every extreme every channel reaches, with no claim about
-when. Size shows each line at full scale; colour is absolute, dB below
+when. Size shows each line at full scale; color is absolute, dB below
 the loudest node at any line, so a quiet line shows its shape but wears
 its quietness. Play walks the cursor up the spectrum. One quantity
 deflects at a time (the toolbar box picks), and a node measured along
@@ -59,7 +59,7 @@ channel* instead, and picking autos alone falls back to the envelope
 
 coherence.plot_map()                    # frequency across, channel down
 geometry.plot()                         # the 3D scene, with its bar
-geometry.plot_dofs(frf, 'force')        # labelled DOF arrows
+geometry.plot_dofs(frf, 'force')        # labeled DOF arrows
 ```
 
 The readings on a time history's bar have calls of their own, in
@@ -77,7 +77,7 @@ the application uses, with the same bar over it — so a control you would
 reach for in the window is there in a script too, and does not have to
 be known about in advance as an argument.
 
-`geometry.plot()` returns a `ScenePane`: the labelled axes and the
+`geometry.plot()` returns a `ScenePane`: the labeled axes and the
 orientation triad are toggles on its bar. `frf.plot()` returns a
 `DataPane`, and complex data gets the component box, so
 `frf.plot(component='imag')` sets where it starts rather than fixing it
@@ -125,7 +125,7 @@ vanish. On the 3-D stage the decades are drawn the way the flat plot
 draws them — a grid line and a label at every power of ten, `1`,
 `10¹`, `10²` … — in place of the axis's even divisions.
 
-Legends sit **below** the plot, one horizontal row centred on the
+Legends sit **below** the plot, one horizontal row centered on the
 axes and wrapping to their width, rather than floating over the
 curves — a legend inside the axes hides the data it names, and a long
 one hid most of it.
@@ -136,7 +136,7 @@ Many channels on one axis hide each other exactly where it matters —
 resonances line up, and the tenth curve lands on the first nine. So
 the 3-D reading is the **default**: selecting data spreads its records
 along a depth axis, one curve per record — a single record included —
-labelled with the channel it is, coloured by level on **one scale for
+labeled with the channel it is, colored by level on **one scale for
 the whole scene**, so a channel four decades quieter draws four
 decades darker. Log-read data plots as log10 and the vertical axis
 title says so. The **3D** button on the plot bar is how the flat plot
@@ -165,13 +165,13 @@ psd.plot_waterfall(screenshot='stack.png')    # headless, to a file
 
 Selecting two PSD objects offers two more readings on the bar. The
 **overlay** stages both on the 3-D axes, station by station where
-their channels share a record, the louder set coloured by level and
-the quieter drawn behind it in grey. The **ratio** divides them where
+their channels share a record, the louder set colored by level and
+the quieter drawn behind it in gray. The **ratio** divides them where
 they match — same DOF, same quantity — and draws the quotient in
 decibels; with the driven and ambient densities of a system ID that
 reading *is* the signal-to-noise, computed where it is looked at
 rather than stored as a third object. The louder set is the
-numerator, so the healthy reading is positive. Both honour the 2D/3D
+numerator, so the healthy reading is positive. Both honor the 2D/3D
 toggle, and a mixed pair offers a quantity box naming what to
 compare.
 
@@ -179,8 +179,8 @@ compare.
 
 Picking modes from a shape set beside measured FRFs asks the modal
 model to predict them, and the pair reads on that same stage: each
-shared channel a station, the measurement coloured by level and the
-synthesis behind it in grey — the emphasis the flat plot gives them
+shared channel a station, the measurement colored by level and the
+synthesis behind it in gray — the emphasis the flat plot gives them
 when it draws the synthesis dashed under the measurement. Ninety-six
 FRFs and their ninety-six predictions on one axis is a band with the
 answer buried in it; given depth, each channel's fit can be read on

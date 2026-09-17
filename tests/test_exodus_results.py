@@ -346,7 +346,7 @@ def test_the_window_asks_and_the_answer_reaches_the_reader(
         'the chosen node set narrowed the channels'
 
 
-def test_cancelling_the_question_skips_the_file(window, pump, tmp_path,
+def test_canceling_the_question_skips_the_file(window, pump, tmp_path,
                                                 monkeypatch):
     from PySide6.QtWidgets import QInputDialog
 

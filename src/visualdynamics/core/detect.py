@@ -6,7 +6,7 @@ environment stopped. Averaging the lot mixes them into one PSD that
 describes none of them. This works out which stretch to use.
 
 The record is compressed to one number per hop before anything else is
-decided — a level, in dB — and every judgement after that is made on
+decided — a level, in dB — and every judgment after that is made on
 that short series. That is what keeps it quick on the sets where it
 matters: three hundred channels of a ten-minute run cost one pass, and
 the rest is arithmetic on a few thousand points.
@@ -15,11 +15,11 @@ Two things make the compression trustworthy rather than merely small:
 
 - the consensus is the median across channels, not the mean, so a
   channel that drops out or spikes or sits forty dB above its
-  neighbours is one vote and not the answer;
+  neighbors is one vote and not the answer;
 - the mean is removed within each hop, so a DC offset or a slow drift
   is not read as level.
 
-Nothing normalises the levels against each other or centres the series.
+Nothing normalizes the levels against each other or centers the series.
 Both were tried: the median across channels already does that work, and
 the threshold sweep walks every bin edge from the top, so scaling a
 whole record by a million moves the bins together and lands on the same
@@ -73,7 +73,7 @@ TOLERANCE = 2.0
 #: still sets it.
 TOP_QUANTILE = 95.0
 
-#: how many times a run is re-centred on itself and grown again. Three
+#: how many times a run is re-centered on itself and grown again. Three
 #: is enough for anything seen: the first pass from a fragment's own
 #: median, the second from the median of what that reached, and the
 #: third to confirm it has stopped moving.
@@ -176,7 +176,7 @@ def hop_levels(ordinate: ArrayLike, hop: int,
         block = ordinate[:, first * hop:last * hop].reshape(
             channels, last - first, hop)
         mean = block.mean(axis=2)
-        # einsum contracts without materialising the squares
+        # einsum contracts without materializing the squares
         power[:, first:last] = (
             np.einsum('cks,cks->ck', block, block) / hop - mean * mean)
 
@@ -218,7 +218,7 @@ def _grow(level, first, last, sigma, tolerance=TOLERANCE):
     Repeated until it settles, because the first median is the median of
     a fragment and a fragment of a wandering plateau sits wherever the
     threshold happened to cut it. Grown once from a median near the top
-    of the wander it reaches only the upper half; re-centred on what it
+    of the wander it reaches only the upper half; re-centered on what it
     then holds, it reaches the rest.
     """
     for _ in range(GROW_PASSES):
@@ -241,7 +241,7 @@ def plateau(level: np.ndarray, sigma: float, want_hops: int,
             tolerance: float = TOLERANCE) -> tuple[int, int]:
     """The highest level the record holds for `want_hops` hops.
 
-    Level alone is the wrong thing to maximise. A ten-second overload in
+    Level alone is the wrong thing to maximize. A ten-second overload in
     the middle of a two-minute test is the highest level in the record
     and the last thing anyone wants to average; sought that way it wins,
     and returns a fifth of the frames the test itself would have. So

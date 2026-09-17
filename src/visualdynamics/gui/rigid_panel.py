@@ -1,7 +1,7 @@
 """The rigid-body settings, as a table beside the 3-D view.
 
 The reference point the rotations pivot on, and — when the set is to
-be mass-normalised — the mass and the six terms of the inertia tensor
+be mass-normalized — the mass and the six terms of the inertia tensor
 about it. The view previews the six shapes on the geometry as they
 are set, and the button at the bottom makes the shape set: select,
 see, set, apply (principle 13), the truncate panel's shape moved from
@@ -79,16 +79,16 @@ class RigidBodyPanel(QWidget):
 
         # mass and inertia are one optional group: both or neither
         # (`core.rigid` says why), so one checkbox reveals them. Named
-        # for what it reveals, not for the result: 'Mass-normalise' did
+        # for what it reveals, not for the result: 'Mass-normalize' did
         # not read as the place to enter a mass (Brandon, 2026-09-04)
         self.scale_check: QCheckBox = QCheckBox('Mass properties')
         self.scale_check.setToolTip(
             'Scale the shapes by the mass and the inertia about the '
-            'point, so the set is mass-normalised like a solved one. '
+            'point, so the set is mass-normalized like a solved one. '
             'Off, the shapes are unit translations and unit rotations')
         grid.addWidget(self.scale_check, 5, 0, 1, 2)
         self.scale_note: QLabel = QLabel(
-            'Declare the length unit to mass-normalise')
+            'Declare the length unit to mass-normalize')
         self.scale_note.setWordWrap(True)
         self.scale_note.setEnabled(False)
         grid.addWidget(self.scale_note, 6, 0, 1, 2)
@@ -162,7 +162,7 @@ class RigidBodyPanel(QWidget):
         display units of `unit_system`.
 
         A geometry whose length unit is undeclared shows its raw
-        coordinates with no unit, and cannot be mass-normalised — an
+        coordinates with no unit, and cannot be mass-normalized — an
         inertia in kg·m² against coordinates in nothing is not a number
         — so the checkbox gives way to a note saying what to declare.
         """
@@ -288,6 +288,6 @@ class RigidBodyPanel(QWidget):
         self.derived['axes'].setText(
             ', '.join(axis_name(axis) for axis in axes))
         self.derived['scaling'].setText(
-            'mass-normalised' if properties.scaled else 'unit shapes')
+            'mass-normalized' if properties.scaled else 'unit shapes')
         self.apply_button.setEnabled(nodes > 0)
         return properties

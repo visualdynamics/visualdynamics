@@ -105,7 +105,7 @@ def test_the_scripting_verbs_document_their_parameters():
     covered = sum(1 for label, obj in public_surface()
                   if label.startswith(ENFORCED) and '.' in label
                   and takes_parameters(obj))
-    # The ratchet reached zero on 2026-08-25: every parameterised
+    # The ratchet reached zero on 2026-08-25: every parameterized
     # method on the scripting surface documents its parameters. It
     # stays at zero — a new public method arrives with its table, or
     # this fails.

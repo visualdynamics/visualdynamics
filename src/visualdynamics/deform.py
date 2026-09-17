@@ -48,7 +48,7 @@ def animation_records(data: DataArray, records: Sequence[int] | None
       note saying how to pick another.
     - Within what remains, the first record per DOF wins and the rest are
       dropped with a note. A drive point carries a load cell beside its
-      accelerometer, and metres per second squared plus newtons is not a
+      accelerometer, and meters per second squared plus newtons is not a
       deflection. An FRF's reference columns repeat every response DOF the
       same way, so a whole FRF animates against its first reference.
       Incompatibility warns; it does not block.
@@ -86,7 +86,7 @@ def envelope_records(data: DataArray, records: Sequence[int] | None = None,
 
     The envelope is the autospectra's reading: a cross row's phase
     belongs to an operating deflection shape, so cross records go
-    first. Then one quantity — newtons and metres per second squared
+    first. Then one quantity — newtons and meters per second squared
     cannot share a normalization — with the commonest kind answering
     when `quantity` is None. Both filters run **before** the
     one-record-per-DOF rule in `animation_records`, or a cross row or
@@ -247,8 +247,8 @@ class Deflection:
 
         Not the same as `peak`, which is the largest value of a single DOF:
         a node moving in both X and Z travels sqrt(x^2 + z^2), further than
-        either. This is what the top of a colour scale should mean, so that
-        the top colour appears at the one instant the model is at its
+        either. This is what the top of a color scale should mean, so that
+        the top color appears at the one instant the model is at its
         furthest and nowhere else.
         """
         raise NotImplementedError
@@ -430,7 +430,7 @@ class EnvelopeDeflection(Deflection):
     scale, and the pair is the envelope.
 
     The line moves like `OdsDeflection`'s and each line shows at its
-    own full scale, for the same reason. Colour is the one channel left
+    own full scale, for the same reason. Color is the one channel left
     to carry level, so it is absolute: `node_decibels` reads each node
     against the loudest node at any line, floored at `FLOOR_DB`.
 
@@ -440,7 +440,7 @@ class EnvelopeDeflection(Deflection):
     the rest.
     """
 
-    #: the bottom of the colour scale, in dB below the loudest node at
+    #: the bottom of the color scale, in dB below the loudest node at
     #: any line: two decades of power, below which everything reads
     #: equally quiet
     FLOOR_DB = -40.0
@@ -503,7 +503,7 @@ class EnvelopeDeflection(Deflection):
                         if self._loudest else
                         np.full(len(self.rows), self.FLOOR_DB))
         # each line at its own full scale, the ODS's own convention: the
-        # shape is the answer here, the level is the colour
+        # shape is the answer here, the level is the color
         strongest = float(column.max(initial=0.0))
         if strongest:
             column = column / strongest
@@ -525,7 +525,7 @@ class EnvelopeDeflection(Deflection):
 
     def node_decibels(self) -> np.ndarray:
         """Each moving node's level, dB below the loudest node at any
-        line — the absolute reading the colour carries."""
+        line — the absolute reading the color carries."""
         return self._db
 
     @property
@@ -536,7 +536,7 @@ class EnvelopeDeflection(Deflection):
     @property
     def peak_magnitude(self) -> float:
         """The furthest any node gets with each line at its normalized
-        scale — unused when the animator pins an absolute colour range,
+        scale — unused when the animator pins an absolute color range,
         but every deflection answers it."""
         if not len(self.rows) or not self.num_lines:
             return 0.0

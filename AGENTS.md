@@ -15,7 +15,7 @@ reference.
 
 A from-scratch, units-aware structural dynamics toolset. Copyright
 Brandon Zwink, published under **GPL-3.0-or-later with a contributor
-licence agreement** (`LICENSE`, `CLA.md`). It is one person's
+license agreement** (`LICENSE`, `CLA.md`). It is one person's
 project: bug reports are welcome and fixed promptly, and code
 contributions arrive by conversation first
 (`contact@visualdynamics.org`) and under the CLA. An agent working in
@@ -33,7 +33,7 @@ project file — provisional for the alpha, as the README says.
 These are not preferences. Each one exists because breaking it costs
 something that cannot be bought back.
 
-1. **No code from any package whose licence would restrict this
+1. **No code from any package whose license would restrict this
    project's licensing.** Copyleft code — GPL, AGPL, however
    compatible with this project's own GPL — must never be imported,
    copied, or derived from (subclassing is deriving, even in code
@@ -44,7 +44,7 @@ something that cannot be bought back.
    understand a method; write the method here yourself. Its
    *numbers* may be compared against as frozen data (a program's
    output is not a covered work); its code may not travel here.
-   `tests/test_licence_boundary.py` enforces the rule by AST walk on
+   `tests/test_license_boundary.py` enforces the rule by AST walk on
    every run, `tests/` included, for the packages this project is
    closest to.
 
@@ -56,7 +56,7 @@ something that cannot be bought back.
    try to route around that, and do not open a pull request on
    someone's behalf without their say-so.
 
-3. **Read a dependency's licence before adding it.** GPL is
+3. **Read a dependency's license before adding it.** GPL is
    disqualifying; permissive (BSD/MIT/ISC) or LGPL with dynamic
    linking only. For Qt the line is **LGPL-available, not
    Essentials-only**: the sanctioned set is `QtCore`, `QtGui`,
@@ -66,7 +66,7 @@ something that cannot be bought back.
    declared by name with no pin and no upper bound (principle 12);
    never cap a version to work around a break.
 
-4. **Never claim a licence the tree does not grant.** Every file that
+4. **Never claim a license the tree does not grant.** Every file that
    says anything says GPL-3.0-or-later; nothing else. And the project
    is **unaffiliated**: never name an employer, client, laboratory or
    institution anywhere in it — code, tests, docs, commit messages.
@@ -114,7 +114,7 @@ Before saying anything is done:
   call it a flake; capture the assertion's values first.
 - **Verify, don't assume.** Claims about the GUI must be measured:
   `tests/conftest.py` gives `window` (a headless `MainWindow`), `pump`
-  and `fixture_path`, so a behaviour gets a named test that runs in
+  and `fixture_path`, so a behavior gets a named test that runs in
   milliseconds. A build that succeeds proves nothing about an app
   that runs.
 - **Never edit source while a suite is running.**
@@ -128,7 +128,7 @@ Before saying anything is done:
   codebase is heavily commented by intention.
 - **One implementation of a rule.** The desktop app and
   `visualdynamics.Project` are two front ends over one workflow: put
-  behaviour in the project (or `core`) and let the GUI display it.
+  behavior in the project (or `core`) and let the GUI display it.
 - Keep `core`, `units`, `io`, `deform`, `rotate` and `viz` free of Qt.
   Qt belongs in `gui/`, `plot/` and `theme.py`.
 - The principles that bite most often while writing code: show only

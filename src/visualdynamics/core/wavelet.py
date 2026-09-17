@@ -18,7 +18,7 @@ scalogram has three things in it, time, frequency and magnitude, and
 scale is the other name for the frequency axis rather than a third
 dimension. This module works in Hz throughout and converts at the edge,
 because every other frequency axis in this toolset is in Hz and a scale
-number means nothing without the wavelet's centre frequency beside it.
+number means nothing without the wavelet's center frequency beside it.
 
 The wavelet is **Morlet**, the standard choice for vibration work: a
 Gaussian-windowed complex sinusoid, so it has a magnitude and a phase,
@@ -29,20 +29,20 @@ Six is the conventional default and is very nearly the smallest value
 for which the wavelet has no appreciable mean, which is the condition
 that makes the transform admissible.
 
-**The normalisation and the frequency mapping are one decision, and
+**The normalization and the frequency mapping are one decision, and
 pairing them wrongly biases every frequency this view reports.** Two
-conventions are in use. Torrence and Compo (1998) normalise each
+conventions are in use. Torrence and Compo (1998) normalize each
 wavelet to unit *energy* and give the scale-to-period relation
-`4*pi*s / (omega0 + sqrt(2 + omega0**2))`; the other normalises to
+`4*pi*s / (omega0 + sqrt(2 + omega0**2))`; the other normalizes to
 unit *amplitude* and pairs with `2*pi*s / omega0`. Both relations are
 exact — for their own convention. At `omega0=6` they differ by 1.4%,
 so borrowing T&C's relation (which is the one quoted everywhere,
-including in this file's first draft) while normalising for amplitude
+including in this file's first draft) while normalizing for amplitude
 reports every frequency 1.4% **high** — a 100 Hz tone at 101.4. That is
 not scatter; it is a bias, one way, and it is invisible on any
 frequency grid coarser than about 1%.
 
-This module normalises for **amplitude**, so it uses `2*pi/omega0`.
+This module normalizes for **amplitude**, so it uses `2*pi/omega0`.
 Amplitude because this is a units-aware toolset whose user reads g and
 N off a picture: under the energy convention the same 2 g tone draws
 four times taller at 50 Hz than at 800 Hz, which is right for asking
@@ -72,7 +72,7 @@ Each piece has a source:
   domain, which is what makes this affordable — one multiply and one
   inverse per scale instead of a convolution.
 - **The `2`** in place of their `pi**-0.25` is the amplitude
-  normalisation, and it is derived here rather than taken from
+  normalization, and it is derived here rather than taken from
   anywhere. A real tone of amplitude `A` puts `A*N/2` in each half of
   its DFT; the analytic wavelet keeps one half; the tuned daughter's
   own peak is its constant; the inverse divides by `N`. So the constant
@@ -136,16 +136,16 @@ def fourier_factor(omega0: float = OMEGA0) -> float:
     """Seconds of Fourier period per second of wavelet scale.
 
     `2*pi/omega0`, which is the exact relation for the amplitude
-    normalisation this module uses: a tone peaks where the wavelet is
+    normalization this module uses: a tone peaks where the wavelet is
     tuned to it, `s*omega == omega0`, because nothing reweights one
     scale against another.
 
     **Not** Torrence and Compo's `4*pi/(omega0 + sqrt(2 + omega0**2))`,
-    which is exact for *their* normalisation — unit energy, whose
+    which is exact for *their* normalization — unit energy, whose
     `sqrt(s)` factor tilts the response across scales and moves the
     peak. Their form is the one usually quoted, and taking it while
-    normalising for amplitude reports every frequency 1.4% low
-    (measured, 2026-08-27). The two are a pair with the normalisation,
+    normalizing for amplitude reports every frequency 1.4% low
+    (measured, 2026-08-27). The two are a pair with the normalization,
     not interchangeable constants.
     """
     return 2.0 * np.pi / omega0
@@ -194,7 +194,7 @@ def cone_of_influence(frequencies: ArrayLike, sample_rate: float,
     what it correlates against there is the padding rather than the
     measurement. The transform still returns a number and the number
     still looks like data, which is why this is drawn rather than left
-    to be remembered — inside the cone, a scalogram is an artefact of
+    to be remembered — inside the cone, a scalogram is an artifact of
     where the record was cut.
 
     The e-folding time of the Morlet's Gaussian envelope, `sqrt(2) * s`
@@ -226,13 +226,13 @@ def scalogram(values: ArrayLike, sample_rate: float,
     itself gigabytes; a picture wants `scalogram_peaks`, which reduces
     each band as it lands and never holds the whole.
 
-    Normalised so that **the magnitude is the record's own amplitude**:
+    Normalized so that **the magnitude is the record's own amplitude**:
     a 2 g tone reads 2 wherever it sits on the frequency axis, so the
-    colour bar carries the record's units and a ridge's height means
+    color bar carries the record's units and a ridge's height means
     one thing everywhere.
 
     That is a choice, and the other one is defensible. Torrence and
-    Compo normalise each wavelet to unit *energy*, which is right for
+    Compo normalize each wavelet to unit *energy*, which is right for
     asking how a record's variance is distributed and is what a
     geophysicist expects; under it a constant-amplitude tone reads
     proportional to the square root of its period, so the same 2 g at
@@ -303,7 +303,7 @@ def scalogram_peaks(values: ArrayLike, sample_rate: float,
     -------
     times, magnitude
         `times` is each column's clock in seconds from the record's
-        start — the centre of its slice, so the first and last columns
+        start — the center of its slice, so the first and last columns
         sit half a slice inside the record's ends — and `magnitude` is
         ``(len(frequencies), len(times))``, real.
     """
@@ -381,7 +381,7 @@ def _bands(record, sample_rate, wanted, omega0):
     # DC offset would appear as a bright band across the bottom of every
     # scalogram, which is a picture of the offset and not of the record.
     # Removed before the padding, so the zeros are the same zero the
-    # record is now centred on rather than a step down from its mean.
+    # record is now centered on rather than a step down from its mean.
     spectrum = fft(record - record.mean(), n=length, workers=-1)
     # angular frequencies of the FFT bins, negative above Nyquist — the
     # Morlet is analytic, so the negative half is what gets discarded
@@ -398,7 +398,7 @@ def _bands(record, sample_rate, wanted, omega0):
         scaled = scales[rows, None] * omega_pos[None, :]
         # The Gaussian, analytic (the negative half of the spectrum is
         # what makes a wavelet complex), times two. The two is the whole
-        # normalisation: a real tone of amplitude A puts A/2 in each
+        # normalization: a real tone of amplitude A puts A/2 in each
         # half of its spectrum, the analytic wavelet keeps one of them,
         # and the peak of the Morlet's own transform is 1 where it is
         # tuned — so twice that reads back A. No sqrt(scale) anywhere,
@@ -475,7 +475,7 @@ def default_range(sample_rate: float, duration: float) -> tuple[float, float]:
     percent right up against it. The bottom is where a handful of the
     longest wavelets still fit inside the record rather than hanging
     off both ends: a default whose bottom octave is all cone would be
-    a default that draws an artefact.
+    a default that draws an artifact.
     """
     nyquist = float(sample_rate) / 2.0
     high = nyquist * 0.98

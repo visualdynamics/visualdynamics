@@ -1,11 +1,11 @@
 """Physical responses through a shape set to modal responses, and back.
 
 The rules pinned here are the ones PLAN.md's phase 2 states: records
-match columns by (DOF, quantity) with the sign honoured; motions fit
+match columns by (DOF, quantity) with the sign honored; motions fit
 (`Φ⁺u`) and forces project (`Φᵀf`); everything else is left out and
 said; the unit rule `[q] = [u]/[Φ]` gives a virtual point's rotations
 in rad/s² and lbf·in through unit rigid shapes, half-power mass units
-through mass-normalised ones, and no unit through a set that has none;
+through mass-normalized ones, and no unit through a set that has none;
 a rank-deficient measurement is refused by name; and the expansion is
 the exact inverse. The units module's new tags are pinned beside.
 """
@@ -167,7 +167,7 @@ def test_a_complex_set_is_refused():
 # ---- the unit rule ----------------------------------------------------------
 
 
-def test_mass_normalised_shapes_give_half_power_mass_units():
+def test_mass_normalized_shapes_give_half_power_mass_units():
     geometry = _geometry()
     unit = rigid_body_shapes(geometry, MassProperties((0, 0, 0)))
     scaled = rigid_body_shapes(geometry, MassProperties(
@@ -233,7 +233,7 @@ def test_modal_coordinates_are_spelled_m_and_the_index():
     rigid = rigid_body_shapes(_geometry(), MassProperties((0, 0, 0)))
     assert modal_dofs(rigid) == ['M1', 'M2', 'M3', 'M4', 'M5', 'M6']
     assert modal_coordinate('M4') == 4
-    assert modal_coordinate('m12') == 12, 'normalised like any DOF'
+    assert modal_coordinate('m12') == 12, 'normalized like any DOF'
     assert modal_coordinate('101X+') is None
     assert modal_coordinate('M') is None and modal_coordinate('M0') is None
     assert modal_coordinate('9001') is None, 'a bare node id is not modal'

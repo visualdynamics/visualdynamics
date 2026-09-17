@@ -74,7 +74,7 @@ def test_it_is_reachable_from_every_audience():
     link = os.path.join(ROOT, 'docs', 'principles.md')
     assert os.path.exists(link), 'the docs site has no principles page'
     if os.name == 'nt':
-        # the page is a POSIX symlink; a Windows checkout materialises
+        # the page is a POSIX symlink; a Windows checkout materializes
         # it, so sameness is only checkable where symlinks exist —
         # the docs are built on the machines that have them
         return

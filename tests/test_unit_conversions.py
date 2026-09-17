@@ -40,7 +40,7 @@ HAND_CHECKED = [
     ('psi', LBF / IN ** 2, 0.0),
     # voltages
     ('V', 1.0, 0.0), ('mV', 1e-3, 0.0),
-    # strains, which are ratios: one metre per metre is one
+    # strains, which are ratios: one meter per meter is one
     ('strain', 1.0, 0.0), ('microstrain', 1e-6, 0.0), ('m/m', 1.0, 0.0),
     # temperatures, the affine ones with their offsets
     ('K', 1.0, 0.0), ('degC', 1.0, 273.15),
@@ -56,7 +56,7 @@ HAND_CHECKED = [
     ('rad/s', 1.0, 0.0), ('deg/s', math.pi / 180.0, 0.0),
     ('rad/s**2', 1.0, 0.0), ('deg/s**2', math.pi / 180.0, 0.0),
     ('N*m', 1.0, 0.0), ('lbf*in', LBF * IN, 0.0), ('lbf*ft', LBF * 0.3048, 0.0),
-    # modal responses through mass-normalised shapes: the response's
+    # modal responses through mass-normalized shapes: the response's
     # unit times the square root of the mass unit (a slinch is
     # lbf·s²/in, so √slinch is √(LBF/IN) kg½)
     ('m/s**2*kg**0.5', 1.0, 0.0),
@@ -229,9 +229,9 @@ def test_display_systems_agree_with_each_other():
     data = waveform()
     data.define_units('g')
     inches = data.display_ordinate(units.IN_LBF_S)
-    millimetres = data.display_ordinate(units.MMKS)
+    millimeters = data.display_ordinate(units.MMKS)
     assert np.allclose(np.asarray(inches) * IN,
-                       np.asarray(millimetres) * 1e-3)
+                       np.asarray(millimeters) * 1e-3)
 
 
 # ---- the refusals -----------------------------------------------------------

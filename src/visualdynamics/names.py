@@ -2,7 +2,7 @@
 
 An importer's keys are for code — `time_data`, `Modal_frf`, `ChannelTable` —
 and the tree is for reading. So the tree shows the object, spelled the way it
-would be written down: words separated by spaces, each capitalised, and the
+would be written down: words separated by spaces, each capitalized, and the
 acronyms this field actually uses left as acronyms.
 
 The name is the key: renaming an item renames the object, so these are what
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-# 'Frf' is not a word, and neither is 'Cpsd'. Capitalising the first letter of
+# 'Frf' is not a word, and neither is 'Cpsd'. Capitalizing the first letter of
 # every word is the rule; these are the exceptions a structural dynamicist
 # would otherwise have to read twice.
 ACRONYMS = {

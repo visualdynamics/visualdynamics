@@ -11,7 +11,7 @@ Reference, Move Up, Move Down, Delete, Export — and a settings pane
 beside it carrying what the selected block has to say: a figure block's
 sources and caption, a text block's Markdown in a Qt editor, the
 report's title and marking when nothing is selected. Every act is one
-operation on the `Report` model, journalled by the window, followed by a
+operation on the `Report` model, journaled by the window, followed by a
 re-render of the page; the exported file never carries any chrome.
 """
 
@@ -64,7 +64,7 @@ BLOCK_TEMPLATES = {
     'coherence': {'kind': 'plot', 'source': '', 'mode': 'map',
                   'caption': '', '_bind': ('source',)},
     # the app's 3-D reading of a data object, in the document: every
-    # record on the stage, receding, coloured by level
+    # record on the stage, receding, colored by level
     'stage': {'kind': 'plot', 'source': '', 'mode': 'stage',
               'caption': '', '_bind': ('source',)},
     'mac': {'kind': 'plot', 'source': '', 'mode': 'mac', 'caption': '',
@@ -380,7 +380,7 @@ class ReportEditor(QWidget):
                     lambda _i: self._field_edited(
                         {'op': 'marking_color',
                          'value': self.color_box.currentData()}, True))
-                form.addRow('Marking colour', self.color_box)
+                form.addRow('Marking color', self.color_box)
                 form.addRow(QLabel(
                     'Click a block in the page to edit it; Insert adds '
                     'one after the selection, or at the end.'))
@@ -561,7 +561,7 @@ class ReportEditor(QWidget):
                                       'psd': 'Psd'}[prefix]}
             elif kind.startswith('dofs:'):
                 # DOFs (Force), DOFs (Acceleration), … — the geometry
-                # with labelled arrows where one data object measures
+                # with labeled arrows where one data object measures
                 # that quantity
                 template = {'kind': 'scene', 'geometry': '', 'shapes': '',
                             'dofs': kind.partition(':')[2],

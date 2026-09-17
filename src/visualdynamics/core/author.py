@@ -87,7 +87,7 @@ class SpecificationDraft:
         bands: One entry per channel: `{'warning': [(below, above)
             per segment], 'abort': [...], 'symmetric': bool, 'uniform':
             bool}`, the bands in decibels either side of the target,
-            a segment being the span between two neighbouring
+            a segment being the span between two neighboring
             breakpoints. A channel's own constraints: `symmetric`
             holds above at minus below, `uniform` holds every segment
             at one band (Brandon, 2026-09-06: each channel its own
@@ -154,7 +154,7 @@ class SpecificationDraft:
                              ) -> SpecificationDraft:
         """A starter at a shape set's modal coordinates `M1 … Mn`, each
         channel's quantity by the transform's unit rule — a unit rigid
-        set's rotations per radian, a mass-normalised set's modal
+        set's rotations per radian, a mass-normalized set's modal
         quantity. A set with no mass unit gives its coordinates no
         unit, and a specification in nothing is refused.
 
@@ -945,7 +945,7 @@ class SpecificationDraft:
 
     def with_breakpoint(self, frequency: float) -> SpecificationDraft:
         """The same draft with a breakpoint at `frequency`, its levels
-        read off the power law between its neighbours — or the end
+        read off the power law between its neighbors — or the end
         breakpoint's, past the ends.
 
         Parameters

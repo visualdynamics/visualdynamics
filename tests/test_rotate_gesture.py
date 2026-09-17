@@ -1,6 +1,6 @@
 """Turning a coordinate system in the window: the rings and the angle.
 
-`test_rotate.py` has the maths — what a frame becomes when it is turned
+`test_rotate.py` has the math — what a frame becomes when it is turned
 about an axis, with no window in sight. This is the gesture on top of it:
 when the rings are offered at all, what appears with them, that a typed
 angle turns the frame and only the frame, that Reset puts it back square

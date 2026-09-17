@@ -25,7 +25,7 @@ Every report carries a bold header and footer strip on each page,
 **UNCLASSIFIED** by default. In the report editor the marking is
 editable — the header and footer are one value, so editing either
 changes both, because a page whose top and bottom disagree about its
-classification is wrong twice — and its colour is either ink (black
+classification is wrong twice — and its color is either ink (black
 or white, following the light or dark theme) or red. Clearing the
 text removes the strips entirely, for work that carries no marking.
 The marking rides in the report object and the `.vdyn` file, so it

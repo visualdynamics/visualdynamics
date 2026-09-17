@@ -57,11 +57,11 @@ DIFFERENTIATED = {value: key for key, value in INTEGRATED.items()}
 
 #: the default drift high-pass corner, in Hz. Integration turns any
 #: sensor bias into a ramp — a 0.05 m/s**2 offset walked a 2 s record
-#: to over a metre of displacement in the design measurement — and
+#: to over a meter of displacement in the design measurement — and
 #: nothing in the data can tell drift from true motion below the
-#: corner, so the corner is a declared judgement, not a detection.
+#: corner, so the corner is a declared judgment, not a detection.
 #: 2 Hz sits below any shock content worth reporting while killing
-#: the ramp dead (the same measurement ended at micrometres).
+#: the ramp dead (the same measurement ended at micrometers).
 DRIFT_CORNER = 2.0
 
 

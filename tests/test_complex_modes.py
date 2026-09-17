@@ -18,8 +18,8 @@ import visualdynamics
 from visualdynamics.core.shapes import ShapeSet
 
 
-def travelling():
-    """Four DOFs a quarter turn apart: the textbook travelling wave."""
+def traveling():
+    """Four DOFs a quarter turn apart: the textbook traveling wave."""
     phases = np.exp(1j * np.array([0.0, np.pi / 2, np.pi, 3 * np.pi / 2]))
     return ShapeSet([10.0], [0.02], ['1X+', '2X+', '3X+', '4X+'],
                     [phases])
@@ -33,7 +33,7 @@ def line_geometry():
 
 
 def test_storage_and_vdyn_round_trip(tmp_path):
-    shapes = travelling()
+    shapes = traveling()
     assert np.iscomplexobj(shapes.shape_matrix)
     visualdynamics.save(shapes, tmp_path / 'complex.vdyn')
     back = visualdynamics.load(tmp_path / 'complex.vdyn')
@@ -45,8 +45,8 @@ def test_a_complex_mode_travels_and_a_real_one_collapses():
     from visualdynamics.deform import ShapeDeflection
 
     geometry = line_geometry()
-    complex_mode = ShapeDeflection(geometry, travelling().coordinate,
-                                   travelling().shape_matrix[0])
+    complex_mode = ShapeDeflection(geometry, traveling().coordinate,
+                                   traveling().shape_matrix[0])
     at_zero = complex_mode.offsets(0.0).copy()
     at_quarter = complex_mode.offsets(np.pi / 2).copy()
     assert np.abs(at_quarter).max() > 0.5, 'still moving at quarter phase'
@@ -74,7 +74,7 @@ def test_the_peak_magnitude_is_the_true_orbit_peak():
 
 
 def test_the_mac_reads_complex_shapes():
-    shapes = travelling()
+    shapes = traveling()
     assert shapes.auto_mac()[0, 0] == pytest.approx(1.0)
     # a phase-rotated copy is the same mode; the MAC must say so
     rotated = ShapeSet([10.0], [0.02], shapes.coordinate,
@@ -87,7 +87,7 @@ def test_unv_round_trip_keeps_the_phases(tmp_path):
     """Dataset 55 densifies to whole nodal vectors (documented), so the
     comparison is at the original DOFs — where the complex values must
     survive exactly."""
-    shapes = travelling()
+    shapes = traveling()
     visualdynamics.export_file(shapes, str(tmp_path / 'complex.unv'),
                                format='unv')
     back = visualdynamics.import_file(str(tmp_path / 'complex.unv'))
@@ -102,7 +102,7 @@ def test_unv_round_trip_keeps_the_phases(tmp_path):
 def test_animation_renders_a_complex_mode(tmp_path):
     from visualdynamics.viz.animate import animate_shape
 
-    animate_shape(line_geometry(), travelling(), 0,
+    animate_shape(line_geometry(), traveling(), 0,
                   screenshot=str(tmp_path / 'complex_mode.png'),
                   show=False)
     assert (tmp_path / 'complex_mode.png').stat().st_size > 1000

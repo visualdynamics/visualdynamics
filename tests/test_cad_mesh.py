@@ -4,7 +4,7 @@ The CAD program tessellates at export, so these importers read
 triangles — no geometry kernel, no new dependency. 3MF is the format
 that keeps an assembly's structure: named objects become named
 blocks, component transforms place each instance, and the declared
-unit converts to metres on the way in. STL is the format everything
+unit converts to meters on the way in. STL is the format everything
 exports: unitless (the import asks, or a `length_unit` declares) and
 one block per ASCII solid or per file.
 """
@@ -23,7 +23,7 @@ from visualdynamics.io import export_file, import_file
 
 
 def _two_block_geometry():
-    """A triangle 'wing' and a quad 'body', metres."""
+    """A triangle 'wing' and a quad 'body', meters."""
     return Geometry(
         node_id=[1, 2, 3, 4, 5, 6, 7],
         node_xyz=[[0, 0, 0], [1, 0, 0], [0, 1, 0],
@@ -49,8 +49,8 @@ def test_3mf_round_trips_blocks_as_named_parts(tmp_path):
                        [(0, 0, 0), (0, 1, 0), (1, 0, 0)])
 
 
-def test_3mf_units_convert_to_metres(tmp_path):
-    """A millimetre file arrives in metres with the unit declared —
+def test_3mf_units_convert_to_meters(tmp_path):
+    """A millimeter file arrives in meters with the unit declared —
     the whole reason 3MF beats STL for CAD hand-off."""
     model = """<?xml version="1.0"?>
 <model unit="millimeter"
@@ -73,7 +73,7 @@ def test_3mf_units_convert_to_metres(tmp_path):
         archive.writestr('3D/3dmodel.model', model)
     back = import_file(path)
     assert back.length_unit == 'm'
-    assert np.isclose(back.node_xyz.max(), 1.0), '1000 mm is one metre'
+    assert np.isclose(back.node_xyz.max(), 1.0), '1000 mm is one meter'
     assert list(back.block_name) == ['plate']
 
 
@@ -135,7 +135,7 @@ def test_stl_without_a_declared_unit_imports_unitless(tmp_path):
     path = tmp_path / 'model.stl'
     export_file(_two_block_geometry(), path)
     assert import_file(path).length_unit is None, (
-        'STL cannot say; pretending it said millimetres would be a guess')
+        'STL cannot say; pretending it said millimeters would be a guess')
 
 
 def test_ascii_stl_solids_become_named_blocks(tmp_path):

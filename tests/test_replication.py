@@ -192,9 +192,9 @@ def test_level_is_blind_to_a_shape_the_waveform_error_catches():
 
 
 def test_every_repeat_is_reported_and_none_is_singled_out():
-    """Which playing was the bad one is a judgement about what the
+    """Which playing was the bad one is a judgment about what the
     article is for, not a measurement. An earlier version reduced these
-    to the worst repeat and labelled it so."""
+    to the worst repeat and labeled it so."""
     spec = _target()
     history = _measured(spec, repeats=4)
     history.ordinate[:, 2 * FRAME:3 * FRAME] *= 2.0
@@ -454,10 +454,10 @@ def test_the_transient_report_asks_for_the_waveform_error(tmp_path):
     project.import_file(str(path))
     report = transient_template(project, links=project.links)
     bars = [b for b in report.blocks if b['kind'] == 'bars']
-    # no 'srs': that judgement moved to the shock report, where the
+    # no 'srs': that judgment moved to the shock report, where the
     # SRS is the test's own measure rather than a borrowed one
     # error first: spectral data and its RMS reading precede the
-    # waveform judgement in the standing order (Brandon, 2026-08-23)
+    # waveform judgment in the standing order (Brandon, 2026-08-23)
     assert [b['mode'] for b in bars] == ['error', 'waveform',
                                          'kurtosis']
     built = _build_block(bars[1], dict(project), visualdynamics.SI, project.links)
@@ -551,7 +551,7 @@ def test_the_event_box_lists_every_repeat_and_marks_none(window, pump,
                                                          tmp_path):
     """Which repeat is the bad one depends on the reading you care
     about and on what the article is for. Naming one here would put a
-    judgement in a list of facts."""
+    judgment in a list of facts."""
     _load_transient(window, tmp_path, repeats=4)
     history = next(o for o in window.objects.values()
                    if type(o) is TimeHistory)
@@ -623,7 +623,7 @@ def test_the_alignment_correction_is_reported_not_hidden(window, pump,
 
 
 def test_the_overlay_draws_one_channel_at_a_time(window, pump, tmp_path):
-    """Six measured curves over six targets share one set of colours,
+    """Six measured curves over six targets share one set of colors,
     and nothing on the plot then says which curve is the target. The
     channel box beside the event box is how the others are reached —
     the same box the specification comparison uses."""
@@ -965,7 +965,7 @@ def test_the_grid_costs_no_shock_spectra(window, pump, tmp_path,
 
 # --- a playing the recording cut off ---------------------------------
 
-def test_a_part_played_repeat_is_not_analysed():
+def test_a_part_played_repeat_is_not_analyzed():
     """Rattlesnake repeats until told to stop, so a record rarely ends
     on a boundary. What is left is not a playing: a waveform error over
     part of a window is taken against a different stretch of the
@@ -994,7 +994,7 @@ def test_every_view_of_the_record_counts_the_same_playings():
 
 
 def test_what_was_left_over_is_still_reported():
-    """Not analysed is not the same as not mentioned, which is where
+    """Not analyzed is not the same as not mentioned, which is where
     this started: a run that recorded two seconds of a further event
     should not have it vanish between a frame count and a file size."""
     spec = _target()
@@ -1124,7 +1124,7 @@ def test_picking_psd_rows_draws_those_channels(window, pump, tmp_path):
 # --- the averaging panel drives the comparison -----------------------
 
 def test_narrowing_the_averaging_narrows_the_comparison():
-    """The panel is where a user says which events to analyse. Left
+    """The panel is where a user says which events to analyze. Left
     unread, the shading on the time history said three and every number
     beside it was still worked out from six."""
     from dataclasses import replace
@@ -1149,9 +1149,9 @@ def test_the_start_of_the_analysis_moves_the_playings():
     assert starts == [FRAME, 2 * FRAME]
 
 
-def test_an_averaging_about_something_else_is_not_honoured():
+def test_an_averaging_about_something_else_is_not_honored():
     """A frame that is not the specification's length does not line up
-    with a playing of it, and honouring it would compare each event
+    with a playing of it, and honoring it would compare each event
     against a slice of the target chosen by accident."""
     from dataclasses import replace
 

@@ -94,6 +94,7 @@ h3 { font-size: 1.05rem; margin: 2em 0 .4em; }
 .downloads.examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .downloads.examples .dl { flex-direction: row; text-align: left;
                           gap: .9rem; padding: 1.1rem 1.2rem; }
+.downloads.examples .dl .app { width: 72px; height: 72px; }
 @media (max-width: 30rem) {
   .downloads { grid-template-columns: 1fr; }
 }

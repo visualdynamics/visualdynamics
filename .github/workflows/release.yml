@@ -23,6 +23,10 @@ on:
         description: 'Only reserve the name on PyPI with an empty placeholder (no builds)'
         type: boolean
         default: false
+      site:
+        description: 'Only redeploy the website from this tree (no builds; the manifest names the latest release)'
+        type: boolean
+        default: false
   # The site follows the release, not the push (Brandon, 2026-09-01):
   # when the draft release is *published*, the `site` job below builds
   # the documentation, writes the update manifest from the release
@@ -179,7 +183,13 @@ jobs:
     # 2026-09-14) fired both these jobs, and the site went out with
     # latest.json saying version "examples" until it was redeployed by
     # hand
-    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
+    # ...or on demand with the `site` input, for a change to the pages
+    # themselves between releases — the example tiles' pictures were
+    # the first (2026-09-16). The manifest then names whatever release
+    # is latest, so the update check keeps its answer.
+    if: >-
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+      || (github.event_name == 'workflow_dispatch' && inputs.site)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -193,10 +203,18 @@ jobs:
         run: properdocs build --strict
       - name: Write the update manifest from the release
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
           URL: ${{ github.event.release.html_url }}
           NAME: ${{ github.event.release.name }}
         run: |
+          if [ -z "$TAG" ]; then
+            # a redeploy on demand: the latest release is the one
+            TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+            URL=$(gh release view --repo "$GITHUB_REPOSITORY" --json url -q .url)
+            NAME=$(gh release view --repo "$GITHUB_REPOSITORY" --json name -q .name)
+            export TAG URL NAME
+          fi
           python - <<'EOF'
           import json, os
           version = os.environ['TAG'].removeprefix('v')

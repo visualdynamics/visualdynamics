@@ -189,6 +189,15 @@ builds go up with the pages.
 
 ## The example projects
 
+The two example tiles wear a picture of what is inside them — the
+plate's mesh and the quadcopter's airframe, rendered from the app's
+own scene on a transparent ground — made by
+`tools/make_example_icons.py` into `web/launch/plate.png` and
+`web/launch/drone.png` (Brandon, 2026-09-16). Re-run it if the
+geometry or the theme changes; the renders are not byte-stable across
+VTK builds, so the test holds them to their shape rather than their
+bytes.
+
 The downloads page links two zips — the plate and the quadcopter
 projects, one `.vdyn` per workflow — that live on a GitHub release
 of their own, tagged `examples`, so the package stays small.

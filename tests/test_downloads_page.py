@@ -73,9 +73,12 @@ def test_the_site_job_deploys_the_directory_the_docs_build_into():
         docs = yaml.safe_load(handle)
     assert workflow[True]['release'] == {'types': ['published']}
     site = workflow['jobs']['site']
-    assert site['if'] == ("github.event_name == 'release' && "
-                          "startsWith(github.event.release.tag_name, 'v')"), \
+    gate = ' '.join(site['if'].split())
+    assert ("github.event_name == 'release' && "
+            "startsWith(github.event.release.tag_name, 'v')") in gate, \
         'the site job runs for a version release only (2026-09-14)'
+    assert "github.event_name == 'release' &&" not in gate.replace(
+        "(github.event_name == 'release' &&", ''), 'the tag check is not optional'
     deploy = [step for step in site['steps'] if 'wrangler' in step.get('run', '')]
     assert len(deploy) == 1
     # the step runs inside the site directory and deploys '.', so that
@@ -267,3 +270,26 @@ def test_ci_holds_coverage_to_a_floor():
     floor = re.search(r'--fail-under=(\d+)', coverage['run'])
     assert floor, 'no floor'
     assert 85 <= int(floor.group(1)) <= 92, floor.group(1)
+
+
+def test_the_site_can_be_redeployed_on_demand_between_releases():
+    """A change to the pages themselves — the example tiles' pictures
+    were the first (2026-09-16) — must not wait for a release: the
+    release workflow's `site` job also runs on dispatch with the `site`
+    input, and then writes the manifest from whatever release is
+    latest so the update check keeps its answer."""
+    import yaml
+
+    root = os.path.join(os.path.dirname(__file__), '..')
+    with open(os.path.join(root, '.github', 'workflows', 'release.yml'),
+              encoding='utf-8') as handle:
+        workflow = yaml.safe_load(handle)
+    inputs = workflow[True]['workflow_dispatch']['inputs']
+    assert inputs['site']['type'] == 'boolean' and inputs['site']['default'] is False
+    site = workflow['jobs']['site']
+    gate = ' '.join(site['if'].split())
+    assert "github.event_name == 'release'" in gate
+    assert "github.event_name == 'workflow_dispatch' && inputs.site" in gate
+    manifest = next(s for s in site['steps'] if 'manifest' in s.get('name', ''))
+    assert 'gh release view' in manifest['run'], 'the latest release names the manifest'
+    assert 'GH_TOKEN' in manifest['env']

@@ -208,3 +208,33 @@ def test_the_requests_function_ranks_the_ideas_by_upvotes():
     assert source.count('open: false') >= 3, 'no token, a failed query, a missing repository'
     assert 'max-age=' in source and 'caches.default' in source, 'cached at the edge'
     assert 'ghp_' not in source and 'github_pat_' not in source, 'the token is a secret, never a literal'
+
+
+def test_the_example_tiles_wear_pictures_of_what_is_inside():
+    """Each example bundle's tile shows the thing it holds — the plate,
+    the quadcopter — rendered from the app's own scene on a transparent
+    ground (Brandon, 2026-09-16), not the application's mark. Held to
+    shape, not bytes: VTK renders differ across builds."""
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PySide6.QtGui import QImage
+
+    page = (ROOT_DIR / 'web' / 'launch' / 'downloads.html').read_text(encoding='utf-8')
+    examples = page.split('class="downloads examples"')[1].split('</div>')[0]
+    assert 'mark.png' not in examples
+    seen = []
+    for name in ('plate.png', 'drone.png'):
+        assert f'src="{name}"' in examples, f'the tile shows {name}'
+        image = QImage(str(ROOT_DIR / 'web' / 'launch' / name))
+        assert not image.isNull(), name
+        assert image.width() == image.height() >= 256, 'square, and big enough for any screen'
+        assert image.hasAlphaChannel()
+        w = image.width() - 1
+        for x, y in ((0, 0), (w, 0), (0, w), (w, w)):
+            assert image.pixelColor(x, y).alpha() == 0, f'{name}: corner ({x},{y}) is not transparent'
+        opaque = sum(1 for x in range(0, image.width(), 8) for y in range(0, image.height(), 8)
+                     if image.pixelColor(x, y).alpha() > 0)
+        assert opaque > 40, f'{name} shows something'
+        seen.append(image)
+    assert seen[0] != seen[1], 'two different things'

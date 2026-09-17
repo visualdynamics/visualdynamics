@@ -293,3 +293,7 @@ def test_the_site_can_be_redeployed_on_demand_between_releases():
     manifest = next(s for s in site['steps'] if 'manifest' in s.get('name', ''))
     assert 'gh release view' in manifest['run'], 'the latest release names the manifest'
     assert 'GH_TOKEN' in manifest['env']
+    # and a site-only dispatch builds nothing: the first one rebuilt
+    # Linux and Windows for a page change (2026-09-16)
+    for job in ('linux', 'windows'):
+        assert '!inputs.site' in workflow['jobs'][job]['if'], job

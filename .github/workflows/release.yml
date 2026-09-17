@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   linux:
-    if: github.event_name != 'release' && !inputs.reserve
+    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -78,7 +78,7 @@ jobs:
         with: {name: linux, path: dist/*.AppImage, retention-days: 1}
 
   windows:
-    if: github.event_name != 'release' && !inputs.reserve
+    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
     runs-on: windows-latest
     timeout-minutes: 40
     steps:

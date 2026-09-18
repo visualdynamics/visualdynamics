@@ -191,6 +191,12 @@ def test_the_requests_page_sends_people_to_github_to_ask_and_vote():
     assert 'ghp_' not in html and 'github_pat_' not in html and \
         'api.github.com' not in html, 'the page carries no token and asks GitHub nothing'
     assert 'could not be loaded just now' in html
+    # the rule is GitHub's — one upvote per account on *each* discussion —
+    # and the first wording read as one vote per person in total
+    # (Brandon, 2026-09-17, asking whether people could have five)
+    assert 'One upvote per account on each request' in html
+    assert 'vote for as many as you like' in html
+    assert 'One upvote per GitHub account,' not in html
     for name in ('index', 'workflows', 'examples', 'downloads', 'about', 'requests'):
         page = (LAUNCH / f'{name}.html').read_text(encoding='utf-8')
         assert '<a href="requests.html"' in page, f'{name}: on the nav'

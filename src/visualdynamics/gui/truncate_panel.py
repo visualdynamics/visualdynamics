@@ -53,6 +53,9 @@ class TruncatePanel(QWidget):
         #: the least daylight between start and stop: one sample
         #: period, or the boxes' own resolution where that is coarser
         self._gap = 1e-4
+        #: the sample period, when the span has no record behind it
+        #: to count samples off (an import window read off a preview)
+        self._period = 0.0
         #: set while the panel is writing to its own editors, so that
         #: restating a clamped value does not read as a fresh edit
         self._loading = False
@@ -128,6 +131,21 @@ class TruncatePanel(QWidget):
             self._gap = max(float(abscissa[1] - abscissa[0]), 1e-4)
         self.set_truncation(truncation)
 
+    def show_span(self, first: float, last: float, period: float,
+                  truncation: Truncation) -> None:
+        """Point the panel at a span of time with no record behind it.
+
+        The import window: the run is still in its file, so the walls
+        and the sample count come from its clock — first and last
+        instant, and the period between samples — rather than from an
+        abscissa nobody has read yet.
+        """
+        self._history = None
+        self._period = float(period)
+        self._first, self._last = float(first), float(last)
+        self._gap = max(self._period, 1e-4)
+        self.set_truncation(truncation)
+
     def set_truncation(self, truncation: Truncation) -> None:
         """Restate the panel from a truncation, without re-emitting."""
         self._loading = True
@@ -198,6 +216,13 @@ class TruncatePanel(QWidget):
                           & (abscissa <= truncation.stop)).sum())
             self.derived['samples'].setText(
                 f'{inside} of {len(abscissa)}')
+        elif self._period:
+            # the importer's own rounding (`_sample_window`): inclusive
+            # at both instants, so the count here is the count it reads
+            inside = (int(np.floor(truncation.stop / self._period + 1e-9))
+                      - int(np.ceil(truncation.start / self._period - 1e-9)) + 1)
+            total = round((self._last - self._first) / self._period) + 1
+            self.derived['samples'].setText(f'{inside} of {total}')
         whole = (truncation.start <= self._first + self._gap / 2.0
                  and truncation.stop >= self._last - self._gap / 2.0)
         self.apply_button.setEnabled(not whole)

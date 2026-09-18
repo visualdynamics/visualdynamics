@@ -1357,7 +1357,9 @@ class Project(dict):
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
         """A spectrum integrated onto proportional bands (Compute
-        Octave Bands) — the same power, arranged the way it is read.
+        Octave Bands) — the same power, arranged the way it is read;
+        a specification with its warning and abort limits banded the
+        same way.
 
         Parameters
         ----------
@@ -2942,8 +2944,8 @@ _VERB_APPLIES: tuple = (
     ('extract_sine', lambda p, o: (_is_time(p, o) and any(
         isinstance(other, SineSweepSpecification)
         for other in p.values()))),
-    ('compute_octave', lambda p, o: (isinstance(o, Psd)
-                                     and not isinstance(o, Specification))),
+    # a specification bands too, limits and all (Brandon, 2026-09-18)
+    ('compute_octave', lambda p, o: isinstance(o, Psd)),
     ('fit_modes', lambda p, o: isinstance(o, Frf)),
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),

@@ -279,7 +279,7 @@ named and linked to its source in one call:
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
 | a geometry | `generate_rigid_body_modes` |
-| a PSD that is not a specification | `compute_octave` |
+| a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |
 | two shape sets | `project_onto_basis`, `match_modes` |
 | any object with a sibling of its type | `merge` |

@@ -85,7 +85,9 @@ def test_extract_sine_appears_with_the_specification():
     assert 'extract_sine' in dict(project.verbs('Run'))
 
 
-def test_a_specification_is_not_banded():
+def test_a_specification_is_banded_too():
+    """It was excluded until 2026-09-18: Brandon wants the target and
+    the measurement it judges convertible alike, limits and all."""
     project = visualdynamics.Project('t')
     project.add('PSD', _psd())
     level = np.full((1, 200), 1e-2)
@@ -95,7 +97,7 @@ def test_a_specification_is_not_banded():
                              abort_lower=level * 0.25,
                              abort_upper=level * 4.0))
     assert 'compute_octave' in dict(project.verbs('PSD'))
-    assert 'compute_octave' not in dict(project.verbs('Spec'))
+    assert 'compute_octave' in dict(project.verbs('Spec'))
 
 
 def test_merge_needs_a_peer_of_the_same_kind():

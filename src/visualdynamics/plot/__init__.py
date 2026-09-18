@@ -978,9 +978,15 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         wanted = (range(data.num_records) if records is None
                   else [int(i) for i in records])
         x = data.display_abscissa(us)
-        # only what is being drawn: converting the whole object to show one
-        # curve is what made a 1356-record FRF take half a second a render
-        y = data.display_ordinate(us, wanted)
+        # Nothing is converted here. The rows are converted below, once
+        # the budget says which curves are drawn, and in blocks: only
+        # what is being drawn — converting the whole object to show one
+        # curve is what made a 1356-record FRF take half a second a
+        # render — and never the whole selection at once, since the
+        # gathered copy and its scaled copy beside a long run's own
+        # data is what took a 22 GB import to the machine's ceiling
+        # (2026-09-18). The entry carries (data, record) in the row's
+        # place until then.
         # the object's own reading of its axis — shared with the waterfall
         log_ordinate = data.log_scaled()
         # and of the abscissa: an SRS reads in decades of natural
@@ -990,14 +996,8 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         # a complex FRF reads four ways; anything but the magnitude is
         # signed, so the log axis gives way to a linear one
         tag = (component if component != 'magnitude'
-               and np.iscomplexobj(y)
+               and np.iscomplexobj(data.ordinate)
                and data.abscissa_dim == 'frequency' else None)
-        if tag == 'real':
-            y = np.asarray(y).real
-        elif tag == 'imag':
-            y = np.asarray(y).imag
-        elif tag == 'phase':
-            y = np.degrees(np.angle(y))
         if tag:
             log_ordinate = False
         # once per object, not once per record: the conversion is the same
@@ -1046,7 +1046,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                 data, 'bandwidth', None) is not None else None
             groups.setdefault(key, []).append(
                 (f'{name}: {label}' if multiple and name else label, x,
-                 y[position], data.abscissa_dim == 'frequency', bands,
+                 (data, i), data.abscissa_dim == 'frequency', bands,
                  pair, follower, synthesized, shape, widths))
             if synthesized:
                 marks = group_marks.setdefault(key, [])
@@ -1102,7 +1102,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # them slaves real frequencies to their own logarithms
             first_by_abscissa[abscissa_dim, log_abscissa] = plot
 
-        curves = groups[key][:budget[row]]
+        curves = _converted(groups[key][:budget[row]], us, tag)
         # paired predictions stay out of the legend, so they don't count
         # against it either
         if sum(1 for c in curves if not c[7]) <= MAX_LEGEND:
@@ -1203,6 +1203,40 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         # view is also the outer limit
         extents.lock(plot, y_bounds=limits)
     return drawn, requested
+
+
+def _converted(curves, us, tag):
+    """The drawn curves with their rows converted, a block at a time.
+
+    Each entry arrives with (data, record) where its row will go; the
+    rows come out of `DataArray.display_blocks` for exactly the records
+    that made the budget, object by object, so the plot never holds a
+    converted copy of the whole selection — only of what it draws,
+    beside one block in flight. A signed component of complex data is
+    taken here, per row, the same reading the waterfall takes.
+    """
+    by_object = {}
+    for n, entry in enumerate(curves):
+        data, record = entry[2]
+        by_object.setdefault(id(data), (data, []))[1].append((n, record))
+    out = list(curves)
+    for data, wanted in by_object.values():
+        for start, _stop, block in data.display_blocks(
+                us, [record for _n, record in wanted]):
+            for offset, row in enumerate(block):
+                n = wanted[start + offset][0]
+                out[n] = (*out[n][:2], _component_row(row, tag), *out[n][3:])
+    return out
+
+
+def _component_row(row, tag):
+    if tag == 'real':
+        return np.asarray(row).real
+    if tag == 'imag':
+        return np.asarray(row).imag
+    if tag == 'phase':
+        return np.degrees(np.angle(row))
+    return row
 
 
 #: how solid an exceedance box is. Stronger than the zone shading it

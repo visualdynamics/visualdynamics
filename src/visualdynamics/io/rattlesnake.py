@@ -49,6 +49,7 @@ from here would describe a test that never happened. See docs/export.md.
 from __future__ import annotations
 
 import os
+import warnings
 from collections.abc import Iterable
 from dataclasses import replace
 from typing import Any
@@ -66,6 +67,316 @@ from ..core.data import (
 )
 from ..core.sine import SineSweepSpecification, SineTone
 from ..units import UNKNOWN, dimension_of, fold_unit_case, si_factor
+
+#: how much of each stream the system-ID sniff reads to compare the
+#: two levels: a quarter of a million samples a channel, a few seconds
+#: at any rate a controller runs
+SNIFF_SAMPLES = 1 << 18
+#: samples a channel per slab when a stream is read: half a million,
+#: which is 128 MB of a 32-channel run at a time
+READ_SAMPLES = 1 << 19
+
+
+#: the share of the machine's memory a stream may take before the
+#: window asks how much of it to import (`stream_summary`; the import
+#: dialog in `gui/stream_window.py`): a quarter, because the import
+#: holds the stream once and the flat plot then holds a converted copy
+#: of every row it draws beside it, so a stream is twice its size on
+#: the way to the screen (PLAN.md "A long run costs its own size").
+LARGE_STREAM_SHARE = 0.25
+
+#: how many points a stream's preview envelope is thinned to — enough
+#: to fill a dialog's plot several times over, small enough that the
+#: preview of a 22 GB run is a few hundred kilobytes
+PREVIEW_POINTS = 4096
+
+
+def machine_memory() -> int:
+    """The machine's physical memory in bytes, or 0 when it cannot be asked.
+
+    The one system question this package asks: whether a stream about
+    to be imported would take a large share of it. POSIX answers
+    through `sysconf`; Windows through `GlobalMemoryStatusEx`.
+    """
+    try:
+        if hasattr(os, 'sysconf'):
+            return int(os.sysconf('SC_PAGE_SIZE')) * int(os.sysconf('SC_PHYS_PAGES'))
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [('dwLength', ctypes.c_ulong),
+                        ('dwMemoryLoad', ctypes.c_ulong),
+                        ('ullTotalPhys', ctypes.c_ulonglong),
+                        ('ullAvailPhys', ctypes.c_ulonglong),
+                        ('ullTotalPageFile', ctypes.c_ulonglong),
+                        ('ullAvailPageFile', ctypes.c_ulonglong),
+                        ('ullTotalVirtual', ctypes.c_ulonglong),
+                        ('ullAvailVirtual', ctypes.c_ulonglong),
+                        ('ullAvailExtendedVirtual', ctypes.c_ulonglong)]
+
+        status = Status()
+        status.dwLength = ctypes.sizeof(Status)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))  # type: ignore[attr-defined]
+        return int(status.ullTotalPhys)
+    except Exception:  # noqa: BLE001 - an unanswerable question is 0, not a crash
+        return 0
+
+
+def _sample_window(start, stop, samples: int, sample_rate: float):
+    """The sample range [a, b) a window in seconds selects from a stream
+    of `samples`, or None when the window misses the stream.
+
+    Inclusive at both instants, the truncation's own rule, so a window
+    read off a preview and a cut made with Truncate Data agree about
+    which samples they mean. A window that runs backwards is refused
+    by name; one that misses the stream — a system-ID stream a few
+    seconds long, asked for its second minute — is None, and the
+    caller leaves that stream out rather than importing nothing.
+    """
+    first = 0.0 if start is None else float(start)
+    last = (samples - 1) / sample_rate if stop is None else float(stop)
+    if not (np.isfinite(first) and np.isfinite(last)):
+        raise ValueError('an import window needs finite start and stop times')
+    if not first < last:
+        raise ValueError(f'an import window runs forward: start ({first:g} s) '
+                         f'must sit before stop ({last:g} s)')
+    a = max(0, int(np.ceil(first * sample_rate - 1e-9)))
+    b = min(samples, int(np.floor(last * sample_rate + 1e-9)) + 1)
+    return (a, b) if b - a >= 2 else None
+
+
+def _channel_rows(channels, dofs: list[str]) -> list[int]:
+    """Which rows of the channel table a `channels` request names.
+
+    Each entry is a channel's coordinate as the table spells it
+    ('101Z+') or its 0-based row; an unknown one is refused by name
+    rather than silently skipped. Order is the request's, once each.
+    """
+    rows: list[int] = []
+    for entry in channels:
+        if isinstance(entry, (int, np.integer)):
+            row = int(entry)
+            if not 0 <= row < len(dofs):
+                raise ValueError(f'channel {row} is not in the table '
+                                 f'({len(dofs)} channels)')
+        else:
+            try:
+                row = dofs.index(str(entry))
+            except ValueError:
+                raise ValueError(f'channel {entry!r} is not in the table: '
+                                 f'{", ".join(dofs)}') from None
+        if row not in rows:
+            rows.append(row)
+    if not rows:
+        raise ValueError('an import needs at least one channel')
+    return rows
+
+
+def _read_stream(variable, rows=None, first: int = 0,
+                 last: int | None = None) -> np.ndarray:
+    """A (channels, samples) stream variable, read into one array.
+
+    `rows` picks channels, in the order given; `first` and `last` a
+    sample range [first, last) — the import window, read as a slice of
+    the file rather than read whole and cut.
+
+    Not `variable[()]`: netCDF4 reads the whole thing into a buffer of
+    its own and then hands over a copy, so a 1.2 GB stream peaked at
+    2.3 GB on the way in — and the import of a 22 GB run at twice that
+    (2026-09-18). Read a slab of samples at a time into the array that
+    will be the history's, the buffer is a slab's, and the stream is
+    held once. The file's own chunks run along the sample axis a
+    channel at a time, so a slab across every channel is read in
+    order. Masking is turned off for the read: the raw values are what
+    the old whole read handed back too, and a masked array of this size
+    would be a second one.
+    """
+    variable.set_auto_maskandscale(False)
+    last = variable.shape[1] if last is None else int(last)
+    rows = list(range(variable.shape[0])) if rows is None else list(rows)
+    # netCDF reads an integer sequence along an axis in sorted order;
+    # the request's order is restored on the way out
+    order = sorted(rows)
+    put = [order.index(row) for row in rows]
+    selector = slice(None) if order == list(range(variable.shape[0])) else order
+    out = np.empty((len(rows), last - first), dtype=np.float64)
+    for start in range(first, last, READ_SAMPLES):
+        stop = min(start + READ_SAMPLES, last)
+        slab = variable[selector, start:stop]
+        out[:, start - first:stop - first] = slab[put]
+    return out
+
+
+def _channel_table(ds):
+    """The run's channel table and what the importer reads off it:
+    (table, dofs, units, columns)."""
+    ch = ds.groups['channels']
+    nodes = _strings(ch.variables['node_number'])
+    directions = _strings(ch.variables['node_direction'])
+    units = _strings(ch.variables['unit'])
+    num_channels = len(nodes)
+
+    columns = {'channel': np.arange(1, num_channels + 1),
+               'node': nodes, 'direction': directions, 'unit': units}
+    for name, var in ch.variables.items():
+        if name not in ('node_number', 'node_direction', 'unit'):
+            columns[name] = _strings(var)
+    # the file states each channel's purpose in its own vocabulary:
+    # a channel with a feedback device is a drive — rattlesnake's
+    # own rule — and every other enabled channel is measured as a
+    # response. Mapping that to a role is translation, not guessing.
+    # The file's minimum_value/maximum_value are deliberately NOT
+    # mapped into the schema's 'range': they are the acquisition
+    # range the DAQ was set to, not the sensor's voltage limit, and
+    # the two agreeing is a coincidence of configuration.
+    columns['role'] = ['reference' if str(value).strip() else 'response'
+                       for value in columns.get(
+                           'feedback_device', [''] * num_channels)]
+    table = ChannelTable(columns)
+    return table, table.dof_strings(), units, columns
+
+
+def _streams(ds) -> list[tuple[str, str, str]]:
+    """The run's stream variables, in order: (variable, dimension, key).
+
+    A run may hold several streams: stopping and restarting the
+    stream mid-run appends time_data_1, time_data_2... (the
+    streaming process's CREATE_NEW_STREAM), and a system ID run
+    saved with a stream file does exactly that — the ambient
+    noise measurement is one stream and the driven excitation
+    the next. Each imports as its own history; only the first
+    used to, and the driven half of a system ID recording was
+    silently dropped. A spectral file carries a time_samples
+    dimension of zero, which the metadata writer puts there; an
+    empty history is not a history, so that one is left out here.
+    """
+    found = [('time_data', 'time_samples', 'time_data')]
+    found += sorted(
+        ((name, f'time_samples_{name.rsplit("_", 1)[1]}',
+          f'time_data_{int(name.rsplit("_", 1)[1]) + 1}')
+         for name in ds.variables
+         if name.startswith('time_data_')
+         and name.rsplit('_', 1)[1].isdigit()),
+        key=lambda triple: int(triple[0].rsplit('_', 1)[1]))
+    return [(variable, dimension, key) for variable, dimension, key in found
+            if variable in ds.variables
+            and len(ds.dimensions.get(dimension, ())) > 0]
+
+
+def stream_summary(path: str | os.PathLike) -> dict[str, Any]:
+    """What a run's streams would cost to import, read without reading one.
+
+    The import dialog's first question — is this stream a large share
+    of the machine? — answered from the file's dimensions alone, so
+    asking it costs nothing on a 22 GB run.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        A Rattlesnake `.nc4`.
+
+    Returns
+    -------
+    dict
+        'sample_rate'; 'channels', the table's coordinates in row
+        order; 'units', their units as the file spells them;
+        'streams', one dict per stream with 'key' (the name the
+        import gives it), 'variable', 'channels', 'samples',
+        'seconds' and 'bytes' (as float64, what the import holds);
+        'memory', `machine_memory()`. A system-ID package has no
+        streams and says so with an empty list.
+    """
+    import netCDF4
+
+    with netCDF4.Dataset(path) as ds:
+        if 'channels' not in ds.groups:
+            return {'sample_rate': None, 'channels': [], 'units': [],
+                    'streams': [], 'memory': machine_memory()}
+        _table, dofs, units, _columns = _channel_table(ds)
+        rate = float(ds.sample_rate)
+        streams = []
+        for variable, _dimension, key in _streams(ds):
+            channels, samples = ds.variables[variable].shape
+            streams.append({'key': key, 'variable': variable,
+                            'channels': int(channels), 'samples': int(samples),
+                            'seconds': (samples - 1) / rate,
+                            'bytes': int(channels) * int(samples) * 8})
+    return {'sample_rate': rate, 'channels': dofs, 'units': units,
+            'streams': streams, 'memory': machine_memory()}
+
+
+def stream_preview(path: str | os.PathLike, channel: int | str = 0,
+                   stream: str = 'time_data',
+                   points: int = PREVIEW_POINTS) -> dict[str, Any]:
+    """One channel's envelope over a whole stream, read in slabs.
+
+    The picture an import window is chosen from: where the run
+    reaches level, where it stops, the false start at the front. Each
+    of `points` buckets keeps its least and greatest sample — the
+    stage's peak thinning, applied as the channel is read — so the
+    preview of a 22 GB run holds a slab at a time and comes back as a
+    few thousand points. The file's chunks run along one channel at a
+    time, so one channel is a sequential read of its own bytes.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        A Rattlesnake `.nc4`.
+    channel : int or str
+        The channel's row in the table, or its coordinate ('101Z+').
+    stream : str
+        Which stream variable ('time_data', 'time_data_1', …).
+    points : int
+        How many buckets to thin to.
+
+    Returns
+    -------
+    dict
+        'times', the bucket centers in seconds on the run's clock;
+        'low' and 'high', each bucket's least and greatest value as
+        the file holds them, NaN where a bucket holds nothing else;
+        'dof', 'unit', 'dim' of the channel; and
+        'samples', 'sample_rate' of the stream.
+    """
+    import netCDF4
+
+    with netCDF4.Dataset(path) as ds:
+        _table, dofs, units, _columns = _channel_table(ds)
+        row = _channel_rows([channel], dofs)[0]
+        # the file's own values in the file's own unit: the preview is
+        # read against what the run was set up in, not converted
+        _scale, dim, unit = _unit_scale(units[row])
+        variable = ds.variables[stream]
+        variable.set_auto_maskandscale(False)
+        rate = float(ds.sample_rate)
+        samples = int(variable.shape[1])
+        bucket = max(1, -(-samples // max(1, int(points))))
+        buckets = -(-samples // bucket)
+        low = np.full(buckets, np.inf)
+        high = np.full(buckets, -np.inf)
+        # slabs that are whole buckets, so a bucket never straddles two
+        slab = bucket * max(1, READ_SAMPLES // bucket)
+        for start in range(0, samples, slab):
+            stop = min(start + slab, samples)
+            chunk = np.asarray(variable[row, start:stop], dtype=np.float64)
+            if len(chunk) % bucket:
+                chunk = np.concatenate(
+                    [chunk, np.full(bucket - len(chunk) % bucket, np.nan)])
+            grid = chunk.reshape(-1, bucket)
+            first = start // bucket
+            # a bucket of nothing but NaN — a stream's lead-in before its
+            # first sample arrived writes NaN, and the stress stream has
+            # a hundred seconds of it — is a gap in the envelope, NaN,
+            # said without numpy's warning about it
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', RuntimeWarning)
+                low[first:first + len(grid)] = np.nanmin(grid, axis=1)
+                high[first:first + len(grid)] = np.nanmax(grid, axis=1)
+    centers = (np.arange(buckets) * bucket + (bucket - 1) / 2.0) / rate
+    centers[-1] = min(centers[-1], (samples - 1) / rate)
+    return {'times': centers, 'low': low, 'high': high,
+            'dof': dofs[row], 'unit': unit, 'dim': dim,
+            'samples': samples, 'sample_rate': rate}
 
 
 def sniff(path: str | os.PathLike) -> bool:
@@ -244,9 +555,14 @@ def streamed_sysid_candidate(path: str | os.PathLike) -> bool:
                     or 'time_data_1' not in ds.variables
                     or 'time_data_2' in ds.variables):
                 return False
-            quiet = float(np.asarray(ds.variables['time_data'][()]).std())
-            driven = float(
-                np.asarray(ds.variables['time_data_1'][()]).std())
+            # a slice, not the stream: the level of a run is settled in
+            # its first seconds, and reading a 22 GB recording twice to
+            # take a standard deviation was most of what an import
+            # cost before it began (2026-09-18)
+            quiet = float(np.asarray(
+                ds.variables['time_data'][:, :SNIFF_SAMPLES]).std())
+            driven = float(np.asarray(
+                ds.variables['time_data_1'][:, :SNIFF_SAMPLES]).std())
         # a simulated ambient can be exact silence; that is the
         # extreme of the same shape, not a different case
         return driven > 10 ** (10 / 20) * quiet and driven > 0.0
@@ -739,90 +1055,141 @@ def _load_sysid_package(ds, path):
     return out
 
 
-def load(path: str | os.PathLike, full_cpsd: bool = False) -> dict[str, Any]:
+def load(path: str | os.PathLike, full_cpsd: bool = False,
+         start: float | None = None, stop: float | None = None,
+         channels: Iterable[int | str] | None = None) -> dict[str, Any]:
+    """Everything a Rattlesnake `.nc4` holds, keyed the way the tree names it.
+
+    The streamed time data, the channel table, and each environment's
+    specification, FRF, coherence and spectra; a saved system-ID
+    package on its own. `start`, `stop` and `channels` import a part
+    of the streams — the window a long run is read through when the
+    whole would not fit the machine (the import dialog asks; a script
+    says). The window is inclusive at both instants on the run's own
+    clock, which the records keep, and a stream the window misses
+    entirely is left out. A part is a recording, so a windowed stream
+    is not split into a spectral save's frames.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The file.
+    full_cpsd : bool
+        Import every cross term of the environment's CPSDs, not only
+        the autos.
+    start, stop : float, optional
+        The window in seconds; either end open when omitted.
+    channels : iterable of int or str, optional
+        Which channels of the streams to import, by table row or by
+        coordinate ('101Z+'). All of them when omitted. An
+        environment's virtual responses come along only when every
+        control channel they are computed from is among them.
+
+    Returns
+    -------
+    dict
+        Objects by key: 'time_data' (and 'time_data_2', …),
+        'channel_table', and '<environment>_specification', '_frf',
+        '_coherence', '_response_cpsd' and the rest as the file has them.
+    """
     import netCDF4
 
     out = {}
     with netCDF4.Dataset(path) as ds:
         if 'channels' not in ds.groups:
             return _load_sysid_package(ds, path)
-        ch = ds.groups['channels']
-        nodes = _strings(ch.variables['node_number'])
-        directions = _strings(ch.variables['node_direction'])
-        units = _strings(ch.variables['unit'])
-        num_channels = len(nodes)
-
-        columns = {'channel': np.arange(1, num_channels + 1),
-                   'node': nodes, 'direction': directions, 'unit': units}
-        for name, var in ch.variables.items():
-            if name not in ('node_number', 'node_direction', 'unit'):
-                columns[name] = _strings(var)
-        # the file states each channel's purpose in its own vocabulary:
-        # a channel with a feedback device is a drive — rattlesnake's
-        # own rule — and every other enabled channel is measured as a
-        # response. Mapping that to a role is translation, not guessing.
-        # The file's minimum_value/maximum_value are deliberately NOT
-        # mapped into the schema's 'range': they are the acquisition
-        # range the DAQ was set to, not the sensor's voltage limit, and
-        # the two agreeing is a coincidence of configuration.
-        columns['role'] = ['reference' if str(value).strip() else 'response'
-                           for value in columns.get(
-                               'feedback_device', [''] * num_channels)]
-        table = ChannelTable(columns)
+        table, dofs, units, columns = _channel_table(ds)
+        num_channels = len(dofs)
         out['channel_table'] = table
 
-        dofs = table.dof_strings()
         scales_dims = [_unit_scale(u) for u in units]
+        chosen = None if channels is None else _channel_rows(channels, dofs)
+        base = os.path.basename(str(path))
         # a channel is a drive exactly when it has a feedback device, which
         # is how rattlesnake itself decides (`Channel.is_output_channel`)
         feedback = columns.get('feedback_device', [''] * num_channels)
         drive_channels = [i for i, value in enumerate(feedback)
                           if str(value).strip()]
 
-        # a run may hold several streams: stopping and restarting the
-        # stream mid-run appends time_data_1, time_data_2... (the
-        # streaming process's CREATE_NEW_STREAM), and a system ID run
-        # saved with a stream file does exactly that — the ambient
-        # noise measurement is one stream and the driven excitation
-        # the next. Each imports as its own history; only the first
-        # used to, and the driven half of a system ID recording was
-        # silently dropped.
-        # A spectral file carries a time_samples dimension of zero,
-        # which the metadata writer puts there; an empty history is
-        # not a history.
-        streams = [('time_data', 'time_samples')]
-        streams += sorted(
-            ((name, f'time_samples_{name.rsplit("_", 1)[1]}')
-             for name in ds.variables
-             if name.startswith('time_data_')
-             and name.rsplit('_', 1)[1].isdigit()),
-            key=lambda pair: int(pair[0].rsplit('_', 1)[1]))
-        for variable, dimension in streams:
-            if (variable not in ds.variables
-                    or len(ds.dimensions.get(dimension, ())) == 0):
-                continue
-            time_data = np.asarray(ds.variables[variable][()])
+        for variable, _dimension, key in _streams(ds):
             sample_rate = float(ds.sample_rate)
-            scales = np.array([s for s, _, _ in scales_dims])
-            values = time_data * scales[:, np.newaxis]
-            frames = _frame_count(ds, time_data.shape[1])
+            samples = int(ds.variables[variable].shape[1])
+            span = _sample_window(start, stop, samples, sample_rate)
+            if span is None:
+                continue
+            first, last = span
+            rows = list(range(num_channels)) if chosen is None else chosen
+            # a part of the run is a recording of that part: the window
+            # is read as a slice of the file, never the whole and cut
+            partial = (first, last) != (0, samples) or chosen is not None
+            time_data = _read_stream(ds.variables[variable], rows, first, last)
+            scales = np.array([scales_dims[i][0] for i in rows])
+            rows_dof = [dofs[i] for i in rows]
+            rows_dim = [scales_dims[i][1] for i in rows]
+            rows_unit = [scales_dims[i][2] for i in rows]
+            # a windowed record says so on every row: the clock is the
+            # run's, and a record starting at 120 s with nothing to say
+            # why would read as a recording that began late
+            note = ('' if (first, last) == (0, samples) else
+                    f'{first / sample_rate:g} to {(last - 1) / sample_rate:g} s '
+                    f'of {base}')
+            rows_comment = [note] * len(rows)
+            # the virtual responses an environment controlled, as more
+            # records of the same history: the controller's own matrix
+            # over the raw channels, so they share the frames, the
+            # averaging and every act the raw channels get — processed
+            # once, beside them, not twice (Brandon, 2026-09-18: "all the
+            # time data can be processed identically"). Taken from the
+            # raw values, before the scaling below rewrites them
+            virtual = []
+            for env_name, group in ds.groups.items():
+                if 'control_channel_indices' not in group.variables:
+                    continue
+                indices = np.asarray(
+                    group.variables['control_channel_indices'][()], dtype=int)
+                found = _response_transformation(group, indices, scales_dims)
+                if found is None or any(int(i) not in rows for i in indices):
+                    # a subset missing a control channel cannot compute
+                    # the virtual row; it is left out, not made up
+                    continue
+                matrix, labels, (scale, dim, unit) = found
+                positions = [rows.index(int(i)) for i in indices]
+                virtual.append((matrix @ time_data[positions]) * scale)
+                rows_dof += labels
+                rows_dim += [dim] * len(labels)
+                rows_unit += [unit] * len(labels)
+                rows_comment += [
+                    (f'{note}; ' if note else '')
+                    + f'row {label} of the {env_name} response transformation '
+                    f'over {len(indices)} control channels' for label in labels]
+            # scaled in place: the array is the file's read and nobody
+            # else holds it, and a scaled copy beside it was the second
+            # of the two whole copies an import cost (2026-09-18)
+            time_data *= scales[:, np.newaxis]
+            values = (np.vstack([time_data, *virtual]) if virtual
+                      else time_data)
+            frames = 0 if partial else _frame_count(ds, time_data.shape[1])
             if frames:
                 # (channels, frames * samples) -> one record per capture.
                 # reshape only, so the samples are not copied.
                 samples = time_data.shape[1] // frames
                 values = values.reshape(-1, frames, samples).reshape(-1, samples)
-                block = [f'avg {i + 1}' for _dof in dofs
+                block = [f'avg {i + 1}' for _dof in rows_dof
                          for i in range(frames)]
-                response_dof = [dof for dof in dofs for _ in range(frames)]
+                response_dof = [dof for dof in rows_dof for _ in range(frames)]
                 repeat = frames
             else:
-                block, response_dof, repeat = None, dofs, 1
+                block, response_dof, repeat = None, rows_dof, 1
             history = TimeHistory(
-                abscissa=np.arange(values.shape[1]) / sample_rate,
+                # the window's own instants; a stack split into frames
+                # has first = 0 and a frame's worth of columns
+                abscissa=np.arange(first, first + values.shape[1],
+                                   dtype=np.float64) / sample_rate,
                 ordinate=values,
                 response_dof=response_dof, block=block,
-                ordinate_dim=[d for _, d, _ in scales_dims for _ in range(repeat)],
-                ordinate_unit=[u for _, _, u in scales_dims for _ in range(repeat)],
+                ordinate_dim=[d for d in rows_dim for _ in range(repeat)],
+                ordinate_unit=[u for u in rows_unit for _ in range(repeat)],
+                comment=[c for c in rows_comment for _ in range(repeat)],
             )
             kind = _run_kind(_environment_kinds(ds).values())
             # a pure sine run has no averaging to describe: the sweep
@@ -837,43 +1204,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False) -> dict[str, Any]:
             if averaging is not None:
                 averaging = _started(history, averaging, kind)
             history.averaging = averaging
-            key = ('time_data' if variable == 'time_data'
-                   else f'time_data_{int(variable.rsplit("_", 1)[1]) + 1}')
             out[key] = history
-            # the virtual responses the environment controlled, as their
-            # own history beside the raw channels: the same matrix the
-            # controller applied, over the same frames, so the PSDs
-            # computed from it are what the specification was judged
-            # against (Brandon, 2026-09-18: "a separate time history")
-            for env_name, group in ds.groups.items():
-                if 'control_channel_indices' not in group.variables:
-                    continue
-                indices = np.asarray(
-                    group.variables['control_channel_indices'][()], dtype=int)
-                found = _response_transformation(group, indices, scales_dims)
-                if found is None:
-                    continue
-                matrix, labels, (scale, dim, unit) = found
-                virtual = (matrix @ time_data[indices]) * scale
-                if frames:
-                    virtual = virtual.reshape(-1, frames, samples).reshape(
-                        -1, samples)
-                    v_block = [f'avg {i + 1}' for _label in labels
-                               for i in range(frames)]
-                    v_dofs = [label for label in labels for _ in range(frames)]
-                else:
-                    v_block, v_dofs = None, labels
-                transformed = TimeHistory(
-                    abscissa=history.abscissa, ordinate=virtual,
-                    response_dof=v_dofs, block=v_block,
-                    ordinate_dim=[dim] * len(v_dofs),
-                    ordinate_unit=[unit] * len(v_dofs),
-                    comment=[f'row {label} of the {env_name} response '
-                             f'transformation over {len(indices)} control '
-                             'channels' for label in v_dofs])
-                transformed.averaging = history.averaging
-                out[key.replace('time_data', f'{env_name}_transformed')] = \
-                    transformed
 
         # rattlesnake's own spectral save keeps only the environment group;
         # the root attributes, the channel table and the time data all go.

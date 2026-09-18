@@ -5458,6 +5458,30 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, run)
 
+    def _stream_window_choices(self, path):
+        """How much of a long run to import, asked when it would matter.
+
+        {} for anything but a Rattlesnake stream that would take
+        `LARGE_STREAM_SHARE` of the machine's memory — no dialog, the
+        whole file. Otherwise the import window dialog: a window and a
+        channel subset in the importer's own keywords, or None to skip
+        the file. The API imports whole unless told a window; this is
+        the window asking what a script would say.
+        """
+        from ..io import rattlesnake
+
+        if not rattlesnake.sniff(path):
+            return {}
+        summary = rattlesnake.stream_summary(path)
+        largest = max((s['bytes'] for s in summary['streams']), default=0)
+        memory = summary['memory']
+        if not memory or largest < rattlesnake.LARGE_STREAM_SHARE * memory:
+            return {}
+        from .stream_window import ask_stream_window
+
+        return ask_stream_window(self, path, summary,
+                                 resolve_theme(self.theme_name))
+
     def _exodus_import_choices(self, path):
         """How an exodus file's results should be read, asked as needed.
 
@@ -5595,6 +5619,13 @@ class MainWindow(QMainWindow):
                     options = self._exodus_import_choices(path)
                     if options is None:
                         continue
+                    # a stream that would take a large share of the
+                    # machine is imported through a window the user
+                    # chooses on a preview — or not at all
+                    window = self._stream_window_choices(path)
+                    if window is None:
+                        continue
+                    options = {**options, **window}
                     # a lone project file reports per object; in a
                     # multi-file drop the files themselves are the steps
                     result = io.import_file(
@@ -5621,7 +5652,8 @@ class MainWindow(QMainWindow):
                 # read, building each object's rows — measured at 4 s of
                 # tree against 0.5 s of file — so the bar walks that too
                 added = self._add_result(
-                    path, result, tick=None if many else tick)
+                    path, result, tick=None if many else tick,
+                    options=options)
                 imported.append(added)
                 announced = self._adopt_project_type(
                     path, added if isinstance(added, list) else [added]) \
@@ -5808,7 +5840,7 @@ class MainWindow(QMainWindow):
         told = ', '.join(loose)
         self._show_status(f'{told} joined the run’s group')
 
-    def _add_result(self, path, result, tick=None):
+    def _add_result(self, path, result, tick=None, options=None):
         """Name each imported object for its type. Nothing else.
 
         Every importer but one returned a single object and got its class
@@ -5831,9 +5863,13 @@ class MainWindow(QMainWindow):
         # session's genesis, so the journal restarts on that line the
         # way Project.open restarts it.
         fresh_open = isinstance(result, io.TestContents) and not self.objects
+        # the options the dialogs asked for ride the line: an import
+        # window replayed without its window would read the whole run
+        asked = ''.join(f', {key}={value!r}'
+                        for key, value in (options or {}).items())
         with self.project.journal_as(
                 None if fresh_open
-                else f'project.import_file({str(path)!r})'):
+                else f'project.import_file({str(path)!r}{asked})'):
 
             if isinstance(result, io.TestContents):
                 # a saved project: the names are the user's own, verbatim,
@@ -8453,12 +8489,13 @@ class MainWindow(QMainWindow):
         self._clear_overlays('filter_overlays')
 
     def _octave_source(self, series):
-        """The one plain density the octave reading would band — or
-        None, which is also what hides the button."""
+        """The one density the octave reading would band — a PSD, a
+        CPSD or a specification, limits and all — or None, which is
+        also what hides the button."""
         if len(series) != 1:
             return None
         _name, data, _records = series[0]
-        if isinstance(data, Psd) and not isinstance(data, Specification):
+        if isinstance(data, Psd):
             return data
         return None
 
@@ -9885,13 +9922,20 @@ class MainWindow(QMainWindow):
         # are what the button makes, which is the whole contract
         per_octave = self.data_pane.octave_panel.per_octave()
         acted = self._act_on(
-            lambda o: isinstance(o, Psd) and not isinstance(o, Specification),
-            'Select a PSD or CPSD to band',
+            lambda o: isinstance(o, Psd),
+            'Select a PSD, CPSD or specification to band',
             self.project.compute_octave, per_octave)
         if acted is None:
             return
         name, obj, added = acted
         banded = self.objects[added]
+        # Apply ends the reading. Left on, the toggle carried over to
+        # the object it had just made: the banded ribbons drew, and
+        # their re-banding stepped over them in the preview color —
+        # every one pink (Brandon, 2026-09-18)
+        pane = self.data_pane
+        if pane.octave_action.isChecked():
+            pane.octave_action.trigger()
         self.show_object(added)
         self._show_status(
             f'{added}: {len(banded.abscissa)} bands from '

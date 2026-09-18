@@ -134,3 +134,55 @@ def test_the_preview_stands_on_the_stage_too(window, pump):
     assert pane.octave_panel.isVisible(), 'the panel rides the stage'
     bands = pane.octave_panel.derived['bands'].text()
     assert bands.isdigit() and int(bands) > 0
+
+
+def test_applying_stands_the_reading_down_and_shows_the_bands_plain(window,
+                                                                    pump):
+    """The banded object came up wearing the preview: the octave toggle
+    stayed on after Apply, so the new object's own stage was drawn and
+    then its re-banding stepped over it in the preview color — every
+    ribbon pink (Brandon, 2026-09-18: "they all just turn pink").
+    Apply is the end of the reading; the object it made shows plain."""
+    _spectra, pane = _psds(window, pump)
+    pane.octave_action.trigger()
+    pump()
+    pane.waterfall_action.trigger()      # onto the stage
+    pump()
+    window.render_current()
+    pump()
+    assert 'marks-octave' in set(pane.waterfall_plotter.actors), 'previewing'
+    pane.octave_panel.apply_asked.emit()
+    pump()
+    banded = window.current_object()
+    assert banded is not None and banded.bandwidth is not None, \
+        'the banded object is what is shown'
+    assert not pane.octave_action.isChecked(), 'the reading stood down'
+    assert not pane.octave_panel.isVisible()
+    assert 'marks-octave' not in set(pane.waterfall_plotter.actors), \
+        'no preview over the object the reading made'
+    assert 'waterfall' in set(pane.waterfall_plotter.actors), 'its own ribbons'
+
+
+def test_a_specification_is_offered_the_reading_and_apply_bands_its_limits(
+        window, pump):
+    """The same toggle, pane and button a PSD has; what Apply makes is a
+    specification on bands, limits and all (Brandon, 2026-09-18)."""
+    from visualdynamics.core.data import Specification
+
+    spec = visualdynamics.import_file(
+        __import__('conftest').fixture_path('plate', 'random_spectra.nc4')
+    )['Random_specification']
+    window.add_object('Spec', spec)
+    window.show_object('Spec')
+    pump()
+    pane = window.data_pane
+    assert pane.octave_action.isVisible(), 'offered on a specification'
+    pane.octave_action.trigger()
+    pump()
+    pane.octave_panel.apply_asked.emit()
+    pump()
+    made = window.current_object()
+    assert isinstance(made, Specification) and made.bandwidth is not None
+    assert set(made.limits) == set(spec.limits)
+    assert not pane.octave_action.isChecked()
+

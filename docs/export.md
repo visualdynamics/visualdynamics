@@ -383,17 +383,36 @@ drives as visibly synthetic 9000-series labels.
 A run that controlled a **virtual response** — a response
 transformation matrix over the control channels, as a MIMO test on a
 rigid fixture often does — imports as both halves of what the
-controller did. The streamed time data stays in hardware channels;
-beside it comes a second time history, the transformation's rows over
-those channels (`Random_transformed`), computed the way the
-controller computed them and carrying the run's averaging, so the
-PSDs made from it are what the specification was judged against. The
-specification, the FRF, the coherence and the control CPSD are over
-those rows too, because that is what the controller saved. The file
+controller did. The streamed time data stays in hardware channels, and
+after them, in the same time history, come the transformation's rows
+over those channels, computed the way the controller computed them —
+one object, so one pass of averaging gives the raw channels' PSDs and
+the virtual ones' together, and the latter are what the specification
+was judged against. The specification, the FRF, the coherence and the
+control CPSD are over those rows too, because that is what the
+controller saved. The file
 names the rows nowhere, so they import as node-only coordinates
 numbered from 1 — rename them in the tree if the rows mean something
 (a virtual point's X, Y and Z, say) — and a row's unit is the control
 channels' unit when they all share one, undeclared when they do not.
+
+A **long run** need not be imported whole. A stream that would take
+a quarter of the machine's memory or more opens a dialog before it
+is read: one channel's envelope over the whole run (read in slabs and
+thinned as it goes, so it costs seconds on a 22 GB file), the
+truncate reading's own span over it to choose the stretch, the
+channels to keep, and what the choice costs in samples and gigabytes
+against the machine's memory. Import reads exactly that window as a
+slice of the file, inclusive at both instants on the run's own clock,
+which the record keeps; every row's comment names the window and the
+file. A script says the same thing — `import_file(path, start=60,
+stop=120, channels=['101Z+', '104Z+'])` — and the journal replays the
+import as it was made. A stream the window misses entirely is left
+out, a windowed stream is not split into a spectral save's frames,
+and an environment's virtual responses come along only when every
+control channel they are computed from is among the channels kept.
+Below the threshold nothing is asked, and the API imports whole
+unless told a window.
 
 A system ID saved as *time data* is a different case: the file is
 indistinguishable from a run of its environment — two streams are

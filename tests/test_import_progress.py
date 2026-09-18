@@ -161,10 +161,10 @@ def test_a_second_import_mid_import_waits_its_turn(
     nested = []
     original = window._add_result
 
-    def drop_arrives_mid_import(path, result, tick=None):
+    def drop_arrives_mid_import(path, result, tick=None, options=None):
         if not nested:
             nested.append(window.import_paths([str(second)]))
-        return original(path, result, tick=tick)
+        return original(path, result, tick=tick, options=options)
 
     monkeypatch.setattr(window, '_add_result', drop_arrives_mid_import)
     window.import_paths([project_file])

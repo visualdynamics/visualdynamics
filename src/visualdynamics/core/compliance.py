@@ -152,11 +152,26 @@ def written_band(frequencies: ArrayLike,
 
 def band_of(specification: Specification,
             record: int = 0) -> tuple[float, float] | None:
-    """(low, high) the specification actually says something over."""
-    return written_band(specification.abscissa, specification.ordinate[record])
+    """(low, high) the specification actually says something over.
+
+    A specification on bands says something over each band's whole
+    width, so its range is its outer bin edges — not its first and last
+    centers, which sit inside them and would shrink every comparison
+    against it by half a band at each end.
+    """
+    frequencies = np.asarray(specification.abscissa, dtype=float)
+    values = np.asarray(np.real(specification.ordinate[record]), dtype=float)
+    band = written_band(frequencies, values)
+    if band is None or getattr(specification, 'bandwidth', None) is None:
+        return band
+    left, right = specification.bin_bounds()
+    usable = (np.isfinite(frequencies) & (frequencies > 0.0)
+              & np.isfinite(values) & (values > 0.0))
+    return float(left[usable].min()), float(right[usable].max())
 
 
-def covered(lines: ArrayLike, low: float, high: float
+def covered(lines: ArrayLike, low: float, high: float,
+            widths: ArrayLike | None = None
             ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Each measured bin cut to the part of it a band covers.
 
@@ -171,14 +186,15 @@ def covered(lines: ArrayLike, low: float, high: float
     if lines.size < 2:
         empty = np.zeros(lines.shape)
         return empty, empty, empty, np.zeros(lines.shape, dtype=bool)
-    widths = np.gradient(lines)
+    # a banded measurement's bins are its own, geometric ones
+    widths = np.gradient(lines) if widths is None else np.asarray(widths)
     start = np.maximum(lines - widths / 2.0, low)
     stop = np.minimum(lines + widths / 2.0, high)
     width = np.clip(stop - start, 0.0, None)
     return start, stop, width, (width > 0.0) & (width < widths * (1.0 - 1e-9))
 
 
-def _written_area(frequencies, values, low, high, reading):
+def _written_area(frequencies, values, low, high, reading, widths=None):
     """The area under a written curve, read the way its owner is.
 
     A limit belongs to a specification and is written the way the
@@ -192,7 +208,9 @@ def _written_area(frequencies, values, low, high, reading):
         return log_log_area(frequencies, values, low, high)
     from .octave import bin_bounds
 
-    left, right = bin_bounds(np.asarray(frequencies, dtype=float))
+    # a banded specification carries its own bins — geometric, from a
+    # standard — and the midpoints between its centers are not them
+    left, right = bin_bounds(np.asarray(frequencies, dtype=float), widths)
     if low is not None:
         left, right = np.maximum(left, low), np.maximum(right, low)
     if high is not None:
@@ -207,7 +225,9 @@ def _written_area(frequencies, values, low, high, reading):
 
 def outside(lines: ArrayLike, values: ArrayLike,
             spec_frequencies: ArrayLike, limit_values: ArrayLike,
-            over: bool = True, reading: str = 'log_log') -> np.ndarray:
+            over: bool = True, reading: str = 'log_log',
+            spec_widths: ArrayLike | None = None,
+            widths: ArrayLike | None = None) -> np.ndarray:
     """Which measured lines fell outside one written limit curve.
 
     In the middle of the band this is the plain comparison: the density
@@ -234,10 +254,10 @@ def outside(lines: ArrayLike, values: ArrayLike,
     band = written_band(spec_frequencies, limit_values)
     if band is None:
         return out
-    start, stop, width, cut = covered(lines, *band)
+    start, stop, width, cut = covered(lines, *band, widths)
     for i in np.flatnonzero(cut & real):
         asked = _written_area(spec_frequencies, limit_values,
-                              start[i], stop[i], reading)
+                              start[i], stop[i], reading, spec_widths)
         if not np.isfinite(asked):
             continue
         held = values[i] * width[i]
@@ -516,7 +536,9 @@ def exceedances(specification: Specification, measured: DataArray,
                      else outside(lines, got, specification.abscissa,
                                   written[spec_record], over,
                                   getattr(specification, 'interpolation',
-                                          'log_log')))
+                                          'log_log'),
+                                  getattr(specification, 'bandwidth', None),
+                                  getattr(measured, 'bandwidth', None)))
     return marks[0], marks[1]
 
 

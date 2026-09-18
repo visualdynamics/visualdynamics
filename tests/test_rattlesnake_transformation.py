@@ -9,9 +9,9 @@ accelerometers transformed to three virtual degrees of freedom, and
 the importer died on the specification with "boolean index did not
 match indexed array along axis 1; size of axis is 3 but size of
 corresponding boolean axis is 12". The rows are unnamed in the file
-and import numbered from 1; the transformed responses arrive as their
-own time history, over the same frames, so their PSDs are what the
-specification was judged against.
+and import numbered from 1; the transformed responses come in as more
+records of the same time history, after the raw channels, so one pass
+of averaging gives the PSDs the specification was judged against.
 """
 
 import numpy as np
@@ -124,22 +124,25 @@ def test_the_specification_is_over_the_transformations_rows(tmp_path):
     assert np.allclose(spec.limits['abort_upper'][1], 8.0)
 
 
-def test_the_transformed_responses_are_their_own_history(tmp_path):
+def test_the_transformed_responses_are_records_of_the_same_history(tmp_path):
     """The controller applied `T @ frame`; the same rows over the raw
-    channels, in the control channels' unit, with the run's averaging
-    so the PSDs land on the specification's lines."""
+    channels come in after them, in the control channels' unit, in the
+    one history — so they are averaged, filtered and banded with the
+    raw channels rather than processed twice (Brandon, 2026-09-18,
+    reversing the separate object he first asked for)."""
     path, raw = write_run(str(tmp_path / 'virtual.nc4'))
     out = visualdynamics.import_file(path)
+    assert 'Random_transformed' not in out, 'no second object'
     history = out['time_data']
-    assert history.num_records == MEASURED + DRIVES, 'the raw channels stay'
-    virtual = out['Random_transformed']
-    assert virtual.response_dof == ['1', '2']
-    assert virtual.ordinate_dim == ['acceleration', 'acceleration']
-    assert virtual.ordinate_unit == ['m/s**2', 'm/s**2']
-    assert np.allclose(virtual.ordinate.real, MATRIX @ raw[CONTROL])
-    assert np.array_equal(virtual.abscissa, history.abscissa)
-    assert virtual.averaging == history.averaging
-    assert virtual.comment[1].startswith('row 2 of the Random response transformation')
+    assert history.num_records == MEASURED + DRIVES + 2
+    assert history.response_dof[-2:] == ['1', '2']
+    assert history.ordinate_dim[-2:] == ['acceleration', 'acceleration']
+    assert history.ordinate_unit[-2:] == ['m/s**2', 'm/s**2']
+    assert np.allclose(history.ordinate[-2:].real, MATRIX @ raw[CONTROL])
+    assert np.allclose(history.ordinate[:MEASURED + DRIVES].real, raw), \
+        'the raw channels first, untouched'
+    assert history.comment[-1].startswith('row 2 of the Random response transformation')
+    assert history.comment[0] == ''
 
 
 def test_a_transformation_over_mixed_units_imports_raw(tmp_path):
@@ -148,10 +151,10 @@ def test_a_transformation_over_mixed_units_imports_raw(tmp_path):
     path, raw = write_run(str(tmp_path / 'mixed.nc4'),
                           units=['g', 'g', 'V', 'V', 'N', 'N'])
     out = visualdynamics.import_file(path)
-    virtual = out['Random_transformed']
-    assert virtual.ordinate_dim == ['unknown', 'unknown']
-    assert virtual.ordinate_unit == [None, None]
-    assert np.allclose(virtual.ordinate.real, MATRIX @ raw[CONTROL]), \
+    history = out['time_data']
+    assert history.ordinate_dim[-2:] == ['unknown', 'unknown']
+    assert history.ordinate_unit[-2:] == [None, None]
+    assert np.allclose(history.ordinate[-2:].real, MATRIX @ raw[CONTROL]), \
         'the raw combination, unscaled'
     spec = out['Random_specification']
     assert spec.ordinate_dim[0] == 'unknown'
@@ -181,7 +184,7 @@ def test_a_transformation_that_does_not_fit_its_channels_is_refused(tmp_path):
 def test_a_run_without_a_transformation_is_as_it_was(tmp_path):
     path, _raw = write_run(str(tmp_path / 'plain.nc4'), with_transformation=False)
     out = visualdynamics.import_file(path)
-    assert 'Random_transformed' not in out
+    assert out['time_data'].num_records == MEASURED + DRIVES
     assert out['Random_specification'].response_dof[:2] == ['101Z+', '102Z+']
 
 

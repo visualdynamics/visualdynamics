@@ -36,7 +36,12 @@ first and last lines](images/psd-reading-steps.png)
 Banding onto proportional bands (the plot bar's *Octave Bands*
 reading and its *Apply Octave Bands* button; `project.compute_octave`
 in a script) conserves
-the area — the same power, arranged the way it is read. An
+the area — the same power, arranged the way it is read. A
+specification bands the same way, its warning and abort limits with
+it: a written curve takes the exact power-law area over each band, a
+controller's target on lines integrates as a density, and the result
+is a specification on the bands, to be compared band for band against
+a measurement banded alike. An
 octave-band spectrum sets `bandwidth`, because its bins are geometric
 and its edges are a standard's, not its neighbors': reading them off
 the centers would be a hair out at every band and wrong at the two

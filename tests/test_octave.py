@@ -231,22 +231,150 @@ def test_the_share_outside_abort_is_counted_over_bands():
         on_lines['101Z+']['abort_percent'], abs=1e-6)
 
 
-def test_the_specification_is_not_offered_a_banding():
-    """It is a continuous curve whose area over a band is the same
-    however the measurement beside it was arranged."""
+def _written_spec(with_limits=True, cross=False):
+    """A specification at four breakpoints, a decade of flat top with
+    power-law skirts, and a ±3 dB warning, ±6 dB abort band."""
     from visualdynamics.core.data import Specification
 
-    spec = Specification(
-        abscissa=np.array([20.0, 2000.0]),
-        ordinate=np.atleast_2d([1e-3, 1e-3]), response_dof=['101Z+'],
-        ordinate_dim=['acceleration**2/frequency'])
-    assert isinstance(spec, Psd), 'it is a Psd underneath, which is the trap'
-    # the applicability table excludes a specification, and the
-    # calculator menu is a presentation of the same table
+    f = np.array([20.0, 80.0, 800.0, 2000.0])
+    target = np.array([1e-3, 4e-3, 4e-3, 1e-3])
+    rows = [target, target * 0.5]
+    dofs = ['101Z+', '104Z+']
+    refs = ['101Z+', '104Z+']
+    if cross:
+        rows += [np.sqrt(target * target * 0.5) * np.exp(1j * np.radians(30.0))]
+        dofs += ['101Z+']
+        refs += ['104Z+']
+    ordinate = np.array(rows)
+    limits = {}
+    if with_limits:
+        for name, db in (('warning_lower', -3), ('warning_upper', 3),
+                         ('abort_lower', -6), ('abort_upper', 6)):
+            band = np.array([r * 10 ** (db / 10) for r in np.real(rows)])
+            if cross:
+                band[2] = np.nan
+            limits[name] = band
+    return Specification(abscissa=f, ordinate=ordinate, response_dof=dofs,
+                         reference_dof=refs,
+                         ordinate_dim=['acceleration**2/frequency'] * len(dofs),
+                         **limits)
+
+
+def test_the_specification_is_offered_a_banding():
+    """It was excluded once (a written curve is integrated exactly by
+    every comparison, so it needed none); Brandon asked for it anyway,
+    2026-09-18 — the target and the measurement it judges should be
+    convertible alike."""
     import visualdynamics
 
+    spec = _written_spec()
+    assert isinstance(spec, Psd), 'it is a Psd underneath'
     offered = dict(visualdynamics.Project('t').verbs(spec))
-    assert 'compute_octave' not in offered
+    assert 'compute_octave' in offered
+
+
+def test_a_written_specification_bands_its_target_and_its_limits():
+    """Each band takes the exact power-law area of the curve over the
+    part of the band the specification covers; the limits go through
+    the same rule, so the banded warning line stands where the written
+    one stood against its target."""
+    from visualdynamics.core.data import Specification
+
+    spec = _written_spec()
+    banded = spec.to_octave(3)
+    assert isinstance(banded, Specification)
+    assert banded.interpolation == 'bin' and banded.bandwidth is not None
+    assert set(banded.limits) == set(spec.limits)
+    for k in range(spec.num_records):
+        assert np.isclose(banded.area(k), spec.area(k), rtol=1e-9), \
+            'the RMS is untouched by banding'
+        for name in spec.limits:
+            got = Specification(banded.abscissa, banded.limits[name][k:k + 1],
+                                response_dof=['x'], bandwidth=banded.bandwidth,
+                                ordinate_dim=['acceleration**2/frequency'])
+            got.interpolation = 'bin'
+            want = Specification(spec.abscissa, spec.limits[name][k:k + 1],
+                                 response_dof=['x'],
+                                 ordinate_dim=['acceleration**2/frequency'])
+            assert np.isclose(got.area(0), want.area(0), rtol=1e-9), name
+    inside = np.isfinite(banded.ordinate[0].real)
+    assert (banded.limits['warning_lower'][0][inside]
+            < banded.ordinate[0].real[inside]).all()
+    assert (banded.ordinate[0].real[inside]
+            < banded.limits['abort_upper'][0][inside]).all()
+    # a flat stretch of the target stays flat across the bands inside it
+    flat = (banded.abscissa > 100) & (banded.abscissa < 600)
+    assert np.allclose(banded.ordinate[0].real[flat], 4e-3)
+
+
+def test_a_cross_term_of_a_written_specification_keeps_its_phase():
+    """Not a power law, so it is read the way the sheet reads it and
+    integrated on a fine grid; the phase written comes through."""
+    spec = _written_spec(cross=True)
+    banded = spec.to_octave(3)
+    inside = np.isfinite(banded.ordinate[2])
+    assert np.iscomplexobj(banded.ordinate)
+    assert np.allclose(np.degrees(np.angle(banded.ordinate[2][inside])), 30.0,
+                       atol=1e-6)
+    assert np.all(np.isnan(banded.limits['abort_upper'][2])), \
+        'a cross term has no limit of its own, before or after'
+    flat = (banded.abscissa > 100) & (banded.abscissa < 600)
+    assert np.allclose(np.abs(banded.ordinate[2][flat]), 4e-3 * np.sqrt(0.5),
+                       rtol=1e-6)
+
+
+def test_a_controllers_specification_bands_its_lines_and_limits():
+    """A controller writes its target on the control lines, cross terms
+    and all, and reads as a power law between them; every curve's area
+    survives the banding, and the cross terms come through complex."""
+    import visualdynamics
+    from visualdynamics.core.data import Specification
+
+    spec = visualdynamics.import_file(
+        fixture_path('plate', 'random_spectra.nc4'))['Random_specification']
+    banded = spec.to_octave(6)
+    assert banded.num_records == spec.num_records
+    for k in range(spec.num_records):
+        if spec.response_dof[k] != spec.reference_dof[k]:
+            continue
+        assert np.isclose(banded.area(k), spec.area(k), rtol=1e-6)
+        for name in spec.limits:
+            if not np.isfinite(spec.limits[name][k]).any():
+                continue
+            want = Specification(spec.abscissa, spec.limits[name][k:k + 1],
+                                 response_dof=['x'],
+                                 ordinate_dim=['acceleration**2/frequency'])
+            want.interpolation = spec.interpolation
+            got = Specification(banded.abscissa, banded.limits[name][k:k + 1],
+                                response_dof=['x'], bandwidth=banded.bandwidth,
+                                ordinate_dim=['acceleration**2/frequency'])
+            got.interpolation = 'bin'
+            assert np.isclose(got.area(0), want.area(0), rtol=1e-6), name
+
+
+def test_a_banded_comparison_reads_like_the_narrowband_one():
+    """A banded measurement against a banded specification reads as
+    the narrowband pair does, because both went through one area rule.
+    Not identically: a specification's edges fall inside its outer
+    bands, so those bands hold a diluted target while the measurement
+    banded alike holds everything in them — a few percent of RMS at
+    the ends of a third-octave banding, which is what banding a
+    bounded curve costs and not something the comparison hides."""
+    from visualdynamics.core.compliance import compare
+
+    spec = _written_spec()
+    f = np.arange(2.0, 2502.0, 2.0)
+    rng = np.random.default_rng(3)
+    target = np.exp(np.interp(np.log(f), np.log(spec.abscissa),
+                              np.log(spec.ordinate[0].real)))
+    measured = Psd(f, np.atleast_2d(target * (1.0 + 0.1 * rng.standard_normal(len(f)))),
+                   response_dof=['101Z+'],
+                   ordinate_dim=['acceleration**2/frequency'])
+    narrow = compare(spec, measured, scale_db=0.0)
+    wide = compare(spec.to_octave(3), measured.to_octave(3), scale_db=0.0)
+    assert np.isclose(wide['measured_rms'], narrow['measured_rms'], rtol=3e-2)
+    assert np.isclose(wide['specification_rms'], narrow['specification_rms'],
+                      rtol=1e-6), 'the target itself is untouched by banding'
 
 
 # ---- banding what is already banded -------------------------------------

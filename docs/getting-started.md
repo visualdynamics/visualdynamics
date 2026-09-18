@@ -102,7 +102,8 @@ spreadsheets (`.xlsx`), CAD geometry (`.step`/`.iges` tessellated on
 import — a McMaster-Carr download drops straight in — and `.3mf` or
 `.stl` meshes, each part a named block),
 photographs, MATLAB files in the project's own layout (`.mat`), and
-whole `.vdyn` projects. The
+whole `.vdyn` projects. A run too long for the machine asks how much
+of it to import, on a preview of one channel. The
 full matrix of what each format carries, both directions, is in
 [Importing and exporting](export.md).
 

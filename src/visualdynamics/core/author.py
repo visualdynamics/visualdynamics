@@ -1285,7 +1285,7 @@ class SpecificationDraft:
             return below if side == 'lower' else above
 
         def carried(values):
-            return _at_lines(old_f, values, lines)
+            return read_at_lines(old_f, values, lines)
 
         def autos_at(name, i):
             # the sheet inside its range, the specification's own
@@ -1493,7 +1493,7 @@ def uniform_spacing(frequencies: Any) -> float | None:
     return float(steps[0])
 
 
-def _at_lines(old_f: np.ndarray, values: np.ndarray,
+def read_at_lines(old_f: np.ndarray, values: np.ndarray,
               lines: np.ndarray) -> np.ndarray:
     """A specification's record read at new lines: its own value where
     a line is one of its own, and between them the power law a

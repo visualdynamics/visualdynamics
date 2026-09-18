@@ -58,6 +58,13 @@ from ..units import (
     si_factor,
     si_transform,
 )
+
+#: how much of an object's ordinate a display conversion holds at
+#: once, in bytes (`DataArray.display_blocks`): a quarter gigabyte is
+#: a few hundred records of a long run, and a block's transients —
+#: the gather, the scaling, the decimator's padding — are bounded by
+#: it whatever the object weighs
+DISPLAY_BLOCK_BYTES = 256 * 2 ** 20
 from .validate import DIRECTION_CODES
 from .validate import dofs as _dofs
 
@@ -853,16 +860,61 @@ class DataArray:
         rows = range(self.num_records) if records is None else list(records)
         out = np.empty((len(rows), self.ordinate.shape[1]),
                        dtype=self.ordinate.dtype)
-        by_dimension = {}
-        for position, record in enumerate(rows):
-            by_dimension.setdefault(self.ordinate_dim[record], []).append(
-                (position, record))
-        for dim, pairs in by_dimension.items():
-            positions = [position for position, _ in pairs]
-            source = self.ordinate[[record for _, record in pairs]]
-            out[positions] = (source if dim == UNKNOWN
-                              else unit_system.from_si(source, dim))
+        # converted a block of records at a time into slices of `out`:
+        # gathering every asked-for record and scaling the gather were
+        # two whole copies beside the answer, and on a 1.2 GB history
+        # the conversion alone peaked at three times its output
+        # (measured 2026-09-18, on the way to a 22 GB import that took
+        # the application down at 67 GB)
+        for start, stop, block in self.display_blocks(unit_system, rows):
+            out[start:stop] = block
         return out
+
+    def display_blocks(self, unit_system: UnitSystem,
+                       records: Iterable[int] | None = None,
+                       block_bytes: int | None = None):
+        """`display_ordinate` a block of records at a time.
+
+        Yields `(start, stop, values)`: positions within `records` and
+        the converted rows for them, each block at most `block_bytes`
+        (`DISPLAY_BLOCK_BYTES` by default) — so a reading that thins
+        every record before it draws it, the 3-D stage above all,
+        never holds a converted copy of the whole object. A record
+        larger than the block is still one block: a row is not split.
+
+        Parameters
+        ----------
+        unit_system : UnitSystem
+            The units to present the values in.
+        records : iterable of int, optional
+            Which records to convert. All of them when omitted.
+        block_bytes : int, optional
+            The most a block may hold, in bytes.
+
+        Yields
+        ------
+        tuple of (int, int, numpy.ndarray)
+            The block's positions among `records`, and its values in
+            display units.
+        """
+        rows = range(self.num_records) if records is None else list(records)
+        limit = DISPLAY_BLOCK_BYTES if block_bytes is None else int(block_bytes)
+        row_bytes = max(1, self.ordinate.shape[1] * self.ordinate.dtype.itemsize)
+        per_block = max(1, limit // row_bytes)
+        for start in range(0, len(rows), per_block):
+            chunk = rows[start:start + per_block]
+            block = np.empty((len(chunk), self.ordinate.shape[1]),
+                             dtype=self.ordinate.dtype)
+            by_dimension = {}
+            for position, record in enumerate(chunk):
+                by_dimension.setdefault(self.ordinate_dim[record], []).append(
+                    (position, record))
+            for dim, pairs in by_dimension.items():
+                positions = [position for position, _ in pairs]
+                source = self.ordinate[[record for _, record in pairs]]
+                block[positions] = (source if dim == UNKNOWN
+                                    else unit_system.from_si(source, dim))
+            yield start, start + len(chunk), block
 
     def __eq__(self, other: object) -> bool:
         if type(self) is not type(other):
@@ -2535,7 +2587,35 @@ class Psd(DataArray):
         Psd
             The same power, arranged on proportional bands.
         """
-        from .octave import PER_OCTAVE, bands, resample
+        from .octave import resample
+
+        frequencies = np.asarray(self.abscissa, dtype=float)
+        per_octave, centers, widths, bounds = self._octave_grid(
+            per_octave, low, high)
+        banded = resample(frequencies, self.ordinate, bounds, widths,
+                          source=self.bin_bounds())
+        out = Psd(centers, banded,
+                  response_dof=list(self.response_dof),
+                  reference_dof=(None if self.reference_dof is None
+                                 else list(self.reference_dof)),
+                  ordinate_dim=list(self.ordinate_dim),
+                  ordinate_unit=list(self.ordinate_unit),
+                  reference_unit=list(self.reference_unit),
+                  dimension_hint=list(self.dimension_hint),
+                  block=None if self.block is None else list(self.block),
+                  bandwidth=widths,
+                  comment=f'1/{per_octave} octave bands')
+        # banding conserves the area and changes nothing about what the
+        # object is — a held comparison scale included, so the report's
+        # own banding compares what the narrowband comparison compared
+        out.scale_db = self.scale_db
+        return out
+
+    def _octave_grid(self, per_octave, low, high):
+        """(per_octave, centers, widths, bounds): the bands this spectrum
+        bands onto — one grid, shared by the ordinate and, for a
+        specification, its limits."""
+        from .octave import PER_OCTAVE, bands
 
         frequencies = np.asarray(self.abscissa, dtype=float)
         positive = frequencies[frequencies > 0.0]
@@ -2555,24 +2635,7 @@ class Psd(DataArray):
         high = float(beyond.max()) if high is None else float(high)
         per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
         centers, widths, bounds = bands(low, high, per_octave)
-        banded = resample(frequencies, self.ordinate, bounds, widths,
-                          source=self.bin_bounds())
-        out = Psd(centers, banded,
-                  response_dof=list(self.response_dof),
-                  reference_dof=(None if self.reference_dof is None
-                                 else list(self.reference_dof)),
-                  ordinate_dim=list(self.ordinate_dim),
-                  ordinate_unit=list(self.ordinate_unit),
-                  reference_unit=list(self.reference_unit),
-                  dimension_hint=list(self.dimension_hint),
-                  block=None if self.block is None else list(self.block),
-                  bandwidth=widths,
-                  comment=f'1/{per_octave} octave bands')
-        # banding conserves the area and changes nothing about what the
-        # object is — a held comparison scale included, so the report's
-        # own banding compares what the narrowband comparison compared
-        out.scale_db = self.scale_db
-        return out
+        return per_octave, centers, widths, bounds
 
     def bin_widths(self) -> np.ndarray:
         """The width of every line's own bin.
@@ -2791,6 +2854,146 @@ class Specification(Bounded, Psd):
     #: a written specification's points are breakpoints of a power
     #: law. `compute_psds` says otherwise for one it computed.
     interpolation = 'log_log'
+
+    #: how finely a breakpoint curve's cross terms are read when a band
+    #: integrates them: points per band on a log grid
+    _CROSS_POINTS = 64
+
+    def to_octave(self, per_octave: int | None = None,
+                  low: float | None = None,
+                  high: float | None = None) -> Specification:
+        """This specification integrated onto proportional bands, its
+        warning and abort limits with it.
+
+        The same area rule as `Psd.to_octave`, read the way the object
+        is: a specification computed on lines is a density and each
+        line is a bin; one written at breakpoints is a power law
+        between them, and each band takes the exact area under that law
+        (`compliance.log_log_area`) over the part of the band the
+        specification covers, divided by the band's width. The limits
+        are curves written the same way and go through the same rule,
+        so a band's warning line stands in the same relation to its
+        target as the breakpoints did. Cross terms of a breakpoint
+        specification are not power laws (a phase is not), so they are
+        read onto a fine log grid the way the authoring sheet reads
+        them — magnitude log–log, phase straight — and integrated there.
+
+        The result is a density per band (`interpolation` 'bin', the
+        bands' widths carried), which is what a banded measurement is
+        compared against band for band. Brandon, 2026-09-18: the
+        specification and the measurement it judges should be
+        convertible alike, so a compliance can be read on bands at both
+        ends — reversing the earlier reasoning (PLAN.md, "Octave
+        bands") that a written curve needed no banding because the
+        comparison integrates it exactly; it does, and a banded
+        specification is still the object a person asks to see and
+        hand on.
+
+        Parameters
+        ----------
+        per_octave : int, optional
+            Bands per octave.
+        low, high : float, optional
+            The band to cover.
+
+        Returns
+        -------
+        Specification
+            The same power and the same limits, arranged on
+            proportional bands.
+        """
+        from .compliance import log_log_area, written_band
+        from .octave import resample
+
+        frequencies = np.asarray(self.abscissa, dtype=float)
+        rows = np.atleast_2d(self.ordinate)
+        if self.interpolation == 'log_log':
+            # the grid spans what the curve is written over — its first
+            # breakpoint to its last — not bins inferred between
+            # breakpoints, which put the first band at the midpoint of
+            # the first segment and lost everything below it
+            spans = [written_band(frequencies, np.abs(row)) for row in rows]
+            spans = [span for span in spans if span is not None]
+            if not spans:
+                raise ValueError('octave bands need a specification written '
+                                 'over a range of frequencies above zero')
+            from .octave import PER_OCTAVE, bands
+
+            per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
+            low = min(span[0] for span in spans) if low is None else float(low)
+            high = (max(span[1] for span in spans) if high is None
+                    else float(high))
+            centers, widths, bounds = bands(low, high, per_octave)
+
+            def band_real(row):
+                out = np.full(len(centers), np.nan)
+                band = written_band(frequencies, row)
+                if band is None:
+                    return out
+                for k in range(len(centers)):
+                    lo = max(bounds[k], band[0])
+                    hi = min(bounds[k + 1], band[1])
+                    if hi > lo:
+                        out[k] = log_log_area(frequencies, row, lo, hi) \
+                            / widths[k]
+                return out
+
+            def band_complex(row):
+                from .author import read_at_lines
+
+                out = np.full(len(centers), np.nan, dtype=complex)
+                band = written_band(frequencies, np.abs(row))
+                if band is None:
+                    return out
+                for k in range(len(centers)):
+                    lo = max(bounds[k], band[0])
+                    hi = min(bounds[k + 1], band[1])
+                    if hi > lo:
+                        grid = np.geomspace(lo, hi, self._CROSS_POINTS)
+                        values = read_at_lines(frequencies, row, grid)
+                        out[k] = np.trapezoid(values, grid) / widths[k]
+                return out
+
+            banded = np.array([
+                band_complex(row) if np.iscomplexobj(row) and np.any(row.imag)
+                else band_real(np.real(row)) for row in rows])
+            limits = {name: np.array([band_real(row) for row in values])
+                      for name, values in self.limits.items()}
+        else:
+            per_octave, centers, widths, bounds = self._octave_grid(
+                per_octave, low, high)
+            source = self.bin_bounds()
+            banded = resample(frequencies, rows, bounds, widths, source=source)
+            limits = {}
+            for name, values in self.limits.items():
+                values = np.atleast_2d(values)
+                # a limit row that is all NaN is a cross term's, which
+                # has no limit of its own; the integration would read
+                # its NaN as nothing and hand back zeros
+                unwritten = ~np.isfinite(values).any(axis=1)
+                out = resample(frequencies, values, bounds, widths,
+                               source=source).astype(float)
+                out[unwritten] = np.nan
+                limits[name] = out
+        out = Specification(
+            centers, banded,
+            response_dof=list(self.response_dof),
+            reference_dof=(None if self.reference_dof is None
+                           else list(self.reference_dof)),
+            ordinate_dim=list(self.ordinate_dim),
+            ordinate_unit=list(self.ordinate_unit),
+            reference_unit=list(self.reference_unit),
+            dimension_hint=list(self.dimension_hint),
+            block=None if self.block is None else list(self.block),
+            bandwidth=widths,
+            comment=f'1/{per_octave} octave bands',
+            **limits)
+        out.interpolation = 'bin'
+        out.scale_db = self.scale_db
+        constraints = getattr(self, 'band_constraints', None)
+        if constraints:
+            out.band_constraints = dict(constraints)
+        return out
 
 
 class ShockSpecification(Bounded, Srs):

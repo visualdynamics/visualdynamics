@@ -135,10 +135,15 @@ def test_a_documented_verb_names_every_parameter_it_takes():
 
 
 def test_a_documented_verb_says_what_it_returns():
+    """A generator says what it yields instead — NumPy's own section
+    for one, and the one the API reference renders for it."""
     for label, obj in public_surface():
         doc = docstring_of(obj) or ''
         if 'Parameters\n' in doc and label.startswith(ENFORCED):
-            assert 'Returns\n' in doc, \
+            target = obj.fget if isinstance(obj, property) else obj
+            section = ('Yields\n' if inspect.isgeneratorfunction(target)
+                       else 'Returns\n')
+            assert section in doc, \
                 f'{label} tabulates its parameters but not its result'
 
 

@@ -253,8 +253,10 @@ def waterfall_arrays(data: DataArray,
     page = max(0, min(int(page), pages - 1))
     drawn = chosen[page * per_page:(page + 1) * per_page]
 
-    y = data.display_ordinate(us, drawn) if drawn else np.empty((0, len(x)))
-    values, log_scaled, tagged = _component_values(data, y, component)
+    # the component and the axis reading are the object's, not a
+    # block's, so they are settled once from a row of nothing
+    _empty, log_scaled, tagged = _component_values(
+        data, np.empty((0, len(x)), dtype=data.ordinate.dtype), component)
 
     def logged(rows):
         if not log_scaled:
@@ -269,6 +271,10 @@ def waterfall_arrays(data: DataArray,
     # as the energy beneath it, so the RMS is the plain area under the
     # trace on the stage. One shape decision serves both readings
     shape = drawing_shape(data, tagged)
+    if shape in ('law', 'steps') and drawn:
+        # spectra: a few thousand lines a record, converted whole
+        y = data.display_ordinate(us, drawn)
+        values, _log, _tag = _component_values(data, y, component)
     if shape == 'law' and drawn:
         # a specification's breakpoints mean the power law between
         # them; each record fills in on its own grid
@@ -304,8 +310,16 @@ def waterfall_arrays(data: DataArray,
         # already draws.
         curves = [(x, row) for row in logged(values)]
     else:
-        curves = (peak_decimate_rows(decades(x), logged(values), budget)
-                  if drawn else [])
+        # converted and thinned a block of records at a time, so the
+        # stage never holds a converted copy of a long run, let alone
+        # the decimator's padded one beside it — the whole-object path
+        # peaked at four times the data and took a 22 GB import down at
+        # 67 GB (2026-09-18); the stage's cost is the block now
+        curves = []
+        stage_x = decades(x)
+        for _start, _stop, block in data.display_blocks(us, drawn):
+            rows, _log, _tag = _component_values(data, block, component)
+            curves.extend(peak_decimate_rows(stage_x, logged(rows), budget))
     dim = data.ordinate_dim[drawn[0]] if drawn else UNKNOWN
     hint = data.dimension_hint[drawn[0]] if drawn else None
     # label_ascii, not label_text: VTK's axis titles silently drop

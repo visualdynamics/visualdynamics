@@ -70,12 +70,16 @@ class AveragingOverlay(QObject):
 
     def __init__(self, plot: Any, averaging: Averaging, sample_rate: float,
                  samples: int, colors: Mapping[str, str],
-                 locked: bool = False, parent: Any = None) -> None:
+                 locked: bool = False, parent: Any = None,
+                 origin: float = 0.0) -> None:
         super().__init__(parent)
         self.plot: Any = plot
         self.averaging: Averaging = averaging
         self.sample_rate: float = float(sample_rate)
         self.samples: int = int(samples)
+        #: the record's first instant: the marks sit on the plot's
+        #: clock, the averaging counts from the record's beginning
+        self.origin: float = float(origin)
         self.colors: dict[str, str] = colors
         self.locked: bool = bool(locked)
         self.bands: list[Any] = []
@@ -170,7 +174,8 @@ class AveragingOverlay(QObject):
     def _span(self):
         """(first sample, last sample) of the analysis, in seconds."""
         first = self.averaging.start_sample(self.sample_rate)
-        return (first / self.sample_rate, self.averaging.stop(self.sample_rate))
+        return (self.origin + first / self.sample_rate,
+                self.averaging.stop(self.sample_rate, self.origin))
 
     def _make_marks(self):
         """A band and a window for every frame, and the ticks under them.
@@ -182,7 +187,7 @@ class AveragingOverlay(QObject):
         import pyqtgraph as pg
 
         _levels, baselines, height, foot = self._rail()
-        bounds = self.averaging.frame_bounds(self.sample_rate)
+        bounds = self.averaging.frame_bounds(self.sample_rate, self.origin)
         n = self.averaging.frame_length
         shape = self.averaging.shape()
         offsets = np.arange(n) / self.sample_rate
@@ -273,7 +278,8 @@ class AveragingOverlay(QObject):
         cap = span * self.averaging.rail(self.sample_rate)['cap']
         segments = []
         for (low, high), baseline in zip(
-                self.averaging.frame_bounds(self.sample_rate), baselines):
+                self.averaging.frame_bounds(self.sample_rate, self.origin),
+                baselines):
             for at in (low, high):
                 segments.append((np.array([at, at]),
                                  np.array([baseline - cap, baseline + cap])))
@@ -319,7 +325,7 @@ class AveragingOverlay(QObject):
         """The averaging a dragged region means — `core.averaging.from_span`,
         which the stage's handles commit through too."""
         return from_span(self.averaging, low, high, self.sample_rate,
-                         self.samples)
+                         self.samples, origin=self.origin)
 
     def _redraw_marks(self):
         """The marks for the averaging as it now stands, leaving the

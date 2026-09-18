@@ -5458,6 +5458,28 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, run)
 
+    @contextlib.contextmanager
+    def _asking(self):
+        """The arrow back while a dialog asks something mid-import.
+
+        A drop puts the wait cursor up for the whole import, and a
+        dialog opened under it — the import window, the exodus
+        reading — was worked with a wait cursor for a pointer: on
+        macOS Qt's own black-and-white disc, not the system's, and it
+        made the span's edges hard to take hold of (Brandon,
+        2026-09-18). Every override is taken down for the asking and
+        put back after, so the import goes on looking busy.
+        """
+        stacked = 0
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
+            stacked += 1
+        try:
+            yield
+        finally:
+            for _ in range(stacked):
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
     def _stream_window_choices(self, path):
         """How much of a long run to import, asked when it would matter.
 
@@ -5616,13 +5638,14 @@ class MainWindow(QMainWindow):
                     # an exodus file with results cannot say what its
                     # own step axis means; the reading is asked, not
                     # guessed — and canceling skips the file
-                    options = self._exodus_import_choices(path)
-                    if options is None:
-                        continue
-                    # a stream that would take a large share of the
-                    # machine is imported through a window the user
-                    # chooses on a preview — or not at all
-                    window = self._stream_window_choices(path)
+                    with self._asking():
+                        options = self._exodus_import_choices(path)
+                        if options is None:
+                            continue
+                        # a stream that would take a large share of
+                        # the machine is imported through a window the
+                        # user chooses on a preview — or not at all
+                        window = self._stream_window_choices(path)
                     if window is None:
                         continue
                     options = {**options, **window}
@@ -8440,7 +8463,8 @@ class MainWindow(QMainWindow):
         for item in self.data_pane.graphics.ci.items:
             if not isinstance(item, pg.PlotItem):
                 continue
-            overlay = AveragingOverlay(item, averaging, rate, samples, colors)
+            overlay = AveragingOverlay(item, averaging, rate, samples, colors,
+                                       origin=float(history.abscissa[0]))
             overlay.changed.connect(self._averaging_dragged)
             self.averaging_overlays.append(overlay)
         panel = self.data_pane.averaging_panel
@@ -8672,8 +8696,10 @@ class MainWindow(QMainWindow):
             self.shock_overlays.append(ShockOverlay(
                 item, found, colors, changed=self._shocks_dragged,
                 locked=locked, common=uniform(found),
-                limit=self._record_end(history)))
+                limit=self._record_end(history),
+                origin=float(history.abscissa[0])))
         panel = self.data_pane.shock_panel
+        panel.origin = float(history.abscissa[0])
         panel.set_shocks(found, locked=locked)
         panel.show_band(*history.srs_band())
         panel.show()
@@ -9582,41 +9608,46 @@ class MainWindow(QMainWindow):
 
             averaging = data.averaging or Averaging.for_records(
                 len(data.abscissa))
+            origin = float(data.abscissa[0])
             add_averaging_marks(plotter, averaging, rate,
-                                extents, theme=self.theme_name)
+                                extents, theme=self.theme_name, origin=origin)
             panel = pane.averaging_panel
             panel.show_history(data, averaging)
             panel.show()
 
             def preview_averaging(proposed):
                 add_averaging_marks(plotter, proposed, rate, extents,
-                                    theme=self.theme_name)
+                                    theme=self.theme_name, origin=origin)
                 plotter.render()
 
             self._stage_dragger.arm_averaging(
                 averaging, rate, len(data.abscissa), extents,
-                preview_averaging, self._averaging_dragged)
+                preview_averaging, self._averaging_dragged, origin=origin)
         else:
             from ..core.shocks import uniform
             from ..viz.marks import add_shock_marks
 
             found = tuple(data.shocks or ())
             locked = bool(data.split_into_frames)
+            origin = float(data.abscissa[0])
             add_shock_marks(plotter, found, extents,
-                            theme=self.theme_name, locked=locked)
+                            theme=self.theme_name, locked=locked,
+                            origin=origin)
             panel = pane.shock_panel
+            panel.origin = origin
             panel.set_shocks(found, locked=locked)
             panel.show_band(*data.srs_band())
             panel.show()
             if not locked:
                 def preview_shocks(proposed):
                     add_shock_marks(plotter, proposed, extents,
-                                    theme=self.theme_name)
+                                    theme=self.theme_name, origin=origin)
                     plotter.render()
 
                 self._stage_dragger.arm_shocks(
                     found, uniform(found), self._record_end(data),
-                    extents, preview_shocks, self._shocks_dragged)
+                    extents, preview_shocks, self._shocks_dragged,
+                    origin=origin)
 
     def _act_on(self, kind, refusal, verb, /, *args, **kwargs):
         """The head every act on the bar shares: the current object has
@@ -12266,9 +12297,21 @@ class MainWindow(QMainWindow):
             plotter, spec, measured, measured_records,
             unit_system=self.unit_system, theme=self.theme_name,
             specification_records=spec_records)
+        stations = arrays['stations']
+        # the octave reading on a specification alone: the same steps
+        # the waterfall's stage gets, at each station of the banded
+        # stage — the button did nothing here, since this stage is
+        # not the waterfall's and the preview only knew that one
+        # (Brandon, 2026-09-18)
+        if (measured is None and stations and pane.showing_octave
+                and self._octave_source(
+                    [(spec_name, spec, spec_records)]) is not None):
+            self._stage_octave_preview(plotter, spec, {
+                'drawn': [station['row'] for station in stations],
+                'extents': arrays['extents'],
+                'stations': len(stations)})
         place_camera(plotter)
         plotter.render()
-        stations = arrays['stations']
         n = sum(not s['cross'] for s in stations)
         axis_note = self._offer_frequency_axis(
             [(spec_name, spec, spec_records)])

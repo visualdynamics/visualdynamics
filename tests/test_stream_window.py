@@ -255,6 +255,19 @@ def test_unchecked_channels_are_left_out(window, tmp_path):
     assert 'no channel is checked' in dialog.cost.text()
 
 
+def test_the_preview_is_one_trace_of_each_buckets_extremes(window, tmp_path):
+    """Two curves — the lows and the highs — read as two noisy
+    signals of opposite sign (Brandon, 2026-09-18). One trace, least
+    and greatest at each bucket's center, reads as the record."""
+    _path, dialog = _dialog(tmp_path, window, samples=1 << 12)
+    assert len(dialog._curves) == 1
+    x, y = dialog._curves[0].getData()
+    preview = dialog.preview
+    assert np.array_equal(x, np.repeat(preview['times'], 2))
+    assert np.array_equal(y[0::2], preview['low'])
+    assert np.array_equal(y[1::2], preview['high'])
+
+
 def test_the_preview_channel_is_the_users_to_pick(window, tmp_path):
     path, dialog = _dialog(tmp_path, window, samples=1 << 12)
     dialog.channel_box.setCurrentIndex(2)
@@ -320,6 +333,36 @@ def test_a_large_stream_imports_the_window_chosen(window, pump, tmp_path,
     assert window.project.journal[-1] == (
         f"project.import_file({path!r}, start=1.0, stop=2.0, "
         "channels=['101Z+', '104Z+'])")
+
+
+def test_the_dialog_is_asked_under_the_arrow_not_the_wait_cursor(
+        window, pump, tmp_path, monkeypatch):
+    """A drop's wait cursor stays up for the import but comes down
+    while the window is being chosen, and goes back up after."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    from visualdynamics.gui import stream_window
+
+    path = _stream(str(tmp_path / 'run.nc4'), samples=1 << 12)
+    monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1)
+    seen = []
+
+    def choose(*_args):
+        seen.append(QApplication.overrideCursor())
+        return {}
+
+    monkeypatch.setattr(stream_window, 'ask_stream_window', choose)
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+        window.import_paths([path])
+        pump()
+        assert seen == [None], 'the arrow while asking'
+        assert QApplication.overrideCursor() is not None, 'and busy again after'
+    finally:
+        while QApplication.overrideCursor() is not None:
+            QApplication.restoreOverrideCursor()
+    assert len(_histories(window)) == 1
 
 
 def test_cancelling_the_dialog_skips_the_file(window, pump, tmp_path, monkeypatch):

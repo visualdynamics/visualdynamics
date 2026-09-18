@@ -80,7 +80,8 @@ def normalize_window(name: str | None) -> str:
 
 
 def from_span(averaging: Averaging, low: float, high: float,
-              sample_rate: float, samples: int) -> Averaging:
+              sample_rate: float, samples: int,
+              origin: float = 0.0) -> Averaging:
     """The averaging a dragged span means, in whole frames.
 
     The frame length and the window are the table's; a drag says only
@@ -91,8 +92,11 @@ def from_span(averaging: Averaging, low: float, high: float,
     """
     rate = sample_rate
     n = averaging.frame_length
+    # the drag is on the record's clock; the start counts from the
+    # record's beginning (`Averaging.stop` says why they differ)
+    low, high = float(low) - origin, float(high) - origin
     last_start = max(samples - n, 0) / rate
-    start = min(max(float(low), 0.0), last_start)
+    start = min(max(low, 0.0), last_start)
     moved = replace(averaging, start=start)
     width = round((float(high) - start) * rate)
     wanted = 1 if width < n else 1 + (width - n) // moved.hop
@@ -265,16 +269,28 @@ class Averaging:
     def start_sample(self, sample_rate: float) -> int:
         return round(self.start * sample_rate)
 
-    def stop(self, sample_rate: float) -> float:
-        """When the analysis ends, in seconds — derived, never stored."""
-        return (self.start_sample(sample_rate) + self.span) / sample_rate
+    def stop(self, sample_rate: float, origin: float = 0.0) -> float:
+        """When the analysis ends, in seconds — derived, never stored.
 
-    def frame_bounds(self, sample_rate: float) -> list[tuple[float, float]]:
-        """[(start, stop)] in seconds, one per frame, overlaps included —
-        what the time history plot shades."""
+        `origin` is the record's first instant. `start` counts from
+        the record's beginning, a sample count in disguise, and stays
+        so whatever the clock says; but a record whose clock does not
+        begin at zero — a truncation keeps its measured instants, an
+        import window reads the run's — is drawn and dragged on that
+        clock, and the frames of one that began at 1060 s were being
+        drawn at 0 s, off the plot (Brandon, 2026-09-18). Every
+        reading in seconds takes the origin here, once.
+        """
+        return origin + (self.start_sample(sample_rate) + self.span) / sample_rate
+
+    def frame_bounds(self, sample_rate: float,
+                     origin: float = 0.0) -> list[tuple[float, float]]:
+        """[(start, stop)] in seconds on the record's clock, one per
+        frame, overlaps included — what the time history plot shades.
+        `origin` as in `stop`."""
         first = self.start_sample(sample_rate)
-        return [((first + i * self.hop) / sample_rate,
-                 (first + i * self.hop + self.frame_length) / sample_rate)
+        return [(origin + (first + i * self.hop) / sample_rate,
+                 origin + (first + i * self.hop + self.frame_length) / sample_rate)
                 for i in range(self.frames)]
 
     def fits(self, samples: int, sample_rate: float) -> bool:

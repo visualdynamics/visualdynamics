@@ -58,6 +58,8 @@ class AveragingPanel(QWidget):
         super().__init__(parent)
         self.sample_rate: float = 1.0
         self.samples: int = 0
+        #: the record's first instant, what the start box counts from
+        self.origin: float = 0.0
         self.records: int = 1
         #: the file already cut this record into one frame per
         #: average, so there is no stream to search for the test —
@@ -78,7 +80,7 @@ class AveragingPanel(QWidget):
         self.start_box.setDecimals(4)
         self.start_box.setSuffix(' s')
         self.start_box.setToolTip(
-            'Where the analysis begins, from the start of the record')
+            'Where the analysis begins, on the record’s own clock')
 
         self.length_box: SpinBox = SpinBox()
         self.length_box.setRange(2, 2 ** 24)
@@ -268,6 +270,10 @@ class AveragingPanel(QWidget):
         self._history = history
         self.sample_rate = history.sample_rate
         self.samples = len(history.abscissa)
+        # the box speaks the record's clock (a truncation keeps its
+        # instants; an import window reads the run's); the averaging
+        # counts from the record's beginning — `Averaging.stop`
+        self.origin = float(history.abscissa[0]) if self.samples else 0.0
         self.precut = history.split_into_frames
         self.records = max(history.records_per_channel.values(), default=1)
         # only what applies (principle 3): the reference-driven
@@ -288,7 +294,7 @@ class AveragingPanel(QWidget):
             # detected 57 frames came out as the 22 the last frame length
             # allowed
             self._apply_limits(averaging)
-            self.start_box.setValue(averaging.start)
+            self.start_box.setValue(self.origin + averaging.start)
             self.length_box.setValue(averaging.frame_length)
             self.overlap_box.setValue(averaging.overlap * 100.0)
             self.frames_box.setValue(averaging.frames)
@@ -316,7 +322,7 @@ class AveragingPanel(QWidget):
                                            if offered else None),
                          detrend=self.detrend_box.currentData(),
                          frames=self.frames_box.value(),
-                         start=self.start_box.value())
+                         start=max(self.start_box.value() - self.origin, 0.0))
 
     # ---- editing ----------------------------------------------------------
 
@@ -383,7 +389,7 @@ class AveragingPanel(QWidget):
         rate = self.sample_rate or 1.0
         self.length_box.setMaximum(max(self.samples, 2))
         last_start = max(self.samples - averaging.frame_length, 0) / rate
-        self.start_box.setRange(0.0, last_start)
+        self.start_box.setRange(self.origin, self.origin + last_start)
         self.start_box.setSingleStep(averaging.frame_length / rate / 4.0)
         self.frames_box.setMaximum(
             max(averaging.most_frames(self.samples, rate), 1))
@@ -417,7 +423,8 @@ class AveragingPanel(QWidget):
             if self.records > 1 else str(averages))
         self.derived['duration'].setText(
             f'{averaging.frame_length / rate:.4g} s')
-        self.derived['stop'].setText(f'{averaging.stop(rate):.4g} s')
+        self.derived['stop'].setText(
+            f'{averaging.stop(rate, self.origin):.4g} s')
         if self.precut:
             whole = averaging.frame_length == self.samples and not averaging.start
             self.note.setText(

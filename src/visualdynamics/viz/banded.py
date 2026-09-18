@@ -175,7 +175,7 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
                     exceed.append({'x': curve['full_x'],
                                    'out': mask, 'bound': bound,
                                    'written': written, 'over': over})
-        out.append({'dof': dof, 'target': logged(target),
+        out.append({'dof': dof, 'row': row, 'target': logged(target),
                     'cross': references is not None
                     and str(references[row]) != spec_dofs[row],
                     'limits': {name: logged(values)
@@ -242,6 +242,12 @@ def add_banded_stage(plotter: Any, specification: Any,
     z1 = max((float(z.max()) for z in finite_z), default=1.0)
     xspan = (x1 - x0) or 1.0
     zspan = (z1 - z0) or 1.0
+
+    # the stage's own extents, for whatever is drawn over it after —
+    # the octave preview normalizes its steps against these, the
+    # waterfall's rule (`info['extents']`), so the banding lands on
+    # the bands it was read from rather than nowhere (2026-09-18)
+    arrays['extents'] = (x0, x1, z0, z1)
 
     def nx(values):
         return (np.asarray(values, dtype=float) - x0) / xspan * sx

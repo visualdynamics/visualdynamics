@@ -776,14 +776,15 @@ def _stage_page(block, source, objects, us, caption, page):
                 rate = None     # unevenly sampled: no frames to draw
             if rate is not None:
                 marks['averaging'] = averaging_stage_geometry(
-                    averaging, rate, staged['extents'])
+                    averaging, rate, staged['extents'],
+                    float(source.abscissa[0]))
                 marks['averaging']['label'] = (
                     f'{averaging.frames} x {averaging.frame_length} '
                     f'samples, {averaging.window}, '
                     f'{round(averaging.overlap * 100)}% overlap')
         if getattr(source, 'shocks', None):
             marks['shocks'] = shock_stage_geometry(
-                source.shocks, staged['extents'])
+                source.shocks, staged['extents'], float(source.abscissa[0]))
     right, up = stage_basis()
     # the canvas prints real values at decade ticks where VTK prints
     # the exponents it was given, so the 'log10' honesty prefix comes
@@ -1819,7 +1820,8 @@ def _averaging_marks(source):
     rail = averaging.rail(rate)
     return {
         'frames': [[float(low), float(high)]
-                   for low, high in averaging.frame_bounds(rate)],
+                   for low, high in averaging.frame_bounds(
+                       rate, float(source.abscissa[0]))],
         # which row each frame sits on. Overlapping frames cannot share
         # one without their windows running through each other, which is
         # what put ten of them on top of each other in the figure.

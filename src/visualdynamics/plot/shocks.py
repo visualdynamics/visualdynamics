@@ -49,9 +49,12 @@ class ShockOverlay:
                  colors: Mapping[str, str],
                  changed: Callable[..., None] | None = None,
                  locked: bool = False, common: bool = False,
-                 limit: float | None = None) -> None:
+                 limit: float | None = None, origin: float = 0.0) -> None:
         self.plot: Any = plot
         self.shocks: tuple[Any, ...] = tuple(shocks)
+        #: the record's first instant: a shock's start counts from the
+        #: record's beginning, the plot's axis is the record's clock
+        self.origin: float = float(origin)
         self.colors: dict[str, str] = colors
         self.changed: Callable[..., None] | None = changed
         self.locked: bool = bool(locked)
@@ -86,7 +89,8 @@ class ShockOverlay:
         brush, pen = self._brushes()
         for index, shock in enumerate(self.shocks):
             region = pg.LinearRegionItem(
-                values=(shock.start, shock.stop), brush=brush, pen=pen,
+                values=(self.origin + shock.start, self.origin + shock.stop),
+                brush=brush, pen=pen,
                 movable=not self.locked)
             region.setZValue(-15)      # under the trace it brackets
             region.is_zone_edge = True
@@ -113,7 +117,7 @@ class ShockOverlay:
     def _place(self, text, shock):
         """Center the number over its own window, near the top."""
         low, high = self.plot.getViewBox().viewRange()[1]
-        text.setPos((shock.start + shock.stop) / 2.0,
+        text.setPos(self.origin + (shock.start + shock.stop) / 2.0,
                     low + (high - low) * LABEL_HEIGHT)
 
     # ---- dragging ---------------------------------------------------------
@@ -143,7 +147,8 @@ class ShockOverlay:
             return
         from ..core.shocks import drag_settled
 
-        low, high = sorted(self.regions[index].getRegion())
+        low, high = (v - self.origin
+                     for v in sorted(self.regions[index].getRegion()))
         settled = drag_settled(self.shocks, index, low, high,
                                self.common, self.limit)
         if settled is None:
@@ -177,8 +182,9 @@ class ShockOverlay:
         """
         for shock, region, label in zip(self.shocks, self.regions,
                                         self.labels):
-            if sorted(region.getRegion()) != [shock.start, shock.stop]:
-                region.setRegion((shock.start, shock.stop))
+            span = (self.origin + shock.start, self.origin + shock.stop)
+            if sorted(region.getRegion()) != list(span):
+                region.setRegion(span)
             self._place(label, shock)
 
     # ---- keeping up -------------------------------------------------------

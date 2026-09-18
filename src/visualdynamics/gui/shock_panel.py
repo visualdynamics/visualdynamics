@@ -66,6 +66,9 @@ class ShockPanel(QWidget):
 
     def __init__(self, parent: Any = None) -> None:
         super().__init__(parent)
+        #: the record's first instant: the table speaks the record's
+        #: clock, a shock's start counts from the record's beginning
+        self.origin: float = 0.0
         self.setFixedWidth(WIDTH)
         self.setSizePolicy(QSizePolicy.Policy.Fixed,
                            QSizePolicy.Policy.Expanding)
@@ -198,7 +201,8 @@ class ShockPanel(QWidget):
         try:
             self.table.setRowCount(len(shocks))
             for row, shock in enumerate(shocks):
-                for column, value in ((0, shock.start), (1, shock.duration)):
+                for column, value in ((0, self.origin + shock.start),
+                                      (1, shock.duration)):
                     item = QTableWidgetItem(f'{value:.{PLACES}f}')
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignRight
@@ -278,7 +282,7 @@ class ShockPanel(QWidget):
             self.set_shocks(self._shocks)
             return
         try:
-            moved = (Shock(value, was.duration) if column == 0
+            moved = (Shock(value - self.origin, was.duration) if column == 0
                      else Shock(was.start, value))
         except ValueError:
             self.set_shocks(self._shocks)

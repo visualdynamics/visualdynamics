@@ -248,7 +248,8 @@ def _edge_rim(plotter, xn, color, name):
 
 
 def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
-                             extents: Sequence[float]) -> dict[str, Any]:
+                             extents: Sequence[float],
+                             origin: float = 0.0) -> dict[str, Any]:
     """The averaging as plain stage geometry — no VTK, no Qt.
 
     The numbers `add_averaging_marks` puts into a plotter and the
@@ -264,8 +265,10 @@ def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
     to_x = _mapper(extents)
     _sx, sy, sz = STAGE
     wall = sy * WALL_SET_BACK
-    first = averaging.start_sample(sample_rate) / sample_rate
-    last = averaging.stop(sample_rate)
+    # on the record's clock, like everything the stage draws
+    # (`Averaging.stop` on the origin)
+    first = origin + averaging.start_sample(sample_rate) / sample_rate
+    last = averaging.stop(sample_rate, origin)
     levels, count = averaging.levels(sample_rate)
     slot = min(RAIL_SLOT, RAIL_BAND / count) * sz
     glyph = slot * GLYPH_SHARE
@@ -278,8 +281,8 @@ def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
     at = np.linspace(0, n - 1, min(GLYPH_POINTS, n)).astype(int)
     weights = shape[at]
     frames = []
-    for (low, high), level in zip(averaging.frame_bounds(sample_rate),
-                                  levels):
+    for (low, high), level in zip(
+            averaging.frame_bounds(sample_rate, origin), levels):
         baseline = foot + level * slot
         frames.append({
             'baseline': float(baseline),
@@ -293,21 +296,24 @@ def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
 
 
 def shock_stage_geometry(shocks: Sequence[Any],
-                         extents: Sequence[float]) -> dict[str, Any]:
+                         extents: Sequence[float],
+                         origin: float = 0.0) -> dict[str, Any]:
     """Each event's analysis window as plain stage geometry — the
     slab's span and the number it wears. The 3-D counterpart of
     `plot/shocks.py`'s regions, shared by the app's stage and the
     report's canvas the way the averaging's geometry is."""
     to_x = _mapper(extents)
     return {'windows': [
-        {'span': [float(to_x(shock.start)), float(to_x(shock.stop))],
+        {'span': [float(to_x(origin + shock.start)),
+                  float(to_x(origin + shock.stop))],
          'label': str(index + 1)}
         for index, shock in enumerate(shocks)]}
 
 
 def add_averaging_marks(plotter: Any, averaging: Averaging,
                         sample_rate: float, extents: Sequence[float],
-                        theme: Any = None) -> dict[str, int]:
+                        theme: Any = None,
+                        origin: float = 0.0) -> dict[str, int]:
     """The averaging as stage geometry: the span, bands, windows.
 
     The analysis span is one filled slab with rimmed edges — the same
@@ -320,7 +326,8 @@ def add_averaging_marks(plotter: Any, averaging: Averaging,
     import pyvista as pv
 
     colors = resolve_theme(theme)
-    geometry = averaging_stage_geometry(averaging, sample_rate, extents)
+    geometry = averaging_stage_geometry(averaging, sample_rate, extents,
+                                        origin)
     _sx, sy, sz = STAGE
     wall = geometry['wall']
 
@@ -457,7 +464,8 @@ def add_truncation_marks(plotter: Any, truncation: Any,
 def add_shock_marks(plotter: Any, shocks: Sequence[Any],
                     extents: Sequence[float],
                     theme: Any = None,
-                    locked: bool = False) -> dict[str, int]:
+                    locked: bool = False,
+                    origin: float = 0.0) -> dict[str, int]:
     """Each event's analysis window as a translucent slab, numbered.
 
     The flat plot brackets a window with a region; here the bracket
@@ -472,7 +480,7 @@ def add_shock_marks(plotter: Any, shocks: Sequence[Any],
     _sx, sy, sz = STAGE
     spots, names = [], []
     for index, window in enumerate(
-            shock_stage_geometry(shocks, extents)['windows']):
+            shock_stage_geometry(shocks, extents, origin)['windows']):
         xl, xh = window['span']
         slab = pv.Box(bounds=(xl, xh, 0.0, sy, 0.0, sz))
         _add(plotter, slab, color=colors['averaging_band'],

@@ -56,14 +56,17 @@ class StageMarksDragger:
     # ---- what the marks mean right now ----------------------------------
 
     def arm_averaging(self, averaging: Averaging, sample_rate: float,
-                      samples: int, extents, preview, commit) -> None:
+                      samples: int, extents, preview, commit,
+                      origin: float = 0.0) -> None:
         """`preview(averaging)` redraws the marks; `commit(averaging)`
-        is the window's own drag handler."""
+        is the window's own drag handler. `origin` is the record's
+        first instant: the handles are on the record's clock, the
+        averaging counts from its beginning."""
         self._context = {
             'kind': 'averaging', 'averaging': averaging,
             'rate': float(sample_rate), 'samples': int(samples),
             'extents': tuple(extents), 'preview': preview,
-            'commit': commit}
+            'commit': commit, 'origin': float(origin)}
 
     def arm_truncation(self, truncation, first: float, last: float,
                        extents, preview, commit) -> None:
@@ -77,14 +80,14 @@ class StageMarksDragger:
             'commit': commit}
 
     def arm_shocks(self, shocks, common: bool, limit, extents,
-                   preview, commit) -> None:
+                   preview, commit, origin: float = 0.0) -> None:
         """`preview(shocks)` redraws; `commit(shocks)` stores the
-        settled series."""
+        settled series. `origin` as for the averaging."""
         self._context = {
             'kind': 'shocks', 'shocks': tuple(shocks),
             'common': bool(common), 'limit': limit,
             'extents': tuple(extents), 'preview': preview,
-            'commit': commit}
+            'commit': commit, 'origin': float(origin)}
 
     def disarm(self) -> None:
         self._context = None
@@ -105,11 +108,12 @@ class StageMarksDragger:
                        'truncation' if truncation_kind else 'shocks')
         if handle_kind != context['kind']:
             return False        # a stale handle from another view
+        origin = context.get('origin', 0.0)
         if context['kind'] == 'averaging':
             averaging = context['averaging']
             rate = context['rate']
-            low = averaging.start_sample(rate) / rate
-            high = averaging.stop(rate)
+            low = origin + averaging.start_sample(rate) / rate
+            high = averaging.stop(rate, origin)
         elif context['kind'] == 'truncation':
             truncation = context['truncation']
             low, high = truncation.start, truncation.stop
@@ -118,7 +122,7 @@ class StageMarksDragger:
             if index >= len(context['shocks']):
                 return False
             shock = context['shocks'][index]
-            low, high = shock.start, shock.stop
+            low, high = origin + shock.start, origin + shock.stop
         self._grab = {
             'role': role, 'index': None if index is None else int(index),
             'low': low, 'high': high,
@@ -140,12 +144,14 @@ class StageMarksDragger:
 
     def _proposal(self, seconds: float):
         context, low_high = self._context, self._span_for(seconds)
+        origin = context.get('origin', 0.0)
         if context['kind'] == 'averaging':
             return from_span(context['averaging'], *low_high,
-                             context['rate'], context['samples'])
+                             context['rate'], context['samples'],
+                             origin=origin)
         if context['kind'] == 'truncation':
             return self._truncation_for(*low_high)
-        low, high = low_high
+        low, high = (v - origin for v in low_high)
         index = self._grab['index']
         raw = Shock(max(low, 0.0), max(high - max(low, 0.0), 1e-9))
         return tuple(raw if k == index else shock

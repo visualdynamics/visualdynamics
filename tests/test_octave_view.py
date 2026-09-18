@@ -179,6 +179,18 @@ def test_a_specification_is_offered_the_reading_and_apply_bands_its_limits(
     assert pane.octave_action.isVisible(), 'offered on a specification'
     pane.octave_action.trigger()
     pump()
+    # the reading shows on the specification's own stage — the banded
+    # stage, not the waterfall's — and on the flat plot (the button
+    # "did nothing" on the stage, Brandon, 2026-09-18)
+    assert pane.waterfall_action.isChecked(), 'a specification opens on its stage'
+    assert 'marks-octave' in set(pane.waterfall_plotter.actors), \
+        'the banded steps on the banded stage'
+    assert pane.octave_panel.isVisible()
+    pane.waterfall_action.trigger()      # and flat
+    pump()
+    assert window.octave_previews, 'the steps over the flat bands'
+    pane.waterfall_action.trigger()      # back to the stage for Apply
+    pump()
     pane.octave_panel.apply_asked.emit()
     pump()
     made = window.current_object()

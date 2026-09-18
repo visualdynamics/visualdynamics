@@ -22,6 +22,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -186,15 +187,17 @@ class StreamWindowDialog(QDialog):
             self.path, self.channel_box.currentIndex(),
             stream=self.stream['variable'])
         self.preview = preview
-        # two curves and no fill between them: a bucket the stream has
-        # no sample in is NaN, drawn as a gap (connect='finite'), and a
-        # filled band would have to invent an edge across it
+        # one trace, each bucket's least and greatest at its center: the
+        # stage's own thinning drawn the stage's own way, which reads as
+        # the record it stands for. Two curves, the lows and the highs,
+        # read as two noisy signals of opposite sign (Brandon,
+        # 2026-09-18). A bucket the stream has no sample in is NaN, a
+        # gap in the trace (connect='finite'), never a bridged edge
+        times = np.repeat(preview['times'], 2)
+        values = np.stack([preview['low'], preview['high']], axis=1).ravel()
         pen = pg.mkPen(self.colors['response_curve'], width=1)
-        low = self.plot.plot(preview['times'], preview['low'], pen=pen,
-                             connect='finite')
-        high = self.plot.plot(preview['times'], preview['high'], pen=pen,
-                              connect='finite')
-        self._curves = [low, high]
+        trace = self.plot.plot(times, values, pen=pen, connect='finite')
+        self._curves = [trace]
         unit = preview['unit'] or 'units undefined'
         self.plot.setLabel('left', f'{preview["dof"]} [{unit}]')
         self.plot.setXRange(0.0, (preview['samples'] - 1) / self.rate, padding=0)

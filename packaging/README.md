@@ -312,6 +312,17 @@ publisher at that first upload. The real distribution goes up by
 itself when the first release is published, the same moment the site
 deploys.
 
+**The placeholder was deleted on 2026-09-17, and `reserve` must not
+run again while every real version is a pre-release.** pip ignores
+pre-releases whenever a stable version exists, and 0.0.0 counted as
+one, so `pip install visualdynamics` installed the empty placeholder
+for three alphas. Yanking it was worse — pip decides about
+pre-releases before it discards yanked files, so a yanked 0.0.0 hid
+the alphas and was then refused itself, and a plain install found
+nothing. Deleting the release (PyPI web UI; permanent, and the
+number can never be reused) is what made a plain install resolve to
+the newest alpha.
+
 ## Regenerating the icons
 
 `icon.icns`, `icon.ico` and `icon-512.png` are generated from

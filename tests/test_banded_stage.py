@@ -317,3 +317,40 @@ def test_a_stage_is_one_drawing_not_one_render_per_actor():
     add_waterfall(plotter, _specification())
     assert not renders, 'the waterfall drawer holds to the same rule'
     assert plotter.suppress_rendering is False
+
+
+def test_a_banded_specification_stands_as_steps():
+    """An octave-band specification is a density per bin and draws
+    flat across each, the 2-D plot's stepMode and the waterfall's
+    outline; the banded stage drew it as the line through its bin
+    centers (Brandon, 2026-09-18). Two points per bin on the bin's
+    edges now, for the target and every limit; the exceedances are
+    still judged on the specification's own lines."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.plot import step_outline
+    from visualdynamics.viz.banded import banded_stage_arrays
+
+    freq = np.linspace(10.0, 2000.0, 200)
+    level = np.full((1, len(freq)), 1e-2)
+    spec = Specification(abscissa=freq, ordinate=level, response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         ordinate_unit=['m/s**2'],
+                         warning_upper=level * 2, abort_upper=level * 4)
+    plain = banded_stage_arrays(spec)
+    assert plain['stations'][0]['target'].shape == (200,)
+    assert np.array_equal(plain['spec_x_drawn'], plain['spec_x'])
+    banded = spec.to_octave(3)
+    arrays = banded_stage_arrays(banded)
+    bins = len(banded.abscissa)
+    station = arrays['stations'][0]
+    assert station['target'].shape == (2 * bins,)
+    assert station['limits']['abort_upper'].shape == (2 * bins,)
+    edges, _rows = step_outline(banded.abscissa, banded.ordinate.real,
+                                banded.bin_widths())
+    assert np.array_equal(arrays['spec_x_drawn'], edges)
+    assert np.array_equal(arrays['spec_x'], banded.abscissa), \
+        'the lines themselves, for judging'
+    assert np.array_equal(station['target'][0::2], station['target'][1::2]), \
+        'flat across each bin'

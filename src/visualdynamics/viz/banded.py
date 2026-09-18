@@ -150,6 +150,27 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
         with np.errstate(invalid='ignore'):
             return np.log10(values)
 
+    # A banded specification (octave bands: `bandwidth` set) is a
+    # density per bin and draws flat across each — the 2-D plot's
+    # stepMode and the waterfall's outline, `drawing_shape`'s one rule
+    # — where this stage drew it as the line through its bin centers
+    # (Brandon, 2026-09-18). The outline is for drawing only: the
+    # exceedances are judged against the written limits on the
+    # specification's own lines, as before.
+    from ..plot import step_outline
+
+    widths = (specification.bin_widths()
+              if getattr(specification, 'bandwidth', None) is not None
+              else None)
+
+    def drawn(values):
+        if widths is None:
+            return np.asarray(values, dtype=float)
+        return np.atleast_2d(step_outline(spec_x, values, widths)[1])[0]
+
+    spec_x_drawn = (spec_x if widths is None
+                    else step_outline(spec_x, np.zeros(len(spec_x)), widths)[0])
+
     out = []
     for dof, row in station_rows:
         # a cross term is complex; its magnitude is what the 2-D plot
@@ -175,10 +196,10 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
                     exceed.append({'x': curve['full_x'],
                                    'out': mask, 'bound': bound,
                                    'written': written, 'over': over})
-        out.append({'dof': dof, 'row': row, 'target': logged(target),
+        out.append({'dof': dof, 'row': row, 'target': logged(drawn(target)),
                     'cross': references is not None
                     and str(references[row]) != spec_dofs[row],
-                    'limits': {name: logged(values)
+                    'limits': {name: logged(drawn(values))
                                for name, values in limits.items()},
                     'raw_limits': limits,
                     'curves': [{'x': c['x'], 'z': c['z'],
@@ -189,7 +210,8 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
         word = getattr(specification, 'ordinate_dim', [''])
         word = word[0] if word else ''
         zlabel = (f'log10 {word}' if log_scaled else word) or 'level'
-    return {'stations': out, 'spec_x': spec_x, 'log_scaled': log_scaled,
+    return {'stations': out, 'spec_x': spec_x, 'spec_x_drawn': spec_x_drawn,
+            'log_scaled': log_scaled,
             'xlabel': xlabel, 'zlabel': zlabel,
             'compared': measured is not None,
             'logged': logged, 'spread': spread}
@@ -229,7 +251,11 @@ def add_banded_stage(plotter: Any, specification: Any,
     spread = arrays['spread']
     compared = arrays['compared']
 
-    xs = [spread(spec_x)] + [c['x'] for s in stations for c in s['curves']]
+    # the targets and limits are drawn along `spec_x_drawn` — the
+    # lines, or a banded specification's bin edges — while the
+    # exceedances below are judged against `spec_x`
+    drawn_x = arrays['spec_x_drawn']
+    xs = [spread(drawn_x)] + [c['x'] for s in stations for c in s['curves']]
     zs = ([s['target'] for s in stations]
           + [v for s in stations for v in s['limits'].values()]
           + [c['z'] for s in stations for c in s['curves']])
@@ -257,7 +283,7 @@ def add_banded_stage(plotter: Any, specification: Any,
 
     total = 0
     label_spots, label_names = [], []
-    spec_xn = nx(spread(spec_x))
+    spec_xn = nx(spread(drawn_x))
     for k, station in enumerate(stations):
         y = (k / max(len(stations) - 1, 1)) * sy
         limits = station['limits']

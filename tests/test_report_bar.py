@@ -175,3 +175,30 @@ def test_caption_source_title_and_marking_edit_from_the_pane(editing):
     assert report.marking == 'SECRET'
     editor.color_box.setCurrentIndex(1)
     assert report.marking_color == 'red'
+
+
+def test_a_build_that_fails_says_so_on_the_page(window, pump, monkeypatch):
+    """A render that raised left the view white and the pane reading
+    "No report" (Brandon, 2026-09-18). The page carries the traceback,
+    the pane and the status line name the error, and the object stays."""
+    from visualdynamics.gui import report_editor as editor_module
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError('the figure that would not draw')
+
+    monkeypatch.setattr(editor_module, 'render_html', broken, raising=False)
+    import visualdynamics.report as report_module
+    monkeypatch.setattr(report_module, 'render_html', broken)
+    window.project.generate_report('empty')
+    window.show_object('Report')
+    pump()
+    editor = window.report_editor
+    assert editor.report is not None, 'the report is still the object'
+    assert 'the figure that would not draw' in (editor.failure or '')
+    assert 'could not be built' in window.statusBar().currentMessage()
+    assert 'the figure that would not draw' in window.statusBar().currentMessage()
+    with open(editor._page_path, encoding='utf-8') as page:
+        assert 'This report could not be built' in page.read()
+    from PySide6.QtWidgets import QLabel
+    assert any('could not be built' in label.text()
+               for label in editor.findChildren(QLabel))

@@ -23,9 +23,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.report import Report
 
 import contextlib
+import html as html_escape
 import json
 import os
 import tempfile
+import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -156,6 +158,9 @@ class ReportEditor(QWidget):
         #: window rebuilds before showing it again rather than paying
         #: 254 ms per change for a document nobody is looking at
         self.stale: bool = False
+        #: what stopped the last build, or None: a page that could not
+        #: be built says so instead of staying white
+        self.failure: str | None = None
         # the pane's widgets, rebuilt when the selection changes; None
         # while the selection has no such field
         self.text_editor: QPlainTextEdit | None = None
@@ -326,6 +331,14 @@ class ReportEditor(QWidget):
 
     # ---- the pane -----------------------------------------------------------
 
+    @staticmethod
+    def _failure_page(text: str) -> str:
+        return ('<!DOCTYPE html><html><body style="font-family: sans-serif; '
+                'margin: 2em"><h2>This report could not be built</h2>'
+                '<p>The error below is the whole story; the report and its '
+                'blocks are unchanged.</p><pre style="white-space: pre-wrap">'
+                f'{html_escape.escape(text)}</pre></body></html>')
+
     def _show_selection(self) -> None:
         """Rebuild the pane for what is selected: a text block's editor,
         a figure block's sources and caption, or the report's title and
@@ -357,6 +370,10 @@ class ReportEditor(QWidget):
                      and 0 <= self.selected < report.num_blocks else None)
             if report is None:
                 form.addRow(QLabel('No report'))
+            elif self.failure:
+                told = QLabel(f'The report could not be built:\n{self.failure}')
+                told.setWordWrap(True)
+                form.addRow(told)
             elif block is None:
                 form.addRow(QLabel('<b>Report</b>'))
                 self.title_edit = QLineEdit(report.title)
@@ -501,10 +518,24 @@ class ReportEditor(QWidget):
             self._channel_js = bytes(resource.readAll()).decode('utf-8')
             resource.close()
         labels: list[tuple[str, str]] = []
-        html = render_html(self.report, self.objects(), self.unit_system,
-                           edit=True, channel_js=self._channel_js,
-                           links=self.links() if self.links else None,
-                           selected=self.selected, labels=labels)
+        try:
+            html = render_html(self.report, self.objects(), self.unit_system,
+                               edit=True, channel_js=self._channel_js,
+                               links=self.links() if self.links else None,
+                               selected=self.selected, labels=labels)
+        except Exception as failure:  # noqa: BLE001 — the page reports it
+            # A build that raised used to leave the view white and the
+            # pane reading "No report", the exception gone to a console
+            # nobody was looking at (Brandon, 2026-09-18: "just getting a
+            # white screen and no report"). The page carries the
+            # traceback now, the pane and the status line the one line
+            # that names it, and the report object is still there to
+            # be looked at.
+            self.failure = f'{type(failure).__name__}: {failure}'
+            html = self._failure_page(traceback.format_exc())
+            labels = []
+        else:
+            self.failure = None
         self._labels = labels
         self._fill_insert_menu()
         self._fill_reference_menu()

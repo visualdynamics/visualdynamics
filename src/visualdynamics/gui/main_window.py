@@ -5846,22 +5846,30 @@ class MainWindow(QMainWindow):
         Runs only (dict results): a .vdyn brings its *own* links, and
         an object its author left unlinked stays that way. Runs at
         import only, so an explicit Unlink later is not fought.
+
+        A run whose kinds the Basis already holds — the same file
+        imported again through a window, a second run beside the
+        first — places nothing, and its arrivals were left unlinked
+        (Brandon, 2026-09-18: "I would think they should import as a
+        linked set"). One file is one measurement either way: they
+        are linked as a group of their own.
         """
         grouped = {member for group in self.links
                    for member in group['members']}
         placed = next((name for name in names if name in grouped), None)
         loose = [name for name in names if name not in grouped]
-        if placed is None or not loose:
+        if not loose or (placed is None and len(loose) < 2):
             return
         try:
-            self.project.link(placed, *loose)
+            self.project.link(*([placed] if placed else []), *loose)
         except (ValueError, KeyError) as refusal:
             # incompatibility warns, it does not block the import
             self._show_status(str(refusal))
             return
         self._links_changed()
         told = ', '.join(loose)
-        self._show_status(f'{told} joined the run’s group')
+        self._show_status(f'{told} joined the run’s group' if placed
+                          else f'{told} linked as the run’s group')
 
     def _add_result(self, path, result, tick=None, options=None):
         """Name each imported object for its type. Nothing else.
@@ -10376,6 +10384,8 @@ class MainWindow(QMainWindow):
             # the project changed while the page was off screen
             self.report_editor.rebuild()
         self.report_editor.show()
+        if self.report_editor.failure:
+            return f'{name}: could not be built — {self.report_editor.failure}'
         unbound = len(report.unbound(self.objects, self.links))
         note = (f'; {unbound} block{"s" * (unbound != 1)} unbound — pick '
                 'a source' if unbound else '')

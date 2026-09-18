@@ -305,7 +305,7 @@ def test_a_small_stream_imports_whole_without_a_question(window, pump, tmp_path,
     window.import_paths([path])
     pump()
     assert _histories(window)[0].ordinate.shape == (8, 1 << 12)
-    assert window.project.journal[-1] == f'project.import_file({path!r})'
+    assert f'project.import_file({path!r})' in window.project.journal
 
 
 def test_a_large_stream_imports_the_window_chosen(window, pump, tmp_path,
@@ -330,9 +330,8 @@ def test_a_large_stream_imports_the_window_chosen(window, pump, tmp_path,
     history = _histories(window)[0]
     assert history.response_dof == ['101Z+', '104Z+']
     assert history.abscissa[0] == 1.0 and history.ordinate.shape[1] == 4097
-    assert window.project.journal[-1] == (
-        f"project.import_file({path!r}, start=1.0, stop=2.0, "
-        "channels=['101Z+', '104Z+'])")
+    assert (f"project.import_file({path!r}, start=1.0, stop=2.0, "
+            "channels=['101Z+', '104Z+'])") in window.project.journal
 
 
 def test_the_dialog_is_asked_under_the_arrow_not_the_wait_cursor(

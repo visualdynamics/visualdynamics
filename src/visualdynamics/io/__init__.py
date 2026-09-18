@@ -21,6 +21,7 @@ from . import (
     excel,
     exodus,
     femap,
+    matlab,
     nastran,
     native,
     photo_files,
@@ -162,6 +163,8 @@ register_importer('step',
                   step.sniff, step.load)
 register_importer('stl', 'CAD triangle mesh (.stl)',
                   stl.sniff, stl.load)
+register_importer('matlab', 'MATLAB file, the project layout (.mat)',
+                  matlab.sniff, matlab.load)
 
 register_exporter('sdynpy_geometry', 'sdynpy native geometry (.npz)', '.npz',
                   sdynpy_npz.handles, sdynpy_npz.save)
@@ -219,6 +222,10 @@ register_exporter('rattlesnake_specification',
 register_exporter('report_template', 'Report template (.vdreport)',
                   report_template.SUFFIX, report_template.handles,
                   report_template.save)
+# the project file in MATLAB's container: every object and a whole
+# project, SI with the units named, exactly as .vdyn holds them
+register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
+                  matlab.handles, matlab.save)
 
 __all__ = ['TestContents', 'export_file', 'exporters', 'from_sep005',
            'import_file', 'importers', 'load', 'native', 'project_type_of',

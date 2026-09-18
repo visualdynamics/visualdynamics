@@ -76,7 +76,8 @@ def test_the_formats_are_the_dialogs_file_types(window, geometry, monkeypatch):
 def test_only_the_formats_this_object_has(window, pump, monkeypatch):
     """Said in the list rather than in an error afterwards: a report
     has one foreign form, the template it can be saved as (2026-09-08),
-    so that and `.vdyn` are offered and nothing else."""
+    plus the project layout in MATLAB's container (2026-09-18), so
+    those and `.vdyn` are offered and nothing else."""
     from visualdynamics.core.report import Report
 
     window.add_object('Report', Report())
@@ -84,7 +85,8 @@ def test_only_the_formats_this_object_has(window, pump, monkeypatch):
     pump()
     seen = offered(window, monkeypatch)
     assert seen['filters'] == ['Visual Dynamics object (*.vdyn)',
-                               'Report template (.vdreport) (*.vdreport)']
+                               'Report template (.vdreport) (*.vdreport)',
+                               'MATLAB file (.mat) (*.mat)']
 
 
 def test_choosing_a_foreign_type_writes_that_format(window, geometry,

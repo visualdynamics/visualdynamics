@@ -552,10 +552,17 @@ def save(obj: Any, path: str | os.PathLike) -> None:
     """Save a visualdynamics object to a .vdyn (HDF5) file."""
     import h5py
 
-    group_name, saver = _saver_for(obj)
     with h5py.File(_visualdynamics_path(path), 'w') as f:
-        f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
-        saver(obj, f.create_group(group_name))
+        save_into(obj, f)
+
+
+def save_into(obj: Any, f: h5py.File) -> None:
+    """Write one object into an open, empty HDF5 file — the whole of
+    `save` but the opening, so another container (`io.matlab`) can run
+    the same writer into memory and carry the tree away."""
+    group_name, saver = _saver_for(obj)
+    f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
+    saver(obj, f.create_group(group_name))
 
 
 # A whole test read back from one file is a Project: {name: object} in
@@ -581,22 +588,32 @@ def save_test(path: str | os.PathLike, name: str,
     import h5py
 
     with h5py.File(_visualdynamics_path(path), 'w') as f:
-        f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
-        f.attrs['test_name'] = name
-        f.attrs['active_geometry'] = active_geometry or ''
-        f.attrs['project_type'] = project_type or ''
-        import json
-        f.attrs['links'] = json.dumps(links or [])
-        # how each derived object was computed, for the staleness
-        # badges — settings fingerprints, so they survive the file
-        f.attrs['provenance'] = json.dumps(provenance or {})
-        container = f.create_group('objects')
-        for i, (obj_name, obj) in enumerate(objects.items()):
-            kind, saver = _saver_for(obj)
-            group = container.create_group(f'{i:04d}')
-            group.attrs['name'] = obj_name
-            group.attrs['kind'] = kind
-            saver(obj, group)
+        save_test_into(f, name, objects, active_geometry, project_type,
+                       links, provenance)
+
+
+def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
+                   active_geometry: str | None = None,
+                   project_type: str | None = None,
+                   links: Sequence[Mapping[str, Any]] | None = None,
+                   provenance: Mapping[str, Any] | None = None) -> None:
+    """`save_test` into an open, empty HDF5 file (see `save_into`)."""
+    f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
+    f.attrs['test_name'] = name
+    f.attrs['active_geometry'] = active_geometry or ''
+    f.attrs['project_type'] = project_type or ''
+    import json
+    f.attrs['links'] = json.dumps(links or [])
+    # how each derived object was computed, for the staleness
+    # badges — settings fingerprints, so they survive the file
+    f.attrs['provenance'] = json.dumps(provenance or {})
+    container = f.create_group('objects')
+    for i, (obj_name, obj) in enumerate(objects.items()):
+        kind, saver = _saver_for(obj)
+        group = container.create_group(f'{i:04d}')
+        group.attrs['name'] = obj_name
+        group.attrs['kind'] = kind
+        saver(obj, group)
 
 
 def load(path: str | os.PathLike,
@@ -612,37 +629,44 @@ def load(path: str | os.PathLike,
     import h5py
 
     with h5py.File(path, 'r') as f:
-        # A newer stamp means a newer Visual Dynamics wrote fields this
-        # reader has no idea exist, and half-loading someone's project
-        # quietly is worse than telling them to update. A missing stamp
-        # means the file is not ours at all — every writer stamps.
-        if 'visualdynamics_schema' not in f.attrs:
-            raise ValueError(f'{path} is not a Visual Dynamics file '
-                             '(no schema stamp)')
-        written = int(f.attrs['visualdynamics_schema'])
-        if written > SCHEMA_VERSION:
-            raise ValueError(
-                f'{path} was written by a newer Visual Dynamics '
-                f'(schema {written}; this build reads up to '
-                f'{SCHEMA_VERSION}). Update to open it.')
-        if 'objects' in f:
-            objects = {}
-            keys = sorted(f['objects'])
+        return load_from(f, progress, str(path))
+
+
+def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
+              path: str = '') -> Any:
+    """`load` from an open HDF5 file (see `save_into`); `path` names
+    the file in the errors."""
+    # A newer stamp means a newer Visual Dynamics wrote fields this
+    # reader has no idea exist, and half-loading someone's project
+    # quietly is worse than telling them to update. A missing stamp
+    # means the file is not ours at all — every writer stamps.
+    if 'visualdynamics_schema' not in f.attrs:
+        raise ValueError(f'{path} is not a Visual Dynamics file '
+                         '(no schema stamp)')
+    written = int(f.attrs['visualdynamics_schema'])
+    if written > SCHEMA_VERSION:
+        raise ValueError(
+            f'{path} was written by a newer Visual Dynamics '
+            f'(schema {written}; this build reads up to '
+            f'{SCHEMA_VERSION}). Update to open it.')
+    if 'objects' in f:
+        objects = {}
+        keys = sorted(f['objects'])
+        if progress is not None:
+            progress(0, len(keys))
+        for done, key in enumerate(keys, start=1):
+            group = f['objects'][key]
+            objects[group.attrs['name']] = (
+                _LOADERS[group.attrs['kind']](group))
             if progress is not None:
-                progress(0, len(keys))
-            for done, key in enumerate(keys, start=1):
-                group = f['objects'][key]
-                objects[group.attrs['name']] = (
-                    _LOADERS[group.attrs['kind']](group))
-                if progress is not None:
-                    progress(done, len(keys))
-            import json
-            return Project(f.attrs['test_name'], objects,
-                           f.attrs['active_geometry'] or None,
-                           f.attrs['project_type'] or None,
-                           json.loads(f.attrs['links']),
-                           provenance=json.loads(f.attrs['provenance']))
-        for group_name, loader in _LOADERS.items():
-            if group_name in f:
-                return loader(f[group_name])
-        raise ValueError(f"No recognized content in {path}")
+                progress(done, len(keys))
+        import json
+        return Project(f.attrs['test_name'], objects,
+                       f.attrs['active_geometry'] or None,
+                       f.attrs['project_type'] or None,
+                       json.loads(f.attrs['links']),
+                       provenance=json.loads(f.attrs['provenance']))
+    for group_name, loader in _LOADERS.items():
+        if group_name in f:
+            return loader(f[group_name])
+    raise ValueError(f"No recognized content in {path}")

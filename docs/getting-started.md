@@ -42,12 +42,13 @@ include and a Python install adds with
 ## The app
 
 ```bash
-visualdynamics-gui                  # or: python -m visualdynamics
-visualdynamics-gui modal_run.nc4    # opening files on the way in
+visualdynamics                      # or: python -m visualdynamics
+visualdynamics modal_run.nc4        # opening files on the way in
 ```
 
 A compiled package opens like any other application; the commands
-above are for the Python install.
+above are for the Python install. (`visualdynamics-gui` still works,
+for anything that learned it from the first alphas.)
 
 Something to open on the first day: the [downloads
 page](https://visualdynamics.org/downloads#examples) links two sets of
@@ -79,11 +80,11 @@ active. From a terminal that has not activated it, either activate
 first or call it by path; both run the same thing:
 
 ```bash
-source .venv/bin/activate && visualdynamics-gui   # from the clone
+source .venv/bin/activate && visualdynamics   # from the clone
 ```
 
 ```bash
-~/visualdynamics/.venv/bin/visualdynamics-gui     # from anywhere
+~/visualdynamics/.venv/bin/visualdynamics     # from anywhere
 ```
 
 ![The main window, holding a plate modal survey: the project tree at
@@ -100,7 +101,8 @@ files (`.neu`), sdynpy arrays (`.npz`/`.npy`), channel-table
 spreadsheets (`.xlsx`), CAD geometry (`.step`/`.iges` tessellated on
 import — a McMaster-Carr download drops straight in — and `.3mf` or
 `.stl` meshes, each part a named block),
-photographs, and whole `.vdyn` projects. The
+photographs, MATLAB files in the project's own layout (`.mat`), and
+whole `.vdyn` projects. The
 full matrix of what each format carries, both directions, is in
 [Importing and exporting](export.md).
 

@@ -49,5 +49,7 @@ def test_the_channel_table_exports_to_excel(tmp_path):
 def test_excel_is_offered_for_channel_tables_alone():
     table = io.load(fixture_path('plate', 'channel_table.vdyn'))
     geometry = visualdynamics.import_file(fixture_path('plate', 'geometry.unv'))
-    assert [e.name for e in io.exporters(table)] == ['excel']
+    # matlab takes every object the project file holds; excel is
+    # the one *spreadsheet* form, and a table's alone
+    assert [e.name for e in io.exporters(table)] == ['excel', 'matlab']
     assert 'excel' not in [e.name for e in io.exporters(geometry)]

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.report import Report
 
+import contextlib
 import json
 import os
 import tempfile
@@ -132,6 +133,8 @@ class ReportEditor(QWidget):
         layout.addWidget(self.toolbar)
         self.split: QSplitter = QSplitter(Qt.Orientation.Horizontal)
         self.view: QWebEngineView = QWebEngineView()
+        #: the loadFinished slot of the navigation in flight, if any
+        self._restore = None
         self.split.addWidget(self.view)
         self.pane: QScrollArea = QScrollArea()
         self.pane.setWidgetResizable(True)
@@ -515,6 +518,7 @@ class ReportEditor(QWidget):
         scroll = self._scroll
 
         def restore(_ok: bool) -> None:
+            self._restore = None
             self.view.loadFinished.disconnect(restore)
             # the view as the timer's context: a window closed inside
             # those 50 ms takes the view with it, and a bare singleShot
@@ -523,8 +527,55 @@ class ReportEditor(QWidget):
             QTimer.singleShot(50, self.view, lambda: self.view.page().runJavaScript(
                 f'window.scrollTo(0, {int(scroll)});'))
 
+        # one slot at a time: a rebuild before the last page finished
+        # would otherwise leave the earlier slot connected, to fire on
+        # this load and disconnect itself twice
+        if self._restore is not None:
+            with contextlib.suppress(RuntimeError, TypeError):
+                self.view.loadFinished.disconnect(self._restore)
+        self._restore = restore
         self.view.loadFinished.connect(restore)
         self._offer()
+
+    def stand_down(self) -> None:
+        """Leave the page with nothing for the view's destructor to wait on.
+
+        A `QWebEngineView` destroyed while its page is live blocked the
+        whole process: Chromium's teardown waits on the render process
+        in a synchronous `mach_msg` call that never returned. That was
+        the gate's "stall at 98 %" — sampled on 2026-09-18 with a
+        worker's main thread parked inside QtWebEngineCore, and then
+        named exactly by a faulthandler dump: the window fixture
+        delivering the deferred delete to a window whose report page
+        had *just finished* loading. Stopping a navigation in flight
+        (the first cut of this) was not enough; a loaded, rendering
+        page hangs the destructor just the same.
+
+        The cure is Qt's own: a hidden page can be *discarded* — its
+        render process shut down gracefully, the page unloaded — and
+        a discarded page is destroyed in a millisecond (measured: the
+        destructor went from a hang to 0.001 s). So the view is
+        hidden, the page discarded, and the events that carry the
+        change are pumped before the caller goes on to destroy
+        anything. The scroll-restoring slot of a navigation in flight
+        is dropped too, since it would fire into the discarded page.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        if self._restore is not None:
+            with contextlib.suppress(RuntimeError, TypeError):
+                self.view.loadFinished.disconnect(self._restore)
+            self._restore = None
+        self.view.stop()
+        self.view.hide()
+        page = self.view.page()
+        # the enum through the page rather than a QtWebEngineCore
+        # import: the rulebook's sanctioned Qt modules are the ones
+        # already imported, and the page carries its own states
+        with contextlib.suppress(RuntimeError):
+            page.setLifecycleState(type(page).LifecycleState.Discarded)
+        for _ in range(20):
+            QApplication.processEvents()
 
     def _operate(self, operation):
         report = self.report

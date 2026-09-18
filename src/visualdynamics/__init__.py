@@ -103,7 +103,7 @@ def launch_gui(*paths: str, in_process: bool | None = None) -> Any:
     if in_process:
         from .gui import main
 
-        # `main` hands back Qt's exit status, which `visualdynamics-gui` wants as
+        # `main` hands back Qt's exit status, which the `visualdynamics` command wants as
         # its own and nothing else does — it is always 0, since nothing
         # here ever calls exit() with anything else. Swallowed, so
         # closing the window from a prompt does not answer with a bare

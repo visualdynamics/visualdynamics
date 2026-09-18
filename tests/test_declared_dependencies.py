@@ -147,3 +147,21 @@ def test_the_check_can_see_the_package_use_these(module):
     assert module in third_party_imports(), (
         f'{module} is imported somewhere under the package, so the '
         'walk should have found it')
+
+
+def test_the_packages_own_name_is_the_command():
+    """One window is the whole program, so `visualdynamics` launches it
+    (Brandon, 2026-09-18); `visualdynamics-gui`, the first alphas'
+    spelling, stays as an alias of the same entry point."""
+    import tomllib
+    from importlib.metadata import entry_points
+
+    scripts = tomllib.loads(pathlib.Path('pyproject.toml').read_text(
+        encoding='utf-8'))['project']['scripts']
+    assert scripts['visualdynamics'] == 'visualdynamics.gui:main'
+    assert scripts['visualdynamics-gui'] == 'visualdynamics.gui:main'
+    installed = {e.name: e.value for e in entry_points(group='console_scripts')
+                 if e.name.startswith('visualdynamics')}
+    assert installed.get('visualdynamics') == 'visualdynamics.gui:main', \
+        'reinstall the package (pip install -e .) to grow the script'
+

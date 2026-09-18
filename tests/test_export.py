@@ -431,7 +431,7 @@ def test_a_geometry_only_exodus_still_reads_as_one_object(tmp_path):
 def test_shapes_can_be_written_to_every_format_that_holds_them():
     shapes = visualdynamics.import_file(survey('shapes.npy'))
     names = {e.name for e in visualdynamics.io.exporters(shapes)}
-    assert names == {'sdynpy_shapes', 'unv', 'exodus', 'adf_shapes'}
+    assert names == {'sdynpy_shapes', 'unv', 'exodus', 'adf_shapes', 'matlab'}
 
 
 # ---- exodus has no coordinate systems, so results go out global ------------

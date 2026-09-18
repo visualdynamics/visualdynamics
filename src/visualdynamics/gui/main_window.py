@@ -2222,6 +2222,10 @@ class MainWindow(QMainWindow):
         take their chances (Brandon's crash report, 2026-08-30).
         """
         self.set_playing(False)
+        # and the report page: a navigation in flight when the view is
+        # destroyed is the gate's stall (ReportEditor.stand_down)
+        if self.report_editor is not None:
+            self.report_editor.stand_down()
         plotters = [self.scene.plotter, self.data_pane.waterfall_plotter,
                     self._mac_bars_plotter_obj]
         self.scene.plotter = None
@@ -5894,10 +5898,15 @@ class MainWindow(QMainWindow):
     def save_test(self) -> None:
         """Save the whole project — every object, under its name — one file."""
         name = self.test_item.text(0)
-        path, _ = QFileDialog.getSaveFileName(
-            self, 'Save Project', f'{name}.vdyn', 'Visual Dynamics files (*.vdyn)')
+        path, chosen = QFileDialog.getSaveFileName(
+            self, 'Save Project', f'{name}.vdyn',
+            'Visual Dynamics files (*.vdyn);;MATLAB file (*.mat)')
         if not path:
             return
+        # the same project in MATLAB's container — the verb picks the
+        # writer by the suffix, so only the suffix has to be right
+        if chosen.startswith('MATLAB') and not path.endswith('.mat'):
+            path += '.mat'
         # through the verb, not io directly: the verb carries the
         # provenance records (the direct call dropped them, and a
         # GUI-saved project reopened with no staleness bookkeeping)

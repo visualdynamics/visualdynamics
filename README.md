@@ -101,7 +101,7 @@ newer). To work on it, install from a clone:
 
 ```bash
 pip install -e .
-visualdynamics-gui                 # the desktop app
+visualdynamics                     # the desktop app
 ```
 
 ```python

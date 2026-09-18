@@ -32,9 +32,11 @@ One row per format, R/W meaning both directions:
 | 3MF CAD mesh ⁵ | `.3mf` | R/W | — | — | — |
 | STL mesh ⁵ | `.stl` | R/W | — | — | — |
 | STEP / IGES ⁶ | `.step`/`.stp`/`.iges`/`.igs` | R | — | — | — |
+| MATLAB ⁷ | `.mat` | R/W | R/W | R/W | R/W |
 
 Three more go in and out whole rather than by object: the project file
-itself (`.vdyn`, everything a project holds), a report template
+itself (`.vdyn`, everything a project holds — or `.mat`, the same
+layout as MATLAB structs, see ⁷), a report template
 (`.vdreport`, a report on its own, to load into another project — see
 [reports](guide/reports.md)), and photographs (a folder of images,
 `.png`/`.jpg`/`.heic`, through the project's Photos).
@@ -179,6 +181,28 @@ holds meshes, not surfaces, so writing B-rep back would be an
 invention. A pip install keeps the kernel optional
 (`pip install 'visualdynamics[step]'`); the packaged application
 carries it.
+
+⁷ **MATLAB** is the project file in MATLAB's container, not a foreign
+format: a `.mat` written here holds exactly what a `.vdyn` holds, under
+the same names ([the `.vdyn` layout](vdyn-format.md)), so nothing is
+lost either way and every object kind — the project itself included —
+goes out and comes back. `load('modal.mat')` gives `objects`, a cell of
+structs each with its `name` and `kind`, alongside the project's
+`test_name`, `project_type`, `links` and `provenance`; a single object
+saved alone is one struct named for its kind (`data`, `geometry`,
+`shapes`, …). The respellings MATLAB needs are mechanical: ragged
+connectivity is a cell array of row vectors, one-dimensional datasets
+are column vectors, strings are char arrays and lists of them cellstr,
+`''` still means undeclared. **Values are SI with every unit named**,
+as in `.vdyn` — the file is the project, not a display of it — so
+convert in MATLAB from the unit strings if a display system is wanted.
+The reader takes back the files it writes, and one other thing: a
+single struct built by hand to the documented layout of one object,
+without the schema stamp. Anything else in a `.mat` is refused by name
+rather than guessed at. Version 5 files only (MATLAB's `-v7`), which
+hold at most 4 GB per variable; a larger record is refused before
+anything is written, and the `.vdyn` — which MATLAB's `h5read` opens
+directly — is the file to hand over instead.
 
 Writing takes the text form by default, because it is the one every
 reader takes. The binary form is `save(obj, path, binary=True)`, or
@@ -355,6 +379,21 @@ means below resolution, in a simulation it means the quiet was
 exactly silent. The package records hardware channel numbers but no
 node names or units, so its DOFs arrive as those numbers and its
 drives as visibly synthetic 9000-series labels.
+
+A run that controlled a **virtual response** — a response
+transformation matrix over the control channels, as a MIMO test on a
+rigid fixture often does — imports as both halves of what the
+controller did. The streamed time data stays in hardware channels;
+beside it comes a second time history, the transformation's rows over
+those channels (`Random_transformed`), computed the way the
+controller computed them and carrying the run's averaging, so the
+PSDs made from it are what the specification was judged against. The
+specification, the FRF, the coherence and the control CPSD are over
+those rows too, because that is what the controller saved. The file
+names the rows nowhere, so they import as node-only coordinates
+numbered from 1 — rename them in the tree if the rows mean something
+(a virtual point's X, Y and Z, say) — and a row's unit is the control
+channels' unit when they all share one, undeclared when they do not.
 
 A system ID saved as *time data* is a different case: the file is
 indistinguishable from a run of its environment — two streams are

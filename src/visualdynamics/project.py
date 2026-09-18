@@ -2633,20 +2633,25 @@ class Project(dict):
     # ---- the file ----------------------------------------------------------
 
     def save(self, path: str | os.PathLike) -> str:
-        """Write the whole project to one .vdyn file.
+        """Write the whole project to one file: `.vdyn`, or `.mat` for
+        the same layout in MATLAB's container.
 
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write the `.vdyn` file.
+            Where to write the file. A `.mat` suffix writes the project
+            as MATLAB structs (`io.matlab`); anything else is `.vdyn`.
 
         Returns
         -------
         str
             The path written.
         """
-        from .io import save_test
+        from .io import export_file, save_test
 
+        if str(path).endswith('.mat'):
+            export_file(self, str(path))
+            return str(path)
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
                   project_type=self.project_type, links=self.links,
@@ -2655,10 +2660,11 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a .vdyn project back."""
-        from .io import load
+        """Read a project back, from `.vdyn` or from `.mat`."""
+        from .io import import_file, load
 
-        loaded = load(str(path))
+        loaded = (import_file(str(path)) if str(path).endswith('.mat')
+                  else load(str(path)))
         if isinstance(loaded, Project):
             # whatever the loader did on the way — construct, add,
             # link — the session's story starts here: one line that

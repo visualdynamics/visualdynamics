@@ -180,4 +180,8 @@ with h5py.File('modal.vdyn') as f:
 ```
 
 MATLAB reads the same file with `h5info('modal.vdyn')` and
-`h5read`. Nothing in a `.vdyn` needs this package to get back out.
+`h5read`. Nothing in a `.vdyn` needs this package to get back out. For
+a MATLAB user who would rather `load` structs than walk datasets, the
+same layout is written as a `.mat` file — `project.save('modal.mat')`,
+or *Save Project* in the app — and read back from one; the
+[export page](export.md) says what MATLAB spells differently.

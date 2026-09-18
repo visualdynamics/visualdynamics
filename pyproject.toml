@@ -87,6 +87,10 @@ Source = "https://github.com/visualdynamics/visualdynamics"
 Issues = "https://github.com/visualdynamics/visualdynamics/issues"
 
 [project.scripts]
+# one window is the whole program, so the package's own name launches
+# it (Brandon, 2026-09-18); the longer spelling stays for anything
+# that learned it from the first alphas
+visualdynamics = "visualdynamics.gui:main"
 visualdynamics-gui = "visualdynamics.gui:main"
 
 [project.optional-dependencies]

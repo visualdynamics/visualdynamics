@@ -452,6 +452,56 @@ def _frequency_lines(group, sample_rate):
     return np.linspace(0.0, sample_rate / 2, lines)
 
 
+def _response_transformation(group, indices, scales_dims):
+    """The environment's response transformation, if it ran one:
+    (matrix, row labels, the rows' (scale, dimension, unit)), or None.
+
+    A random, sine or transient environment may control a *virtual*
+    response — a matrix over the control channels, applied by the
+    controller's data collector to every frame it collects
+    (`response_frame = T @ response_frame`) — and then everything the
+    environment computes and saves is over the matrix's rows: the
+    specification, the FRF, the coherence, the control CPSD. Only the
+    streamed time data stays in hardware channels. The file names the
+    rows nowhere (`load_specification` drops the coordinates when a
+    transformation is set), so they import as node-only DOFs numbered
+    from 1, the same way the system-ID package numbers channels it
+    cannot name (Brandon, 2026-09-18: three virtual degrees of freedom
+    from twelve accelerometers, labelled 1, 2 and 3).
+
+    Units: the controller multiplies engineering-unit values, so a row
+    is in the control channels' unit exactly when they all share one;
+    a mix of units gives rows that are numbers in no unit, imported
+    raw and undeclared rather than labelled with a guess. (A rotation
+    row of a rigid-body transformation is in that unit per length, and
+    the file cannot say which rows those are — the user declares.)
+    """
+    if 'response_transformation_matrix' not in group.variables:
+        return None
+    matrix = np.asarray(group.variables['response_transformation_matrix'][()],
+                        dtype=float)
+    if matrix.ndim != 2 or matrix.shape[1] != len(indices):
+        raise ValueError(
+            f'{group.name}: the response transformation is '
+            f'{matrix.shape} but the environment controls '
+            f'{len(indices)} channels')
+    labels = [str(k + 1) for k in range(matrix.shape[0])]
+    kinds = {scales_dims[ci] for ci in indices}
+    common = kinds.pop() if len(kinds) == 1 else (1.0, UNKNOWN, None)
+    return matrix, labels, common
+
+
+def _control_channels(group, indices, dofs, scales_dims):
+    """What the environment's specification and spectra are over:
+    [(dof, (scale, dim, unit)), ...] — the control channels themselves,
+    or the rows of the response transformation when there is one."""
+    found = _response_transformation(group, indices, scales_dims)
+    if found is None:
+        return [(dofs[ci], scales_dims[ci]) for ci in indices]
+    _matrix, labels, common = found
+    return [(label, common) for label in labels]
+
+
 def _spectra(env_name, group, dofs, scales_dims, sample_rate, drives):
     """FRFs, coherence and cross spectra computed by an environment.
 
@@ -496,19 +546,33 @@ def _spectra(env_name, group, dofs, scales_dims, sample_rate, drives):
     # measurement, and would put a spurious force-per-force axis on the plot.
     drives = set(references.tolist()) if references is not None else set()
 
-    if 'frf_data_real' in group.variables and responses is not None:
+    # each response row as (dof, (scale, dim, unit), is a drive): the
+    # control channels, or the transformation's rows in their place
+    rows = None
+    if responses is not None:
+        found = _response_transformation(group, responses, scales_dims)
+        if found is None:
+            rows = [(dofs[ri], scales_dims[ri], ri in drives)
+                    for ri in responses]
+        else:
+            rows = [(label, found[2], False) for label in found[1]]
+
+    if 'frf_data_real' in group.variables and rows is not None:
         frf = (np.asarray(group.variables['frf_data_real'][()])
                + 1j * np.asarray(group.variables['frf_data_imag'][()]))
+        if frf.shape[1] != len(rows):
+            raise ValueError(
+                f'{env_name}: the FRF has {frf.shape[1]} response rows '
+                f'but the environment names {len(rows)}')
         records, response_dof, reference_dof = [], [], []
         dims, units, ref_units = [], [], []
-        for i, ri in enumerate(responses):
-            if ri in drives:
+        for i, (dof_i, (si, di, ui), is_drive) in enumerate(rows):
+            if is_drive:
                 continue
             for j, rj in enumerate(references):
-                si, di, ui = scales_dims[ri]
                 sj, dj, uj = scales_dims[rj]
                 records.append(frf[:, i, j] * si / sj)
-                response_dof.append(dofs[ri])
+                response_dof.append(dof_i)
                 reference_dof.append(dofs[rj])
                 known = UNKNOWN not in (di, dj)
                 dims.append(f'{di}/{dj}' if known else UNKNOWN)
@@ -520,20 +584,25 @@ def _spectra(env_name, group, dofs, scales_dims, sample_rate, drives):
             ordinate_dim=dims, ordinate_unit=units, reference_unit=ref_units)
 
     for name in ('coherence', 'frf_coherence'):
-        if name in group.variables and responses is not None:
+        if name in group.variables and rows is not None:
             values = np.asarray(group.variables[name][()]).real
-            keep = [i for i, r in enumerate(responses) if r not in drives]
+            keep = [i for i, (_dof, _sdu, is_drive) in enumerate(rows)
+                    if not is_drive]
             # multiple coherence, not ordinary: one curve per response with
             # the references summed over, which is UFF's type 26. Writing
             # it as type 6 promised a reference DOF that is not there.
             out[f'{env_name}_coherence'] = MultipleCoherence(
                 abscissa=freq, ordinate=values.T[keep],
-                response_dof=[dofs[responses[i]] for i in keep])
+                response_dof=[rows[i][0] for i in keep])
             break
 
+    drive_rows = (None if references is None
+                  else [(dofs[ci], scales_dims[ci]) for ci in references])
+    response_rows = (None if rows is None
+                     else [(dof, sdu) for dof, sdu, _drive in rows])
     for prefix, channels, label in (
-            ('response_cpsd', responses, 'response_cpsd'),
-            ('drive_cpsd', references, 'drive_cpsd')):
+            ('response_cpsd', response_rows, 'response_cpsd'),
+            ('drive_cpsd', drive_rows, 'drive_cpsd')):
         if f'{prefix}_real' not in group.variables or channels is None:
             continue
         matrix = (np.asarray(group.variables[f'{prefix}_real'][()])
@@ -543,13 +612,11 @@ def _spectra(env_name, group, dofs, scales_dims, sample_rate, drives):
         # grid makes the full n x n navigable in a way a flat list did not.
         records, response_dof, reference_dof = [], [], []
         dims, units, ref_units = [], [], []
-        for i, ci in enumerate(channels):
-            for j, cj in enumerate(channels):
-                si, di, ui = scales_dims[ci]
-                sj, dj, uj = scales_dims[cj]
+        for i, (dof_i, (si, di, ui)) in enumerate(channels):
+            for j, (dof_j, (sj, dj, uj)) in enumerate(channels):
                 records.append(matrix[:, i, j] * si * sj)
-                response_dof.append(dofs[ci])
-                reference_dof.append(dofs[cj])
+                response_dof.append(dof_i)
+                reference_dof.append(dof_j)
                 known = UNKNOWN not in (di, dj)
                 dims.append(
                     (f'{di}**2/frequency' if di == dj
@@ -614,11 +681,16 @@ def _load_sysid_package(ds, path):
                 f'{path}: {env_name} holds a system-ID package but '
                 'neither its sysid settings nor specification lines — '
                 'the frequency axis cannot be recovered')
-        if 'control_channel_indices' in group.variables:
+        transformed = ('response_transformation_matrix' in group.variables
+                       and group.variables['response_transformation_matrix']
+                       .shape[0] == n_responses)
+        if 'control_channel_indices' in group.variables and not transformed:
             indices = np.asarray(
                 group.variables['control_channel_indices'][()], dtype=int)
             responses = [str(int(i) + 1) for i in indices]
         else:
+            # no control channels named, or a response transformation
+            # whose rows the package is over (`_response_transformation`)
             responses = [str(i + 1) for i in range(n_responses)]
         references = [str(9001 + j) for j in range(n_references)]
 
@@ -768,6 +840,40 @@ def load(path: str | os.PathLike, full_cpsd: bool = False) -> dict[str, Any]:
             key = ('time_data' if variable == 'time_data'
                    else f'time_data_{int(variable.rsplit("_", 1)[1]) + 1}')
             out[key] = history
+            # the virtual responses the environment controlled, as their
+            # own history beside the raw channels: the same matrix the
+            # controller applied, over the same frames, so the PSDs
+            # computed from it are what the specification was judged
+            # against (Brandon, 2026-09-18: "a separate time history")
+            for env_name, group in ds.groups.items():
+                if 'control_channel_indices' not in group.variables:
+                    continue
+                indices = np.asarray(
+                    group.variables['control_channel_indices'][()], dtype=int)
+                found = _response_transformation(group, indices, scales_dims)
+                if found is None:
+                    continue
+                matrix, labels, (scale, dim, unit) = found
+                virtual = (matrix @ time_data[indices]) * scale
+                if frames:
+                    virtual = virtual.reshape(-1, frames, samples).reshape(
+                        -1, samples)
+                    v_block = [f'avg {i + 1}' for _label in labels
+                               for i in range(frames)]
+                    v_dofs = [label for label in labels for _ in range(frames)]
+                else:
+                    v_block, v_dofs = None, labels
+                transformed = TimeHistory(
+                    abscissa=history.abscissa, ordinate=virtual,
+                    response_dof=v_dofs, block=v_block,
+                    ordinate_dim=[dim] * len(v_dofs),
+                    ordinate_unit=[unit] * len(v_dofs),
+                    comment=[f'row {label} of the {env_name} response '
+                             f'transformation over {len(indices)} control '
+                             'channels' for label in v_dofs])
+                transformed.averaging = history.averaging
+                out[key.replace('time_data', f'{env_name}_transformed')] = \
+                    transformed
 
         # rattlesnake's own spectral save keeps only the environment group;
         # the root attributes, the channel table and the time data all go.
@@ -787,6 +893,12 @@ def load(path: str | os.PathLike, full_cpsd: bool = False) -> dict[str, Any]:
                         group.variables['specification_cpsd_matrix_imag'][()]))
             indices = np.asarray(group.variables['control_channel_indices'][()],
                                  dtype=int)
+            channels = _control_channels(group, indices, dofs, scales_dims)
+            if cpsd.shape[-1] != len(channels):
+                raise ValueError(
+                    f'{env_name}: the specification is over '
+                    f'{cpsd.shape[-1]} channels but the environment '
+                    f'names {len(channels)}')
             # (2, lines, channels), lower first: rattlesnake's own plotting
             # reads [1] as upper and [0] as lower
             bands = {}
@@ -804,28 +916,26 @@ def load(path: str | os.PathLike, full_cpsd: bool = False) -> dict[str, Any]:
             # and a specification with only autos says so honestly —
             # the virtual point transform refuses it rather than
             # inventing the phase between the control channels.
-            off_diagonal = cpsd[:, ~np.eye(len(indices), dtype=bool)]
+            off_diagonal = cpsd[:, ~np.eye(len(channels), dtype=bool)]
             meaningful = bool(np.any(np.isfinite(off_diagonal)
                                      & (off_diagonal != 0)))
             records, response, reference, dims = [], [], [], []
             units, ref_units = [], []
             limits = {name: [] for name in bands}
-            for i, ci in enumerate(indices):
-                for j, cj in enumerate(indices):
+            for i, (dof_i, (si, di, ui)) in enumerate(channels):
+                for j, (dof_j, (sj, dj, uj)) in enumerate(channels):
                     if i != j and not (full_cpsd or meaningful):
                         continue
                     if i != j and not np.isfinite(cpsd[:, i, j]).any():
                         continue        # this one pair was never written
-                    si, di, ui = scales_dims[ci]
-                    sj, dj, uj = scales_dims[cj]
                     for name, matrix in bands.items():
                         # limits are per control channel, so a cross-spectral
                         # record has none of its own
                         limits[name].append(matrix[:, i] * si * sj if i == j
                                             else np.full(len(freq), np.nan))
                     records.append(cpsd[:, i, j] * si * sj)
-                    response.append(dofs[ci])
-                    reference.append(dofs[cj])
+                    response.append(dof_i)
+                    reference.append(dof_j)
                     known = UNKNOWN not in (di, dj)
                     dims.append(
                         (f'{di}**2/frequency' if di == dj

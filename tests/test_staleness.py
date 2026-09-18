@@ -260,6 +260,7 @@ def test_the_open_report_follows_a_refresh(window, pump, monkeypatch):
 
     class FakeEditor:
         stale = False
+        failure = None
 
         def isHidden(self):
             return False

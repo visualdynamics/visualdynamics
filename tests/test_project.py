@@ -764,3 +764,30 @@ def test_plot_mac_draws_the_projected_comparison(survey, tmp_path,
     out = tmp_path / 'crossmac.png'
     project.plot_mac('Test Modes', 'FEM Modes', path=out, show=False)
     assert out.stat().st_size > 0, 'and it renders headless like every plot'
+
+
+def test_the_singular_accessor_is_the_plain_object_beside_its_banded_one():
+    """A worked-up random project holds the requirement on lines and on
+    octave bands: `.specification` is the one on lines, as
+    '@basis:Specification' is in a report; two on lines still refuse."""
+    import numpy as np
+
+    freq = np.linspace(10.0, 2000.0, 200)
+    level = np.full((1, 200), 1e-3)
+    spec = visualdynamics.Specification(
+        freq, level, response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'], ordinate_unit=['m/s**2'])
+    psd = visualdynamics.Psd(freq, level, response_dof=['101Z+'],
+                             ordinate_dim=['acceleration**2/frequency'],
+                             ordinate_unit=['m/s**2'])
+    project = visualdynamics.Project('t')
+    project.add('Spec', spec)
+    project.add('Octave Spec', spec.to_octave(6))
+    project.add('PSD', psd)
+    project.add('Octave PSD', psd.to_octave(6))
+    assert project.specification is project['Spec']
+    assert project.psd is project['PSD']
+    assert len(project.specifications) == 2 and len(project.psds) == 2
+    project.add('Spec 2', spec)
+    with pytest.raises(AttributeError, match='3 in project'):
+        _ = project.specification

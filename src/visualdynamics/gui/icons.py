@@ -40,6 +40,7 @@ COLORS = {
     'OctavePsd': '#9467bd',
     'Spectrum': '#17becf',      # teal
     'Specification': '#d62728',  # red: the thing being aimed at
+    'OctaveSpecification': '#d62728',  # the same requirement, on bands
     'Srs': '#00a878',           # jade
     # a shock target is aimed at just as a random one is, so it takes the
     # same red and says which kind it is by its shape
@@ -1148,6 +1149,7 @@ _DRAW = {
     'OctavePsd': _draw_octave_psd,
     'Spectrum': _draw_spectrum,
     'Specification': _draw_specification,
+    'OctaveSpecification': _draw_octave_psd,
     'Srs': _draw_srs,
     'ShockSpecification': _draw_shock_specification,
     'SineSweepSpecification': _draw_sine_sweep_specification,
@@ -1626,13 +1628,17 @@ def object_icon(obj: Any, units_defined: bool = True) -> QIcon:
     The same rule as `record_icon`: what a thing measures, not what
     holds it.
     """
-    from ..core.data import Psd
+    from ..core.data import Psd, Specification
 
     name = type(obj).__name__
     # `type(obj) is Psd`, not isinstance: Specification subclasses Psd
     # and has an icon of its own to keep
     if type(obj) is Psd and getattr(obj, 'bandwidth', None) is not None:
         name = 'OctavePsd'
+    # and the requirement on bands, the same way (2026-09-18)
+    if isinstance(obj, Specification) \
+            and getattr(obj, 'bandwidth', None) is not None:
+        name = 'OctaveSpecification'
     return type_icon(name, units_defined)
 
 

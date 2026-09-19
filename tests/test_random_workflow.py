@@ -51,7 +51,7 @@ def test_the_run_arrives_worked_up(worked_up):
     project typed by what the file says it is."""
     assert worked_up.project_type == 'Random Vibration'
     assert isinstance(worked_up.time_history, TimeHistory)
-    assert isinstance(worked_up.specification, Specification)
+    assert isinstance(worked_up.specifications[0], Specification)
     assert isinstance(worked_up.coherence, MultipleCoherence)
     narrow, banded = _measured(worked_up)
     assert narrow.num_records == worked_up.time_history.num_records
@@ -113,7 +113,8 @@ def test_one_call_writes_the_report(tmp_path):
     for caption in ('Control against specification',
                     'RMS error by control channel',
                     'Band outside the abort limits, by control channel',
-                    'sixth-octave bands',
+                    'Control against specification, octave bands',
+                    'Test specification, octave bands',
                     'Multiple coherence',
                     'Instrumentation'):
         assert caption in html, caption
@@ -142,7 +143,7 @@ def test_a_file_with_no_time_data_says_so(tmp_path):
 def test_every_comparison_plot_renders_headless(worked_up, tmp_path):
     """The three readings the app's toolbar offers, each to a file."""
     narrow, banded = _measured(worked_up)
-    spec = worked_up.specification
+    spec = worked_up.specifications[0]
     drawn = {
         'curves': lambda p: plot_comparison(narrow, spec, path=p, show=False),
         'octave': lambda p: plot_comparison(banded, spec, path=p, show=False),
@@ -161,7 +162,7 @@ def test_every_comparison_plot_renders_headless(worked_up, tmp_path):
 
 def test_a_comparison_draws_the_channel_it_was_asked_for(worked_up, tmp_path):
     narrow, _banded = _measured(worked_up)
-    spec = worked_up.specification
+    spec = worked_up.specifications[0]
     pair = (spec.response_dof[2], spec.reference_dof[2])
     path = tmp_path / 'one.png'
     plot_comparison(narrow, spec, pair=pair, path=str(path), show=False)
@@ -175,7 +176,7 @@ def test_a_reading_that_is_not_one_says_which_are(worked_up, tmp_path):
     narrow, _banded = _measured(worked_up)
     with pytest.raises(ValueError,
                        match="'error', 'lines' or 'srs'"):
-        plot_bars(narrow, worked_up.specification, 'rms',
+        plot_bars(narrow, worked_up.specifications[0], 'rms',
                   path=str(tmp_path / 'x.png'), show=False)
 
 
@@ -199,7 +200,7 @@ def test_the_bar_labels_are_the_channels(worked_up, qt_app):
     from visualdynamics.theme import theme
 
     narrow, _banded = _measured(worked_up)
-    rows = channel_errors(compare_all(worked_up.specification, narrow))
+    rows = channel_errors(compare_all(worked_up.specifications[0], narrow))
     widget = pg.GraphicsLayoutWidget()
     chart = error_chart(widget.addPlot(row=0, col=0), rows, theme(None))
     axis = chart.plot.getAxis('left')

@@ -178,6 +178,33 @@ def source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) -> list
             if isinstance(obj, wanted)]
 
 
+#: the bindings that name a *banded* flavor of a class: an octave-band
+#: PSD is a Psd with `bandwidth` set and an octave-band specification a
+#: Specification with it, and a report that compares the banded
+#: measurement against the banded requirement has to be able to ask
+#: for each by name (Brandon, 2026-09-18). The plain token never
+#: answers with a banded object — a banded flavor is claimed by its own
+#: token, the way a bound is claimed by its own class.
+BANDED_TOKENS = {'OctavePsd': 'Psd', 'OctaveSpecification': 'Specification'}
+
+
+def binding_tokens() -> dict[str, tuple[type, bool | None]]:
+    """{token: (class, banded)} — every symbolic token: the plain
+    types (banded None, meaning not banded), and the banded flavors."""
+    types = binding_types()
+    out: dict[str, tuple[type, bool | None]] = {
+        token: (cls, None) for token, cls in types.items()}
+    for token, plain in BANDED_TOKENS.items():
+        out[token] = (types[plain], True)
+    return out
+
+
+def is_banded(obj: Any) -> bool:
+    """Does this object live on bands — an octave-band PSD or
+    specification rather than one on lines?"""
+    return getattr(obj, 'bandwidth', None) is not None
+
+
 def binding_types() -> dict[str, type]:
     """{token: class} — the types a symbolic binding can name."""
     from .channel_table import ChannelTable
@@ -231,7 +258,7 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
     if not value.startswith('@'):
         return value or None
     role, _, token = value[1:].partition(':')
-    cls = binding_types().get(token)
+    cls, banded = binding_tokens().get(token, (None, None))
     if cls is None or role not in ('basis', 'other', 'any'):
         return None
     # A token never returns what a more specific token would claim —
@@ -256,10 +283,13 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
     flavors = tuple(other for other in narrower if other not in bounds)
     # ordered, not filtered: the plain kind first, flavors after, so
     # every role below prefers exact and degrades to the flavor
+    # and a banded flavor answers only to its own token: '@basis:Psd'
+    # is the narrowband PSD, '@basis:OctavePsd' the banded one
     names = sorted(
         (name for name, obj in objects.items()
          if isinstance(obj, cls)
-         and not any(isinstance(obj, kind) for kind in bounds)),
+         and not any(isinstance(obj, kind) for kind in bounds)
+         and is_banded(obj) == bool(banded)),
         key=lambda name: isinstance(objects[name], flavors))
     basis = next((set(group['members']) for group in (links or [])
                   if group.get('role') == 'Basis'), None)
@@ -283,7 +313,7 @@ def binding_label(value: str) -> str:
     if not value.startswith('@'):
         return value
     role, _, token = value[1:].partition(':')
-    spaced = {'Frf': 'FRF', 'Psd': 'PSD'}.get(
+    spaced = {'Frf': 'FRF', 'Psd': 'PSD', 'OctavePsd': 'Octave PSD'}.get(
         token, re.sub(r'(?<!^)(?=[A-Z])', ' ', token))
     return f'{role.title()} {spaced} (auto)'
 
@@ -299,9 +329,9 @@ def symbolic_options(block: Mapping[str, Any]) -> list[tuple[str, str]]:
     if any(cls is DataArray for cls in classes):
         # a plain curves plot could draw from anything; offer the
         # useful few rather than every subclass
-        tokens = ['TimeHistory', 'Spectrum', 'Psd', 'Frf']
+        tokens = ['TimeHistory', 'Spectrum', 'Psd', 'OctavePsd', 'Frf']
     else:
-        tokens = [token for token, cls in binding_types().items()
+        tokens = [token for token, (cls, _banded) in binding_tokens().items()
                   if any(cls is wanted_cls for wanted_cls in classes)]
     return [(f'@{role}:{token}', binding_label(f'@{role}:{token}'))
             for token in tokens for role in ('basis', 'other')]
@@ -614,6 +644,14 @@ def project_expectations(
                      'Basis'),
                     ('Specification', Specification, 'Specification',
                      1, False, 'Basis'),
+                    # The same requirement on octave bands, limits and
+                    # all — `Specification.to_octave` — the *second*
+                    # Specification in the group, the way the octave PSD
+                    # is the second Psd. The report's octave section
+                    # compares the banded measurement against it
+                    # (Brandon, 2026-09-18).
+                    ('Octave Band Specification', Specification,
+                     'OctaveSpecification', 2, False, 'Basis'),
                     ('PSD', Psd, 'Psd', 1, False, 'Basis'),
                     # The sixth-octave view of that PSD, and **required**: a
                     # random vibration report is not finished without it.
@@ -749,7 +787,8 @@ def project_expectations(
              cls, icon, count, optional, side)
             for _label, cls, icon, count, optional, side in raw()]
 
-def _expected_narrowly(obj: Any, cls: type, classes: Sequence[type]) -> bool:
+def _expected_narrowly(obj: Any, cls: type, classes: Sequence[type],
+                       banded: bool | None = None) -> bool:
     """Does `obj` satisfy an expectation of `cls`, read the way the
     type's own list narrows it?
 
@@ -772,6 +811,13 @@ def _expected_narrowly(obj: Any, cls: type, classes: Sequence[type]) -> bool:
     2026-08-23).
     """
     if not isinstance(obj, cls):
+        return False
+    # and a banded slot — 'Octave Band PSD', 'Octave Band
+    # Specification' — wants the object on bands, a plain slot the one
+    # on lines: a second narrowband specification imported beside the
+    # first was filling the octave slot (2026-09-18), the same rule
+    # the report's banded tokens hold
+    if banded is not None and is_banded(obj) != banded:
         return False
     from .data import Bounded, TransientSpecification
 
@@ -808,17 +854,20 @@ def missing_expectations(
     classes = [expectation[1] for expectation in expectations]
     out, ordinals = [], {}
     for expectation in expectations:
-        _name, cls, _icon, _count, _optional, tag = expectation
+        _name, cls, icon, _count, _optional, tag = expectation
         # the n-th slot of a class on a side wants an n-th object of it,
-        # so a side expecting two shape sets is not filled by one
-        ordinals[tag, cls] = ordinal = ordinals.get((tag, cls), 0) + 1
+        # so a side expecting two shape sets is not filled by one — and
+        # a banded slot counts the banded objects, a plain one the rest
+        banded = icon in BANDED_TOKENS
+        key = (tag, cls, banded)
+        ordinals[key] = ordinal = ordinals.get(key, 0) + 1
         if placed is None or tag is None:
             pool = list(objects.values())
         else:
             pool = [objects[name] for name in placed.get(tag, ())
                     if name in objects]
         if sum(1 for obj in pool
-               if _expected_narrowly(obj, cls, classes)) < ordinal:
+               if _expected_narrowly(obj, cls, classes, banded)) < ordinal:
             out.append(expectation)
     return out
 
@@ -845,18 +894,23 @@ def expectation_satisfiers(
     groups = {tag: list(names) for tag, names in (placed or {}).items()}
     expectations = project_expectations(project_type)
     classes = [expectation[1] for expectation in expectations]
-    for _name, cls, _icon, count, _optional, tag in expectations:
+    for _name, cls, icon, count, _optional, tag in expectations:
         if tag != 'Basis':
             continue          # the other side is never guessed into
         # The ordinal is over *every* instance in the project, placed or
         # not. Counting only the unplaced ones renumbers them, and the
         # model's geometry becomes the project's first — which is the
         # Basis slot, the very group it was just dragged off.
+        banded = icon in BANDED_TOKENS
         instances = [obj_name for obj_name, obj in objects.items()
-                     if _expected_narrowly(obj, cls, classes)]
-        if len(instances) < count:
+                     if _expected_narrowly(obj, cls, classes, banded)]
+        # a banded slot is the first of its own kind, not the second
+        # of the class: the octave PSD is one object, however many
+        # narrowband PSDs stand beside it
+        wanted = 1 if banded else count
+        if len(instances) < wanted:
             continue
-        candidate = instances[count - 1]
+        candidate = instances[wanted - 1]
         if homes.get(candidate, tag) != tag:
             continue        # somebody has put it elsewhere
         groups.setdefault(tag, [])
@@ -2170,29 +2224,45 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
          'measured': '@basis:Psd',
          'caption': 'Band outside the abort limits, by control channel'},
         {'kind': 'text', 'text':
-            '## Octave Band Comparison\n\nThe same control spectra '
-            'integrated onto sixth-octave bands, and the same three '
+            '## Octave Band Comparison\n\nThe same comparison on '
+            'octave bands: the control spectra integrated onto bands '
+            '({{figure:Control against specification, octave bands}}) '
+            'against the specification banded the same way, its '
+            'warning and abort limits banded with it ({{figure:Test '
+            'specification, octave bands}}), and the same two '
             'readings of them. The bands are wider as the frequency '
             'rises, which is how a response is usually specified and '
             'how it is usually read.\n\n'
-            'The specification is *not* banded, and does not need to '
-            'be: it is a continuous curve whose area over a band is '
-            'the same however the measurement beside it was arranged. '
-            'Banding conserves that area, so the RMS error below is '
-            'the same number as above — what changes is the share of '
-            'the band outside abort, which is now counted over bands '
-            'rather than over lines.'},
-        {'kind': 'plot', 'source': '@basis:Psd',
-         'specification': '@basis:Specification', 'mode': 'curves',
-         'octave': 6,
-         'caption': 'Control against specification, sixth-octave bands'},
-        {'kind': 'bars', 'mode': 'error', 'source': '@basis:Specification',
-         'measured': '@basis:Psd', 'octave': 6,
-         'caption': 'RMS error by control channel, sixth-octave bands'},
-        {'kind': 'bars', 'mode': 'lines', 'source': '@basis:Specification',
-         'measured': '@basis:Psd', 'octave': 6,
+            'Banding conserves the area under each curve, so the RMS '
+            'error below is the same number as above; what changes is '
+            'the share of the band outside abort, which is counted '
+            'over bands rather than over lines, against limits that '
+            'are themselves per band.'},
+        # the banded objects themselves, not the report banding the
+        # narrowband ones for itself (which `'octave': N` on a block
+        # still does, for a template that asks): the octave-band
+        # specification is a deliverable beside the octave-band PSD,
+        # limits and all, and the comparison is read between the two
+        # objects the project holds (Brandon, 2026-09-18 — the
+        # earlier text said the specification "is not banded, and
+        # does not need to be", true of a breakpoint curve and beside
+        # the point once the banded requirement exists as its own
+        # object)
+        {'kind': 'plot', 'source': '@basis:OctaveSpecification',
+         'mode': 'curves',
+         'caption': 'Test specification, octave bands'},
+        {'kind': 'plot', 'source': '@basis:OctavePsd',
+         'specification': '@basis:OctaveSpecification', 'mode': 'curves',
+         'caption': 'Control against specification, octave bands'},
+        {'kind': 'bars', 'mode': 'error',
+         'source': '@basis:OctaveSpecification',
+         'measured': '@basis:OctavePsd',
+         'caption': 'RMS error by control channel, octave bands'},
+        {'kind': 'bars', 'mode': 'lines',
+         'source': '@basis:OctaveSpecification',
+         'measured': '@basis:OctavePsd',
          'caption': 'Band outside the abort limits, by control channel, '
-                    'sixth-octave bands'},
+                    'octave bands'},
         {'kind': 'text', 'text':
             '## Data Quality\n\n'
             'Two checks stand behind every number above, and a channel '

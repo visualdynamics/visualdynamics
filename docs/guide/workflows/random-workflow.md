@@ -52,10 +52,15 @@ averaged over the run's own frames](../images/random-psds.png)
 ### 3. Band onto sixth octaves
 
 The octave-band PSD is a standing deliverable of a random report, not
-an option. **Octave Bands** on the PSD's bar previews the banded
-steps over the narrowband as the spacing is set (a sixth is the usual
-answer) and the panel's own button bands conserving area — the octave
-PSD is still a PSD, drawn as bars because its `bandwidth` says so.
+an option, and so is the specification on the same bands. **Octave
+Bands** on the PSD's bar previews the banded steps over the
+narrowband as the spacing is set (a sixth is the usual answer) and the
+panel's own button bands conserving area — the octave PSD is still a
+PSD, drawn as bars because its `bandwidth` says so. The same button on
+the specification bands the requirement and its warning and abort
+limits together, and the report's octave section reads the banded
+measurement against that banded requirement rather than against the
+breakpoint curve.
 
 ![The sixth-octave view of the same PSDs](../images/random-octave.png)
 
@@ -133,12 +138,12 @@ project = visualdynamics.random_vibration_run('random.nc4')
 assert project.project_type == 'Random Vibration'
 
 history = project.time_history
-spec = project.specification
-psds, octave = project.psds        # the specification is not among them
+spec, octave_spec = project.specifications   # the requirement, and it on bands
+psds, octave = project.psds                  # the specifications are not among them
 
-# 5. the comparison, drawn headless
+# 5. the comparison, drawn headless — bands against bands
 plot_comparison(psds, spec, path='control.png', show=False)
-plot_comparison(octave, spec, path='control_octave.png', show=False)
+plot_comparison(octave, octave_spec, path='control_octave.png', show=False)
 plot_bars(psds, spec, 'error', path='error.png', show=False)
 plot_bars(psds, spec, 'lines', path='lines.png', show=False)
 plot_coherence_map(project.coherence, path='coherence.png', show=False)

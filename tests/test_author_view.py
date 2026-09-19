@@ -1015,3 +1015,28 @@ def test_a_failure_in_a_sheet_gesture_is_said_and_logged(window, pump, tmp_path,
     assert 'Traceback' in text
     assert _rows(panel.points) > 4, 'the sheet still shows the lines it has'
 
+
+
+def test_a_virtual_points_specification_opens_from_the_plots_bar(window, pump):
+    """Rows numbered '1', '2' with no direction — a controller's
+    virtual response — refused the sheet with "channel '1' names no
+    direction" (Brandon, 2026-09-18). It opens now, on both the
+    requirement on lines and the one on bands."""
+    freq = np.array([20.0, 80.0, 800.0, 2000.0])
+    level = np.array([[1e-3, 4e-3, 4e-3, 1e-3], [2e-3, 8e-3, 8e-3, 2e-3]])
+    spec = visualdynamics.Specification(
+        freq, level, response_dof=['1', '2'],
+        ordinate_dim=['acceleration**2/frequency'] * 2,
+        ordinate_unit=['m/s**2'] * 2)
+    spec.interpolation = 'log_log'
+    window.add_object('Virtual', spec)
+    window.add_object('Virtual Octave', spec.to_octave(6))
+    for name in ('Virtual', 'Virtual Octave'):
+        _select(window, pump, name)
+        assert window.author_data_action.isVisible()
+        panel = _open(window, pump, on_plot=True)
+        assert panel.isVisible(), name
+        assert panel.origin.text().startswith(f'opened from {name}'), \
+            window.statusBar().currentMessage()
+        window.author_data_action.trigger()
+        pump()

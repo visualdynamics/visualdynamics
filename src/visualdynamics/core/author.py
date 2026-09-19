@@ -128,7 +128,15 @@ class SpecificationDraft:
     def __post_init__(self) -> None:
         from .validate import dofs as _dofs
 
-        self.channels = _dofs(list(self.channels), 'channel')
+        # what the object accepts, the sheet accepts: a virtual point's
+        # rows come in numbered '1', '2', '3' with no direction, since
+        # the controller's file names them nowhere, and the sheet
+        # refused to open on them (Brandon, 2026-09-18). Only an empty
+        # name is refused — a channel has to be called something
+        self.channels = _dofs(list(self.channels), 'channel',
+                              allow_unknown=True)
+        if any(not name for name in self.channels):
+            raise ValueError('every channel needs a name')
         self.dims = [str(d) for d in self.dims]
         self.frequencies = [float(f) for f in self.frequencies]
         self.levels = [[float(v) for v in row] for row in self.levels]

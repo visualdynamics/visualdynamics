@@ -310,6 +310,16 @@ class Selection:
                 f'{self._label} holds {", ".join(self._kinds()) or "nothing"}')
         plural, cls = _SINGULAR[attribute]
         found = self.of_type(cls)
+        if len(found) > 1:
+            # a banded flavor answers only to a request that names it:
+            # `.specification` beside the same requirement on octave
+            # bands is the one on lines, as '@basis:Specification' is
+            # in a report (core.report.resolve_binding) — the worked-up
+            # random project holds both (2026-09-18)
+            plain = [name for name in found
+                     if getattr(self._project[name], 'bandwidth', None) is None]
+            if len(plain) == 1:
+                found = plain
         if len(found) == 1:
             return self._project[found[0]]
         if not found:
@@ -3300,9 +3310,12 @@ def random_vibration_run(run: str | os.PathLike,
     Every step the window would take on the way from a controller file
     to a finished project, in the order it takes them: import the run,
     average PSDs from the control time histories, band those onto
-    proportional bands, and measure how much of each response the drives
-    account for. The run says it is a random vibration test, so the
-    project comes back declared as one.
+    proportional bands — and the specification onto the same bands,
+    limits and all, since the report reads the banded measurement
+    against the banded requirement (Brandon, 2026-09-18) — and
+    measure how much of each response the drives account for. The run
+    says it is a random vibration test, so the project comes back
+    declared as one.
 
     The frames the spectra are averaged over are detected from the data
     itself when the file does not carry them, exactly as the bar's act
@@ -3316,6 +3329,11 @@ def random_vibration_run(run: str | os.PathLike,
         raise ValueError(f'{run} holds no time data to work up')
     psds = project.compute_psds(history)
     project.compute_octave(psds, per_octave)
+    from .core.data import Specification
+    specification = next((name for name, obj in project.items()
+                          if isinstance(obj, Specification)), None)
+    if specification is not None:
+        project.compute_octave(specification, per_octave)
     project.compute_multiple_coherence(history)
     return project
 

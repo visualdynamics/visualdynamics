@@ -108,7 +108,7 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
     """
     from visualdynamics.core.report import (
         PROJECT_TEMPLATES,
-        binding_types,
+        binding_tokens,
         modal_template,
         random_template,
         shock_template,
@@ -122,7 +122,7 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
                 'sine': sine_template, 'sysid': sysid_template}
     report = builders[PROJECT_TEMPLATES[project_type]](
         visualdynamics.Project(), links=[])
-    types = binding_types()
+    types = binding_tokens()
     wanted = {token for block in report.blocks
               for value in block.values()
               for token in re.findall(r'@\w+:(\w+)', str(value))}
@@ -134,7 +134,7 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
     slots = [cls for _name, cls, *_rest
              in project_expectations(project_type)]
     for token in sorted(wanted):
-        cls = types[token]
+        cls, _banded = types[token]
         assert any(issubclass(slot, cls) or issubclass(cls, slot)
                    for slot in slots), (
             f'the {project_type} report binds {token} and the project '
@@ -395,3 +395,69 @@ def test_a_sine_sweep_project_shows_its_slots(window, pump):
                                      'Channel Table', 'Time History',
                                      'Sine Sweep Specification',
                                      'Sine Level Set', 'Report']
+
+
+def test_a_random_report_wants_the_octave_band_specification_too():
+    """The requirement on octave bands beside the PSD on them: the
+    second Specification in the group, as the octave PSD is the second
+    Psd (Brandon, 2026-09-18)."""
+    from visualdynamics.core.data import Specification
+    from visualdynamics.core.report import project_expectations
+
+    slots = project_expectations('Random Vibration')
+    octave = next(s for s in slots if s[2] == 'OctaveSpecification')
+    name, cls, _icon, count, optional, tag = octave
+    assert name == 'Specification'
+    assert cls is Specification and count == 2 and not optional
+    assert tag == 'Basis'
+    icons = [s[2] for s in slots]
+    assert icons.index('Specification') < icons.index('OctaveSpecification')
+
+
+def test_a_banded_specification_fills_the_octave_slot_and_not_the_plain(window, pump):
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+
+    window.set_project_type('Random Vibration')
+    pump()
+    assert _placeholders(window).count('Specification') == 2
+    f = np.linspace(10.0, 2000.0, 400)
+    level = np.ones((1, 400)) * 1e-3
+    spec = Specification(f, level, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         ordinate_unit='m/s**2',
+                         abort_upper=level * 4, abort_lower=level / 4)
+    window.add_object('Specification', spec)
+    pump()
+    assert _placeholders(window).count('Specification') == 1
+    assert _placeholders(window).count('PSD') == 2, 'a specification is no PSD'
+    window.add_object('Octave Band Specification', spec.to_octave(6))
+    pump()
+    assert 'Specification' not in _placeholders(window)
+
+
+def test_a_second_narrowband_specification_does_not_fill_the_octave_slot(window, pump):
+    """The octave slot wants the requirement on bands: a second plain
+    specification — the same run imported again — was filling it
+    (2026-09-18), and then the whole second run followed it into the
+    Basis."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+
+    window.set_project_type('Random Vibration')
+    pump()
+    f = np.linspace(10.0, 2000.0, 400)
+    level = np.ones((1, 400)) * 1e-3
+    spec = Specification(f, level, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         ordinate_unit='m/s**2')
+    window.add_object('Specification', spec)
+    window.add_object('Specification (2)', spec)
+    pump()
+    assert _placeholders(window).count('Specification') == 1, \
+        'the second plain one fills nothing'
+    window.add_object('Octave Band Specification', spec.to_octave(6))
+    pump()
+    assert 'Specification' not in _placeholders(window)

@@ -913,3 +913,26 @@ def test_a_target_with_band_corners_still_opens_as_lines_with_few_runs():
         'one band, not two a rounding error apart'
     assert len(read.band_runs(0, 'warning')) == 1, 'one handle, not thousands'
 
+
+
+def test_a_virtual_points_rows_open_in_the_sheet():
+    """A controller's virtual response comes in numbered '1', '2', '3'
+    with no direction (the file names the rows nowhere), and the sheet
+    refused to open on it: "channel '1' names no direction" (Brandon,
+    2026-09-18). What the object accepts, the sheet accepts."""
+    freq = np.array([20.0, 80.0, 800.0, 2000.0])
+    level = np.array([[1e-3, 4e-3, 4e-3, 1e-3], [2e-3, 8e-3, 8e-3, 2e-3]])
+    spec = visualdynamics.Specification(
+        freq, level, response_dof=['1', '2'],
+        ordinate_dim=['acceleration**2/frequency'] * 2,
+        ordinate_unit=['m/s**2'] * 2)
+    spec.interpolation = 'log_log'
+    draft = SpecificationDraft.from_specification(spec)
+    assert draft.channels == ['1', '2']
+    back = draft.make()
+    assert back.response_dof == ['1', '2']
+    assert np.allclose(back.ordinate.real, level)
+    with pytest.raises(ValueError, match='every channel needs a name'):
+        SpecificationDraft(channels=['1', ''], dims=['acceleration'] * 2,
+                           frequencies=[20.0, 2000.0],
+                           levels=[[1e-3, 1e-3], [1e-3, 1e-3]])

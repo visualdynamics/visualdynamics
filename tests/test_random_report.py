@@ -31,6 +31,12 @@ def run(window, pump):
                    if isinstance(obj, visualdynamics.TimeHistory))
     window.add_object('Control PSDs', history.compute_psds())
     pump()
+    # the octave section reads the banded objects, both of them
+    window.project.compute_octave('Control PSDs', 6)
+    spec = next(name for name, obj in window.objects.items()
+                if isinstance(obj, visualdynamics.Specification))
+    window.project.compute_octave(spec, 6)
+    pump()
     return window
 
 
@@ -306,6 +312,74 @@ def test_a_binding_never_answers_with_what_a_narrower_one_claims():
     assert resolve_binding('@basis:Psd', project) == 'Measured'
 
 
+def test_a_banded_object_answers_only_to_its_own_token():
+    """An octave-band PSD is a Psd and an octave-band specification a
+    Specification, and each is what the report's octave section
+    compares (Brandon, 2026-09-18): the plain token never answers
+    with the banded object, and the banded token never with the
+    plain one."""
+    from visualdynamics.core.report import binding_label, resolve_binding
+
+    f = np.linspace(10.0, 2000.0, 200)
+    level = np.full((1, 200), 1e-3)
+    spec = visualdynamics.Specification(
+        f, level, response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'], ordinate_unit=['m/s**2'],
+        abort_upper=level * 4, abort_lower=level / 4)
+    psd = visualdynamics.Psd(f, level, response_dof=['101Z+'],
+                             ordinate_dim=['acceleration**2/frequency'],
+                             ordinate_unit=['m/s**2'])
+    project = {'Octave Spec': spec.to_octave(6), 'Octave PSD': psd.to_octave(6),
+               'Spec': spec, 'PSD': psd}
+    assert resolve_binding('@basis:Psd', project) == 'PSD'
+    assert resolve_binding('@basis:OctavePsd', project) == 'Octave PSD'
+    assert resolve_binding('@basis:Specification', project) == 'Spec'
+    assert resolve_binding('@basis:OctaveSpecification', project) == 'Octave Spec'
+    del project['PSD'], project['Spec']
+    assert resolve_binding('@basis:Psd', project) is None, \
+        'the banded PSD is not an answer for the narrowband one'
+    assert resolve_binding('@basis:Specification', project) is None
+    assert binding_label('@basis:OctavePsd') == 'Basis Octave PSD (auto)'
+    assert binding_label('@basis:OctaveSpecification') == \
+        'Basis Octave Specification (auto)'
+
+
+def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
+    """The banded specification and the banded PSDs the run fixture
+    made are what the octave blocks bind, and the page draws them as
+    a comparison of steps against steps."""
+    from visualdynamics.core.report import resolve_binding
+
+    objects, links = run.project, run.project.links
+    template = report_of(run)
+    octave = [b for b in template.blocks
+              if b.get('source') in ('@basis:OctavePsd',
+                                      '@basis:OctaveSpecification')]
+    assert len(octave) == 4, 'the specification figure, the comparison, two bar charts'
+    for block in octave:
+        for field in ('source', 'specification', 'measured'):
+            if block.get(field):
+                name = resolve_binding(block[field], objects, links)
+                assert name is not None, (field, block[field])
+                assert objects[name].bandwidth is not None, 'the banded object'
+    assert not [i for i in template.unbound(objects, links)
+                if template.blocks[i].get('source', '').startswith('@basis:Octave')]
+    page = render_html(template, objects, unit_system=visualdynamics.SI)
+    assert 'Control against specification, octave bands' in page
+    assert 'Test specification, octave bands' in page
+
+
+def test_the_script_workflow_bands_the_specification_too():
+    project = visualdynamics.random_vibration_run(
+        fixture_path('plate', 'random.nc4'), per_octave=6)
+    banded = [name for name, obj in project.items()
+              if isinstance(obj, visualdynamics.Specification)
+              and obj.bandwidth is not None]
+    assert len(banded) == 1
+    assert 'to_octave' in ''.join(project.journal) or any(
+        'compute_octave' in line for line in project.journal)
+
+
 def test_the_comparison_is_drawn_on_the_measurements_own_axis():
     """The two rarely share one — a specification is written at
     breakpoints or on the controller's lines — so the specification is
@@ -420,9 +494,11 @@ def test_the_report_carries_both_bar_charts():
                                            'error', 'lines',
                                            'kurtosis'], (
         'both readings, narrowband and then on octave bands')
-    assert [b.get('octave') for b in charts] == [None, None, 6, 6,
-                                                None], (
-        'and the octave pair comes after the narrowband pair')
+    assert [b.get('octave') for b in charts] == [None] * 5, (
+        'no chart bands for itself: the octave pair reads the banded objects')
+    assert [(b['source'], b.get('measured')) for b in charts[2:4]] == [
+        ('@basis:OctaveSpecification', '@basis:OctavePsd')] * 2, (
+        'the banded requirement against the banded measurement')
     assert not any(b.get('kind') == 'compliance' for b in blocks), (
         'the comparison table is gone entirely')
 
@@ -483,8 +559,11 @@ def test_the_bar_charts_are_numbered_figures():
     from visualdynamics.core.report import random_template
 
     loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    psds = loaded['time_data'].compute_psds()
     project = {'Specification': loaded['Random_specification'],
-               'Measured': loaded['time_data'].compute_psds()}
+               'Measured': psds,
+               'Octave Specification': loaded['Random_specification'].to_octave(6),
+               'Octave Measured': psds.to_octave(6)}
     page = render_html(random_template(project), project,
                        unit_system=visualdynamics.SI)
     payload = json.loads(re.search(

@@ -3301,11 +3301,52 @@ def _state_story(was, now):
             f'now says {_summarize_state(now)}')
 
 
+def _last_window(run, last):
+    """The import options for the last `last` seconds of a run: empty
+    when the run is no longer than that, so a short run is imported
+    whole and the journal line stays the plain one."""
+    from .io.rattlesnake import last_window, stream_summary
+
+    streams = stream_summary(run)['streams']
+    if not streams:
+        return {}
+    start = last_window(max(s['seconds'] for s in streams), last)
+    return {} if start is None else {'start': start}
+
+
+def _photos_from(photos) -> Photos:
+    """A `Photos` from a folder, one file, or a sequence of files."""
+    from .core.photos import FORMATS
+
+    if isinstance(photos, (str, os.PathLike)):
+        if os.path.isdir(photos):
+            files = [os.path.join(photos, name)
+                     for name in sorted(os.listdir(photos))
+                     if os.path.splitext(name)[1].lower() in FORMATS]
+            if not files:
+                raise ValueError(f'{photos} holds no png or jpeg to add')
+        else:
+            files = [photos]
+    else:
+        files = [str(p) for p in photos]
+    out = Photos()
+    for file in files:
+        out.add_file(file)
+    return out
+
+
 def random_vibration_run(run: str | os.PathLike,
-                         per_octave: int | None = None) -> Project:
+                         per_octave: int | None = None, *,
+                         last: float | None = None,
+                         geometry: str | os.PathLike | None = None,
+                         length_unit: str | None = None,
+                         photos: Any = None) -> Project:
     """A Rattlesnake random vibration run, worked up into a project.
 
         project = visualdynamics.random_vibration_run('run.nc4')
+        project = visualdynamics.random_vibration_run(
+            'run.nc4', last=100.0, geometry='article.stp', length_unit='mm',
+            photos='setup_photos/')
 
     Every step the window would take on the way from a controller file
     to a finished project, in the order it takes them: import the run,
@@ -3317,12 +3358,43 @@ def random_vibration_run(run: str | os.PathLike,
     says it is a random vibration test, so the project comes back
     declared as one.
 
-    The frames the spectra are averaged over are detected from the data
-    itself when the file does not carry them, exactly as the bar's act
-    does — so a script and a click reach the same numbers.
+    The averaging is the Detect answer: the controller's own frame
+    length, window and overlap from the file, with the start and the
+    count worked out from the record — where the run is at level and
+    how many frames that stretch holds — so a script, an import and a
+    click on Detect reach the same numbers (Brandon, 2026-09-19).
+
+    The rest is what the window's tree asks for after the run is in,
+    given here so a script never has to open it (Brandon,
+    2026-09-19): the article's geometry, with its length unit
+    declared when the file does not carry one; the setup photographs,
+    as a folder of png or jpeg files, one file, or a list of files in
+    the order they should appear; and, for a run too long to hold,
+    `last` — the seconds before the end to import, the same window the
+    import dialog's *Last* field sets, and a run shorter than that is
+    taken whole. The geometry and the photographs are linked into the
+    run's own group, which is what lets the report read them against
+    the channel table.
+
+    Parameters
+    ----------
+    run : str or os.PathLike
+        The controller's `.nc4`.
+    per_octave : int, optional
+        Bands per octave for the banded PSD and specification; the
+        project's default (a sixth) when omitted.
+    last : float, optional
+        Import only the last `last` seconds of the run's streams.
+    geometry : str or os.PathLike, optional
+        A geometry file to import and link to the run.
+    length_unit : str, optional
+        The geometry's length unit, for a file that does not say.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several.
     """
     project = Project()
-    project.import_file(run)
+    project.import_file(run, **(_last_window(run, last) if last is not None
+                                else {}))
     history = next((name for name, obj in project.items()
                     if isinstance(obj, TimeHistory)), None)
     if history is None:
@@ -3335,28 +3407,51 @@ def random_vibration_run(run: str | os.PathLike,
     if specification is not None:
         project.compute_octave(specification, per_octave)
     project.compute_multiple_coherence(history)
+    extras: list[str] = []
+    if geometry is not None:
+        options = {} if length_unit is None else {'length_unit': length_unit}
+        extras += project.import_file(geometry, **options)
+    if photos is not None:
+        extras.append(project.add('Photos', _photos_from(photos)))
+    if extras:
+        project.link(history, *extras)
     return project
 
 
 def random_vibration_report(run: str | os.PathLike,
                             path: str | os.PathLike | None = None, *,
+                            last: float | None = None,
+                            geometry: str | os.PathLike | None = None,
+                            length_unit: str | None = None,
+                            photos: Any = None,
                             per_octave: int | None = None,
                             unit_system: Any = None) -> str:
     """A Rattlesnake random vibration run in, an HTML report out.
 
-        visualdynamics.random_vibration_report('run.nc4')
+        visualdynamics.random_vibration_report('run.nc4', 'report.html')
+        visualdynamics.random_vibration_report(
+            'run.nc4', 'report.html', last=100.0,
+            geometry='article.stp', length_unit='mm', photos='setup_photos/')
 
-    The whole workflow in one call: import, PSDs, octave bands, multiple
-    coherence, the Random Vibration report, and the self-contained HTML.
-    Returns the path written, which defaults to the run's own name with
-    an `.html` extension.
+    The whole workflow in one call, with nothing to click (Brandon,
+    2026-09-19): import the run — or only its last `last` seconds, a
+    shorter run taken whole — detect the averaging, compute the PSDs,
+    band them and the specification onto octave bands, compute the
+    multiple coherence, bring in the geometry and the photographs when
+    they are given, generate the Random Vibration report and write it
+    as one self-contained HTML file. Returns the path written, which
+    defaults to the run's own name with an `.html` extension. The
+    keywords are `random_vibration_run`'s, plus `unit_system` for the
+    units the report is written in.
 
     Everything it does is `random_vibration_run` followed by
     `generate_report` and `export_report`; reach for those instead when
-    the project is wanted afterwards — to add photographs or a geometry,
-    to write the test summary, or to save it as `.vdyn`.
+    the project is wanted afterwards — to write the test summary, or to
+    save it as `.vdyn`.
     """
-    project = random_vibration_run(run, per_octave)
+    project = random_vibration_run(run, per_octave, last=last,
+                                   geometry=geometry, length_unit=length_unit,
+                                   photos=photos)
     report = project.generate_report('random', name='Report')
     if path is None:
         path = os.path.splitext(str(run))[0] + '.html'

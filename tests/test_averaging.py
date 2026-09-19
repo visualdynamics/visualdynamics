@@ -196,12 +196,18 @@ def test_a_modal_run_brings_its_own_averaging():
 
 
 def test_a_random_run_brings_the_control_loop_settings():
-    """frames_in_cpsd, cpsd_overlap, cpsd_window — and 'Hann' normalized."""
-    averaging = imported('random.nc4').averaging
+    """samples_per_frame, cpsd_overlap, cpsd_window — and 'Hann'
+    normalized. The count is not the file's frames_in_cpsd (10, the
+    controller's running buffer) but what the run's full-level stretch
+    holds: the import answers as Detect does (Brandon, 2026-09-19)."""
+    history = imported('random.nc4')
+    averaging = history.averaging
     assert averaging.frame_length == 2048
-    assert averaging.frames == 10
     assert averaging.overlap == 0.5
     assert averaging.window == 'hann'
+    assert averaging.frames > 10, 'the stretch holds more than the buffer did'
+    assert history.suggest_averaging() == averaging, \
+        'the import is the Detect answer, exactly'
 
 
 def test_the_system_id_settings_count_too():
@@ -310,7 +316,9 @@ def test_counting_channels_and_averaging_them_agree():
 
 def test_a_continuous_capture_counts_its_frames_per_record():
     """One record each, so the count is what the averaging asks for."""
-    assert imported('random.nc4').average_counts == (10, 10)
+    history = imported('random.nc4')
+    frames = history.averaging.frames
+    assert history.average_counts == (frames, frames)
 
 
 def test_the_window_is_still_the_users_when_the_frames_are_fixed():
@@ -405,18 +413,22 @@ def test_a_random_run_starts_where_the_record_is_worth_averaging(tmp_path):
     assert averaging.stop(256.0) < 80.0, 'and done before the level drops'
 
 
-def test_only_the_start_moves(tmp_path):
-    """Everything else is the controller's own account of the run and
-    outranks anything worked out from the samples."""
+def test_the_recipe_is_the_controllers_and_the_count_is_the_stretchs(tmp_path):
+    """The frame length, overlap and window are the controller's own
+    account of the run and outrank anything worked out from the
+    samples; the count is as many frames as the full-level stretch
+    holds — the file's five were its running buffer, not the record
+    (Brandon, 2026-09-19)."""
     path = rattlesnake_run(tmp_path / 'random.nc4',
                            [(0.05, 20), (1.0, 60), (0.05, 20)],
                            per_frame=512, averages=5, overlap=0.5,
                            window='hann')
     averaging = loaded(path).averaging
     assert averaging.frame_length == 512
-    assert averaging.frames == 5
     assert averaging.overlap == 0.5
     assert averaging.window == 'hann'
+    assert averaging.frames > 5, 'sixty seconds at level hold far more than five'
+    assert averaging.stop(256.0) <= 80.0 + 2.0, 'and none of it past the level drop'
 
 
 def test_a_modal_run_is_left_where_it_was(tmp_path):
@@ -430,17 +442,45 @@ def test_a_modal_run_is_left_where_it_was(tmp_path):
     assert imported('modal.nc4').averaging.start == 0.0
 
 
-def test_a_stretch_too_short_for_the_frames_is_not_used(tmp_path):
-    """Short of room for what the file asked for, the detector has
-    plainly not found what the controller averaged, and the file's own
-    account is the better one."""
+def test_a_short_stretch_is_used_with_the_frames_it_holds(tmp_path):
+    """Until 2026-09-19 a stretch short of the file's count was not
+    used at all, and the analysis stayed at zero with the shaker coming
+    up in it. The stretch is what is at level; the count follows it."""
     # 8 s of full level cannot hold 20 frames of 2 s at half overlap
     path = rattlesnake_run(tmp_path / 'brief.nc4',
                            [(0.05, 40), (1.0, 8), (0.05, 40)],
                            per_frame=512, averages=20)
     averaging = loaded(path).averaging
-    assert averaging.start == 0.0
-    assert averaging.frames == 20, 'and the count is still the file s'
+    assert 38.0 <= averaging.start <= 42.0, 'onto the eight seconds at level'
+    assert 1 <= averaging.frames < 20, 'as many as fit, no more'
+    assert averaging.frame_length == 512
+
+
+def test_detect_keeps_the_recipe_a_record_carries():
+    """Detect works out the start and the count; the frame length,
+    window, overlap and detrend stay the controller's (Brandon,
+    2026-09-19). A bare record gets the detector's own recipe."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rate = 1024.0
+    t = np.arange(int(rate * 30)) / rate
+    rng = np.random.default_rng(4)
+    level = np.where((t > 5.0) & (t < 25.0), 1.0, 0.05)
+    history = TimeHistory(
+        t, rng.standard_normal((2, len(t))) * level, response_dof=['1Z+', '2Z+'],
+        ordinate_dim='acceleration')
+    bare = history.suggest_averaging()
+    history.averaging = Averaging(frame_length=2048, overlap=0.25,
+                                  window='rectangle', frames=3, detrend='mean')
+    kept = history.suggest_averaging()
+    assert (kept.frame_length, kept.overlap, kept.window, kept.detrend) == \
+        (2048, 0.25, normalize_window('rectangle'), 'mean')
+    assert kept.frames > 3 and 5.0 <= kept.start <= 10.0, 'on the level stretch, trimmed at the front'
+    assert bare.frame_length != 2048 or bare.window != 'rectangle', \
+        'the bare record was given the detector\'s own recipe'
+    assert history.suggest_averaging(window='hann').window == 'hann', \
+        'an explicit choice still wins'
 
 
 def test_the_moved_analysis_still_fits_the_record(tmp_path):

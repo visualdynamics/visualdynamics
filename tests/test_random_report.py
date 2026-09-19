@@ -359,9 +359,10 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
 
     per_channel = len(control_channel_labels(objects, links,
                                              '@basis:OctaveSpecification'))
-    assert per_channel > 1
-    assert len(octave) == 2 + 2 * per_channel, \
-        'a specification figure and a comparison per control channel, two bar charts'
+    assert per_channel > 4, 'the plate has eight: a grid, not a sequence'
+    assert len(octave) == 4, \
+        'a specification grid, a comparison grid, two bar charts'
+    assert [b.get('grid') for b in octave if b['kind'] == 'plot'] == [True, True]
     for block in octave:
         for field in ('source', 'specification', 'measured'):
             if block.get(field):
@@ -454,16 +455,26 @@ def test_a_density_is_drawn_flat_across_its_own_bin():
     from visualdynamics.report import _plot_block
 
     loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
-    spec = loaded['Random_specification']
+    lines = loaded['Random_specification']
     psds = loaded['time_data'].compute_psds()
     comparison = _plot_block(
         {'kind': 'plot', 'source': 'P', 'specification': 'S',
-         'mode': 'curves'}, psds, {'S': spec, 'P': psds}, visualdynamics.SI)
-    alone = _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves'},
-                        spec, {}, visualdynamics.SI)
+         'mode': 'curves'}, psds, {'S': lines, 'P': psds}, visualdynamics.SI)
     assert psds.interpolation == 'bin'
     assert comparison['steps'] is True
-    assert spec.interpolation == 'log_log'
+    # the controller's target on its lines is a density per line too,
+    # and steps (2026-09-19); a written breakpoint curve is the one
+    # shape that does not
+    assert lines.interpolation == 'bin'
+    assert _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves'},
+                       lines, {}, visualdynamics.SI)['steps'] is True
+    written = visualdynamics.Specification(
+        np.array([20.0, 80.0, 800.0, 2000.0]),
+        np.array([[1e-3, 4e-3, 4e-3, 1e-3]]), response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'], ordinate_unit=['m/s**2'])
+    assert written.interpolation == 'log_log'
+    alone = _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves'},
+                        written, {}, visualdynamics.SI)
     assert alone.get('steps', False) is False
 
 
@@ -720,12 +731,16 @@ def test_a_block_may_name_its_channel():
                        psds, {'S': spec, 'P': psds}, visualdynamics.SI) is None
 
 
-def test_the_template_writes_a_figure_per_control_channel():
+def test_the_template_writes_a_figure_per_control_channel(monkeypatch):
     """One figure per control channel, narrowband and on octave bands,
     rather than one figure with a drop-down (Brandon, 2026-09-18); a
-    project with nothing bound yet gets the one figure that picks."""
+    project with nothing bound yet gets the one figure that picks.
+    Up to `GRID_ABOVE` channels — the plate's eight are held under it
+    here; above it the figures are a grid (the next test)."""
+    from visualdynamics.core import report as core_report
     from visualdynamics.core.report import control_channel_labels, random_template
 
+    monkeypatch.setattr(core_report, 'GRID_ABOVE', 100)
     loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
     spec = loaded['Random_specification']
     psds = loaded['time_data'].compute_psds()
@@ -767,6 +782,140 @@ def test_the_template_writes_a_figure_per_control_channel():
     assert len(lone_specs) == 1 and 'channel' not in lone_specs[0]
 
 
+def test_many_control_channels_read_as_a_grid():
+    """Above four control channels a sequence of figures stops reading
+    (Brandon, 2026-09-19): the template writes one grid figure in each
+    place — a row per node, a column per direction — and the page gets
+    a cell per channel, each the figure that channel alone would have
+    had. The plate's eight channels are all Z, so one column; with the
+    geometry linked it is 'Global Z', without it the DOF's own letter."""
+    import json
+    import re
+
+    from visualdynamics.core.report import GRID_ABOVE, random_template
+
+    assert GRID_ABOVE == 4
+    project = visualdynamics.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
+    report = random_template(project, links=project.links)
+    grids = [b for b in report.blocks if b.get('grid')]
+    assert [b['caption'] for b in grids] == [
+        'Test specification, with its warning and abort limits',
+        'Control against specification',
+        'Test specification, octave bands',
+        'Control against specification, octave bands']
+    assert not any(b.get('channel') for b in report.blocks), \
+        'no per-channel figures beside the grids'
+
+    def payload_of(project, report):
+        page = render_html(report, project, links=project.links,
+                           unit_system=visualdynamics.SI)
+        return json.loads(re.search(
+            r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
+
+    payload = payload_of(project, report)
+    drawn = [b for b in payload['blocks'] if b['kind'] == 'grid']
+    assert len(drawn) == 4 and drawn[1]['caption'] == 'Control against specification'
+    control = drawn[1]
+    assert control['columns'] == ['Global Z']
+    assert [row['label'] for row in control['rows']] == [
+        'Node 101', 'Node 104', 'Node 110', 'Node 113',
+        'Node 1301', 'Node 1304', 'Node 1310', 'Node 1313']
+    [cell] = control['rows'][0]['cells']
+    [figure] = cell
+    assert figure['kind'] == 'plot' and figure['caption'] == '101Z+'
+    assert [ch['label'] for ch in figure['channels']] == ['101Z+']
+    assert 'note' not in figure, 'on its axis: nothing to note'
+    assert control['label'].startswith('Figure '), 'a grid is one numbered figure'
+    text = ' '.join(b['html'] for b in payload['blocks'] if b['kind'] == 'text')
+    assert 'a row per node, a column per direction' in text
+    assert not re.search(r'\{\{figure:', text), 'every reference resolves'
+    # without a geometry the column is the DOF's own letter
+    bare = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    payload = payload_of(bare, random_template(bare, links=bare.links))
+    control = [b for b in payload['blocks'] if b['kind'] == 'grid'][1]
+    assert control['columns'] == ['Z']
+
+
+def test_the_grid_lays_channels_by_node_and_direction():
+    """The layout on its own: rows in the order the nodes first appear,
+    global columns for channels a geometry can place — with the angle
+    off the axis noted — the DOF's letter for ones it cannot, and a
+    'Channel' column for a node number alone."""
+    from visualdynamics.core.report import channel_grid
+
+    c, s = np.cos(np.radians(30.0)), np.sin(np.radians(30.0))
+    turned = [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]]
+    identity = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0, 0, 0]]
+    geometry = visualdynamics.Geometry(
+        node_id=[101, 102], node_xyz=np.zeros((2, 3)), node_disp_cs=[2, 1],
+        cs_id=[1, 2], cs_name=['', ''], cs_type=[0, 0],
+        cs_matrix=[identity, turned])
+    labels = ['101X+', '101Y+', '102Z-', '101Z+', '300X+', '400']
+    grid = channel_grid(labels, geometry)
+    assert grid['columns'] == ['Global X', 'Global Y', 'Global Z', 'X', 'Channel']
+    assert [row['label'] for row in grid['rows']] == [
+        'Node 101', 'Node 102', 'Node 300', 'Node 400']
+    node101 = grid['rows'][0]['cells']
+    assert node101[0] == [{'channel': '101X+', 'note': '30° off global X'}]
+    assert node101[1] == [{'channel': '101Y+', 'note': '30° off global Y'}]
+    assert node101[2] == [{'channel': '101Z+', 'note': ''}]
+    assert node101[3] == node101[4] == []
+    assert grid['rows'][1]['cells'][2] == [{'channel': '102Z-', 'note': ''}]
+    assert grid['rows'][2]['cells'][3] == [{'channel': '300X+', 'note': ''}], \
+        'a node the geometry lacks stands under its own letter'
+    assert grid['rows'][3]['cells'][4] == [{'channel': '400', 'note': ''}], \
+        'a node number alone is a node, in the channel column'
+    # no geometry at all: letters and the channel column only
+    grid = channel_grid(['5Z+', '5X+', '6'])
+    assert grid['columns'] == ['X', 'Z', 'Channel']
+    assert grid['rows'][0]['cells'] == [[{'channel': '5X+', 'note': ''}],
+                                        [{'channel': '5Z+', 'note': ''}], []]
+
+
+def test_the_page_draws_a_grid_of_cells():
+    """The page lays a grid figure out as one section — cells are
+    divs, because edit mode maps sections to blocks by position — and
+    draws each cell with the plot's own code."""
+    from visualdynamics.report.page import _CSS, _JS
+
+    assert 'function gridBlock(block) {' in _JS
+    assert "else if (block.kind === 'grid') gridBlock(block);" in _JS
+    assert 'function plotBlock(block, into) {' in _JS
+    assert 'cell.forEach(figure => plotBlock(figure, holder));' in _JS
+    assert "holder.className = 'gridcell'" in _JS
+    assert '.grid { display: grid;' in _CSS
+
+
+def test_sections_whose_objects_are_absent_are_dropped():
+    """A run with no specification has nothing to compare against
+    (Brandon, 2026-09-19): the specification, control, compliance and
+    octave sections go, heading and prose too, rather than standing
+    as headings over nothing. An empty project keeps the whole
+    outline — that is the template being read."""
+    from visualdynamics.core.report import random_template
+
+    thin = visualdynamics.Project()
+    thin.import_file(fixture_path('plate', 'random.nc4'))
+    thin.remove('Specification')
+    thin.compute_psds('Time History')
+
+    def headings(report):
+        return [b['text'].split('\n')[0][3:] for b in report.blocks
+                if b.get('kind') == 'text' and b['text'].startswith('## ')]
+
+    assert headings(random_template(thin, links=thin.links)) == [
+        'Test Summary', 'Test Article and Instrumentation', 'Measured Data',
+        'Data Quality', 'Conclusions']
+    full = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    assert 'Specification' in headings(random_template(full, links=full.links))
+    assert 'Octave Band Comparison' in headings(random_template({}))
+    assert len(random_template({}).blocks) == len(
+        random_template(full, links=full.links).blocks), \
+        'an empty project keeps every slot of the outline'
+
+
 def test_a_table_row_is_one_line():
     """A channel table's comments wrapped every row onto four lines
     (Brandon, 2026-09-18): cells never wrap, and a table wider than the
@@ -795,3 +944,13 @@ def test_a_specification_figure_may_name_its_channel():
     assert _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves',
                         'channel': '999Z+'}, spec, {'S': spec},
                        visualdynamics.SI) is None
+
+
+def test_the_page_steps_the_zones_with_the_target():
+    """The report drew a banded specification\'s limits as polygons
+    through the band centers under a stepped target (Brandon,
+    2026-09-19): the page steps a zone on the same edges as its target."""
+    from visualdynamics.report.page import _JS
+
+    assert 'const stepped = !!(zoneSteps && zoneEdges);' in _JS
+    assert 'if (stepped) g.lineTo(xAt(i, 1), YL);' in _JS

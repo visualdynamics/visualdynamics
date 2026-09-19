@@ -144,6 +144,34 @@ jobs:
           name: coverage-html
           path: htmlcov/
 
+  # The head branch of a pull request is named for what it carries:
+  # `fix/`, `feature/`, `docs/` or `tooling/` and a short lower-case
+  # slug — the one branch scheme the project has (PLAN.md, "Branches",
+  # 2026-09-19). Checked here so a pull request from any fork wears
+  # it, and required on `main` so a branch that does not cannot merge.
+  # The canonical repository itself takes no working branches at all:
+  # a ruleset refuses their creation, the owner included, so the scheme
+  # only ever has to be checked on the way in. `sync/` is the owner's
+  # publishing tool. Skipped on a push to main, where there is no head
+  # branch to name. tests/test_public_tree.py reads the pattern out of
+  # this file rather than writing it a second time.
+  branch:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: The head branch is named by the scheme
+        env:
+          HEAD: ${{ github.head_ref }}
+        run: |
+          pattern='^(fix|feature|docs|tooling)/[a-z0-9][a-z0-9.-]*$|^sync/[0-9]{8}-[0-9]{4}$'
+          if [[ $HEAD =~ $pattern ]]; then
+            echo "$HEAD"
+          else
+            echo "::error::The branch '$HEAD' is not named by the scheme: fix/, feature/, docs/ or tooling/, then a short lower-case slug of letters, digits and hyphens — fix/decade-axis-ticks, say. Rename the branch in your fork (the pull request follows the rename) and push again."
+            exit 1
+          fi
+
   # The documentation site, built here as a check and published only by
   # the release workflow into visualdynamics.org/documentation/ — GitHub
   # Pages and Read the Docs are not connected. The site comes back as an

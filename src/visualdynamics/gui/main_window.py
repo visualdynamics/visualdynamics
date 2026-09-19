@@ -5758,6 +5758,23 @@ class MainWindow(QMainWindow):
                     + (f' — project type changed from {previous}'
                        if previous else ''))
                 return True
+        if wanted is None and self.project_type is None:
+            # a file that names environments visualdynamics has no
+            # project for — or none at all — leaves the project
+            # untyped, which leaves its objects out of any Basis: said,
+            # so the person knows to set one (Brandon, 2026-09-19: a run
+            # that "doesn't come in as the basis set")
+            try:
+                kinds = io.rattlesnake.environment_kinds(path)
+            except Exception:  # noqa: BLE001 - not every file is a run
+                kinds = {}
+            if kinds:
+                named = ', '.join(f'{name} ({kind})'
+                                  for name, kind in kinds.items())
+                self._show_status(
+                    f'{os.path.basename(path)}: environments {named} fit '
+                    'no project type; set one from the project row')
+                return True
         if wanted is None or wanted == self.project_type:
             return False
         previous = self.project_type
@@ -5853,12 +5870,21 @@ class MainWindow(QMainWindow):
         (Brandon, 2026-09-18: "I would think they should import as a
         linked set"). One file is one measurement either way: they
         are linked as a group of their own.
+
+        Only once the project has a type. With none — a run whose kind
+        the importer cannot name, a system-ID question answered no —
+        nothing *could* have been placed, and the type, when it is
+        set, builds the Basis from whatever is unlinked; grouped
+        first, the run's objects counted as placed elsewhere and the
+        Basis stayed empty beside an orange bracket (Brandon,
+        2026-09-19).
         """
         grouped = {member for group in self.links
                    for member in group['members']}
         placed = next((name for name in names if name in grouped), None)
         loose = [name for name in names if name not in grouped]
-        if not loose or (placed is None and len(loose) < 2):
+        if not loose or (placed is None
+                         and (len(loose) < 2 or self.project_type is None)):
             return
         try:
             self.project.link(*([placed] if placed else []), *loose)

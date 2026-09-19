@@ -25,6 +25,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 import contextlib
 import html as html_escape
 import json
+import logging
 import os
 import tempfile
 import traceback
@@ -96,6 +97,8 @@ BLOCK_TEMPLATES = {
 TEXT_DEBOUNCE_MS = 400
 
 
+_log = logging.getLogger(__name__)
+
 class _Bridge(QObject):
     """The single slot the page talks to; one JSON operation per call."""
 
@@ -137,6 +140,15 @@ class ReportEditor(QWidget):
         self.view: QWebEngineView = QWebEngineView()
         #: the loadFinished slot of the navigation in flight, if any
         self._restore = None
+        #: the one timer that scrolls a freshly loaded page back to
+        #: where it was — held, so standing down can stop it: a bare
+        #: single-shot could still fire its script into a page in the
+        #: middle of being discarded (the gate's stall, 2026-09-19)
+        self._scroll_timer: QTimer = QTimer(self.view)
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.setInterval(50)
+        self._scroll_timer.timeout.connect(self._scroll_back)
+        self._scroll_to: int = 0
         self.split.addWidget(self.view)
         self.pane: QScrollArea = QScrollArea()
         self.pane.setWidgetResizable(True)
@@ -551,12 +563,13 @@ class ReportEditor(QWidget):
         def restore(_ok: bool) -> None:
             self._restore = None
             self.view.loadFinished.disconnect(restore)
-            # the view as the timer's context: a window closed inside
-            # those 50 ms takes the view with it, and a bare singleShot
-            # then fired into a deleted QWebEngineView (2026-09-13, once
-            # windows really died at teardown)
-            QTimer.singleShot(50, self.view, lambda: self.view.page().runJavaScript(
-                f'window.scrollTo(0, {int(scroll)});'))
+            # the view owns the timer: a window closed inside those
+            # 50 ms takes the view with it, and a bare singleShot then
+            # fired into a deleted QWebEngineView (2026-09-13, once
+            # windows really died at teardown); and `stand_down` stops
+            # it, so no script fires into a page being discarded
+            self._scroll_to = int(scroll)
+            self._scroll_timer.start()
 
         # one slot at a time: a rebuild before the last page finished
         # would otherwise leave the earlier slot connected, to fire on
@@ -567,6 +580,9 @@ class ReportEditor(QWidget):
         self._restore = restore
         self.view.loadFinished.connect(restore)
         self._offer()
+
+    def _scroll_back(self) -> None:
+        self.view.page().runJavaScript(f'window.scrollTo(0, {self._scroll_to});')
 
     def stand_down(self) -> None:
         """Leave the page with nothing for the view's destructor to wait on.
@@ -593,18 +609,27 @@ class ReportEditor(QWidget):
         """
         from PySide6.QtWidgets import QApplication
 
+        page = self.view.page()
+        # the witness the stall's record asks for (PLAN.md "The 98 %
+        # stall, named"): the page's state at the moment of the
+        # discard, on the debug log — the faulthandler dump names the
+        # line and not the page
+        _log.debug('stand_down: loading=%s state=%s restore=%s scroll_timer=%s',
+                   page.isLoading(), page.lifecycleState(),
+                   self._restore is not None, self._scroll_timer.isActive())
         if self._restore is not None:
             with contextlib.suppress(RuntimeError, TypeError):
                 self.view.loadFinished.disconnect(self._restore)
             self._restore = None
+        self._scroll_timer.stop()
         self.view.stop()
         self.view.hide()
-        page = self.view.page()
         # the enum through the page rather than a QtWebEngineCore
         # import: the rulebook's sanctioned Qt modules are the ones
         # already imported, and the page carries its own states
         with contextlib.suppress(RuntimeError):
             page.setLifecycleState(type(page).LifecycleState.Discarded)
+        _log.debug('stand_down: discarded')
         for _ in range(20):
             QApplication.processEvents()
 

@@ -73,6 +73,17 @@ TOLERANCE = 2.0
 #: still sets it.
 TOP_QUANTILE = 95.0
 
+#: how far below the record's top level a stretch may sit and still be
+#: the test, in dB. The threshold sweep in `plateau` stops here: a run
+#: eight seconds at level inside eighty of quiet holds no thirty frames
+#: at level, and sweeping on found thirty frames of noise floor — the
+#: importer's own guard against exactly that, folded into the detector
+#: once the import became the Detect answer (2026-09-19). Twelve sits
+#: between the two things it must tell apart: an overload nearly ten
+#: decibels above the test (duration still wins, as it must) and an
+#: ambient twenty and more below it (duration must not).
+FULL_LEVEL_MARGIN = 12.0
+
 #: how many times a run is re-centered on itself and grown again. Three
 #: is enough for anything seen: the first pass from a fragment's own
 #: median, the second from the median of what that reached, and the
@@ -258,7 +269,12 @@ def plateau(level: np.ndarray, sigma: float, want_hops: int,
     if len(level) == 0:
         return (0, 0)
     step = max(tolerance * sigma, 1e-9)
+    # the sweep stops a margin under the top: below that a run is not
+    # the test at level, however long it is held
+    floor = float(np.percentile(level, TOP_QUANTILE)) - FULL_LEVEL_MARGIN
     for edge in np.sort(np.unique(np.round(level / step)))[::-1]:
+        if (edge - 0.5) * step < floor:
+            break
         first, last = _longest_run(level >= (edge - 0.5) * step)
         if last - first >= want_hops:
             return _grow(level, first, last, sigma, tolerance)

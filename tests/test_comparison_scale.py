@@ -59,12 +59,18 @@ def test_a_quiet_run_detects_its_commanded_level():
     assert detect_scale_db(spec, psds) == 6
 
 
-def test_detection_rounds_to_whole_decibels():
-    """Runs are commanded in whole dB; a genuine half-dB level error is
-    the comparison's business, not the scaling's."""
+def test_detection_snaps_to_the_three_decibel_ladder():
+    """Runs are commanded at +3, 0, -3, -6 … (Brandon, 2026-09-19,
+    from whole decibels): the detected offset lands on that ladder,
+    and a level error of a decibel or two reads as its nearest step —
+    the Scaling field is there to type the truth."""
+    from visualdynamics.core.compliance import SCALE_STEP_DB
+
+    assert SCALE_STEP_DB == 3
     spec = _spec()
-    assert detect_scale_db(spec, _measured(spec, [6.4])) == 6
-    assert detect_scale_db(spec, _measured(spec, [5.6])) == 6
+    for offset, snapped in ((6.4, 6), (5.6, 6), (7.4, 6), (7.6, 9),
+                            (1.4, 0), (1.6, 3), (-4.4, -3), (-4.6, -6)):
+        assert detect_scale_db(spec, _measured(spec, [offset])) == snapped, offset
 
 
 def test_monitors_cannot_outvote_the_controls():
@@ -296,15 +302,16 @@ def test_banding_carries_the_held_scale():
 # ---- one measurement, one scale ---------------------------------------------
 
 def _tilted(spec):
-    """A channel at +5 dB below 300 Hz and +6 above: the narrowband
-    median (linear grid, most lines high) rounds to 6, the octave
-    median (log bands, most bands low) rounds to 5 — the rounding
-    disagreement between gridings that one-resolution exists to kill."""
+    """A channel at +7.4 dB below 300 Hz and +7.6 above: the narrowband
+    median (linear grid, most lines high) snaps to 9, the octave
+    median (log bands, most bands low) snaps to 6 — the snapping
+    disagreement between gridings that one-resolution exists to kill
+    (5 and 6 on the whole-decibel rule, until 2026-09-19)."""
     from visualdynamics.core.compliance import log_interpolate
 
     f = np.linspace(20.0, 2000.0, 400)
     base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
-    offset = np.where(f < 300.0, 5.0, 6.0)
+    offset = np.where(f < 300.0, 7.4, 7.6)
     return Psd(f, np.array([base * 10.0 ** (-offset / 10.0)]),
                response_dof=['101Z+'],
                ordinate_dim='acceleration**2/frequency',
@@ -322,12 +329,12 @@ def test_the_report_resolves_one_scale_for_every_grid():
 
     spec = _spec()
     psds = _tilted(spec)
-    assert detect_scale_db(spec, psds) == 6
-    assert detect_scale_db(spec, psds.to_octave(6)) == 5, (
+    assert detect_scale_db(spec, psds) == 9
+    assert detect_scale_db(spec, psds.to_octave(6)) == 6, (
         'the fixture must make the two gridings disagree')
     bars = _bars_block({'mode': 'error', 'octave': 6, 'caption': 'Bands'},
                        spec, psds, visualdynamics.SI)
-    assert 'scaled +6 dB' in bars['caption'], (
+    assert 'scaled +9 dB' in bars['caption'], (
         'the octave blocks use the scale resolved on the narrowband')
 
 

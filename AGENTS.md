@@ -78,6 +78,26 @@ something that cannot be bought back.
    `git restore` a file holding uncommitted work — copy it aside
    first.
 
+## Branches
+
+The repository holds no working branches: `main`, the CLA bot's
+`cla-signatures`, the maintainer's publishing branches and, should a
+backport ever be needed, `maintenance/X.Y.x`. A ruleset refuses the
+creation of anything else, the maintainer included, and no
+contributor has write access — so every working branch, yours and
+the maintainer's alike, lives in a fork. Your fork is your folder:
+named for you, writable by nobody else. That is the structure the
+large scientific Python projects run on, and it is what keeps the
+canonical repository readable.
+
+A pull request's head branch is named `kind/short-slug`: `fix/`,
+`feature/`, `docs/` or `tooling/`, then lower-case letters, digits
+and hyphens — `fix/decade-axis-ticks`, `feature/comparison-grid`. CI
+checks the name on every pull request and the check is required, so
+a branch named otherwise cannot merge; rename it in your fork (the
+pull request follows the rename) and push again. When you make a
+branch for the person you are working with, name it by the scheme.
+
 ## The gate
 
 Before saying anything is done:

@@ -35,6 +35,13 @@ environment drove it, so the project type switches to *Random
 Vibration* by itself. The tree's gray slots then say what a finished
 report still needs.
 
+A run too long to hold whole asks first: the import window shows one
+channel's envelope over the whole run, and the stretch to import is
+chosen on it — dragged, typed as a start and a stop, or typed as the
+**Last** so many seconds of the run, which is the usual answer for a
+long run whose end is the stretch at level. A run shorter than that is
+imported whole.
+
 ![The imported run: the control time histories drawn, the
 specification and channel table beside them in the tree, and the
 type's remaining slots in gray](../images/random-import.png)
@@ -42,9 +49,12 @@ type's remaining slots in gray](../images/random-import.png)
 ### 2. Compute the control PSDs
 
 **Compute PSDs** in the time history's averaging view averages over
-the run's own frame length and framing — the numbers the controller
-used, read from the file, not guessed — and the view shows exactly
-those frames before the button is pressed.
+the run's own frame length, overlap and window — the controller's,
+read from the file, not guessed — with the start and the count worked
+out from the record itself: where the run is at level and how many
+frames that stretch holds, the same answer the view's **Detect**
+button gives. The view shows exactly those frames before the button
+is pressed.
 
 ![The control PSDs: eight acceleration channels and the drive forces,
 averaged over the run's own frames](../images/random-psds.png)
@@ -84,8 +94,9 @@ red or blue for which way it went. The table below the plot accounts
 for every channel at once; the plot shows the ones you pick in it.
 
 Two things to notice in the bar above the plot. The **Scaling** field
-is the comparison's dB offset — detected from the data in whole
-decibels, for runs captured below the 0 dB requirement; this run was
+is the comparison's dB offset — detected from the data to the nearest
+3 dB, the ladder runs are commanded on, for runs captured below the
+0 dB requirement; this run was
 at full level, so it reads 0. And the status bar notes the records
 that had no specification to answer to: the drive force PSDs share
 DOF names with control channels, and the comparison filters them out
@@ -108,9 +119,17 @@ comparison are one figure per control channel — no drop-down
 anywhere in the report — narrowband and again on octave bands
 against the banded specification, each comparison opening on the specification's own
 frequency band with the measurement beyond it a zoom away; a banded
-specification is drawn on its own bands, steps against steps. The
+specification is drawn on its own bands, steps against steps. Above
+four control channels the figures become a grid instead: a row per
+node, a column per direction — the global axes when the linked
+geometry can place the channels, with how far off its axis a channel
+sits noted in its cell, the DOF's own letter when it cannot — and
+each cell is the figure that channel alone would have had. The
 channel table keeps every row on one line, however long its
-comments. *Export → HTML…* writes one self-contained file.
+comments. A section whose objects the project does not hold — the
+specification sections of a run imported without one, say — is left
+out of the report rather than standing as a heading over nothing.
+*Export → HTML…* writes one self-contained file.
 
 ![The exported report: control histories with the averaged frames
 shaded, the specification with its tolerance
@@ -127,6 +146,20 @@ The whole thing is one call when the defaults are right:
 import visualdynamics
 
 visualdynamics.random_vibration_report('random.nc4', 'report.html')
+```
+
+…and still one call when the report needs the rest of what the tree
+asks for. The geometry comes in with its length unit declared when
+the file does not carry one, the photographs from a folder (or a list
+of files, in the order they should appear), and a run too long to hold
+is read from its last so many seconds — a shorter run is taken whole:
+
+```python
+visualdynamics.random_vibration_report(
+    'random.nc4', 'report.html',
+    geometry='article.stp', length_unit='mm',
+    photos='setup_photos/',
+    last=100.0)
 ```
 
 …and the same call written out when the project should live on. It

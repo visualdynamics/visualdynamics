@@ -1178,7 +1178,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # The zones say where the limits are. Drawn as lines too,
             # four more curves per record crowd the two that are being
             # compared and the shading behind them says the same thing.
-            _shade_limit_zones(plot, x, bands, colors, shape)
+            _shade_limit_zones(plot, x, bands, colors, shape, widths)
             for values in bands.values():
                 # they still set how far the view reaches, so a limit
                 # above everything measured is not cropped off
@@ -1540,7 +1540,7 @@ def data_curves(plot: Any) -> list[Any]:
             if not getattr(item, 'is_zone_edge', False)]
 
 
-def _shade_limit_zones(plot, x, bands, colors, shape='line'):
+def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
     """Fill the zones a response must not be in.
 
     Yellow between the warning limit and the abort limit, red beyond
@@ -1556,7 +1556,19 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line'):
     import pyqtgraph as pg
     from PySide6.QtGui import QColor
 
-    if shape == 'law':
+    if shape == 'steps' and np.asarray(x).size > 1:
+        # the zones step with the target they bound: a limit is a
+        # density per bin like the level it is written around, and a
+        # polygon through the bin centers drew a banded
+        # specification's warning and abort limits as slopes under a
+        # stepped target (Brandon, 2026-09-19)
+        stepped = {}
+        for bound, values in bands.items():
+            _grid, rows = step_outline(x, np.asarray(values).real, widths)
+            stepped[bound] = np.atleast_2d(rows)[0]
+        bands = stepped
+        x = step_outline(x, np.zeros(np.asarray(x).size), widths)[0]
+    elif shape == 'law':
         # the zone a limit fills is bounded by the limit, and a limit
         # means the power law its breakpoints make just as the curve it
         # bounds does. Filled between straight lines instead, the shaded

@@ -97,3 +97,19 @@ def test_a_window_closed_mid_navigation_stops_the_page(qt_app,
     assert not editor.view.isVisible()
     destroy_window(window, qt_app)
 
+
+
+def test_standing_down_stops_the_scroll_script(qt_app):
+    """The scroll-back script fired from a bare single-shot timer, into
+    a page in the middle of being discarded when a window closed
+    within its 50 ms — the gate's stall, five times (2026-09-19). The
+    editor holds the timer and stops it before the discard."""
+    from visualdynamics.gui.report_editor import ReportEditor
+
+    editor = ReportEditor()
+    editor._scroll_timer.start()
+    assert editor._scroll_timer.isActive()
+    editor.stand_down()
+    assert not editor._scroll_timer.isActive()
+    editor.deleteLater()
+    qt_app.processEvents()

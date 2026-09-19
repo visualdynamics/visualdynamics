@@ -297,3 +297,27 @@ def test_a_curve_in_decades_is_drawn_whole_not_peak_downsampled(window, pump):
     assert len(x) == len(f) and np.all(np.diff(x) > 0), \
         'every line drawn, once, in order — no bucket, no tooth'
     assert curve.opts['clipToView'], 'clipping does not bucket; it stays'
+
+
+def test_the_decade_axis_turns_the_ticks_off_through_vtk():
+    """The major ticks off by VTK's own call. The line assigned
+    `x_axis_tick_visibility`, a name pyvista does not define on its
+    actor, and reached VTK only through the wrappers' snake-case
+    alias — which one Windows install refused outright, taking every
+    banded stage down (Kevin Cross, 2026-09-19). Ticks on beforehand,
+    so the test measures the call rather than the actor's default."""
+    import pyvista as pv
+
+    from visualdynamics.viz.marks import add_decade_axis
+
+    plotter = pv.Plotter(off_screen=True)
+    plotter.add_mesh(pv.Cube())
+    plotter.show_bounds()
+    axes = plotter.renderer.cube_axes_actor
+    axes.XAxisTickVisibilityOn()
+    assert axes.GetXAxisTickVisibility()
+    add_decade_axis(plotter, (1.0, 3.0, -3.0, 1.0))
+    assert not axes.GetXAxisTickVisibility()
+    assert 'x_axis_tick_visibility' not in vars(axes), \
+        'nothing assigned under a name the actor does not define'
+    plotter.close()

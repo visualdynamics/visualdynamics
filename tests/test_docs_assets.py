@@ -57,5 +57,10 @@ def test_the_logo_is_the_application_icon(qt_app):
         (ROOT / 'docs' / 'assets' / 'logo.png').read_bytes())
     drawn = draw_app_icon(make_docs_assets.LOGO)
     assert (logo.width(), logo.height()) == (drawn.width(), drawn.height())
-    assert logo.pixelColor(logo.width() // 2, logo.height() // 2) == \
-        drawn.pixelColor(drawn.width() // 2, drawn.height() // 2)
+    # the same mark, allowing the rasterizer its rounding: the file was
+    # drawn on a Mac and Windows antialiases a little differently (a
+    # bug report, 2026-09-19); a different mark is off by far more
+    center = (logo.width() // 2, logo.height() // 2)
+    a, b = logo.pixelColor(*center), drawn.pixelColor(*center)
+    assert max(abs(a.red() - b.red()), abs(a.green() - b.green()),
+               abs(a.blue() - b.blue()), abs(a.alpha() - b.alpha())) <= 8

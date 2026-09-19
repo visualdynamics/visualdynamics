@@ -600,3 +600,23 @@ def test_a_stack_expands_into_a_grid_of_channels_by_averages(tmp_path, window,
     grid.item(1, 2).setSelected(True)
     pump()
     assert grid.selected_records() == [6], 'channel 2, average 3'
+
+
+def test_a_target_on_the_controllers_lines_reads_as_a_density_per_line():
+    """A narrowband specification on one-hertz lines drew as the law
+    between its points; it is a density per line and steps, like the
+    octave-band one (Brandon, 2026-09-19). A written breakpoint curve —
+    a few unevenly spaced points — is still the law."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.plot import drawing_shape
+
+    spec = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))['Random_specification']
+    assert spec.interpolation == 'bin', 'the controller\'s lines'
+    assert spec.bandwidth is None, 'and not banded: the plain specification still'
+    assert drawing_shape(spec) == 'steps'
+    assert Specification.reading_of(np.array([20.0, 80.0, 800.0, 2000.0])) == 'log_log'
+    assert Specification.reading_of(np.arange(1.0, 2001.0)) == 'bin'
+    assert Specification.reading_of(np.linspace(10.0, 20.0, 5)) == 'log_log', \
+        'too few to be lines, however even'

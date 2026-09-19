@@ -154,7 +154,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
         drawn = built if isinstance(built, list) else [built]
         for built in drawn:
             if built['kind'] in ('plot', 'mac', 'map', 'scene', 'image',
-                                 'bars', 'stage'):
+                                 'bars', 'stage', 'grid'):
                 figures += 1
                 built['label'] = f'Figure {figures}'
             elif built['kind'] == 'table':
@@ -434,6 +434,10 @@ def _build_block(block, objects, us, links=None):
         source = objects.get(block.get('source'))
         if source is None:
             return None
+        if block.get('grid'):
+            geometry = objects.get(
+                resolve_binding('@basis:Geometry', objects, links) or '')
+            return _grid_block(block, source, objects, us, geometry)
         return _plot_block(block, source, objects, us)
     if kind == 'scene':
         geometry = objects.get(block.get('geometry'))
@@ -1040,6 +1044,46 @@ def _stage_figures(block, source, objects, us, caption):
                 f'{at + count} of {held}').strip()
             at += count
     return figures
+
+
+def _grid_block(block, source, objects, us, geometry=None):
+    """Many control channels as one figure: a grid, a row per node and
+    a column per direction (`core.report.channel_grid`), each cell the
+    channel's own figure — the very block `_plot_block` draws for a
+    block naming that channel, so a cell reads exactly as the single
+    figure would (Brandon, 2026-09-19). The columns are the global
+    axes when the basis geometry can place the channels, the DOF's own
+    letters when it cannot."""
+    from ..core.report import channel_grid, control_channels_of
+
+    bounded = (objects.get(block['specification'])
+               if block.get('specification') else source)
+    labels = control_channels_of(bounded)
+    if not labels:
+        return None
+    layout = channel_grid(labels, geometry)
+    rows, drawn_any = [], False
+    for row in layout['rows']:
+        cells = []
+        for column in row['cells']:
+            drawn = []
+            for entry in column:
+                cell = _plot_block({**block, 'grid': False,
+                                    'channel': entry['channel'],
+                                    'caption': entry['channel']},
+                                   source, objects, us)
+                if cell is None:
+                    continue
+                if entry['note']:
+                    cell['note'] = entry['note']
+                drawn.append(cell)
+                drawn_any = True
+            cells.append(drawn)
+        rows.append({'label': row['label'], 'cells': cells})
+    if not drawn_any:
+        return None
+    return {'kind': 'grid', 'caption': block.get('caption', ''),
+            'columns': layout['columns'], 'rows': rows}
 
 
 def _plot_block(block, source, objects, us):

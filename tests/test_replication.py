@@ -1387,13 +1387,20 @@ def test_every_computed_spectrum_is_drawn_flat_in_band(tmp_path):
 
 def test_a_written_specification_stays_a_power_law():
     """Its points are breakpoints, and drawing them as steps would make
-    a staircase of a slope."""
+    a staircase of a slope. A controller's target on its lines is the
+    other thing — a density per line, stepped — and the spacing tells
+    them apart at import (Brandon, 2026-09-19); this test pinned the
+    lines one as breakpoints until then."""
     from visualdynamics.core.data import Specification
 
     project = visualdynamics.Project()
     project.import_file(fixture_path('plate', 'random.nc4'))
-    written = next(o for o in project.values()
-                   if type(o) is Specification)
+    lines = next(o for o in project.values() if type(o) is Specification)
+    assert lines.interpolation == 'bin', "the controller's lines"
+    written = Specification(np.array([20.0, 80.0, 800.0, 2000.0]),
+                            np.array([[1e-3, 4e-3, 4e-3, 1e-3]]),
+                            response_dof=['101Z+'],
+                            ordinate_dim=['acceleration**2/frequency'])
     assert written.interpolation == 'log_log'
 
 

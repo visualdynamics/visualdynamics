@@ -1156,6 +1156,13 @@ class TimeHistory(DataArray):
         and this finds the settled stretch worth averaging and as many
         frames as it will carry. See `visualdynamics.core.detect`.
 
+        A record that already carries an averaging — a controller's own
+        recipe from an import, or one set by hand — keeps its frame
+        length, window, overlap and detrend: only the start and the
+        count are worked out (Brandon, 2026-09-19: Detect must not
+        override the frame length, window and overlap the controller
+        used). A bare record gets the detector's own recipe.
+
         Parameters
         ----------
         **kwargs
@@ -1166,9 +1173,20 @@ class TimeHistory(DataArray):
         Averaging
             Parameters worked out from the record itself.
         """
+        from dataclasses import replace
+
         from .detect import suggest
 
-        return suggest(self, **kwargs)
+        own = self.averaging
+        if own is not None:
+            kwargs.setdefault('frame_length', own.frame_length)
+            kwargs.setdefault('window', own.window)
+            kwargs.setdefault('overlap', own.overlap)
+        found = suggest(self, **kwargs)
+        if own is not None:
+            found = replace(found, detrend=own.detrend,
+                            window_parameter=own.window_parameter)
+        return found
 
     def _spectral_frame(self, averaging=None):
         """(frequencies, one-sided scale, channel -> windowed frames).
@@ -2852,8 +2870,43 @@ class Specification(Bounded, Psd):
     PLAIN = Psd
 
     #: a written specification's points are breakpoints of a power
-    #: law. `compute_psds` says otherwise for one it computed.
+    #: law. `compute_psds` says otherwise for one it computed, and an
+    #: importer says otherwise for a target on a controller's lines
+    #: (`reading_of`).
     interpolation = 'log_log'
+
+    #: how many lines an even grid needs before it reads as lines
+    #: rather than as breakpoints that happen to be evenly spaced
+    LINES_AT_LEAST = 8
+
+    @staticmethod
+    def reading_of(frequencies: ArrayLike) -> str:
+        """How a specification written at these frequencies reads:
+        'bin', a density per line, for many lines on an even grid — a
+        controller's target on its FFT lines — and 'log_log', breakpoints
+        of a power law, for a few unevenly spaced points (Brandon,
+        2026-09-19: "breakpoint specifications have very few frequency
+        lines and I would expect an uneven spacing of them"). Both
+        octave-band and narrowband specifications step; only a
+        breakpoint curve is drawn as the law between its points.
+
+        Parameters
+        ----------
+        frequencies : array_like
+            The specification's frequency lines, ascending.
+
+        Returns
+        -------
+        str
+            'bin' or 'log_log'.
+        """
+        f = np.asarray(frequencies, dtype=float)
+        if f.size < Specification.LINES_AT_LEAST:
+            return 'log_log'
+        steps = np.diff(f)
+        even = np.all(np.abs(steps - np.median(steps))
+                      <= 1e-6 * max(abs(float(np.median(steps))), 1e-12))
+        return 'bin' if even else 'log_log'
 
     #: how finely a breakpoint curve's cross terms are read when a band
     #: integrates them: points per band on a log grid

@@ -232,6 +232,42 @@ def test_a_span_set_on_the_panel_is_the_window(window, tmp_path):
     assert dialog.panel.derived['samples'].text() == '4097 of 16384'
 
 
+def test_the_last_window_rule():
+    """One rule for the dialog's field and a script's `last=`: the
+    window opens `last` seconds before the end, and a run no longer
+    than that is taken whole (Brandon, 2026-09-19)."""
+    assert rattlesnake.last_window(28.0, 10.0) == pytest.approx(18.0)
+    assert rattlesnake.last_window(28.0, 28.0) is None
+    assert rattlesnake.last_window(28.0, 100.0) is None
+    with pytest.raises(ValueError, match='positive'):
+        rattlesnake.last_window(28.0, 0.0)
+
+
+def test_the_last_field_windows_from_the_end(window, tmp_path):
+    _path, dialog = _dialog(tmp_path, window, samples=1 << 14)   # 4 s
+    end = ((1 << 14) - 1) / 4096
+    dialog.last_box.setValue(1.0)
+    span = dialog.truncation()
+    # to the panel's own decimals: the field writes the panel, and the
+    # panel is what the import reads
+    assert span.start == pytest.approx(end - 1.0, abs=1e-3)
+    assert span.stop == pytest.approx(end, abs=1e-3)
+    assert dialog.options()['start'] == pytest.approx(end - 1.0, abs=1e-3)
+    assert dialog.panel.derived['samples'].text().startswith('4096 of 16384')
+    # a span set any other way is no longer "the last so many seconds"
+    dialog.panel.start_box.setValue(0.5)
+    dialog.panel.start_box.editingFinished.emit()
+    assert dialog.last_box.value() == 0.0
+    assert dialog.last_box.text() == '—'
+
+
+def test_a_last_longer_than_the_run_is_the_whole_run(window, tmp_path):
+    _path, dialog = _dialog(tmp_path, window, samples=1 << 14)
+    dialog.last_box.setValue(100.0)
+    assert dialog.options() == {}, 'a short run is taken whole'
+    assert dialog.import_button.isEnabled()
+
+
 def test_a_dragged_span_restates_the_panel(window, pump, tmp_path):
     _path, dialog = _dialog(tmp_path, window, samples=1 << 14)
     dialog.overlay.region.setRegion((0.5, 1.5))

@@ -368,20 +368,28 @@ def significant_band(want: np.ndarray, good: np.ndarray) -> np.ndarray:
     return good & (want >= peak / 10.0 ** (DETECTION_RANGE_DB / 10.0))
 
 
+#: the ladder a commanded level sits on, in decibels: runs are run at
+#: +3, 0, -3, -6, -9, -12 … and the detected offset snaps to it
+#: (Brandon, 2026-09-19, from the whole decibels of 2026-08). A typed
+#: scale is still any whole decibel.
+SCALE_STEP_DB = 3
+
+
 def detect_scale_db(specification: Specification, measured: DataArray,
                     spec_records: Sequence[int] | None = None,
                     measured_records: Sequence[int] | None = None) -> int:
-    """The whole-dB offset that best lays the measurement on the
-    specification — what a run captured at -6 dB needs added to be
-    compared against the 0 dB requirement.
+    """The offset, on the 3 dB ladder from zero, that best lays the
+    measurement on the specification — what a run captured at -6 dB
+    needs added to be compared against the 0 dB requirement.
 
     Each common channel answers with the median dB difference across
     the lines it shares with the specification — the median because a
     resonance or a notch is exactly the kind of departure the
     comparison exists to show, and a mean would let it vote on the
-    level. Whole decibels because runs are commanded in them, and
-    rounding is what keeps a genuine half-dB level error visible as an
-    error instead of silently absorbed.
+    level — snapped to the nearest multiple of `SCALE_STEP_DB`, since
+    that is the ladder runs are commanded on; a level error of a
+    decibel or two reads as its nearest step, and the Scaling field is
+    there to type the truth. (Whole decibels until 2026-09-19.)
 
     Across channels the answer is the **smallest offset at least two
     channels agree on**, not the median of all of them. A specification
@@ -423,8 +431,8 @@ def detect_scale_db(specification: Specification, measured: DataArray,
         # see `significant_band`
         good = significant_band(want, good)
         if good.any():
-            per_channel.append(round(float(np.median(
-                10.0 * np.log10(want[good] / got[good])))))
+            median = float(np.median(10.0 * np.log10(want[good] / got[good])))
+            per_channel.append(round(median / SCALE_STEP_DB) * SCALE_STEP_DB)
     if not per_channel:
         return 0
     agreed = [value for value in set(per_channel)

@@ -354,3 +354,25 @@ def test_a_banded_specification_stands_as_steps():
         'the lines themselves, for judging'
     assert np.array_equal(station['target'][0::2], station['target'][1::2]), \
         'flat across each bin'
+
+
+def test_a_specification_on_lines_stands_as_steps_too():
+    """The controller's target on its lines is a density per line (its
+    reading is 'bin' with no band widths) and steps on its stage by
+    the one drawing rule, not only when it carries band widths
+    (Brandon, 2026-09-19)."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.viz.banded import banded_stage_arrays
+
+    freq = np.arange(10.0, 210.0)
+    level = np.full((1, len(freq)), 1e-2)
+    spec = Specification(freq, level, response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         ordinate_unit=['m/s**2'], abort_upper=level * 4)
+    spec.interpolation = Specification.reading_of(freq)
+    assert spec.interpolation == 'bin' and spec.bandwidth is None
+    arrays = banded_stage_arrays(spec)
+    assert arrays['stations'][0]['target'].shape == (2 * len(freq),)
+    assert arrays['stations'][0]['limits']['abort_upper'].shape == (2 * len(freq),)

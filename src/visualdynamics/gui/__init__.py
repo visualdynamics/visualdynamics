@@ -181,4 +181,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Import once the event loop is running: an import may open a modal
         # units dialog, which cannot be displayed before app.exec() starts.
         QTimer.singleShot(0, lambda: [window.import_path(p) for p in argv])
-    return app.exec()
+    code = app.exec()
+    # A mime object handed to the clipboard (copying a tree item) is
+    # Qt's to delete, and Qt deletes it from its static destructors —
+    # after the interpreter has gone, where the Python-made object's
+    # wrapper cannot run and the process aborts on the way out (a
+    # macOS crash report from a test worker, 2026-09-19). Cleared
+    # while both still stand.
+    app.clipboard().clear()
+    app.processEvents()
+    return code

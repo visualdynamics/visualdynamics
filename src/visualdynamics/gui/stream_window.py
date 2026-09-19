@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -112,6 +113,21 @@ class StreamWindowDialog(QDialog):
         # record from a run not yet imported would be a promise
         self.panel.apply_button.hide()
 
+        # the usual answer for a long run is its end — the stretch at
+        # full level after the ramp — so the end is one number away
+        # (Brandon, 2026-09-19): the seconds before the end to import,
+        # by `rattlesnake.last_window`, the rule a script's `last=`
+        # reads too. Zero is the field standing by, shown as a dash.
+        self.last_box: QDoubleSpinBox = QDoubleSpinBox()
+        self.last_box.setRange(0.0, 1e9)
+        self.last_box.setDecimals(1)
+        self.last_box.setSuffix(' s')
+        self.last_box.setSpecialValueText('—')
+        self.last_box.setKeyboardTracking(False)
+        self.last_box.setToolTip('Import only this many seconds before the '
+                                 'end of the run; a run shorter than that '
+                                 'is imported whole')
+
         self.channel_list: QListWidget = QListWidget()
         self.channel_list.setToolTip('Uncheck a channel to leave it out')
         for dof in summary['channels']:
@@ -134,8 +150,14 @@ class StreamWindowDialog(QDialog):
         chooser.addWidget(self.channel_box)
         chooser.addWidget(self.stream_box)
         chooser.addStretch(1)
+        last_row = QHBoxLayout()
+        last_row.addWidget(QLabel('Last'))
+        last_row.addWidget(self.last_box)
+        last_row.addWidget(QLabel('of the run'))
+        last_row.addStretch(1)
         side = QVBoxLayout()
         side.addWidget(self.panel)
+        side.addLayout(last_row)
         side.addWidget(QLabel('Channels'))
         side.addWidget(self.channel_list, 1)
         middle = QHBoxLayout()
@@ -151,6 +173,7 @@ class StreamWindowDialog(QDialog):
         self.channel_box.currentIndexChanged.connect(lambda _i: self._draw_preview())
         self.stream_box.currentIndexChanged.connect(self._stream_chosen)
         self.panel.changed.connect(self._panel_edited)
+        self.last_box.valueChanged.connect(self._last_edited)
         self.channel_list.itemChanged.connect(lambda _item: self._restate())
         self._show_stream(self.stream)
 
@@ -175,6 +198,7 @@ class StreamWindowDialog(QDialog):
                                          first, last, self.colors)
         self.overlay.changed.connect(self._dragged)
         self.panel.show_span(first, last, 1.0 / self.rate, whole)
+        self._stand_last_by()
         self._restate()
 
     def _draw_preview(self) -> None:
@@ -206,12 +230,33 @@ class StreamWindowDialog(QDialog):
 
     def _dragged(self, truncation: Truncation) -> None:
         self.panel.set_truncation(truncation)
+        self._stand_last_by()
         self._restate()
 
     def _panel_edited(self, truncation: Truncation) -> None:
         if self.overlay is not None:
             self.overlay.set_truncation(truncation)
+        self._stand_last_by()
         self._restate()
+
+    def _last_edited(self, seconds: float) -> None:
+        """The window is the run's last `seconds`, or the whole run."""
+        if seconds <= 0:
+            return
+        first, last = 0.0, (self.stream['samples'] - 1) / self.rate
+        start = rattlesnake.last_window(last, seconds)
+        span = Truncation(first if start is None else start, last)
+        self.panel.set_truncation(span)
+        if self.overlay is not None:
+            self.overlay.set_truncation(span)
+        self._restate()
+
+    def _stand_last_by(self) -> None:
+        """A span set any other way is not "the last so many seconds":
+        the field goes back to its dash rather than misdescribe it."""
+        self.last_box.blockSignals(True)
+        self.last_box.setValue(0.0)
+        self.last_box.blockSignals(False)
 
     def truncation(self) -> Truncation:
         return self.panel.truncation()

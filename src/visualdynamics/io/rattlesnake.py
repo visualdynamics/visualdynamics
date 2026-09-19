@@ -263,6 +263,34 @@ def _streams(ds) -> list[tuple[str, str, str]]:
             and len(ds.dimensions.get(dimension, ())) > 0]
 
 
+def last_window(seconds: float, last: float) -> float | None:
+    """Where a window of the last `last` seconds of a run opens.
+
+    The one rule behind the import dialog's *Last* field and a
+    script's `last=` (Brandon, 2026-09-19): a run `seconds` long is
+    read from `seconds - last` to its end — and a run no longer than
+    that is taken whole, which is what `None` says. Asking for the last
+    100 s of a 28 s run is not a mistake to refuse; it is all of it.
+
+    Parameters
+    ----------
+    seconds : float
+        The instant of the run's last sample on its own clock.
+    last : float
+        How many seconds before the end the window opens; positive.
+
+    Returns
+    -------
+    float or None
+        The `start` to import from, or None for the whole run.
+    """
+    if not last > 0:
+        raise ValueError(f'last must be a positive number of seconds, not {last!r}')
+    if last >= seconds:
+        return None
+    return float(seconds - last)
+
+
 def stream_summary(path: str | os.PathLike) -> dict[str, Any]:
     """What a run's streams would cost to import, read without reading one.
 
@@ -410,8 +438,59 @@ _SPECTRAL_MARKERS = ('frf_data_real', 'coherence', 'frf_coherence')
 #: self-describing: an environment's *group* is named by whoever set the
 #: test up, so a group called 'Random' is only a random environment by
 #: convention, and often is not one at all.
+#:
+#: The numbers above 3 have meant different things: the controller
+#: renumbered its enum on 2026-07-30 (SDS 4, modal 5, time 6, where it
+#: had been time 4, modal 6), so a file says which controller wrote it
+#: only by what its groups hold. `_kind_of` reads the group first and
+#: falls back to this table, which is the older numbering the fixtures
+#: carry. A run misread as modal beside its random environment came in
+#: as 'mixed' and got no project type (Brandon, 2026-09-19).
 ENVIRONMENT_KINDS = {1: 'random', 2: 'transient', 3: 'sine', 4: 'time',
-                     6: 'modal'}
+                     5: 'modal', 6: 'modal'}
+
+#: the codes whose meaning the renumbering moved — everything above
+#: the three that stayed put — and what the two kinds it confuses
+#: carry that no other does: the modal metadata writer's own
+#: attributes and its reference channels, a time environment's output
+#: signal. Only these are read off the group; a code of 1, 2 or 3 is
+#: what it always was.
+_AMBIGUOUS_CODES = frozenset({4, 5, 6})
+_GROUP_SIGNATURES = (
+    ('modal', ('frf_technique', 'frf_window', 'accept_type'),
+     ('reference_channel_indices',), ()),
+    ('time', (), ('output_signal',), ('signal_samples',)),
+)
+
+#: and what every kind writes, for a file that carries no codes at
+#: all: a controller from before 2026-04 wrote none, so a real random
+#: run from one arrived with no project type and its objects in no
+#: Basis (Brandon, 2026-09-19, on an older controller). The random
+#: environment's CPSD settings and its specification, a shock's pulse,
+#: a sine's phase fit — each is the controller's own metadata writer
+#: naming the environment, which is the file's account and not a guess.
+_ALL_SIGNATURES = _GROUP_SIGNATURES + (
+    ('random', ('cpsd_window', 'frames_in_cpsd'),
+     ('specification_cpsd_matrix_real',), ()),
+    ('transient', ('pulse_duration', 'shocks'), (), ()),
+    ('sine', ('phase_fit', 'ramp_time'), (), ()),
+)
+
+
+def _kind_of_group(group, signatures=_GROUP_SIGNATURES) -> str | None:
+    """The kind an environment group says it is by what it holds, or
+    None when it holds nothing distinctive (a spectral save's bare
+    group, a hand-made file)."""
+    if group is None:
+        return None
+    attrs = set(group.ncattrs())
+    variables = set(group.variables)
+    dimensions = set(group.dimensions)
+    for kind, own_attrs, own_variables, own_dimensions in signatures:
+        if (attrs & set(own_attrs) or variables & set(own_variables)
+                or dimensions & set(own_dimensions)):
+            return kind
+    return None
 
 #: an environment that records without driving anything. A time-history
 #: replay running beside a shaker test says nothing about what kind of
@@ -433,21 +512,28 @@ PROJECT_FOR_KIND = {'modal': 'Modal Test', 'random': 'Random Vibration',
 #: established one; sine follows.
 MIXED_PRECEDENCE = ('random', 'sine', 'transient', 'modal')
 
-#: how far under a record's own top level a detected stretch may sit and
-#: still be taken for the test, in dB. A run's levels step by 3 and 6;
-#: the noise floor under one is tens.
-FULL_LEVEL_MARGIN = 9.0
 
 
-def _kind_of(value):
+def _kind_of(value, group=None):
     """The kind one entry of `environment_types` names, or None.
 
-    Rattlesnake writes the code, so the code is what is read. A file
-    naming the kind outright is still answered rather than crashing the
-    whole import on `int('transient')` — the names are the ones visualdynamics
-    already uses, so there is nothing to guess at, and an entry that is
-    neither is no environment visualdynamics knows.
+    The environment's group first, when it holds something only one
+    kind writes (`_kind_of_group`): the number's meaning above 3 has
+    changed between controller versions and the group has not. Then
+    Rattlesnake's code. A file naming the kind outright is still
+    answered rather than crashing the whole import on
+    `int('transient')` — the names are the ones visualdynamics already
+    uses, so there is nothing to guess at, and an entry that is neither
+    is no environment visualdynamics knows.
     """
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        code = None
+    if code in _AMBIGUOUS_CODES:
+        said = _kind_of_group(group)
+        if said is not None:
+            return said
     try:
         return ENVIRONMENT_KINDS.get(int(value))
     except (TypeError, ValueError):
@@ -460,10 +546,15 @@ def _environment_kinds(ds):
     types = ds.variables.get('environment_types')
     names = ds.variables.get('environment_names')
     if types is None:
-        return {}
-    found = [_kind_of(value) for value in types[:]]
+        # no codes: each environment group by what it holds, and a
+        # group that holds nothing distinctive is no environment
+        found = {name: _kind_of_group(group, _ALL_SIGNATURES)
+                 for name, group in ds.groups.items() if name != 'channels'}
+        return {name: kind for name, kind in found.items() if kind is not None}
     labels = (_strings(names) if names is not None
-              else [f'Environment {i}' for i in range(len(found))])
+              else [f'Environment {i}' for i in range(len(types[:]))])
+    found = [_kind_of(value, ds.groups.get(label))
+             for value, label in zip(types[:], labels)]
     return {label: kind for label, kind in zip(labels, found)
             if kind is not None}
 
@@ -646,63 +737,33 @@ def _averaging(ds, samples, sample_rate):
 
 
 def _started(history, averaging, kind):
-    """The same averaging, moved to where the record is worth averaging.
+    """The same averaging, moved to where the record is worth averaging,
+    with as many frames as that stretch holds.
 
-    The file settles the frame length, the count, the overlap and the
-    window; the one thing it never says is *when*. Left at zero the
-    analysis starts on the shaker coming up, which is the one stretch of
-    a run that is certainly not the test.
+    The file settles the frame length, the overlap and the window; the
+    two things it never says are *when* and *how many* — its count was
+    the controller's running CPSD buffer, twenty frames of a
+    hundred-second run, not a property of the recording. So the import
+    answers exactly as the pane's Detect does: `suggest_averaging` on
+    the history, which keeps the recipe the record carries and works
+    out the start and the count (Brandon, 2026-09-19: "I want the
+    import to match the detect answer"). One implementation, so the
+    number on arrival is the number a click would give.
 
     Only for a random run. A modal survey averages bursts, and a burst
     record has no stationary stretch to find — asked for one on the
-    airplane's modal capture the detector returns sixteen seconds
+    airplane's modal capture the detector returned sixteen seconds
     holding four of the twenty averages the file asked for, which is
     worse than starting at zero.
-
-    What is wanted here is specifically the full-level stretch: a
-    controller averages its run at full level and nowhere else. The
-    detector answers a slightly wider question — where can these frames
-    be had — and on a record holding eight seconds of test inside eighty
-    of quiet the quiet is where they can be had. So what it finds is
-    checked against the record's own top level, and a stretch well below
-    it is one the detector has settled for rather than found.
-
-    Detection runs at the detector's own resolution rather than the
-    file's frame length. Finding which side of a step at 61 s a hop
-    falls does not want a four-second hop; the file's frames are laid
-    down from wherever a second-long one says.
-
-    The move also needs room for the frames the file asked for. Short of
-    that the detector has plainly not found what the controller
-    averaged, and the file's own account is the better one.
     """
     if kind != 'random':
         return averaging
-    from ..core.detect import TOP_QUANTILE, compress, plateau, trim
-
+    history.averaging = averaging
     try:
-        level, per_frame, hop, sigma = compress(history)
+        return history.suggest_averaging()
     except ValueError:
         # unevenly sampled, or too short to frame at all
         return averaging
-    if len(level) == 0:
-        return averaging
-    rate = history.sample_rate
-    # the analysis spans this many samples; the detector counts in hops
-    wanted_hops = -(-averaging.span // hop)
-    first, last = trim(*plateau(level, sigma, max(wanted_hops, per_frame)))
-    if last <= first:
-        return averaging
-    # is this the test, or the quietest thing long enough to hold the
-    # frames? A stretch a long way under the record's top level is the
-    # second, and starting the analysis there analyses the noise floor
-    top = float(np.percentile(level, TOP_QUANTILE))
-    if float(np.median(level[first:last])) < top - FULL_LEVEL_MARGIN:
-        return averaging
-    moved = replace(averaging, start=first * hop / rate)
-    if moved.most_frames(last * hop, rate) < averaging.frames:
-        return averaging
-    return moved
 
 
 def _frame_count(ds, samples):
@@ -1273,7 +1334,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                          else f'{di}*{dj}/frequency') if known else UNKNOWN)
                     units.append(ui if known else None)
                     ref_units.append(uj if known and ui != uj else None)
-            out[f'{env_name}_specification'] = Specification(
+            spec = Specification(
                 abscissa=freq,
                 ordinate=np.array(records),
                 response_dof=response,
@@ -1283,6 +1344,11 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                 reference_unit=ref_units,
                 **{name: np.array(values) for name, values in limits.items()},
             )
+            # the controller's target on its FFT lines is a density per
+            # line and draws as steps; a breakpoint curve is the law
+            # between its points (`Specification.reading_of`)
+            spec.interpolation = Specification.reading_of(freq)
+            out[f'{env_name}_specification'] = spec
 
         # A sine environment's target is its tone set: a specifications
         # subgroup with one named group per tone, each a breakpoint

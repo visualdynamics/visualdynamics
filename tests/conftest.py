@@ -152,7 +152,25 @@ def qt_app():
     QApplication.setAttribute(
         Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication([])
+    # the report editor's witness log: the page's state at every
+    # discard, appended per worker to a gitignored file, so the next
+    # stall in the gate (PLAN.md "The 98 % stall, named") comes with
+    # the state the faulthandler dump cannot give
+    import logging
+
+    witness = logging.getLogger('visualdynamics.gui.report_editor')
+    witness.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(
+        os.path.join(os.path.dirname(__file__), '.witness.log'))
+    handler.setFormatter(logging.Formatter(
+        f'%(asctime)s pid={os.getpid()} %(message)s'))
+    witness.addHandler(handler)
     yield app
+    # nothing of Python's left for Qt's static destructors to delete
+    # after the interpreter is gone: a clipboard mime object from a
+    # tree-copy test aborted a worker at exit (`gui.main` does the
+    # same on the way out; a crash report, 2026-09-19)
+    app.clipboard().clear()
     app.processEvents()
 
 

@@ -1,9 +1,10 @@
 """The full random vibration workflow, scripted — no GUI anywhere.
 
-A controller run in, a report out. The short way is one call; the rest
-of this is that same call written out, because a real test wants the
-project afterwards — to add the photographs, the geometry and the test
-summary that the report has slots for.
+A controller run in, a report out. The short way is one call — it
+takes the geometry, the photographs and a `last=` window for a long
+run as keywords; the rest of this is that same call written out,
+because a real test wants the project afterwards — to write the test
+summary the report has a slot for, and to save it.
 
 Every step is the verb behind a button in the app, and every plot is
 the one the app draws, rendered to a file instead of a window.

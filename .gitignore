@@ -57,3 +57,4 @@ web/launch/documentation/
 # the update manifest: written from the release by the site job, and
 # by hand for a redeploy — never a checked-in claim about what is out
 web/launch/latest.json
+tests/.witness.log

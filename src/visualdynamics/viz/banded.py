@@ -157,11 +157,13 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
     # (Brandon, 2026-09-18). The outline is for drawing only: the
     # exceedances are judged against the written limits on the
     # specification's own lines, as before.
-    from ..plot import step_outline
+    from ..plot import drawing_shape, step_outline
 
+    # by the one drawing rule: a density per bin steps, whether its
+    # bins are octave bands or a controller's lines (2026-09-19); a
+    # breakpoint curve is the law through its points
     widths = (specification.bin_widths()
-              if getattr(specification, 'bandwidth', None) is not None
-              else None)
+              if drawing_shape(specification) == 'steps' else None)
 
     def drawn(values):
         if widths is None:

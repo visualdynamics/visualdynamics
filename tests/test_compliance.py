@@ -714,8 +714,17 @@ def test_the_exported_report_steps_where_the_app_steps(tmp_path):
 
     assert project[measured].interpolation == 'bin'
     assert block(measured)['steps'] is True
-    assert project[written].interpolation == 'log_log'
-    assert block(written).get('steps', False) is False
+    # the controller's target on its lines is a density per line and
+    # steps too (2026-09-19); a written breakpoint curve is the shape
+    # that does not
+    assert project[written].interpolation == 'bin'
+    assert block(written)['steps'] is True
+    breakpoints = project.add('Written', Specification(
+        np.array([20.0, 80.0, 800.0, 2000.0]),
+        np.array([[1e-3, 4e-3, 4e-3, 1e-3]]), response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'], ordinate_unit=['m/s**2']))
+    assert project[breakpoints].interpolation == 'log_log'
+    assert block(breakpoints).get('steps', False) is False
 
 
 def test_a_limit_is_read_the_way_its_specification_is():

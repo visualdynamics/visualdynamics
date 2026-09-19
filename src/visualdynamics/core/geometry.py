@@ -410,6 +410,55 @@ class Geometry:
     def _next_id(self, array):
         return int(array.max()) + 1 if len(array) else 1
 
+    def dof_direction(self, dof: str) -> np.ndarray | None:
+        """A DOF's direction in global coordinates, through the frame
+        its node is measured in.
+
+        '101X+' at a node whose `node_disp_cs` is rotated is not global
+        X. The report's grid of control channels reads which global
+        axis a channel is nearest and how far off it sits (Brandon,
+        2026-09-19), and this is where that is answered. A rotational
+        DOF points along its axis, as the DOF arrows draw it.
+
+        Parameters
+        ----------
+        dof : str
+            The DOF, such as '101X+' or '1313RZ-'.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            A unit vector, or None when the DOF names no node this
+            geometry has, no axis (a node number alone), or a node
+            measured in a cylindrical or spherical frame — whose local
+            axes turn with the node's position, a reading this does
+            not attempt rather than half-answer.
+        """
+        from .data import parse_dof
+
+        node, direction = parse_dof(dof)
+        direction = str(direction).upper()
+        letter, sign = direction.lstrip('R')[:1], direction.lstrip('R')[1:]
+        axis = {'X': 0, 'Y': 1, 'Z': 2}.get(letter)
+        if node is None or axis is None or sign not in ('', '+', '-'):
+            return None
+        rows = np.flatnonzero(self.node_id == int(node))
+        if not rows.size:
+            return None
+        frames = np.flatnonzero(self.cs_id == self.node_disp_cs[rows[0]])
+        if frames.size:
+            if int(self.cs_type[frames[0]]) != 0:
+                return None
+            vector = np.asarray(self.cs_matrix[frames[0], axis], dtype=float)
+        else:
+            # a frame the table does not list is the global one: a
+            # geometry with no systems at all measures every node in it
+            vector = np.eye(3)[axis]
+        norm = float(np.linalg.norm(vector))
+        if not norm:
+            return None
+        return (-1.0 if sign == '-' else 1.0) * vector / norm
+
     def add_node(self, xyz: ArrayLike, node_id: int | None = None,
                  color: int = 1, def_cs: int | None = None,
                  disp_cs: int | None = None) -> int:

@@ -609,7 +609,15 @@ def add_decade_axis(plotter: Any, extents: Sequence[float],
     axes = getattr(plotter.renderer, 'cube_axes_actor', None)
     if axes is not None:
         axes.x_label_visibility = False
-        axes.x_axis_tick_visibility = False
+        # VTK's own call, not a snake-case name: pyvista defines no
+        # `x_axis_tick_visibility` on its CubeAxesActor (only the
+        # minor-tick one), and the assignment reached VTK's property
+        # only through the wrappers' alias — which a Windows install of
+        # pyvista 0.49.0 with vtk 9.7.0 refused with a
+        # PyVistaAttributeError, taking every banded stage render down
+        # (Kevin Cross, 2026-09-19, by mail; not reproduced on macOS
+        # with the same pair, nor on Linux CI)
+        axes.XAxisTickVisibilityOff()
         axes.x_axis_minor_tick_visibility = False
         axes.SetDrawXGridlines(False)
     decades = decade_labels(x0, x1)

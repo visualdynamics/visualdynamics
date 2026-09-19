@@ -97,6 +97,16 @@ table { border-collapse: collapse; font-size: .85rem; width: 100%; }
 th, td { border: 1px solid var(--line); padding: .25rem .55rem;
          text-align: left; white-space: nowrap; }
 .tablewrap { overflow-x: auto; }
+/* the grid figure: headings across, node labels down, a cell's own
+   legend, controls and caption at a size that leaves room for the plot */
+.grid { display: grid; gap: .5rem .6rem; align-items: start; }
+.gridhead { font-size: .85rem; font-weight: 600; text-align: center; }
+.gridrow { font-size: .85rem; font-weight: 600; padding-top: .3rem;
+           white-space: nowrap; }
+.gridcell { min-width: 0; }
+.gridcell .legend, .gridcell .controls, .gridcell .caption {
+  font-size: .72rem; margin-top: .2rem; }
+.gridcell .controls button { padding: 0 .4rem; }
 th { background: color-mix(in srgb, var(--line) 30%, transparent); }
 /* a cell the app marks is marked here too, in the same two colors the
    plots shade an exceedance with: a channel red on screen is red on the
@@ -469,8 +479,13 @@ function controlBar(s, block, hintText, onChannel) {
   return reset;
 }
 
-function plotBlock(block) {
-  const s = document.createElement('section'); root.appendChild(s);
+function plotBlock(block, into) {
+  /* `into`: a cell of a grid figure to draw in, rather than a section
+     of the page's own — the same figure, smaller, with the pan/zoom
+     hint left to the grid's caption (a cell is not a section: edit
+     mode maps sections to blocks by position) */
+  const s = into || document.createElement('section');
+  if (!into) root.appendChild(s);
   const canvas = document.createElement('canvas'); s.appendChild(canvas);
   const legend = document.createElement('div'); legend.className = 'legend';
   function fillLegend() {
@@ -488,7 +503,7 @@ function plotBlock(block) {
      targets and two dozen limit lines stacked together are unreadable,
      which is the same reason the app draws one at a time */
   let picked = 0;
-  const reset = controlBar(s, block,
+  const reset = controlBar(s, block, into ? '' :
     'drag to pan, wheel to zoom — over an axis, that axis alone; '
     + 'double-click also resets',
     i => { picked = i; applyChannel(); draw(); });
@@ -585,7 +600,7 @@ function plotBlock(block) {
   clampView();
 
   function draw() {
-    const [g, width, height] = sized(canvas, 340);
+    const [g, width, height] = sized(canvas, into ? 220 : 340);
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
     const px = v => margin.left + (v - view.x0) / (view.x1 - view.x0) * plotW;
@@ -691,6 +706,16 @@ function plotBlock(block) {
        plot — the zone past abort has no far side. */
     if (block.channels) {
       const xs = block.curves[0].x || block.x;
+      /* the zones step with the target they bound: on a banded or a
+         lines specification each edge is flat across its bin, on the
+         same edges the target steps on (2026-09-19) */
+      const zoneSteps = block.curves[0].steps !== undefined
+        ? block.curves[0].steps : block.steps;
+      const zoneEdges = block.curves[0].edges
+        || (block.curves[0].x ? null : block.edges);
+      const stepped = !!(zoneSteps && zoneEdges);
+      const xAt = (i, side) => stepped
+        ? px(zoneEdges[i + side]) : px(xs[i]);
       block.channels[picked].zones.forEach(zone => {
         /* past abort, and which way: red above, blue below — the same
            reading every other mark on the plot gives */
@@ -707,18 +732,20 @@ function plotBlock(block) {
           const bad = (zone.lower && !finite(lo))
                    || (zone.upper && !finite(hi));
           if (bad || !finite(xs[i])) { open = false; continue; }
-          const X = px(xs[i]);
           const YL = zone.lower ? py(lo) : bottom;
           const YU = zone.upper ? py(hi) : top;
-          if (!open) { g.moveTo(X, YL); open = true; }
-          g.lineTo(X, YL);
+          if (!open) { g.moveTo(xAt(i, 0), YL); open = true; }
+          g.lineTo(xAt(i, 0), YL);
+          if (stepped) g.lineTo(xAt(i, 1), YL);
         }
         for (let i = xs.length - 1; i >= 0; i--) {
           const lo = zone.lower ? zone.lower[i] : null;
           const hi = zone.upper ? zone.upper[i] : null;
           if ((zone.lower && !finite(lo)) || (zone.upper && !finite(hi))
               || !finite(xs[i])) continue;
-          g.lineTo(px(xs[i]), zone.upper ? py(hi) : top);
+          const YU = zone.upper ? py(hi) : top;
+          if (stepped) g.lineTo(xAt(i, 1), YU);
+          g.lineTo(xAt(i, 0), YU);
         }
         g.closePath(); g.fill();
       });
@@ -1897,6 +1924,31 @@ function stageBlock(block) {
   draw();
 }
 
+/* A grid figure: many control channels in one figure, a row per node
+   and a column per direction, each cell the channel's own plot drawn
+   by plotBlock into the cell (Brandon, 2026-09-19: above four control
+   channels a sequence of figures stops reading). The column headings
+   and row labels are the page's; the cells' captions are the channels,
+   with how far off its global axis a channel sits as the cell's note. */
+function gridBlock(block) {
+  const s = section(block);
+  const grid = document.createElement('div'); grid.className = 'grid';
+  grid.style.gridTemplateColumns =
+    'auto repeat(' + block.columns.length + ', minmax(0, 1fr))';
+  grid.appendChild(document.createElement('div'));
+  block.columns.forEach(name => {
+    const head = document.createElement('div'); head.className = 'gridhead';
+    head.textContent = name; grid.appendChild(head); });
+  block.rows.forEach(row => {
+    const label = document.createElement('div'); label.className = 'gridrow';
+    label.textContent = row.label; grid.appendChild(label);
+    row.cells.forEach(cell => {
+      const holder = document.createElement('div'); holder.className = 'gridcell';
+      cell.forEach(figure => plotBlock(figure, holder));
+      grid.appendChild(holder); }); });
+  s.insertBefore(grid, s.firstChild);
+}
+
 /* ---- assembly ---------------------------------------------------------- */
 DATA.blocks.forEach(block => {
   if (block.kind === 'text') {
@@ -1919,6 +1971,7 @@ DATA.blocks.forEach(block => {
     img.alt = block.caption || 'photo';
     s.insertBefore(img, s.firstChild);
   } else if (block.kind === 'plot') plotBlock(block);
+  else if (block.kind === 'grid') gridBlock(block);
   else if (block.kind === 'bars') barsBlock(block);
   else if (block.kind === 'mac') macBlock(block);
   else if (block.kind === 'map') mapBlock(block);

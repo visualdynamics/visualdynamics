@@ -135,3 +135,33 @@ def test_the_shortcuts_are_the_platform_copy_and_paste(window):
         assert action.shortcutContext() == Qt.ShortcutContext.WidgetShortcut
         assert action in window.tree.actions()
         assert action not in window.table.actions()
+
+
+def test_the_application_leaves_nothing_on_the_clipboard_at_exit(qt_app, monkeypatch):
+    """A mime object handed to the clipboard is Qt's to delete, and Qt
+    deletes it from its static destructors after the interpreter has
+    gone — where the Python-made object's wrapper aborts the process
+    (a macOS crash report from a test worker, 2026-09-19). The entry
+    point clears the clipboard while both still stand."""
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from visualdynamics import gui
+    from visualdynamics.gui import main_window
+
+    class Window(QWidget):
+        """What `main` builds, without a 3-D view (the disclaimer test's
+        stand-in: the real window under the offscreen platform is the
+        fixture's `offscreen_3d=True` one)."""
+
+        def import_path(self, _path):
+            pass
+
+    monkeypatch.setattr(main_window, 'MainWindow', Window)
+    mime = QMimeData()
+    mime.setText('copied')
+    QApplication.clipboard().setMimeData(mime)
+    assert QApplication.clipboard().text() == 'copied'
+    monkeypatch.setattr(qt_app, 'exec', lambda: 0)   # the disclaimer test's way
+    assert gui.main(['--no-disclaimer']) == 0
+    assert QApplication.clipboard().text() == '', 'cleared on the way out'

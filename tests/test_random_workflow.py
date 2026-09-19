@@ -137,6 +137,82 @@ def test_a_file_with_no_time_data_says_so(tmp_path):
             tmp_path / 'nothing.html')
 
 
+def test_the_last_seconds_of_a_run_are_what_is_imported():
+    """`last=` is the import dialog's Last field for a script: the
+    window opens that many seconds before the end and runs to it, and
+    the work-up is the same afterwards (Brandon, 2026-09-19)."""
+    whole = visualdynamics.random_vibration_run(fixture_path('plate', RUN))
+    part = visualdynamics.random_vibration_run(fixture_path('plate', RUN),
+                                               last=10.0)
+    full, cut = whole.time_history.abscissa, part.time_history.abscissa
+    assert cut[-1] == pytest.approx(full[-1])
+    assert cut[0] == pytest.approx(full[-1] - 10.0)
+    assert cut.size < full.size
+    assert set(part.names) == set(whole.names), 'worked up the same'
+
+
+def test_a_last_longer_than_the_run_takes_it_whole():
+    """Asking for the last 100 s of a 28 s run is asking for all of it
+    (Brandon, 2026-09-19), not a mistake to refuse."""
+    whole = visualdynamics.random_vibration_run(fixture_path('plate', RUN))
+    part = visualdynamics.random_vibration_run(fixture_path('plate', RUN),
+                                               last=100.0)
+    assert part.time_history.abscissa.size == whole.time_history.abscissa.size
+    assert part.time_history.abscissa[0] == pytest.approx(
+        whole.time_history.abscissa[0])
+
+
+def test_last_must_be_a_positive_span():
+    with pytest.raises(ValueError, match='positive'):
+        visualdynamics.random_vibration_run(fixture_path('plate', RUN), last=0)
+
+
+def _photo(path, color):
+    from PySide6.QtGui import QImage
+
+    image = QImage(64, 48, QImage.Format.Format_RGB32)
+    image.fill(color)
+    assert image.save(str(path), 'PNG')
+    return path
+
+
+def test_the_geometry_and_the_photos_ride_along(qt_app, tmp_path):
+    """The rest of what the tree asks for, given to the one call: the
+    geometry with its unit declared, the photographs from a folder —
+    all linked into the run's group, which is what the report reads
+    them through."""
+    folder = tmp_path / 'photos'
+    folder.mkdir()
+    _photo(folder / 'front.png', 0x336699)
+    _photo(folder / 'side.png', 0x996633)
+    (folder / 'notes.txt').write_text('not a photo')
+    project = visualdynamics.random_vibration_run(
+        fixture_path('plate', RUN), geometry=fixture_path('plate', 'geometry.npz'),
+        length_unit='m', photos=folder)
+    assert project['Geometry'].length_unit == 'm'
+    assert project['Photos'].names == ['front', 'side']
+    [group] = project.links
+    assert {'Time History', 'Geometry', 'Photos'} <= set(group['members'])
+    path = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'run.html', last=10.0,
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m',
+        photos=[folder / 'side.png', folder / 'front.png'])
+    html = (tmp_path / 'run.html').read_text(encoding='utf-8')
+    assert str(path) == str(tmp_path / 'run.html')
+    # the page carries its blocks as JSON, the caption's dash escaped
+    # to \u2014, which is what the file holds
+    assert html.index('Test setup \\u2014 side') < html.index('Test setup \\u2014 front'), \
+        'listed files appear in the order given'
+    assert 'Test geometry and measurement locations' in html
+
+
+def test_a_folder_with_no_photos_says_so(tmp_path):
+    (tmp_path / 'empty').mkdir()
+    with pytest.raises(ValueError, match='no png or jpeg'):
+        visualdynamics.random_vibration_run(fixture_path('plate', RUN),
+                                            photos=tmp_path / 'empty')
+
+
 # ---- the plots, with no window ------------------------------------------
 
 

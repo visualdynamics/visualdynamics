@@ -2131,6 +2131,21 @@ def transient_template(objects: Mapping[str, Any],
     ])
 
 
+def control_channels_of(spec: Any) -> list[str]:
+    """The control channels a specification names, as the comparison
+    figure labels them: its autospectra, in its own order. A cross
+    term has no measured response to stand against it. Empty for
+    anything that is not a specification."""
+    if spec is None or not hasattr(spec, 'record_pair'):
+        return []
+    labels: list[str] = []
+    for i in range(spec.num_records):
+        response, reference = spec.record_pair(i)
+        if response == reference and response not in labels:
+            labels.append(response)
+    return labels
+
+
 def control_channel_labels(objects: Mapping[str, Any],
                            links: Sequence[Mapping[str, Any]] | None,
                            token: str = '@basis:Specification') -> list[str]:
@@ -2141,17 +2156,133 @@ def control_channel_labels(objects: Mapping[str, Any],
     token binds nothing yet, and the template writes one figure that
     picks."""
     name = resolve_binding(token, objects, links)
-    spec = objects[name] if name and name in objects else None
-    if spec is None or not hasattr(spec, 'record_pair'):
-        return []
-    labels: list[str] = []
-    for i in range(spec.num_records):
-        response, reference = spec.record_pair(i)
-        # autospectra only: a cross term has no measured response to
-        # stand against it
-        if response == reference and response not in labels:
-            labels.append(response)
-    return labels
+    return control_channels_of(objects[name] if name and name in objects
+                               else None)
+
+
+#: above this many control channels the random report lays their
+#: figures out as a grid — a row per node, a column per direction —
+#: rather than one figure after another (Brandon, 2026-09-19); four
+#: still read as a sequence
+GRID_ABOVE = 4
+
+GRID_AXES = ('X', 'Y', 'Z')
+
+
+def channel_grid(labels: Sequence[str],
+                 geometry: Any = None) -> dict[str, Any]:
+    """The grid the random report lays many control channels out on.
+
+    A row per node, in the order the channels first name them; a
+    column per direction. With a geometry that can place a channel
+    (`Geometry.dof_direction`), the columns are the global axes —
+    'Global X', 'Global Y', 'Global Z' — and a channel goes under the
+    axis its measured direction is nearest, with how far off it sits
+    noted when it is not on it (Brandon, 2026-09-19). Without one, or
+    for a node the geometry cannot place, the columns are the DOF's
+    own letters; a channel with no direction at all — a node number
+    alone — stands in a 'Channel' column. Only the columns in use
+    appear, in that order.
+
+    Parameters
+    ----------
+    labels : sequence of str
+        The control channels, as `control_channels_of` lists them.
+    geometry : Geometry, optional
+        The geometry the channels are measured on.
+
+    Returns
+    -------
+    dict
+        'columns', the column headings; 'rows', one dict per node with
+        'label' and 'cells' — a list per column of the channels in it,
+        each {'channel': str, 'note': str}.
+    """
+    import numpy as np
+
+    from .data import parse_dof
+
+    placed: list[tuple[str, tuple[int, int], str, str]] = []
+    for label in labels:
+        node, direction = parse_dof(label)
+        row = f'Node {node}' if node is not None else str(label)
+        letter = str(direction).upper().lstrip('R')[:1]
+        vector = geometry.dof_direction(label) if geometry is not None else None
+        note = ''
+        if vector is not None:
+            axis = int(np.argmax(np.abs(vector)))
+            angle = float(np.degrees(np.arccos(min(1.0, abs(float(vector[axis]))))))
+            column = (0, axis)
+            if angle >= 0.5:
+                note = f'{angle:.0f}° off global {GRID_AXES[axis]}'
+        elif letter in GRID_AXES:
+            column = (1, GRID_AXES.index(letter))
+        else:
+            column = (2, 0)
+        placed.append((row, column, str(label), note))
+    columns = sorted({column for _row, column, _label, _note in placed})
+    names = {0: 'Global {}', 1: '{}', 2: 'Channel'}
+    headings = [names[kind].format(GRID_AXES[axis] if kind < 2 else '')
+                for kind, axis in columns]
+    rows: list[dict[str, Any]] = []
+    for row, column, label, note in placed:
+        entry = next((r for r in rows if r['label'] == row), None)
+        if entry is None:
+            entry = {'label': row, 'cells': [[] for _ in columns]}
+            rows.append(entry)
+        entry['cells'][columns.index(column)].append(
+            {'channel': label, 'note': note})
+    return {'columns': headings, 'rows': rows}
+
+
+def _figures_text(labels: Sequence[str], sequence: str, grid: str) -> str:
+    """How the prose describes the control figures: one after another
+    up to `GRID_ABOVE` channels, a grid above."""
+    return grid if len(labels) > GRID_ABOVE else sequence
+
+
+def prune_empty_sections(report: Report, objects: Mapping[str, Any],
+                         links: Sequence[Mapping[str, Any]] | None = None
+                         ) -> Report:
+    """Drop every section whose figures all fail to bind, once the
+    project holds anything (Brandon, 2026-09-19).
+
+    A section is a text block opening with a `## ` heading and what
+    follows it up to the next; its figures are the blocks in it that
+    are not text. When none of them can resolve — the section's
+    objects are simply not in the project — the whole section goes,
+    heading and prose included, rather than a heading over nothing. A
+    section with no figures (the summary, the conclusions) is prose
+    and stays. An empty project keeps the whole outline: that is the
+    template being read, not a report being written.
+    """
+    if not objects:
+        return report
+    keys = ('source', 'geometry', 'dofs_source', 'shapes', 'measured',
+            'specification')
+
+    def bound(block):
+        needed = [block.get(key) for key in keys if block.get(key)]
+        return all(resolve_binding(name, objects, links) in objects
+                   for name in needed)
+
+    def heading(block):
+        return (block.get('kind') == 'text'
+                and block.get('text', '').lstrip().startswith('## '))
+
+    sections: list[list[int]] = []
+    for i, block in enumerate(report.blocks):
+        if heading(block) or not sections:
+            sections.append([])
+        sections[-1].append(i)
+    doomed = []
+    for section in sections:
+        figures = [i for i in section
+                   if report.blocks[i].get('kind') != 'text']
+        if figures and not any(bound(report.blocks[i]) for i in figures):
+            doomed.extend(section)
+    report.remove(doomed)
+    return report
 
 
 def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
@@ -2163,6 +2294,11 @@ def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
     if not labels:
         return [{'kind': 'plot', 'source': token, 'mode': 'curves',
                  'caption': caption}]
+    if len(labels) > GRID_ABOVE:
+        # many channels read as a grid, a row per node and a column per
+        # direction, one figure (Brandon, 2026-09-19)
+        return [{'kind': 'plot', 'source': token, 'mode': 'curves',
+                 'grid': True, 'caption': caption}]
     return [{'kind': 'plot', 'source': token, 'mode': 'curves',
              'channel': label, 'caption': f'{caption} — {label}'}
             for label in labels]
@@ -2179,6 +2315,10 @@ def _comparisons(psd_token: str, spec_token: str, caption: str,
         return [{'kind': 'plot', 'source': psd_token,
                  'specification': spec_token, 'mode': 'curves',
                  'caption': caption}]
+    if len(labels) > GRID_ABOVE:
+        return [{'kind': 'plot', 'source': psd_token,
+                 'specification': spec_token, 'mode': 'curves',
+                 'grid': True, 'caption': caption}]
     return [{'kind': 'plot', 'source': psd_token,
              'specification': spec_token, 'mode': 'curves',
              'channel': label, 'caption': f'{caption} — {label}'}
@@ -2205,11 +2345,12 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
     """
     time = '@basis:TimeHistory'
     psd = '@basis:Psd'
+    controls = control_channel_labels(objects, links)
 
     def ref(name: str, field: str) -> str:
         return '{{' + f'{name}.{field}' + '}}'
 
-    return Report('Random Vibration Test Report', [
+    return prune_empty_sections(Report('Random Vibration Test Report', [
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
             'A random vibration test was run: the article was driven '
@@ -2250,9 +2391,14 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
                       objects, links),
         {'kind': 'text', 'text':
             '## Control\n\nThe measured control spectra against the '
-            'specification, one figure per control channel '
-            '({{figure:Control against specification}} and following). '
-            'Each opens on the specification\'s own frequency band; '
+            'specification, '
+            + _figures_text(
+                controls,
+                'one figure per control channel '
+                '({{figure:Control against specification}} and following). ',
+                'laid out by control channel — a row per node, a column '
+                'per direction ({{figure:Control against specification}}). ')
+            + 'Each opens on the specification\'s own frequency band; '
             'the measurement beyond it is a zoom away. Shading marks '
             'lines outside an abort limit — red above the upper, blue '
             'below the lower.'},
@@ -2282,9 +2428,11 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         {'kind': 'text', 'text':
             '## Octave Band Comparison\n\nThe same comparison on '
             'octave bands: the control spectra integrated onto bands '
-            '({{figure:Control against specification, octave bands}} '
-            'and following, one per control channel) '
-            'against the specification banded the same way, its '
+            '({{figure:Control against specification, octave bands}}'
+            + _figures_text(controls,
+                            ' and following, one per control channel) ',
+                            ', by node and direction) ')
+            + 'against the specification banded the same way, its '
             'warning and abort limits banded with it ({{figure:Test '
             'specification, octave bands}}), and the same two '
             'readings of them. The bands are wider as the frequency '
@@ -2366,4 +2514,4 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'what decide whether the article or the measurement is at '
             'fault. A channel clean on both and still outside '
             'tolerance is a real exceedance.'},
-    ])
+    ]), objects, links)

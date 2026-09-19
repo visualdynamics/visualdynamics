@@ -61,3 +61,23 @@ def test_a_lone_arrival_is_not_a_group(window, pump, tmp_path):
     pump()
     assert 'FRF (2)' in window.objects
     assert all('FRF (2)' not in members for _r, members in _groups(window))
+
+
+def test_a_run_into_a_project_with_no_type_waits_for_the_type(window, pump, tmp_path):
+    """A run whose kind the importer cannot name sets no type, and the
+    type, when it is set, builds the Basis from what is unlinked.
+    Grouped on arrival, the run's objects counted as placed elsewhere
+    and the Basis stayed empty beside an orange bracket (Brandon,
+    2026-09-19). The run stays unlinked until the type comes."""
+    from test_run_kind import _run_with_environments
+
+    # an environment the importer can name no type for: a playback
+    path = _run_with_environments(str(tmp_path / 'run.nc4'),
+                                  [('Playback', 6, 'time')])
+    window.import_paths([path])
+    pump()
+    assert window.project.project_type is None
+    assert _groups(window) == [], 'nothing grouped ahead of the type'
+    window.set_project_type('Random Vibration')
+    pump()
+    assert _groups(window) == [('Basis', ['Channel Table', 'Time History'])]

@@ -81,6 +81,21 @@ the OpenCASCADE kernel behind STEP/IGES import (about 220 MB
 installed); without it those tests skip and the rest of the suite is
 unaffected.
 
+## How a change travels
+
+Work in a fork. The repository itself holds no working branches —
+`main`, the CLA bot's signature branch and the maintainer's publishing
+branches — and a ruleset refuses the creation of any other, the
+maintainer included. Your fork is your own space: nobody else can
+name a branch there, and the fork's name says whose the branch is.
+
+Name the branch for what it carries: `fix/`, `feature/`, `docs/` or
+`tooling/`, then a short lower-case slug of letters, digits and
+hyphens — `fix/decade-axis-ticks`, `docs/random-workflow`. Open the
+pull request against `main`. A check on every pull request reads the
+branch name and stays red until it fits; renaming the branch in your
+fork is enough, the pull request follows the rename.
+
 ## Before you push
 
 ```bash

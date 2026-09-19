@@ -196,6 +196,12 @@ def test_the_legend_wraps_to_the_width_of_the_axes(qt_app, spec):
     legend = plot.legend
     entries = len(legend.items)
     assert entries >= 3, 'the fixture has enough records to wrap'
+    # wide enough for one row in any font: Windows draws its fonts
+    # wider and wrapped the row at the default width, a fault of the
+    # assertion and not the legend (a bug report, 2026-09-19)
+    layout.resize(1200, 600)
+    for _ in range(10):
+        qt_app.processEvents()
     wide = legend.sceneBoundingRect()
     assert legend.rowCount == 1 and legend.columnCount == entries
 

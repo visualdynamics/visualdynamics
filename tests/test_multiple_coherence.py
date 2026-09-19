@@ -159,12 +159,28 @@ def test_a_history_that_is_all_drives_says_so():
 def test_it_agrees_with_the_controller():
     """The strongest check available: Rattlesnake computed its own
     multiple coherence for the same run, in its own code, and this has
-    to land on it."""
+    to land on it.
+
+    Over the controller's own frame count. A coherence estimate is
+    biased upward at few averages, and the controller's number came
+    from its ten-frame CPSD buffer: ten frames here land on it
+    (0.687 against 0.684), the full run's twenty-eight settle lower
+    (0.57), and the import's default is the full run since
+    2026-09-19. Like against like, so the count is read off the file.
+    """
+    from dataclasses import replace
+
+    import netCDF4
+
     loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
     spectra = visualdynamics.import_file(fixture_path('plate',
                                             'random_spectra.nc4'))
     theirs = next(v for k, v in spectra.items() if 'coherence' in k)
-    mine = loaded['time_data'].compute_multiple_coherence()
+    with netCDF4.Dataset(fixture_path('plate', 'random.nc4')) as ds:
+        frames = int(ds.groups['Random'].frames_in_cpsd)
+    history = loaded['time_data']
+    mine = history.compute_multiple_coherence(
+        averaging=replace(history.averaging, frames=frames))
     for dof in mine.response_dof:
         assert dof in theirs.response_dof
         a = mine.ordinate[list(mine.response_dof).index(dof)]

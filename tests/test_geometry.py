@@ -386,3 +386,34 @@ def test_element_and_traceline_ids_are_still_allowed_to_repeat():
     geometry = Geometry(node_id=[1, 2, 3], node_xyz=xyz,
                         traceline_conn=[[1, 2], [2, 3]], traceline_id=[4, 4])
     assert list(geometry.traceline_id) == [4, 4]
+
+
+def _framed_geometry():
+    """Node 101 measured in a frame turned 30° about Z, node 102 in the
+    global one, node 103 in a cylindrical one."""
+    c, s = np.cos(np.radians(30.0)), np.sin(np.radians(30.0))
+    turned = [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]]
+    identity = [[1.0, 0, 0], [0, 1.0, 0], [0, 0, 1.0], [0, 0, 0]]
+    return visualdynamics.Geometry(
+        node_id=[101, 102, 103], node_xyz=np.zeros((3, 3)),
+        node_disp_cs=[2, 1, 3], cs_id=[1, 2, 3], cs_name=['', '', ''],
+        cs_type=[0, 0, 1], cs_matrix=[identity, turned, identity])
+
+
+def test_a_dofs_direction_reads_through_its_nodes_frame():
+    """'101X+' at a node measured in a turned frame is not global X: the
+    report's grid reads which global axis a channel is nearest and how
+    far off (Brandon, 2026-09-19)."""
+    geometry = _framed_geometry()
+    c, s = np.cos(np.radians(30.0)), np.sin(np.radians(30.0))
+    assert np.allclose(geometry.dof_direction('101X+'), [c, s, 0.0])
+    assert np.allclose(geometry.dof_direction('101Y-'), [s, -c, 0.0])
+    assert np.allclose(geometry.dof_direction('101RZ+'), [0.0, 0.0, 1.0]), \
+        'a rotational DOF points along its axis'
+    assert np.allclose(geometry.dof_direction('102Z+'), [0.0, 0.0, 1.0])
+    assert geometry.dof_direction('103X+') is None, 'a cylindrical frame is not read'
+    assert geometry.dof_direction('999X+') is None, 'no such node'
+    assert geometry.dof_direction('101') is None, 'no axis'
+    bare = visualdynamics.Geometry(node_id=[7], node_xyz=[[0, 0, 0]])
+    assert np.allclose(bare.dof_direction('7Y+'), [0.0, 1.0, 0.0]), \
+        'a geometry with only the default frame measures in the global one'

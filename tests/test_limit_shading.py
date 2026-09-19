@@ -193,3 +193,36 @@ def test_without_an_abort_line_the_yellow_runs_past_everything(qt_app):
     tops = [bounds_of(fill)[1].max() for fill in zones(qt_app, data)]
     # decades, not a factor: the curves are in log space
     assert max(tops) > shown(data, 'warning_upper').max() + 5
+
+
+def test_the_zones_step_with_a_banded_target(qt_app):
+    """The stage stepped a banded specification\'s warning and abort
+    limits; the flat plot filled them as polygons through the band
+    centers, slopes under a stepped target (Brandon, 2026-09-19). The
+    zone edges stand on the same bin edges the target steps on."""
+    import numpy as np
+    import pyqtgraph as pg
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.plot import bin_edges, build_plots
+
+    freq = np.linspace(10.0, 2000.0, 200)
+    level = np.full((1, 200), 1e-2)
+    spec = Specification(freq, level, response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         ordinate_unit=['m/s**2'],
+                         warning_upper=level * 2, abort_upper=level * 4,
+                         warning_lower=level / 2, abort_lower=level / 4)
+    banded = spec.to_octave(3)
+    layout = pg.GraphicsLayoutWidget()
+    build_plots(layout, [('Spec', banded, None)])
+    plot = next(item for item in layout.ci.items if isinstance(item, pg.PlotItem))
+    edges = [c for c in plot.listDataItems() if getattr(c, 'is_zone_edge', False)]
+    assert edges, 'the zones are drawn'
+    expected = bin_edges(banded.abscissa, banded.bin_widths())
+    for curve in edges:
+        x, y = curve.getData()
+        assert len(x) == 2 * len(banded.abscissa), 'two points per bin'
+        assert np.allclose(np.sort(np.unique(x)), np.unique(expected)), \
+            'on the bin edges the target steps on'
+        assert np.array_equal(y[0::2], y[1::2]), 'flat across each bin'

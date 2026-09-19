@@ -197,4 +197,5 @@ def load(path: str | os.PathLike,
         **{name: np.asarray(values) for name, values in limits.items()})
     if ordinate_unit is not None:
         spec.define_units(ordinate_unit)
+    spec.interpolation = Specification.reading_of(frequencies)
     return spec

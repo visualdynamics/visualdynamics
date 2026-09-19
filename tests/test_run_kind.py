@@ -127,12 +127,30 @@ def test_a_replay_on_its_own_is_a_time_run(tmp_path):
 
 
 def test_a_file_that_never_says_answers_nothing(tmp_path):
-    """An nc4 assembled by hand, or a save from before the controller
-    wrote its types down. Guessing would be worse than not knowing."""
+    """An nc4 assembled by hand, with no environment group that holds
+    anything: guessing would be worse than not knowing."""
     path = written(tmp_path / 'silent.nc4')
     assert environment_kinds(path) == {}
     assert run_kind(path) is None
     assert project_type(path) is None
+
+
+def test_an_older_controllers_save_answers_by_its_groups(tmp_path):
+    """A controller from before 2026-04 wrote no `environment_types`,
+    and a real random run from one came in with no project type and its
+    objects in no Basis (Brandon, 2026-09-19). The group the random
+    environment saved — its CPSD settings, its specification — is the
+    file's own account of the kind; a bare group is still nothing."""
+    import netCDF4
+
+    path = written(tmp_path / 'older.nc4')
+    with netCDF4.Dataset(path, 'a') as ds:
+        env = ds.createGroup('Random')
+        env.cpsd_window = 'hann'
+        env.frames_in_cpsd = 10
+        ds.createGroup('Notes')
+    assert environment_kinds(path) == {'Random': 'random'}
+    assert project_type(path) == 'Random Vibration'
 
 
 def test_an_unknown_type_number_is_not_invented(tmp_path):
@@ -245,3 +263,95 @@ def test_importing_the_same_kind_twice_says_nothing(window, pump):
     pump()
     assert 'project type changed' not in window._status_text
     assert window.project_type == 'Modal Test'
+
+
+# ---- the controller renumbered its environments --------------------------------
+
+def _run_with_environments(path, environments):
+    """A stream file naming `environments` as [(name, code, shape)], the
+    group shaped the way that kind's save shapes it: 'modal' carries
+    the modal metadata, 'time' the output signal, 'bare' nothing."""
+    import netCDF4
+    import numpy as np
+
+    with netCDF4.Dataset(path, 'w', format='NETCDF4') as ds:
+        ds.sample_rate = 256.0
+        ds.createDimension('response_channels', 2)
+        ds.createDimension('time_samples', 64)
+        ds.createVariable('time_data', 'f8',
+                          ('response_channels', 'time_samples'))[...] = \
+            np.zeros((2, 64))
+        group = ds.createGroup('channels')
+        for name, values in (('node_number', ['101', '102']),
+                             ('node_direction', ['Z+', 'Z+']),
+                             ('unit', ['g', 'g'])):
+            var = group.createVariable(name, str, ('response_channels',))
+            for i, value in enumerate(values):
+                var[i] = value
+        ds.createDimension('num_environments', len(environments))
+        names = ds.createVariable('environment_names', str, ('num_environments',))
+        codes = ds.createVariable('environment_types', int, ('num_environments',))
+        for i, (name, code, shape) in enumerate(environments):
+            names[i] = name
+            codes[i] = code
+            env = ds.createGroup(name)
+            if shape == 'modal':
+                env.frf_technique = 'H1'
+                env.num_averages = 4
+            elif shape == 'time':
+                env.createDimension('output_channels', 1)
+                env.createDimension('signal_samples', 8)
+                env.createVariable('output_signal', 'f8',
+                                   ('output_channels', 'signal_samples'))
+            elif shape == 'random':
+                env.cpsd_window = 'hann'
+    return path
+
+
+def test_a_newer_controllers_time_environment_is_not_a_modal_one(tmp_path):
+    """The controller renumbered its enum on 2026-07-30 (modal 6 → 5,
+    time 4 → 6): a random run with a time environment beside it read
+    as random plus modal, 'mixed', and got no project type — an orange
+    bracket where the Basis should be (Brandon, 2026-09-19). The group
+    says its kind; the number is the fallback."""
+    from visualdynamics.io.rattlesnake import environment_kinds, project_type, run_kind
+
+    path = _run_with_environments(str(tmp_path / 'new.nc4'),
+                                  [('Random', 1, 'random'), ('Time', 6, 'time')])
+    assert environment_kinds(path) == {'Random': 'random', 'Time': 'time'}
+    assert run_kind(path) == 'random', 'a time environment is passive'
+    assert project_type(path) == 'Random Vibration'
+
+
+def test_both_numberings_of_a_modal_run_read_as_modal(tmp_path):
+    from visualdynamics.io.rattlesnake import project_type
+
+    old = _run_with_environments(str(tmp_path / 'old.nc4'), [('Modal', 6, 'modal')])
+    new = _run_with_environments(str(tmp_path / 'new.nc4'), [('Modal', 5, 'modal')])
+    assert project_type(old) == 'Modal Test'
+    assert project_type(new) == 'Modal Test'
+
+
+def test_a_group_that_says_nothing_falls_back_to_the_older_numbering(tmp_path):
+    """A spectral save's group carries no signature; the number reads as
+    the fixtures' controller wrote it."""
+    from visualdynamics.io.rattlesnake import environment_kinds
+
+    path = _run_with_environments(str(tmp_path / 'bare.nc4'),
+                                  [('Modal', 6, 'bare'), ('Playback', 4, 'bare')])
+    assert environment_kinds(path) == {'Modal': 'modal', 'Playback': 'time'}
+
+
+def test_a_run_that_fits_no_type_says_so(window, pump, tmp_path, monkeypatch):
+    """Untyped, its objects join no Basis; the status bar says which
+    environments the file names and that a type wants setting."""
+    from visualdynamics.io import rattlesnake
+
+    monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1 << 40)
+    path = _run_with_environments(str(tmp_path / 'playback.nc4'),
+                                  [('Playback', 6, 'time')])
+    window.import_paths([path])
+    pump()
+    assert window.project.project_type is None, 'a playback alone is no test type'
+    said = window.statusBar().currentMessage()
+    assert 'Playback (time) fit no project type' in said, said

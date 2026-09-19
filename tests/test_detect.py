@@ -302,3 +302,18 @@ def test_the_real_run_is_not_averaged_across_a_level_change():
         window = detect.suggest(data)
         assert not (window.start < edge < window.stop(rate)), (
             f'the window straddles the step at {edge} s')
+
+
+def test_a_short_test_beats_a_long_quiet():
+    """Eight seconds at level inside eighty of quiet hold no thirty frames
+    at level, and the sweep used to carry on down to the quiet and find
+    thirty frames of noise floor there — the exact mistake the exercise
+    is meant to avoid, caught by the importer's guard until the import
+    became the Detect answer (2026-09-19). The sweep stops a margin under
+    the top; the test is found, with the frames it holds."""
+    data = history([(0.05, 40), (1.0, 8), (0.05, 40)])
+    first, last = detect.analysis_window(data, keep=(0.0, 1.0))
+    assert seconds(data, (first, last)) == (pytest.approx(40.0, abs=1.5),
+                                            pytest.approx(48.0, abs=1.5))
+    found = detect.suggest(data)
+    assert 1 <= found.frames < 30 and 39.0 <= found.start <= 42.0

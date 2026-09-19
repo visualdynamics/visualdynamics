@@ -177,7 +177,7 @@ carries a drag handle: one over the whole range while the channel is
 *Uniform*, and with Uniform off one per linear section of the
 requirement — every segment between breakpoints, or every run of one
 power law in the interpolated form — each moved on its own. Drag
-one up or down — it snaps to whole decibels, and its label says
+one up or down — it snaps to quarter decibels, and its label says
 which — and, when you let go, that edge moves to that value on every
 channel the sheet holds in that frequency range: the whole
 specification, or the channels picked in the tree. A specification

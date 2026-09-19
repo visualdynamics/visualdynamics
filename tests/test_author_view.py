@@ -654,17 +654,18 @@ def test_the_bands_are_dragged_on_the_plot_for_every_selected_channel(window,
     upper.release(0.0)
     pump()
     assert window.project['Modes Specification'] is made, 'no drag, no edit'
-    # the drag snaps to whole decibels: seven tenths of a decibel (seven
-    # hundredths of a decade) is one whole decibel
+    # the drag snaps to quarter decibels (a whole one was too coarse,
+    # Brandon, 2026-09-18): seven tenths of a decibel (seven hundredths
+    # of a decade) lands on nine and three quarters
     upper.release(0.07)
     pump()
-    assert all(entry['abort'] == [(-10.0, 10.0)]
-               for entry in window._drafts[key].bands), 'snapped to 10, not 9.7'
-    assert upper.snapped(0.04) == 9.0, 'and four tenths is none at all'
-    upper.release(0.04)
+    assert all(entry['abort'] == [(-9.75, 9.75)]
+               for entry in window._drafts[key].bands), 'snapped to 9.75, not 9.7'
+    assert upper.snapped(0.01) == 9.0, 'and a tenth of a decibel is none at all'
+    upper.release(0.01)
     pump()
     assert window.project['Modes Specification'] is not made
-    assert all(entry['abort'] == [(-10.0, 10.0)]
+    assert all(entry['abort'] == [(-9.75, 9.75)]
                for entry in window._drafts[key].bands), 'nothing moved'
 
 
@@ -1040,3 +1041,35 @@ def test_a_virtual_points_specification_opens_from_the_plots_bar(window, pump):
             window.statusBar().currentMessage()
         window.author_data_action.trigger()
         pump()
+
+
+def test_a_dragged_limit_lands_on_a_quarter_decibel():
+    """A whole decibel was too coarse to place a limit where it was
+    wanted (Brandon, 2026-09-18)."""
+    from visualdynamics.plot.bands import STEP, snap_db
+
+    assert STEP == 0.25
+    assert snap_db(3.0, 0.02) == 3.25          # 0.2 dB up rounds to the quarter
+    assert snap_db(3.0, 0.01) == 3.0           # 0.1 dB up does not
+    assert snap_db(-6.0, -0.0375) == -6.5      # and down, on the grid
+
+
+def test_the_sheet_stands_down_when_the_selection_moves_on(window, pump):
+    """Opened on a specification and left wanted, the sheet followed
+    the selection onto a lone channel table — a door of its own — and
+    opened a fresh sheet at the table's control channels above the
+    table (Brandon, 2026-09-18: "a split window with the channel table
+    in the bottom"). It stays on the object it was opened on and
+    stands down when the selection moves to another."""
+    window.import_paths([fixture_path('plate', 'random.nc4')])
+    pump()
+    _select(window, pump, 'Specification')
+    panel = _open(window, pump, on_plot=True)
+    assert panel.isVisible()
+    _select(window, pump, 'Channel Table')
+    assert not window.data_pane.author_panel.isVisible(), 'the sheet stood down'
+    assert not window.author_action.isChecked()
+    assert window.table.isVisible(), 'the table, alone'
+    assert window.views.sizes()[1] == 0, 'no plot pane split above it'
+    # and it is still one toggle away, on the table's own door
+    assert window.author_action.isVisible()

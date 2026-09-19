@@ -103,8 +103,14 @@ photographs beside it; link them into the group. Then the project's
 row's *Generate Report* builds the random report — the measured data, the
 specification comparison read three ways (spectra, RMS error bars,
 lines-out bars), the coherence beside the compliance so the reader
-can ask *why* a channel exceeded. *Export → HTML…* writes one
-self-contained file.
+can ask *why* a channel exceeded. The specification and the
+comparison are one figure per control channel — no drop-down
+anywhere in the report — narrowband and again on octave bands
+against the banded specification, each comparison opening on the specification's own
+frequency band with the measurement beyond it a zoom away; a banded
+specification is drawn on its own bands, steps against steps. The
+channel table keeps every row on one line, however long its
+comments. *Export → HTML…* writes one self-contained file.
 
 ![The exported report: control histories with the averaged frames
 shaded, the specification with its tolerance

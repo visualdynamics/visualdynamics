@@ -67,6 +67,13 @@ STARTER_LEVEL = 1.0
 CONSTANT_TOLERANCE = 1e-6
 
 
+#: the grid a dragged or stepped limit lands on, in decibels. A
+#: whole decibel (Brandon, 2026-09-06: "never 1.5") was too coarse
+#: to place a limit where it was wanted (Brandon, 2026-09-18); the
+#: plot's handles snap to the same grid (`plot.bands.STEP`).
+LIMIT_STEP_DB = 0.25
+
+
 @dataclass
 class SpecificationDraft:
     """A specification being written, at any channels.
@@ -781,12 +788,13 @@ class SpecificationDraft:
 
     def shifted_band(self, kind: str, side: str, segments: Any,
                      decibels: float, channels: Any = None,
-                     step: float = 1.0) -> SpecificationDraft:
+                     step: float = LIMIT_STEP_DB) -> SpecificationDraft:
         """The same draft with one edge of a band moved — the drag on
         the plot, landed. A symmetric channel moves the other edge to
         match; a uniform channel moves every segment. The edge lands
-        on a multiple of `step` (Brandon, 2026-09-06: whole decibels,
-        never 1.5), and never nearer the target than one step.
+        on a multiple of `step` (`LIMIT_STEP_DB`: a quarter decibel,
+        Brandon 2026-09-18, from the whole decibel of 2026-09-06), and
+        never nearer the target than one step.
 
         Parameters
         ----------
@@ -801,7 +809,7 @@ class SpecificationDraft:
         channels : list of str, optional
             Which channels; all of them when omitted — the channels
             selected are the channels edited.
-        step : float, default 1.0
+        step : float, default LIMIT_STEP_DB
             The decibel grid the edge lands on.
 
         Returns
@@ -814,7 +822,7 @@ class SpecificationDraft:
 
     def with_band_edge(self, kind: str, side: str, segments: Any,
                        decibels: float, channels: Any = None,
-                       step: float = 1.0) -> SpecificationDraft:
+                       step: float = LIMIT_STEP_DB) -> SpecificationDraft:
         """The same draft with one edge of a band set to `decibels` on
         every channel — the drag on the plot, landed (Brandon,
         2026-09-06: a drag from 3 to 4 dB puts every selected channel
@@ -836,7 +844,7 @@ class SpecificationDraft:
             The edge's level, positive above the target.
         channels : list of str, optional
             Which channels; all of them when omitted.
-        step : float, default 1.0
+        step : float, default LIMIT_STEP_DB
             The decibel grid the edge lands on.
 
         Returns

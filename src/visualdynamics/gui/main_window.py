@@ -7509,6 +7509,24 @@ class MainWindow(QMainWindow):
         on_plot = door is not None and door[0] == 'spec'
         self.author_action.setVisible(door is not None and not on_plot)
         self.author_data_action.setVisible(on_plot)
+        # The sheet stays open on the object it was opened on — picks
+        # of its records included — and stands down when the selection
+        # moves to another door. Left wanted, it followed the selection
+        # from a specification onto a lone channel table, which is a
+        # door of its own, and opened a fresh sheet at the table's
+        # control channels above the table: "a split window with the
+        # channel table in the bottom" (Brandon, 2026-09-18).
+        if door is not None and self._author_door is not None:
+            was = set(self._door_names(self._author_door))
+            now = set(self._door_names(door))
+            # the object a door made carries the sheet on (the set or
+            # table it was made from, and back): the same sheet, not
+            # another door
+            made = {self._author_made.get(name) for name in was | now}
+            made |= {self._author_made.get(self._author_door[1]),
+                     self._author_made.get(door[1])}
+            if not (was & now) and not ((was | now) & made):
+                self._author_wanted = False
         wanted = door is not None and self._author_wanted
         self.author_action.setChecked(wanted and not on_plot)
         self.author_data_action.setChecked(wanted and on_plot)

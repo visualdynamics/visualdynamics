@@ -735,13 +735,14 @@ def test_a_drag_lands_under_each_channels_constraints():
     assert edge.bands[0]['abort'] == [(-6.0, 6.0), (-6.0, 9.0), (-6.0, 6.0)]
     # an edge cannot cross the target: a step short of it at the least
     pinned = loose.shifted_band('abort', 'upper', [1], -20.0)
-    assert pinned.bands[0]['abort'][1] == (-6.0, 1.0)
-    # and it lands on whole decibels (Brandon, 2026-09-06: never 1.5)
-    assert draft.shifted_band('abort', 'upper', [0], 0.7).bands[0]['abort'][0] == (-7.0, 7.0)
-    assert draft.shifted_band('abort', 'upper', [0], 0.4).bands[0]['abort'][0] == (-6.0, 6.0)
+    assert pinned.bands[0]['abort'][1] == (-6.0, 0.25)
+    # and it lands on quarter decibels (Brandon, 2026-09-18, from the
+    # whole decibels of 2026-09-06: a whole one was too coarse)
+    assert draft.shifted_band('abort', 'upper', [0], 0.7).bands[0]['abort'][0] == (-6.75, 6.75)
+    assert draft.shifted_band('abort', 'upper', [0], 0.1).bands[0]['abort'][0] == (-6.0, 6.0)
     odd = draft._copy(bands=[{'warning': [(-3.0, 3.0)] * 3,
                               'abort': [(-6.3, 6.3)] * 3}, draft.bands[1]])
-    assert odd.shifted_band('abort', 'upper', [0], 1.0).bands[0]['abort'][0] == (-7.0, 7.0), \
+    assert odd.shifted_band('abort', 'upper', [0], 1.0).bands[0]['abort'][0] == (-7.25, 7.25), \
         'a band off the grid lands on it'
     assert odd.shifted_band('abort', 'upper', [0], 0.25, step=0.5).bands[0]['abort'][0] == (-6.5, 6.5)
     # the drag itself lands every channel *at* a level, not each a
@@ -754,10 +755,10 @@ def test_a_drag_lands_under_each_channels_constraints():
     assert uneven.shifted_band('warning', 'upper', [1], 1.0).bands[1]['warning'][0] == \
         (-5.0, 5.0), 'the shift is still there for a script that wants it'
     below = uneven.with_band_edge('warning', 'lower', [0], -2.5, channels=['2Z+'])
-    assert below.bands[1]['warning'] == [(-2.0, 2.0)] * 3, 'on the grid, mirrored'
+    assert below.bands[1]['warning'] == [(-2.5, 2.5)] * 3, 'on the grid, mirrored'
     assert below.bands[0]['warning'] == [(-3.0, 3.0)] * 3
     assert loose.with_band_edge('abort', 'upper', [1], 0.2).bands[0]['abort'][1] == \
-        (-6.0, 1.0), 'never nearer the target than a step'
+        (-6.0, 0.25), 'never nearer the target than a step'
     # constraints turned on settle the bands to their rule
     tidy = edge.constrained(['1Z+'], symmetric=True)
     assert tidy.bands[0]['abort'] == [(-6.0, 6.0), (-9.0, 9.0), (-6.0, 6.0)]

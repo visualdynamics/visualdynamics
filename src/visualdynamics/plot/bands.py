@@ -22,10 +22,20 @@ from typing import Any
 
 import numpy as np
 
+from ..core.author import LIMIT_STEP_DB
+
 #: how wide the grab is, in pixels, either side of an edge
 GRAB = 6
 #: the decibel grid a drag lands on
-STEP = 1.0
+def snap_db(value_db: float, dy: float) -> float:
+    """The decibels a drag of `dy` decades from `value_db` reaches, on
+    the `STEP` grid: ten decibels to the decade, rounded to the step."""
+    return float(np.round((float(value_db) + 10.0 * dy) / STEP) * STEP)
+
+
+#: the grid a dragged limit lands on, in decibels — the sheet's own
+#: (`core.author.LIMIT_STEP_DB`), so a drag and a typed step agree
+STEP = LIMIT_STEP_DB
 
 
 def band_edges(draft: Any, channel: int, unit_system: Any
@@ -126,13 +136,13 @@ def _handle_base():
 
         def said(self, value: float | None = None) -> str:
             value = self.value_db if value is None else value
-            return f'{value:+.0f} dB'.replace('-', '−')
+            return f'{value:+g} dB'.replace('-', '−')
 
         def snapped(self, dy: float) -> float:
-            """The decibels the drag has reached, on the whole-decibel
-            grid the edge lands on: the edge's value plus the decades
-            dragged times ten, rounded."""
-            return float(np.round((self.value_db + 10.0 * dy) / STEP) * STEP)
+            """The decibels the drag has reached, on the `STEP` grid the
+            edge lands on: the edge's value plus the decades dragged
+            times ten, rounded (`snap_db`)."""
+            return snap_db(self.value_db, dy)
 
         def hoverEvent(self, ev):
             from PySide6.QtCore import Qt

@@ -1354,6 +1354,15 @@ def _plot_block(block, source, objects, us):
     paged = bounded or (isinstance(source, TransientSpecification)
                         and len(indices) > 1)
     channels = list(indices) if paged else []
+    if paged and block.get('channel'):
+        # a block that names its channel is that channel's figure and
+        # carries no others: the random report writes one per control
+        # channel, with no drop-down anywhere in it (Brandon, 2026-09-18)
+        named = str(block['channel'])
+        channels = [i for i in channels if _channel_label(source, i) == named]
+        if not channels:
+            return None
+        indices = channels
     if paged:
         # One channel drawn — with its limits shaded around it when it
         # has any — the same reading the app gives. Six targets stacked
@@ -2096,8 +2105,14 @@ def _comparison_block(block, measured, specification, us, caption,
     answers = _measured_by_pair(
         measured, us, scale_db=scale_db,
         dimension=specification.known_dim(0))
+    # a block that names its channel is one channel's figure — the
+    # random report writes one per control channel rather than one
+    # figure with a drop-down (Brandon, 2026-09-18)
+    named = block.get('channel')
     shared = [i for i in range(specification.num_records)
-              if _pair_key(specification, i) in answers]
+              if _pair_key(specification, i) in answers
+              and (not named
+                   or _channel_label(specification, i) == str(named))]
     if not shared:
         return None
     measured = _positive_lines(measured)
@@ -2108,14 +2123,33 @@ def _comparison_block(block, measured, specification, us, caption,
     spec_x = np.asarray(specification.display_abscissa(us), dtype=float)
     limits = {name: specification.display_limit(name, us)
               for name in Specification.LIMITS}
+    # A banded specification is drawn on its own bins — the target and
+    # its zones flat across each of *its* bands, the shape its own
+    # figure and the app give it — where every specification used to
+    # be interpolated onto the measurement's grid and stepped on the
+    # measurement's bins, which drew an octave-band requirement as a
+    # staircase of the measurement's making (Brandon, 2026-09-18: "it
+    # seems wrong to compare a stair-step psd to a non-stairstep
+    # specification"). A specification on lines or at breakpoints is
+    # still read onto the measurement's axis: its power law between
+    # points needs the dense grid to be drawn as the curve it is.
+    banded = getattr(specification, 'bandwidth', None) is not None
+    spec_edges = (bin_edges(spec_x, specification.bin_widths())
+                  if banded else None)
 
     def onto(values: ArrayLike) -> np.ndarray:
-        """One of the specification's curves, on the measurement's axis."""
+        """One of the specification's curves, on the axis it is drawn
+        on: its own bins when banded, the measurement's otherwise."""
+        values = np.asarray(values, dtype=float)
+        return values if banded else log_interpolate(x, spec_x, values)
+
+    def on_measured(values: ArrayLike) -> np.ndarray:
+        """A limit on the measurement's axis, where the marks stand."""
         return log_interpolate(x, spec_x, np.asarray(values, dtype=float))
 
-    def mapped(values: ArrayLike) -> np.ndarray:
+    def mapped(values: ArrayLike, own: bool = False) -> np.ndarray:
         y = np.asarray(values, dtype=float)
-        if keep is not None:
+        if keep is not None and not own:
             y = y[keep]
         with np.errstate(divide='ignore', invalid='ignore'):
             return _finite(np.where(y > 0.0,
@@ -2135,48 +2169,54 @@ def _comparison_block(block, measured, specification, us, caption,
             if any(name is not None and edges.get(name) is None
                    for name in (lower, upper)):
                 continue                      # a limit never written
-            zones.append({'lower': None if pair[0] is None else mapped(pair[0]),
-                          'upper': None if pair[1] is None else mapped(pair[1]),
+            zones.append({'lower': None if pair[0] is None
+                          else mapped(pair[0], banded),
+                          'upper': None if pair[1] is None
+                          else mapped(pair[1], banded),
                           'severity': severity})
         channel = {'label': _channel_label(specification, record),
-                   'y': mapped(target), 'response': mapped(response),
+                   'y': mapped(target, banded), 'response': mapped(response),
                    'zones': zones}
-        # and where it went outside abort, in the app's own two colors.
-        # Both sides in display units: the response comes back converted
-        # and the raw limits do not, so comparing one against the other
-        # was comparing m/s^2 against whatever the report was set to.
         for name, key in (('abort_upper', 'over'), ('abort_lower', 'under')):
             if limits.get(name) is None:
                 continue
             out = outside(x, response, spec_x, limits[name][record],
                           over=(key == 'over'))
-            channel[key] = mapped(np.where(out, edges[name], np.nan))
+            channel[key] = mapped(np.where(
+                out, on_measured(limits[name][record]), np.nan))
         channels.append(channel)
 
     first = channels[0]
-    # the app's own reading: the specification gray behind, because it
-    # is the reference, and the response in the page's ink because it is
-    # what is being looked at
     measured_label = (f'measured ({scale_db:+d} dB)' if scale_db
                       else 'measured')
     curves = [{'label': first['label'], 'x': None, 'y': first['y'],
                'gray': True},
               {'label': measured_label, 'x': None, 'y': first['response'],
                'ink': True}]
+    if banded:
+        # the target on its own grid, stepped on its own edges; the
+        # response keeps the block's grid and edges
+        curves[0]['x'] = [float(v) for v in spec_x]
+        curves[0]['steps'] = True
+        curves[0]['edges'] = [float(v) for v in spec_edges]
     if scale_db:
         caption = (caption + f' — measured data scaled {scale_db:+d} dB '
                    'to the specification').strip()
     if len(channels) > 1:
         caption = (caption + f' — one of {len(channels)} control '
                    'channels; the rest are on the drop-down').strip()
+    # the view opens on the specification's own band — its outer bin
+    # edges when banded, its first and last line otherwise — and the
+    # measurement's wider band is a zoom away (Brandon, 2026-09-18:
+    # the axis ran to the response's band, well past the requirement)
+    home = ([spec_edges[0], spec_edges[-1]] if banded
+            else [spec_x[0], spec_x[-1]])
     built = {'kind': 'plot', 'caption': caption, 'logy': True,
              'x': [float(v) for v in grid],
              'xlabel': f'frequency [{us.label_text("frequency")}]',
              'ylabel': _axis_text(specification, us, shared[0]),
-             # a density is flat across its own bin, and drawing it as a
-             # polyline through the line centers draws a slope that is not
-             # in the data. The app steps them; so does this.
              'steps': True,
+             'home_x': [float(home[0]), float(home[1])],
              'curves': curves, 'channels': channels}
     if keep is None:
         # the grid *is* the measured object's own lines, so its own

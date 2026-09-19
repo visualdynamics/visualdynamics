@@ -274,10 +274,10 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
 
     assert outcome.get('picked'), 'the page never reported back'
     got = json.loads(outcome['picked'])
-    assert got['pickers'] >= 2, 'the specification figure and the comparison'
-    assert got['channels'] > 1, 'more than one channel to pick from'
-    assert got['now'] != got['was'], 'and picking one actually moves it'
-    assert got['figures'] >= 4, 'and they carry their figure numbers'
+    # no drop-down anywhere in the random report (Brandon, 2026-09-18):
+    # one figure per control channel, the specification's own included
+    assert got['pickers'] == 0, 'nothing to pick from'
+    assert got['figures'] >= 4, 'and the figures carry their numbers'
     assert outcome.get('drawn'), 'the page never reported what it had drawn'
     drew = json.loads(outcome['drawn'])
     assert drew['canvases'] > 0, 'the figures drew'
@@ -355,7 +355,13 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
     octave = [b for b in template.blocks
               if b.get('source') in ('@basis:OctavePsd',
                                       '@basis:OctaveSpecification')]
-    assert len(octave) == 4, 'the specification figure, the comparison, two bar charts'
+    from visualdynamics.core.report import control_channel_labels
+
+    per_channel = len(control_channel_labels(objects, links,
+                                             '@basis:OctaveSpecification'))
+    assert per_channel > 1
+    assert len(octave) == 2 + 2 * per_channel, \
+        'a specification figure and a comparison per control channel, two bar charts'
     for block in octave:
         for field in ('source', 'specification', 'measured'):
             if block.get(field):
@@ -619,3 +625,173 @@ def test_the_octave_comparison_reads_the_same_channels():
     assert built['steps'], 'bands are drawn flat across their own width'
     assert len(built['channels']) > 1
     assert len(built['x']) < len(psds.abscissa), 'fewer bands than lines'
+
+
+# ---- the comparison figure, per channel and on the specification's band ----
+
+def _pair_for_comparison():
+    lines = np.linspace(5.0, 2000.0, 800)
+    spec = visualdynamics.Specification(
+        abscissa=np.array([10.0, 100.0, 1000.0]),
+        ordinate=np.atleast_2d([1e-3, 1e-3, 1e-3]), response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'],
+        abort_upper=np.atleast_2d([4e-3, 4e-3, 4e-3]),
+        abort_lower=np.atleast_2d([2.5e-4, 2.5e-4, 2.5e-4]))
+    measured = visualdynamics.Psd(abscissa=lines,
+                                  ordinate=np.atleast_2d(np.full(800, 9e-3)),
+                                  response_dof=['101Z+'],
+                                  ordinate_dim=['acceleration**2/frequency'])
+    measured.scale_db = 0
+    return spec, measured
+
+
+def test_the_comparison_opens_on_the_specifications_band():
+    """The axis ran to the response's band, well past the requirement
+    (Brandon, 2026-09-18): the figure opens on the specification's
+    own band — its lines, or a banded one's outer edges — and the
+    rest is a zoom away."""
+    from visualdynamics.plot import bin_edges
+    from visualdynamics.report import _plot_block
+
+    spec, measured = _pair_for_comparison()
+    built = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves'}, measured, {'S': spec, 'P': measured},
+                        visualdynamics.SI)
+    assert built['home_x'] == [10.0, 1000.0]
+    assert min(built['x']) == 5.0 and max(built['x']) == 2000.0, \
+        'the measurement is still there to zoom out to'
+    banded_spec = spec.to_octave(3)
+    banded = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                          'mode': 'curves'}, measured.to_octave(6),
+                         {'S': banded_spec, 'P': measured.to_octave(6)},
+                         visualdynamics.SI)
+    edges = bin_edges(banded_spec.abscissa, banded_spec.bin_widths())
+    assert banded['home_x'] == pytest.approx([edges[0], edges[-1]])
+
+
+def test_a_banded_specification_is_drawn_on_its_own_bins():
+    """Its target and zones flat across each of *its* bands, beside a
+    response stepped on the measurement's: the requirement used to be
+    interpolated onto the measurement's grid and stepped there, a
+    staircase of the measurement's making (Brandon, 2026-09-18)."""
+    from visualdynamics.plot import bin_edges
+    from visualdynamics.report import _plot_block
+
+    spec, measured = _pair_for_comparison()
+    banded_spec, banded_psd = spec.to_octave(3), measured.to_octave(6)
+    built = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves'}, banded_psd,
+                        {'S': banded_spec, 'P': banded_psd}, visualdynamics.SI)
+    target, response = built['curves']
+    assert target['x'] == pytest.approx(list(banded_spec.abscissa))
+    assert target['steps'] is True
+    assert target['edges'] == pytest.approx(
+        list(bin_edges(banded_spec.abscissa, banded_spec.bin_widths())))
+    channel = built['channels'][0]
+    assert len(channel['y']) == len(banded_spec.abscissa)
+    zone = next(z for z in channel['zones'] if z['lower'] is not None)
+    assert len(zone['lower']) == len(banded_spec.abscissa)
+    assert len(channel['response']) == len(built['x']) == len(banded_psd.abscissa)
+    assert len(channel['over']) == len(built['x']), 'the marks on the measurement'
+    assert response['x'] is None and 'edges' not in response
+    # and a specification on lines stays on the measurement's axis
+    plain = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves'}, measured, {'S': spec, 'P': measured},
+                        visualdynamics.SI)
+    assert plain['curves'][0]['x'] is None
+    assert len(plain['channels'][0]['y']) == len(plain['x'])
+
+
+def test_a_block_may_name_its_channel():
+    from visualdynamics.report import _plot_block
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    spec = loaded['Random_specification']
+    psds = loaded['time_data'].compute_psds()
+    named = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves', 'channel': '104Z+',
+                         'caption': 'Control against specification — 104Z+'},
+                        psds, {'S': spec, 'P': psds}, visualdynamics.SI)
+    assert [ch['label'] for ch in named['channels']] == ['104Z+']
+    assert named['caption'] == 'Control against specification — 104Z+', \
+        'no drop-down note: there is one channel'
+    assert _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                        'mode': 'curves', 'channel': '999Z+'},
+                       psds, {'S': spec, 'P': psds}, visualdynamics.SI) is None
+
+
+def test_the_template_writes_a_figure_per_control_channel():
+    """One figure per control channel, narrowband and on octave bands,
+    rather than one figure with a drop-down (Brandon, 2026-09-18); a
+    project with nothing bound yet gets the one figure that picks."""
+    from visualdynamics.core.report import control_channel_labels, random_template
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    spec = loaded['Random_specification']
+    psds = loaded['time_data'].compute_psds()
+    project = {'Specification': spec, 'Measured': psds,
+               'Octave Specification': spec.to_octave(6),
+               'Octave Measured': psds.to_octave(6)}
+    labels = control_channel_labels(project, None)
+    assert len(labels) == 8 and labels[0] == '101Z+'
+    blocks = random_template(project).blocks
+    narrow = [b for b in blocks if b.get('specification') == '@basis:Specification'
+              and b.get('kind') == 'plot']
+    octave = [b for b in blocks
+              if b.get('specification') == '@basis:OctaveSpecification'
+              and b.get('kind') == 'plot']
+    assert [b['channel'] for b in narrow] == labels
+    assert [b['channel'] for b in octave] == labels
+    assert narrow[0]['caption'] == 'Control against specification — 101Z+'
+    assert octave[-1]['caption'].endswith(f'octave bands — {labels[-1]}')
+    empty = random_template({}).blocks
+    lone = [b for b in empty if b.get('specification') == '@basis:Specification']
+    assert len(lone) == 1 and 'channel' not in lone[0]
+    import json
+    import re
+
+    page = render_html(random_template(project), project,
+                       unit_system=visualdynamics.SI)
+    payload = json.loads(re.search(
+        r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
+    captions = [b.get('caption', '') for b in payload['blocks']
+                if b.get('kind') == 'plot']
+    comparisons = [c for c in captions if c.startswith('Control against specification')]
+    assert len(comparisons) == 16
+    specs = [c for c in captions if c.startswith('Test specification')]
+    assert len(specs) == 16, 'the specification figures too, one per channel'
+    assert not any('drop-down' in c for c in captions), \
+        'no drop-down anywhere in the random report'
+    lone_specs = [b for b in random_template({}).blocks
+                  if b.get('source') == '@basis:Specification' and b.get('kind') == 'plot']
+    assert len(lone_specs) == 1 and 'channel' not in lone_specs[0]
+
+
+def test_a_table_row_is_one_line():
+    """A channel table's comments wrapped every row onto four lines
+    (Brandon, 2026-09-18): cells never wrap, and a table wider than the
+    page scrolls in its own wrap."""
+    from visualdynamics.report.page import _CSS, _JS
+
+    rule = _CSS[_CSS.index('th, td {'):]
+    rule = rule[:rule.index('}')]
+    assert 'white-space: nowrap' in rule
+    assert '.tablewrap { overflow-x: auto; }' in _CSS
+    assert "wrap.className = 'tablewrap'" in _JS
+
+
+def test_a_specification_figure_may_name_its_channel():
+    """A bounded source's block that names a channel carries that one
+    channel and no drop-down note."""
+    from visualdynamics.report import _plot_block
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    spec = loaded['Random_specification']
+    named = _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves',
+                         'channel': '104Z+', 'caption': 'Test specification — 104Z+'},
+                        spec, {'S': spec}, visualdynamics.SI)
+    assert [ch['label'] for ch in named['channels']] == ['104Z+']
+    assert named['caption'] == 'Test specification — 104Z+'
+    assert _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves',
+                        'channel': '999Z+'}, spec, {'S': spec},
+                       visualdynamics.SI) is None

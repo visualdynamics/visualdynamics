@@ -91,8 +91,12 @@ canvas { width: 100%; border: 1px solid var(--line); border-radius: 6px;
 option { background: var(--paper); color: var(--ink); }
 img.photo { max-width: 100%; border-radius: 6px; display: block; }
 table { border-collapse: collapse; font-size: .85rem; width: 100%; }
+/* a row is one line: the columns take the width of what is in them —
+   a channel table's comments wrapped every row onto four (Brandon,
+   2026-09-18) — and a table wider than the page scrolls in its wrap */
 th, td { border: 1px solid var(--line); padding: .25rem .55rem;
-         text-align: left; }
+         text-align: left; white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
 th { background: color-mix(in srgb, var(--line) 30%, transparent); }
 /* a cell the app marks is marked here too, in the same two colors the
    plots shade an exceedance with: a channel red on screen is red on the
@@ -725,7 +729,9 @@ function plotBlock(block) {
        seen at a glance where a few pixels of height is not. */
     if (block.channels) {
       const ch = block.channels[picked];
-      const xs = block.curves[0].x || block.x;
+      /* the marks stand on the measurement's lines — the block's grid —
+         whatever grid the target is drawn on */
+      const xs = block.x;
       const top = margin.top, bottom = margin.top + plotH;
       [['over', 'rgba(229, 83, 75, 0.60)', top],
        ['under', 'rgba(76, 146, 217, 0.60)', bottom]].forEach(
@@ -756,10 +762,15 @@ function plotBlock(block) {
       g.setLineDash(curve.dash ? [6, 4] : []);
       g.lineWidth = 1.2; g.beginPath();
       let pen = false;
+      /* a curve drawn on its own grid brings its own shape and edges —
+         a banded specification stepped on its own bands beside a
+         response stepped on the measurement's (2026-09-18) */
+      const steps = curve.steps !== undefined ? curve.steps : block.steps;
+      const edges = curve.edges || (curve.x ? null : block.edges);
       for (let i = 0; i < curve.y.length; i++) {
         if (!finite(curve.y[i]) || !finite(xs[i])) { pen = false; continue; }
         const Y = py(curve.y[i]);
-        if (block.steps) {
+        if (steps) {
           /* A density is flat across its own bin: a polyline through
              the line centers draws a slope that is not in the data,
              and the area drawn stops being the area summed.
@@ -771,7 +782,7 @@ function plotBlock(block) {
              octave band's center is the geometric mean of its edges,
              so midpoints missed them by several percent of a band, and
              the first and last bins came out half width. */
-          const e = block.edges;
+          const e = edges;
           const X0 = px(e ? e[i] : (i > 0 ? (xs[i - 1] + xs[i]) / 2 : xs[i]));
           const X1 = px(e ? e[i + 1]
                           : (i < xs.length - 1 ? (xs[i] + xs[i + 1]) / 2
@@ -1930,7 +1941,10 @@ DATA.blocks.forEach(block => {
         const mark = block.marks && block.marks[ri] && block.marks[ri][ci];
         if (mark) cell.className = 'mark-' + mark;
       }); });
-    s.insertBefore(table, s.firstChild);
+    const wrap = document.createElement('div');
+    wrap.className = 'tablewrap';
+    wrap.appendChild(table);
+    s.insertBefore(wrap, s.firstChild);
   }
 });
 

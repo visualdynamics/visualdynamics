@@ -2131,6 +2131,60 @@ def transient_template(objects: Mapping[str, Any],
     ])
 
 
+def control_channel_labels(objects: Mapping[str, Any],
+                           links: Sequence[Mapping[str, Any]] | None,
+                           token: str = '@basis:Specification') -> list[str]:
+    """The control channels the specification a token binds names, as
+    the comparison figure labels them — each its own figure in the
+    random report (Brandon, 2026-09-18: one figure per control
+    channel rather than one figure with a drop-down). Empty when the
+    token binds nothing yet, and the template writes one figure that
+    picks."""
+    name = resolve_binding(token, objects, links)
+    spec = objects[name] if name and name in objects else None
+    if spec is None or not hasattr(spec, 'record_pair'):
+        return []
+    labels: list[str] = []
+    for i in range(spec.num_records):
+        response, reference = spec.record_pair(i)
+        # autospectra only: a cross term has no measured response to
+        # stand against it
+        if response == reference and response not in labels:
+            labels.append(response)
+    return labels
+
+
+def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
+                 links: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    """A specification's own figures, one per control channel — no
+    drop-down anywhere in the random report (Brandon, 2026-09-18);
+    one figure that picks when nothing binds yet."""
+    labels = control_channel_labels(objects, links, token)
+    if not labels:
+        return [{'kind': 'plot', 'source': token, 'mode': 'curves',
+                 'caption': caption}]
+    return [{'kind': 'plot', 'source': token, 'mode': 'curves',
+             'channel': label, 'caption': f'{caption} — {label}'}
+            for label in labels]
+
+
+def _comparisons(psd_token: str, spec_token: str, caption: str,
+                 objects: Mapping[str, Any],
+                 links: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    """The control-against-specification figures: one per control
+    channel the bound specification names, each opening on its own
+    channel; one figure that picks when nothing binds yet."""
+    labels = control_channel_labels(objects, links, spec_token)
+    if not labels:
+        return [{'kind': 'plot', 'source': psd_token,
+                 'specification': spec_token, 'mode': 'curves',
+                 'caption': caption}]
+    return [{'kind': 'plot', 'source': psd_token,
+             'specification': spec_token, 'mode': 'curves',
+             'channel': label, 'caption': f'{caption} — {label}'}
+            for label in labels]
+
+
 def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A random vibration report: what was asked for, what arrived, and
     by how much they differ.
@@ -2191,17 +2245,19 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             '## Specification\n\nThe required control spectrum and the '
             'tolerance the controller was set to warn and abort on '
             '({{figure:Test specification}}).'},
-        {'kind': 'plot', 'source': '@basis:Specification',
-         'mode': 'curves', 'caption': 'Test specification, with its '
-         'warning and abort limits'},
+        *_per_channel('@basis:Specification',
+                      'Test specification, with its warning and abort limits',
+                      objects, links),
         {'kind': 'text', 'text':
             '## Control\n\nThe measured control spectra against the '
-            'specification ({{figure:Control against specification}}). '
-            'Shading marks lines outside an abort limit — red above the '
-            'upper, blue below the lower.'},
-        {'kind': 'plot', 'source': '@basis:Psd',
-         'specification': '@basis:Specification', 'mode': 'curves',
-         'caption': 'Control against specification'},
+            'specification, one figure per control channel '
+            '({{figure:Control against specification}} and following). '
+            'Each opens on the specification\'s own frequency band; '
+            'the measurement beyond it is a zoom away. Shading marks '
+            'lines outside an abort limit — red above the upper, blue '
+            'below the lower.'},
+        *_comparisons('@basis:Psd', '@basis:Specification',
+                      'Control against specification', objects, links),
         {'kind': 'text', 'text':
             '## Compliance\n\nThe same comparison read two ways, a bar '
             'per control channel. **RMS error** '
@@ -2226,7 +2282,8 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         {'kind': 'text', 'text':
             '## Octave Band Comparison\n\nThe same comparison on '
             'octave bands: the control spectra integrated onto bands '
-            '({{figure:Control against specification, octave bands}}) '
+            '({{figure:Control against specification, octave bands}} '
+            'and following, one per control channel) '
             'against the specification banded the same way, its '
             'warning and abort limits banded with it ({{figure:Test '
             'specification, octave bands}}), and the same two '
@@ -2248,12 +2305,11 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         # does not need to be", true of a breakpoint curve and beside
         # the point once the banded requirement exists as its own
         # object)
-        {'kind': 'plot', 'source': '@basis:OctaveSpecification',
-         'mode': 'curves',
-         'caption': 'Test specification, octave bands'},
-        {'kind': 'plot', 'source': '@basis:OctavePsd',
-         'specification': '@basis:OctaveSpecification', 'mode': 'curves',
-         'caption': 'Control against specification, octave bands'},
+        *_per_channel('@basis:OctaveSpecification',
+                      'Test specification, octave bands', objects, links),
+        *_comparisons('@basis:OctavePsd', '@basis:OctaveSpecification',
+                      'Control against specification, octave bands',
+                      objects, links),
         {'kind': 'bars', 'mode': 'error',
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',

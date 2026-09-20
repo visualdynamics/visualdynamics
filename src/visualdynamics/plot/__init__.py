@@ -1041,13 +1041,16 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # a spectrum that knows its own bin widths says so, and a
             # step plot then lands on the bands the standard defines
             # rather than on the midpoints between their centers
-            own = getattr(data, 'bin_widths', None)
+            own = getattr(data, 'bin_edges', None)
             widths = own() if own is not None and getattr(
                 data, 'bandwidth', None) is not None else None
             groups.setdefault(key, []).append(
                 (f'{name}: {label}' if multiple and name else label, x,
                  (data, i), data.abscissa_dim == 'frequency', bands,
-                 pair, follower, synthesized, shape, widths))
+                 pair, follower, synthesized, shape, widths,
+                 # the object and its record, for the judgment the
+                 # exceedance boxes are drawn from
+                 (data, i)))
             if synthesized:
                 marks = group_marks.setdefault(key, [])
                 for f in getattr(data, 'mode_frequencies', ()) or ():
@@ -1136,7 +1139,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         with_measurement = {c[5] for c in ordered if not c[6]}
         bounded_pairs = with_spec & with_measurement
         for (label, x, values, is_frequency, bands, pair, follower,
-             dashed, shape, widths) in ordered:
+             dashed, shape, widths, owner) in ordered:
             magnitude = (np.abs(values) if is_frequency
                          and np.iscomplexobj(values) else values.real)
             # A specification and the response it bounds are a pair, and
@@ -1172,9 +1175,9 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                                                    **named)
             extents.add(drawn_x, drawn_y, log_ordinate, log_abscissa)
             if shape == 'steps' and not follower:
-                measured_by_pair.setdefault(pair, (x, magnitude))
+                measured_by_pair.setdefault(pair, (x, magnitude, owner))
             if bands and follower:
-                bounded.append((pair, x, bands))
+                bounded.append((pair, x, bands, owner))
             # The zones say where the limits are. Drawn as lines too,
             # four more curves per record crowd the two that are being
             # compared and the shading behind them says the same thing.
@@ -1185,18 +1188,33 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                 extents.add(x, values.real, log_ordinate, log_abscissa)
             del curve
             drawn += 1
-        for pair, spec_x, bands in bounded:
+        for pair, spec_x, bands, (spec_obj, si) in bounded:
             found = measured_by_pair.get(pair)
             if found is None:
                 continue
-            lines, measured = found
+            lines, measured, (meas_obj, mi) = found
             written = {bound: bands.get(bound)
                        for bound in ('abort_lower', 'abort_upper')}
+            # the one judgment, `compliance.judge` — an area against
+            # an area over each cell, the same call the table and the
+            # report's page make — with each mark's level brought into
+            # the plot's units by the limit's own conversion
+            from ..core.compliance import comparison_scale_db, judge
+
+            scale = comparison_scale_db(spec_obj, meas_obj)
+            verdicts = {}
+            for bound, over in (('abort_upper', True), ('abort_lower', False)):
+                if written.get(bound) is None:
+                    continue
+                verdict = judge(spec_obj, meas_obj, si, mi, bound, over, scale)
+                raw = np.atleast_2d(spec_obj.limits[bound])[si]
+                verdict['level'] = verdict['level'] * _display_factor(
+                    written[bound], raw)
+                verdicts[bound] = verdict
             # the extents are known by now: every curve is drawn, and
             # the view is about to be locked to them
             reach = _reach(extents, log_ordinate)
-            _shade_exceedances(plot, lines, measured, spec_x, written,
-                               colors, reach)
+            _shade_exceedances(plot, lines, measured, verdicts, colors, reach)
         add_mode_markers(plot, group_marks.get(key, []),
                          colors['plot_foreground'])
         # zoom and pan stay inside what the data covers — the opening
@@ -1245,18 +1263,36 @@ def _component_row(row, tag):
 EXCEED_ALPHA = 150
 
 
-def _shade_exceedances(plot, x, y, spec_x, written, colors, reach):
+def _display_factor(shown, raw):
+    """What one curve's SI values are multiplied by to be the shown
+    ones — a unit conversion is one factor, read off any written
+    point. One when nothing is written."""
+    shown = np.asarray(np.real(shown), dtype=float)
+    raw = np.asarray(np.real(raw), dtype=float)
+    with np.errstate(invalid='ignore'):
+        good = np.isfinite(shown) & np.isfinite(raw) & (raw > 0.0)
+    if not good.any():
+        return 1.0
+    k = int(np.flatnonzero(good)[0])
+    return float(shown[k] / raw[k])
+
+
+def _shade_exceedances(plot, x, y, verdicts, colors, reach):
     """Box every measured line that went outside an abort limit.
+
+    `verdicts` is `compliance.judge`'s answer per limit — which lines
+    are out, the limit's mean density over each one's cell (in the
+    plot's units by now) and the stretch of each bin that was judged
+    — so what is shaded is exactly what the table counted and what
+    the report's page marks (Brandon, 2026-09-19: one judgment, an
+    area against an area over each cell).
 
     Over its own bin, from the limit to the edge of the plot: red above
     the upper abort limit, blue below the lower. Which way it went is
     the first thing to know, and a stripe running off the plot is seen
-    at a glance where a box a few pixels tall is not.
-
-    A bin at the end of the specification is drawn over the part of it
-    the specification covers and no further, because that is the part
-    that was judged — `compliance.outside` decides which bins are out,
-    so what is shaded and what is counted in the table cannot disagree.
+    at a glance where a box a few pixels tall is not. A bin at the end
+    of the specification is drawn over the part of it that was judged
+    and no further.
 
     `reach` is (floor, ceiling) in data units — where the plot's own
     edges will be, which is what the stripe runs to. Not some multiple
@@ -1265,55 +1301,39 @@ def _shade_exceedances(plot, x, y, spec_x, written, colors, reach):
     doing it about one run in three.
 
     One fill for each direction rather than one per violation. The fill
-    runs the whole width, hugging the limit wherever the line is inside
-    it — zero height there, so nothing shows — and opening out to the
-    line only where it is not. Where the specification says nothing the
-    limit is taken as the line itself, which closes the fill for the
-    same reason.
+    runs the judged width, hugging the line wherever it is inside the
+    limit — zero height there, so nothing shows — and opening out to
+    the plot's edge only where it is not.
     """
     import pyqtgraph as pg
     from PySide6.QtGui import QColor
 
-    from ..core.compliance import covered, log_interpolate, outside, written_band
-
     all_edges = bin_edges(x)
     if all_edges.size != np.asarray(y).size + 1:
         return
+    y = np.asarray(y, dtype=float)
     for bound, key, over in (('abort_upper', 'exceed_over', True),
                              ('abort_lower', 'exceed_under', False)):
-        written_values = written.get(bound)
-        if written_values is None:
+        verdict = verdicts.get(bound)
+        if verdict is None or not verdict['lines'].any():
             continue
-        written_values = np.real(written_values)
-        limit = log_interpolate(x, spec_x, written_values)
-        base = np.where(np.isfinite(limit), limit, y)
-        out = outside(x, y, spec_x, written_values, over)
-        if not out.any():
-            continue
-        # Only the band is drawn over. Nothing outside it can be an
-        # exceedance, so carrying those bins along adds thousands of
-        # flat segments to a polygon Qt has to rasterize for nothing —
-        # and the two bins the edge cuts are clipped to the part the
-        # specification covers, which is the part that was judged.
-        band = written_band(spec_x, written_values)
-        first, last = 0, len(x) - 1
-        edges = all_edges
-        if band is not None:
-            reached = np.flatnonzero(covered(x, *band)[2] > 0.0)
-            if reached.size == 0:
-                continue
-            first, last = int(reached[0]), int(reached[-1])
-            edges = np.clip(all_edges[first:last + 2], *band)
+        out = verdict['lines']
+        # only the judged stretch is drawn over: the bins the cells
+        # reach, each cut to the part of it that was judged, so the
+        # box at an end stops where the specification does
+        marked = np.flatnonzero(out)
+        first, last = int(marked[0]), int(marked[-1])
+        edges = all_edges[first:last + 2].copy()
+        edges[0] = max(edges[0], float(verdict['start'][first]))
+        edges[-1] = min(edges[-1], float(verdict['stop'][last]))
         keep = slice(first, last + 1)
-        # to the edge of the plot where the line is out, and nowhere at
-        # all where it is not: the fill runs the whole width, closed on
-        # itself except over the bins that went outside
+        base = np.where(out, verdict['level'], y)[keep]
         edge = reach[1] if over else reach[0]
-        far = np.where(out, edge, base)[keep]
+        far = np.where(out[keep], edge, base)
         color = QColor(colors[key])
         color.setAlpha(EXCEED_ALPHA)
         curves = []
-        for values in (base[keep], far):
+        for values in (base, far):
             curve = plot.plot(edges, values, stepMode='center',
                               pen=pg.mkPen(None))
             curve.is_zone_edge = True     # an edge, not a measurement
@@ -1454,6 +1474,13 @@ def bin_edges(centers: ArrayLike,
     if centers.size < 2:
         return centers
     if widths is not None:
+        widths = np.asarray(widths, dtype=float)
+        if widths.size == centers.size + 1:
+            # the object's own drawn edges (`Psd.bin_edges`), handed
+            # over whole: a banded spectrum's end band is drawn only
+            # where its source covered it (2026-09-19), which no
+            # center-and-width can say
+            return widths
         from ..core.octave import bin_bounds
 
         lower, upper = bin_bounds(centers, widths)

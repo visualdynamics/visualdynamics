@@ -144,7 +144,7 @@ def test_steps_and_power_laws_are_built_in_hertz_then_put_in_decades():
     out of the exponents, so an octave PSD's steps and a specification's
     law landed in the wrong places under a log axis."""
     from visualdynamics.core.author import SpecificationDraft
-    from visualdynamics.plot import as_power_law, bin_edges, step_outline
+    from visualdynamics.plot import as_power_law, step_outline
     from visualdynamics.report import _build_block
     from visualdynamics.viz.waterfall import waterfall_arrays
 
@@ -153,13 +153,14 @@ def test_steps_and_power_laws_are_built_in_hertz_then_put_in_decades():
     frequency_axis('log')
     us = visualdynamics.SI
     # the stage: a banded PSD's steps
+    # the object's own drawn edges: an end band is drawn over the part
+    # its source covered (2026-09-19)
     real_x, _values = step_outline(banded.abscissa, banded.ordinate,
-                                   banded.bin_widths())
+                                   banded.bin_edges())
     cx, _cz = waterfall_arrays(banded, unit_system=us)['curves'][0]
     assert np.allclose(cx, np.log10(real_x)), \
         'edges from hertz, then decades — not edges from exponents'
-    assert cx[0] == pytest.approx(np.log10(bin_edges(
-        banded.abscissa, banded.bin_widths())[0]))
+    assert cx[0] == pytest.approx(np.log10(banded.bin_edges()[0]))
     # the stage: a specification's power law between two breakpoints
     law_x, _law = as_power_law(spec.abscissa, np.real(spec.ordinate[0]))
     assert len(law_x) > 2, 'filled in between 20 and 2000 Hz'
@@ -171,8 +172,7 @@ def test_steps_and_power_laws_are_built_in_hertz_then_put_in_decades():
                          {'Banded': banded}, us, [])
     assert built['logx'] and built['steps']
     assert np.allclose(built['x'], np.log10(banded.abscissa))
-    assert np.allclose(built['edges'], np.log10(bin_edges(
-        banded.abscissa, banded.bin_widths())))
+    assert np.allclose(built['edges'], np.log10(banded.bin_edges()))
     built = _build_block({'kind': 'plot', 'source': 'Spec',
                           'mode': 'curves', 'caption': 'c'},
                          {'Spec': spec}, us, [])

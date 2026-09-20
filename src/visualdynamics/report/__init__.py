@@ -1373,18 +1373,18 @@ def _plot_block(block, source, objects, us):
         # line went out
         return _srs_comparison_block(block, source, against, us, caption)
     if against is not None and isinstance(against, Specification):
-        banded = _banded(source, block)
-        if banded is None:
-            return None
         # the scale is resolved on the measurement itself, before any
         # banding: the report bands the narrowband PSD for its octave
         # figures, and detecting again on the banded copy rounded to a
         # different decibel — one report, two claimed scalings
         from ..core.compliance import comparison_scale_db
 
+        scale_db = comparison_scale_db(against, source)
+        banded, against = _banded_pair(source, against, block)
+        if banded is None:
+            return None
         return _comparison_block(block, banded, against, us, caption,
-                                 scale_db=comparison_scale_db(against,
-                                                              source))
+                                 scale_db=scale_db)
 
     from ..core.data import Bounded, TransientSpecification
 
@@ -1516,7 +1516,7 @@ def _plot_block(block, source, objects, us):
         # octave band's center is the geometric mean of its edges, so
         # midpoints miss them by several percent of a band. The JS
         # cannot work these out — it never sees `bandwidth`.
-        own = getattr(source, 'bin_widths', None)
+        own = getattr(source, 'bin_edges', None)
         widths = own() if own is not None and getattr(
             source, 'bandwidth', None) is not None else None
         built['edges'] = _finite(_decades(bin_edges(x, widths), logx))
@@ -1524,6 +1524,12 @@ def _plot_block(block, source, objects, us):
         built['channels'] = _specification_channels(source, channels, x,
                                                     logy, us)
         built['curves'][0]['ink'] = True
+        # and the figure opens on the band the target is written on,
+        # as the comparison does: a controller's target sits on every
+        # line to Nyquist, most of them empty (Brandon, 2026-09-19)
+        band = _specified_band(source, channels[0], us)
+        if band is not None:
+            built['home_x'] = [float(v) for v in _decades(band, logx)]
     elif paged:
         # the transient specification's channels: waveforms, linear,
         # nothing to shade — a target carries no limits
@@ -2014,6 +2020,22 @@ def _banded(measured, block):
         return None
 
 
+def _banded_pair(measured, specification, block):
+    """Both objects on the bands the block asks for: bands compare only
+    with the same bands (Brandon, 2026-09-19), so a block that bands
+    the measurement bands the specification with it, limits and all,
+    unless the specification is on bands already."""
+    banded = _banded(measured, block)
+    if banded is None or not block.get('octave'):
+        return banded, specification
+    if getattr(specification, 'bandwidth', None) is not None:
+        return banded, specification
+    try:
+        return banded, specification.to_octave(int(block['octave']))
+    except (ValueError, AttributeError):
+        return None, specification
+
+
 def _srs_comparison_block(block, measured, specification, us, caption):
     """The control channel's measured shock spectra over the
     specification and its band — the reading the app gives when the
@@ -2139,8 +2161,9 @@ def _comparison_block(block, measured, specification, us, caption,
     """
     from ..core.compliance import (
         comparison_scale_db,
+        judge,
         log_interpolate,
-        outside,
+        matched_records,
     )
     from ..core.data import Specification
 
@@ -2178,8 +2201,7 @@ def _comparison_block(block, measured, specification, us, caption,
     # still read onto the measurement's axis: its power law between
     # points needs the dense grid to be drawn as the curve it is.
     banded = getattr(specification, 'bandwidth', None) is not None
-    spec_edges = (bin_edges(spec_x, specification.bin_widths())
-                  if banded else None)
+    spec_edges = specification.bin_edges() if banded else None
 
     def onto(values: ArrayLike) -> np.ndarray:
         """One of the specification's curves, on the axis it is drawn
@@ -2187,9 +2209,10 @@ def _comparison_block(block, measured, specification, us, caption,
         values = np.asarray(values, dtype=float)
         return values if banded else log_interpolate(x, spec_x, values)
 
-    def on_measured(values: ArrayLike) -> np.ndarray:
-        """A limit on the measurement's axis, where the marks stand."""
-        return log_interpolate(x, spec_x, np.asarray(values, dtype=float))
+    # the measured record each specification record is judged
+    # against, by the pairing the table uses
+    measured_of = {si: mi for _label, si, mi
+                   in matched_records(specification, measured)}
 
     def mapped(values: ArrayLike, own: bool = False) -> np.ndarray:
         y = np.asarray(values, dtype=float)
@@ -2222,12 +2245,17 @@ def _comparison_block(block, measured, specification, us, caption,
                    'y': mapped(target, banded), 'response': mapped(response),
                    'zones': zones}
         for name, key in (('abort_upper', 'over'), ('abort_lower', 'under')):
-            if limits.get(name) is None:
+            if limits.get(name) is None or record not in measured_of:
                 continue
-            out = outside(x, response, spec_x, limits[name][record],
-                          over=(key == 'over'))
-            channel[key] = mapped(np.where(
-                out, on_measured(limits[name][record]), np.nan))
+            # the one judgment (`compliance.judge`, an area against an
+            # area over each cell), so a mark on the page is a cell the
+            # table counts; the mark stands at the limit's mean density
+            # over its cell, in the page's units
+            verdict = judge(specification, measured, record, measured_of[record],
+                            name, key == 'over', scale_db)
+            factor = _display_factor(limits[name][record],
+                                     specification.limits[name][record])
+            channel[key] = mapped(verdict['level'] * factor)
         channels.append(channel)
 
     first = channels[0]
@@ -2249,12 +2277,14 @@ def _comparison_block(block, measured, specification, us, caption,
     if len(channels) > 1:
         caption = (caption + f' — one of {len(channels)} control '
                    'channels; the rest are on the drop-down').strip()
-    # the view opens on the specification's own band — its outer bin
-    # edges when banded, its first and last line otherwise — and the
-    # measurement's wider band is a zoom away (Brandon, 2026-09-18:
-    # the axis ran to the response's band, well past the requirement)
-    home = ([spec_edges[0], spec_edges[-1]] if banded
-            else [spec_x[0], spec_x[-1]])
+    # the view opens on the specification's own band — the lines its
+    # target is written on, not the axis it is stored on, which for a
+    # controller's target runs to Nyquist — and the measurement's
+    # wider band is a zoom away (Brandon, 2026-09-18 and again
+    # 2026-09-19)
+    home = _specified_band(specification, shared[0], us) or (
+        [spec_edges[0], spec_edges[-1]] if banded
+        else [spec_x[0], spec_x[-1]])
     built = {'kind': 'plot', 'caption': caption, 'logy': True,
              'x': [float(v) for v in grid],
              'xlabel': f'frequency [{us.label_text("frequency")}]',
@@ -2271,11 +2301,52 @@ def _comparison_block(block, measured, specification, us, caption,
         # widths no longer describe the points being drawn, so no
         # edges are claimed and the page falls back to midpoints of
         # what it was given — the honest reading of a thinned grid.
-        own = getattr(measured, 'bin_widths', None)
+        own = getattr(measured, 'bin_edges', None)
         widths = own() if own is not None and getattr(
             measured, 'bandwidth', None) is not None else None
         built['edges'] = [float(v) for v in bin_edges(grid, widths)]
     return built
+
+
+def _specified_band(specification, record, us):
+    """The band a specification's record actually specifies: from its
+    first to its last line whose target is finite and positive — a
+    banded one's outer bin edges — on the display axis.
+
+    A controller's target is written on every FFT line of the run,
+    NaN or zero outside the band it controlled (the plate's has 726
+    positive lines of 1025), so the specification's *abscissa* runs to
+    Nyquist and says nothing about where the requirement is. The
+    figures open on this band instead (Brandon, 2026-09-19: the
+    specification and comparison figures "zoomed across the entire
+    data range"). None when no line is positive.
+    """
+    x = np.asarray(specification.display_abscissa(us), dtype=float)
+    y = np.asarray(specification.display_ordinate(us, [record]),
+                   dtype=complex).real[0]
+    with np.errstate(invalid='ignore'):
+        lines = np.flatnonzero(np.isfinite(y) & (y > 0.0))
+    if not lines.size:
+        return None
+    first, last = int(lines[0]), int(lines[-1])
+    if getattr(specification, 'bandwidth', None) is not None:
+        edges = specification.bin_edges()
+        return [float(edges[first]), float(edges[last + 1])]
+    return [float(x[first]), float(x[last])]
+
+
+def _display_factor(shown, raw):
+    """What one curve's SI values are multiplied by to be the shown
+    ones — a unit conversion is one factor, read off any written
+    point. One when nothing is written."""
+    shown = np.asarray(np.real(shown), dtype=float)
+    raw = np.asarray(np.real(raw), dtype=float)
+    with np.errstate(invalid='ignore'):
+        good = np.isfinite(shown) & np.isfinite(raw) & (raw > 0.0)
+    if not good.any():
+        return 1.0
+    k = int(np.flatnonzero(good)[0])
+    return float(shown[k] / raw[k])
 
 
 def _channel_label(data, record):
@@ -2407,7 +2478,7 @@ def _bars_block(block, specification, measured, us):
     from ..core.compliance import comparison_scale_db
 
     scale_db = comparison_scale_db(specification, measured)
-    measured = _banded(measured, block)
+    measured, specification = _banded_pair(measured, specification, block)
     if measured is None:
         return None
     rows = channel_errors(compare_all(specification, measured,

@@ -204,7 +204,7 @@ def test_the_zones_step_with_a_banded_target(qt_app):
     import pyqtgraph as pg
 
     from visualdynamics.core.data import Specification
-    from visualdynamics.plot import bin_edges, build_plots
+    from visualdynamics.plot import build_plots
 
     freq = np.linspace(10.0, 2000.0, 200)
     level = np.full((1, 200), 1e-2)
@@ -219,7 +219,7 @@ def test_the_zones_step_with_a_banded_target(qt_app):
     plot = next(item for item in layout.ci.items if isinstance(item, pg.PlotItem))
     edges = [c for c in plot.listDataItems() if getattr(c, 'is_zone_edge', False)]
     assert edges, 'the zones are drawn'
-    expected = bin_edges(banded.abscissa, banded.bin_widths())
+    expected = banded.bin_edges()    # drawn where the target covers them
     for curve in edges:
         x, y = curve.getData()
         assert len(x) == 2 * len(banded.abscissa), 'two points per bin'

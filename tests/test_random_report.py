@@ -617,9 +617,9 @@ def test_the_octave_section_bands_the_measurement_for_itself():
     banded = _bars_block({'mode': 'error', 'octave': 6}, spec, psds,
                          visualdynamics.SI)
     assert plain['labels'] == banded['labels'], 'the same control channels'
-    # the level each channel came out at cannot depend on how the
-    # measurement was arranged — that is why the specification is not
-    # banded alongside it
+    # the specification is banded alongside — bands compare only with
+    # the same bands (2026-09-19) — and banding conserves the area on
+    # both sides, so the level each channel came out at does not move
     assert banded['values'] == pytest.approx(plain['values'], abs=0.05)
 
 
@@ -661,7 +661,6 @@ def test_the_comparison_opens_on_the_specifications_band():
     (Brandon, 2026-09-18): the figure opens on the specification's
     own band — its lines, or a banded one's outer edges — and the
     rest is a zoom away."""
-    from visualdynamics.plot import bin_edges
     from visualdynamics.report import _plot_block
 
     spec, measured = _pair_for_comparison()
@@ -676,7 +675,7 @@ def test_the_comparison_opens_on_the_specifications_band():
                           'mode': 'curves'}, measured.to_octave(6),
                          {'S': banded_spec, 'P': measured.to_octave(6)},
                          visualdynamics.SI)
-    edges = bin_edges(banded_spec.abscissa, banded_spec.bin_widths())
+    edges = banded_spec.bin_edges()
     assert banded['home_x'] == pytest.approx([edges[0], edges[-1]])
 
 
@@ -685,7 +684,6 @@ def test_a_banded_specification_is_drawn_on_its_own_bins():
     response stepped on the measurement's: the requirement used to be
     interpolated onto the measurement's grid and stepped there, a
     staircase of the measurement's making (Brandon, 2026-09-18)."""
-    from visualdynamics.plot import bin_edges
     from visualdynamics.report import _plot_block
 
     spec, measured = _pair_for_comparison()
@@ -696,8 +694,7 @@ def test_a_banded_specification_is_drawn_on_its_own_bins():
     target, response = built['curves']
     assert target['x'] == pytest.approx(list(banded_spec.abscissa))
     assert target['steps'] is True
-    assert target['edges'] == pytest.approx(
-        list(bin_edges(banded_spec.abscissa, banded_spec.bin_widths())))
+    assert target['edges'] == pytest.approx(list(banded_spec.bin_edges()))
     channel = built['channels'][0]
     assert len(channel['y']) == len(banded_spec.abscissa)
     zone = next(z for z in channel['zones'] if z['lower'] is not None)
@@ -911,9 +908,164 @@ def test_sections_whose_objects_are_absent_are_dropped():
     full = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
     assert 'Specification' in headings(random_template(full, links=full.links))
     assert 'Octave Band Comparison' in headings(random_template({}))
-    assert len(random_template({}).blocks) == len(
-        random_template(full, links=full.links).blocks), \
+    outline = random_template({}).blocks
+    assert {'scene', 'photo'} <= {b['kind'] for b in outline}, \
         'an empty project keeps every slot of the outline'
+    assert len(outline) > len(random_template(full, links=full.links).blocks), \
+        'a run without a geometry or photographs keeps only what binds'
+
+
+def test_the_figures_open_on_the_band_the_target_is_written_on():
+    """A controller's target sits on every FFT line to Nyquist, NaN
+    outside the band it controlled — the plate's on 726 lines of
+    1025 — so opening on the specification's *axis* opened on the
+    whole run (Brandon, 2026-09-19: "zoomed across the entire data
+    range"). Both the specification figure and the comparison open on
+    the lines the target is written on; the rest is a zoom away."""
+    import json
+    import re
+
+    from visualdynamics.report import _plot_block
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    spec = loaded['Random_specification']
+    psds = loaded['time_data'].compute_psds()
+    y = np.real(np.asarray(spec.ordinate)[0])
+    written = np.flatnonzero(np.isfinite(y) & (y > 0))
+    band = [float(spec.abscissa[written[0]]), float(spec.abscissa[written[-1]])]
+    assert band == [50.0, 1500.0] and float(spec.abscissa[-1]) == 2048.0, \
+        'the fixture is the case: written on a band, stored to Nyquist'
+    objects = {'S': spec, 'P': psds}
+    alone = _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves',
+                         'channel': '101Z+'}, spec, objects, visualdynamics.SI)
+    assert alone['home_x'] == band
+    assert max(alone['x']) == 2048.0, 'the stored axis is still there to zoom to'
+    against = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                           'mode': 'curves', 'channel': '101Z+'},
+                          psds, objects, visualdynamics.SI)
+    assert against['home_x'] == band
+    # and in the grid's cells, which are those very figures
+    project = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    page = render_html(random_template(project, links=project.links), project,
+                       links=project.links, unit_system=visualdynamics.SI)
+    payload = json.loads(re.search(
+        r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
+    grids = [b for b in payload['blocks'] if b['kind'] == 'grid']
+    for grid in grids[:2]:
+        for row in grid['rows']:
+            [[cell]] = row['cells']
+            assert cell['home_x'] == band, (grid['caption'], row['label'])
+
+
+def test_the_front_matter_says_only_what_the_project_holds():
+    """A run with no geometry kept a paragraph about "the test
+    geometry" and four unbound scene cards (Brandon, 2026-09-19): the
+    scenes go, and the prose is the channel table's sentence — the
+    photographs' too when there are any. With a geometry the standing
+    text stands; an empty project keeps it as the outline."""
+    from visualdynamics.core.report import _INSTRUMENTATION_TEXT, instrumentation_text
+
+    bare = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    template = random_template(bare, links=bare.links)
+    assert not [b for b in template.blocks if b['kind'] in ('scene', 'photo')]
+    prose = instrumentation_text(bare, bare.links)
+    assert prose.startswith('## Test Article and Instrumentation\n\n')
+    assert 'geometry' not in prose and 'photograph' not in prose
+    assert '{{table:Instrumentation}}' in prose
+    assert [b['text'] for b in template.blocks
+            if b['kind'] == 'text'][1] == prose
+    page = render_html(template, bare, links=bare.links, edit=True,
+                       unit_system=visualdynamics.SI)
+    assert "'kind': 'unbound'" not in page and '"kind": "unbound"' not in page, \
+        'no unbound cards for the editor to show'
+    from visualdynamics.core.photos import Photos
+
+    with_photos = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    photos = Photos()
+    photos.names, photos.formats, photos.images = ['front'], ['png'], [b'']
+    with_photos.add('Photos', photos)
+    with_photos.link('Time History', 'Photos')
+    assert 'photographs record the article' in instrumentation_text(
+        with_photos, with_photos.links)
+    placed = visualdynamics.random_vibration_run(
+        fixture_path('plate', 'random.nc4'),
+        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
+    assert instrumentation_text(placed, placed.links) == _INSTRUMENTATION_TEXT
+    assert instrumentation_text({}) == _INSTRUMENTATION_TEXT
+
+
+def test_no_reference_is_left_as_written_on_a_thin_projects_page():
+    """A thin project's report showed `{{figure:...}}` in its
+    conclusions, and `{{@basis:Psd....}}` in its summary, for what it
+    did not have (Brandon, 2026-09-19): the conclusions reference no
+    figures, and the summary and data-quality prose speak only of what
+    binds — so no reference of any kind reaches the page as written.
+    The full run keeps every sentence."""
+    import re
+
+    from visualdynamics.core.report import random_template
+
+    for objects in ({}, visualdynamics.random_vibration_run(
+            fixture_path('plate', 'random.nc4'))):
+        links = getattr(objects, 'links', None)
+        [conclusions] = [b['text'] for b in random_template(objects, links).blocks
+                         if b.get('kind') == 'text'
+                         and b['text'].startswith('## Conclusions')]
+        assert '{{figure:' not in conclusions and '{{table:' not in conclusions
+
+    def page_of(project):
+        return render_html(random_template(project, links=project.links),
+                           project, links=project.links,
+                           unit_system=visualdynamics.SI)
+
+    run_only = visualdynamics.Project()
+    run_only.import_file(fixture_path('plate', 'random.nc4'))
+    thin = visualdynamics.Project()
+    thin.import_file(fixture_path('plate', 'random.nc4'))
+    thin.remove('Specification')
+    thin.compute_psds('Time History')
+    for project in (run_only, thin):
+        page = page_of(project)
+        assert 'Conclusions' in page
+        assert not re.search(r'\{\{[^}]*\}\}', page), \
+            'nothing unresolved reaches the page'
+    assert 'One check stands behind' in page_of(thin), 'kurtosis alone'
+    assert 'overlap.' in page_of(run_only) and 'resolution out to' not in page_of(run_only)
+    full = page_of(visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4')))
+    assert 'Two checks stand behind' in full and 'Multiple coherence (Figure' in full
+    assert 'resolution out to 2048 Hz' in full
+
+
+def test_the_octave_marks_are_the_lines_the_table_counts():
+    """The page judged a banded comparison with `outside`'s defaults
+    where the table read it bin against bin (Brandon, 2026-09-19: the
+    last octave band marked blue under a response in the middle of
+    its zone). One reading — `compliance.how_read` — for both: a
+    response on its target is unmarked, and the real pair's marks
+    are the table's counts, channel by channel."""
+    from conftest import banded_pair_on_target
+
+    from visualdynamics.core.compliance import compare_all
+    from visualdynamics.report import _plot_block
+
+    banded, on_target = banded_pair_on_target()
+    built = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves'}, on_target,
+                        {'S': banded, 'P': on_target}, visualdynamics.SI)
+    for channel in built['channels']:
+        assert all(v is None for key in ('over', 'under')
+                   for v in channel.get(key, [])), channel['label']
+    project = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
+    _narrow, octave = project.psds
+    _spec, octave_spec = project.specifications
+    counted = dict(compare_all(octave_spec, octave))
+    built = _plot_block({'kind': 'plot', 'source': 'P', 'specification': 'S',
+                         'mode': 'curves'}, octave,
+                        {'S': octave_spec, 'P': octave}, visualdynamics.SI)
+    for channel in built['channels']:
+        marked = sum(1 for key in ('over', 'under')
+                     for v in channel.get(key, []) if v is not None)
+        assert marked == counted[channel['label']]['abort_lines'], channel['label']
 
 
 def test_a_table_row_is_one_line():

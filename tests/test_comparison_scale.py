@@ -330,8 +330,12 @@ def test_the_report_resolves_one_scale_for_every_grid():
     spec = _spec()
     psds = _tilted(spec)
     assert detect_scale_db(spec, psds) == 9
-    assert detect_scale_db(spec, psds.to_octave(6)) == 6, (
-        'the fixture must make the two gridings disagree')
+    # bands compare only with the same bands (2026-09-19): the banded
+    # pair is the specification banded too, and a curve against bands
+    # is not compared at all
+    assert detect_scale_db(spec, psds.to_octave(6)) == 0, 'refused, not detected'
+    on_bands = detect_scale_db(spec.to_octave(6), psds.to_octave(6))
+    assert on_bands in (6, 9), 'the banded pair reads its own decibel'
     bars = _bars_block({'mode': 'error', 'octave': 6, 'caption': 'Bands'},
                        spec, psds, visualdynamics.SI)
     assert 'scaled +9 dB' in bars['caption'], (

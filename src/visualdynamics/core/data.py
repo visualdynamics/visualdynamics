@@ -2530,9 +2530,16 @@ class Psd(DataArray):
             The area beneath the curve — the mean square, whose root
             is the RMS.
         """
+        return self._area_of(np.asarray(self.ordinate[record]), low, high)
+
+    def _area_of(self, values: ArrayLike, low: float | None,
+                 high: float | None) -> float:
+        """The area under one curve on this spectrum's axis, read the
+        way this spectrum is — the target, or one of a specification's
+        limits, which is written the same way."""
         from .compliance import log_log_area
 
-        values = np.real(np.asarray(self.ordinate[record], dtype=float))
+        values = np.real(np.asarray(values, dtype=float))
         if self.interpolation == 'log_log':
             return log_log_area(self.abscissa, values, low, high)
         left, right = self.bin_bounds()
@@ -2545,6 +2552,120 @@ class Psd(DataArray):
         if not good.any():
             return float('nan')
         return float(np.sum(values[good] * width[good]))
+
+    def areas(self, record: int, lows: ArrayLike, highs: ArrayLike
+              ) -> np.ndarray:
+        """`area` over several bands at once: the comparison is
+        judged cell by cell, and a thousand cells must not cost a
+        thousand passes over the lines.
+
+        Parameters
+        ----------
+        record : int
+            Which record.
+        lows, highs : array-like
+            The bands' edges, paired.
+
+        Returns
+        -------
+        numpy.ndarray
+            One area per band; NaN where nothing is written.
+        """
+        return self._areas_of(np.asarray(self.ordinate[record]), lows, highs)
+
+    def _areas_of(self, values: ArrayLike, lows: ArrayLike,
+                  highs: ArrayLike) -> np.ndarray:
+        from .compliance import log_log_areas
+
+        values = np.real(np.asarray(values, dtype=float))
+        lows = np.atleast_1d(np.asarray(lows, dtype=float))
+        highs = np.atleast_1d(np.asarray(highs, dtype=float))
+        if self.interpolation == 'log_log':
+            return log_log_areas(self.abscissa, values, lows, highs)
+        # the running total of the density, knot by knot, and a band's
+        # area as the difference of two readings of it: a bin's edges
+        # are knots, its area accrues linearly between them, and a gap
+        # between bins accrues nothing
+        left, right = self.bin_bounds()
+        good = np.isfinite(values) & (values >= 0.0) & (right > left)
+        # only the bins the bands can reach: a running total that
+        # started far below the first band would carry every line
+        # outside it into the subtraction, and a band's area must not
+        # move in the twelfth decimal with what lies outside it
+        if lows.size:
+            good &= (right > np.nanmin(lows)) & (left < np.nanmax(highs))
+        if not good.any():
+            return np.zeros(lows.shape) if lows.size else np.full(lows.shape, np.nan)
+        left, right, held = left[good], right[good], values[good]
+        order = np.argsort(left)
+        left, right, held = left[order], right[order], held[order]
+        gained = held * (right - left)
+        before = np.concatenate([[0.0], np.cumsum(gained)[:-1]])
+        knots = np.column_stack([left, right]).ravel()
+        totals = np.column_stack([before, before + gained]).ravel()
+        total = np.interp(np.clip(highs, knots[0], knots[-1]), knots, totals) \
+            - np.interp(np.clip(lows, knots[0], knots[-1]), knots, totals)
+        return np.where(highs > lows, np.maximum(total, 0.0), 0.0)
+
+    def written(self, record: int | None = None) -> np.ndarray:
+        """Which lines say something: finite, and for a requirement
+        positive — a controller writes zero or NaN on every line it did
+        not control, and those lines are not a requirement of nothing.
+        Over one record, or any record when none is named.
+
+        Parameters
+        ----------
+        record : int, optional
+            The record; every record when omitted.
+
+        Returns
+        -------
+        numpy.ndarray
+            A boolean per line.
+        """
+        values = np.real(np.atleast_2d(np.asarray(self.ordinate)))
+        if record is not None:
+            values = values[[int(record)]]
+        return np.isfinite(values).any(axis=0)
+
+    def extent(self, record: int | None = None) -> tuple[float, float] | None:
+        """(low, high) this spectrum speaks for, in hertz.
+
+        For a density per bin, the outer edges of the written bins — a
+        line stands for its whole bin. For a curve between breakpoints,
+        the first and last written points. What octave banding clips
+        its end bands to, and what a comparison is judged over
+        (Brandon, 2026-09-19): a controller's target is stored on
+        every FFT line to Nyquist and speaks only where it is written.
+
+        Parameters
+        ----------
+        record : int, optional
+            The record; the union over every record when omitted.
+
+        Returns
+        -------
+        tuple of float, or None
+            None when nothing is written above zero hertz.
+        """
+        frequencies = np.asarray(self.abscissa, dtype=float)
+        said = self.written(record) & np.isfinite(frequencies)
+        if self.interpolation == 'log_log':
+            said &= frequencies > 0.0
+            if not said.any():
+                return None
+            return float(frequencies[said].min()), float(frequencies[said].max())
+        left, right = self.bin_bounds()
+        said &= right > 0.0
+        if not said.any():
+            return None
+        return float(left[said].min()), float(right[said].max())
+
+    def bin_edges(self) -> np.ndarray:
+        """The edges a step plot of this spectrum lands on: one more
+        than there are lines, `bin_bounds` tiled."""
+        left, right = self.bin_bounds()
+        return np.concatenate([left, right[-1:]])
 
 
     function_type = 9
@@ -2559,6 +2680,7 @@ class Psd(DataArray):
     #: off the centers is a hair out at every band and plainly wrong at
     #: the two ends.
     bandwidth: np.ndarray | None = None
+
 
     def __init__(self, *args: Any, bandwidth: ArrayLike | None = None,
                  **kwargs: Any) -> None:
@@ -2632,7 +2754,11 @@ class Psd(DataArray):
     def _octave_grid(self, per_octave, low, high):
         """(per_octave, centers, widths, bounds): the bands this spectrum
         bands onto — one grid, shared by the ordinate and, for a
-        specification, its limits."""
+        specification, its limits. The standard's own bands, whole:
+        they are defined frequency bands and are not cut to the data,
+        nor read or drawn over part of themselves (Brandon,
+        2026-09-19, twice). A band the data only partly fills holds
+        that content over its whole width."""
         from .octave import PER_OCTAVE, bands
 
         frequencies = np.asarray(self.abscissa, dtype=float)
@@ -2645,15 +2771,19 @@ class Psd(DataArray):
         # cover, not the range the centers do. A line at 0.5 Hz stands
         # for a bin reaching down to 0.25, and a grid that started at
         # the line would leave that half outside every band — which is
-        # a small loss of area and an unnecessary one.
-        reach, beyond = self.bin_bounds()
+        # a small loss of area and an unnecessary one. And only the
+        # written bins: a target stored to Nyquist and written to
+        # 2000 Hz speaks to 2000 Hz.
+        span = self.extent()
+        reach, _beyond = self.bin_bounds()
         inside = reach[reach > 0.0]
-        low = (float(inside.min()) if inside.size else float(positive.min())) \
-            if low is None else float(low)
-        high = float(beyond.max()) if high is None else float(high)
+        floor = float(inside.min()) if inside.size else float(positive.min())
+        if span is None:
+            span = (floor, float(positive.max()))
+        low = max(span[0], floor) if low is None else float(low)
+        high = span[1] if high is None else float(high)
         per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
-        centers, widths, bounds = bands(low, high, per_octave)
-        return per_octave, centers, widths, bounds
+        return (per_octave, *bands(low, high, per_octave))
 
     def bin_widths(self) -> np.ndarray:
         """The width of every line's own bin.
@@ -2811,6 +2941,39 @@ class Bounded:
     def has_limits(self) -> bool:
         return bool(self.limits)
 
+    def limit_area(self, name: str, record: int = 0,
+                   low: float | None = None,
+                   high: float | None = None) -> float:
+        """The area under one limit curve, read the way the
+        specification is — a limit is written the way its owner is.
+
+        Parameters
+        ----------
+        name : str
+            One of `LIMITS`.
+        record : int, default 0
+            Which record.
+        low, high : float, optional
+            The band to integrate over.
+
+        Returns
+        -------
+        float
+            The area beneath the limit; NaN when it was never written.
+        """
+        values = self.limits.get(name)
+        if values is None:
+            return float('nan')
+        return self._area_of(np.atleast_2d(values)[record], low, high)
+
+    def limit_areas(self, name: str, record: int, lows: ArrayLike,
+                    highs: ArrayLike) -> np.ndarray:
+        """`limit_area` over several bands at once — see `areas`."""
+        values = self.limits.get(name)
+        if values is None:
+            return np.full(np.shape(np.atleast_1d(lows)), np.nan)
+        return self._areas_of(np.atleast_2d(values)[record], lows, highs)
+
     def limit(self, name: str) -> DataArray | None:
         """One limit in its own right, or None if it has none."""
         if name not in self.limits:
@@ -2911,6 +3074,28 @@ class Specification(Bounded, Psd):
     #: how finely a breakpoint curve's cross terms are read when a band
     #: integrates them: points per band on a log grid
     _CROSS_POINTS = 64
+
+    def written(self, record: int | None = None) -> np.ndarray:
+        """Which lines the requirement is written on: finite and
+        positive. A controller writes zero on the lines it did not
+        control, and zero is not a requirement of silence.
+
+        Parameters
+        ----------
+        record : int, optional
+            The record; every record when omitted.
+
+        Returns
+        -------
+        numpy.ndarray
+            A boolean per line.
+        """
+        values = np.atleast_2d(np.asarray(self.ordinate))
+        if record is not None:
+            values = values[[int(record)]]
+        magnitude = np.abs(values) if np.iscomplexobj(values) else np.real(values)
+        with np.errstate(invalid='ignore'):
+            return (np.isfinite(magnitude) & (magnitude > 0.0)).any(axis=0)
 
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,

@@ -558,6 +558,35 @@ _INSTRUMENTATION_TEXT = (
     'instrumentation at each location.')
 
 
+def instrumentation_text(objects: Mapping[str, Any],
+                         links: Sequence[Mapping[str, Any]] | None = None
+                         ) -> str:
+    """The front matter's prose, saying only what the project holds.
+
+    The standing text names the geometry, the DOF scenes and the
+    channel table. A run imported without a geometry has none of the
+    first three, and a paragraph about "the test geometry" over a
+    channel table alone reads as a report with holes in it (Brandon,
+    2026-09-19). With a geometry bound the text is the standing one;
+    without, it is the channel table's sentence, and the photographs'
+    when there are any. An empty project keeps the standing text —
+    there it is the template being read.
+    """
+    if not objects:
+        return _INSTRUMENTATION_TEXT
+    if resolve_binding('@basis:Geometry', objects, links) in objects:
+        return _INSTRUMENTATION_TEXT
+    photos = resolve_binding('@basis:Photos', objects, links)
+    sentences = []
+    if photos in objects and getattr(objects[photos], 'names', None):
+        sentences.append('The photographs record the article as it was '
+                         'instrumented.')
+    sentences.append('The channel table ({{table:Instrumentation}}) '
+                     'lists the instrumentation at each location.')
+    return ('## Test Article and Instrumentation\n\n'
+            + ' '.join(sentences))
+
+
 def project_expectations(
         project_type: str
         ) -> list[tuple[str, type, str, int, bool, str | None]]:
@@ -1996,7 +2025,7 @@ def transient_template(objects: Mapping[str, Any],
             f'The run was recorded on {ref(time, "num_channels")} '
             f'channels at {ref(time, "sample_rate")} over '
             f'{ref(time, "duration")}.'},
-        {'kind': 'text', 'text': _INSTRUMENTATION_TEXT},
+        {'kind': 'text', 'text': instrumentation_text(objects, links)},
         *front_matter(objects, links, time),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
@@ -2241,20 +2270,23 @@ def _figures_text(labels: Sequence[str], sequence: str, grid: str) -> str:
     return grid if len(labels) > GRID_ABOVE else sequence
 
 
-def prune_empty_sections(report: Report, objects: Mapping[str, Any],
-                         links: Sequence[Mapping[str, Any]] | None = None
-                         ) -> Report:
-    """Drop every section whose figures all fail to bind, once the
-    project holds anything (Brandon, 2026-09-19).
+def prune_unbound(report: Report, objects: Mapping[str, Any],
+                  links: Sequence[Mapping[str, Any]] | None = None
+                  ) -> Report:
+    """Drop what the project cannot fill, once it holds anything
+    (Brandon, 2026-09-19): every figure block that fails to bind, and
+    every section whose figures all did.
 
     A section is a text block opening with a `## ` heading and what
     follows it up to the next; its figures are the blocks in it that
     are not text. When none of them can resolve — the section's
     objects are simply not in the project — the whole section goes,
-    heading and prose included, rather than a heading over nothing. A
-    section with no figures (the summary, the conclusions) is prose
-    and stays. An empty project keeps the whole outline: that is the
-    template being read, not a report being written.
+    heading and prose included, rather than a heading over nothing;
+    when some can, the ones that cannot go on their own, so the editor
+    shows no unbound cards for a run that has no geometry. A section
+    with no figures (the summary, the conclusions) is prose and stays.
+    An empty project keeps the whole outline: that is the template
+    being read, not a report being written.
     """
     if not objects:
         return report
@@ -2281,6 +2313,8 @@ def prune_empty_sections(report: Report, objects: Mapping[str, Any],
                    if report.blocks[i].get('kind') != 'text']
         if figures and not any(bound(report.blocks[i]) for i in figures):
             doomed.extend(section)
+        else:
+            doomed.extend(i for i in figures if not bound(report.blocks[i]))
     report.remove(doomed)
     return report
 
@@ -2345,12 +2379,22 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
     """
     time = '@basis:TimeHistory'
     psd = '@basis:Psd'
+    coherence = '@basis:MultipleCoherence'
     controls = control_channel_labels(objects, links)
 
     def ref(name: str, field: str) -> str:
         return '{{' + f'{name}.{field}' + '}}'
 
-    return prune_empty_sections(Report('Random Vibration Test Report', [
+    def present(token: str) -> bool:
+        """Whether the prose may speak of what a token binds: yes in
+        an empty project (the outline), otherwise only when it binds.
+        A reference to what is not there stays on the page as written
+        — the page's rule for an unmatched reference, right for an
+        author and wrong for a reader (Brandon, 2026-09-19) — so the
+        prose says only what the project holds."""
+        return not objects or resolve_binding(token, objects, links) in objects
+
+    return prune_unbound(Report('Random Vibration Test Report', [
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
             'A random vibration test was run: the article was driven '
@@ -2367,9 +2411,11 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             f'averaged over {ref(time, "num_frames")} frames of '
             f'{ref(time, "frame_length")} samples with a '
             f'{ref(time, "window")} window at {ref(time, "overlap")} '
-            f'overlap, giving {ref(psd, "frequency_resolution")} '
-            f'resolution out to {ref(psd, "max_frequency")}.'},
-        {'kind': 'text', 'text': _INSTRUMENTATION_TEXT},
+            'overlap'
+            + (f', giving {ref(psd, "frequency_resolution")} resolution '
+               f'out to {ref(psd, "max_frequency")}.' if present(psd)
+               else '.')},
+        {'kind': 'text', 'text': instrumentation_text(objects, links)},
         *front_matter(objects, links, time),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '
@@ -2469,16 +2515,21 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
                     'octave bands'},
         {'kind': 'text', 'text':
             '## Data Quality\n\n'
-            'Two checks stand behind every number above, and a channel '
-            'that fails either is one whose exceedance may be the '
-            'measurement rather than the article.\n\n'
-            'Multiple coherence ({{figure:Multiple coherence}}) says '
-            'how much of each response the drives account for. At one '
-            'the channel moved because the shakers moved it; well '
-            'below one something else did, and a control channel in '
-            'that state was being held to a level it was not wholly '
-            'responsible for.\n\n'
-            'Pearson kurtosis ({{figure:Pearson kurtosis}}) says '
+            + ('Two checks stand behind every number above, and a '
+               'channel that fails either is one whose exceedance may '
+               'be the measurement rather than the article.\n\n'
+               if present(coherence) else
+               'One check stands behind every number above, and a '
+               'channel that fails it is one whose exceedance may be '
+               'the measurement rather than the article.\n\n')
+            + ('Multiple coherence ({{figure:Multiple coherence}}) says '
+               'how much of each response the drives account for. At '
+               'one the channel moved because the shakers moved it; '
+               'well below one something else did, and a control '
+               'channel in that state was being held to a level it '
+               'was not wholly responsible for.\n\n'
+               if present(coherence) else '')
+            + 'Pearson kurtosis ({{figure:Pearson kurtosis}}) says '
             'whether the excitation had the shape a random test '
             'assumes. A spectrum cannot answer this: two records with '
             'identical densities can be a smooth hiss and a train of '
@@ -2496,20 +2547,24 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         {'kind': 'plot', 'source': '@basis:MultipleCoherence',
          'mode': 'stage', 'caption': 'Multiple coherence'},
         kurtosis_block(),
+        # no figure references here (Brandon, 2026-09-19): the
+        # conclusions stand whatever the project holds, and a reference
+        # to a figure a thin project does not have would stay on the
+        # page as written — the page's rule for an unmatched reference,
+        # right for an author and wrong for a reader
         {'kind': 'text', 'text':
             '## Conclusions\n\n'
-            'Whether the run met its specification is read off '
-            '{{figure:Control against specification}} and the two '
-            'compliance charts under it: {{figure:RMS error by control '
-            'channel}} says how far each channel sat from the level it '
-            'was asked for, and {{figure:Band outside the abort '
-            'limits}} how much of each channel\'s band fell outside '
-            'tolerance. A channel can pass one and fail the other — a '
-            'channel 2 dB low everywhere may never cross an abort '
-            'limit, and one at exactly the right level may be out '
-            'across half its band — which is why both are here. The '
-            'octave-band figures read the same run the way a '
-            'requirement is usually written and usually argued.\n\n'
+            'Whether the run met its specification is read off the '
+            'control comparison and the two compliance charts under '
+            'it: the RMS error says how far each channel sat from the '
+            'level it was asked for, and the band outside abort how '
+            'much of each channel\'s band fell outside tolerance. A '
+            'channel can pass one and fail the other — a channel 2 dB '
+            'low everywhere may never cross an abort limit, and one at '
+            'exactly the right level may be out across half its band — '
+            'which is why both are there. The octave-band figures read '
+            'the same run the way a requirement is usually written and '
+            'usually argued.\n\n'
             'Where a channel is out, the two data-quality figures are '
             'what decide whether the article or the measurement is at '
             'fault. A channel clean on both and still outside '

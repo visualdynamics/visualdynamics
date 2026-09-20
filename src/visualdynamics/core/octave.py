@@ -108,6 +108,16 @@ def bands(low: float, high: float, per_octave: int = PER_OCTAVE
 SNAP = 1e-9
 
 
+def per_octave_of(centers: ArrayLike) -> int:
+    """The fraction a set of band centers is on: bands to the octave,
+    read off the ratio of neighboring centers. Two bands are enough."""
+    centers = np.asarray(centers, dtype=float)
+    centers = centers[np.isfinite(centers) & (centers > 0.0)]
+    if centers.size < 2:
+        raise ValueError('a fraction needs at least two bands to be read from')
+    return int(np.rint(DECADE_FRACTION / np.log10(centers[1] / centers[0])))
+
+
 def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
                ) -> tuple[np.ndarray, np.ndarray]:
     """(left, right) of the bin each line stands for.
@@ -146,6 +156,12 @@ def resample(frequencies: ArrayLike, values: ArrayLike, bounds: ArrayLike,
 
     Complex values pass through as complex: the cross terms of a CPSD
     average over a band the same way the diagonal does.
+
+    A band the source only partly fills holds that content over its
+    whole width, and reads lower than its neighbors for it. That is
+    what an octave band of a target ending inside it is: the bands
+    are defined frequency bands, whole, not cut or read over part of
+    themselves (Brandon, 2026-09-19, twice).
     """
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.atleast_2d(np.asarray(values))

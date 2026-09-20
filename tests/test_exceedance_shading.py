@@ -107,6 +107,19 @@ def test_a_line_under_the_abort_limit_is_boxed_in_blue(qt_app):
     assert span(blues[0]) is not None
 
 
+def test_a_banded_response_on_its_target_is_not_shaded(qt_app):
+    """The app's plot judged a banded comparison with `outside`'s
+    defaults too (Brandon, 2026-09-19: the last octave band blue under
+    a response in the middle of its zone). It reads the pair the way
+    the table does now, and a response on its banded target draws no
+    box at all."""
+    from conftest import banded_pair_on_target
+
+    banded, on_target = banded_pair_on_target()
+    fills, _plot = shaded(qt_app, banded, on_target)
+    assert fills == []
+
+
 def test_a_run_inside_its_limits_is_not_shaded(qt_app):
     lines = np.linspace(20.0, 2000.0, 120)
     fills, _plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),

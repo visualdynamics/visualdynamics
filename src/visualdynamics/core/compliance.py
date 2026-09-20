@@ -29,6 +29,7 @@ areas over exactly the same stretch of frequency.
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -70,28 +71,84 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     return out
 
 
-def log_log_area(frequencies: ArrayLike, values: ArrayLike,
-                 low: float | None = None,
-                 high: float | None = None) -> float:
-    """The area under the power law through these points, exactly.
+def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
+                  lows: ArrayLike, highs: ArrayLike) -> np.ndarray:
+    """The area under the power law through these points over each of
+    several bands at once, exactly — `log_log_area`, vectorized.
 
     A specification's points are breakpoints of a continuous curve, and
     the curve between two of them is the straight line they make on log
     axes — which is a power law, W = C f**n. Its integral has a closed
     form, so there is nothing to approximate: no grid, no rule, and no
     dependence on how finely anything else happened to be measured.
-
     For a segment from (f1, W1) to (f2, W2), n is the slope in log-log
     and the area is
 
         W1 f1 ln(f2/f1)                      when n is -1
         W1 / f1**n * (f2**(n+1) - f1**(n+1)) / (n + 1)   otherwise
 
-    `low` and `high` clip the band. A segment straddling an edge is cut
-    there and its value at the cut taken from the same power law, so a
-    comparison over part of a specification integrates exactly that
-    part.
+    The cumulative area at every breakpoint is taken once, and each
+    band's answer is the cumulative area at its high edge less that at
+    its low edge, the partial segment at either end taken from the
+    same power law — so a thousand cells cost what one did (the
+    comparison is judged cell by cell, 2026-09-19). A band reaching
+    past the written points is cut at them; one wholly outside is
+    zero; too few points to make a curve is NaN.
     """
+    frequencies = np.asarray(frequencies, dtype=float)
+    values = np.asarray(np.real(values), dtype=float)
+    lows = np.atleast_1d(np.asarray(lows, dtype=float))
+    highs = np.atleast_1d(np.asarray(highs, dtype=float))
+    usable = (np.isfinite(frequencies) & (frequencies > 0.0)
+              & np.isfinite(values) & (values > 0.0))
+    if usable.sum() < 2:
+        return np.full(lows.shape, np.nan)
+    f = frequencies[usable]
+    w = values[usable]
+    order = np.argsort(f)
+    f, w = f[order], w[order]
+    keep = np.concatenate([[True], np.diff(f) > 0.0])
+    f, w = f[keep], w[keep]
+    if f.size < 2:
+        return np.full(lows.shape, np.nan)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        n = np.log(w[1:] / w[:-1]) / np.log(f[1:] / f[:-1])
+    # the whole of each segment, then the running total at every point
+    with np.errstate(divide='ignore', invalid='ignore'):
+        whole = np.where(
+            np.abs(n + 1.0) < 1e-12,
+            w[:-1] * f[:-1] * np.log(f[1:] / f[:-1]),
+            # written as w1·f1·((f2/f1)**(n+1) - 1)/(n+1): the exponent
+            # is bounded by the data where f1**n alone is not (a steep
+            # segment of a dense specification overflowed the other
+            # form)
+            w[:-1] * f[:-1] * ((f[1:] / f[:-1]) ** (n + 1.0) - 1.0)
+            / (n + 1.0))
+    cumulative = np.concatenate([[0.0], np.cumsum(whole)])
+
+    def total(x: np.ndarray) -> np.ndarray:
+        """The area from the first point to `x`, `x` cut to the curve."""
+        x = np.clip(x, f[0], f[-1])
+        k = np.clip(np.searchsorted(f, x, side='right') - 1, 0, f.size - 2)
+        f1, w1, nk = f[k], w[k], n[k]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            partial = np.where(
+                np.abs(nk + 1.0) < 1e-12,
+                w1 * f1 * np.log(x / f1),
+                w1 * f1 * ((x / f1) ** (nk + 1.0) - 1.0) / (nk + 1.0))
+        return cumulative[k] + np.where(x > f1, partial, 0.0)
+
+    out = total(highs) - total(lows)
+    return np.where(highs > lows, np.maximum(out, 0.0), 0.0)
+
+
+def log_log_area(frequencies: ArrayLike, values: ArrayLike,
+                 low: float | None = None,
+                 high: float | None = None) -> float:
+    """The area under the power law through these points, exactly —
+    one band of `log_log_areas`, the whole curve when no band is
+    given. Zero when the band is empty, NaN when fewer than two points
+    are written."""
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     usable = (np.isfinite(frequencies) & (frequencies > 0.0)
@@ -99,43 +156,11 @@ def log_log_area(frequencies: ArrayLike, values: ArrayLike,
     if usable.sum() < 2:
         return float('nan')
     f = frequencies[usable]
-    w = values[usable]
-    order = np.argsort(f)
-    f, w = f[order], w[order]
-
-    low = f[0] if low is None else max(float(low), f[0])
-    high = f[-1] if high is None else min(float(high), f[-1])
+    low = float(f.min()) if low is None else max(float(low), float(f.min()))
+    high = float(f.max()) if high is None else min(float(high), float(f.max()))
     if not high > low:
         return 0.0
-
-    total = 0.0
-    for (f1, w1), (f2, w2) in zip(zip(f, w), zip(f[1:], w[1:])):
-        if f2 <= low or f1 >= high or f2 <= f1:
-            continue
-        n = np.log(w2 / w1) / np.log(f2 / f1)
-        a, b = max(f1, low), min(f2, high)
-        # the same power law evaluated at wherever the band cuts it
-        wa = w1 * (a / f1) ** n
-        if abs(n + 1.0) < 1e-12:
-            total += wa * a * np.log(b / a)
-        else:
-            # written as wa·a·((b/a)**(n+1) - 1)/(n+1) rather than
-            # wa/a**n · (b**(n+1) - a**(n+1))/(n+1). The two are the
-            # same expression, and only this one survives a steep
-            # segment: (b/a)**(n+1) is exp((n+1)·ln(b/a)), whose
-            # exponent works out to ln(w2/w1) + ln(f2/f1) and is
-            # therefore bounded by the data, where a**n alone is not.
-            #
-            # It matters because a specification is no longer always a
-            # handful of breakpoints spanning decades. The PSD of a
-            # transient target is a Specification with four thousand
-            # lines a quarter-hertz apart, and neighboring lines two
-            # decades apart over a frequency ratio of 1.00025 give an
-            # exponent near twenty thousand: a**n overflowed, the
-            # subtraction went inf - inf, and every channel's RMS error
-            # came back NaN.
-            total += wa * a * ((b / a) ** (n + 1.0) - 1.0) / (n + 1.0)
-    return float(total)
+    return float(log_log_areas(frequencies, values, [low], [high])[0])
 
 
 def written_band(frequencies: ArrayLike,
@@ -150,24 +175,246 @@ def written_band(frequencies: ArrayLike,
     return float(frequencies[usable].min()), float(frequencies[usable].max())
 
 
-def band_of(specification: Specification,
-            record: int = 0) -> tuple[float, float] | None:
-    """(low, high) the specification actually says something over.
+def coverage(spectrum: Any, record: int = 0) -> list[tuple[float, float]]:
+    """The stretches one record of a spectrum speaks for, merged.
 
-    A specification on bands says something over each band's whole
-    width, so its range is its outer bin edges — not its first and last
-    centers, which sit inside them and would shrink every comparison
-    against it by half a band at each end.
+    A density's written bins — a controller's zero and NaN lines are
+    holes, not a requirement of nothing — or the segments between a
+    curve's consecutive written breakpoints; either way as (low,
+    high) pairs in order, neighbors joined. What a comparison is
+    judged over: the part of a cell inside these, and nothing else.
+
+    Parameters
+    ----------
+    spectrum : Psd or Specification
+        The object.
+    record : int, default 0
+        Which record.
+
+    Returns
+    -------
+    list of (float, float)
+        Empty when nothing is written above zero hertz.
     """
-    frequencies = np.asarray(specification.abscissa, dtype=float)
-    values = np.asarray(np.real(specification.ordinate[record]), dtype=float)
-    band = written_band(frequencies, values)
-    if band is None or getattr(specification, 'bandwidth', None) is None:
-        return band
-    left, right = specification.bin_bounds()
-    usable = (np.isfinite(frequencies) & (frequencies > 0.0)
-              & np.isfinite(values) & (values > 0.0))
-    return float(left[usable].min()), float(right[usable].max())
+    frequencies = np.asarray(spectrum.abscissa, dtype=float)
+    said = spectrum.written(record) & np.isfinite(frequencies)
+    if getattr(spectrum, 'interpolation', 'bin') == 'log_log':
+        said &= frequencies > 0.0
+        points = np.flatnonzero(said)
+        pairs = [(float(frequencies[a]), float(frequencies[b]))
+                 for a, b in itertools.pairwise(points)
+                 if b == a + 1 and frequencies[b] > frequencies[a]]
+    else:
+        left, right = spectrum.bin_bounds()
+        said &= right > 0.0
+        pairs = [(float(max(left[i], 0.0)), float(right[i]))
+                 for i in np.flatnonzero(said) if right[i] > max(left[i], 0.0)]
+    merged: list[tuple[float, float]] = []
+    for low, high in sorted(pairs):
+        if merged and low <= merged[-1][1] * (1.0 + 1e-12):
+            merged[-1] = (merged[-1][0], max(merged[-1][1], high))
+        else:
+            merged.append((low, high))
+    return merged
+
+
+def _pieces(low: float, high: float,
+            stretches: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    """(low, high) cut to `stretches`: the parts of it inside them."""
+    out = []
+    for a, b in stretches:
+        lo, hi = max(low, a), min(high, b)
+        if hi > lo:
+            out.append((lo, hi))
+    return out
+
+
+def comparable(specification: Specification, measured: DataArray) -> str | None:
+    """Why this pair cannot be compared, or None when it can.
+
+    A requirement on octave bands compares only with a response on
+    the same bands, same fraction, and a response on octave bands
+    only with such a requirement (Brandon, 2026-09-19): a band's
+    power cannot be attributed to part of its width, and a
+    requirement on bands says nothing about the lines under them. A
+    narrowband response compares with a curve at breakpoints or a
+    requirement on lines. Anything else is not judged, and this says
+    so in words the table and the status bar can show.
+
+    Parameters
+    ----------
+    specification, measured : Specification, DataArray
+        The pair.
+
+    Returns
+    -------
+    str or None
+        The reason, or None.
+    """
+    from .octave import per_octave_of
+
+    on_bands = getattr(specification, 'bandwidth', None) is not None
+    banded = getattr(measured, 'bandwidth', None) is not None
+    if on_bands and not banded:
+        return ('a specification on octave bands compares only with a '
+                'response on the same bands; band the response the same way')
+    if banded and not on_bands:
+        return ('a response on octave bands compares only with a '
+                'specification on the same bands; band the specification '
+                'the same way')
+    if on_bands and banded:
+        asked = per_octave_of(specification.abscissa)
+        held = per_octave_of(measured.abscissa)
+        if asked != held:
+            return (f'a specification on 1/{asked}-octave bands compares only '
+                    f'with a response on 1/{asked}-octave bands, not 1/{held}')
+    return None
+
+
+def cells(specification: Specification, measured: DataArray,
+          spec_record: int = 0, measured_record: int = 0
+          ) -> list[dict[str, Any]]:
+    """The cells one comparison is judged over.
+
+    A comparison happens on the coarser of the two grids — a
+    requirement written per octave band is a requirement on the
+    band's power, not on every line under it, and a banded
+    measurement against a breakpoint curve is judged band by band —
+    and each cell is cut to what both objects speak for: the
+    specification's written stretches (`coverage`; a controller's
+    zeros are holes) and the measurement's. A cell nothing is written
+    in is not judged at all, and one written over part of its width
+    is judged over that part, both sides integrated over the same
+    stretch. That is the one rule at the ends and in the middle
+    alike (Brandon, 2026-09-19; PLAN.md "A comparison is an area
+    against an area"). A pair that cannot be compared (`comparable`)
+    has no cells at all.
+
+    Parameters
+    ----------
+    specification, measured : Specification, DataArray
+        The pair.
+    spec_record, measured_record : int
+        Which record of each.
+
+    Returns
+    -------
+    list of dict
+        Each with 'low' and 'high' (the cell's outer reach), 'pieces'
+        (the stretches judged, inside it) and 'width' (their sum).
+    """
+    if comparable(specification, measured) is not None:
+        return []
+    asked = coverage(specification, spec_record)
+    held = coverage(measured, measured_record)
+    if not asked or not held:
+        return []
+    if getattr(specification, 'interpolation', 'bin') == 'log_log':
+        grid = measured.bin_bounds()
+    else:
+        sl, sr = specification.bin_bounds()
+        ml, mr = measured.bin_bounds()
+        s_said = specification.written(spec_record)
+        m_said = measured.written(measured_record)
+        s_width = float(np.median((sr - sl)[s_said])) if s_said.any() else 0.0
+        m_width = float(np.median((mr - ml)[m_said])) if m_said.any() else 0.0
+        grid = (sl, sr) if s_width > m_width * (1.0 + 1e-9) else (ml, mr)
+    out = []
+    for low, high in zip(*grid):
+        pieces = [piece for a, b in _pieces(float(low), float(high), asked)
+                  for piece in _pieces(a, b, held)]
+        if pieces:
+            out.append({'low': pieces[0][0], 'high': pieces[-1][1],
+                        'pieces': pieces,
+                        'width': float(sum(b - a for a, b in pieces))})
+    return out
+
+
+def judge(specification: Specification, measured: DataArray,
+          spec_record: int = 0, measured_record: int = 0,
+          limit: str | None = 'abort_upper', over: bool = True,
+          scale_db: float | None = None) -> dict[str, Any]:
+    """Which cells of a comparison fell outside one limit, and where.
+
+    Over each cell the measurement's power — its area, read as it is
+    drawn, times the comparison's scale — against the power the limit
+    asks for over the very same stretch, the limit read the way its
+    specification is: the exact area under a power law between
+    breakpoints, a density per line or per band otherwise. A cell is
+    out when it holds more than the upper limit asks (`over`) or less
+    than the lower one (not `over`). `limit` None judges against the
+    target itself.
+
+    Parameters
+    ----------
+    specification, measured : Specification, DataArray
+        The pair.
+    spec_record, measured_record : int
+        Which record of each.
+    limit : str or None
+        The limit curve, one of `Specification.LIMITS`, or None for
+        the target.
+    over : bool
+        Whether holding more than the curve asks is what is out.
+    scale_db : float, optional
+        The comparison's scale; resolved through `comparison_scale_db`
+        when omitted.
+
+    Returns
+    -------
+    dict
+        'cells' (as `cells` gives them), 'asked' and 'held' (the two
+        powers per cell), 'judged' and 'out' (a bool per cell each),
+        and on the measurement's own lines: 'lines' (a bool per line, True where
+        its cell is out), 'level' (the limit's mean density over that
+        cell, NaN elsewhere — where a mark is drawn), 'start' and
+        'stop' (the judged stretch within each marked line's bin).
+    """
+    if scale_db is None:
+        scale_db = comparison_scale_db(specification, measured)
+    scale = 10.0 ** (float(scale_db) / 10.0)
+    found = cells(specification, measured, spec_record, measured_record)
+    # every piece of every cell at once — one vectorized read of each
+    # object — then summed back per cell
+    owner = np.array([k for k, cell in enumerate(found)
+                      for _piece in cell['pieces']], dtype=int)
+    lows = np.array([a for cell in found for a, _b in cell['pieces']])
+    highs = np.array([b for cell in found for _a, b in cell['pieces']])
+    count = len(found)
+    if count:
+        wanted = (specification.areas(spec_record, lows, highs) if limit is None
+                  else specification.limit_areas(limit, spec_record, lows, highs))
+        got = measured.areas(measured_record, lows, highs) * scale
+        asked = np.bincount(owner, weights=np.nan_to_num(wanted), minlength=count)
+        asked[np.bincount(owner, weights=~np.isfinite(wanted), minlength=count) > 0] = np.nan
+        held = np.bincount(owner, weights=np.nan_to_num(got), minlength=count)
+        held[np.bincount(owner, weights=~np.isfinite(got), minlength=count) > 0] = np.nan
+    else:
+        asked = held = np.zeros(0)
+    with np.errstate(invalid='ignore'):
+        judged = np.isfinite(asked) & (asked > 0.0) & np.isfinite(held)
+        out = judged & ((held > asked) if over else (held < asked))
+    left, right = measured.bin_bounds()
+    lines = np.zeros(left.shape, dtype=bool)
+    level = np.full(left.shape, np.nan)
+    start, stop = left.copy(), right.copy()
+    # the lines each out cell reaches, found by where the cell's ends
+    # fall among the sorted bins: a bin that ends where the cell
+    # begins shares an edge and no width, and is not in it
+    for k in np.flatnonzero(out):
+        cell = found[k]
+        first = int(np.searchsorted(right, cell['low'] * (1.0 + 1e-12), side='right'))
+        last = int(np.searchsorted(left, cell['high'] * (1.0 - 1e-12), side='left'))
+        if last <= first:
+            continue
+        inside = slice(first, last)
+        lines[inside] = True
+        level[inside] = asked[k] / cell['width']
+        start[inside] = np.maximum(left[inside], cell['low'])
+        stop[inside] = np.minimum(right[inside], cell['high'])
+    return {'cells': found, 'asked': asked, 'held': held, 'out': out,
+            'judged': judged, 'lines': lines, 'level': level,
+            'start': start, 'stop': stop, 'scale_db': float(scale_db)}
 
 
 def covered(lines: ArrayLike, low: float, high: float,
@@ -175,52 +422,29 @@ def covered(lines: ArrayLike, low: float, high: float,
             ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Each measured bin cut to the part of it a band covers.
 
-    A line stands for its whole bin, half a width either side, and at
-    the ends of a specification a bin hangs over the edge. Returns
-    (start, stop, width, cut): where each bin lies inside the band, how
-    wide that is, and which bins the edge went through.
-
-    A bin wholly outside has zero width and is neither cut nor covered.
+    A line stands for its whole bin, and at the ends of a specification
+    a bin hangs over the edge. Returns (start, stop, width, cut): where
+    each bin lies inside the band, how wide that is, and which bins the
+    edge went through. A bin wholly outside has zero width and is
+    neither cut nor covered. With widths given, a bin is its own
+    geometric edges; without, the midpoints between neighbors.
     """
     lines = np.asarray(lines, dtype=float)
     if lines.size < 2:
         empty = np.zeros(lines.shape)
         return empty, empty, empty, np.zeros(lines.shape, dtype=bool)
-    # a banded measurement's bins are its own, geometric ones
-    widths = np.gradient(lines) if widths is None else np.asarray(widths)
-    start = np.maximum(lines - widths / 2.0, low)
-    stop = np.minimum(lines + widths / 2.0, high)
+    if widths is None:
+        widths = np.gradient(lines)
+        left, right = lines - widths / 2.0, lines + widths / 2.0
+    else:
+        from .octave import bin_bounds
+
+        widths = np.asarray(widths, dtype=float)
+        left, right = bin_bounds(lines, widths)
+    start = np.maximum(left, low)
+    stop = np.minimum(right, high)
     width = np.clip(stop - start, 0.0, None)
     return start, stop, width, (width > 0.0) & (width < widths * (1.0 - 1e-9))
-
-
-def _written_area(frequencies, values, low, high, reading, widths=None):
-    """The area under a written curve, read the way its owner is.
-
-    A limit belongs to a specification and is written the way the
-    specification is, so it is integrated the same way. Reaching
-    straight for the log-log form would be right for one written at
-    breakpoints and wrong for one whose owner is a density — the same
-    assumption that had the PSD of a transient target drawn as a power
-    law through four thousand of its own lines.
-    """
-    if reading != 'bin':
-        return log_log_area(frequencies, values, low, high)
-    from .octave import bin_bounds
-
-    # a banded specification carries its own bins — geometric, from a
-    # standard — and the midpoints between its centers are not them
-    left, right = bin_bounds(np.asarray(frequencies, dtype=float), widths)
-    if low is not None:
-        left, right = np.maximum(left, low), np.maximum(right, low)
-    if high is not None:
-        left, right = np.minimum(left, high), np.minimum(right, high)
-    width = np.maximum(right - left, 0.0)
-    values = np.asarray(np.real(values), dtype=float)
-    good = np.isfinite(values) & (values >= 0.0)
-    if not good.any():
-        return float('nan')
-    return float(np.sum(values[good] * width[good]))
 
 
 def outside(lines: ArrayLike, values: ArrayLike,
@@ -228,41 +452,40 @@ def outside(lines: ArrayLike, values: ArrayLike,
             over: bool = True, reading: str = 'log_log',
             spec_widths: ArrayLike | None = None,
             widths: ArrayLike | None = None) -> np.ndarray:
-    """Which measured lines fell outside one written limit curve.
-
-    In the middle of the band this is the plain comparison: the density
-    measured on a line against the density the limit asks for there.
-
-    At the two ends it cannot be. A bin straddling the edge is covered
-    by the specification for part of its width and by nothing for the
-    rest, and reading the limit at the bin's center either invents a
-    requirement past the edge or drops a bin that is mostly inside. So
-    a cut bin is judged on the part that is covered: the power the
-    measurement holds over that stretch, `G` times the covered width,
-    against the power the limit asks for over the same stretch, which
-    is the exact log-log area under it. Both sides then span one
-    identical piece of frequency, which is the only way the comparison
-    means anything at an edge.
+    """Which measured lines fell outside one written limit curve — the
+    array form of `judge`, for a limit and a measurement held as
+    arrays: the limit is read as `reading` ('log_log' between its
+    points, 'bin' as a density per bin of `spec_widths`), the
+    measurement as a density per bin of `widths` (midpoints between
+    neighbors when None), and the two go through the one cell rule.
     """
+    from .data import Psd, Specification
+
     lines = np.asarray(lines, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
-    limit = log_interpolate(lines, spec_frequencies, limit_values)
-    real = np.isfinite(values)
-    out = (np.isfinite(limit) & real
-           & ((values > limit) if over else (values < limit)))
+    spec_frequencies = np.asarray(spec_frequencies, dtype=float)
+    limit_values = np.asarray(np.real(limit_values), dtype=float)
+    if lines.size < 2 or spec_frequencies.size < 2:
+        return np.zeros(lines.shape, dtype=bool)
+    if (spec_widths is None) != (widths is None):
+        return np.zeros(lines.shape, dtype=bool)   # not comparable
+    curve = Specification(spec_frequencies, np.atleast_2d(limit_values),
+                          response_dof=['1X+'], ordinate_dim=['unknown'],
+                          bandwidth=spec_widths)
+    curve.interpolation = reading
+    held = Psd(lines, np.atleast_2d(values), response_dof=['1X+'],
+               ordinate_dim=['unknown'], bandwidth=widths)
+    return judge(curve, held, 0, 0, limit=None, over=over, scale_db=0)['lines']
 
-    band = written_band(spec_frequencies, limit_values)
-    if band is None:
-        return out
-    start, stop, width, cut = covered(lines, *band, widths)
-    for i in np.flatnonzero(cut & real):
-        asked = _written_area(spec_frequencies, limit_values,
-                              start[i], stop[i], reading, spec_widths)
-        if not np.isfinite(asked):
-            continue
-        held = values[i] * width[i]
-        out[i] = held > asked if over else held < asked
-    return out
+
+def band_of(specification: Specification,
+            record: int = 0) -> tuple[float, float] | None:
+    """(low, high) the specification actually says something over: the
+    outer ends of its `coverage`."""
+    stretches = coverage(specification, record)
+    if not stretches:
+        return None
+    return stretches[0][0], stretches[-1][1]
 
 
 def specification_rms(specification: Specification, record: int = 0,
@@ -421,11 +644,16 @@ def detect_scale_db(specification: Specification, measured: DataArray,
     per_channel = []
     for _label, spec_index, measured_index in matched_records(
             specification, measured, spec_records, measured_records):
-        lines = np.asarray(measured.abscissa, dtype=float)
-        got = np.asarray(np.real(measured.ordinate[measured_index]),
+        # cell by cell, the same cells the comparison is judged on —
+        # each a density: the power asked and held over the same
+        # stretch, over that stretch's width
+        level = judge(specification, measured, spec_index, measured_index,
+                      None, True, scale_db=0)
+        width = np.array([cell['width'] for cell in level['cells']],
                          dtype=float)
-        want = log_interpolate(lines, specification.abscissa,
-                               specification.ordinate[spec_index])
+        with np.errstate(divide='ignore', invalid='ignore'):
+            want = level['asked'] / width
+            got = level['held'] / width
         good = np.isfinite(want) & (want > 0.0) & np.isfinite(got) & (got > 0.0)
         # only where the requirement says something about level —
         # see `significant_band`
@@ -534,19 +762,13 @@ def exceedances(specification: Specification, measured: DataArray,
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
-    lines = np.asarray(measured.abscissa, dtype=float)
-    got = (np.asarray(np.real(measured.ordinate[measured_record]),
-                      dtype=float) * 10.0 ** (scale_db / 10.0))
     marks = []
     for edge, over in ((f'{pair}_upper', True), (f'{pair}_lower', False)):
-        written = specification.limits.get(edge)
-        marks.append(np.zeros(lines.shape, dtype=bool) if written is None
-                     else outside(lines, got, specification.abscissa,
-                                  written[spec_record], over,
-                                  getattr(specification, 'interpolation',
-                                          'log_log'),
-                                  getattr(specification, 'bandwidth', None),
-                                  getattr(measured, 'bandwidth', None)))
+        if specification.limits.get(edge) is None:
+            marks.append(np.zeros(np.shape(measured.abscissa), dtype=bool))
+        else:
+            marks.append(judge(specification, measured, spec_record,
+                               measured_record, edge, over, scale_db)['lines'])
     return marks[0], marks[1]
 
 
@@ -559,7 +781,9 @@ def compare(specification: Specification, measured: DataArray,
     The two RMS levels and the difference between them as a percentage,
     how many lines were compared and over what band, and for each pair
     of limits how many of those lines fell outside it. A limit the
-    specification does not carry is absent rather than zero.
+    specification does not carry is absent rather than zero. A pair
+    that cannot be compared (`comparable`) answers with no lines and
+    'refused', the reason in words.
 
     Every number is of the **scaled** measurement — `scale_db` resolved
     through `comparison_scale_db` unless the caller already did — and
@@ -568,44 +792,26 @@ def compare(specification: Specification, measured: DataArray,
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
-    lines = np.asarray(measured.abscissa, dtype=float)
-    got = (np.asarray(np.real(measured.ordinate[measured_record]),
-                      dtype=float) * 10.0 ** (scale_db / 10.0))
-    written = band_of(specification, spec_record)
-    if written is None or lines.size < 2:
-        return {'lines': 0}
-    # the bins the spectrum actually has. An octave-band one carries
-    # its own — geometric, from a standard — and reading them off the
-    # centers would be a hair out at every band and wrong at the ends.
-    own = getattr(measured, 'bin_widths', None)
-
-    # A measured line stands for its whole bin, half a width either
-    # side. The band compared is where those bins and the specification
-    # overlap, and a bin straddling the edge is counted for the part of
-    # it that is inside — so the two are summed and integrated over one
-    # identical stretch, and a response sitting exactly on its
+    # the level, cell by cell: both integrated over the very same
+    # stretches, the specification from its own points exactly and the
+    # measurement from its bins, so a response sitting on its
     # specification comes out at nothing rather than a quarter of a
-    # percent over.
-    widths = np.gradient(lines) if own is None else np.asarray(own())
-    left, right = lines - widths / 2.0, lines + widths / 2.0
-    low = max(written[0], float(left.min()))
-    high = min(written[1], float(right.max()))
-    if not high > low:
+    # percent over
+    refused = comparable(specification, measured)
+    if refused is not None:
+        return {'lines': 0, 'refused': refused}
+    level = judge(specification, measured, spec_record, measured_record,
+                  None, True, scale_db)
+    found = level['cells']
+    good = np.isfinite(level['asked']) & np.isfinite(level['held'])
+    if not good.any():
         return {'lines': 0}
-    overlap = np.clip(np.minimum(right, high) - np.maximum(left, low),
-                      0.0, None)
-    inside = np.isfinite(got) & (got >= 0.0) & (overlap > 0.0)
-    if inside.sum() < 1:
-        return {'lines': 0}
-
-    response = got[inside]
-    # the specification from its own points, exactly; the measurement
-    # from its bins, which is what a discrete spectrum holds. Each
-    # integrated as its own points mean, over the one band.
-    spec_rms = specification_rms(specification, spec_record, low, high)
-    got_rms = float(np.sqrt(np.sum(response * overlap[inside])))
+    low, high = found[0]['low'], found[-1]['high']
+    spec_rms = float(np.sqrt(np.sum(level['asked'][good])))
+    got_rms = float(np.sqrt(np.sum(level['held'][good])))
+    counted = good & level['judged']
     out = {
-        'lines': int(inside.sum()),
+        'lines': int(counted.sum()),
         'band': (low, high),
         'scale_db': float(scale_db),
         'specification_rms': spec_rms,
@@ -623,15 +829,24 @@ def compare(specification: Specification, measured: DataArray,
             or not np.isfinite(spec_rms) or not np.isfinite(got_rms)
             else 20.0 * np.log10(got_rms / spec_rms)),
     }
+    # the cells outside a pair of limits, and the share of the judged
+    # frequency width they make — a share of width rather than a count,
+    # which reads the same whether the cells are lines or bands
+    width = np.array([cell['width'] for cell in found], dtype=float)
     for pair in ('warning', 'abort'):
         if not any(f'{pair}_{edge}' in specification.limits
                    for edge in ('lower', 'upper')):
             continue
-        over, under = exceedances(specification, measured, spec_record,
-                                  measured_record, pair, scale_db=scale_db)
-        beyond = int(((over | under) & inside).sum())
-        out[f'{pair}_lines'] = beyond
-        out[f'{pair}_percent'] = 100.0 * beyond / out['lines']
+        beyond = np.zeros(len(found), dtype=bool)
+        for edge, over in ((f'{pair}_upper', True), (f'{pair}_lower', False)):
+            if specification.limits.get(edge) is not None:
+                beyond |= judge(specification, measured, spec_record,
+                                measured_record, edge, over, scale_db)['out']
+        beyond &= counted
+        out[f'{pair}_lines'] = int(beyond.sum())
+        out[f'{pair}_percent'] = (100.0 * float(width[beyond].sum())
+                                  / float(width[counted].sum())
+                                  if counted.any() else 0.0)
     return out
 
 

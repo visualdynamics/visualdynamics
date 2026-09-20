@@ -6388,6 +6388,7 @@ class MainWindow(QMainWindow):
         self._clear_shocks()
         self._clear_filtering()
         self._clear_truncation()
+        self._refused_comparison = None
         self._clear_octave()
         # and so does the 3-D surface: the waterfall path raises it
         # again itself, so a photo, a report, a fit or an empty
@@ -6654,6 +6655,9 @@ class MainWindow(QMainWindow):
             self.mac_bars_action.setVisible(False)
             self.table_bar.show()
         self._offer_acts()
+        refused = getattr(self, '_refused_comparison', None)
+        if refused:
+            parts.append(f'Not compared: {refused}')
         self._show_status('  |  '.join(part for part in parts if part))
 
     def _empty_category(self, geometries):
@@ -8604,7 +8608,7 @@ class MainWindow(QMainWindow):
         colors = resolve_theme(self.theme_name)
         x, rows = step_outline(banded.abscissa,
                                banded.display_ordinate(self.unit_system),
-                               banded.bin_widths())
+                               banded.bin_edges())
         rows = np.atleast_2d(rows)
         wanted = (range(rows.shape[0]) if records is None
                   else [int(i) for i in records])
@@ -9583,7 +9587,7 @@ class MainWindow(QMainWindow):
             return
         x, rows = step_outline(banded.abscissa,
                                banded.display_ordinate(self.unit_system),
-                               banded.bin_widths())
+                               banded.bin_edges())
         rows = np.abs(np.atleast_2d(rows))
         if getattr(banded, 'log_abscissa', False):
             x = np.log10(np.where(x > 0, x, np.nan))
@@ -11665,6 +11669,13 @@ class MainWindow(QMainWindow):
                            scale_db=self._family_scale_db(specs[0][0], name))
         if not rows:
             return None
+        # a pair that is not compared says why, on the status line the
+        # render writes last: bands compare only with the same bands
+        # (Brandon, 2026-09-19), and the bars standing empty would not
+        # say what to do about it
+        self._refused_comparison = next(
+            (result['refused'] for _label, result in rows
+             if result.get('refused')), None)
         return rows, self.unit_system.label(
             data.ordinate_dim[0].replace('**2/frequency', ''))
 

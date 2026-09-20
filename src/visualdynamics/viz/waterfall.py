@@ -286,7 +286,9 @@ def waterfall_arrays(data: DataArray,
     elif shape == 'steps' and len(x) > 1 and drawn:
         # flat across each bin, on the bins the object itself declares
         # — an octave PSD lands on its own band edges.
-        own = getattr(data, 'bin_widths', None)
+        # the object's own drawn edges: an end band is drawn over the
+        # part its source covered (2026-09-19)
+        own = getattr(data, 'bin_edges', None)
         widths = own() if own is not None and getattr(
             data, 'bandwidth', None) is not None else None
         x, values = step_outline(x, values, widths)

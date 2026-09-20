@@ -40,6 +40,8 @@ not. Open each `.vdyn` once in that alpha and save it again.
   spreadsheet, and its rules
 - [How a PSD means its area](psd-reading.md) — bandwidth, integration,
   and what the numbers mean
+- [How a comparison is judged](compliance.md) — the one cell rule,
+  every pairing of PSD and specification, and the edges
 - [Reports](reports.md) — symbolic bindings, live text, one file out
 
 For signatures see the API reference in the site navigation; for the

@@ -348,7 +348,7 @@ def test_a_banded_specification_stands_as_steps():
     assert station['target'].shape == (2 * bins,)
     assert station['limits']['abort_upper'].shape == (2 * bins,)
     edges, _rows = step_outline(banded.abscissa, banded.ordinate.real,
-                                banded.bin_widths())
+                                banded.bin_edges())
     assert np.array_equal(arrays['spec_x_drawn'], edges)
     assert np.array_equal(arrays['spec_x'], banded.abscissa), \
         'the lines themselves, for judging'

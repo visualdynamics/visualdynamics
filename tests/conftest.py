@@ -35,6 +35,41 @@ def fixture_path(*parts):
     return os.path.join(TESTDATA, *parts)
 
 
+def banded_pair_on_target(cut_at=1000.0, per_octave=6):
+    """(banded specification, banded measurement sitting exactly on its
+    target): the plate's target cut off above `cut_at` — mid-band, so
+    the last written band is only partly covered — banded, and a
+    measurement whose matched records carry the banded target itself.
+    Any mark on it is a false one. The case behind the blue last band
+    of 2026-09-19."""
+    import copy
+
+    import numpy as np
+
+    import visualdynamics
+    from visualdynamics.core.compliance import matched_records
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    spec = copy.deepcopy(loaded['Random_specification'])
+    beyond = np.asarray(spec.abscissa) > cut_at
+    spec.ordinate = np.where(beyond[None, :], np.nan, np.asarray(spec.ordinate))
+    spec.limits = {name: np.where(beyond[None, :], np.nan, np.asarray(values))
+                   for name, values in spec.limits.items()}
+    # the measurement carries the narrowband target on the lines it is
+    # written, and nothing beyond — so the two band onto the very same
+    # bins, the end band of each cut at the same place
+    narrow = loaded['time_data'].compute_psds()
+    narrow.ordinate[:, ~spec.written()] = np.nan   # every record speaks where the target does
+    for _label, si, mi in matched_records(spec, narrow):
+        target = np.real(spec.ordinate[si])
+        narrow.ordinate[mi] = np.where(np.isfinite(target) & (target > 0),
+                                       target, np.nan)
+    banded = spec.to_octave(per_octave)
+    measured = narrow.to_octave(per_octave)
+    measured.scale_db = 0
+    return banded, measured
+
+
 def plate_geometry_and_shapes():
     """The plate's geometry in meters and its truth shapes — the pair
     every animation and deflection test starts from."""

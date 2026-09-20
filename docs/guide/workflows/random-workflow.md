@@ -92,6 +92,9 @@ draws at a time — the drop-down reaches the rest — with the tolerance
 zones shaded and every line that went outside the abort band striped
 red or blue for which way it went. The table below the plot accounts
 for every channel at once; the plot shows the ones you pick in it.
+How a line or a band is judged in or out — an area against an area
+over each cell, whatever form the two objects take — is
+[its own page](../compliance.md).
 
 Two things to notice in the bar above the plot. The **Scaling** field
 is the comparison's dB offset — detected from the data to the nearest

@@ -258,7 +258,9 @@ def test_the_plate_run_against_its_own_specification():
               if measured.response_dof[i] == '101Z+')
     got = compliance.compare(target, measured, si, mi)
     assert got['lines'] > 100
-    assert got['band'][0] >= 50.0 and got['band'][1] <= 1500.0
+    # the band is the outer edges of the written lines' bins: 50 Hz
+    # lines two hertz apart reach a hertz either side
+    assert got['band'][0] >= 49.0 and got['band'][1] <= 1501.0
     assert got['specification_rms'] > 0
     assert got['measured_rms'] > 0
     assert np.isfinite(got['difference_percent'])
@@ -740,3 +742,56 @@ def test_a_limit_is_read_the_way_its_specification_is():
     assert spec.limit('abort_upper').interpolation == spec.interpolation
     spec.interpolation = 'bin'
     assert spec.limit('abort_upper').interpolation == 'bin'
+
+
+def test_a_banded_comparison_is_judged_on_its_bins_own_edges():
+    """The blue last band (Brandon, 2026-09-19): a response squarely on
+    its banded target was marked under the lower abort limit in the
+    last octave band. Two readings were wrong at once. The written
+    band was taken from the band centers, so the last band was "cut"
+    at its own center; and a cut bin's covered stretch was center
+    minus half a width, which for a geometric bin reaches a couple of
+    hertz into the band below — whose limit was far higher — and that
+    sliver flipped the verdict. A banded comparison is bin against
+    bin: the written band runs to the outer edges of the written
+    bins, and a bin is its own edges."""
+    from conftest import banded_pair_on_target
+
+    from visualdynamics.core.compliance import (
+        cells,
+        covered,
+        exceedances,
+        matched_records,
+        outside,
+    )
+    from visualdynamics.core.octave import bin_bounds
+
+    banded, measured = banded_pair_on_target()
+    for label, si, mi in matched_records(banded, measured):
+        over, under = exceedances(banded, measured, si, mi, 'abort')
+        assert not over.any() and not under.any(), label
+    # the cells are the bands themselves — the two grids are one —
+    # each whole, the two ends included: an octave band is a defined
+    # band and is judged as one
+    centers = np.asarray(banded.abscissa)
+    lower = np.real(banded.limits['abort_lower'][0])
+    written = np.flatnonzero(np.isfinite(lower) & (lower > 0))
+    left, right = bin_bounds(centers, banded.bandwidth)
+    found = cells(banded, measured, 0, matched_records(banded, measured)[0][2])
+    assert len(found) == written.size
+    for cell, k in zip(found, written):
+        assert cell['pieces'] == [pytest.approx((left[k], right[k]))]
+    # a bin cut by a band edge is cut at its own geometric edges
+    band = (left[written[0]], right[written[-1]])
+    start, stop, _width, cut = covered(centers, *band, banded.bandwidth)
+    assert not cut.any(), 'the band ends on bin edges: nothing is cut'
+    inside = slice(written[0], written[-1] + 1)
+    assert start[inside] == pytest.approx(left[inside])
+    assert stop[inside] == pytest.approx(right[inside])
+    # and the array form, told the reading — a density per band of
+    # these widths — is clean on the same bins too
+    _label, _si, mi = matched_records(banded, measured)[0]
+    plain = outside(np.asarray(measured.abscissa), np.real(measured.ordinate[mi]),
+                    centers, lower, over=False, reading='bin',
+                    spec_widths=banded.bandwidth, widths=measured.bandwidth)
+    assert not plain.any()

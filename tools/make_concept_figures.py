@@ -57,9 +57,126 @@ def psd_reading():
     print(f'specification RMS {np.sqrt(specification.area()):.3f}')
 
 
+def _breakpoints():
+    """The four-breakpoint specification every compliance figure judges
+    against: a decade of flat top with power-law skirts, warning at
+    ±3 dB and abort at ±6 dB."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification
+
+    f = np.array([20.0, 80.0, 800.0, 2000.0])
+    target = np.array([[0.01, 0.04, 0.04, 0.007]])
+    limits = {name: target * 10 ** (db / 10)
+              for name, db in (('warning_lower', -3), ('warning_upper', 3),
+                               ('abort_lower', -6), ('abort_upper', 6))}
+    return Specification(f, target, response_dof=['101Z+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         ordinate_unit='m/s**2', **limits)
+
+
+def _lines(specification, df=2.0, high=2000.0):
+    """The same requirement as a controller writes it: a density per
+    line, on lines `df` apart, NaN beyond `high` — stored to Nyquist
+    and written only where it was controlled."""
+    import numpy as np
+
+    from visualdynamics.core.compliance import log_interpolate
+    from visualdynamics.core.data import Specification
+
+    f = np.arange(0.0, 2560.0 + df / 2, df)
+    rows = {}
+    for name, values in (('target', specification.ordinate[0]),
+                         *specification.limits.items()):
+        written = log_interpolate(f, specification.abscissa, np.real(values[0])
+                                  if name != 'target' else np.real(values))
+        written[f > high] = np.nan
+        rows[name] = np.atleast_2d(written)
+    out = Specification(f, rows.pop('target'), response_dof=['101Z+'],
+                        ordinate_dim='acceleration**2/frequency',
+                        ordinate_unit='m/s**2', **rows)
+    out.interpolation = Specification.reading_of(f)
+    return out
+
+
+def _response(specification, df=1.0, high=2560.0, seed=7):
+    """A measurement of the target with two departures: a resonance
+    over the abort limit around 300 Hz and a notch under it around
+    1200 Hz, on `df` lines to `high` — past the requirement's end."""
+    import numpy as np
+
+    from visualdynamics.core.compliance import log_interpolate
+    from visualdynamics.core.data import Psd
+
+    f = np.arange(0.0, high + df / 2, df)
+    target = log_interpolate(f, specification.abscissa,
+                             np.real(specification.ordinate[0]))
+    rng = np.random.default_rng(seed)
+    shape = np.exp(0.15 * rng.standard_normal(f.size))
+    # wide enough to be out on a third-octave band too, not only on
+    # the lines under it: a requirement on bands is on their power
+    shape *= 1.0 + 6.0 * np.exp(-((f - 300.0) / 60.0) ** 2)
+    shape *= 1.0 - 0.85 * np.exp(-((f - 1200.0) / 120.0) ** 2)
+    values = np.where(np.isfinite(target), target, 0.002) * shape
+    out = Psd(f, np.atleast_2d(values), response_dof=['101Z+'],
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='m/s**2')
+    out.scale_db = 0
+    return out
+
+
+def compliance():
+    """One figure per comparison there is, plus the two edge cases —
+    each judged by the one cell rule (`compliance.judge`) and drawn
+    by `plot_comparison`."""
+    from visualdynamics.core.compliance import compare
+    from visualdynamics.plot import plot_comparison
+    from visualdynamics.units import SI
+
+    breakpoints = _breakpoints()
+    lines = _lines(breakpoints)
+    octave_spec = lines.to_octave(3)
+    narrow = _response(breakpoints)
+    octave = narrow.to_octave(3)
+    # the three comparisons there are (Brandon, 2026-09-19): bands
+    # compare only with the same bands
+    cases = {
+        'lines-vs-breakpoints': (narrow, breakpoints),
+        'lines-vs-lines': (narrow, lines),
+        'octave-vs-octave': (octave, octave_spec),
+    }
+    for name, (measured, specification) in cases.items():
+        plot_comparison(measured, specification, unit_system=SI, show=False,
+                        path=str(OUT / f'compliance-{name}.png'))
+        got = compare(specification, measured, scale_db=0)
+        print(f'{name:>24}: {got["lines"]} cells, {got["abort_percent"]:.1f}% '
+              f'of the band outside abort, RMS {got["difference_db"]:+.2f} dB')
+    # the end of a requirement inside a band: the lines end at 1450 Hz,
+    # the third-octave band holding 1450 reaches to 1778 and stays
+    # whole, and the measurement runs on to Nyquist
+    short = _lines(breakpoints, high=1450.0).to_octave(3)
+    plot_comparison(octave, short, unit_system=SI, show=False,
+                    path=str(OUT / 'compliance-edge.png'))
+    got = compare(short, octave, scale_db=0)
+    print(f'{"edge":>24}: {got["lines"]} cells, judged to {got["band"][1]:.0f} Hz, '
+          f'the whole last band; {got["abort_lines"]} band out')
+    # a hole: a controller's notch, written as zero across 400-500 Hz
+
+    notched = _lines(breakpoints)
+    hole = (notched.abscissa >= 400.0) & (notched.abscissa <= 500.0)
+    notched.ordinate[:, hole] = 0.0
+    for values in notched.limits.values():
+        values[:, hole] = 0.0
+    plot_comparison(narrow, notched, unit_system=SI, show=False,
+                    path=str(OUT / 'compliance-hole.png'))
+    got = compare(notched, narrow, scale_db=0)
+    print(f'{"hole":>24}: {got["lines"]} cells, nothing judged in the notch')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
+    compliance()
     print('done')
 
 

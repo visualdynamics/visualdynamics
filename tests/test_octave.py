@@ -119,9 +119,13 @@ def test_banding_keeps_the_area_under_the_spectrum():
     narrow = flat()
     banded = narrow.to_octave(6)
     before = float(np.sum(np.real(narrow.ordinate[0]) * narrow.bin_widths()))
+    # a band's value is the density over the part of it the data
+    # covers, so its area is that value over the drawn width — the
+    # object's own integral says so
     after = float(np.nansum(np.real(banded.ordinate[0])
-                            * banded.bin_widths()))
+                            * np.diff(banded.bin_edges())))
     assert after == pytest.approx(before, rel=1e-6)
+    assert banded.area() == pytest.approx(before, rel=1e-6)
 
 
 def test_a_flat_spectrum_stays_flat():
@@ -211,7 +215,7 @@ def test_the_rms_error_is_the_same_on_bands_as_on_lines():
     on_lines = {label: db for label, db, _p in
                 channel_errors(compare_all(spec, narrow))}
     on_bands = {label: db for label, db, _p in
-                channel_errors(compare_all(spec, banded))}
+                channel_errors(compare_all(spec.to_octave(6), banded))}
     assert set(on_lines) == set(on_bands)
     for label, db in on_lines.items():
         assert on_bands[label] == pytest.approx(db, abs=0.05), label
@@ -225,7 +229,7 @@ def test_the_share_outside_abort_is_counted_over_bands():
 
     spec, narrow, banded = compared()
     on_lines = dict(compare_all(spec, narrow))
-    on_bands = dict(compare_all(spec, banded))
+    on_bands = dict(compare_all(spec.to_octave(6), banded))
     assert on_bands['101Z+']['lines'] < on_lines['101Z+']['lines']
     assert on_bands['101Z+']['abort_percent'] != pytest.approx(
         on_lines['101Z+']['abort_percent'], abs=1e-6)
@@ -440,3 +444,90 @@ def test_the_bins_it_reads_are_the_bands_it_carries():
     guessed = np.gradient(banded.abscissa)
     assert not np.allclose(guessed, banded.bandwidth, rtol=1e-4), (
         'and the guess really is different, or this proves nothing')
+
+
+# ---- an end band is cut to what it covers (2026-09-19) -------------------
+
+
+def test_an_end_band_is_whole_and_holds_what_it_was_given():
+    """An octave band is a defined frequency band (Brandon, 2026-09-19,
+    twice: not cut, not moved, not read or drawn over part of
+    itself). A band the data only partly fills holds that content
+    over its whole width and reads lower than its neighbors for it —
+    that is what a band of a spectrum ending inside it is — and the
+    area under the bands is the area under the spectrum, exactly."""
+    from visualdynamics.core import octave
+
+    narrow = flat(level=4e-3)
+    banded = narrow.to_octave(6)
+    low, high = narrow.extent()
+    _c, _w, standard = octave.bands(low, high, 6)
+    left, right = banded.bin_bounds()
+    assert left == pytest.approx(standard[:-1]) and right == pytest.approx(standard[1:])
+    assert banded.bin_edges() == pytest.approx(standard), 'drawn whole'
+    values = np.real(banded.ordinate[0])
+    assert np.allclose(values[1:-1], 4e-3, rtol=1e-9), 'flat where filled'
+    assert values[0] < 4e-3 and values[-1] < 4e-3, 'the end bands, partly filled'
+    assert values[-1] * (right[-1] - left[-1]) == pytest.approx(
+        4e-3 * (high - left[-1]), rel=1e-9), 'holding exactly what fell in'
+    assert banded.area() == pytest.approx(narrow.area(), rel=1e-9)
+    assert banded.extent() == pytest.approx((left[0], right[-1])), \
+        'and speaking for its whole bands'
+
+
+def test_a_target_cut_mid_band_bands_onto_whole_bands():
+    """A controller's target written to a frequency inside its last
+    octave band: the band stays the standard band, whole, and holds
+    the target's content over its whole width — lower than its
+    neighbors, which is what that band of that target is (Brandon,
+    2026-09-19). The limits band the same way, so the band's limits
+    stand where the lines' did against its target."""
+    from visualdynamics.core.data import Specification
+
+    f = np.arange(2.0, 2049.0, 2.0)
+    target = np.where((f >= 50.0) & (f <= 2000.0), 1e-3, np.nan)
+    spec = Specification(f, np.atleast_2d(target), response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         abort_lower=np.atleast_2d(target * 0.5),
+                         abort_upper=np.atleast_2d(target * 2.0))
+    spec.interpolation = Specification.reading_of(f)   # as the importer reads it
+    assert spec.interpolation == 'bin'
+    assert spec.extent() == pytest.approx((49.0, 2001.0))
+    banded = spec.to_octave(6)
+    values = np.real(banded.ordinate[0])
+    left, right = banded.bin_bounds()
+    assert left[0] < 49.0 and right[-1] > 2001.0, 'the standard bands, whole'
+    assert banded.bin_edges()[-1] == pytest.approx(right[-1]), 'drawn whole'
+    assert np.allclose(values[1:-1], 1e-3, rtol=1e-9), 'flat where filled'
+    assert values[-1] * (right[-1] - left[-1]) == pytest.approx(
+        1e-3 * (2001.0 - left[-1]), rel=1e-9), 'the last band holds what fell in it'
+    assert np.allclose(np.real(banded.limits['abort_lower'][0]) / values, 0.5,
+                       rtol=1e-9), 'the limits stand where they stood'
+    assert banded.area() == pytest.approx(spec.area(), rel=1e-9)
+
+
+def test_a_spectrum_knows_what_it_speaks_for():
+    """`extent`: a density's written bins to their outer edges, a
+    breakpoint curve's first and last point; a controller's zeros and
+    NaNs outside its band are not a requirement of nothing."""
+    from visualdynamics.core.data import Specification
+
+    narrow = flat(df=0.5)
+    left, right = narrow.bin_bounds()
+    assert narrow.extent() == pytest.approx((left[0], right[-1]))
+    written = Specification(np.array([20.0, 80.0, 800.0, 2000.0]),
+                            np.array([[1e-3, 4e-3, 4e-3, 1e-3]]),
+                            response_dof=['101Z+'],
+                            ordinate_dim=['acceleration**2/frequency'])
+    assert written.extent() == (20.0, 2000.0)
+    f = np.arange(0.0, 101.0, 1.0)
+    zeros = np.where((f >= 20.0) & (f <= 60.0), 2e-3, 0.0)
+    lines = Specification(f, np.atleast_2d(zeros), response_dof=['101Z+'],
+                          ordinate_dim=['acceleration**2/frequency'])
+    lines.interpolation = 'bin'
+    assert lines.extent() == pytest.approx((19.5, 60.5))
+    assert lines.written().sum() == 41
+    nothing = Specification(f, np.zeros((1, f.size)), response_dof=['101Z+'],
+                            ordinate_dim=['acceleration**2/frequency'])
+    nothing.interpolation = 'bin'
+    assert nothing.extent() is None

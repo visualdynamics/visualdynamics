@@ -14,13 +14,16 @@ from __future__ import annotations
 from typing import Any
 
 
-def table_of(obj: Any) -> tuple[list[str], list[list[str]]] | None:
+def table_of(obj: Any, geometry: Any = None
+             ) -> tuple[list[str], list[list[str]]] | None:
     """(headers, rows) for an object that reads as a table, else None.
 
     A shape set is its identified modal parameters; a channel table is
-    its instrumentation. Everything is text, formatted the way it is
-    read rather than the way it is stored — a damping of 0.0213 is
-    '2.130' percent, because that is the number an engineer quotes.
+    its instrumentation — with the direction columns a geometry
+    derives beside it, when one is given. Everything is text,
+    formatted the way it is read rather than the way it is stored — a
+    damping of 0.0213 is '2.130' percent, because that is the number
+    an engineer quotes.
     """
     from .channel_table import ChannelTable
     from .shapes import ShapeSet
@@ -35,10 +38,12 @@ def table_of(obj: Any) -> tuple[list[str], list[list[str]]] | None:
         # a Rattlesnake save's coupling and feedback wiring stop at the
         # importer now, so there is no acquisition plumbing left here to
         # cut and no second list to keep in step with the first
-        from .channel_table import title_of
+        from .channel_table import DERIVED_COLUMNS, title_of
 
         names = obj.column_names
-        return ([title_of(name) for name in names],
+        derived = list(DERIVED_COLUMNS) if geometry is not None else []
+        return ([title_of(name) for name in names + derived],
                 [[str(obj[name][r]) for name in names]
+                 + (obj.derived_cells(r, geometry) if derived else [])
                  for r in range(obj.num_channels)])
     return None

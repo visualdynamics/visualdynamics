@@ -861,6 +861,59 @@ ERROR_DB = 3.0
 LINES_PERCENT = 10.0
 
 
+#: the share of control channels out on either reading past which the
+#: test failed (Brandon, 2026-09-20): a fifth of the channels with
+#: more than `LINES_PERCENT` of their band outside the abort limits,
+#: or a tenth of them more than `ERROR_DB` off in RMS. At the number
+#: exactly, failed — "20% or more is a failure".
+LINES_CHANNELS_FAIL_PERCENT = 20.0
+RMS_CHANNELS_FAIL_PERCENT = 10.0
+
+
+def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    """Whether a run passed, read off its octave-band comparison.
+
+    Two readings across the control channels `compare_all` judged:
+    the share of them with more than `LINES_PERCENT` of their band
+    outside the abort limits, and the share more than `ERROR_DB` off
+    in RMS. The run passes when the first is under
+    `LINES_CHANNELS_FAIL_PERCENT` and the second under
+    `RMS_CHANNELS_FAIL_PERCENT`; either at or past its number fails
+    it (Brandon, 2026-09-20). Channels with nothing to compare are
+    not counted. No channels at all is no verdict: 'passed' None.
+
+    Parameters
+    ----------
+    rows : sequence of (str, dict)
+        What `compare_all` returned.
+
+    Returns
+    -------
+    dict
+        'passed' (True, False or None), 'channels' (how many were
+        judged), 'lines_percent' and 'rms_percent' (the two shares),
+        and the four thresholds they were read against.
+    """
+    judged = [result for _label, result in rows if result.get('lines')]
+    out = {'channels': len(judged),
+           'lines_limit': LINES_PERCENT, 'rms_limit': ERROR_DB,
+           'lines_fail_percent': LINES_CHANNELS_FAIL_PERCENT,
+           'rms_fail_percent': RMS_CHANNELS_FAIL_PERCENT}
+    if not judged:
+        return {**out, 'passed': None, 'lines_percent': float('nan'),
+                'rms_percent': float('nan')}
+    lines_out = sum(1 for r in judged
+                    if float(r.get('abort_percent') or 0.0) > LINES_PERCENT)
+    rms_out = sum(1 for r in judged
+                  if abs(float(r.get('difference_db', 0.0))) > ERROR_DB)
+    lines_percent = 100.0 * lines_out / len(judged)
+    rms_percent = 100.0 * rms_out / len(judged)
+    passed = (lines_percent < LINES_CHANNELS_FAIL_PERCENT
+              and rms_percent < RMS_CHANNELS_FAIL_PERCENT)
+    return {**out, 'passed': passed, 'lines_percent': lines_percent,
+            'rms_percent': rms_percent}
+
+
 def channel_errors(rows: Sequence[tuple[str, dict[str, Any]]]
                    ) -> list[tuple[str, float, float]]:
     """[(label, dB out, percent of lines outside abort)] for a bar chart.

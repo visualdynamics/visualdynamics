@@ -280,5 +280,7 @@ def test_the_report_steps_on_the_bands_own_edges():
     assert built.get('steps') is True
     lower, upper = bin_bounds(centers, widths)
     expected = np.concatenate([lower, [upper[-1]]])
-    assert np.allclose(built['edges'], expected), \
+    # in decades: an octave-band figure reads on a log axis (2026-09-20)
+    assert built.get('logx') is True
+    assert np.allclose(built['edges'], np.log10(expected), atol=1e-6), \
         'the bands, not the midpoints between their centers'

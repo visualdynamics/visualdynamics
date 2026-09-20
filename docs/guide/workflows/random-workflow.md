@@ -72,6 +72,24 @@ limits together, and the report's octave section reads the banded
 measurement against that banded requirement rather than against the
 breakpoint curve.
 
+The report opens on a pass/fail box under its title: **PASS** in
+green or **FAIL** in red, read off the octave-band comparison, with
+the two readings it was decided on beside it — the share of control
+channels that had more than a tenth of their band outside the abort
+limits, failing at a fifth of them, and the share more than 3 dB off
+in RMS, failing at a tenth. Someone opening the report knows whether
+the environment passed before reading a word. The octave-band
+figures read on a log frequency axis, the narrowband ones on a
+linear one.
+
+The report draws the measured time histories flat, two dozen
+channels to a figure and as many figures as the run has channels,
+each figure an envelope of its channels on one shared time axis with
+the averaged frames marked. A 144-channel run at 16 kHz was a
+200 MB report when those figures were the stage; they are a few
+megabytes now, and every number on the page keeps seven significant
+digits, which draws a figure to a part in ten million.
+
 ![The sixth-octave view of the same PSDs](../images/random-octave.png)
 
 ### 4. Multiple coherence

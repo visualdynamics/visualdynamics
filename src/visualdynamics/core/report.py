@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 BLOCK_KINDS = ('text', 'plot', 'scene', 'table', 'photo', 'pairs',
-               'overlay', 'bars')
+               'overlay', 'bars', 'verdict')
 
 
 class Report:
@@ -49,6 +49,11 @@ class Report:
                        'caption': str}
         (a bar reading: kurtosis per channel, SRS levels against the
         target, or sine levels against their tones)
+      {'kind': 'verdict', 'source': Specification-name,
+                          'measured': Psd-name}
+        (the pass/fail box: whether the run passed, read off the
+        octave-band comparison of `measured` against `source` —
+        `compliance.verdict`)
 
     'select' filters a curves plot to the records the GUI's own filters
     would pick: 'drive' is the response==reference diagonal of an FRF,
@@ -166,6 +171,9 @@ def _wanted_classes(block):
     if kind == 'overlay':
         from .matches import MatchedModes
         return MatchedModes
+    if kind == 'verdict':
+        from .data import Specification
+        return Specification
     return None
 
 
@@ -488,7 +496,8 @@ def insert_options(objects: Mapping[str, Any]) -> list[tuple[str, str]]:
     """[(kind, label)] for the editor's Result drop-down. The Time
     entries are per quantity, and only for quantities the project's
     time data actually holds."""
-    return ([('geometry', 'Geometry'),
+    return ([('verdict', 'Pass/Fail Box'),
+             ('geometry', 'Geometry'),
              ('modes', 'Mode Shape Animations')]
             + [(f'dofs:{quantity}', f'DOFs ({quantity.title()})')
                for quantity in dof_quantities(objects)]
@@ -987,7 +996,8 @@ def quantity_order(dims: set[str]) -> list[str]:
 
 def time_data_blocks(source: str, objects: Mapping[str, Any],
                      links: Sequence[Mapping[str, Any]] | None,
-                     caption: str, per_quantity: str) -> list[dict[str, Any]]:
+                     caption: str, per_quantity: str,
+                     mode: str = 'stage') -> list[dict[str, Any]]:
     """The time plots for one history: one figure per quantity it
     measures (Brandon, 2026-08-23 — an axis holds one quantity, so a
     stream carrying drive voltages beside response accelerations must
@@ -1006,9 +1016,9 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
     obj = objects.get(name)
     dims = record_dimensions(obj) if obj is not None else set()
     if len(dims) < 2:
-        return [{'kind': 'plot', 'source': source, 'mode': 'stage',
+        return [{'kind': 'plot', 'source': source, 'mode': mode,
                  'caption': caption}]
-    return [{'kind': 'plot', 'source': source, 'mode': 'stage',
+    return [{'kind': 'plot', 'source': source, 'mode': mode,
              'select': f'dim:{quantity}',
              'caption': per_quantity.replace('{quantity}', quantity)}
             for quantity in quantity_order(dims)]
@@ -2395,6 +2405,12 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         return not objects or resolve_binding(token, objects, links) in objects
 
     return prune_unbound(Report('Random Vibration Test Report', [
+        # the verdict first, under the title: whether the environment
+        # passed, read off the octave-band comparison, so a reader
+        # opening the report knows before reading a word (Brandon,
+        # 2026-09-20)
+        {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
+         'measured': '@basis:OctavePsd'},
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
             'A random vibration test was run: the article was driven '
@@ -2422,12 +2438,16 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'figure per quantity, with the frames a PSD is averaged '
             'over marked on them ({{figure:Measured}}) — which part '
             'of the run was analyzed, and under what window.'},
+        # 2-D, not the stage: a random run is long and wide, and the
+        # stage's point budget per page made a 144-channel report
+        # 200 MB (Brandon, 2026-09-20); the flat figure pages the
+        # channels and shares a smaller budget among them
         *time_data_blocks(
             time, objects, links,
             'Measured time histories, with the frames the spectra '
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
-            'the spectra are averaged over'),
+            'the spectra are averaged over', mode='curves'),
         {'kind': 'text', 'text':
             '## Specification\n\nThe required control spectrum and the '
             'tolerance the controller was set to warn and abort on '

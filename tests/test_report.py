@@ -656,7 +656,14 @@ def test_a_channel_table_block_shows_the_whole_schema(project):
     report = Report('R', [{'kind': 'table', 'source': 'Channels',
                            'caption': 'Instrumentation'}])
     block = _payload(render_html(report, objects))['blocks'][0]
-    assert block['headers'] == [title_of(n) for n in table.SCHEMA]
+    # and the direction columns a basis geometry derives beside them
+    # (2026-09-20), when the report has one to read against
+    from visualdynamics.core.channel_table import DERIVED_COLUMNS
+    from visualdynamics.core.report import resolve_binding
+
+    placed = resolve_binding('@basis:Geometry', objects, None) in objects
+    derived = list(DERIVED_COLUMNS) if placed else []
+    assert block['headers'] == [title_of(n) for n in (*table.SCHEMA, *derived)]
     assert len(block['rows']) == table.num_channels
 
 

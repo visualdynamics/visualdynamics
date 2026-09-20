@@ -88,3 +88,48 @@ def _extreme_indices(rows: np.ndarray, bins: int) -> list[np.ndarray]:
     real = starts < m
     return [np.unique(np.concatenate([row_lo[real], row_hi[real]]))
             for row_lo, row_hi in zip(lo, hi)]
+
+
+def envelope_rows(x: ArrayLike, rows: ArrayLike, bins: int
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """Every record of one object thinned onto the same `bins`: two
+    points a bin, the bin's least and greatest in the order they
+    occurred, at the bin's first and last sample time.
+
+    `peak_decimate_rows` keeps each record's extremes at their own
+    positions, so a page carrying two dozen records carries two dozen
+    time axes. A report's time-history page shares one axis among its
+    curves (2026-09-20: it is what halved the page), and an envelope
+    on common bins draws the same picture — the bin is far narrower
+    than a pixel at any zoom the page offers. Input at or under two
+    points a bin is returned as given, one axis for all.
+    """
+    x = np.asarray(x, dtype=float)
+    rows = np.atleast_2d(np.asarray(rows, dtype=float))
+    n, m = rows.shape
+    if m <= 2 * bins:
+        return x, rows
+    chunk = -(-m // bins)
+    real = int(-(-m // chunk))
+    padded = np.full((n, real * chunk), np.nan)
+    padded[:, :m] = rows
+    shaped = padded.reshape(n, real, chunk)
+    finite = np.isfinite(shaped)
+    lo = np.argmin(np.where(finite, shaped, np.inf), axis=-1)
+    hi = np.argmax(np.where(finite, shaped, -np.inf), axis=-1)
+    least = np.take_along_axis(shaped, lo[..., None], axis=-1)[..., 0]
+    most = np.take_along_axis(shaped, hi[..., None], axis=-1)[..., 0]
+    any_finite = finite.any(axis=-1)
+    least = np.where(any_finite, least, np.nan)
+    most = np.where(any_finite, most, np.nan)
+    # the extreme that came first goes at the bin's start
+    first_is_low = lo <= hi
+    start = np.where(first_is_low, least, most)
+    end = np.where(first_is_low, most, least)
+    starts = np.arange(real) * chunk
+    ends = np.minimum(starts + chunk - 1, m - 1)
+    axis = np.column_stack([x[starts], x[ends]]).ravel()
+    out = np.empty((n, 2 * real))
+    out[:, 0::2] = start
+    out[:, 1::2] = end
+    return axis, out

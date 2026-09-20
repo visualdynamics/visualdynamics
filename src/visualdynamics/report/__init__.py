@@ -33,6 +33,15 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 MAX_REPORT_CURVES = 24
 
+#: points a 2-D time-history figure carries in all, shared by its
+#: curves. The stage's two million per page made a 144-channel run at
+#: 16 kHz a 200 MB report; a record's figure is read for where the
+#: run was at level and how the frames sat on it, which a quarter of
+#: a million peak-kept points draw at every zoom the page offers
+#: (Brandon, 2026-09-20: "switch those plots to 2D so the report can
+#: be smaller").
+TIME_FIGURE_POINTS = 160_000
+
 #: points one figure may carry, across every curve on it. A report is
 #: a deliverable that gets zoomed into — Brandon found the shock
 #: traces thinned when he looked closely (2026-08-24) — and a figure
@@ -202,8 +211,19 @@ def render_html(report: Report, objects: Mapping[str, Any],
                  .replace('__JS__', scripts))
 
 
+#: significant digits a number keeps on the page. A figure is a
+#: picture: seven digits draw it to a part in ten million, where the
+#: seventeen a float prints by default were most of what made a
+#: 144-channel report 200 MB (Brandon, 2026-09-20).
+PAGE_DIGITS = 7
+
+
+def _compact(value) -> float:
+    return float(f'{float(value):.{PAGE_DIGITS}g}')
+
+
 def _finite(values):
-    return [None if not np.isfinite(v) else float(v) for v in values]
+    return [None if not np.isfinite(v) else _compact(v) for v in values]
 
 
 def _decades(coords, logx):
@@ -262,10 +282,11 @@ def _thinned_note(drawn: int, held: int) -> str:
             'every extreme kept.')
 
 
-def _decimate(x, y):
+def _decimate(x, y, budget=None):
     """Peak-keeping decimation: a report is a document, not a scope."""
-    cx, cy = peak_decimate(np.asarray(x), np.asarray(y), MAX_POINTS_PER_CURVE)
-    return [float(v) for v in cx], [float(v) for v in cy]
+    cx, cy = peak_decimate(np.asarray(x), np.asarray(y),
+                           MAX_POINTS_PER_CURVE if budget is None else int(budget))
+    return [_compact(v) for v in cx], [_compact(v) for v in cy]
 
 
 _REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
@@ -450,7 +471,11 @@ def _build_block(block, objects, us, links=None):
         source = objects.get(block.get('source'))
         if source is None:
             return None
-        return _table_block(block, source)
+        # the basis geometry brings the channel table its direction
+        # columns, as it does in the window
+        geometry = objects.get(
+            resolve_binding('@basis:Geometry', objects, links) or '')
+        return _table_block(block, source, geometry)
     if kind == 'photo':
         source = objects.get(block.get('source'))
         if source is None:
@@ -487,7 +512,35 @@ def _build_block(block, objects, us, links=None):
         return _pairs_block(block, objects)
     if kind == 'overlay':
         return _overlay_block(block, objects, us, links)
+    if kind == 'verdict':
+        source = objects.get(block.get('source'))
+        measured = objects.get(block.get('measured'))
+        if source is None or measured is None:
+            return None
+        return _verdict_block(source, measured)
     return None
+
+
+def _verdict_block(specification, measured):
+    """The pass/fail box: `compliance.verdict` over the comparison of
+    `measured` against `specification`, the scale resolved once for
+    the pair the way the bar charts resolve it. None when the two
+    have no channel in common or cannot be compared."""
+    from ..core.compliance import compare_all, comparison_scale_db, verdict
+
+    rows = compare_all(specification, measured,
+                       scale_db=comparison_scale_db(specification, measured))
+    read = verdict(rows)
+    if read['passed'] is None:
+        return None
+    return {'kind': 'verdict', 'passed': bool(read['passed']),
+            'channels': int(read['channels']),
+            'lines_percent': _compact(read['lines_percent']),
+            'rms_percent': _compact(read['rms_percent']),
+            'lines_limit': float(read['lines_limit']),
+            'rms_limit': float(read['rms_limit']),
+            'lines_fail_percent': float(read['lines_fail_percent']),
+            'rms_fail_percent': float(read['rms_fail_percent'])}
 
 
 def _pairs_block(block, objects):
@@ -803,12 +856,12 @@ def _stage_page(block, source, objects, us, caption, page):
              'extents': [float(x0), float(x1), float(z0), float(z1)],
              'log': bool(log), 'logx': logx,
              'xlabel': xlabel, 'zlabel': staged['zlabel'],
-             'stage': [float(v) for v in STAGE],
+             'stage': [_compact(v) for v in STAGE],
              # the app's own opening view of data, derived from the
              # camera `place_camera` sets — the figure opens where
              # the reader last saw this object on screen
-             'home': [[float(v) for v in right],
-                      [float(v) for v in up]]}
+             'home': [[_compact(v) for v in right],
+                      [_compact(v) for v in up]]}
     if marks:
         built['marks'] = marks
     if note:
@@ -918,8 +971,8 @@ def _scalogram_figure(block, source, us, caption):
              'log': False, 'logx': False,
              'xlabel': f'time [{us.label_text("time")}]',
              'zlabel': zlabel,
-             'stage': [float(v) for v in STAGE],
-             'home': [[float(v) for v in right], [float(v) for v in up]]}
+             'stage': [_compact(v) for v in STAGE],
+             'home': [[_compact(v) for v in right], [_compact(v) for v in up]]}
     if note:
         built['note'] = note
     return built
@@ -1152,7 +1205,7 @@ def _plot_block(block, source, objects, us):
                  if 0 <= r < len(rows) and 0 <= c < len(columns)]
         return {'kind': 'mac', 'caption': caption,
                 'rows': rows, 'columns': columns, 'pairs': pairs,
-                'matrix': [[float(v) for v in row] for row in matrix]}
+                'matrix': [[_compact(v) for v in row] for row in matrix]}
     if mode == 'stage':
         return _stage_figures(block, source, objects, us, caption)
     if mode == 'scalogram':
@@ -1238,7 +1291,7 @@ def _plot_block(block, source, objects, us):
                        'side on these channels, which recorded exactly '
                        'zero').strip()
         built = {'kind': 'plot', 'caption': caption, 'logy': bool(logy),
-                 'x': [float(v) for v in x],
+                 'x': [_compact(v) for v in x],
                  'xlabel': f'frequency [{us.label_text("frequency")}]',
                  'ylabel': _axis_text(source, us, shared[0][0]),
                  'curves': curves}
@@ -1268,7 +1321,7 @@ def _plot_block(block, source, objects, us):
         if not curves:
             return None
         return {'kind': 'plot', 'caption': caption, 'logy': False,
-                'x': [float(v) for v in x],
+                'x': [_compact(v) for v in x],
                 'xlabel': f'frequency [{us.label_text("frequency")}]',
                 'ylabel': 'ratio [dB]', 'curves': curves}
     if mode == 'cmif':
@@ -1281,7 +1334,7 @@ def _plot_block(block, source, objects, us):
         shapes = objects.get(block.get('shapes')) \
             if block.get('shapes') else None
         built = {'kind': 'plot', 'caption': caption, 'logy': True,
-                 'x': [float(v) for v in x],
+                 'x': [_compact(v) for v in x],
                  'xlabel': f'frequency [{us.label_text("frequency")}]',
                  'ylabel': _axis_text(source, us), 'curves': curves}
         if shapes is not None:
@@ -1318,7 +1371,7 @@ def _plot_block(block, source, objects, us):
                 'xlabel': f'frequency [{us.label_text("frequency")}]',
                 'zlabel': 'coherence',
                 'labels': [source.record_label(i) for i in records],
-                'rows': [[float(v) for v in row] for row in values]}
+                'rows': [[_compact(v) for v in row] for row in values]}
         if stride > 1:
             # a map strides its columns where a curve keeps extremes:
             # a color field is read across, so the honest note names
@@ -1414,9 +1467,55 @@ def _plot_block(block, source, objects, us):
         # payload and reached with the drop-down instead.
         chosen = block.get('record')
         indices = [indices[0] if chosen is None else int(chosen)]
+    from ..core.data import TimeHistory
+
+    budget = None
+    if isinstance(source, TimeHistory) and not paged:
+        # a time history of many channels continues into further
+        # figures rather than stopping at the first two dozen — the
+        # stage's paging, in 2-D — and each figure shares one point
+        # budget among its curves
+        pages = max(1, -(-len(indices) // MAX_REPORT_CURVES))
+        if pages > 1 and 'page' not in block:
+            return [built for k in range(pages)
+                    for built in [_plot_block({**block, 'page': k},
+                                              source, objects, us)]
+                    if built is not None]
+        page = int(block.get('page', 0))
+        first = page * MAX_REPORT_CURVES
+        indices = indices[first:first + MAX_REPORT_CURVES]
+        if pages > 1:
+            caption = (f'{caption} — channels {first + 1}–'
+                       f'{first + len(indices)} of {len(source.response_dof)}')
+        budget = min(max(TIME_FIGURE_POINTS // max(len(indices), 1), 512),
+                     MAX_POINTS_PER_CURVE)
     wanted = indices[:MAX_REPORT_CURVES]
     source = _positive_lines(source)
     x = np.asarray(source.display_abscissa(us), dtype=float)
+    if budget is not None and x.size > budget:
+        # the page's curves share one time axis: an envelope on common
+        # bins, two points a bin (`decimate.envelope_rows`), so a page
+        # of two dozen channels carries one axis and not two dozen
+        from ..decimate import envelope_rows
+
+        rows = np.real(np.asarray(source.display_ordinate(us, wanted)))
+        axis, envelope = envelope_rows(x, rows, max(budget // 2, 256))
+        built = {'kind': 'plot', 'caption': caption, 'logy': False,
+                 'logx': False, 'x': [_compact(v) for v in axis],
+                 'xlabel': f'{source.abscissa_dim} '
+                           f'[{us.label_text(source.abscissa_dim)}]',
+                 'ylabel': _axis_text(source, us, wanted[0]),
+                 'curves': [{'label': source.record_label(i), 'x': None,
+                             'y': _finite(envelope[k])}
+                            for k, i in enumerate(wanted)],
+                 'note': _thinned_note(int(envelope.shape[1]), int(x.size))}
+        frames = _averaging_marks(source)
+        if frames is not None:
+            built['averaging'] = frames
+        events = _shock_marks(source)
+        if events is not None:
+            built['shocks'] = events
+        return built
     # the abscissa's own reading, the same flag the app consults: an
     # SRS lays natural frequency out in decades. The curves are built
     # in hertz — a band's edges, a power law's fill-in — and each is
@@ -1424,7 +1523,10 @@ def _plot_block(block, source, objects, us):
     # the lines first put an octave PSD's steps and a specification's
     # law in the wrong places once the axis became the viewer's
     # choice (Brandon, 2026-09-05)
-    logx = bool(getattr(source, 'log_abscissa', False))
+    logx = (bool(getattr(source, 'log_abscissa', False))
+            # an octave-band figure reads on a log frequency axis, the
+            # way bands are read (Brandon, 2026-09-20)
+            or getattr(source, 'bandwidth', None) is not None)
     values = source.display_ordinate(us, wanted)
     logy = source.abscissa_dim == 'frequency' \
         if source.log_ordinate is None else source.log_ordinate
@@ -1474,14 +1576,14 @@ def _plot_block(block, source, objects, us):
             with np.errstate(divide='ignore', invalid='ignore'):
                 y = np.where(y > 0.0, np.log10(np.maximum(y, 1e-300)),
                              np.nan)
-        cx, cy = _decimate(law_x, np.asarray(y, dtype=float))
+        cx, cy = _decimate(law_x, np.asarray(y, dtype=float), budget)
         thinned_from = max(thinned_from, len(law_x))
         thinned_to = max(thinned_to, len(cx))
         curves.append({'label': source.record_label(i),
                        'x': (_finite(_decades(cx, logx)) if len(cx) != len(x)
                              or not np.array_equal(cx, x) else None),
                        'y': _finite(cy)})
-    dropped = (0 if paged else source.num_records - len(wanted))
+    dropped = (0 if paged or 'page' in block else source.num_records - len(wanted))
     if dropped:
         caption = (caption + f' (first {len(wanted)} of '
                              f'{source.num_records} records)').strip()
@@ -1490,7 +1592,7 @@ def _plot_block(block, source, objects, us):
                    'channels; the rest are on the drop-down').strip()
     built = {'kind': 'plot', 'caption': caption, 'logy': bool(logy),
              'logx': logx,
-             'x': [float(v) for v in _decades(x, logx)],
+             'x': [_compact(v) for v in _decades(x, logx)],
              'xlabel': f'{source.abscissa_dim} '
                        f'[{us.label_text(source.abscissa_dim)}]',
              'ylabel': ylabel, 'curves': curves}
@@ -1529,7 +1631,7 @@ def _plot_block(block, source, objects, us):
         # line to Nyquist, most of them empty (Brandon, 2026-09-19)
         band = _specified_band(source, channels[0], us)
         if band is not None:
-            built['home_x'] = [float(v) for v in _decades(band, logx)]
+            built['home_x'] = [_compact(v) for v in _decades(band, logx)]
     elif paged:
         # the transient specification's channels: waveforms, linear,
         # nothing to shade — a target carries no limits
@@ -1623,7 +1725,7 @@ def _scene_block(block, geometry, shapes, us, objects):
     node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
     built = {'kind': 'scene', 'caption': block.get('caption', ''),
              'unit': axis_unit,
-             'points': [[float(v) for v in p] for p in points],
+             'points': [[_compact(v) for v in p] for p in points],
              'node_colors': node_colors,
              'lines': lines, 'faces': faces, 'modes': []}
     quantity = block.get('dofs', '')
@@ -1654,7 +1756,7 @@ def _scene_block(block, geometry, shapes, us, objects):
                     or int(node) not in node_row:
                 continue
             arrows.append({'node': node_row[int(node)],
-                           'vector': [float(v) for v in vector],
+                           'vector': [_compact(v) for v in vector],
                            'color': AXIS_COLORS[axis],
                            'label': dof})
         if not arrows:
@@ -1685,8 +1787,8 @@ def _scene_block(block, geometry, shapes, us, objects):
                          'frequency': float(shapes.frequency[m]),
                          'damping': float(shapes.damping[m]) * 100.0},
                 'peak': float(deflection.peak_magnitude) or 1.0,
-                'real': [[float(v) for v in p] for p in real],
-                'imag': [[float(v) for v in p] for p in imag]})
+                'real': [[_compact(v) for v in p] for p in real],
+                'imag': [[_compact(v) for v in p] for p in imag]})
     return built
 
 
@@ -1808,8 +1910,8 @@ def _overlay_block(block, objects, us, links=None):
             'info': [info(matched.first, a, r),
                      info(matched.second, b, c)],
             'peak': 1.0,
-            'real': [[float(v) for v in p] for p in real],
-            'imag': [[float(v) for v in p] for p in imag]})
+            'real': [[_compact(v) for v in p] for p in real],
+            'imag': [[_compact(v) for v in p] for p in imag]})
     if not modes:
         return None
     # each shape is drawn to its own peak just above, which is what makes
@@ -1824,7 +1926,7 @@ def _overlay_block(block, objects, us, links=None):
         matched.first, matched.second)
     return {'kind': 'scene', 'caption': caption, 'note': note,
             'unit': unit, 'flat': True,
-            'points': [[float(v) for v in p] for p in points],
+            'points': [[_compact(v) for v in p] for p in points],
             'node_colors': node_colors, 'node_alphas': node_alphas,
             'lines': lines, 'faces': faces, 'modes': modes}
 
@@ -2124,7 +2226,7 @@ def _srs_comparison_block(block, measured, specification, us, caption):
         grid = np.log10(np.maximum(np.asarray(grid, dtype=float), 1e-300))
     built = {'kind': 'plot', 'caption': caption, 'logy': True,
              'logx': logx,
-             'x': [float(v) for v in grid],
+             'x': [_compact(v) for v in grid],
              'xlabel': f'frequency [{us.label_html("frequency")}]',
              'ylabel': axis_label(measured.ordinate_dim[0], us,
                                   measured.dimension_hint[0]),
@@ -2268,9 +2370,9 @@ def _comparison_block(block, measured, specification, us, caption,
     if banded:
         # the target on its own grid, stepped on its own edges; the
         # response keeps the block's grid and edges
-        curves[0]['x'] = [float(v) for v in spec_x]
+        curves[0]['x'] = [_compact(v) for v in spec_x]
         curves[0]['steps'] = True
-        curves[0]['edges'] = [float(v) for v in spec_edges]
+        curves[0]['edges'] = [_compact(v) for v in spec_edges]
     if scale_db:
         caption = (caption + f' — measured data scaled {scale_db:+d} dB '
                    'to the specification').strip()
@@ -2286,7 +2388,7 @@ def _comparison_block(block, measured, specification, us, caption,
         [spec_edges[0], spec_edges[-1]] if banded
         else [spec_x[0], spec_x[-1]])
     built = {'kind': 'plot', 'caption': caption, 'logy': True,
-             'x': [float(v) for v in grid],
+             'x': [_compact(v) for v in grid],
              'xlabel': f'frequency [{us.label_text("frequency")}]',
              'ylabel': _axis_text(specification, us, shared[0]),
              'steps': True,
@@ -2304,8 +2406,31 @@ def _comparison_block(block, measured, specification, us, caption,
         own = getattr(measured, 'bin_edges', None)
         widths = own() if own is not None and getattr(
             measured, 'bandwidth', None) is not None else None
-        built['edges'] = [float(v) for v in bin_edges(grid, widths)]
+        built['edges'] = [_compact(v) for v in bin_edges(grid, widths)]
+    if getattr(measured, 'bandwidth', None) is not None:
+        # an octave-band comparison reads on a log frequency axis, the
+        # way bands are read; the narrowband one stays linear (Brandon,
+        # 2026-09-20)
+        _into_decades(built)
     return built
+
+
+def _into_decades(built):
+    """A finished flat figure put on a log frequency axis: every x it
+    carries — the grid, the opening window, the bin edges, a curve's
+    own grid and edges — taken to decades, and `logx` set so the page
+    labels the axis in hertz."""
+    def decades(values):
+        return _finite(_decades(np.asarray(values, dtype=float), True))
+
+    for key in ('x', 'home_x', 'edges'):
+        if built.get(key) is not None:
+            built[key] = decades(built[key])
+    for curve in built.get('curves', ()):
+        for key in ('x', 'edges'):
+            if curve.get(key) is not None:
+                curve[key] = decades(curve[key])
+    built['logx'] = True
 
 
 def _specified_band(specification, record, us):
@@ -2634,7 +2759,7 @@ def _replication_overlay_block(block, measured, specification, us):
     if window is None:
         return None
     count = len(playings(measured, specification))
-    x = [float(v) for v in specification.display_abscissa(us)]
+    x = [_compact(v) for v in specification.display_abscissa(us)]
     rows = {dof: i for i, dof in enumerate(window.response_dof)}
     channels = []
     for i, dof in enumerate(specification.response_dof):
@@ -2660,7 +2785,7 @@ def _replication_overlay_block(block, measured, specification, us):
             'channels': channels}
 
 
-def _table_block(block, source):
+def _table_block(block, source, geometry=None):
     """An object as a table.
 
     The rows come from `core.tables.table_of`, so a report and a script
@@ -2670,7 +2795,7 @@ def _table_block(block, source):
     from ..core.shapes import ShapeSet
     from ..core.tables import table_of
 
-    built = table_of(source)
+    built = table_of(source, geometry)
     if built is None:
         return None
     headers, rows = built

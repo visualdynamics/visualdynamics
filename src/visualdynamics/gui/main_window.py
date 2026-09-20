@@ -12835,7 +12835,12 @@ class MainWindow(QMainWindow):
             self.render_current()
 
     def _render_table(self, table, rows=None, name=None):
-        self._set_table_model(channel_table_model(table, self, rows=rows))
+        # the geometry the table answers to — its group's, else the
+        # active one — brings the derived direction columns with it
+        found = self.project.geometry_for(name) if name is not None else None
+        self._set_table_model(channel_table_model(
+            table, self, rows=rows,
+            geometry=None if found is None else found[1]))
         self._arm_row_deletion(name, 'channel', rows)
         if rows is not None:
             return f'{len(rows)} of {table.num_channels} channels'

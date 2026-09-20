@@ -89,6 +89,10 @@ BLOCK_TEMPLATES = {
     'bars': {'kind': 'bars', 'mode': 'error', 'source': '', 'measured': '',
              'caption': '', '_bind': ('source', 'measured'),
              '_only': 'Specification'},
+    # the pass/fail box: the octave-band specification and the
+    # octave-band PSDs judged against it
+    'verdict': {'kind': 'verdict', 'source': '', 'measured': '',
+                '_bind': ('source', 'measured'), '_only': 'Specification'},
 }
 
 #: how long typing in the text editor rests before the page re-renders

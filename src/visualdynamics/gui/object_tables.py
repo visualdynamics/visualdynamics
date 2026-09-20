@@ -145,8 +145,17 @@ def _column_journal(name, index):
 
 
 def channel_table_model(table: ChannelTable, parent: QObject | None = None,
-                        rows: Sequence[int] | None = None) -> TableModel:
+                        rows: Sequence[int] | None = None,
+                        geometry: Geometry | None = None) -> TableModel:
     """A channel table: every column editable, every column typed.
+
+    With a `geometry`, the derived columns follow: each channel's
+    measured direction as a unit vector in the geometry's global
+    system, the nearest global axis and the angle to it (Brandon,
+    2026-09-20). Read from the geometry on every show and restated
+    with the row whenever the node or the direction is edited, so
+    they can never disagree with it; not editable, since they are not
+    the table's to hold.
 
     The columns come from the table's own `COLUMNS` spec rather than
     being listed again here, so a schema change reaches the interface
@@ -178,7 +187,9 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
                 title, _shown_getter(name, index),
                 set=_column_setter(name, index),
                 journal=_column_journal(name, index),
-                choices=shown, affects_row=name == 'channel_type',
+                choices=shown,
+                # a direction moves the derived columns beside it
+                affects_row=name in ('channel_type', 'direction'),
                 alignment=LEFT))
             continue
         if spec.kind == 'unit':
@@ -195,7 +206,17 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
             title, _column_getter(name, index),
             set=_column_setter(name, index),
             journal=_column_journal(name, index),
-            date=spec.kind == 'date', alignment=LEFT))
+            date=spec.kind == 'date',
+            # a node moves the derived columns beside it
+            affects_row=name == 'node', alignment=LEFT))
+    if geometry is not None:
+        from ..core.channel_table import DERIVED_COLUMNS
+
+        for k, name in enumerate(DERIVED_COLUMNS):
+            columns.append(Column(
+                title_of(name),
+                lambda t, r, k=k, i=index, g=geometry: t.derived_cells(i(r), g)[k],
+                alignment=LEFT))
     count = ((lambda t: t.num_channels) if rows is None
              else (lambda t: len(rows)))
     return TableModel(table, columns, count, parent)

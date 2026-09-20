@@ -72,7 +72,21 @@ TITLES = {
     'triax_dof': 'Triax DOF',
     'sensitivity': 'Sensitivity (mV/Unit)',
     'range': 'Range (V)',
+    'unit_x': 'Unit X',
+    'unit_y': 'Unit Y',
+    'unit_z': 'Unit Z',
+    'nearest_axis': 'Nearest Axis',
+    'axis_angle': 'Angle to Axis (deg)',
 }
+
+#: the columns a geometry adds beside the table's own, in order: the
+#: channel's measured direction as a unit vector in the geometry's
+#: global system, the global axis it is nearest, and how far off it
+#: sits (Brandon, 2026-09-20). Derived — read from the geometry each
+#: time, never stored — so they follow an edit to the node or the
+#: direction at once and never disagree with the geometry.
+DERIVED_COLUMNS = ('unit_x', 'unit_y', 'unit_z', 'nearest_axis', 'axis_angle')
+AXES = ('X', 'Y', 'Z')
 
 
 def title_of(name: str) -> str:
@@ -462,6 +476,63 @@ class ChannelTable:
     def column_names(self) -> list[str]:
         """The table's column headings, in order."""
         return [str(name) for name in self.frame.columns]
+
+    def orientation(self, row: int, geometry: Any
+                    ) -> tuple[np.ndarray | None, str | None, float | None]:
+        """One channel's measured direction against a geometry.
+
+        The DOF the row names — node and direction — read through the
+        frame that node is measured in (`Geometry.dof_direction`), as
+        a unit vector in the geometry's global system; the global axis
+        it is nearest, signed ('X+', 'Z-'); and the angle between the
+        two in degrees. What the derived columns show.
+
+        Parameters
+        ----------
+        row : int
+            The channel's row.
+        geometry : Geometry
+            The geometry the channel is measured on.
+
+        Returns
+        -------
+        tuple
+            (vector, axis, angle), each None when the geometry cannot
+            place the channel — a node it lacks, no direction, or a
+            node measured in a frame that turns with position.
+        """
+        if geometry is None:
+            return None, None, None
+        vector = geometry.dof_direction(self.dof_strings()[row])
+        if vector is None:
+            return None, None, None
+        k = int(np.argmax(np.abs(vector)))
+        axis = f'{AXES[k]}{"+" if vector[k] >= 0 else "-"}'
+        angle = float(np.degrees(np.arccos(min(1.0, abs(float(vector[k]))))))
+        return vector, axis, angle
+
+    def derived_cells(self, row: int, geometry: Any) -> list[str]:
+        """The derived columns' cells for one row, as text: three
+        components to three decimals, the nearest axis, the angle to a
+        tenth of a degree; empty where the geometry cannot place the
+        channel.
+
+        Parameters
+        ----------
+        row : int
+            The channel's row.
+        geometry : Geometry
+            The geometry the channel is measured on.
+
+        Returns
+        -------
+        list of str
+            One cell per `DERIVED_COLUMNS` entry.
+        """
+        vector, axis, angle = self.orientation(row, geometry)
+        if vector is None:
+            return [''] * len(DERIVED_COLUMNS)
+        return [f'{float(v):+.3f}' for v in vector] + [axis, f'{angle:.1f}']
 
     def dof_strings(self) -> list[str]:
         """Each channel's degree of freedom, as '101Z+' strings."""

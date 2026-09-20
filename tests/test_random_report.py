@@ -354,7 +354,8 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
     template = report_of(run)
     octave = [b for b in template.blocks
               if b.get('source') in ('@basis:OctavePsd',
-                                      '@basis:OctaveSpecification')]
+                                      '@basis:OctaveSpecification')
+              and b['kind'] != 'verdict']     # the box reads them too
     from visualdynamics.core.report import control_channel_labels
 
     per_channel = len(control_channel_labels(objects, links,
@@ -676,7 +677,10 @@ def test_the_comparison_opens_on_the_specifications_band():
                          {'S': banded_spec, 'P': measured.to_octave(6)},
                          visualdynamics.SI)
     edges = banded_spec.bin_edges()
-    assert banded['home_x'] == pytest.approx([edges[0], edges[-1]])
+    # an octave-band comparison reads on a log axis (2026-09-20): its
+    # opening window is the outer edges, in decades
+    assert banded['logx'] is True
+    assert banded['home_x'] == pytest.approx(list(np.log10([edges[0], edges[-1]])))
 
 
 def test_a_banded_specification_is_drawn_on_its_own_bins():
@@ -692,9 +696,11 @@ def test_a_banded_specification_is_drawn_on_its_own_bins():
                          'mode': 'curves'}, banded_psd,
                         {'S': banded_spec, 'P': banded_psd}, visualdynamics.SI)
     target, response = built['curves']
-    assert target['x'] == pytest.approx(list(banded_spec.abscissa))
+    # in decades: an octave-band comparison reads on a log axis (2026-09-20)
+    assert built['logx'] is True
+    assert target['x'] == pytest.approx(list(np.log10(banded_spec.abscissa)))
     assert target['steps'] is True
-    assert target['edges'] == pytest.approx(list(banded_spec.bin_edges()))
+    assert target['edges'] == pytest.approx(list(np.log10(banded_spec.bin_edges())))
     channel = built['channels'][0]
     assert len(channel['y']) == len(banded_spec.abscissa)
     zone = next(z for z in channel['zones'] if z['lower'] is not None)

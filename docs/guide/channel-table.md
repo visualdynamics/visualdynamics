@@ -45,6 +45,22 @@ mapped: `Cal Due` is the expiration, `Point` is the node, `SN` and
 `Serial Number` are the same column, and a calibration lab's
 `Sensitivity (mV/g)` lands where you would expect.
 
+## Direction columns from the geometry
+
+Beside a geometry the table shows five columns it derives rather
+than holds: each channel's measured direction as a unit vector in
+the geometry's global system (**Unit X**, **Unit Y**, **Unit Z**),
+the global axis it is nearest (**Nearest Axis**, signed: `X+`,
+`Z-`), and the angle between the two (**Angle to Axis (deg)**). The
+direction is the row's node and direction read through the frame
+that node is measured in, so a channel mounted in a turned local
+frame reads as the global vector it really is. Edit the node or the
+direction and the five restate at once; a node the geometry lacks
+leaves them blank. They are the geometry's to say, so they are not
+editable and do not travel to Excel, but the report's instrumentation
+table carries them beside the basis geometry and a script reads the
+same rows from `visualdynamics.core.tables.table_of(table, geometry)`.
+
 ## Role and Control
 
 Role is one value rather than three check boxes, so the one nonsense

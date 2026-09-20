@@ -97,6 +97,18 @@ table { border-collapse: collapse; font-size: .85rem; width: 100%; }
 th, td { border: 1px solid var(--line); padding: .25rem .55rem;
          text-align: left; white-space: nowrap; }
 .tablewrap { overflow-x: auto; }
+/* the pass/fail box: its two colors are the box's own, one for each
+   word, and are not the exceedance red — a verdict is not a mark */
+.verdict { border-radius: 8px; padding: 1rem 1.25rem; border: 2px solid;
+           line-height: 1.5; }
+.verdict.pass { border-color: #2e8b57;
+                background: color-mix(in srgb, #2e8b57 16%, var(--paper)); }
+.verdict.fail { border-color: #c0392b;
+                background: color-mix(in srgb, #c0392b 16%, var(--paper)); }
+.verdict .word { font-size: 2rem; font-weight: 700; letter-spacing: .08em;
+                 margin-bottom: .3rem; }
+.verdict.pass .word { color: #2e8b57; }
+.verdict.fail .word { color: #c0392b; }
 /* the grid figure: headings across, node labels down, a cell's own
    legend, controls and caption at a size that leaves room for the plot */
 .grid { display: grid; gap: .5rem .6rem; align-items: start; }
@@ -1949,6 +1961,32 @@ function gridBlock(block) {
   s.insertBefore(grid, s.firstChild);
 }
 
+/* The pass/fail box under the title (Brandon, 2026-09-20): whether
+   the environment passed, in one word and one color, with the two
+   readings it was decided on — so a reader opening the report knows
+   before reading anything else. */
+function verdictBlock(block) {
+  const s = section(null);
+  s.className = 'verdict ' + (block.passed ? 'pass' : 'fail');
+  const word = document.createElement('div'); word.className = 'word';
+  word.textContent = block.passed ? 'PASS' : 'FAIL';
+  s.appendChild(word);
+  const lines = document.createElement('div');
+  lines.textContent = block.lines_percent + '% of ' + block.channels
+    + ' control channels had more than ' + block.lines_limit
+    + '% of their band outside the abort limits (fails at '
+    + block.lines_fail_percent + '%)';
+  s.appendChild(lines);
+  const rms = document.createElement('div');
+  rms.textContent = block.rms_percent + '% of ' + block.channels
+    + ' control channels were more than ' + block.rms_limit
+    + ' dB off in RMS (fails at ' + block.rms_fail_percent + '%)';
+  s.appendChild(rms);
+  const how = document.createElement('div'); how.className = 'hint';
+  how.textContent = 'Read off the octave-band comparison.';
+  s.appendChild(how);
+}
+
 /* ---- assembly ---------------------------------------------------------- */
 DATA.blocks.forEach(block => {
   if (block.kind === 'text') {
@@ -1972,6 +2010,7 @@ DATA.blocks.forEach(block => {
     s.insertBefore(img, s.firstChild);
   } else if (block.kind === 'plot') plotBlock(block);
   else if (block.kind === 'grid') gridBlock(block);
+  else if (block.kind === 'verdict') verdictBlock(block);
   else if (block.kind === 'bars') barsBlock(block);
   else if (block.kind === 'mac') macBlock(block);
   else if (block.kind === 'map') mapBlock(block);

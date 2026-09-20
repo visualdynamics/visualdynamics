@@ -45,6 +45,20 @@ mapped: `Cal Due` is the expiration, `Point` is the node, `SN` and
 `Serial Number` are the same column, and a calibration lab's
 `Sensitivity (mV/g)` lands where you would expect.
 
+## What a channel measures
+
+**Type** is the quantity the channel measures, and **Unit** is what it
+is measured in. A source states the type in its own words, and the
+import is lenient about the spelling: a word the schema does not know
+is dropped rather than refused. When that leaves the type blank, the
+unit answers for it — `G` is an acceleration, `V` a voltage, `N` a
+force — so a controller that writes `Accel`, or nothing at all, still
+comes in typed. A type the file does state is never overruled: a
+disagreement between the two is yours to resolve, and the table
+refuses to create one when you edit a cell. A unitless unit says
+nothing, because strain and a bare ratio share a dimensionality,
+which is the whole reason they are two names.
+
 ## Direction columns from the geometry
 
 Beside a geometry the table shows five columns it derives rather

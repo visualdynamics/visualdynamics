@@ -291,7 +291,42 @@ class ChannelTable:
                     dtype='int64')
             else:
                 frame[name] = pd.Series(values, dtype='string').fillna('')
+        frame['channel_type'] = cls._typed_by_unit(frame)
         return frame
+
+    @classmethod
+    def _typed_by_unit(cls, frame) -> list[str]:
+        """The type column with its blanks answered by the unit beside
+        them.
+
+        A source states a channel's type in its own words, and the
+        coercion above is lenient: a spelling the schema does not know
+        blanks rather than failing the import. So a controller writing
+        'Accel' — or nothing at all — lost the type while its 'Voltage'
+        channels kept theirs, and a table of accelerometers in G came
+        in typeless (Brandon, 2026-09-20). The unit is the same claim
+        said another way, and `dimension_of` already reads it, so a
+        blank type takes the unit's answer. A stated type is never
+        overruled: a disagreement between the two is the owner's to
+        resolve, and `set_cell` refuses to create one.
+
+        Only a unit that names a channel type answers. A unitless unit
+        reads as 'dimensionless', which is no channel type — strain and
+        a bare ratio share that dimensionality, which is the whole
+        reason they are two names.
+        """
+        from ..units import dimension_of
+
+        out = []
+        for declared, unit in zip(frame['channel_type'], frame['unit']):
+            declared = '' if declared is None else str(declared)
+            unit = '' if unit is None else str(unit)
+            if declared or not unit:
+                out.append(declared)
+                continue
+            found = dimension_of(unit)
+            out.append(found if found in CHANNEL_TYPES else '')
+        return out
 
     @classmethod
     def _coerce(cls, name: str, value: object) -> Any:

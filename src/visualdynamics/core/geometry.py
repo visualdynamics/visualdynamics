@@ -30,28 +30,94 @@ CS_TYPES = {0: 'cartesian', 1: 'cylindrical', 2: 'spherical'}
 
 # UFF dataset 2412 descriptor code -> (name, nodes per element, render class)
 # render class: 'line', 'face', 'volume', 'point'
+#
+# A face element's *name* says how many corners it has — 'tri' three,
+# anything else four — which is how the viewer draws one without a
+# second table of node counts to keep in step (`face_corners`). Every
+# face entry here is named accordingly.
 ELEMENT_TYPES = {
     11: ('rod2', 2, 'line'),
     21: ('beam2', 2, 'line'),
     22: ('beam2_tapered', 2, 'line'),
     23: ('beam3', 3, 'line'),
     24: ('beam3_parabolic', 3, 'line'),
-    41: ('tri3', 3, 'face'),
+    31: ('pipe2', 2, 'line'),
+    32: ('pipe3', 3, 'line'),
+    # 2412's plane families, which differ from each other in what the
+    # solver does with them and not at all in what is drawn: a
+    # triangle is three corners and a quadrilateral four, whichever
+    # family the descriptor names. A mesh of plane-strain quads
+    # (54) was refused outright until they were all written down
+    # (Brandon, 2026-09-20).
+    41: ('tri3', 3, 'face'),           # plane stress
     42: ('tri6', 6, 'face'),
+    43: ('tri9', 9, 'face'),
     44: ('quad4', 4, 'face'),
     45: ('quad8', 8, 'face'),
-    91: ('trishell3', 3, 'face'),
+    46: ('quad12', 12, 'face'),
+    51: ('tri3_strain', 3, 'face'),    # plane strain
+    52: ('tri6_strain', 6, 'face'),
+    53: ('tri9_strain', 9, 'face'),
+    54: ('quad4_strain', 4, 'face'),
+    55: ('quad8_strain', 8, 'face'),
+    56: ('quad12_strain', 12, 'face'),
+    61: ('tri3_plate', 3, 'face'),     # plate
+    62: ('tri6_plate', 6, 'face'),
+    63: ('tri9_plate', 9, 'face'),
+    64: ('quad4_plate', 4, 'face'),
+    65: ('quad8_plate', 8, 'face'),
+    66: ('quad12_plate', 12, 'face'),
+    71: ('tri3_membrane', 3, 'face'),  # membrane
+    72: ('tri6_membrane', 6, 'face'),
+    73: ('tri9_membrane', 9, 'face'),
+    74: ('quad4_membrane', 4, 'face'),
+    75: ('quad8_membrane', 8, 'face'),
+    76: ('quad12_membrane', 12, 'face'),
+    81: ('tri3_axisym', 3, 'face'),    # axisymmetric solid
+    82: ('tri6_axisym', 6, 'face'),
+    84: ('quad4_axisym', 4, 'face'),
+    85: ('quad8_axisym', 8, 'face'),
+    91: ('trishell3', 3, 'face'),      # thin shell
     92: ('trishell6', 6, 'face'),
+    93: ('trishell9', 9, 'face'),
     94: ('quadshell4', 4, 'face'),
     95: ('quadshell8', 8, 'face'),
+    96: ('quadshell12', 12, 'face'),
+    # thick shell: a solid cell by another name, drawn as one
+    101: ('wedge6_thick', 6, 'volume'),
+    102: ('wedge15_thick', 15, 'volume'),
+    103: ('wedge24_thick', 24, 'volume'),
+    104: ('hex8_thick', 8, 'volume'),
+    105: ('hex20_thick', 20, 'volume'),
+    106: ('hex32_thick', 32, 'volume'),
     111: ('tet4', 4, 'volume'),
     112: ('wedge6', 6, 'volume'),
     113: ('wedge15', 15, 'volume'),
+    114: ('wedge24', 24, 'volume'),
     115: ('hex8', 8, 'volume'),
     116: ('hex20', 20, 'volume'),
     117: ('hex27', 27, 'volume'),
     118: ('tet10', 10, 'volume'),
+    # rigid links and the axisymmetric shells, all drawn as lines. A
+    # rigid element joins however many nodes the file states; the two
+    # it is drawn between are the two it names first.
+    121: ('rigid_bar', 2, 'line'),
+    122: ('rigid_element', 2, 'line'),
+    171: ('shell_axisym2', 2, 'line'),
+    172: ('shell_axisym3', 3, 'line'),
+    # Springs, dampers and gaps come in two kinds: between two nodes,
+    # which draws as the line it is, and from a node to ground, which
+    # is one node and draws as a point. 136 is the exception and stays
+    # one node here on purpose — the Nastran reader writes a CELAS2 as
+    # a 136 at a single grid, and exodus maps its SPRING to one.
     136: ('spring', 1, 'point'),
+    137: ('spring_rotational', 2, 'line'),
+    138: ('spring_ground', 1, 'point'),
+    139: ('spring_ground_rotational', 1, 'point'),
+    141: ('damper', 2, 'line'),
+    142: ('damper_ground', 1, 'point'),
+    151: ('gap', 2, 'line'),
+    152: ('gap_ground', 1, 'point'),
     161: ('mass', 1, 'point'),
     # Codes from 200 up are visualdynamics's own, not UFF 2412's: the
     # universal file has no pyramid descriptor — I-DEAS meshed without
@@ -62,6 +128,29 @@ ELEMENT_TYPES = {
     201: ('pyramid5', 5, 'volume'),
     202: ('pyramid13', 13, 'volume'),
 }
+
+
+def face_corners(code: int) -> int:
+    """How many corners a face element is drawn with: three for a
+    triangle, four for a quadrilateral, whichever family its
+    descriptor names and however many nodes it carries.
+
+    Read off the name in `ELEMENT_TYPES` rather than from the node
+    count, which cannot tell a nine-node cubic triangle from a
+    nine-node quadrilateral (Brandon, 2026-09-20).
+
+    Parameters
+    ----------
+    code : int
+        The element's descriptor.
+
+    Returns
+    -------
+    int
+        3 or 4.
+    """
+    name = ELEMENT_TYPES[int(code)][0]
+    return 3 if name.startswith('tri') else 4
 
 
 class Geometry:

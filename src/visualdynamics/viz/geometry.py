@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..core.geometry import ELEMENT_TYPES
+from ..core.geometry import ELEMENT_TYPES, face_corners
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM
 
@@ -640,10 +640,10 @@ def add_geometry(plotter: Any, geometry: Geometry,
                   geometry.elem_conn[i]) for i in element_indices]
                 if 'elements' in draw else [])
     for code, color, conn in elements:
-        _name, nnodes, render = ELEMENT_TYPES[int(code)]
+        _name, _nnodes, render = ELEMENT_TYPES[int(code)]
         if render == 'face':
-            corners = {3: 3, 6: 3, 4: 4, 8: 4, 9: 4}[nnodes]
-            faces.setdefault(int(color), []).append(rows(conn[:corners]))
+            faces.setdefault(int(color), []).append(
+                rows(conn[:face_corners(int(code))]))
         elif render == 'volume':
             # render outer faces later; M0 draws the wireframe of the cell
             lines.setdefault(int(color), []).append(rows(conn))

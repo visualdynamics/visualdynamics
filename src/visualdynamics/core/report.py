@@ -997,7 +997,7 @@ def quantity_order(dims: set[str]) -> list[str]:
 def time_data_blocks(source: str, objects: Mapping[str, Any],
                      links: Sequence[Mapping[str, Any]] | None,
                      caption: str, per_quantity: str,
-                     mode: str = 'stage') -> list[dict[str, Any]]:
+                     mode: str = 'curves') -> list[dict[str, Any]]:
     """The time plots for one history: one figure per quantity it
     measures (Brandon, 2026-08-23 — an axis holds one quantity, so a
     stream carrying drive voltages beside response accelerations must
@@ -1011,7 +1011,17 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
     to single ones, which the reference resolver then does not match.
     The shock report shipped 'at {Time History.filter_corner}' under
     two figures exactly that way, and only in the two-quantity case,
-    because the one-quantity path never calls format at all."""
+    because the one-quantity path never calls format at all.
+
+    Flat, not the stage (Brandon, 2026-09-20). A stage figure carries
+    `MAX_FIGURE_POINTS` — two million points — and a report's time
+    histories are the largest thing in it by an order of magnitude:
+    the plate's modal report was 36 MB, 88% of it two such figures,
+    and a 144-channel run at 16 kHz made a 200 MB report. The flat
+    figure pages its channels two dozen at a time and draws each page
+    as an envelope on one shared time axis, which is the same picture
+    at every zoom the page offers. `mode='stage'` is still there for a
+    template that wants depth."""
     name = resolve_binding(source, objects, links)
     obj = objects.get(name)
     dims = record_dimensions(obj) if obj is not None else set()
@@ -1183,10 +1193,14 @@ def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             '{{figure:Averaged response acceleration}}) show how the '
             'excitation energy was distributed over frequency and '
             'which bands the structure responded in.'},
-        {'kind': 'plot', 'source': time, 'mode': 'stage',
+        # flat, for the reason `time_data_blocks` gives: these two were
+        # 88% of a 36 MB page (Brandon, 2026-09-20). The spectra below
+        # keep the stage — a thousand lines a channel is a figure the
+        # depth helps and the file can hold.
+        {'kind': 'plot', 'source': time, 'mode': 'curves',
          'select': 'dim:force', 'caption': 'Excitation force time '
          'histories, all frames'},
-        {'kind': 'plot', 'source': time, 'mode': 'stage',
+        {'kind': 'plot', 'source': time, 'mode': 'curves',
          'select': 'dim:acceleration', 'caption': 'Response '
          'acceleration time histories, all frames'},
         {'kind': 'plot', 'source': psd, 'mode': 'stage',
@@ -2068,7 +2082,7 @@ def transient_template(objects: Mapping[str, Any],
             'the shakers to their limit is one that will not repeat '
             'on a heavier article or a colder day, and because a '
             'drive that clipped is visible here and nowhere else.'},
-        {'kind': 'plot', 'source': '@basis:TimeHistory', 'mode': 'stage',
+        {'kind': 'plot', 'source': '@basis:TimeHistory', 'mode': 'curves',
          'select': 'dim:acceleration',
          'caption': 'Measured control response'},
         # the comparison itself: a playing over the waveform it was
@@ -2077,7 +2091,7 @@ def transient_template(objects: Mapping[str, Any],
          'source': '@basis:TimeHistory',
          'specification': '@basis:TransientSpecification',
          'caption': 'First playing against the target waveform'},
-        {'kind': 'plot', 'source': '@basis:TimeHistory', 'mode': 'stage',
+        {'kind': 'plot', 'source': '@basis:TimeHistory', 'mode': 'curves',
          'select': 'dim:force',
          'caption': 'Drive forces the controller produced'},
         {'kind': 'text', 'text':
@@ -2438,16 +2452,12 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'figure per quantity, with the frames a PSD is averaged '
             'over marked on them ({{figure:Measured}}) — which part '
             'of the run was analyzed, and under what window.'},
-        # 2-D, not the stage: a random run is long and wide, and the
-        # stage's point budget per page made a 144-channel report
-        # 200 MB (Brandon, 2026-09-20); the flat figure pages the
-        # channels and shares a smaller budget among them
         *time_data_blocks(
             time, objects, links,
             'Measured time histories, with the frames the spectra '
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
-            'the spectra are averaged over', mode='curves'),
+            'the spectra are averaged over'),
         {'kind': 'text', 'text':
             '## Specification\n\nThe required control spectrum and the '
             'tolerance the controller was set to warn and abort on '

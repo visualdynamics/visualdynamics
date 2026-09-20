@@ -1469,13 +1469,18 @@ def _plot_block(block, source, objects, us):
         indices = [indices[0] if chosen is None else int(chosen)]
     from ..core.data import TimeHistory
 
+    # what this block draws from, before any cap: a figure filtered to
+    # one quantity is a figure of that quantity's channels, and
+    # counting the object's other records told a reader that 6 of 30
+    # records were dropped from a figure that drew all 24 of its own
+    available = len(indices)
     budget = None
     if isinstance(source, TimeHistory) and not paged:
         # a time history of many channels continues into further
         # figures rather than stopping at the first two dozen — the
         # stage's paging, in 2-D — and each figure shares one point
         # budget among its curves
-        pages = max(1, -(-len(indices) // MAX_REPORT_CURVES))
+        pages = max(1, -(-available // MAX_REPORT_CURVES))
         if pages > 1 and 'page' not in block:
             return [built for k in range(pages)
                     for built in [_plot_block({**block, 'page': k},
@@ -1486,7 +1491,7 @@ def _plot_block(block, source, objects, us):
         indices = indices[first:first + MAX_REPORT_CURVES]
         if pages > 1:
             caption = (f'{caption} — channels {first + 1}–'
-                       f'{first + len(indices)} of {len(source.response_dof)}')
+                       f'{first + len(indices)} of {available}')
         budget = min(max(TIME_FIGURE_POINTS // max(len(indices), 1), 512),
                      MAX_POINTS_PER_CURVE)
     wanted = indices[:MAX_REPORT_CURVES]
@@ -1583,7 +1588,7 @@ def _plot_block(block, source, objects, us):
                        'x': (_finite(_decades(cx, logx)) if len(cx) != len(x)
                              or not np.array_equal(cx, x) else None),
                        'y': _finite(cy)})
-    dropped = (0 if paged or 'page' in block else source.num_records - len(wanted))
+    dropped = 0 if paged or 'page' in block else available - len(wanted)
     if dropped:
         caption = (caption + f' (first {len(wanted)} of '
                              f'{source.num_records} records)').strip()

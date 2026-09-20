@@ -151,13 +151,20 @@ def compliance():
         got = compare(specification, measured, scale_db=0)
         print(f'{name:>24}: {got["lines"]} cells, {got["abort_percent"]:.1f}% '
               f'of the band outside abort, RMS {got["difference_db"]:+.2f} dB')
-    # the end of a requirement inside a band: the lines end at 1450 Hz,
-    # the third-octave band holding 1450 reaches to 1778 and stays
-    # whole, and the measurement runs on to Nyquist
+    # the end of a requirement inside a band: the lines end at 1450 Hz
+    # and the third-octave band holding 1450 reaches to 1778, whole.
+    # The controller held the narrowband response to the requirement
+    # and drove nothing past it, so the response falls away there
+    # too — the case that happens (Brandon, 2026-09-20)
+    import numpy as np
+
     short = _lines(breakpoints, high=1450.0).to_octave(3)
-    plot_comparison(octave, short, unit_system=SI, show=False,
+    controlled = _response(breakpoints, seed=7)
+    beyond = np.asarray(controlled.abscissa) > 1450.0
+    controlled.ordinate[:, beyond] *= 0.02
+    plot_comparison(controlled.to_octave(3), short, unit_system=SI, show=False,
                     path=str(OUT / 'compliance-edge.png'))
-    got = compare(short, octave, scale_db=0)
+    got = compare(short, controlled.to_octave(3), scale_db=0)
     print(f'{"edge":>24}: {got["lines"]} cells, judged to {got["band"][1]:.0f} Hz, '
           f'the whole last band; {got["abort_lines"]} band out')
     # a hole: a controller's notch, written as zero across 400-500 Hz

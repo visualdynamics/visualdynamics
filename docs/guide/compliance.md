@@ -121,19 +121,32 @@ Here the requirement's lines end at 1450 Hz, and the third-octave
 band that holds 1450 Hz reaches to 1778. An octave band is a defined
 frequency band: banding keeps it whole — its center, width and edges
 are the standard's — and the band holds what the lines put in it,
-spread over its whole width, so it reads lower than its neighbors.
-That is what a band of a requirement ending inside it is. The
-comparison then judges the whole band: the measurement's power from
-1413 to 1778 Hz against that. A measurement running on past 1450 Hz
-at the target's level holds several times what the banded
-requirement asks there, and the band is out — the consequence of
-banding a requirement onto a band it does not fill, which the
-narrowband comparison (the lines figures above) does not have.
-Past the last band nothing is judged.
+spread over its whole width, so the banded requirement's last band
+reads lower than its neighbors. That is what a band of a requirement
+ending inside it is, and the octave-band specification says so
+rather than pretending the requirement reached 1778 Hz.
+
+The banded measurement is judged against it over the whole band,
+1413 to 1778 Hz, and in the case that happens that is fair. A
+controller holds the narrowband response to the requirement and
+drives nothing past it, so the response falls away past 1450 Hz too;
+its band then holds about what the requirement's band holds, and the
+band is in. The figure is that case: the response is on the target
+to 1450 Hz and a fiftieth of it beyond, the last band of each side
+sits low together, and past the last band nothing is judged.
+
+What the band would say about a response that did *not* fall away —
+one running on at the target's level to 1778 Hz — is that it holds
+several times what the banded requirement asks there, and the band
+would be out. That is a true statement about the band: the
+requirement, banded, asks for that much power in that band and no
+more. It is not a statement the narrowband comparison would make,
+since its cells stop where the lines do, and it is the reason to
+read the narrowband figures for the end of a requirement.
 
 ![The banded requirement's last band whole and lower, the banded
-measurement over it there and unjudged beyond
-it](images/compliance-edge.png)
+measurement's last band low beside it and in, nothing judged
+beyond](images/compliance-edge.png)
 
 ### A hole in a requirement
 

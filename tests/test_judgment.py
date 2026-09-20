@@ -229,6 +229,13 @@ def test_a_requirement_ending_inside_a_band_is_judged_over_the_whole_band():
     assert not verdict['out'][:-1].any(), 'and only it'
     x = np.asarray(measured.abscissa)
     assert verdict['lines'][x > right[-1]].sum() == 0
+    # the case that happens (Brandon, 2026-09-20): a controller holds
+    # the response to the requirement and drives nothing past it, so
+    # the response falls away past 1450 Hz too, both last bands sit
+    # low together, and the band is in
+    controlled = response(lambda f: np.where(f > 1450.0, 0.02, 1.0)).to_octave(3)
+    over, under = compliance.exceedances(short, controlled, scale_db=0)
+    assert not over.any() and not under.any()
     # the same requirement ending on a band edge is filled and clean
     whole = lines(high=1777.0).to_octave(3)   # the lines end on the band's edge
     over, under = compliance.exceedances(whole, measured, scale_db=0)

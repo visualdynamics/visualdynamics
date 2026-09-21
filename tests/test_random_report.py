@@ -1199,27 +1199,35 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     view.resize(900, 600)
     outcome = {}
 
-    # polled, not waited on: a fixed delay is a guess about the
-    # runner, and 1.5 s that is plenty here was not enough on a CI
-    # worker — the callback never came and the guard quit the app
-    # (2026-09-21). Ask until the page answers.
+    # polled, not waited on: a fixed delay is a guess about the runner.
+    # The reading carries the page's state with it, so a failure says
+    # what was there instead of only what was missing.
     poll = QTimer()
 
     def answered(value):
-        if value and value != 'null':
-            outcome.update(js=value)
+        if not value:
+            return
+        seen = json.loads(value)
+        outcome['seen'] = seen
+        if seen.get('home'):
+            outcome['js'] = seen['home']
             poll.stop()
             app.quit()
 
     def ask():
         view.page().runJavaScript(
             "const c = document.querySelector('canvas');"
-            "JSON.stringify(c && c.dataset.home"
-            "               ? JSON.parse(c.dataset.home) : null)",
+            "JSON.stringify({canvases:"
+            "  document.querySelectorAll('canvas').length,"
+            " sections: document.querySelectorAll('section').length,"
+            " ready: document.readyState,"
+            " home: c && c.dataset.home ? JSON.parse(c.dataset.home)"
+            "                           : null})",
             0, answered)
 
     poll.timeout.connect(ask)
-    view.loadFinished.connect(lambda _ok: poll.start(250))
+    view.loadFinished.connect(lambda ok: (outcome.update(loaded=ok),
+                                          poll.start(250)))
     view.load(QUrl.fromLocalFile(str(path)))
     guard = QTimer()
     guard.setSingleShot(True)
@@ -1233,9 +1241,11 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     for _ in range(10):
         app.processEvents()
 
-    assert 'js' in outcome, 'the page never reported its opening window'
-    home = json.loads(outcome['js'])
-    assert home is not None, 'the figure rendered and recorded its window'
+    assert 'js' in outcome, (
+        'the page never reported its opening window — '
+        f'loaded={outcome.get("loaded")}, saw={outcome.get("seen")}'
+    )
+    home = outcome['js']
     zones = block['channels'][0]['zones']
     edges = [v for zone in zones for edge in (zone['lower'], zone['upper'])
              for v in (edge or []) if v is not None]

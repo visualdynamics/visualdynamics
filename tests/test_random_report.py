@@ -1112,3 +1112,119 @@ def test_the_page_steps_the_zones_with_the_target():
 
     assert 'const stepped = !!(zoneSteps && zoneEdges);' in _JS
     assert 'if (stepped) g.lineTo(xAt(i, 1), YL);' in _JS
+
+
+def test_a_banded_figure_keeps_its_zones_on_the_block_grid():
+    """The zones step with the target, and a curve that claims its own
+    grid without edges takes that away.
+
+    `_decimate` rounds every coordinate to `PAGE_DIGITS`, and an octave
+    band center is a geometric mean, so the rounded copy of the block's
+    own grid compared unequal to it and every octave figure shipped a
+    curve carrying an `x` and no `edges`. The page reads that pair as
+    "on its own grid, edges unknown" and drew the warning and abort
+    zones as a smooth polygon while the target beside them stepped
+    (Brandon, 2026-09-21). The comparison figure was right all along
+    because it sets both.
+    """
+    from visualdynamics.report import _plot_block
+
+    loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
+    banded = loaded['Random_specification'].to_octave(6)
+    block = _plot_block({'kind': 'plot', 'source': 'S', 'mode': 'curves',
+                         'channel': '101Z+'}, banded, {'S': banded},
+                        visualdynamics.SI)
+    assert block['steps'] and block['edges'], 'a banded target steps'
+    assert block['curves'][0].get('x') is None, (
+        'on the block grid, so the page reads the block edges'
+    )
+    assert len(block['edges']) == len(block['x']) + 1
+    zones = block['channels'][0]['zones']
+    assert [z['severity'] for z in zones] == ['warning', 'abort',
+                                              'warning', 'abort']
+    for zone in zones:
+        for edge in (zone['lower'], zone['upper']):
+            if edge is not None:
+                assert len(edge) == len(block['x']), (
+                    'every zone edge sits on the grid the target steps on'
+                )
+
+
+def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
+    """Read off the page itself: the figure opens showing the abort
+    limits, not cropped to the target.
+
+    `home_x` narrows a specification figure to the band the target is
+    written on and the vertical fit was recomputed there from the
+    curves alone, so an abort limit sitting above the target opened off
+    the top of the plot (Brandon, 2026-09-21).
+    """
+    import json
+    import os
+    import re
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWidgets import QApplication
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.core.report import Report
+    from visualdynamics.report import _plot_block
+
+    # a target that *varies*, with limits far off it. Flat would not
+    # bite: the curve fit then spans nothing, the narrowed window keeps
+    # the full extent, and the full extent already counts the zones.
+    f = np.array([10.0, 100.0, 1000.0])
+    target = np.array([[0.002, 0.02, 0.004]])
+    spec = Specification(f, target, response_dof=['101Z+'],
+                         ordinate_dim='acceleration',
+                         ordinate_unit='m/s**2',
+                         warning_upper=target * 2, warning_lower=target / 2,
+                         abort_upper=target * 16, abort_lower=target / 16)
+    descriptor = {'kind': 'plot', 'source': 'S', 'mode': 'curves',
+                  'channel': '101Z+', 'caption': 'Limits'}
+    assert 'home_x' in _plot_block(descriptor, spec, {'S': spec},
+                                   visualdynamics.SI), \
+        'the case only bites where the window narrows'
+    page = render_html(Report('Limits', [descriptor]), {'S': spec})
+    block = json.loads(re.search(r'<script id="data"[^>]*>(.*?)</script>',
+                                 page, re.DOTALL).group(1))['blocks'][0]
+    path = tmp_path / 'limits.html'
+    path.write_text(page, encoding='utf-8')
+
+    app = QApplication.instance() or QApplication(['x'])
+    view = QWebEngineView()
+    view.resize(900, 600)
+    outcome = {}
+
+    def probe(_ok):
+        QTimer.singleShot(1500, lambda: view.page().runJavaScript(
+            "const c = document.querySelector('canvas');"
+            "JSON.stringify(c.dataset.home ? JSON.parse(c.dataset.home)"
+            "                              : null)",
+            0, lambda value: (outcome.update(js=value), app.quit())))
+
+    view.loadFinished.connect(probe)
+    view.load(QUrl.fromLocalFile(str(path)))
+    guard = QTimer()
+    guard.setSingleShot(True)
+    guard.timeout.connect(app.quit)
+    guard.start(30000)
+    app.exec()
+    guard.stop()
+    view.setPage(None)
+    view.deleteLater()
+    for _ in range(10):
+        app.processEvents()
+
+    home = json.loads(outcome['js'])
+    assert home is not None, 'the figure rendered and recorded its window'
+    zones = block['channels'][0]['zones']
+    edges = [v for zone in zones for edge in (zone['lower'], zone['upper'])
+             for v in (edge or []) if v is not None]
+    assert home['y0'] <= min(edges) and home['y1'] >= max(edges), (
+        f'the opening window {home["y0"]}..{home["y1"]} shows every limit '
+        f'({min(edges)}..{max(edges)})'
+    )

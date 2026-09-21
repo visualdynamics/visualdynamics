@@ -1558,6 +1558,7 @@ def _plot_block(block, source, objects, us):
     # frequency. The JS is handed the answer rather than deciding it —
     # it has no `interpolation` field and no way to know.
     shape = drawing_shape(source, bool(tag))
+    rounded_x = [_compact(v) for v in x]
     curves = []
     thinned_from = thinned_to = 0
     for position, i in enumerate(wanted):
@@ -1584,9 +1585,19 @@ def _plot_block(block, source, objects, us):
         cx, cy = _decimate(law_x, np.asarray(y, dtype=float), budget)
         thinned_from = max(thinned_from, len(law_x))
         thinned_to = max(thinned_to, len(cx))
+        # a curve claims its own grid only when it really is on one —
+        # a power law's fill-in, or a decimation that dropped points.
+        # Compared against the raw `x` this was true of every octave
+        # figure: `_decimate` rounds to PAGE_DIGITS and a band center
+        # is a geometric mean, so the rounded copy of the *same* grid
+        # compared unequal. The curve then carried an `x` and no
+        # `edges`, and the page reads that as "on its own grid, edges
+        # unknown" — which dropped the warning and abort zones off
+        # their steps (Brandon, 2026-09-21). Compared like with like.
         curves.append({'label': source.record_label(i),
-                       'x': (_finite(_decades(cx, logx)) if len(cx) != len(x)
-                             or not np.array_equal(cx, x) else None),
+                       'x': (_finite(_decades(cx, logx))
+                             if len(cx) != len(x)
+                             or not np.array_equal(cx, rounded_x) else None),
                        'y': _finite(cy)})
     dropped = 0 if paged or 'page' in block else available - len(wanted)
     if dropped:

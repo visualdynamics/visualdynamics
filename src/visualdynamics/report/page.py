@@ -574,14 +574,29 @@ function plotBlock(block, into) {
     // y then fits only the data visible inside it
     home.x0 = block.home_x[0]; home.x1 = block.home_x[1];
     let lo = Infinity, hi = -Infinity;
-    block.curves.forEach(curve => {
-      const xs = curve.x || block.x;
-      for (let i = 0; i < curve.y.length; i++) {
-        if (!finite(curve.y[i]) || !finite(xs[i])) continue;
-        if (xs[i] < home.x0 || xs[i] > home.x1) continue;
-        lo = Math.min(lo, curve.y[i]); hi = Math.max(hi, curve.y[i]);
+    const fit = (values, xs) => {
+      if (!values) return;
+      for (let i = 0; i < values.length; i++) {
+        const at = xs[i];
+        if (!finite(values[i]) || !finite(at)) continue;
+        if (at < home.x0 || at > home.x1) continue;
+        lo = Math.min(lo, values[i]); hi = Math.max(hi, values[i]);
       }
-    });
+    };
+    block.curves.forEach(curve => fit(curve.y, curve.x || block.x));
+    /* and the bands the target is judged against. The opening window
+       used to fit the curves alone, so a specification whose abort
+       limit sits 6 dB above its target opened with that limit off the
+       top and the reader had to zoom out to see what the response had
+       to stay inside (Brandon, 2026-09-21). The zones are on the same
+       grid the zone drawing reads them on. */
+    if (block.channels) {
+      const ch = block.channels[picked];
+      const xs = block.curves[0].x || block.x;
+      fit(ch.response, xs);
+      (ch.responses || []).forEach(r => fit(r.y, r.x || block.x));
+      ch.zones.forEach(z => { fit(z.lower, xs); fit(z.upper, xs); });
+    }
     if (hi > lo) { home.y0 = lo - 0.05 * (hi - lo);
                    home.y1 = hi + 0.05 * (hi - lo); }
   }

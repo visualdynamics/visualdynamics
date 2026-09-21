@@ -67,15 +67,26 @@ def test_linking_merges_groups_and_refuses_a_second_geometry():
         project.link('Geometry', 'Nothing')
 
 
-def test_linking_refuses_dofs_the_geometry_lacks():
-    """A link says these objects describe one structure; shapes at
-    nodes the geometry has never heard of are not that."""
+def test_linking_reports_dofs_the_geometry_lacks_and_does_not_refuse():
+    """Nodes the geometry lacks are reported, never refused.
+
+    This did refuse, on the reading that a link asserts one structure
+    (2026-09-19). A test names places the model does not draw as a
+    matter of course, two real reports died on it, and no line could
+    be drawn from here: a controller's control object and a foreign
+    mode shape both name nothing the geometry has (Brandon,
+    2026-09-21). The red indicator is the answer, and the person
+    reading it can tell those two apart."""
+    from visualdynamics.compatibility import check_compatibility
+
     project = visualdynamics.Project()
     project.add('Geometry', _geometry(101))
     project.add('Stranger Shapes', _shapes(900))
-    with pytest.raises(ValueError, match='cannot link'):
-        project.link('Geometry', 'Stranger Shapes')
-    assert project.links == [], 'a refused link changes nothing'
+    assert project.link('Geometry', 'Stranger Shapes') == [
+        'Geometry', 'Stranger Shapes']
+    report = check_compatibility(dict(project), 'Geometry', project.links)
+    assert not report.is_compatible('Stranger Shapes')
+    assert report.issue_for('Stranger Shapes').missing_dofs == ['900X+']
 
 
 def test_a_few_points_the_model_lacks_are_not_another_structure():
@@ -96,8 +107,7 @@ def test_a_few_points_the_model_lacks_are_not_another_structure():
 
     report = check_compatibility(dict(project), 'Geometry', project.links)
     assert not report.is_compatible('Shapes'), 'still flagged, not refused'
-    issue = report.issue_for('Shapes')
-    assert issue.missing_dofs == ['1X+'] and issue.shared_nodes == 2
+    assert report.issue_for('Shapes').missing_dofs == ['1X+']
 
 
 def test_a_reference_nowhere_on_the_model_flags_every_record_and_still_links():
@@ -113,6 +123,24 @@ def test_a_reference_nowhere_on_the_model_flags_every_record_and_still_links():
                            response_dof=['101X+', '102X+', '103X+'],
                            reference_dof=['1X+', '1X+', '1X+']))
     assert project.link('Geometry', 'FRF') == ['Geometry', 'FRF']
+
+
+def test_an_object_that_is_all_virtual_points_links_too():
+    """The case an overlap rule could not reach: a controller writes a
+    control object whose every channel is a virtual coordinate, so it
+    shares no node with the model at all and still belongs in the
+    group (Brandon, 2026-09-21, the second report to die on it)."""
+    from visualdynamics.compatibility import check_compatibility
+    from visualdynamics.core.data import Psd
+
+    project = visualdynamics.Project()
+    project.add('Geometry', visualdynamics.Geometry(
+        node_id=[101, 102, 103], node_xyz=np.zeros((3, 3))))
+    project.add('Control', Psd(np.array([1.0, 2.0]), np.ones((3, 2)),
+                               response_dof=['1', '2', '3']))
+    assert project.link('Geometry', 'Control') == ['Geometry', 'Control']
+    report = check_compatibility(dict(project), 'Geometry', project.links)
+    assert report.issue_for('Control').missing_dofs == ['1', '2', '3']
 
 
 def test_a_modal_record_with_no_shape_set_still_refuses():

@@ -51,10 +51,6 @@ class Issue:
     message: str
     missing_dofs: list = field(default_factory=list)
     sub_items: list = field(default_factory=list)  # indices to mark
-    #: distinct nodes the object names that the geometry *does*
-    #: define. Zero is what tells "a different structure" from "this
-    #: test has points the model does not draw" — see `blocks_a_link`.
-    shared_nodes: int = 0
 
 
 @dataclass
@@ -174,36 +170,29 @@ def _index(dof: str) -> int:
     return modal_coordinate(dof) or 0
 
 
-def _shared(geometry: Geometry, dofs: Sequence[str]) -> int:
-    """How many distinct nodes an object names that the geometry has."""
-    from .core.data import parse_dof
-
-    nodes = sorted({parse_dof(dof)[0] for dof in dofs} - {None})
-    if not nodes:
-        return 0
-    return int(sum(geometry.contains_nodes(nodes)))
-
-
 def blocks_a_link(issue: Issue | None) -> bool:
     """Whether an issue is reason to refuse a link outright.
 
-    A link says these objects describe one structure. Naming a few
-    points the geometry does not draw does not contradict that: a
-    controller's run carries virtual channels, drive points and
-    control coordinates that were never nodes, and a report died on
-    three of them (Brandon, 2026-09-21). Sharing *no* node at all is
-    the case the refusal exists for — airplane shapes beside a plate
-    — and a partial overlap gets what it always got, the
-    compatibility indicator naming the DOFs that have nowhere to sit.
-    Anything else reaching here (a modal record with no shape set to
-    answer to) still blocks, because there is nothing to draw it
-    against at all.
+    Naming nodes the geometry lacks is **not**. It is reported, in
+    red, by the indicator this module exists to feed — and that is
+    the whole of the answer it gets. A link is a statement about
+    which objects belong together, and a test names places the model
+    does not draw as a matter of course: drive points, control
+    coordinates, computed locations, virtual channels. Twice in two
+    days a real report died on them (Brandon, 2026-09-20 and
+    2026-09-21), the second time on an object whose channels were
+    *all* virtual — which is why the first attempt at this, refusing
+    only when nothing overlapped, was not a line that could be drawn.
+    A controller's control object and a foreign mode shape look the
+    same from here; the person reading the red indicator can tell
+    them apart, and this function cannot.
+
+    What still blocks is what is not about nodes at all: a modal
+    record with no shape set to answer to has nothing to be drawn
+    against in any geometry. (Two geometries in one link is refused
+    before this is ever called.)
     """
-    if issue is None:
-        return False
-    if issue.kind == 'dofs-not-in-geometry':
-        return issue.shared_nodes == 0
-    return True
+    return issue is not None and issue.kind != 'dofs-not-in-geometry'
 
 
 def check_object(name: str, obj: Any, geometry: Geometry | None,
@@ -237,16 +226,14 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
                      f'geometry {geometry_name!r}: {_listed(missing)}'),
             missing_dofs=missing,
             # every mode spans the same DOFs, so all of them are affected
-            sub_items=list(range(obj.num_shapes)),
-            shared_nodes=_shared(geometry, obj.coordinate))
+            sub_items=list(range(obj.num_shapes)))
 
     if isinstance(obj, DataArray):
-        missing, flagged, named = [], [], []
+        missing, flagged = [], []
         for i in range(obj.num_records):
             dofs = [obj.response_dof[i]]
             if obj.reference_dof is not None:
                 dofs.append(obj.reference_dof[i])
-            named.extend(dofs)
             gone = geometry.missing_dofs(dofs)
             if gone:
                 flagged.append(i)
@@ -258,11 +245,7 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
             message=(f'{len(flagged)} of {obj.num_records} records reference '
                      f'DOFs not in geometry {geometry_name!r}: '
                      f'{_listed(missing)}'),
-            missing_dofs=missing, sub_items=flagged,
-            # counted over the DOFs, never the records: a set whose
-            # every record names one virtual reference flags every
-            # record while its responses sit on the model perfectly
-            shared_nodes=_shared(geometry, named))
+            missing_dofs=missing, sub_items=flagged)
 
     if isinstance(obj, ChannelTable):
         dofs = obj.dof_strings()
@@ -275,8 +258,7 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
             name=name, kind='dofs-not-in-geometry',
             message=(f'{len(flagged)} of {len(dofs)} channels are not in '
                      f'geometry {geometry_name!r}: {_listed(missing)}'),
-            missing_dofs=missing, sub_items=flagged,
-            shared_nodes=_shared(geometry, dofs))
+            missing_dofs=missing, sub_items=flagged)
 
     return None
 

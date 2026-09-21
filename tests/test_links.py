@@ -73,21 +73,27 @@ def test_linked_groups_float_to_the_top(window, pump, survey):
         'the linked group leads, members adjacent, unlinked after')
 
 
-def test_a_link_holds_one_geometry_and_refuses_misfits(window, pump,
-                                                       survey):
+def test_a_link_holds_one_geometry_and_reports_rather_than_refuses(window,
+                                                                   pump,
+                                                                   survey):
+    """Two geometries in one link is still refused: it is a statement
+    about structure, not about nodes. Shapes naming nodes the geometry
+    lacks are not — they link, and the indicator carries the news
+    (Brandon, 2026-09-21)."""
     _airplane_pair(window, survey)
     second = visualdynamics.Geometry(node_id=[900], node_xyz=[[0.0, 0.0, 0.0]])
     window.add_object('Other Geometry', second)
     _select(window, 'Geometry', 'Other Geometry')
     window.link_selected()
     assert window.links == [], 'two geometries cannot share a link'
+    assert 'one geometry' in window.statusBar().currentMessage()
     stranger = ShapeSet([1.0], [0.01], ['999X+'], np.ones((1, 1)))
     window.add_object('Stranger', stranger)
     _select(window, 'Geometry', 'Stranger')
     window.link_selected()
-    assert window.links == [], (
-        'shapes naming nodes the geometry lacks cannot link to it')
-    assert 'Cannot link' in window.statusBar().currentMessage()
+    pump()
+    assert any('Stranger' in group['members'] for group in window.links), (
+        'shapes naming nodes the geometry lacks link and are flagged')
 
 
 def test_the_window_links_across_a_test_s_virtual_points(window, pump,

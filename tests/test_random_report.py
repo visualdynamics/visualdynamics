@@ -1199,26 +1199,41 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     view.resize(900, 600)
     outcome = {}
 
-    def probe(_ok):
-        QTimer.singleShot(1500, lambda: view.page().runJavaScript(
-            "const c = document.querySelector('canvas');"
-            "JSON.stringify(c.dataset.home ? JSON.parse(c.dataset.home)"
-            "                              : null)",
-            0, lambda value: (outcome.update(js=value), app.quit())))
+    # polled, not waited on: a fixed delay is a guess about the
+    # runner, and 1.5 s that is plenty here was not enough on a CI
+    # worker — the callback never came and the guard quit the app
+    # (2026-09-21). Ask until the page answers.
+    poll = QTimer()
 
-    view.loadFinished.connect(probe)
+    def answered(value):
+        if value and value != 'null':
+            outcome.update(js=value)
+            poll.stop()
+            app.quit()
+
+    def ask():
+        view.page().runJavaScript(
+            "const c = document.querySelector('canvas');"
+            "JSON.stringify(c && c.dataset.home"
+            "               ? JSON.parse(c.dataset.home) : null)",
+            0, answered)
+
+    poll.timeout.connect(ask)
+    view.loadFinished.connect(lambda _ok: poll.start(250))
     view.load(QUrl.fromLocalFile(str(path)))
     guard = QTimer()
     guard.setSingleShot(True)
     guard.timeout.connect(app.quit)
-    guard.start(30000)
+    guard.start(60000)
     app.exec()
     guard.stop()
+    poll.stop()
     view.setPage(None)
     view.deleteLater()
     for _ in range(10):
         app.processEvents()
 
+    assert 'js' in outcome, 'the page never reported its opening window'
     home = json.loads(outcome['js'])
     assert home is not None, 'the figure rendered and recorded its window'
     zones = block['channels'][0]['zones']

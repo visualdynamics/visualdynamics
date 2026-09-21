@@ -78,6 +78,58 @@ def test_linking_refuses_dofs_the_geometry_lacks():
     assert project.links == [], 'a refused link changes nothing'
 
 
+def test_a_few_points_the_model_lacks_are_not_another_structure():
+    """A run carries virtual channels — drive points, control
+    coordinates, computed places — that were never nodes, and a report
+    died linking a geometry beside three of them (Brandon,
+    2026-09-21). Sharing *no* node is what the refusal is for; a
+    partial overlap links and keeps its indicator."""
+    from visualdynamics.compatibility import check_compatibility
+
+    project = visualdynamics.Project()
+    project.add('Geometry', visualdynamics.Geometry(
+        node_id=[101, 102, 103], node_xyz=np.zeros((3, 3))))
+    project.add('Shapes', ShapeSet([10.0], [0.01],
+                                   ['101X+', '102X+', '1X+'],
+                                   np.ones((1, 3))))
+    assert project.link('Geometry', 'Shapes') == ['Geometry', 'Shapes']
+
+    report = check_compatibility(dict(project), 'Geometry', project.links)
+    assert not report.is_compatible('Shapes'), 'still flagged, not refused'
+    issue = report.issue_for('Shapes')
+    assert issue.missing_dofs == ['1X+'] and issue.shared_nodes == 2
+
+
+def test_a_reference_nowhere_on_the_model_flags_every_record_and_still_links():
+    """Counted over DOFs, never over records: a set shaken at one
+    virtual drive flags all of its records while every response sits
+    on the model exactly."""
+    from visualdynamics.core.data import Frf
+
+    project = visualdynamics.Project()
+    project.add('Geometry', visualdynamics.Geometry(
+        node_id=[101, 102, 103], node_xyz=np.zeros((3, 3))))
+    project.add('FRF', Frf(np.array([1.0, 2.0]), np.ones((3, 2), complex),
+                           response_dof=['101X+', '102X+', '103X+'],
+                           reference_dof=['1X+', '1X+', '1X+']))
+    assert project.link('Geometry', 'FRF') == ['Geometry', 'FRF']
+
+
+def test_a_modal_record_with_no_shape_set_still_refuses():
+    """The other reason a link is refused is untouched: modal
+    coordinates answer to a shape set, and without one there is
+    nothing to draw them against at all."""
+    from visualdynamics.core.data import Frf
+
+    project = visualdynamics.Project()
+    project.add('Geometry', _geometry())
+    project.add('Modal', Frf(np.array([1.0, 2.0]), np.ones((2, 2), complex),
+                             response_dof=['M1', 'M2'],
+                             reference_dof=['M1', 'M2']))
+    with pytest.raises(ValueError, match='cannot link'):
+        project.link('Geometry', 'Modal')
+
+
 def test_the_basis_is_declared_once_and_moves():
     project = visualdynamics.Project()
     project.add('Geometry', _geometry())

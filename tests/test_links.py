@@ -90,6 +90,24 @@ def test_a_link_holds_one_geometry_and_refuses_misfits(window, pump,
     assert 'Cannot link' in window.statusBar().currentMessage()
 
 
+def test_the_window_links_across_a_test_s_virtual_points(window, pump,
+                                                        survey):
+    """The same rule the API keeps: shapes naming a handful of places
+    the model does not draw are this structure with extra points, and
+    the window links them and leaves the indicator to say so."""
+    _airplane_pair(window, survey)
+    geometry = window.project['Geometry']
+    on_the_model = str(geometry.node_id[0])
+    partly = ShapeSet([1.0], [0.01], [f'{on_the_model}X+', '999X+'],
+                      np.ones((1, 2)))
+    window.add_object('Mostly Ours', partly)
+    _select(window, 'Geometry', 'Mostly Ours')
+    window.link_selected()
+    pump()
+    assert any('Mostly Ours' in group['members'] and 'Geometry' in group['members']
+               for group in window.links), 'linked despite the virtual point'
+
+
 def test_renames_and_deletions_keep_links_honest(window, pump, survey):
     _airplane_pair(window, survey)
     _select(window, 'Geometry', 'Shapes')

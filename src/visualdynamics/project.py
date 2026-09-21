@@ -835,7 +835,7 @@ class Project(dict):
         if len(geometries) > 1:
             raise ValueError('a link holds one geometry — '
                              f'{" and ".join(geometries)} cannot share')
-        from .compatibility import check_object, modal_object
+        from .compatibility import blocks_a_link, check_object, modal_object
 
         # a modal member answers to a shape set in the group, whether
         # or not the group holds a geometry; everything else answers
@@ -850,7 +850,10 @@ class Project(dict):
                 None if against is None else against[0],
                 'the active geometry' if against is None else against[1],
                 companions=companions)
-            if issue is not None:
+            # a few points the geometry does not draw are a test's
+            # virtual channels, not a different structure: the
+            # indicator names them and the link stands
+            if blocks_a_link(issue):
                 raise ValueError(f'cannot link: {issue.message}')
         self.links = kept + [{'members': merged, 'role': role}]
         if role is not None:

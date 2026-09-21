@@ -39,9 +39,15 @@ from one reading. A comparison is built on that:
    than the lower one.
 4. **The level.** The RMS error compares the two areas summed over
    every cell: the measurement's against the requirement's, both over
-   the same stretches. The *band outside abort* is the width of the
-   cells that are out as a share of the width judged, so it reads
-   the same whether the cells are lines or bands.
+   the same stretches. The *band outside abort* counts the cells
+   that are out as a share of the cells judged, each weighted by how
+   much of itself was judged — a line cut in half by the end of a
+   written stretch counts for half. Six bands out of forty-seven read
+   as thirteen percent whether they sit at the bottom of the range or
+   the top, which a share of the width in hertz did not: proportional
+   bands are equal in *log* frequency, so the highest band of a
+   sixth-octave decade set is two hundred times the width of the
+   lowest.
 
 One function holds it — `visualdynamics.core.compliance.judge` — and
 the compliance table, the application's comparison plot and the

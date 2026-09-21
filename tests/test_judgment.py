@@ -133,10 +133,10 @@ def test_a_departure_wide_enough_to_move_a_band_is_out_everywhere(name):
         scale_db=0)['out'].sum()
 
 
-def test_the_share_outside_is_a_share_of_width_not_a_count():
-    """The same departure read on lines and on bands is the same share
-    of the band, near enough — a count of cells would differ by a
-    factor of fifty."""
+def test_the_same_departure_reads_the_same_on_lines_and_on_bands():
+    """A departure covering a real stretch of the spectrum is the same
+    share of the comparison whichever form it is read in, even though
+    fifty times more cells are outside on the lines."""
     def shape(f):
         out = np.ones(f.size)
         out[(f >= 250.0) & (f <= 350.0)] = 6.0
@@ -261,3 +261,91 @@ def test_the_window_says_why_a_pair_is_not_compared(window, pump):
     message = window.statusBar().currentMessage()
     assert 'Not compared: ' in message
     assert 'octave bands' in message and 'band the response' in message
+
+
+def octave_case(per_octave=6, low=10.0, high=2000.0, df=1.0):
+    """A flat requirement on proportional bands, and a response that
+    sits on it — the shape a controller's octave report has."""
+    f = np.arange(0.0, 2048.0 + df / 2, df)
+    level = np.where((f >= low) & (f <= high), 0.01, np.nan)
+    written = Specification(f, level[None, :], response_dof=['101Z+'],
+                            ordinate_dim=['acceleration**2/frequency'],
+                            abort_upper=(level * 4)[None, :],
+                            abort_lower=(level / 4)[None, :])
+    held = Psd(f, np.where(np.isfinite(level), 0.01, 0.0)[None, :],
+               response_dof=['101Z+'],
+               ordinate_dim=['acceleration**2/frequency'])
+    return written.to_octave(per_octave), held.to_octave(per_octave)
+
+
+def test_a_band_out_counts_the_same_wherever_it_sits():
+    """Six bands outside abort are six bands, high or low.
+
+    They were not. The share was a share of frequency width in hertz,
+    and proportional bands are equal in *log* frequency — so in a
+    sixth-octave set from 10 Hz to 2 kHz the lowest band is 1.2 Hz
+    wide and the highest 243 Hz. Six bands out read 0.45 % at the
+    bottom and 44.7 % at the top: the same exceedance, a hundredfold
+    apart, and a channel that should have tripped the ten-percent rule
+    read as clean (Brandon, 2026-09-21).
+    """
+    banded, held = octave_case()
+    centers = np.asarray(held.abscissa, dtype=float)
+    inside = np.flatnonzero((centers >= 10.0) & (centers <= 2000.0))
+    judged = len(compliance.cells(banded, held))
+
+    def lifting(which):
+        values = np.array(held.ordinate, dtype=float).copy()
+        values[0, which] *= 1000.0
+        return compliance.compare(
+            banded, Psd(held.abscissa, values, response_dof=['101Z+'],
+                        ordinate_dim=['acceleration**2/frequency'],
+                        bandwidth=held.bandwidth), scale_db=0.0)
+
+    bottom, top = lifting(inside[:6]), lifting(inside[-6:])
+    assert bottom['abort_lines'] == top['abort_lines'] == 6
+    expected = 100.0 * 6 / judged
+    assert bottom['abort_percent'] == pytest.approx(expected, abs=0.01)
+    assert top['abort_percent'] == pytest.approx(expected, abs=0.01)
+    # and that is over ten percent, which is what calls a channel out
+    assert bottom['abort_percent'] > compliance.LINES_PERCENT
+
+    # the widths that made the old reading wrong, so the case is on
+    # the record rather than described
+    widths = np.array([c['span'] for c in compliance.cells(banded, held)])
+    assert widths[-1] > 100 * widths[0]
+
+
+def test_a_line_judged_over_half_its_bin_counts_for_half():
+    """Why this is a weighted count and not a plain one. A written
+    stretch ends in the middle of a line's own bin, and that line is
+    judged over half of itself — so narrowband shares are exactly what
+    a share of hertz gave, to every digit, rather than nearly."""
+    df = 1.0
+    f = np.arange(0.0, 2048.0 + df / 2, df)
+    level = np.where((f >= 10.0) & (f <= 2000.0), 0.01, np.nan)
+    level[(f > 400.0) & (f < 450.0)] = np.nan      # a notch, two more ends
+    specification = Specification(
+        f, level[None, :], response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'],
+        abort_upper=(level * 4)[None, :], abort_lower=(level / 4)[None, :])
+    values = np.nan_to_num(level).copy()
+    values[(f >= 100.0) & (f < 160.0)] *= 1000.0
+    measured = Psd(f, values[None, :], response_dof=['101Z+'],
+                   ordinate_dim=['acceleration**2/frequency'])
+    found = compliance.cells(specification, measured)
+    fractions = np.array([c['width'] / c['span'] for c in found])
+    assert set(np.round(np.unique(fractions), 6)) == {0.5, 1.0}, (
+        'whole lines, and the half ones at the ends of the stretch'
+    )
+    hertz = np.array([c['width'] for c in found])
+    out = compliance.judge(specification, measured, limit='abort_upper',
+                           over=True, scale_db=0.0)['out']
+    assert out.any(), 'the response is outside abort somewhere'
+    by_hertz = 100.0 * hertz[out].sum() / hertz.sum()
+    got = compliance.compare(specification, measured, scale_db=0.0)
+    assert got['abort_percent'] == pytest.approx(by_hertz, rel=1e-12)
+    assert got['abort_percent'] != pytest.approx(
+        100.0 * out.sum() / len(found), rel=1e-12), (
+        'and a plain count would have moved it, which is the point'
+    )

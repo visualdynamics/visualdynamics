@@ -301,7 +301,8 @@ def cells(specification: Specification, measured: DataArray,
     -------
     list of dict
         Each with 'low' and 'high' (the cell's outer reach), 'pieces'
-        (the stretches judged, inside it) and 'width' (their sum).
+        (the stretches judged, inside it), 'width' (their sum) and
+        'span' (the whole bin it came from, judged or not).
     """
     if comparable(specification, measured) is not None:
         return []
@@ -326,7 +327,12 @@ def cells(specification: Specification, measured: DataArray,
         if pieces:
             out.append({'low': pieces[0][0], 'high': pieces[-1][1],
                         'pieces': pieces,
-                        'width': float(sum(b - a for a, b in pieces))})
+                        'width': float(sum(b - a for a, b in pieces)),
+                        # the bin this cell came from, whole. `width`
+                        # over `span` is how much of one line or one
+                        # band was judged, which is what a share of
+                        # the comparison counts in.
+                        'span': float(high) - float(low)})
     return out
 
 
@@ -829,10 +835,29 @@ def compare(specification: Specification, measured: DataArray,
             or not np.isfinite(spec_rms) or not np.isfinite(got_rms)
             else 20.0 * np.log10(got_rms / spec_rms)),
     }
-    # the cells outside a pair of limits, and the share of the judged
-    # frequency width they make — a share of width rather than a count,
-    # which reads the same whether the cells are lines or bands
-    width = np.array([cell['width'] for cell in found], dtype=float)
+    # the cells outside a pair of limits, and the share of the
+    # comparison they make.
+    #
+    # Counted in cells, each weighted by how much of itself was judged
+    # — `width` over `span`. This used to be a share of frequency
+    # *width* in hertz, on the reasoning that it reads the same
+    # whether the cells are lines or bands. It does not (Brandon,
+    # 2026-09-21). Proportional bands are equal in *log* frequency, so
+    # in hertz they grow geometrically: in a sixth-octave set from
+    # 10 Hz to 2 kHz the lowest band is 1.2 Hz wide and the highest
+    # 243 Hz, and six bands outside abort read 0.45 % at the bottom
+    # against 44.7 % at the top. The same six bands, a hundredfold
+    # apart, and a channel that should have tripped the ten-percent
+    # rule did not.
+    #
+    # Narrowband numbers do not move, to every digit: those bins are
+    # all one width, so weighting by the fraction judged and weighting
+    # by hertz are the same ratio. Cells *are* cut — at the ends of
+    # every written stretch the outermost line is judged over half its
+    # own bin — which is why this is a weighted count and not a plain
+    # one.
+    share = np.array([cell['width'] / cell['span'] if cell['span'] else 0.0
+                      for cell in found], dtype=float)
     for pair in ('warning', 'abort'):
         if not any(f'{pair}_{edge}' in specification.limits
                    for edge in ('lower', 'upper')):
@@ -844,8 +869,8 @@ def compare(specification: Specification, measured: DataArray,
                                 measured_record, edge, over, scale_db)['out']
         beyond &= counted
         out[f'{pair}_lines'] = int(beyond.sum())
-        out[f'{pair}_percent'] = (100.0 * float(width[beyond].sum())
-                                  / float(width[counted].sum())
+        out[f'{pair}_percent'] = (100.0 * float(share[beyond].sum())
+                                  / float(share[counted].sum())
                                   if counted.any() else 0.0)
     return out
 

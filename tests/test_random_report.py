@@ -1162,10 +1162,11 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     import json
     import os
     import re
+    import time
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -1199,21 +1200,14 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     view.resize(900, 600)
     outcome = {}
 
-    # polled, not waited on: a fixed delay is a guess about the runner.
-    # The reading carries the page's state with it, so a failure says
-    # what was there instead of only what was missing.
-    poll = QTimer()
-
-    def answered(value):
-        if not value:
-            return
-        seen = json.loads(value)
-        outcome['seen'] = seen
-        if seen.get('home'):
-            outcome['js'] = seen['home']
-            poll.stop()
-            app.quit()
-
+    # driven here rather than through `app.exec()`. On a CI worker this
+    # came back with nothing at all — `loadFinished` never seen, no
+    # answer, 60 s of guard unused — which is what an `exec()` that
+    # returns at once looks like, and a `quit()` left pending by an
+    # earlier test in the same worker is enough to do that
+    # (2026-09-21). Pumping the events this test needs depends on
+    # nothing another test did. The reading carries the page's state
+    # with it, so a failure says what was there.
     def ask():
         view.page().runJavaScript(
             "const c = document.querySelector('canvas');"
@@ -1223,19 +1217,25 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
             " ready: document.readyState,"
             " home: c && c.dataset.home ? JSON.parse(c.dataset.home)"
             "                           : null})",
-            0, answered)
+            0, lambda value: outcome.update(seen=json.loads(value))
+            if value else None)
 
-    poll.timeout.connect(ask)
-    view.loadFinished.connect(lambda ok: (outcome.update(loaded=ok),
-                                          poll.start(250)))
+    view.loadFinished.connect(lambda ok: outcome.update(loaded=ok))
     view.load(QUrl.fromLocalFile(str(path)))
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(60000)
-    app.exec()
-    guard.stop()
-    poll.stop()
+    deadline = time.monotonic() + 60.0
+    asked = 0.0
+    while 'js' not in outcome and time.monotonic() < deadline:
+        app.processEvents()
+        now = time.monotonic()
+        if now - asked > 0.25:
+            asked = now
+            ask()
+        if (outcome.get('seen') or {}).get('home'):
+            outcome['js'] = outcome['seen']['home']
+        time.sleep(0.01)
+
+    # torn down while the application still runs: a page alive at
+    # interpreter exit segfaults the process
     view.setPage(None)
     view.deleteLater()
     for _ in range(10):

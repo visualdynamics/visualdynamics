@@ -111,7 +111,16 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     foreign file is one read, and nothing inside netCDF or UFF parsing
     reports fractions worth relaying.
     """
-    path = str(path)
+    # a person types a path where the window hands one over: `~` is
+    # theirs to write and Python's to expand, and a path that is not
+    # there has to say so. Both came back as "No importer recognizes",
+    # which reads as "your file is the wrong kind" and is how a typo
+    # looked like an unsupported format (Brandon, 2026-09-20).
+    path = os.path.expanduser(str(path))
+    if not os.path.exists(path):
+        raise FileNotFoundError(f'no file at {path}')
+    if os.path.isdir(path):
+        raise IsADirectoryError(f'{path} is a folder, not a file')
     if path.endswith('.vdyn'):
         return load(path, progress=progress)
     if format is not None:
@@ -123,7 +132,14 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     for imp in _IMPORTERS:
         if imp.sniff(path):
             return imp.load(path, **kwargs)
-    raise ValueError(f"No importer recognizes {path}")
+    # a refusal that says what the file *is* saves a round trip: a
+    # container whose contents decide the reader, and whose name does
+    # not, is the case that brought this up (Brandon, 2026-09-20)
+    from .sniffing import describe
+
+    said = describe(path)
+    raise ValueError(f"No importer recognizes {path}"
+                     + (f" — {said}" if said else ''))
 
 
 register_importer('sdynpy_geometry', 'sdynpy native geometry (.npz)',

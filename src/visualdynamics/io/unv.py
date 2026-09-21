@@ -46,7 +46,7 @@ import re
 import numpy as np
 
 from ..core.data import direction_code
-from ..core.geometry import ELEMENT_TYPES
+from ..core.geometry import ELEMENT_TYPES, to_global, to_local
 from .sniffing import text_head
 
 _FLOAT = re.compile(r'[-+]?\d*\.?\d+(?:[DdEe][-+]?\d+)?')
@@ -639,11 +639,21 @@ def _build_geometry(nodes, tracelines, elements, scale, length_unit,
     from ..core.geometry import Geometry
 
     node_ids = [n[0] for n in nodes]
+    # a 2411 record states a node's position in the frame it is placed
+    # in — the record's own second column — and the frames are in the
+    # 2420 beside it. Read as written they land wherever those numbers
+    # happen to point in global (Brandon, 2026-09-20). Resolved before
+    # the unit scale, because an angle is not a length.
+    frames = ([s[0] for s in systems], [s[1] for s in systems],
+              np.array([s[4] for s in systems])) if systems else None
+    written = np.array([n[4] for n in nodes], dtype=float)
+    placement = [n[1] for n in nodes]
     return Geometry(
         length_unit=length_unit,
         node_id=node_ids,
-        node_xyz=np.array([n[4] for n in nodes]) * scale,
-        node_def_cs=[n[1] for n in nodes],
+        node_xyz=(written if frames is None
+                  else to_global(written, placement, *frames)) * scale,
+        node_def_cs=placement,
         node_disp_cs=[n[2] for n in nodes],
         node_color=[n[3] for n in nodes],
         cs_id=[s[0] for s in systems] or None,
@@ -728,12 +738,17 @@ def _geometry_datasets(geometry, unit_system=None):
     points, matrices = geometry_values(geometry, unit_system)
     out = [_coordinate_system_dataset(geometry, matrices)]
 
+    # written back into each node's own placement frame, or the file
+    # would state global coordinates under a local frame and the next
+    # reader would resolve them a second time
+    written = to_local(points, geometry.node_def_cs, geometry.cs_id,
+                       geometry.cs_type, matrices)
     nodes = []
     for i, node in enumerate(geometry.node_id):
         nodes.append(f'{int(node):10d}{int(geometry.node_def_cs[i]):10d}'
                      f'{int(geometry.node_disp_cs[i]):10d}'
                      f'{int(geometry.node_color[i]):10d}\n')
-        nodes.append(''.join(f'{v:25.16E}' for v in points[i]) + '\n')
+        nodes.append(''.join(f'{v:25.16E}' for v in written[i]) + '\n')
     out.append(_block(2411, ''.join(nodes)))
 
     for i, conn in enumerate(geometry.traceline_conn):

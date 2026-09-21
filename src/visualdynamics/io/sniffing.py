@@ -39,3 +39,32 @@ def npz_has(path: str | os.PathLike, keys: Iterable[str], *,
             return set(keys) <= set(d.files)
     except Exception:  # noqa: BLE001 - sniffers must not raise on foreign files
         return False
+
+
+def npz_summary(path: str | os.PathLike) -> str | None:
+    """A one-line description of what an `.npz` holds, for a refusal
+    that would otherwise say only that nothing recognized it. None
+    when the file is not an npz archive."""
+    if not str(path).lower().endswith('.npz'):
+        return None
+    try:
+        import numpy as np
+
+        with np.load(path, allow_pickle=True) as d:
+            names = sorted(d.files)
+        said = f'an npz archive holding {len(names)} array'
+        said += 's' if len(names) != 1 else ''
+        if names:
+            said += ': ' + ', '.join(names[:8])
+            said += ', …' if len(names) > 8 else ''
+        return said
+    except Exception:  # noqa: BLE001
+        return 'an npz archive that could not be read'
+
+
+def describe(path: str | os.PathLike) -> str | None:
+    """What a file is, for a refusal to say. An `.npz` is a container
+    whose contents decide which reader wants it, and a refusal that
+    names only the path cannot tell the wrong file from an
+    unsupported one."""
+    return npz_summary(path)

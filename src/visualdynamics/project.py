@@ -2313,7 +2313,7 @@ class Project(dict):
 
         name = self.name_of(name)
         html = render_html(self[name], self, unit_system, links=self.links)
-        path = str(path)
+        path = os.path.expanduser(str(path))
         with open(path, 'w', encoding='utf-8') as out:
             out.write(html)
         return path

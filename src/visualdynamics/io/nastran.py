@@ -49,7 +49,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.geometry import ELEMENT_TYPES, Geometry
+from ..core.geometry import ELEMENT_TYPES, Geometry, placed, to_local
 from .sniffing import text_head
 
 EXTENSIONS = ('.bdf', '.dat', '.nas')
@@ -336,24 +336,15 @@ def _resolve_positions(nodes, systems, path):
         if cp == 0:
             out[k] = xyz
             continue
+        # a deck that places a grid in a frame it never defines is
+        # wrong about itself, and saying which grid beats drawing it
+        # somewhere plausible
         if cp not in systems:
             raise ValueError(f'{path}: grid {label} is defined in '
                              f'coordinate system {cp}, which the deck '
                              'does not define')
-        kind = systems[cp]['kind']
-        local = np.asarray(xyz, dtype=float)
-        if kind == 1:      # cylindrical: R, theta (degrees), Z
-            r, theta, z = local
-            local = np.array([r * np.cos(np.radians(theta)),
-                              r * np.sin(np.radians(theta)), z])
-        elif kind == 2:    # spherical: R, theta from +z, phi (degrees)
-            r, theta, phi = local
-            theta, phi = np.radians(theta), np.radians(phi)
-            local = np.array([r * np.sin(theta) * np.cos(phi),
-                              r * np.sin(theta) * np.sin(phi),
-                              r * np.cos(theta)])
-        matrix = _resolved_matrix(systems, cp, path)
-        out[k] = matrix[3] + local @ matrix[:3]
+        out[k] = placed(xyz, systems[cp]['kind'],
+                        _resolved_matrix(systems, cp, path))
     return out
 
 
@@ -422,8 +413,15 @@ def save(geometry: Geometry, path: str | os.PathLike,
         b = a + matrix[2]          # the z axis point
         c = a + matrix[0]          # in the x-z plane
         lines.append(_card(name, int(cid), 0, *a, *b, *c))
+    # each grid is stated in the frame its CP field names, or the deck
+    # would carry basic-frame values under a local CP and every reader
+    # of it, this one included, would resolve them a second time
+    written = to_local(np.asarray(geometry.node_xyz, dtype=float),
+                       geometry.node_def_cs, geometry.cs_id,
+                       geometry.cs_type,
+                       np.asarray(geometry.cs_matrix, dtype=float))
     for i, node in enumerate(geometry.node_id):
-        x, y, z = (float(v) for v in geometry.node_xyz[i])
+        x, y, z = (float(v) for v in written[i])
         lines.append(
             f'GRID*   {int(node):>16d}'
             f'{int(geometry.node_def_cs[i]):>16d}'

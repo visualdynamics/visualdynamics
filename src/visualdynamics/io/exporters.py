@@ -144,7 +144,9 @@ def export_file(obj: Any, path: str | os.PathLike, format: str | None = None,
     written as, since "cannot export" is nearly always a question of which
     format.
     """
-    path = str(path)
+    # `~` is the writer's to expand too, or a file lands in a folder
+    # named for a tilde (the import's own courtesy, 2026-09-20)
+    path = os.path.expanduser(str(path))
     available = exporters(obj)
     if format is not None:
         for exporter in _EXPORTERS:

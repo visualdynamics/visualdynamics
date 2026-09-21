@@ -24,13 +24,18 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 import numpy as np
 
-from ..core.geometry import Geometry
+from ..core.geometry import Geometry, to_global
 from ..units import si_factor
 from .sniffing import npz_has
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    return npz_has(path, {'node', 'coordinate_system', 'traceline', 'element'})
+    # the two a geometry cannot be without. Tracelines and elements are
+    # each optional — a point cloud has neither, and asking for all
+    # four turned a geometry that happened to lack one into a file no
+    # reader would claim (Brandon, 2026-09-20). Together these two
+    # names belong to no other sdynpy save.
+    return npz_has(path, {'node', 'coordinate_system'})
 
 
 def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
@@ -41,15 +46,22 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     with np.load(path, allow_pickle=True) as d:
         node = d['node']
         cs = d['coordinate_system']
-        tl = d['traceline']
-        el = d['element']
+        tl = d['traceline'] if 'traceline' in d else np.empty(0, TRACELINE_DTYPE)
+        el = d['element'] if 'element' in d else np.empty(0, ELEMENT_DTYPE)
 
-    matrix = cs['matrix'].astype(np.float64).copy()
+    raw = cs['matrix'].astype(np.float64)
+    matrix = raw.copy()
     matrix[:, 3, :] *= scale  # origin row carries length
 
+    # a node is written in the frame it is placed in, and reading those
+    # numbers as global puts it somewhere else entirely (Brandon,
+    # 2026-09-20). Resolved in the file's own units, because an angle
+    # is not a length and the scale must not touch it.
     return Geometry(
         node_id=node['id'],
-        node_xyz=node['coordinate'].astype(np.float64) * scale,
+        node_xyz=to_global(node['coordinate'].astype(np.float64),
+                           node['def_cs'], cs['id'], cs['cs_type'],
+                           raw) * scale,
         node_def_cs=node['def_cs'],
         node_disp_cs=node['disp_cs'],
         node_color=node['color'],

@@ -145,3 +145,105 @@ def test_the_nastran_and_exodus_codes_still_mean_what_they_write():
     assert ELEMENT_TYPES[161][2] == 'point', 'CONM2, a mass at a grid'
     assert ELEMENT_TYPES[201][0] == 'pyramid5'
     assert set(_ELEM_TYPES.values()) <= set(ELEMENT_TYPES)
+
+
+def test_the_node_count_corrects_a_descriptor_that_disagrees():
+    """A file states both what an element is and how many nodes it
+    has, and the two can contradict each other: one wrote a four-node
+    element as descriptor 41, a plane-stress *triangle*, and it drew
+    as a triangle with the fourth node dropped (Brandon, 2026-09-20).
+    The count is the element; the descriptor is a label on it."""
+    from visualdynamics.core.geometry import reconcile_type
+
+    assert reconcile_type(41, 4) == 44, 'a four-node plane-stress face is a quad'
+    assert reconcile_type(41, 8) == 45
+    assert reconcile_type(41, 3) == 41, 'agreeing already: left alone'
+    assert reconcile_type(44, 3) == 41, 'and the other way'
+    assert reconcile_type(91, 4) == 94, 'the shell family keeps its own'
+    assert reconcile_type(51, 4) == 54, 'so does plane strain'
+    assert reconcile_type(111, 8) == 115, 'a solid too'
+    assert reconcile_type(21, 3) == 23, 'and a beam'
+
+
+def test_a_descriptor_with_no_sibling_to_match_stands():
+    """An element nobody can name is better carried as written than
+    renamed to a guess."""
+    from visualdynamics.core.geometry import reconcile_type
+
+    assert reconcile_type(41, 5) == 41, 'no five-node face in the family'
+    assert reconcile_type(999, 4) == 999, 'not a descriptor at all'
+    assert reconcile_type(41, 0) == 41, 'no nodes listed: nothing to read'
+
+
+def test_a_geometry_reads_the_elements_it_holds():
+    """Every source states both, so the mending is the geometry's, not
+    one reader's: an sdynpy archive is where this one came from
+    (Brandon, 2026-09-20)."""
+    import numpy as np
+
+    import visualdynamics
+    from visualdynamics.core.geometry import face_corners
+
+    geometry = visualdynamics.Geometry(
+        node_id=[1, 2, 3, 4],
+        node_xyz=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+        elem_id=[1], elem_type=[41], elem_color=[7], elem_conn=[[1, 2, 3, 4]])
+    assert int(geometry.elem_type[0]) == 44, 'read as the quadrilateral it is'
+    assert list(geometry.elem_conn[0]) == [1, 2, 3, 4]
+    assert face_corners(int(geometry.elem_type[0])) == 4, 'and drawn with four'
+    honest = visualdynamics.Geometry(
+        node_id=[1, 2, 3], node_xyz=np.zeros((3, 3)),
+        elem_id=[1], elem_type=[41], elem_color=[7], elem_conn=[[1, 2, 3]])
+    assert int(honest.elem_type[0]) == 41, 'agreeing already: left alone'
+
+
+def test_an_sdynpy_archive_of_a_mislabelled_quad_reads_as_a_quad(tmp_path):
+    """The case itself: a geometry saved from sdynpy whose element
+    array says 41 over four nodes."""
+    import numpy as np
+
+    import visualdynamics
+    from visualdynamics.io.sdynpy_npz import CS_DTYPE, ELEMENT_DTYPE, NODE_DTYPE
+
+    node = np.zeros(4, NODE_DTYPE)
+    node['id'] = [1, 2, 3, 4]
+    node['coordinate'] = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]
+    node['def_cs'] = node['disp_cs'] = 1
+    cs = np.zeros(1, CS_DTYPE)
+    cs['id'] = 1
+    cs['matrix'] = [[[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]]]
+    element = np.zeros(1, ELEMENT_DTYPE)
+    element['id'] = 1
+    element['type'] = 41
+    conn = np.empty(1, dtype=object)
+    conn[0] = np.array([1, 2, 3, 4])
+    element['connectivity'] = conn
+    path = tmp_path / 'mislabelled.npz'
+    np.savez(path, node=node, coordinate_system=cs, element=element)
+    geometry = visualdynamics.import_file(path)
+    assert int(geometry.elem_type[0]) == 44
+    assert list(geometry.elem_conn[0]) == [1, 2, 3, 4]
+
+
+def test_a_universal_file_reads_the_element_it_holds(tmp_path):
+    """The same through a universal file, whose record states the
+    count separately from the descriptor."""
+    import visualdynamics
+    from visualdynamics.core.geometry import face_corners
+
+    path = tmp_path / 'mislabelled.unv'
+    path.write_text(
+        '    -1\n  2411\n'
+        + ''.join(f'{i:10d}{1:10d}{1:10d}{11:10d}\n'
+                  f'{x:25.16E}{y:25.16E}{0.0:25.16E}\n'
+                  for i, (x, y) in enumerate(
+                      ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), start=1))
+        + '    -1\n    -1\n  2412\n'
+        f'{1:10d}{41:10d}{1:10d}{1:10d}{7:10d}{4:10d}\n'
+        f'{1:10d}{2:10d}{3:10d}{4:10d}\n'
+        '    -1\n')
+    geometry = visualdynamics.import_file(path)
+    assert len(geometry.elem_conn) == 1
+    assert int(geometry.elem_type[0]) == 44, 'read as the quadrilateral it is'
+    assert list(geometry.elem_conn[0]) == [1, 2, 3, 4]
+    assert face_corners(int(geometry.elem_type[0])) == 4, 'and drawn with four'

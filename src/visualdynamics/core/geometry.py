@@ -130,6 +130,146 @@ ELEMENT_TYPES = {
 }
 
 
+def placed(local: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
+    """One point written in a frame, as global cartesian.
+
+    `kind` is the frame's `CS_TYPES` code and `matrix` its `(4, 3)`
+    rows — three directions then the origin. A cylindrical frame
+    writes (r, theta, z) and a spherical one (r, theta from +z, phi),
+    both with the angles in **degrees**, which is what the universal
+    file, a Nastran CORD2C/S and sdynpy all mean by them.
+    """
+    local = np.asarray(local, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    if int(kind) == 1:
+        r, theta, z = local
+        theta = np.radians(theta)
+        local = np.array([r * np.cos(theta), r * np.sin(theta), z])
+    elif int(kind) == 2:
+        r, theta, phi = local
+        theta, phi = np.radians(theta), np.radians(phi)
+        local = np.array([r * np.sin(theta) * np.cos(phi),
+                          r * np.sin(theta) * np.sin(phi),
+                          r * np.cos(theta)])
+    return matrix[3] + local @ matrix[:3]
+
+
+def written_in(point: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
+    """The inverse of `placed`: a global cartesian point as the frame
+    would write it, so a file states its nodes the way it stated them
+    before."""
+    point = np.asarray(point, dtype=float)
+    matrix = np.asarray(matrix, dtype=float)
+    local = (point - matrix[3]) @ matrix[:3].T
+    if int(kind) == 1:
+        x, y, z = local
+        return np.array([np.hypot(x, y), np.degrees(np.arctan2(y, x)), z])
+    if int(kind) == 2:
+        x, y, z = local
+        r = float(np.sqrt(x * x + y * y + z * z))
+        theta = np.degrees(np.arccos(z / r)) if r else 0.0
+        return np.array([r, theta, np.degrees(np.arctan2(y, x))])
+    return local
+
+
+def _frames(cs_id, cs_type, cs_matrix):
+    ids = [int(i) for i in np.asarray(cs_id).ravel()]
+    kinds = np.asarray(cs_type).ravel()
+    matrices = np.asarray(cs_matrix, dtype=float).reshape(-1, 4, 3)
+    return {code: (int(kinds[k]), matrices[k]) for k, code in enumerate(ids)}
+
+
+def to_global(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
+              cs_type: ArrayLike, cs_matrix: ArrayLike) -> np.ndarray:
+    """Node coordinates, each written in the frame it is placed in, as
+    global cartesian — what `Geometry` stores.
+
+    A file states a node's position in whatever frame it was drawn in,
+    and the frame is the node's `def_cs`. Reading those numbers as if
+    they were global puts the node somewhere else entirely, which is
+    what a geometry with local placement frames looked like (Brandon,
+    2026-09-20). A node whose frame the file does not define, or which
+    names the global frame, is taken as written.
+
+    Parameters
+    ----------
+    node_xyz : array-like
+        `(nodes, 3)` as the source wrote them.
+    node_def_cs : array-like
+        The frame each node is placed in.
+    cs_id, cs_type, cs_matrix : array-like
+        The frames themselves, as `Geometry` holds them.
+
+    Returns
+    -------
+    numpy.ndarray
+        `(nodes, 3)` in the global cartesian frame.
+    """
+    xyz = np.asarray(node_xyz, dtype=float).reshape(-1, 3)
+    frames = _frames(cs_id, cs_type, cs_matrix)
+    out = xyz.copy()
+    for k, code in enumerate(np.asarray(node_def_cs).ravel()[:len(xyz)]):
+        found = frames.get(int(code))
+        if found is not None:
+            out[k] = placed(xyz[k], found[0], found[1])
+    return out
+
+
+def to_local(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
+             cs_type: ArrayLike, cs_matrix: ArrayLike) -> np.ndarray:
+    """The inverse of `to_global`, for a writer that states each node
+    in the frame the geometry says it is placed in."""
+    xyz = np.asarray(node_xyz, dtype=float).reshape(-1, 3)
+    frames = _frames(cs_id, cs_type, cs_matrix)
+    out = xyz.copy()
+    for k, code in enumerate(np.asarray(node_def_cs).ravel()[:len(xyz)]):
+        found = frames.get(int(code))
+        if found is not None:
+            out[k] = written_in(xyz[k], found[0], found[1])
+    return out
+
+
+def reconcile_type(code: int, node_count: int) -> int:
+    """The descriptor that matches how many nodes an element really
+    has, when the two disagree.
+
+    A file states both, and they can contradict each other: one wrote
+    a four-node element as descriptor 41, a plane-stress *triangle*,
+    and it drew as a triangle with the fourth node dropped (Brandon,
+    2026-09-20). The count is the element; the descriptor is a label
+    on it. So a descriptor whose count is wrong is exchanged for the
+    one in its own family that carries that many nodes — 41 with four
+    nodes is 44, the plane-stress quadrilateral, keeping the family
+    the file chose and mending only what it got wrong.
+
+    2412 numbers a family in one decade, triangles before
+    quadrilaterals, which is what makes the sibling findable. When no
+    sibling fits, the descriptor stands: an element nobody can name is
+    better carried as written than renamed to a guess.
+
+    Parameters
+    ----------
+    code : int
+        The descriptor the file gave.
+    node_count : int
+        How many nodes the file actually listed for it.
+
+    Returns
+    -------
+    int
+        The descriptor to use.
+    """
+    code = int(code)
+    known = ELEMENT_TYPES.get(code)
+    if known is None or node_count < 1 or known[1] == node_count:
+        return code
+    family, render = code // 10, known[2]
+    for other, (_name, count, kind) in ELEMENT_TYPES.items():
+        if other // 10 == family and kind == render and count == node_count:
+            return other
+    return code
+
+
 def face_corners(code: int) -> int:
     """How many corners a face element is drawn with: three for a
     triangle, four for a quadrilateral, whichever family its
@@ -283,6 +423,17 @@ class Geometry:
                                       else [''] * len(self.block_id))
         self.elem_conn: list[IdArray] = [
             np.asarray(c, dtype=np.int64) for c in (elem_conn or [])]
+        # a source states both what an element is and which nodes it
+        # joins, and the two can contradict each other — a four-node
+        # element carrying a triangle's descriptor drew as a triangle,
+        # a node short (Brandon, 2026-09-20). The nodes are the
+        # element; `reconcile_type` mends the label. Here rather than
+        # in each reader, so every source is read the same way.
+        if len(self.elem_type) == len(self.elem_conn):
+            self.elem_type = np.array(
+                [reconcile_type(int(code), len(conn))
+                 for code, conn in zip(self.elem_type, self.elem_conn)],
+                dtype=np.int64) if len(self.elem_conn) else self.elem_type
         #: the reference point, mass and inertia the rigid-body view
         #: sets, riding the geometry the way averaging rides a time
         #: history (`core.rigid`); None until set or adopted

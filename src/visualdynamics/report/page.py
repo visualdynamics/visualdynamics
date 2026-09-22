@@ -1188,8 +1188,11 @@ function sceneBlock(block) {
   resetView.className = 'reset'; resetView.textContent = 'Reset View';
   controls.appendChild(resetView);
   const hint = document.createElement('span'); hint.className = 'hint';
-  hint.textContent = 'drag to rotate, wheel to zoom'
-    + (block.unit ? ' — coordinates in ' + block.unit : '');
+  /* no unit on the hint: a scene shows a shape, never a coordinate or
+     a real scale, so naming the length the points happen to be in
+     answered a question the figure does not raise (Brandon,
+     2026-09-22) */
+  hint.textContent = 'drag to rotate, wheel to zoom';
   controls.appendChild(hint);
   const c = captionFor(block); if (c) s.appendChild(c);
 

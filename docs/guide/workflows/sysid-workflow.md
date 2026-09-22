@@ -95,6 +95,31 @@ recording — the record a control run stands on.
 
 And the script never has to be reconstructed by hand: the **console tab** along the bottom of the window writes it live as you click — every act of the session as the line that replays it. Expand it, copy the stretch you want, and it runs as-is.
 
+The whole thing is one call when the defaults are right:
+
+```python
+import visualdynamics
+
+visualdynamics.system_id_report('sysid.nc4', 'sysid.html')
+```
+
+It asks for what it is not given, exactly as
+[the random vibration report](random-workflow.md) does. Called with no
+run it opens a file dialog, takes as many recordings as are chosen and
+writes one report each; a run chosen that way is asked once for a
+geometry to share across the batch, where Cancel means none. `path`
+may be the file to write or a folder each report lands in under its
+run's own name.
+
+```python
+visualdynamics.system_id_report()                  # ask for both
+visualdynamics.system_id_report(path='reports/')   # ask, write here
+```
+
+`visualdynamics.system_id_run` is the same workup stopping at the
+project, for when it should live on — to save as `.vdyn`, or to read
+the plant against something else.
+
 
 ```python
 import numpy as np

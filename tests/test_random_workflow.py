@@ -14,6 +14,8 @@ there is a workflow that has to be finished by hand in the GUI.
 
 from __future__ import annotations
 
+import pathlib
+
 import numpy as np
 import pytest
 from conftest import fixture_path
@@ -197,7 +199,7 @@ def test_the_geometry_and_the_photos_ride_along(qt_app, tmp_path):
     assert {'Time History', 'Geometry', 'Photos'} <= set(group['members'])
     path = visualdynamics.random_vibration_report(
         fixture_path('plate', RUN), tmp_path / 'run.html', last=10.0,
-        geometry=fixture_path('plate', 'geometry.npz'), length_unit='m',
+        geometry=fixture_path('plate', 'geometry.npz'),
         photos=[folder / 'side.png', folder / 'front.png'])
     html = (tmp_path / 'run.html').read_text(encoding='utf-8')
     assert str(path) == str(tmp_path / 'run.html')
@@ -341,3 +343,339 @@ def test_the_script_and_the_window_agree(worked_up, window, pump):
     coherence = next(obj for obj in window.objects.values()
                      if isinstance(obj, MultipleCoherence))
     assert np.allclose(coherence.ordinate, worked_up.coherence.ordinate)
+
+
+def test_a_folder_takes_the_run_s_own_name(tmp_path):
+    """`path` may be the file to write or the folder to write into.
+
+    A campaign is a folder of runs and nobody wants to name each
+    report after its run by hand (Brandon, 2026-09-22)."""
+    folder = tmp_path / 'reports'
+    folder.mkdir()
+    written = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), folder)
+    assert pathlib.Path(written) == folder / 'random.html'
+    assert pathlib.Path(written).is_file()
+    # and a name that is not a folder is still the file to write
+    named = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'named.html')
+    assert pathlib.Path(named) == tmp_path / 'named.html'
+
+
+def test_a_folder_that_does_not_exist_yet_is_a_file_name(tmp_path):
+    """The one case with no right answer, decided and written down:
+    there is no telling a folder nobody has made from a file nobody
+    has written, and guessing folder would put the report where
+    nothing looks for it."""
+    written = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'no_extension')
+    assert pathlib.Path(written) == tmp_path / 'no_extension'
+    assert pathlib.Path(written).is_file()
+
+
+def test_left_out_it_asks_once_and_reports_on_everything_chosen(tmp_path,
+                                                                monkeypatch):
+    """No run given: a dialog, and one report per run chosen.
+
+    **One geometry for the batch, asked for once.** A campaign is a
+    folder of runs on one article (Brandon, 2026-09-22), so the
+    question is put before the loop and its answer is used by every
+    report. Counted rather than merely observed: a test that only
+    checks a dialog happened cannot tell one from three.
+    """
+    import shutil
+
+    from visualdynamics.gui import ask
+
+    runs = []
+    for name in ('run_a', 'run_b', 'run_c'):
+        runs.append(tmp_path / f'{name}.nc4')
+        shutil.copy(fixture_path('plate', RUN), runs[-1])
+    calls = {'runs': 0, 'geometry': 0}
+
+    def chose_runs(*a, **k):
+        calls['runs'] += 1
+        return [str(r) for r in runs]
+
+    def chose_geometry(*a, **k):
+        calls['geometry'] += 1
+        return str(fixture_path('plate', 'geometry.npz'))
+
+    monkeypatch.setattr(ask, 'for_runs', chose_runs)
+    monkeypatch.setattr(ask, 'for_geometry', chose_geometry)
+    folder = tmp_path / 'out'
+    folder.mkdir()
+    written = visualdynamics.random_vibration_report(path=folder)
+    assert calls == {'runs': 1, 'geometry': 1}, (
+        f'asked once each for three runs, not per run: {calls}'
+    )
+    assert [pathlib.Path(p).name for p in written] == [
+        'run_a.html', 'run_b.html', 'run_c.html']
+    assert all(pathlib.Path(p).is_file() for p in written)
+    assert all('Test geometry and measurement locations'
+               in pathlib.Path(p).read_text() for p in written), (
+        'and that one geometry is in every report of the batch'
+    )
+
+
+def test_one_run_chosen_still_answers_with_one_path(tmp_path, monkeypatch):
+    from visualdynamics.gui import ask
+
+    monkeypatch.setattr(ask, 'for_runs',
+                        lambda *a, **k: [str(fixture_path('plate', RUN))])
+    monkeypatch.setattr(ask, 'for_geometry', lambda *a, **k: None)
+    written = visualdynamics.random_vibration_report(path=tmp_path)
+    assert isinstance(written, str), 'a list is for a batch, not for one'
+    assert pathlib.Path(written) == tmp_path / 'random.html'
+
+
+def test_several_runs_refuse_one_file_name(tmp_path, monkeypatch):
+    from visualdynamics.gui import ask
+
+    monkeypatch.setattr(ask, 'for_runs',
+                        lambda *a, **k: [str(fixture_path('plate', RUN))] * 2)
+    monkeypatch.setattr(ask, 'for_geometry', lambda *a, **k: None)
+    with pytest.raises(ValueError, match='cannot be written to one file'):
+        visualdynamics.random_vibration_report(path=tmp_path / 'one.html')
+
+
+def test_choosing_nothing_says_so(monkeypatch):
+    from visualdynamics.gui import ask
+
+    monkeypatch.setattr(ask, 'for_runs', lambda *a, **k: [])
+    with pytest.raises(ValueError, match='no run chosen'):
+        visualdynamics.random_vibration_report()
+
+
+def test_a_named_run_without_a_geometry_asks_nothing(tmp_path, monkeypatch):
+    """The contract this function was built on: a script that names its
+    run and leaves the geometry out means *no geometry*, and nothing
+    opens. `ASK` is how it says otherwise."""
+    from visualdynamics.gui import ask
+
+    def refuse(*a, **k):
+        raise AssertionError('a dialog opened in a scripted call')
+
+    monkeypatch.setattr(ask, 'for_runs', refuse)
+    monkeypatch.setattr(ask, 'for_geometry', refuse)
+    written = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'quiet.html')
+    assert pathlib.Path(written).is_file()
+
+    monkeypatch.setattr(ask, 'for_geometry',
+                        lambda *a, **k: str(fixture_path('plate',
+                                                         'geometry.npz')))
+    asked = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'asked.html',
+        geometry=visualdynamics.ASK)
+    assert 'Test geometry and measurement locations' in \
+        pathlib.Path(asked).read_text()
+
+
+def test_cancelling_the_geometry_is_asked_once_for_the_whole_batch(
+        tmp_path, monkeypatch):
+    """The state where asking per run actually bites.
+
+    Answer the geometry dialog with a file and the question stops
+    asking itself either way, because the answer is no longer missing.
+    **Cancel** is the case: None is what "no geometry" looks like, so a
+    question put inside the loop would be put again for every run of
+    the batch — three dialogs to say no once.
+    """
+    import shutil
+
+    from visualdynamics.gui import ask
+
+    runs = []
+    for name in ('one', 'two', 'three'):
+        runs.append(tmp_path / f'{name}.nc4')
+        shutil.copy(fixture_path('plate', RUN), runs[-1])
+    calls = {'geometry': 0}
+
+    def cancelled(*a, **k):
+        calls['geometry'] += 1
+
+    monkeypatch.setattr(ask, 'for_runs', lambda *a, **k: [str(r) for r in runs])
+    monkeypatch.setattr(ask, 'for_geometry', cancelled)
+    folder = tmp_path / 'out'
+    folder.mkdir()
+    written = visualdynamics.random_vibration_report(path=folder)
+    assert calls['geometry'] == 1, (
+        f'cancel is an answer, given once for the batch: {calls}'
+    )
+    assert len(written) == 3
+    assert all(pathlib.Path(p).is_file() for p in written)
+    assert not any('Test geometry and measurement locations'
+                   in pathlib.Path(p).read_text() for p in written), (
+        'and no report pretends to a geometry nobody chose'
+    )
+
+
+def test_a_scene_names_no_unit_and_the_report_asks_for_none(tmp_path):
+    """A scene draws a shape, never a coordinate or a real scale.
+
+    The hint under each geometry figure used to end "coordinates in
+    <unit>", and the only thing a declared length unit changed in a
+    whole report was that label and the numbers behind it — no
+    spectrum, no compliance number, no verdict (Brandon, 2026-09-22).
+    Both are gone: the scenes say nothing about units, and the report
+    call no longer takes one.
+    """
+    import inspect
+    import json
+    import re
+
+    assert 'length_unit' not in inspect.signature(
+        visualdynamics.random_vibration_report).parameters, (
+        'the report takes no length unit'
+    )
+    # while the run, whose project lives on, still declares one
+    assert 'length_unit' in inspect.signature(
+        visualdynamics.random_vibration_run).parameters
+
+    written = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), tmp_path / 'scenes.html',
+        geometry=fixture_path('plate', 'geometry.npz'))
+    page = pathlib.Path(written).read_text(encoding='utf-8')
+    assert 'coordinates in ' not in page, 'no scene names a unit'
+    assert 'units undefined' not in page, (
+        'nor says it lacks one, having stopped claiming to need it'
+    )
+    payload = json.loads(re.search(r'<script id="data"[^>]*>(.*?)</script>',
+                                   page, re.DOTALL).group(1))
+    scenes = [b for b in payload['blocks'] if b['kind'] == 'scene']
+    assert len(scenes) == 3, 'geometry, excitation DOFs, response DOFs'
+    assert not any('unit' in scene for scene in scenes), (
+        'and none of them carries the field that fed the label'
+    )
+
+
+def _history(level, dof='101Z+'):
+    from visualdynamics.core.data import TimeHistory
+
+    rng = np.random.default_rng(0)
+    return TimeHistory(np.arange(0.0, 1.0, 0.01),
+                       rng.normal(0.0, level, (1, 100)),
+                       response_dof=[dof], ordinate_dim='acceleration',
+                       ordinate_unit='m/s**2')
+
+
+def test_the_quieter_recording_is_the_ambient_one():
+    """A system identification is two recordings — the room, then the
+    room with the shakers running — and the file does not say which is
+    which. The quieter one is the ambient, by the only measure always
+    there (Brandon, 2026-09-22)."""
+    from visualdynamics.project import _quiet_and_driven
+
+    project = visualdynamics.Project()
+    project.add('First', _history(1.0))
+    project.add('Second', _history(0.01))
+    assert _quiet_and_driven(project) == ('Second', 'First')
+
+    # and the other way round, so the order in the file proves nothing
+    other = visualdynamics.Project()
+    other.add('First', _history(0.01))
+    other.add('Second', _history(1.0))
+    assert _quiet_and_driven(other) == ('First', 'Second')
+
+    # one recording has no ambient at all
+    alone = visualdynamics.Project()
+    alone.add('Only', _history(1.0))
+    assert _quiet_and_driven(alone) == (None, 'Only')
+
+    with pytest.raises(ValueError, match='no time data'):
+        _quiet_and_driven(visualdynamics.Project())
+
+
+def test_a_system_id_run_names_its_streams_and_measures_the_plant(tmp_path):
+    """The workup, on the one recording a committed fixture holds: the
+    stream named for what it is, the plant by H1, the coherence and a
+    density. With no ambient the signal-to-noise stands down on its
+    own rather than refusing the report."""
+    project = visualdynamics.system_id_run(fixture_path('plate', RUN))
+    assert project.project_type == 'System ID'
+    assert 'Excitation Time History' in project
+    assert 'Noise Time History' not in project, 'this file holds one stream'
+    kinds = {type(obj).__name__ for obj in project.values()}
+    assert {'Frf', 'MultipleCoherence', 'Psd'} <= kinds
+
+    written = visualdynamics.system_id_report(
+        fixture_path('plate', RUN), tmp_path / 'sysid.html')
+    page = pathlib.Path(written).read_text(encoding='utf-8')
+    assert 'System ID Report' in page
+    assert 'The measured plant' in page
+
+
+def test_the_system_id_report_asks_and_batches_like_the_random_one(
+        tmp_path, monkeypatch):
+    """The asking, the batch and the folder are one implementation
+    shared by both one-call reports, so this proves the sharing."""
+    import shutil
+
+    from visualdynamics.gui import ask
+
+    runs = []
+    for name in ('sysid_a', 'sysid_b'):
+        runs.append(tmp_path / f'{name}.nc4')
+        shutil.copy(fixture_path('plate', RUN), runs[-1])
+    calls = {'geometry': 0}
+
+    def chose_geometry(*a, **k):
+        calls['geometry'] += 1
+
+    monkeypatch.setattr(ask, 'for_runs', lambda *a, **k: [str(r) for r in runs])
+    monkeypatch.setattr(ask, 'for_geometry', chose_geometry)
+    folder = tmp_path / 'out'
+    folder.mkdir()
+    written = visualdynamics.system_id_report(path=folder)
+    assert [pathlib.Path(p).name for p in written] == ['sysid_a.html',
+                                                       'sysid_b.html']
+    assert calls['geometry'] == 1, 'asked once for the batch'
+    assert all('System ID Report' in pathlib.Path(p).read_text()
+               for p in written)
+
+
+def test_the_ambient_stream_borrows_the_excitation_s_frames():
+    """A ratio of densities only exists on lines both hold.
+
+    The signal-to-noise the report draws is the driven density over
+    the ambient one, so the two must be averaged on the same frames —
+    and nothing in the file makes that happen. No committed recording
+    holds the two streams a system identification is made of, so the
+    second is built here from the first, quieter by a factor of a
+    hundred, and the work is done through the seam that does not read
+    a file.
+    """
+    import copy
+    import dataclasses
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.project import work_up_system_id
+
+    project = visualdynamics.Project()
+    project.import_file(fixture_path('plate', RUN))
+    driven = next(name for name, obj in project.items()
+                  if isinstance(obj, TimeHistory))
+    quiet = copy.deepcopy(project[driven])
+    quiet.ordinate = np.asarray(quiet.ordinate, dtype=float) / 100.0
+    # framed differently to begin with, or borrowing the excitation's
+    # frames would be a line that changed nothing and a test that
+    # proved nothing
+    quiet.averaging = dataclasses.replace(quiet.averaging,
+                                          frame_length=1024, overlap=0.0)
+    project.add('Ambient', quiet)
+    assert quiet.averaging != project[driven].averaging
+
+    noise, excitation = work_up_system_id(project)
+    assert (noise, excitation) == ('Noise Time History',
+                                   'Excitation Time History')
+    assert project[noise].averaging == project[excitation].averaging, (
+        'the ambient is averaged on the frames the excitation was'
+    )
+    psds = [name for name, obj in project.items()
+            if type(obj).__name__ == 'Psd']
+    assert len(psds) == 2, 'a density from each stream'
+    first, second = (np.asarray(project[name].abscissa) for name in psds)
+    assert np.array_equal(first, second), (
+        'and on one set of lines, or the ratio has nowhere to live'
+    )

@@ -170,18 +170,42 @@ visualdynamics.random_vibration_report('random.nc4', 'report.html')
 ```
 
 …and still one call when the report needs the rest of what the tree
-asks for. The geometry comes in with its length unit declared when
-the file does not carry one, the photographs from a folder (or a list
-of files, in the order they should appear), and a run too long to hold
-is read from its last so many seconds — a shorter run is taken whole:
+asks for. The geometry comes in as it stands — the report draws it as
+a shape and never states a coordinate or a scale, so it asks for no
+length unit — the photographs from a folder (or a list of files, in
+the order they should appear), and a run too long to hold is read from
+its last so many seconds, a shorter run taken whole:
 
 ```python
 visualdynamics.random_vibration_report(
     'random.nc4', 'report.html',
-    geometry='article.stp', length_unit='mm',
+    geometry='article.stp',
     photos='setup_photos/',
     last=100.0)
 ```
+
+…and it asks for what it is not given. Called with no run at all it
+opens a file dialog, takes as many runs as are chosen, and writes one
+report for each — a campaign is a folder of runs, and the answer to
+each is its own report. A run chosen that way is asked about its
+geometry too, where Cancel means none:
+
+```python
+visualdynamics.random_vibration_report()                # ask for both
+visualdynamics.random_vibration_report(path='reports/')  # ask, write here
+```
+
+A run *named* in the call and left without a geometry means no
+geometry, as it always has, and nothing opens. `visualdynamics.ASK`
+in either place forces the question, so a script holding a run can
+still be asked for the geometry.
+
+`path` may be the file to write or a **folder** to write into, where
+each report takes its run's own name with an `.html` extension.
+Without a path it lands beside the run. Several runs need a folder, or
+no path at all. (A name that does not exist yet and does not end in a
+separator is a file: there is no telling a folder nobody has made from
+a file nobody has written.)
 
 …and the same call written out when the project should live on. It
 is condensed from

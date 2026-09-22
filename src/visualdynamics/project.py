@@ -3421,20 +3421,237 @@ def random_vibration_run(run: str | os.PathLike,
     return project
 
 
-def random_vibration_report(run: str | os.PathLike,
+def _quiet_and_driven(project: Project) -> tuple[str | None, str]:
+    """(the ambient recording, the driven one) among the time histories.
+
+    A system identification is made from two recordings — the room on
+    its own, then the room with the shakers running — and the file
+    does not say which is which. The quieter one is the ambient, by
+    the only measure that is always there: how much the signal moves.
+    A file holding one recording has no ambient, and the report's
+    signal-to-noise stands down on its own.
+    """
+    names = [name for name, obj in project.items()
+             if isinstance(obj, TimeHistory)]
+    if not names:
+        raise ValueError('no time data to work up')
+    ranked = sorted(names, key=lambda name: float(
+        np.std(np.asarray(project[name].ordinate, dtype=float))))
+    return (ranked[0] if len(ranked) > 1 else None), ranked[-1]
+
+
+def work_up_system_id(project: Project) -> tuple[str | None, str]:
+    """An imported system identification, worked up in place.
+
+    The seam between reading a file and doing the work, so the work
+    can be exercised on a recording built by hand: no file a test can
+    commit holds the *two* streams a system identification is made of,
+    and a rule that is never exercised is a rule that is not tested
+    (2026-09-22).
+
+    Returns the two stream names, the ambient one None where the
+    recording holds only the driven stream.
+    """
+    noise, driven = _quiet_and_driven(project)
+    project.project_type = 'System ID'
+    driven = project.rename(driven, 'Excitation Time History')
+    if noise is not None:
+        noise = project.rename(noise, 'Noise Time History')
+    # H1: the plant is measured driving through a known excitation, so
+    # what noise there is sits on the response
+    project.compute_frfs(driven, 'H1')
+    project.compute_multiple_coherence(driven)
+    project.compute_psds(driven)
+    if noise is not None:
+        # the ambient borrows the excitation's frames on purpose: the
+        # ratio the report reads is only defined on lines both hold
+        project[noise].averaging = project[driven].averaging
+        project.compute_psds(noise)
+    return noise, driven
+
+
+def system_id_run(run: str | os.PathLike, *,
+                  last: float | None = None,
+                  geometry: str | os.PathLike | None = None,
+                  length_unit: str | None = None,
+                  photos: Any = None) -> Project:
+    """A Rattlesnake system identification, worked up into a project.
+
+        project = visualdynamics.system_id_run('sysid.nc4')
+
+    The steps the window would take, in its order: import the
+    recording, name the two streams for what they are, measure the
+    plant from the driven one by H1 — the controller's own estimator,
+    the excitation being known and the noise on the response — take
+    the multiple coherence, and average a density from each stream on
+    **the same frames**, since the signal-to-noise is a ratio of
+    densities and a ratio only exists on shared lines. The project
+    comes back declared a System ID.
+
+    `last`, `geometry`, `length_unit` and `photos` are
+    `random_vibration_run`'s, and mean the same things.
+    """
+    project = Project()
+    project.import_file(run, **(_last_window(run, last) if last is not None
+                                else {}))
+    try:
+        noise, driven = work_up_system_id(project)
+    except ValueError as exc:
+        raise ValueError(f'{run} holds no time data to work up') from exc
+    extras: list[str] = []
+    if geometry is not None:
+        options = {} if length_unit is None else {'length_unit': length_unit}
+        extras += project.import_file(geometry, **options)
+    if photos is not None:
+        extras.append(project.add('Photos', _photos_from(photos)))
+    linked = [name for name in (noise, *extras) if name]
+    if linked:
+        project.link(driven, *linked)
+    return project
+
+
+class _Ask:
+    """The value that means "open a dialog and ask me".
+
+    A sentinel rather than None, because None already means something
+    on every one of these keywords: no geometry, no photographs, the
+    whole run. `visualdynamics.ASK` is the public name.
+    """
+
+    def __repr__(self) -> str:           # pragma: no cover - a label
+        return 'visualdynamics.ASK'
+
+    def __bool__(self) -> bool:
+        return False
+
+
+#: pass this where a path goes to be asked for it instead
+ASK = _Ask()
+
+
+def _report_path(run: str | os.PathLike,
+                 path: str | os.PathLike | None) -> str:
+    """Where one run's report is written.
+
+    A *folder* is taken as a folder — the report lands in it under the
+    run's own name — and anything else is the file to write (Brandon,
+    2026-09-22). Without a path at all it lands beside the run, which
+    is what it always did. A name that does not exist yet and does not
+    end in a separator is a file: there is no way to tell a folder
+    nobody has made from a file nobody has written, and guessing wrong
+    writes a report where nothing will look for it.
+    """
+    if path is None:
+        return os.path.splitext(os.path.expanduser(str(run)))[0] + '.html'
+    path = os.path.expanduser(str(path))
+    if os.path.isdir(path) or path.endswith((os.sep, '/')):
+        stem = os.path.splitext(os.path.basename(os.path.expanduser(
+            str(run))))[0]
+        return os.path.join(path, stem + '.html')
+    return path
+
+
+def _one_call_reports(run: Any, path: Any, geometry: Any,
+                      unit_system: Any, kind: str,
+                      work_up: Any) -> Any:
+    """What every one-call report function does around its workup.
+
+    The asking, the batch and the destination, in one place because
+    they are one rule (PRINCIPLES.md, 9): a run left out is asked for,
+    several may be chosen, the geometry is asked for only when the run
+    was, and `path` may be a folder each report lands in under its
+    run's own name.
+    """
+    asked = run is ASK
+    if asked:
+        from .gui.ask import for_runs
+        runs = for_runs()
+        if not runs:
+            raise ValueError('no run chosen')
+    else:
+        runs = [run]
+    # the geometry is asked for only when the run was: a script that
+    # names its run and leaves the geometry out means "no geometry",
+    # and has meant it since these functions existed. `ASK` says so on
+    # purpose either way. Asked once, before the loop: a campaign is a
+    # folder of runs on one article (Brandon, 2026-09-22).
+    if geometry is ASK or (asked and geometry is None):
+        from .gui.ask import for_geometry
+        geometry = for_geometry()
+    if len(runs) > 1 and path is not None and not (
+            os.path.isdir(os.path.expanduser(str(path)))
+            or str(path).endswith((os.sep, '/'))):
+        raise ValueError(
+            f'{len(runs)} runs cannot be written to one file '
+            f'{str(path)!r} — give a folder, or no path at all')
+    written = []
+    for one in runs:
+        project = work_up(one, geometry)
+        report = project.generate_report(kind, name='Report')
+        written.append(project.export_report(
+            report, _report_path(one, path), unit_system))
+    return written if len(written) > 1 else written[0]
+
+
+def system_id_report(run: Any = ASK,
+                     path: str | os.PathLike | None = None, *,
+                     last: float | None = None,
+                     geometry: Any = None,
+                     photos: Any = None,
+                     unit_system: Any = None) -> Any:
+    """A Rattlesnake system identification in, an HTML report out.
+
+        visualdynamics.system_id_report('sysid.nc4', 'sysid.html')
+        visualdynamics.system_id_report()            # ask for both
+
+    `system_id_run` followed by the System ID report: the measured
+    plant as a CMIF, the coherence map, and the signal-to-noise of the
+    measurement — where that ratio approaches one, the plant is the
+    room.
+
+    Everything about being asked, writing a batch and taking a folder
+    is `random_vibration_report`'s, and means the same things: left
+    out, the run is asked for and as many may be chosen as there are
+    reports wanted; the geometry is asked for once for the whole
+    batch when the run was asked for, Cancel meaning none;
+    `visualdynamics.ASK` forces either question; and `path` may be the
+    file to write or the folder to write into.
+    """
+    return _one_call_reports(
+        run, path, geometry, unit_system, 'sysid',
+        lambda one, geo: system_id_run(one, last=last, geometry=geo,
+                                       photos=photos))
+
+
+def random_vibration_report(run: Any = ASK,
                             path: str | os.PathLike | None = None, *,
                             last: float | None = None,
-                            geometry: str | os.PathLike | None = None,
-                            length_unit: str | None = None,
+                            geometry: Any = None,
                             photos: Any = None,
                             per_octave: int | None = None,
-                            unit_system: Any = None) -> str:
+                            unit_system: Any = None) -> Any:
     """A Rattlesnake random vibration run in, an HTML report out.
 
         visualdynamics.random_vibration_report('run.nc4', 'report.html')
         visualdynamics.random_vibration_report(
             'run.nc4', 'report.html', last=100.0,
-            geometry='article.stp', length_unit='mm', photos='setup_photos/')
+            geometry='article.stp', photos='setup_photos/')
+        visualdynamics.random_vibration_report()          # ask for both
+        visualdynamics.random_vibration_report('run.nc4', 'reports/')
+
+    **Left out, it asks.** Called with no run, it opens a file dialog
+    and takes as many runs as are chosen, writing one report each and
+    returning the list; a run chosen that way is asked about its
+    geometry too, where Cancel means none. `visualdynamics.ASK` in
+    either place forces the question, so a script with a run in hand
+    can still be asked for the geometry. A run given without a
+    geometry keyword means *no geometry*, as it always has, and
+    nothing opens.
+
+    **A folder is a folder.** `path` may be the file to write, or a
+    folder the report lands in under the run's own name with an
+    `.html` extension. Without a path it lands beside the run. Several
+    runs need a folder or no path, never one file name.
 
     The whole workflow in one call, with nothing to click (Brandon,
     2026-09-19): import the run — or only its last `last` seconds, a
@@ -3442,20 +3659,22 @@ def random_vibration_report(run: str | os.PathLike,
     band them and the specification onto octave bands, compute the
     multiple coherence, bring in the geometry and the photographs when
     they are given, generate the Random Vibration report and write it
-    as one self-contained HTML file. Returns the path written, which
-    defaults to the run's own name with an `.html` extension. The
-    keywords are `random_vibration_run`'s, plus `unit_system` for the
-    units the report is written in.
+    as one self-contained HTML file. Returns the path written, or the
+    list of them when several runs were chosen. The keywords are
+    `random_vibration_run`'s, plus `unit_system` for the units the
+    report is written in.
 
     Everything it does is `random_vibration_run` followed by
     `generate_report` and `export_report`; reach for those instead when
     the project is wanted afterwards — to write the test summary, or to
     save it as `.vdyn`.
     """
-    project = random_vibration_run(run, per_octave, last=last,
-                                   geometry=geometry, length_unit=length_unit,
-                                   photos=photos)
-    report = project.generate_report('random', name='Report')
-    if path is None:
-        path = os.path.splitext(str(run))[0] + '.html'
-    return project.export_report(report, path, unit_system)
+    # no length unit reaches the workup: the report draws the geometry
+    # as a shape and never states a coordinate or a scale, so declaring
+    # what the file's numbers meant changed one label and nothing else
+    # (Brandon, 2026-09-22). The `_run` calls still take it, for a
+    # project that lives on.
+    return _one_call_reports(
+        run, path, geometry, unit_system, 'random',
+        lambda one, geo: random_vibration_run(one, per_octave, last=last,
+                                              geometry=geo, photos=photos))

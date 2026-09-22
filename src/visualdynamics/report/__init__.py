@@ -1716,7 +1716,9 @@ def _scene_geometry(geometry, us):
     entity: the report is the GUI, emailed."""
     from ..viz.geometry import color_rgb, display_points
 
-    points, axis_unit = display_points(geometry, us)
+    # the unit the points came out in is no longer asked for:
+    # a scene draws a shape, not a measurement
+    points, _unit = display_points(geometry, us)
     points = np.asarray(points, dtype=float)
     node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
     lines, faces = [], []
@@ -1732,15 +1734,13 @@ def _scene_geometry(geometry, us):
         elif len(chain) == 2:
             lines.append(chain + [color])
     node_colors = [_hex(color_rgb(c)) for c in geometry.node_color]
-    return points, node_colors, lines, faces, axis_unit or ''
+    return points, node_colors, lines, faces
 
 
 def _scene_block(block, geometry, shapes, us, objects):
-    points, node_colors, lines, faces, axis_unit = \
-        _scene_geometry(geometry, us)
+    points, node_colors, lines, faces = _scene_geometry(geometry, us)
     node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
     built = {'kind': 'scene', 'caption': block.get('caption', ''),
-             'unit': axis_unit,
              'points': [[_compact(v) for v in p] for p in points],
              'node_colors': node_colors,
              'lines': lines, 'faces': faces, 'modes': []}
@@ -1869,8 +1869,8 @@ def _overlay_block(block, objects, us, links=None):
                        and role_of(matched.first) != 'Basis')
     first_alpha, second_alpha = ((OVERLAY_ALPHA, 1.0) if basis_is_second
                                  else (1.0, OVERLAY_ALPHA))
-    pa, _na, la, fa, unit = _scene_geometry(geo_a, us)
-    pb, _nb, lb, fb = _scene_geometry(geo_b, us)[:4]
+    pa, _na, la, fa = _scene_geometry(geo_a, us)
+    pb, _nb, lb, fb = _scene_geometry(geo_b, us)
     offset = len(pa)
     points = np.vstack([pa, pb])
     lines = ([[i, j, first_color, first_alpha] for i, j, _c in la]
@@ -1941,7 +1941,7 @@ def _overlay_block(block, objects, us, links=None):
     note = compare_scaling(a, b, matched.pairs or None).message(
         matched.first, matched.second)
     return {'kind': 'scene', 'caption': caption, 'note': note,
-            'unit': unit, 'flat': True,
+            'flat': True,
             'points': [[_compact(v) for v in p] for p in points],
             'node_colors': node_colors, 'node_alphas': node_alphas,
             'lines': lines, 'faces': faces, 'modes': modes}

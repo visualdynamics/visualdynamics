@@ -59,7 +59,14 @@ from .io import (
     register_importer,
     save,
 )
-from .project import Project, random_vibration_report, random_vibration_run
+from .project import (
+    ASK,
+    Project,
+    random_vibration_report,
+    random_vibration_run,
+    system_id_report,
+    system_id_run,
+)
 from .units import (
     DEFAULT_SYSTEM,
     FT_LBF_S,
@@ -137,6 +144,7 @@ def _spawn_gui(paths=(), spawn=None):
     return (spawn or subprocess.Popen)(command, env=environment)
 
 __all__ = [
+    'ASK',
     'DEFAULT_SYSTEM',
     'FT_LBF_S',
     'IN_LBF_S',
@@ -176,4 +184,6 @@ __all__ = [
     'register_importer',
     'save',
     'si_factor',
+    'system_id_report',
+    'system_id_run',
 ]

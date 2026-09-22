@@ -1353,7 +1353,9 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
 
     narrow, wide = measure(800), measure(1600)
     for read in (narrow, wide):
-        assert read['body'] == read['frame'], (
+        # all of it but the scrollbar, which macOS draws as an overlay
+        # of no width and Linux gives fifteen pixels of its own
+        assert read['frame'] - 20 <= read['body'] <= read['frame'], (
             f'the page fills its frame: {read}'
         )
         assert read['prose'] <= 900, f'the prose never exceeds it: {read}'

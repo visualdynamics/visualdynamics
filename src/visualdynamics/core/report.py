@@ -2458,13 +2458,11 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
             'the spectra are averaged over'),
-        {'kind': 'text', 'text':
-            '## Specification\n\nThe required control spectrum and the '
-            'tolerance the controller was set to warn and abort on '
-            '({{figure:Test specification}}).'},
-        *_per_channel('@basis:Specification',
-                      'Test specification, with its warning and abort limits',
-                      objects, links),
+        # The specification is not drawn on its own, in either form.
+        # It is the shaded band behind every comparison below, and a
+        # figure of the requirement with nothing measured against it
+        # was a page the reader had already seen (Brandon,
+        # 2026-09-21).
         {'kind': 'text', 'text':
             '## Control\n\nThe measured control spectra against the '
             'specification, '
@@ -2474,10 +2472,14 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
                 '({{figure:Control against specification}} and following). ',
                 'laid out by control channel — a row per node, a column '
                 'per direction ({{figure:Control against specification}}). ')
-            + 'Each opens on the specification\'s own frequency band; '
-            'the measurement beyond it is a zoom away. Shading marks '
-            'lines outside an abort limit — red above the upper, blue '
-            'below the lower.'},
+            + 'Each carries the requirement with it — the target '
+            'drawn through the measurement, its warning and abort '
+            'limits shaded around it — so the specification is read '
+            'where the response is. Each opens on the '
+            'specification\'s own frequency band; the measurement '
+            'beyond it is a zoom away. Shading marks lines outside '
+            'an abort limit — red above the upper, blue below the '
+            'lower.'},
         *_comparisons('@basis:Psd', '@basis:Specification',
                       'Control against specification', objects, links),
         {'kind': 'text', 'text':
@@ -2509,9 +2511,8 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
                             ' and following, one per control channel) ',
                             ', by node and direction) ')
             + 'against the specification banded the same way, its '
-            'warning and abort limits banded with it ({{figure:Test '
-            'specification, octave bands}}), and the same two '
-            'readings of them. The bands are wider as the frequency '
+            'warning and abort limits banded with it, and the same '
+            'two readings of them. The bands are wider as the frequency '
             'rises, which is how a response is usually specified and '
             'how it is usually read.\n\n'
             'Banding conserves the area under each curve, so the RMS '
@@ -2521,16 +2522,10 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'are themselves per band.'},
         # the banded objects themselves, not the report banding the
         # narrowband ones for itself (which `'octave': N` on a block
-        # still does, for a template that asks): the octave-band
-        # specification is a deliverable beside the octave-band PSD,
-        # limits and all, and the comparison is read between the two
-        # objects the project holds (Brandon, 2026-09-18 — the
-        # earlier text said the specification "is not banded, and
-        # does not need to be", true of a breakpoint curve and beside
-        # the point once the banded requirement exists as its own
-        # object)
-        *_per_channel('@basis:OctaveSpecification',
-                      'Test specification, octave bands', objects, links),
+        # still does, for a template that asks): the comparison is
+        # read between the two objects the project holds (Brandon,
+        # 2026-09-18). The banded specification is drawn only there,
+        # as the narrowband one is — see above.
         *_comparisons('@basis:OctavePsd', '@basis:OctaveSpecification',
                       'Control against specification, octave bands',
                       objects, links),

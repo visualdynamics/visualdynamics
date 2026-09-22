@@ -122,8 +122,8 @@ def test_octave_band_figures_read_on_a_log_axis_and_narrowband_ones_linear():
                        (int(np.flatnonzero(octave_spec.written(0))[0]),
                         int(np.flatnonzero(octave_spec.written(0))[-1]) + 1)])), rel=1e-5)
     assert banded['edges'][0] == pytest.approx(np.log10(octave.bin_edges()[0]), abs=1e-5)
-    spec_alone = grids['Test specification, octave bands']['rows'][0]['cells'][0][0]
-    assert spec_alone['logx'] is True
-    assert spec_alone['x'][1] == pytest.approx(np.log10(octave_spec.abscissa[1]), abs=1e-5)
-    assert not grids['Test specification, with its warning and abort limits'][
+    # and the narrowband comparison stays linear
+    assert not grids['Control against specification'][
         'rows'][0]['cells'][0][0].get('logx')
+    # the specification is no longer drawn on its own, in either form
+    assert not [key for key in grids if key.startswith('Test specification')]

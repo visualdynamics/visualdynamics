@@ -61,9 +61,17 @@ _CSS = """
 body.marked { padding-top: 4.2rem; }
 .marked .themetoggle { top: 2.6rem; }
 body.marked::after { content: ""; display: block; height: 2.4rem; }
-body { margin: 0 auto; padding: 2rem 1.5rem 4rem; max-width: 900px;
+/* The page fills the frame; the *prose* does not. A figure is worth
+   every pixel a wide monitor has — a grid of control channels most of
+   all — while a paragraph set 300 characters to the line is unreadable
+   (Brandon, 2026-09-21: the report sat in a narrow column in the middle
+   of a wide screen, in the app pane and the saved file alike, both being
+   this one page). So the body cap is gone and `.text` carries the
+   measure instead. */
+body { margin: 0 auto; padding: 2rem 1.5rem 4rem;
        background: var(--paper); color: var(--ink);
        font: 16px/1.55 -apple-system, "Segoe UI", sans-serif; }
+.text { max-width: 900px; }
 h1 { font-size: 1.6rem; border-bottom: 1px solid var(--line);
      padding-bottom: .4rem; }
 section { margin: 1.6rem 0; }
@@ -194,6 +202,9 @@ function section(block, extra) {
 function sized(canvas, height) {
   const scale = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 850;
+  // a height that knows its own width: a figure free to grow sideways
+  // would otherwise stay 340 px tall and read as a letterboxed strip
+  if (typeof height === 'function') height = Math.round(height(width));
   canvas.width = width * scale; canvas.height = height * scale;
   canvas.style.height = height + 'px';
   const g = canvas.getContext('2d'); g.scale(scale, scale);
@@ -627,7 +638,12 @@ function plotBlock(block, into) {
   clampView();
 
   function draw() {
-    const [g, width, height] = sized(canvas, into ? 220 : 340);
+    // proportional between bounds: unchanged at the width this page
+    // used to be, taller as the frame widens, and never so tall that
+    // one figure is the whole screen
+    const [g, width, height] = sized(canvas, w => into
+      ? Math.min(Math.max(220, w * 0.62), 340)
+      : Math.min(Math.max(340, w * 0.38), 560));
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
     const px = v => margin.left + (v - view.x0) / (view.x1 - view.x0) * plotW;

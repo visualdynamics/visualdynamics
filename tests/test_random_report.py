@@ -361,9 +361,9 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
     per_channel = len(control_channel_labels(objects, links,
                                              '@basis:OctaveSpecification'))
     assert per_channel > 4, 'the plate has eight: a grid, not a sequence'
-    assert len(octave) == 4, \
-        'a specification grid, a comparison grid, two bar charts'
-    assert [b.get('grid') for b in octave if b['kind'] == 'plot'] == [True, True]
+    assert len(octave) == 3, \
+        'a comparison grid and two bar charts; the specification is '
+    assert [b.get('grid') for b in octave if b['kind'] == 'plot'] == [True]
     for block in octave:
         for field in ('source', 'specification', 'measured'):
             if block.get(field):
@@ -374,7 +374,7 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
                 if template.blocks[i].get('source', '').startswith('@basis:Octave')]
     page = render_html(template, objects, unit_system=visualdynamics.SI)
     assert 'Control against specification, octave bands' in page
-    assert 'Test specification, octave bands' in page
+    assert 'Test specification' not in page, 'never drawn on its own'
 
 
 def test_the_script_workflow_bands_the_specification_too():
@@ -776,13 +776,15 @@ def test_the_template_writes_a_figure_per_control_channel(monkeypatch):
                 if b.get('kind') == 'plot']
     comparisons = [c for c in captions if c.startswith('Control against specification')]
     assert len(comparisons) == 16
-    specs = [c for c in captions if c.startswith('Test specification')]
-    assert len(specs) == 16, 'the specification figures too, one per channel'
+    assert not [c for c in captions if c.startswith('Test specification')], (
+        'the specification is drawn against a measurement, never alone'
+    )
     assert not any('drop-down' in c for c in captions), \
         'no drop-down anywhere in the random report'
     lone_specs = [b for b in random_template({}).blocks
-                  if b.get('source') == '@basis:Specification' and b.get('kind') == 'plot']
-    assert len(lone_specs) == 1 and 'channel' not in lone_specs[0]
+                  if b.get('source', '').endswith('Specification')
+                  and b.get('kind') == 'plot' and not b.get('specification')]
+    assert lone_specs == []
 
 
 def test_many_control_channels_read_as_a_grid():
@@ -804,9 +806,7 @@ def test_many_control_channels_read_as_a_grid():
     report = random_template(project, links=project.links)
     grids = [b for b in report.blocks if b.get('grid')]
     assert [b['caption'] for b in grids] == [
-        'Test specification, with its warning and abort limits',
         'Control against specification',
-        'Test specification, octave bands',
         'Control against specification, octave bands']
     assert not any(b.get('channel') for b in report.blocks), \
         'no per-channel figures beside the grids'
@@ -819,8 +819,8 @@ def test_many_control_channels_read_as_a_grid():
 
     payload = payload_of(project, report)
     drawn = [b for b in payload['blocks'] if b['kind'] == 'grid']
-    assert len(drawn) == 4 and drawn[1]['caption'] == 'Control against specification'
-    control = drawn[1]
+    assert len(drawn) == 2 and drawn[0]['caption'] == 'Control against specification'
+    control = drawn[0]
     assert control['columns'] == ['Global Z']
     assert [row['label'] for row in control['rows']] == [
         'Node 101', 'Node 104', 'Node 110', 'Node 113',
@@ -912,7 +912,10 @@ def test_sections_whose_objects_are_absent_are_dropped():
         'Test Summary', 'Test Article and Instrumentation', 'Measured Data',
         'Data Quality', 'Conclusions']
     full = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
-    assert 'Specification' in headings(random_template(full, links=full.links))
+    # 'Specification' as its own heading went with the figure it
+    # introduced; the requirement is read on the Control comparison
+    assert 'Control' in headings(random_template(full, links=full.links))
+    assert 'Specification' not in headings(random_template(full, links=full.links))
     assert 'Octave Band Comparison' in headings(random_template({}))
     outline = random_template({}).blocks
     assert {'scene', 'photo'} <= {b['kind'] for b in outline}, \
@@ -956,11 +959,16 @@ def test_the_figures_open_on_the_band_the_target_is_written_on():
                        links=project.links, unit_system=visualdynamics.SI)
     payload = json.loads(re.search(
         r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
-    grids = [b for b in payload['blocks'] if b['kind'] == 'grid']
-    for grid in grids[:2]:
-        for row in grid['rows']:
-            [[cell]] = row['cells']
-            assert cell['home_x'] == band, (grid['caption'], row['label'])
+    grids = {b['caption']: b for b in payload['blocks'] if b['kind'] == 'grid'}
+    for row in grids['Control against specification']['rows']:
+        [[cell]] = row['cells']
+        assert cell['home_x'] == band, row['label']
+    # the banded comparison opens on the same band, read in decades
+    # because its axis is logarithmic
+    for row in grids['Control against specification, octave bands']['rows']:
+        [[cell]] = row['cells']
+        assert 10 ** cell['home_x'][0] < band[0]
+        assert 10 ** cell['home_x'][1] > band[1]
 
 
 def test_the_front_matter_says_only_what_the_project_holds():
@@ -1253,3 +1261,102 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
         f'the opening window {home["y0"]}..{home["y1"]} shows every limit '
         f'({min(edges)}..{max(edges)})'
     )
+
+
+def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
+    """Read off the page at three frame widths.
+
+    The report sat in a 900-pixel column in the middle of a wide
+    monitor, in the application's pane and the saved file alike, both
+    being this one page (Brandon, 2026-09-21). A figure is worth every
+    pixel a wide screen has; a paragraph set three hundred characters
+    to the line is not. So the body cap is gone, `.text` carries the
+    measure, and a plot's height follows its width between bounds —
+    free to grow sideways at a fixed height it would read as a
+    letterboxed strip.
+    """
+    import json
+    import os
+    import re
+    import time
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWidgets import QApplication
+
+    from visualdynamics.core.data import Psd, Specification
+    from visualdynamics.core.report import Report
+
+    f = np.array([10.0, 100.0, 1000.0])
+    level = np.array([[0.002, 0.02, 0.004]])
+    spec = Specification(f, level, response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         abort_upper=level * 4, abort_lower=level / 4)
+    measured = Psd(f, level, response_dof=['101Z+'],
+                   ordinate_dim=['acceleration**2/frequency'])
+    report = Report('Width', [
+        {'kind': 'text', 'text': 'A paragraph of prose, to be measured.'},
+        {'kind': 'plot', 'source': 'P', 'specification': 'S',
+         'mode': 'curves', 'channel': '101Z+', 'caption': 'One figure'},
+    ])
+    path = tmp_path / 'width.html'
+    path.write_text(render_html(report, {'S': spec, 'P': measured}),
+                    encoding='utf-8')
+    assert re.search(r'^\.text \{ max-width: 900px; \}$',
+                     path.read_text(), re.MULTILINE), 'the measure is on the prose'
+
+    app = QApplication.instance() or QApplication(['x'])
+    seen = {}
+
+    def measure(frame):
+        view = QWebEngineView()
+        view.resize(frame, 900)
+        view.show()                      # offscreen, a hidden view has no width
+        got = {}
+        view.loadFinished.connect(lambda ok: got.update(loaded=ok))
+        view.load(QUrl.fromLocalFile(str(path)))
+
+        def answered(value):
+            if not value:
+                return
+            read = json.loads(value)
+            if read.get('figure'):
+                got['read'] = read
+
+        deadline, asked = time.monotonic() + 60.0, 0.0
+        while 'read' not in got and time.monotonic() < deadline:
+            app.processEvents()
+            now = time.monotonic()
+            if now - asked > 0.25:
+                asked = now
+                view.page().runJavaScript(
+                    "(() => { const cv = document.querySelector('canvas');"
+                    " const tx = document.querySelector('.text');"
+                    " return JSON.stringify({body: document.body.clientWidth,"
+                    "  prose: tx ? tx.clientWidth : null,"
+                    "  figure: cv ? cv.clientWidth : null,"
+                    "  tall: cv ? cv.clientHeight : null}); })()",
+                    0, answered)
+            time.sleep(0.01)
+        view.setPage(None)
+        view.deleteLater()
+        for _ in range(10):
+            app.processEvents()
+        assert 'read' in got, f'the page never reported at {frame} px: {got}'
+        return got['read']
+
+    for frame in (1000, 2560):
+        seen[frame] = measure(frame)
+
+    narrow, wide = seen[1000], seen[2560]
+    assert narrow['body'] == 1000 and wide['body'] == 2560, (
+        'the page fills whatever frame it is given'
+    )
+    assert narrow['prose'] == wide['prose'] == 900, (
+        'and the prose keeps its measure in both'
+    )
+    assert wide['figure'] > 2 * narrow['figure'], 'the figure took the room'
+    assert wide['tall'] > narrow['tall'], 'and grew taller with it'
+    assert wide['tall'] <= 560, 'but never runs away with the screen'

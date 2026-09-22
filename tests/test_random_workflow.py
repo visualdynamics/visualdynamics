@@ -114,10 +114,12 @@ def test_one_call_writes_the_report(tmp_path):
                     'RMS error by control channel',
                     'Band outside the abort limits, by control channel',
                     'Control against specification, octave bands',
-                    'Test specification, octave bands',
                     'Multiple coherence',
                     'Instrumentation'):
         assert caption in html, caption
+    # the specification is drawn only against a measurement, never
+    # alone (Brandon, 2026-09-21)
+    assert 'Test specification' not in html
 
 
 def test_the_report_lands_beside_the_run_by_default(tmp_path):

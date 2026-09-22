@@ -12,6 +12,8 @@ and a `.nc4` is a controller's file (Brandon, 2026-09-20).
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from conftest import fixture_path
 
@@ -141,21 +143,37 @@ def test_a_path_that_is_not_there_says_so(tmp_path):
         visualdynamics.import_file(tmp_path)
 
 
+def _home_is(monkeypatch, folder):
+    """Point `~` at `folder` on every platform.
+
+    `HOME` on its own is a POSIX answer. `os.path.expanduser` reads
+    `USERPROFILE` on Windows and never consults `HOME`, so setting only
+    `HOME` left `~` expanding to the real account: the first of these
+    two tests looked for its archive in the developer's home folder,
+    and the second wrote `written.unv` into it, which is the thing a
+    test must never do (Kevin Cross, 2026-09-21).
+    """
+    monkeypatch.setenv('HOME', str(folder))
+    monkeypatch.setenv('USERPROFILE', str(folder))
+
+
 def test_a_typed_home_path_is_expanded(tmp_path, monkeypatch):
     """`~/article.npz` is what a person writes, and Python does not
     expand it — the file was reported unrecognized rather than sought
     in the home folder."""
-    monkeypatch.setenv('HOME', str(tmp_path))
+    _home_is(monkeypatch, tmp_path)
     _geometry_archive(tmp_path / 'article.npz')
     geometry = visualdynamics.import_file('~/article.npz')
     assert isinstance(geometry, Geometry) and geometry.num_nodes == 3
-    with pytest.raises(FileNotFoundError, match=str(tmp_path)):
+    # re.escape: `match` is a regular expression, and a Windows tmp_path
+    # is full of backslashes that read as escapes
+    with pytest.raises(FileNotFoundError, match=re.escape(str(tmp_path))):
         visualdynamics.import_file('~/absent.npz')
 
 
 def test_a_written_path_is_expanded_too(tmp_path, monkeypatch):
     """Or the file lands in a folder named for a tilde."""
-    monkeypatch.setenv('HOME', str(tmp_path))
+    _home_is(monkeypatch, tmp_path)
     geometry = visualdynamics.import_file(
         _geometry_archive(tmp_path / 'source.npz'))
     visualdynamics.export_file(geometry, '~/written.unv', 'unv')

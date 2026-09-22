@@ -1308,7 +1308,6 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
                      path.read_text(), re.MULTILINE), 'the measure is on the prose'
 
     app = QApplication.instance() or QApplication(['x'])
-    seen = {}
 
     def measure(frame):
         view = QWebEngineView()
@@ -1340,23 +1339,39 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
                     "  tall: cv ? cv.clientHeight : null}); })()",
                     0, answered)
             time.sleep(0.01)
+        # what the widget *became*, not what was asked for: a runner's
+        # virtual screen clamps a window, and CI read 2545 where this
+        # desk read 2560 (2026-09-21). The claim is that the page fills
+        # its frame, whatever the frame turned out to be.
+        got['frame'] = view.width()
         view.setPage(None)
         view.deleteLater()
         for _ in range(10):
             app.processEvents()
         assert 'read' in got, f'the page never reported at {frame} px: {got}'
-        return got['read']
+        return {**got['read'], 'frame': got['frame']}
 
-    for frame in (1000, 2560):
-        seen[frame] = measure(frame)
-
-    narrow, wide = seen[1000], seen[2560]
-    assert narrow['body'] == 1000 and wide['body'] == 2560, (
-        'the page fills whatever frame it is given'
+    narrow, wide = measure(800), measure(1600)
+    for read in (narrow, wide):
+        assert read['body'] == read['frame'], (
+            f'the page fills its frame: {read}'
+        )
+        assert read['prose'] <= 900, f'the prose never exceeds it: {read}'
+        assert read['figure'] >= read['body'] - 100, (
+            f'and the figure takes the width the prose does not: {read}'
+        )
+    assert wide['prose'] == 900, (
+        f'where the frame is wide enough, the measure is what binds: {wide}'
     )
-    assert narrow['prose'] == wide['prose'] == 900, (
-        'and the prose keeps its measure in both'
+    # within the canvas's own one-pixel border on each side
+    assert abs(narrow['prose'] - narrow['figure']) <= 4, (
+        f'and where it is not, prose and figure are alike bound by the '
+        f'frame: {narrow}'
     )
-    assert wide['figure'] > 2 * narrow['figure'], 'the figure took the room'
+    assert wide['body'] > narrow['body'] + 200, (
+        f'the two frames really differ, or this proves nothing: '
+        f'{narrow["body"]} and {wide["body"]}'
+    )
+    assert wide['figure'] > narrow['figure'], 'the figure took the room'
     assert wide['tall'] > narrow['tall'], 'and grew taller with it'
     assert wide['tall'] <= 560, 'but never runs away with the screen'

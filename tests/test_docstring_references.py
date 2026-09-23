@@ -9,6 +9,13 @@ know how to compute the SRS, or different FRF types, or a wavelet?").
 Two rules, and the second is about rendering rather than scholarship:
 this site renders Markdown, so a reST `.. [1]` citation marker comes
 out literally and the whole list runs together in one paragraph.
+
+Every docstring here is read through `inspect.cleandoc`, because
+**Python 3.13 strips a docstring's leading whitespace at compile time
+and 3.12 does not** — this project supports both. A test matching an
+unindented `References` heading passes on one and fails on the other,
+which is exactly what happened the first time (2026-09-22): green on
+this desk, red on the 3.12 matrix job.
 """
 
 from __future__ import annotations
@@ -43,9 +50,18 @@ def _module(name):
     return importlib.import_module(f'visualdynamics.{name}')
 
 
+def _doc(obj) -> str:
+    """A docstring with its indentation normalized away.
+
+    3.13 dedents at compile time, 3.12 leaves the indentation in; both
+    are supported, so neither form may be matched directly.
+    """
+    return inspect.cleandoc(obj.__doc__ or '')
+
+
 @pytest.mark.parametrize('name', sorted(THEORY))
 def test_a_module_implementing_theory_cites_it(name):
-    doc = _module(name).__doc__ or ''
+    doc = _doc(_module(name))
     assert 'References\n----------' in doc, (
         f'{name} implements {THEORY[name]} and cites nothing'
     )
@@ -61,7 +77,7 @@ def test_a_module_implementing_theory_cites_it(name):
 
 @pytest.mark.parametrize('name,cls,method', THEORY_METHODS)
 def test_a_method_implementing_theory_cites_it(name, cls, method):
-    doc = getattr(getattr(_module(name), cls), method).__doc__ or ''
+    doc = _doc(getattr(getattr(_module(name), cls), method))
     assert 'References\n----------' in doc, (
         f'{name}.{cls}.{method} cites nothing'
     )
@@ -83,11 +99,10 @@ def test_no_docstring_uses_a_citation_marker_this_site_cannot_render():
                 or inspect.isfunction(obj)):
             continue
         for label, doc in _docs_of(obj, seen):
-            if '.. [' in (doc or ''):
+            if '.. [' in inspect.cleandoc(doc or ''):
                 offenders.append(label)
     for name in sorted(THEORY):
-        doc = _module(name).__doc__ or ''
-        if '.. [' in doc:
+        if '.. [' in _doc(_module(name)):
             offenders.append(name)
     assert not offenders, (
         'reST citation markers render literally on this site: '
@@ -105,3 +120,30 @@ def _docs_of(obj, seen):
             if name.startswith('_') or not callable(member):
                 continue
             yield f'{obj.__name__}.{name}', getattr(member, '__doc__', '')
+
+
+def test_the_check_reads_both_interpreters_docstrings():
+    """The version difference, covered on whichever version is running.
+
+    Python 3.13 strips a docstring's leading whitespace at compile
+    time; 3.12 hands it over indented. This project supports both, and
+    only one of them runs here — so the two forms are written out
+    literally and the reading is held to answering the same on each.
+    A bare substring match answers differently, which is the bug this
+    replaced (green on 3.13, red on the 3.12 matrix job, 2026-09-22).
+    """
+    indented = ('One line.\n\n        References\n        ----------\n'
+                '        1. Thing (1981).\n        ')
+    dedented = 'One line.\n\nReferences\n----------\n1. Thing (1981).\n'
+
+    class Carrier:
+        pass
+
+    for form in (indented, dedented):
+        Carrier.__doc__ = form
+        assert 'References\n----------' in _doc(Carrier), (
+            'the reading finds the section in either interpreter'
+        )
+    assert 'References\n----------' not in indented, (
+        'and the bare match really does miss the 3.12 form'
+    )

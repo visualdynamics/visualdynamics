@@ -67,14 +67,30 @@ window is a verb on the project.
 ## Docstrings
 
 The docstrings **are** the API reference: the site is generated from
-them at build time, and there is nothing else to keep in step. Two
-standards, both enforced by `tests/test_docstrings.py`:
+them at build time, and there is nothing else to keep in step. Three
+standards, all enforced by `tests/test_docstrings.py` and
+`tests/test_docstring_references.py`:
 
 - **Every public callable has a docstring.** That is the floor.
 - **The scripting surface** — what `visualdynamics.__all__` exports and
   the public methods on those classes — also carries NumPy
   `Parameters` and `Returns` sections, because that is where somebody
   arrives without context and a table earns its place.
+- **Anything implementing published theory carries a NumPy
+  `References` section** — the shock response spectrum's filter, the
+  octave bands, the FRF estimators, the wavelet, the averaging, the
+  kurtosis, the beam element, the modal fit, the filters, the
+  coherence. A reader has to be able to check the equations against
+  the source they came from, and an implementer coming after has to
+  know which formulation was chosen among several. Each entry says
+  what it is *for*, not merely that it exists.
+
+  Write those entries as a **Markdown numbered list**, not as reST
+  `.. [1]` citations. This site renders Markdown: a `.. [1]` marker
+  comes out literally and the entries run together in one paragraph,
+  where `1.` gives an ordered list, `*title*` italicizes, and ordinary
+  Markdown link syntax becomes an anchor a reader can follow. Verified
+  by building both, 2026-09-22.
 
 Everywhere else, prose. The house style is that a docstring or comment
 explains *why* — especially why the obvious approach was tried and
@@ -150,7 +166,8 @@ and are why the rules above are not merely preferences:
 |---|---|
 | `test_license_boundary.py` | The package, and the tests, import no code whose license would restrict the project's licensing; the detector finds a planted violation. |
 | `test_principles.py` | The thirteen principles are numbered, stated, counted the same everywhere, reachable from every audience; no dependency is capped or pinned. |
-| `test_docstrings.py` | The two docstring standards above. |
+| `test_docstrings.py` | The first two docstring standards above. |
+| `test_docstring_references.py` | The third: theory carries its citations, in the form this site renders. |
 | `test_verbs.py` | `Project.verbs` is the one applicability table the bar reads. |
 | `test_headless.py` | Every view has a headless call. |
 | `test_journal.py`, `test_workflow_journals.py` | The journal replays, for every project type's workflow. |

@@ -23,6 +23,21 @@ assumption rather than an approximation of it.
 Damping is quoted either as a ratio or as Q = 1/(2*zeta). Q = 10 —
 5% of critical — is the near-universal default, and the value a
 specification is assumed to be written at unless it says otherwise.
+
+References
+----------
+1. Smallwood, D. O. (1981). "An Improved Recursive Formula for
+   Calculating Shock Response Spectra." *Shock and Vibration
+   Bulletin*, 51(2), 211-217. The ramp-invariant recursion the
+   filter coefficients below are taken from.
+2. ISO 18431-4:2007, *Mechanical vibration and shock - Signal
+   processing - Part 4: Shock-response spectrum analysis*. The
+   standard statement of the same digital filter, and of the maximax,
+   primary and residual readings.
+3. Irvine, T. ["An Introduction to the Shock Response
+   Spectrum"](https://www.vibrationdata.com/tutorials2/srs_intr.pdf).
+   A worked introduction, including why multiplying by the continuous
+   transfer function in the frequency domain goes wrong near Nyquist.
 """
 
 from __future__ import annotations

@@ -10,6 +10,27 @@ can disagree.
 The frame count is what is kept, not the stop time. Dragging the end of
 the analysis in the GUI adds or removes whole frames, because half a
 frame is not an average.
+
+References
+----------
+1. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
+   Estimation of Power Spectra: A Method Based on Time Averaging Over
+   Short, Modified Periodograms." *IEEE Transactions on Audio and
+   Electroacoustics*, 15(2), 70-73.
+   [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
+   The averaged-periodogram method these frames feed, and why
+   overlapping them recovers what the window threw away.
+2. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
+   with the Discrete Fourier Transform." *Proceedings of the IEEE*,
+   66(1), 51-83.
+   [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
+   The window shapes, their equivalent noise bandwidths and their
+   overlap correlation - the table behind a half overlap for a Hann
+   window.
+3. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
+   Measurement Procedures*, 4th ed. Wiley. The random error of an
+   averaged estimate against the number of frames, which is what the
+   frame count buys.
 """
 
 from __future__ import annotations

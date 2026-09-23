@@ -47,6 +47,22 @@ member is slender (length more than about ten times its depth) and
 progressively optimistic when it is not. A drone arm at 180 mm long and
 16 mm deep is comfortably inside that; a stubby mounting stub is not, and
 frequencies there read high.
+
+References
+----------
+1. Przemieniecki, J. S. (1968). *Theory of Matrix Structural
+   Analysis*. McGraw-Hill. The twelve-by-twelve Euler-Bernoulli beam
+   stiffness and consistent mass matrices assembled here, term for
+   term.
+2. Cook, R. D., Malkus, D. S., Plesha, M. E., & Witt, R. J. (2002).
+   *Concepts and Applications of Finite Element Analysis*, 4th ed.
+   Wiley. The cubic Hermite shape functions the consistent mass
+   follows from, and why consistent rather than lumped changes the
+   frequencies it returns.
+3. Craig, R. R., & Kurdila, A. J. (2006). *Fundamentals of Structural
+   Dynamics*, 2nd ed. Wiley. The generalized symmetric eigenproblem
+   this solves, and normalization of the mode shapes to unit modal
+   mass.
 """
 
 from __future__ import annotations

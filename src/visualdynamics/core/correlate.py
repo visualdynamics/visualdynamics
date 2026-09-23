@@ -12,6 +12,22 @@ overlay animation, reports — works on it unchanged.
 
 Both geometries must overlay in one frame already; aligning mismatched
 frames is a separate, later problem.
+
+References
+----------
+1. Allemang, R. J., & Brown, D. L. (1982). "A Correlation Coefficient
+   for Modal Vector Analysis." *Proceedings of the 1st International
+   Modal Analysis Conference (IMAC)*, 110-116. The Modal Assurance
+   Criterion that the cross-MAC downstream of this projection
+   computes.
+2. Allemang, R. J. (2003). "The Modal Assurance Criterion - Twenty
+   Years of Use and Abuse." *Sound and Vibration*, 37(8), 14-21. What
+   the number does and does not say, including why a high MAC between
+   a model and a test is not by itself agreement.
+3. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
+   Application*, 2nd ed. Research Studies Press. Chapter 7 on
+   comparing a model with a test, and on reducing one to the other's
+   degrees of freedom.
 """
 
 from __future__ import annotations

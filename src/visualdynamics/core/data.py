@@ -1846,20 +1846,22 @@ class TimeHistory(DataArray):
 
         References
         ----------
+        The coupled multi-reference H2 form is Rocklin, Crowley and
+        Vold's; the rest set out the three estimators and their
+        errors.
+
         1. Rocklin, G. T., Crowley, J., & Vold, H. (1985). "A
            comparison of H1, H2 and Hv frequency response functions."
-           *Proceedings of the 3rd International Modal Analysis
-           Conference (IMAC)*, 272-278. Where the three estimators are
-           set beside each other, and the source of the coupled
-           multi-reference H2 form used here.
+           *Proceedings of the International Modal Analysis Conference
+           (IMAC)*.
         2. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-           Application*, 2nd ed. Research Studies Press. Chapter 3 on
-           which estimator biases which way, and why the bias is worst
+           Application*, 2nd ed. Research Studies Press. Which
+           estimator biases which way, and why the bias is worst
            exactly where the measurement matters.
         3. Bendat, J. S., & Piersol, A. G. (2010). *Random Data:
-           Analysis and Measurement Procedures*, 4th ed. Wiley.
-           Chapters 6-7 on the single- and multiple-input frequency
-           response estimates and their errors.
+           Analysis and Measurement Procedures*, 4th ed. Wiley. The
+           single- and multiple-input frequency response estimates and
+           their errors.
         4. Van Huffel, S., & Vandewalle, J. (1991). *The Total Least
            Squares Problem: Computational Aspects and Analysis*. SIAM.
            The fit Hv performs, and what it means to weigh error in
@@ -2045,11 +2047,14 @@ class TimeHistory(DataArray):
 
         References
         ----------
+        The multiple coherence function is standard; these are where
+        it and the bias of an estimate of it are set out.
+
         1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data:
            Analysis and Measurement Procedures*, 4th ed. Wiley.
-           Chapter 7 on multiple-input systems: the multiple coherence
-           function, and its reading as the fraction of a response's
-           power the whole set of references accounts for.
+           Multiple-input systems: the multiple coherence function,
+           read as the fraction of a response's power the whole set of
+           references accounts for.
         2. Carter, G. C., Knapp, C. H., & Nuttall, A. H. (1973).
            "Estimation of the magnitude-squared coherence function via
            overlapped fast Fourier transform processing." *IEEE

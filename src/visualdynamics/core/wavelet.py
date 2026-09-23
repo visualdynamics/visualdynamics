@@ -98,14 +98,14 @@ is one independent FFT per scale.
 
 References
 ----------
+The Morlet definition, the scale-to-frequency relation and the cone of
+influence are Torrence and Compo's.
+
 1. Torrence, C., & Compo, G. P. (1998). "A Practical Guide to Wavelet
-   Analysis." *Bulletin of the American Meteorological Society*,
-   79(1), 61-78. The Morlet definition, the scale-to-frequency
-   relation and the cone of influence used here.
-2. Morlet, J., Arens, G., Fourgeau, E., & Glard, D. (1982). "Wave
-   propagation and sampling theory - Part I: Complex signal and
-   scattering in multilayered media." *Geophysics*, 47(2), 203-221.
-   The wavelet itself.
+   Analysis." *Bulletin of the American Meteorological Society*.
+2. Morlet, J., Arens, G., Fourgeau, E., & Giard, D. (1982). "Wave
+   propagation and sampling theory." *Geophysics*. The wavelet
+   itself.
 3. Mallat, S. (2009). *A Wavelet Tour of Signal Processing: The Sparse
    Way*, 3rd ed. Academic Press. Admissibility, and why the Morlet
    needs its correction term at low center frequency.

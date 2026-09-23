@@ -23,18 +23,21 @@ clipped or is not random at all.
 
 References
 ----------
+The fourth standardized moment is standard; these are where it and its
+use in vibration testing are set out.
+
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
-   Measurement Procedures*, 4th ed. Wiley. Chapter 3 on the moments of
-   a distribution, and the fourth standardized moment reported here.
+   Measurement Procedures*, 4th ed. Wiley. The moments of a
+   distribution.
 2. Joanes, D. N., & Gill, C. A. (1998). "Comparing measures of sample
    skewness and kurtosis." *Journal of the Royal Statistical Society:
-   Series D*, 47(1), 183-189. The three sample estimators and their
-   bias; this uses the plain moment ratio, which is what a vibration
-   specification means by the word.
+   Series D*. The sample estimators and their bias; this reports the
+   plain moment ratio, which is what a vibration specification means
+   by the word.
 3. Steinwolf, A. (2006). "Shaker simulation of random vibrations with
-   a high kurtosis value." *Journal of the IEST*, 49(1), 89-107. Why a
-   record reading above three fatigues an article that a Gaussian one
-   of the same spectrum does not.
+   a high kurtosis value." *Journal of the IEST*. Why a record reading
+   above three fatigues an article that a Gaussian one of the same
+   spectrum does not.
 """
 
 from __future__ import annotations

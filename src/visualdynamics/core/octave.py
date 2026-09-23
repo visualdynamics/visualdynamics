@@ -34,18 +34,17 @@ conserve anything.
 
 References
 ----------
+The bands are the ones these two standards define; they agree on every
+band this module builds.
+
 1. ANSI/ASA S1.11-2014, *Electroacoustics - Octave-band and
-   Fractional-octave-band Filters - Part 1: Specifications*. The
-   base-ten band system, its center frequencies and its edges.
+   Fractional-octave-band Filters - Part 1: Specifications*.
 2. IEC 61260-1:2014, *Electroacoustics - Octave-band and
-   fractional-octave-band filters - Part 1: Specifications*. The
-   international statement of the same system; the two agree on the
-   bands this module builds.
+   fractional-octave-band filters - Part 1: Specifications*.
 3. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
-   Measurement Procedures*, 4th ed. Wiley. Chapter 11 on the relation
-   between a density and the power in a band, which is why a band
-   takes the integral over its width rather than a reading at its
-   center.
+   Measurement Procedures*, 4th ed. Wiley. On the relation between a
+   density and the power in a band, which is why a band takes the
+   integral over its width rather than a reading at its center.
 """
 
 from __future__ import annotations

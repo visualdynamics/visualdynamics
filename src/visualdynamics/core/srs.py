@@ -26,18 +26,18 @@ specification is assumed to be written at unless it says otherwise.
 
 References
 ----------
+The recursion implemented here is Smallwood's; the others set out the
+same analysis and where it goes wrong.
+
 1. Smallwood, D. O. (1981). "An Improved Recursive Formula for
    Calculating Shock Response Spectra." *Shock and Vibration
-   Bulletin*, 51(2), 211-217. The ramp-invariant recursion the
-   filter coefficients below are taken from.
+   Bulletin*.
 2. ISO 18431-4:2007, *Mechanical vibration and shock - Signal
-   processing - Part 4: Shock-response spectrum analysis*. The
-   standard statement of the same digital filter, and of the maximax,
-   primary and residual readings.
+   processing - Part 4: Shock-response spectrum analysis*.
 3. Irvine, T. ["An Introduction to the Shock Response
-   Spectrum"](https://www.vibrationdata.com/tutorials2/srs_intr.pdf).
-   A worked introduction, including why multiplying by the continuous
-   transfer function in the frequency domain goes wrong near Nyquist.
+   Spectrum"](https://www.vibrationdata.com/tutorials2/srs_intr.pdf),
+   including why multiplying by the continuous transfer function in
+   the frequency domain goes wrong near Nyquist.
 """
 
 from __future__ import annotations

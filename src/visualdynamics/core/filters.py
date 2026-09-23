@@ -36,17 +36,19 @@ accuracy.
 
 References
 ----------
+The filter forms are textbook; these are where they and the drift a
+double integration invents are set out.
+
 1. Oppenheim, A. V., & Schafer, R. W. (2010). *Discrete-Time Signal
    Processing*, 3rd ed. Prentice Hall. The bilinear transform, the
-   filter forms and zero-phase forward-backward filtering used here.
+   filter forms and zero-phase forward-backward filtering.
 2. ISO 18431-1:2005, *Mechanical vibration and shock - Signal
    processing - Part 1: General introduction*, and ISO 18431-2 on
-   time-domain integration. Why an acceleration record is high-pass
-   filtered before it is integrated, rather than after.
+   time-domain integration.
 3. Boore, D. M., & Bommer, J. J. (2005). "Processing of strong-motion
-   accelerograms: needs, options and consequences." *Soil Dynamics and
-   Earthquake Engineering*, 25(2), 93-115. The drift a double
-   integration invents, and what filtering does and does not cure.
+   accelerograms: needs, options and consequences." *Soil Dynamics
+   and Earthquake Engineering*. The drift a double integration
+   invents, and what filtering does and does not cure.
 """
 
 from __future__ import annotations

@@ -20,18 +20,19 @@ One mode is fitted from the residual alone:
 
 References
 ----------
+The single-degree-of-freedom residue fit is standard; these are where
+it and the indicator driving it are set out.
+
 1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-   Application*, 2nd ed. Research Studies Press. Chapters 4-5: the
-   single-degree-of-freedom residue form fitted here, and what the
-   neighboring modes leave behind as residuals.
+   Application*, 2nd ed. Research Studies Press. The residue form
+   fitted here, and what neighboring modes leave behind as residuals.
 2. Allemang, R. J., & Brown, D. L. (1998). "A Complete Review of the
    Complex Mode Indicator Function (CMIF) with Applications."
-   *Proceedings of ISMA*. The indicator whose peaks drive the
-   suggestion of the next mode, and whose collapse confirms one.
+   *Proceedings of ISMA*. The indicator whose peaks suggest the next
+   mode and whose collapse confirms one.
 3. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
-   Experimental Modal Analysis*. Research Studies Press. The residue
-   to mode-shape scaling, including the unit-modal-mass convention
-   used when the scale comes from residue magnitudes.
+   Experimental Modal Analysis*. Research Studies Press. Residue to
+   mode-shape scaling, including the unit-modal-mass convention.
 """
 
 from __future__ import annotations

@@ -15,19 +15,19 @@ frames is a separate, later problem.
 
 References
 ----------
+The projection here is ordinary; these are where the comparison it
+feeds is set out.
+
 1. Allemang, R. J., & Brown, D. L. (1982). "A Correlation Coefficient
    for Modal Vector Analysis." *Proceedings of the 1st International
-   Modal Analysis Conference (IMAC)*, 110-116. The Modal Assurance
-   Criterion that the cross-MAC downstream of this projection
-   computes.
+   Modal Analysis Conference (IMAC)*. The Modal Assurance Criterion.
 2. Allemang, R. J. (2003). "The Modal Assurance Criterion - Twenty
-   Years of Use and Abuse." *Sound and Vibration*, 37(8), 14-21. What
-   the number does and does not say, including why a high MAC between
-   a model and a test is not by itself agreement.
+   Years of Use and Abuse." *Sound and Vibration*. What the number
+   does and does not say, including why a high MAC between a model
+   and a test is not by itself agreement.
 3. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
-   Application*, 2nd ed. Research Studies Press. Chapter 7 on
-   comparing a model with a test, and on reducing one to the other's
-   degrees of freedom.
+   Application*, 2nd ed. Research Studies Press. Comparing a model
+   with a test, and reducing one to the other's degrees of freedom.
 """
 
 from __future__ import annotations

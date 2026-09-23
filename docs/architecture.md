@@ -85,6 +85,15 @@ standards, all enforced by `tests/test_docstrings.py` and
   know which formulation was chosen among several. Each entry says
   what it is *for*, not merely that it exists.
 
+  **Claim only what has been checked.** A section opens with a
+  sentence saying which it is: the formulation this code follows, or
+  a standard method and where it is set out. No chapter or section
+  numbers — they look checkable and, written from knowledge of a
+  method rather than from the book in hand, they are not. Volume,
+  issue and pages appear only beside a DOI link, where a reader can
+  follow them and find them wrong. Everywhere else an entry stops at
+  the venue, which is true.
+
   Write those entries as a **Markdown numbered list**, not as reST
   `.. [1]` citations. This site renders Markdown: a `.. [1]` marker
   comes out literally and the entries run together in one paragraph,

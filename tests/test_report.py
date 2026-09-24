@@ -60,7 +60,7 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -68,14 +68,23 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
     path = tmp_path / 'modal.html'
     path.write_text(render_html(report, project), encoding='utf-8')
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(1000, 800)
-    outcome = {}
-
-    def probe(_ok):
-        QTimer.singleShot(1200, lambda: view.page().runJavaScript(
-            "const cmif = document.querySelectorAll('canvas')[3];"
+    view.load(QUrl.fromLocalFile(str(path)))
+    # Through the shared reader, never one reading after a fixed delay
+    # inside `app.exec()`. The probe answers null until the CMIF and
+    # the MAC have views and the theme toggle exists, and only then
+    # wheels, clicks and reports — so the wheeling and the toggle
+    # happen once, on a built page, however long it took to build.
+    try:
+        js = web_read(
+            view,
+            "(() => { const all = document.querySelectorAll('canvas');"
+            "if (all.length < 5 || !all[3].dataset.view"
+            "    || !all[4].dataset.view"
+            "    || !document.querySelector('.themetoggle')) return null;"
+            "const cmif = all[3];"
             "const rect = cmif.getBoundingClientRect();"
             "for (let k = 0; k < 8; k++)"
             "  cmif.dispatchEvent(new WheelEvent('wheel', {deltaY: 600,"
@@ -96,7 +105,7 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
             "    cancelable: true}));"
             "const inkBefore = getComputedStyle(document.body).color;"
             "document.querySelector('.themetoggle').click();"
-            "JSON.stringify({canvases:"
+            "return JSON.stringify({canvases:"
             " document.querySelectorAll('canvas').length,"
             " theme: document.documentElement.dataset.theme,"
             " inkChanged:"
@@ -114,30 +123,11 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
             " macZoomedOut: JSON.parse(mac.dataset.view),"
             " macFull: JSON.parse(mac.dataset.full),"
             " homes: Array.from(document.querySelectorAll('canvas'),"
-            "   c => c.dataset.home ? JSON.parse(c.dataset.home) : null)})",
-            0, lambda value: (outcome.update(js=value), app.quit())))
-
-    view.loadFinished.connect(probe)
-    view.load(QUrl.fromLocalFile(str(path)))
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~30 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(30000)
-    app.exec()
-    guard.stop()
-    # tear the view down while the app still runs: a WebEnginePage
-    # alive at interpreter exit segfaults the whole test process
-    # (setPage(None) already deletes the page — deleting it again is the
-    # double-free this comment used to be)
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
-    built = json.loads(outcome['js'])
+            "   c => c.dataset.home ? JSON.parse(c.dataset.home) : null)});"
+            " })()")
+    finally:
+        web_close(view)
+    built = json.loads(js)
     payload = json.loads(render_html(report, project).split(
         'type="application/json">')[1].split('</script>')[0])
     assert built['sections'] == len(payload['blocks']), (
@@ -1033,18 +1023,18 @@ def test_a_narrow_log_axis_labels_its_real_values(tmp_path, project):
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     path = tmp_path / 'labels.html'
     path.write_text(render_html(modal_template(project), project),
                     encoding='utf-8')
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     outcome = {}
 
-    # Asked once the page's own functions exist rather than after a
+    # Asked until the page's own functions exist rather than after a
     # fixed wait: under a loaded machine (load average 11, 2026-09-09)
     # Chromium had not run the page's script 1.2 s after loadFinished,
     # and the probe answered '' — a JSON decode error that named
@@ -1059,36 +1049,18 @@ def test_a_narrow_log_axis_labels_its_real_values(tmp_path, project):
         " wide: ticks(-6, 0, true)}); }"
         " catch (e) { return 'ERR ' + e.message; } })()")
 
-    def answered(value):
-        if value == 'NOT READY':
-            QTimer.singleShot(200, ask)
-            return
-        outcome['js'] = value
-        app.quit()
-
-    def ask():
-        view.page().runJavaScript(expression, 0, answered)
-
-    def probe(ok):
-        outcome['loaded'] = ok
-        QTimer.singleShot(200, ask)
-
-    view.loadFinished.connect(probe)
+    view.loadFinished.connect(lambda ok: outcome.update(loaded=ok))
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~30 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(30000)
-    app.exec()
-    guard.stop()
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
+    # through the shared reader, which pumps its own events rather than
+    # entering `app.exec()`; ready once the page has answered and its
+    # load has reported, so `loaded` below is a reading and not a race
+    try:
+        outcome['js'] = web_read(
+            view, expression,
+            ready=lambda value: bool(value) and value != 'NOT READY'
+            and 'loaded' in outcome)
+    finally:
+        web_close(view)
     assert outcome.get('loaded'), 'the page loaded'
     assert 'js' in outcome, 'the page answered before the guard'
     assert not str(outcome['js']).startswith('ERR'), outcome['js']
@@ -1266,7 +1238,7 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -1279,14 +1251,22 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
     path = tmp_path / 'stage.html'
     path.write_text(render_html(report, project), encoding='utf-8')
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(1000, 700)
-    outcome = {}
-
-    def probe(_ok):
-        QTimer.singleShot(1500, lambda: view.page().runJavaScript(
-            "const canvas = document.querySelector('canvas');"
+    view.load(QUrl.fromLocalFile(str(path)))
+    # Through the shared reader. This read the stage once, 1.5 s after
+    # load — the same canvas, under the same load, as the shading test
+    # that came back empty on 2026-09-23. The probe answers null until
+    # the first figure has drawn (a stage publishes its view as it
+    # draws) and Reset View exists, and only then drags and resets, so
+    # the drag happens once, on a figure that is there.
+    try:
+        js = web_read(
+            view,
+            "(() => { const canvas = document.querySelector('canvas');"
+            "if (!canvas || !canvas.dataset.view"
+            "    || !document.querySelector('button.reset')) return null;"
             "canvas.setPointerCapture = () => {};"
             "const r = canvas.getBoundingClientRect();"
             "const at = {clientX: r.left + r.width / 2,"
@@ -1304,30 +1284,15 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
             "document.querySelector('button.reset').click();"
             "const blank = document.createElement('canvas');"
             "blank.width = canvas.width; blank.height = canvas.height;"
-            "JSON.stringify({painted: drawn !== blank.toDataURL('image/png'),"
+            "return JSON.stringify({"
+            " painted: drawn !== blank.toDataURL('image/png'),"
             " repainted: turnedShot !== drawn,"
             " turnedDiffers: turned !== home, cameHome: seen() === home,"
             " home: JSON.parse(home),"
-            " canvases: document.querySelectorAll('canvas').length})",
-            0, lambda value: (outcome.update(js=value), app.quit())))
-
-    view.loadFinished.connect(probe)
-    view.load(QUrl.fromLocalFile(str(path)))
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~30 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(30000)
-    app.exec()
-    guard.stop()
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
-    got = json.loads(outcome['js'])
+            " canvases: document.querySelectorAll('canvas').length}); })()")
+    finally:
+        web_close(view)
+    got = json.loads(js)
     # the fixture holds a hundred records and a stage draws 48 of
     # them legibly, so the block continues into three figures rather
     # than truncating at one (Brandon, 2026-08-24)
@@ -1619,7 +1584,7 @@ def test_a_hidden_node_is_hidden(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -1652,61 +1617,43 @@ def test_a_hidden_node_is_hidden(tmp_path):
     flat = scene['node_colors'][0]
     ink = tuple(int(flat[i:i + 2], 16) for i in (1, 3, 5))
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(900, 600)
-    outcome = {}
 
+    # null until there is a canvas with paint on it, and the reading
+    # after that — the question the old version asked by hoping a
+    # non-empty answer meant a drawn one
     reading = (
-        "const c = document.querySelector('canvas');"
+        "(() => { const c = document.querySelector('canvas');"
+        "if (!c) return null;"
         "const g = c.getContext('2d', {willReadFrequently: true});"
         "const d = g.getImageData(0, 0, c.width, c.height).data;"
         "const at = (x, y) => {const i = (y * c.width + x) * 4;"
         "  return [d[i], d[i+1], d[i+2], d[i+3]];};"
-        "let flat = 0;"
-        "for (let i = 0; i < d.length; i += 4)"
+        "let flat = 0, painted = 0;"
+        "for (let i = 0; i < d.length; i += 4) {"
+        "  if (d[i+3] > 200) painted++;"
         "  if (d[i+3] > 200 && d[i] === __R__ && d[i+1] === __G__"
-        "      && d[i+2] === __B__) flat++;"
-        "JSON.stringify({middle: at(c.width >> 1, c.height >> 1),"
-        " flat: flat})"
+        "      && d[i+2] === __B__) flat++; }"
+        "if (!painted) return null;"
+        "return JSON.stringify({middle: at(c.width >> 1, c.height >> 1),"
+        " flat: flat}); })()"
         .replace('__R__', str(ink[0])).replace('__G__', str(ink[1]))
         .replace('__B__', str(ink[2])))
 
     # polled rather than one shot at a fixed delay: under a parallel
     # run the renderer can be starved well past 1.5 s, the JS then
     # answers empty (no canvas yet), and the test failed on timing it
-    # never meant to assert. The 30 s cap below still bounds it.
-    def took(value):
-        if value:
-            outcome.update(js=value)
-            app.quit()
-        else:
-            QTimer.singleShot(500, ask)
-
-    def ask():
-        view.page().runJavaScript(reading, 0, took)
-
-    def probe(_ok):
-        QTimer.singleShot(1500, ask)
-
-    view.loadFinished.connect(probe)
+    # never meant to assert. Through the shared reader, which also
+    # keeps it out of `app.exec()`.
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~30 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(30000)
-    app.exec()
-    guard.stop()
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
+    try:
+        js = web_read(view, reading)
+    finally:
+        web_close(view)
 
-    got = json.loads(outcome['js'])
+    got = json.loads(js)
     middle = tuple(got['middle'][:3])
     assert got['middle'][3] > 200, 'the middle of the box is painted'
     assert got['flat'] > 0, (
@@ -1948,7 +1895,7 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -1975,14 +1922,27 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
     path = tmp_path / 'edit.html'
     path.write_text(html, encoding='utf-8')
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(1000, 800)
-    outcome: dict = {}
-
-    def probe(_ok):
-        QTimer.singleShot(1200, lambda: view.page().runJavaScript(
-            "JSON.stringify({"
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    # Through the shared reader, never one reading after a fixed delay
+    # inside `app.exec()`. The page is one inline script, so once the
+    # document is complete it has run to the end or thrown; the probe
+    # waits for that and then selects and clicks once. *This* document:
+    # the view's opening about:blank is complete too, and a probe that
+    # asked only that answered the blank page's missing `__select` as
+    # the report's (the first try at this, 2026-09-23). A page that
+    # threw leaves no `__select`, and the probe answers the error as a
+    # reading rather than going blank, so the assertions below say
+    # which piece is missing instead of the reader timing out.
+    try:
+        answer = web_read(
+            view,
+            "(() => { if (document.readyState !== 'complete'"
+            "    || !document.getElementById('data')) return null;"
+            "try { return JSON.stringify({"
             "selected: (window.__select(1),"
             "  document.querySelectorAll('section.selected').length),"
             "sections: document.querySelectorAll('section').length,"
@@ -1993,25 +1953,13 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
             "cleared: (document.body.click(),"
             "  document.querySelectorAll('section.selected').length),"
             "sent: window.__sent.map(m => m.at),"
-            "hzLabels: window.__hz === undefined})",
-            lambda result: (outcome.update(found=result), app.quit())))
-
-    view.page().loadFinished.connect(probe)
-    view.load(QUrl.fromLocalFile(str(path)))
-    view.show()
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~15 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(15000)
-    app.exec()
-    guard.stop()
+            "hzLabels: window.__hz === undefined}); }"
+            " catch (e) { return JSON.stringify({error: e.message}); } })()")
+    finally:
+        web_close(view)
     import json
 
-    found = json.loads(outcome.get('found') or '{}')
+    found = json.loads(answer)
     assert found.get('sections') == 3, 'every block drew'
     assert found.get('selected') == 1, \
         'the selection script built and frames the block asked for'

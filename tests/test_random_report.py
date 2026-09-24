@@ -198,14 +198,14 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     path = tmp_path / 'random.html'
     path.write_text(render_html(report_of(run), run.project,
                                 unit_system=visualdynamics.SI), encoding='utf-8')
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(1000, 800)
     outcome = {}
@@ -222,55 +222,43 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
     # syntax or runtime error in the script leaves the markup perfectly
     # searchable and the page blank, and an unreached stamp says so.
     drawn = (
-        "const cs = Array.from(document.querySelectorAll('canvas.bars'));"
-        "JSON.stringify({canvases: cs.length,"
-        " bars: cs.map(c => +(c.dataset.bars || 0))})")
+        "(() => {"
+        " const cs = Array.from(document.querySelectorAll('canvas.bars'));"
+        " return JSON.stringify({canvases: cs.length,"
+        "  bars: cs.map(c => +(c.dataset.bars || 0))}); })()")
     picked = (
-        "const pick = document.querySelector('select.channel');"
+        "(() => { const pick = document.querySelector('select.channel');"
         "const was = pick ? pick.options[pick.selectedIndex].text : null;"
         "if (pick) { pick.selectedIndex = 1;"
         "  pick.dispatchEvent(new Event('change')); }"
-        "JSON.stringify({"
+        "return JSON.stringify({"
         " pickers: document.querySelectorAll('select.channel').length,"
         " channels: pick ? pick.options.length : 0,"
         " was: was,"
         " now: pick ? pick.options[pick.selectedIndex].text : null,"
         " figures: Array.from(document.querySelectorAll('.caption'),"
         "   d => d.textContent).filter(t => t.startsWith('Figure '))"
-        "   .length})")
+        "   .length}); })()")
 
-    def finish(value):
-        outcome.update(picked=value)
-        app.quit()
-
-    def read_drawing(value, left):
-        """Wait for the page to have built itself, rather than for a
-        fixed moment. A single 1500 ms delay was enough on an idle
-        machine and not on a busy one, which made this the suite's
-        flakiest test the day it started running in parallel.
-
-        An empty answer is the script not having run at all yet, which
-        is a reason to keep waiting and not a reading to keep.
-        """
-        if value:
-            outcome.update(drawn=value)
-        ready = json.loads(value) if value else {}
-        if left and len(ready.get('bars') or []) < BAR_CHARTS:
-            QTimer.singleShot(200, lambda: view.page().runJavaScript(
-                drawn, 0, lambda v: read_drawing(v, left - 1)))
-            return
-        view.page().runJavaScript(picked, 0, finish)
-
-    def probe(_ok):
-        QTimer.singleShot(200, lambda: view.page().runJavaScript(
-            drawn, 0, lambda value: read_drawing(value, 40)))
-
-    view.loadFinished.connect(probe)
+    # Wait for the page to have built itself, rather than for a fixed
+    # moment. A single 1500 ms delay was enough on an idle machine and
+    # not on a busy one, which made this the suite's flakiest test the
+    # day it started running in parallel. An empty answer is the script
+    # not having run at all yet, which is a reason to keep waiting and
+    # not a reading to keep. Through the shared reader, which pumps its
+    # own events: this used to arm a bare `QTimer.singleShot(60000,
+    # app.quit)` that was never canceled, and would land in whichever
+    # later test's `exec()` was running a minute on.
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()
-    QTimer.singleShot(60000, app.quit)
-    app.exec()
-    view.deleteLater()
+    try:
+        outcome['drawn'] = web_read(
+            view, drawn,
+            ready=lambda value: bool(value)
+            and len(json.loads(value)['bars']) >= BAR_CHARTS)
+        outcome['picked'] = web_read(view, picked)
+    finally:
+        web_close(view)
 
     assert outcome.get('picked'), 'the page never reported back'
     got = json.loads(outcome['picked'])

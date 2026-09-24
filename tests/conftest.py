@@ -406,7 +406,9 @@ def web_read(view, expression, ready=bool, timeout=60.0, interval=0.25):
       condition in which they are slowest.
 
     `expression` should evaluate to a string (usually `JSON.stringify`)
-    or to null while the page is not ready. Fails naming the last
+    or to null while the page is not ready — and "ready" must be a
+    fact about *this* page: the view's opening about:blank answers
+    `document.readyState === 'complete'` too. Fails naming the last
     answer seen, so a timeout says what the page *did* have.
     """
     import time

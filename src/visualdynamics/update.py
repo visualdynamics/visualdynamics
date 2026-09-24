@@ -93,13 +93,68 @@ def trust_store() -> ssl.SSLContext:
     return context
 
 
-def fetch(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | None:
-    """The manifest as published, or None when it cannot be had.
+#: how long File -> Check for Updates waits, the one place the
+#: application asks. Longer than `TIMEOUT`, which stays the default for
+#: scripted `fetch` and `check` calls: somebody who chose the menu item
+#: is waiting on an answer, and a corporate network is not always quick.
+ASKED_TIMEOUT = 12.0
 
-    `check` folds "nothing newer" and "could not ask" into one answer,
-    which is right for a check that runs unasked. Asked for from a
-    menu, the two deserve different words — up to date is not the same
-    news as offline — so the fetch stands on its own.
+
+def reason_for(error: BaseException, timeout: float) -> str:
+    """Why the manifest could not be had, in words for a status line.
+
+    One sentence, naming the cause rather than the exception. Folding
+    every failure into "could not reach visualdynamics.org" was the
+    original behavior and it cost a long diagnosis by hand: a proxy, a
+    filtered domain, an unverifiable certificate, a slow network and a
+    site that is down all read identically, and none of them can be
+    told apart from outside the program (Brandon, 2026-09-23).
+
+    **`urlopen` wraps the cause.** A refused connection, a timeout and a
+    certificate that will not verify all arrive as a `URLError` whose
+    `reason` is the real exception — measured against a self-signed
+    host, 2026-09-23. The first version tested for the certificate
+    error *before* unwrapping, so a real one never matched and read as
+    "could not be reached", which is the one message that hides the
+    likeliest cause on an inspecting network. Its test passed only
+    because it raised the certificate error bare, a shape urllib never
+    produces. So `HTTPError` first (it *is* a `URLError`, and its
+    status is the news), then unwrap, then read the cause once.
+    """
+    from urllib.error import HTTPError, URLError
+
+    if isinstance(error, HTTPError):
+        return (f'visualdynamics.org answered {error.code} '
+                f'{error.reason} — something between here and it is '
+                'refusing the request')
+    if isinstance(error, URLError):
+        error = error.reason
+    if isinstance(error, ssl.SSLCertVerificationError):
+        # every one of these is optional on the exception — ssl fills
+        # them in, a hand-raised one may not, and a status line is no
+        # place to raise AttributeError
+        said = (getattr(error, 'verify_message', None)
+                or getattr(error, 'reason', None) or error)
+        return (f'visualdynamics.org could not be verified: {said}. A '
+                'network that inspects HTTPS re-signs it with its own '
+                'authority, which this build does not trust')
+    if isinstance(error, TimeoutError):      # socket.timeout is this alias
+        return f'visualdynamics.org did not answer within {timeout:g} s'
+    if isinstance(error, (ValueError, UnicodeDecodeError)):
+        return 'visualdynamics.org answered, but not with a readable manifest'
+    if isinstance(error, (OSError, str)):    # a URLError's reason is either
+        return f'visualdynamics.org could not be reached: {error}'
+    return f'the update check failed: {type(error).__name__}: {error}'
+
+
+def attempt(url: str = MANIFEST,
+            timeout: float = TIMEOUT) -> tuple[dict[str, Any] | None, str | None]:
+    """(manifest, None), or (None, why not) in words.
+
+    The reading `fetch` is built on. It exists because a status line
+    that says only "could not reach visualdynamics.org" cannot be
+    acted on: the answer a person needs is *which* of the half-dozen
+    things went wrong.
     """
     try:
         request = Request(url, headers={
@@ -107,11 +162,25 @@ def fetch(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | Non
         with urlopen(request, timeout=timeout,
                      context=trust_store()) as response:
             manifest = json.loads(response.read(64_000).decode('utf-8'))
-    except Exception:      # noqa: BLE001 — see the docstring: every
-        return None        # failure here means 'no manifest', never a
-                           # traceback in front of somebody who only
-                           # opened the application
-    return manifest if isinstance(manifest, dict) else None
+    except Exception as error:   # noqa: BLE001 — every failure here is
+        return None, reason_for(error, timeout)   # news, never a
+                                                 # traceback in front
+                                                 # of somebody who
+                                                 # only opened the app
+    if not isinstance(manifest, dict):
+        return None, 'visualdynamics.org answered, but not with a manifest'
+    return manifest, None
+
+
+def fetch(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | None:
+    """The manifest as published, or None when it cannot be had.
+
+    `check` folds "nothing newer" and "could not ask" into one answer
+    for a script that only wants to know whether to act. Where the two
+    deserve different words — up to date is not the same news as
+    offline — `attempt` carries the reason, and the menu uses that.
+    """
+    return attempt(url, timeout)[0]
 
 
 def check(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | None:

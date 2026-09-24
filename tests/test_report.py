@@ -11,7 +11,7 @@ import json
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import fixture_path, web_close, web_read
 
 import visualdynamics
 from visualdynamics import io
@@ -1538,7 +1538,7 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
-    from PySide6.QtCore import QTimer, QUrl
+    from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
@@ -1556,40 +1556,33 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
     path = tmp_path / 'ramp.html'
     path.write_text(render_html(report, {'T': history}), encoding='utf-8')
 
-    app = QApplication.instance() or QApplication(['x'])
+
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(900, 600)
-    outcome = {}
-
-    def probe(_ok):
-        QTimer.singleShot(1500, lambda: view.page().runJavaScript(
-            "const c = document.querySelector('canvas');"
-            "const g = c.getContext('2d', {willReadFrequently: true});"
-            "const d = g.getImageData(0, 0, c.width, c.height).data;"
-            "const seen = [];"
-            "for (let i = 0; i < d.length; i += 4)"
-            "  if (d[i + 3] > 200) seen.push([d[i], d[i+1], d[i+2]]);"
-            "JSON.stringify(seen)",
-            0, lambda value: (outcome.update(js=value), app.quit())))
-
-    view.loadFinished.connect(probe)
     view.load(QUrl.fromLocalFile(str(path)))
-    # a *canceled* guard, never a bare singleShot: an
-    # uncanceled quit fired ~30 s after its own test
-    # finished, into whichever exec was running by then — the
-    # intermittent that killed unrelated WebEngine tests under -n 4
-    guard = QTimer()
-    guard.setSingleShot(True)
-    guard.timeout.connect(app.quit)
-    guard.start(30000)
-    app.exec()
-    guard.stop()
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
+    # Polled until there is paint, through the shared reader. This read
+    # the canvas once, 1.5 s after load, and failed under a full
+    # four-worker run with `Expecting value: line 1 column 1 (char 0)`:
+    # the canvas did not exist yet and the probe came back empty
+    # (2026-09-23). The probe answers null until the canvas has width,
+    # and '[]' until something has painted, and is asked again for both.
+    try:
+        answer = web_read(
+            view,
+            "(() => { const c = document.querySelector('canvas');"
+            " if (!c || !c.width) return null;"
+            " const g = c.getContext('2d', {willReadFrequently: true});"
+            " const d = g.getImageData(0, 0, c.width, c.height).data;"
+            " const seen = [];"
+            " for (let i = 0; i < d.length; i += 4)"
+            "   if (d[i + 3] > 200) seen.push([d[i], d[i+1], d[i+2]]);"
+            " return JSON.stringify(seen); })()",
+            ready=lambda value: bool(value) and value != '[]')
+    finally:
+        web_close(view)
 
-    painted = np.asarray(json.loads(outcome['js']), dtype=float)
+    painted = np.asarray(json.loads(answer), dtype=float)
     assert len(painted), 'the figure painted something'
     stops = np.asarray(VIRIDIS, dtype=float)
     # which stops of the scale actually reached the canvas: a pixel

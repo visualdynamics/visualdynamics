@@ -5261,6 +5261,16 @@ class MainWindow(QMainWindow):
         The fetch runs off the main thread: the check is the least
         important thing the application does and must never be why it
         is slow.
+
+        It is patient (`ASKED_TIMEOUT`) and it reports **why** it
+        failed. Somebody who chose this menu item is waiting on news,
+        and "could not reach visualdynamics.org" is not news — a proxy,
+        a filtered domain, an unverifiable certificate and a slow
+        network all read the same, and none can be told apart from
+        outside the program (Brandon, 2026-09-23: a work machine that
+        could not check, and an afternoon of commands to find out why).
+        This menu item is the only place the application checks; there
+        is no check on startup.
         """
         import threading
 
@@ -5271,18 +5281,21 @@ class MainWindow(QMainWindow):
             self._update_answer.connect(self._report_update)
             self._update_wired = True
         threading.Thread(target=lambda: self._update_answer.emit(
-            update.fetch()), daemon=True).start()
+            update.attempt(timeout=update.ASKED_TIMEOUT)),
+            daemon=True).start()
 
-    def _report_update(self, manifest) -> None:
+    def _report_update(self, answer) -> None:
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtWidgets import QMessageBox
 
         from .. import __version__, update
 
+        # `attempt`'s pair, the only thing this signal ever carries; it
+        # never answers (None, None), so a failure always has its reason
+        manifest, why = answer
         if manifest is None:
-            self._show_status('Could not reach visualdynamics.org to '
-                              'check for updates')
+            self._show_status(why)
             return
         version = str(manifest.get('version', ''))
         if not version or not update.newer(version):

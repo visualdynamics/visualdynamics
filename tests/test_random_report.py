@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import fixture_path, web_close, web_read
 
 import visualdynamics
 from visualdynamics.core.report import random_template
@@ -1170,7 +1170,6 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     import json
     import os
     import re
-    import time
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
@@ -1203,57 +1202,32 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     path = tmp_path / 'limits.html'
     path.write_text(page, encoding='utf-8')
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
     view = QWebEngineView()
     view.resize(900, 600)
-    outcome = {}
-
-    # driven here rather than through `app.exec()`. On a CI worker this
-    # came back with nothing at all — `loadFinished` never seen, no
-    # answer, 60 s of guard unused — which is what an `exec()` that
-    # returns at once looks like, and a `quit()` left pending by an
-    # earlier test in the same worker is enough to do that
-    # (2026-09-21). Pumping the events this test needs depends on
-    # nothing another test did. The reading carries the page's state
-    # with it, so a failure says what was there.
-    def ask():
-        view.page().runJavaScript(
-            "const c = document.querySelector('canvas');"
-            "JSON.stringify({canvases:"
-            "  document.querySelectorAll('canvas').length,"
-            " sections: document.querySelectorAll('section').length,"
-            " ready: document.readyState,"
-            " home: c && c.dataset.home ? JSON.parse(c.dataset.home)"
-            "                           : null})",
-            0, lambda value: outcome.update(seen=json.loads(value))
-            if value else None)
-
-    view.loadFinished.connect(lambda ok: outcome.update(loaded=ok))
     view.load(QUrl.fromLocalFile(str(path)))
-    deadline = time.monotonic() + 60.0
-    asked = 0.0
-    while 'js' not in outcome and time.monotonic() < deadline:
-        app.processEvents()
-        now = time.monotonic()
-        if now - asked > 0.25:
-            asked = now
-            ask()
-        if (outcome.get('seen') or {}).get('home'):
-            outcome['js'] = outcome['seen']['home']
-        time.sleep(0.01)
-
-    # torn down while the application still runs: a page alive at
-    # interpreter exit segfaults the process
-    view.setPage(None)
-    view.deleteLater()
-    for _ in range(10):
-        app.processEvents()
-
-    assert 'js' in outcome, (
-        'the page never reported its opening window — '
-        f'loaded={outcome.get("loaded")}, saw={outcome.get("seen")}'
-    )
-    home = outcome['js']
+    # Through the shared reader, which never uses `app.exec()`: on a CI
+    # worker an `exec()` returned at once on a `quit()` left pending by
+    # an earlier test and this read nothing at all (2026-09-21). The
+    # reading carries the page's state with it, so a timeout says what
+    # the page had. Wrapped in a function so each question declares its
+    # own `c` — asked repeatedly at the page's top level, a second
+    # `const c` is a SyntaxError.
+    try:
+        answer = web_read(
+            view,
+            "(() => { const c = document.querySelector('canvas');"
+            " return JSON.stringify({canvases:"
+            "  document.querySelectorAll('canvas').length,"
+            "  sections: document.querySelectorAll('section').length,"
+            "  ready: document.readyState,"
+            "  home: c && c.dataset.home ? JSON.parse(c.dataset.home)"
+            "                            : null}); })()",
+            ready=lambda value: bool(value)
+            and json.loads(value).get('home') is not None)
+    finally:
+        web_close(view)
+    home = json.loads(answer)['home']
     zones = block['channels'][0]['zones']
     edges = [v for zone in zones for edge in (zone['lower'], zone['upper'])
              for v in (edge or []) if v is not None]
@@ -1278,7 +1252,6 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
     import json
     import os
     import re
-    import time
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
@@ -1307,49 +1280,32 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
     assert re.search(r'^\.text \{ max-width: 900px; \}$',
                      path.read_text(), re.MULTILINE), 'the measure is on the prose'
 
-    app = QApplication.instance() or QApplication(['x'])
+    QApplication.instance() or QApplication(['x'])
 
     def measure(frame):
         view = QWebEngineView()
         view.resize(frame, 900)
         view.show()                      # offscreen, a hidden view has no width
-        got = {}
-        view.loadFinished.connect(lambda ok: got.update(loaded=ok))
         view.load(QUrl.fromLocalFile(str(path)))
-
-        def answered(value):
-            if not value:
-                return
-            read = json.loads(value)
-            if read.get('figure'):
-                got['read'] = read
-
-        deadline, asked = time.monotonic() + 60.0, 0.0
-        while 'read' not in got and time.monotonic() < deadline:
-            app.processEvents()
-            now = time.monotonic()
-            if now - asked > 0.25:
-                asked = now
-                view.page().runJavaScript(
-                    "(() => { const cv = document.querySelector('canvas');"
-                    " const tx = document.querySelector('.text');"
-                    " return JSON.stringify({body: document.body.clientWidth,"
-                    "  prose: tx ? tx.clientWidth : null,"
-                    "  figure: cv ? cv.clientWidth : null,"
-                    "  tall: cv ? cv.clientHeight : null}); })()",
-                    0, answered)
-            time.sleep(0.01)
-        # what the widget *became*, not what was asked for: a runner's
-        # virtual screen clamps a window, and CI read 2545 where this
-        # desk read 2560 (2026-09-21). The claim is that the page fills
-        # its frame, whatever the frame turned out to be.
-        got['frame'] = view.width()
-        view.setPage(None)
-        view.deleteLater()
-        for _ in range(10):
-            app.processEvents()
-        assert 'read' in got, f'the page never reported at {frame} px: {got}'
-        return {**got['read'], 'frame': got['frame']}
+        try:
+            answer = web_read(
+                view,
+                "(() => { const cv = document.querySelector('canvas');"
+                " const tx = document.querySelector('.text');"
+                " return JSON.stringify({body: document.body.clientWidth,"
+                "  prose: tx ? tx.clientWidth : null,"
+                "  figure: cv ? cv.clientWidth : null,"
+                "  tall: cv ? cv.clientHeight : null}); })()",
+                ready=lambda value: bool(value)
+                and bool(json.loads(value).get('figure')))
+            # what the widget *became*, not what was asked for: a
+            # runner's virtual screen clamps a window, and CI read 2545
+            # where this desk read 2560 (2026-09-21). The claim is that
+            # the page fills its frame, whatever the frame turned out to be.
+            became = view.width()
+        finally:
+            web_close(view)
+        return {**json.loads(answer), 'frame': became}
 
     narrow, wide = measure(800), measure(1600)
     for read in (narrow, wide):

@@ -385,3 +385,71 @@ def pump(qt_app):
         for _ in range(times):
             qt_app.processEvents()
     return pump
+
+
+def web_read(view, expression, ready=bool, timeout=60.0, interval=0.25):
+    """Ask a page `expression` until `ready(answer)`; return the answer.
+
+    For every test that reads a rendered report back out of
+    `QWebEngineView`. Three rules, each learned by a failure:
+
+    - **Polled, never read once after a fixed delay.** A single reading
+      1.5 s after load came back empty under a full four-worker run
+      because the canvas did not exist yet (2026-09-23).
+    - **Driven here, never through `app.exec()`.** An `exec()` returns
+      at once on a `quit()` left pending by an earlier test in the same
+      worker, which on CI looked like a page that never loaded at all
+      (2026-09-21).
+    - **One question in flight at a time.** `runJavaScript` is
+      asynchronous; asking again every `interval` while a slow answer
+      is still pending stacks up whole-canvas scans under load, the one
+      condition in which they are slowest.
+
+    `expression` should evaluate to a string (usually `JSON.stringify`)
+    or to null while the page is not ready. Fails naming the last
+    answer seen, so a timeout says what the page *did* have.
+    """
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    state = {'pending': False, 'last': None, 'ok': False}
+
+    def answered(value):
+        state['pending'] = False
+        state['last'] = value
+        if ready(value):
+            state['ok'] = True
+
+    deadline = time.monotonic() + timeout
+    while not state['ok'] and time.monotonic() < deadline:
+        app.processEvents()
+        if not state['pending']:
+            state['pending'] = True
+            view.page().runJavaScript(expression, 0, answered)
+            asked = time.monotonic()
+        elif time.monotonic() - asked > interval * 40:
+            state['pending'] = False     # an answer lost, not merely late
+        time.sleep(0.01)
+    assert state['ok'], (
+        f'the page never answered ready within {timeout:g} s; '
+        f'last answer: {state["last"]!r}'
+    )
+    return state['last']
+
+
+def web_close(view):
+    """Tear a view down while the application still runs.
+
+    A page alive at interpreter exit segfaults the process — two crash
+    reports on 2026-09-20 were exactly that — so every test that makes
+    a view ends by calling this.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    view.setPage(None)
+    view.deleteLater()
+    for _ in range(10):
+        app.processEvents()

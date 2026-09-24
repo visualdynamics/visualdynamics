@@ -331,9 +331,10 @@ class ShapeSet:
         shape_matrix: `(modes, dofs)`. Complex for a complex mode; the
             overlay and MAC machinery handles either.
         modal_mass: Per mode. 1.0 throughout for a mass-normalized set,
-            which is what an eigensolution here produces. Complex when
-            an imported source carried complex modal mass — kept as
-            measured, never squeezed real.
+            which is what an eigensolution here produces. For complex
+            shapes it is modal A, the first-order scaling, which is what
+            `synthesize_frf` reads it as. Complex when an imported source
+            carried it complex — kept as measured, never squeezed real.
         modal_damping: Complex modal damping per mode where a source
             carried one (I-DEAS ADFs do), or None. Distinct from
             `damping`, the viscous fraction of critical: this is the
@@ -471,16 +472,48 @@ class ShapeSet:
                        power: int = 0) -> np.ndarray:
         """FRFs from the modal model, one row per DOF pair.
 
-        H_jk(f) = sum_r (iw)^power phi_jr phi_kr
-                        / (m_r (w_r^2 - w^2 + 2i z_r w_r w))
-        with w = 2*pi*f — the residue form for mass-normalized shapes, with
-        `modal_mass` carrying any other scaling. `power` picks the response
-        quantity: 0 displacement per force, 1 velocity, 2 acceleration. It
-        applies inside the sum because a rigid-body mode's denominator is
-        exactly -w^2: at w = 0 its accelerance cancels to the finite
-        residue, where an after-the-fact multiply is 0/0 and a screenful
-        of warnings. Its displacement and velocity there are genuinely
-        unbounded and come back as nan.
+        For real shapes, the second-order residue form
+
+            H_jk(f) = sum_r (iw)^power phi_jr phi_kr
+                            / (m_r (w_r^2 - w^2 + 2i z_r w_r w))
+
+        with w = 2*pi*f — exact for mass-normalized shapes, with
+        `modal_mass` carrying any other scaling. For complex shapes, the
+        first-order form, a pole and its conjugate:
+
+            H_jk(f) = sum_r (iw)^power [ psi_jr psi_kr / (A_r (iw - l_r))
+                          + conj(psi_jr psi_kr / A_r) / (iw - conj(l_r)) ]
+
+        with the pole l_r = -z_r w_r + i w_r sqrt(1 - z_r^2) and
+        `modal_mass` read as **modal A**, the scaling a complex mode
+        carries (unity when a set has none). The two are the same FRF
+        for a real mode whose modal A is 2i w_d m_r, with w_d the damped
+        frequency, which is how they connect.
+
+        Which form is decided by the shapes alone, complex or real, as
+        sdynpy decides it. The second-order form cannot represent a
+        complex mode: however `modal_mass` is set, it gives the
+        conjugate pole the residue -R where the structure has conj(R),
+        and with modal A in `modal_mass` it is off by 2i w_d outright —
+        every imported complex set synthesized an answer rotated 90
+        degrees and 2 w_d times too small, until 2026-09-23. Modal A is
+        conjugated in the second term, where sdynpy's is not; the two
+        agree whenever modal A is real, which sdynpy's always is, and
+        only the conjugate is right when it is not.
+
+        `power` picks the response quantity: 0 displacement per force, 1
+        velocity, 2 acceleration. It applies inside the sum because a
+        real rigid-body mode's denominator is exactly -w^2: at w = 0 its
+        accelerance cancels to the finite residue, where an
+        after-the-fact multiply is 0/0 and a screenful of warnings. Its
+        displacement and velocity there are genuinely unbounded and
+        come back as nan.
+
+        Both forms are checked against the direct inverse of the dynamic
+        stiffness — proportionally damped for real shapes, and not
+        proportionally damped for complex ones — and against sdynpy's own
+        synthesis, all to rounding (`tests/test_frf_synthesis_exact.py`,
+        `tests/test_modal_frf_oracle.py`).
 
         `modes` restricts the sum; a truncated synthesis beside the
         measurement is what shows which modes the measurement actually
@@ -504,6 +537,17 @@ class ShapeSet:
         -------
         numpy.ndarray
             The synthesized FRFs, one row per response and drive pair.
+
+        References
+        ----------
+        1. Ewins, D. J. (2000). *Modal Testing: Theory, Practice and
+           Application*, 2nd ed. Research Studies Press. The residue
+           form for real modes, and why non-proportional damping makes
+           the modes complex.
+        2. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
+           Experimental Modal Analysis*. Research Studies Press. The
+           first-order (state-space) form, its conjugate pole pairs,
+           and modal A as the scaling that goes with them.
         """
         frequencies = np.asarray(frequencies, dtype=np.float64)
         picked = (np.arange(self.num_shapes) if modes is None
@@ -519,19 +563,34 @@ class ShapeSet:
 
         omega = 2.0 * np.pi * frequencies
         omega_r = 2.0 * np.pi * self.frequency[picked]
-        denominator = ((omega_r ** 2)[:, None] - (omega ** 2)[None, :]
-                       + 2j * (self.damping[picked] * omega_r)[:, None]
-                       * omega[None, :])
+        zeta = self.damping[picked]
         numerator = (1j * omega) ** power
-        # an undamped mode's own resonance line divides by zero too; the
-        # infinity is the right answer there, not worth a warning
+        out = np.empty((len(response_dof), len(frequencies)),
+                       dtype=np.complex128)
+        if self.is_complex:
+            # complex so an overdamped entry gives a real pole pair
+            # rather than nan
+            pole = (-zeta * omega_r
+                    + 1j * omega_r * np.sqrt((1.0 - zeta ** 2).astype(complex)))
+            # an undamped mode's own resonance line divides by zero; the
+            # infinity is the right answer there, not worth a warning
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = numerator[None, :] / (1j * omega[None, :] - pole[:, None])
+                mirror = numerator[None, :] / (1j * omega[None, :]
+                                               - np.conj(pole)[:, None])
+            for row, (response, reference) in enumerate(zip(response_dof,
+                                                            reference_dof)):
+                residues = (shape_at(response) * shape_at(reference)
+                            / self.modal_mass[picked])
+                out[row] = residues @ ratio + np.conj(residues) @ mirror
+            return out
+        denominator = ((omega_r ** 2)[:, None] - (omega ** 2)[None, :]
+                       + 2j * (zeta * omega_r)[:, None] * omega[None, :])
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio = numerator[None, :] / denominator
         rigid, still = omega_r == 0.0, omega == 0.0
         if rigid.any() and still.any():
             ratio[np.ix_(rigid, still)] = 1.0 if power == 2 else np.nan
-        out = np.empty((len(response_dof), len(frequencies)),
-                       dtype=np.complex128)
         for row, (response, reference) in enumerate(zip(response_dof,
                                                         reference_dof)):
             residues = (shape_at(response) * shape_at(reference)

@@ -2,8 +2,9 @@
 
 visualdynamics is an analysis toolset, so this is deliberately the smallest
 modeling capability that produces something worth analyzing: three-dimensional
-two-node beams and lumped masses, assembled into mass and stiffness matrices
-and solved for real normal modes. It exists because a demonstration needs a
+two-node beams, four-node rectangular flat-shell plates (MITC4) and lumped
+masses, assembled into mass and stiffness matrices and solved for real
+normal modes. It exists because a demonstration needs a
 *truth* model — a dense analytical answer the measured one can be compared
 against — and because building one should not require reaching for another
 package.
@@ -14,13 +15,14 @@ member along every edge of it and share the mass over its nodes. The second
 is the shorter road from any geometry — imported or built — to a set of
 modes, and `visualdynamics.demo.drone` is built that way throughout.
 
-What it is not: a general finite element code. There are no shells, no
-solids, no constraints beyond fixing degrees of freedom, and no static
-solution. A plate is modeled the way a frame is, as a grillage of beams,
-which is a real modeling choice with a known cost rather than an
-approximation hidden inside an element. Wiring a surface mesh's edges is the
-same bargain: it answers what order of mode density and what mode families a
-shape has, and it does not pretend to be shell theory.
+What it is not: a general finite element code. The plate is rectangular
+only — a skewed or warped quad is refused rather than solved badly — and
+there are no curved shells, no solids, no constraints beyond fixing degrees
+of freedom, and no static solution. Wiring a surface mesh's edges with
+`from_geometry` makes a grillage of beams, not plates, which is a real
+modeling choice with a known cost rather than an approximation hidden
+inside an element: it answers what order of mode density and what mode
+families a shape has, and it does not pretend to be shell theory.
 
 Everything here is SI, because the mass and stiffness matrices are the one
 place in visualdynamics where several dimensions have to be consistent with each
@@ -176,11 +178,17 @@ class Section:
         area = width * height
         iz = width ** 3 * height / 12.0     # bending in the local x-y plane
         iy = width * height ** 3 / 12.0     # bending in the local x-z plane
-        a, b = max(width, height) / 2.0, min(width, height) / 2.0
-        # St Venant's constant for a solid rectangle, to better than 0.1%
-        # over the whole aspect range (Roark): the series in b/a truncated
-        # where the next term is under a part in a thousand
-        j = a * b ** 3 * (16 / 3 - 3.36 * (b / a) * (1 - b ** 4 / (12 * a ** 4)))
+        long, short = max(width, height), min(width, height)
+        # St Venant's constant for a solid rectangle, from the exact series
+        # solution of the Prandtl stress function (Timoshenko & Goodier,
+        # Theory of Elasticity, sec. 109). The odd terms fall as n^-5, so a
+        # hundred of them leave under a part in 1e10. This replaced Roark's
+        # closed approximation (2026-09-23), which had been described as
+        # good to 0.1% and is 0.45% off at an aspect ratio of 1.2.
+        tail = sum(math.tanh(n * math.pi * long / (2.0 * short)) / n ** 5
+                   for n in range(1, 200, 2))
+        j = long * short ** 3 / 3.0 * (
+            1.0 - 192.0 / math.pi ** 5 * (short / long) * tail)
         return cls(name, area, iy, iz, j)
 
     @classmethod

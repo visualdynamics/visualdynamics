@@ -37,6 +37,28 @@ diagonal unless asked for principal axes, and Visual Dynamics always
 takes the principal axes (`tests/test_rigid.py` proves which is
 orthonormal) — so the two would disagree there by design.
 
+Three more files, each from its own `generate_*_oracle.py`, added
+2026-09-23 when the computations were audited for what had only ever
+been checked against themselves:
+
+- `modal_frf.npz` — FRFs synthesized from a modal model (unequal
+  modal masses, damping 1.2% to 8%) as displacement, velocity and
+  acceleration, once with real shapes and once with complex ones
+  (`tests/test_modal_frf_oracle.py`). Complex shapes take the
+  pole-plus-conjugate form with modal A. sdynpy stores modal A as a
+  real number, so a real modal A is what is frozen. Closed-form physics
+  checks both forms independently, a complex modal A included
+  (`tests/test_frf_synthesis_exact.py`).
+- `octave.npz` — PSD banding at 1, 3, 6 and 12 bands per octave, real
+  and complex, on sdynpy's own band edges (`tests/test_octave_oracle.py`).
+  Bands are matched by edge, not label: sdynpy names a band by the
+  arithmetic mean of its edges, Visual Dynamics by the geometric.
+- `beam.npz` — the assembled 30x30 mass and stiffness matrices of a
+  small 3D beam frame (`tests/test_beam_oracle.py`). The section
+  numbers are handed to sdynpy rather than derived by it, because its
+  rectangle helper's shear modulus and torsion constant are not the
+  textbook ones; the generator's docstring has the details.
+
 ## What is covered, and what deliberately is not
 
 Covered: PSDs (hann, rectangle, flattop; half- and no-overlap), the
@@ -45,11 +67,12 @@ coherence (both references, and the single-reference identity), the
 CMIF, MAC on complex shapes, the SRS family (maximax at Q of 10 and
 50, the signed peak types), and band RMS.
 
+Then, in the files above: FRF synthesis from real modes, octave
+banding, and the beam element with its assembly.
+
 Deliberately not covered, with reasons at the implementation sites:
-octave banding (sdynpy's lives in a documentation-support class whose
-conventions were not verified against ours), linear spectra (ours is
-numpy's rfft unscaled by convention), and integrate/differentiate
-(ours applies a drift high-pass by design).
+linear spectra (ours is numpy's rfft unscaled by convention), and
+integrate/differentiate (ours applies a drift high-pass by design).
 
 ## An agreement oracle, not a truth oracle
 

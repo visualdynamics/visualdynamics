@@ -315,17 +315,32 @@ _55_COMPONENTS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
 def _parse_55(records, modes, path):
     """Parse one dataset 55 — one mode's shape over the nodes — into `modes`.
 
-    Only normal modes are read. The other analysis types the dataset can
-    carry (static, transient, buckling) are not mode shapes and would need
-    somewhere else to go.
+    Two analysis types are mode shapes, and both are read. Type 2, a
+    normal mode, carries frequency, modal mass and damping ratio. Type
+    3, a complex eigenvalue of the first-order problem, carries the
+    eigenvalue itself (rad/s), modal A and modal B, each as a real and
+    imaginary pair; it is how a curve fitter exports complex modes. The
+    eigenvalue l becomes frequency |l| / 2 pi and damping -Re(l) / |l|,
+    which is the pole `ShapeSet.synthesize_frf` rebuilds; modal A goes
+    into `modal_mass`, which is what that synthesis reads it as for
+    complex shapes, and modal B into `modal_damping`. The other analysis
+    types (static, transient, buckling) are not mode shapes and would
+    need somewhere else to go.
     """
     definition = _ints(records[5])
     if len(definition) < 6:
         raise ValueError(f'{path}: dataset 55 has a short definition record')
-    analysis_type, _characteristic = definition[1], definition[2]
+    analysis_type, characteristic = definition[1], definition[2]
     data_type, values_per_node = definition[4], definition[5]
-    if analysis_type != 2:
-        return                      # not a normal mode; nothing to build here
+    if analysis_type not in (2, 3):
+        return                      # not a mode shape; nothing to build here
+    # The characteristic says what a node's vector *is* — 2 a 3-DOF
+    # translation, 3 translation and rotation — and so how many values
+    # it has; the count field only repeats it. Where the two disagree
+    # the count is the writer's slip: sdynpy writes 1 for a 3-DOF
+    # vector, and trusting it read one value per node and dropped the
+    # rest without a word (2026-09-23).
+    values_per_node = {2: 3, 3: 6}.get(characteristic, values_per_node)
     if values_per_node > len(_55_COMPONENTS):
         raise ValueError(
             f'{path}: dataset 55 has {values_per_node} values per node; '
@@ -334,9 +349,22 @@ def _parse_55(records, modes, path):
     integers = _ints(records[6])
     reals = _floats(records[7])
     mode_number = integers[3] if len(integers) > 3 else len(modes) + 1
-    frequency = reals[0] if reals else 0.0
-    modal_mass = reals[1] if len(reals) > 1 else 1.0
-    damping = reals[2] if len(reals) > 2 else 0.0
+    modal_b = 0.0
+    if analysis_type == 3:
+        pairs = [complex(reals[k], reals[k + 1]) if len(reals) > k + 1
+                 else 0j for k in (0, 2, 4)]
+        eigenvalue, modal_mass, modal_b = pairs
+        frequency = abs(eigenvalue) / (2.0 * np.pi)
+        damping = (-eigenvalue.real / abs(eigenvalue)
+                   if eigenvalue != 0 else 0.0)
+        # a writer with no scaling to give leaves modal A zero; unity is
+        # what the synthesis assumes of a set that carries none
+        if modal_mass == 0:
+            modal_mass = 1.0
+    else:
+        frequency = reals[0] if reals else 0.0
+        modal_mass = reals[1] if len(reals) > 1 else 1.0
+        damping = reals[2] if len(reals) > 2 else 0.0
 
     complex_values = data_type == 5
     per_node = values_per_node * (2 if complex_values else 1)
@@ -356,8 +384,9 @@ def _parse_55(records, modes, path):
             values = [values[k] + 1j * values[k + 1]
                       for k in range(0, len(values), 2)]
         node_values[node[0]] = values
-    modes.append({'mode': mode_number, 'frequency': frequency,
-                  'modal_mass': modal_mass, 'damping': damping,
+    modes.append({'mode': mode_number, 'analysis': analysis_type,
+                  'frequency': frequency, 'modal_mass': modal_mass,
+                  'modal_b': modal_b, 'damping': damping,
                   'values_per_node': values_per_node, 'nodes': node_values,
                   'comment': records[0].strip() if records else ''})
 
@@ -367,6 +396,13 @@ def _build_shapes(modes, path):
     from ..core.shapes import ShapeSet
 
     modes = sorted(modes, key=lambda m: m['mode'])
+    # the two carry different scalings — a normal mode's modal mass and
+    # a complex mode's modal A — and one set holds one of them
+    if len({m['analysis'] for m in modes}) > 1:
+        raise ValueError(
+            f'{path}: dataset 55 mixes normal modes (analysis type 2) with '
+            'complex eigenvalues (type 3); a visualdynamics ShapeSet is '
+            'one or the other')
     first = modes[0]
     nodes = list(first['nodes'])
     width = first['values_per_node']
@@ -388,6 +424,8 @@ def _build_shapes(modes, path):
         shape_matrix=shape_matrix,
         modal_mass=[m['modal_mass'] for m in modes],
         comment=[m['comment'] for m in modes],
+        modal_damping=([m['modal_b'] for m in modes]
+                       if any(m['modal_b'] != 0 for m in modes) else None),
     )
 
 
@@ -938,16 +976,26 @@ def _shape_datasets(shapes, unit_system=None):
         values = coefficients[mode]
         lines = [f'{shapes.mode_label(mode)[:80]}\n', 'NONE\n', 'NONE\n',
                  'NONE\n', 'NONE\n']
-        lines.append(f'{1:10d}{2:10d}{2 if width == 3 else 3:10d}'
+        # a complex set goes out as analysis type 3, the complex
+        # eigenvalue, which is where every reader looks for one and the
+        # only record with room for a complex modal A; a real set as
+        # type 2, the normal mode
+        lines.append(f'{1:10d}{3 if complex_values else 2:10d}'
+                     f'{2 if width == 3 else 3:10d}'
                      f'{8:10d}{5 if complex_values else 2:10d}'
                      f'{width:10d}\n')
-        lines.append(f'{2:10d}{4:10d}{1:10d}{mode + 1:10d}\n')
-        # dataset 55's normal-mode record holds a real modal mass; a
-        # complex one writes its real part, which is the loss the .vdyn
-        # and ADF forms do not have
-        lines.append(f'{float(shapes.frequency[mode]):13.5E}'
-                     f'{float(np.real(shapes.modal_mass[mode])):13.5E}'
-                     f'{float(shapes.damping[mode]):13.5E}{0.0:13.5E}\n')
+        if complex_values:
+            eigenvalue, modal_a, modal_b = _complex_mode_record(shapes, mode)
+            lines.append(f'{2:10d}{6:10d}{1:10d}{mode + 1:10d}\n')
+            lines.append(''.join(f'{v:13.5E}' for pair in
+                                 (eigenvalue, modal_a, modal_b)
+                                 for v in (pair.real, pair.imag)) + '\n')
+        else:
+            lines.append(f'{2:10d}{4:10d}{1:10d}{mode + 1:10d}\n')
+            lines.append(f'{float(shapes.frequency[mode]):13.5E}'
+                         f'{float(np.real(shapes.modal_mass[mode])):13.5E}'
+                         f'{float(shapes.damping[mode]):13.5E}'
+                         f'{0.0:13.5E}\n')
         for node in order:
             lines.append(f'{node:10d}\n')
             row = []
@@ -959,6 +1007,26 @@ def _shape_datasets(shapes, unit_system=None):
             lines.append(''.join(f'{v:13.5E}' for v in row) + '\n')
         blocks.append(_block(55, ''.join(lines)))
     return blocks
+
+
+def _complex_mode_record(shapes, mode):
+    """(eigenvalue, modal A, modal B) for one complex mode's record.
+
+    The eigenvalue is the pole `synthesize_frf` uses, -z w + i w
+    sqrt(1 - z^2) in rad/s. Modal B is the set's own where it carried
+    one; otherwise it is -l A, which is what B is for the first-order
+    problem (l = -B / A), rather than a zero that would claim the pole
+    sits at the origin.
+    """
+    omega = 2.0 * np.pi * float(shapes.frequency[mode])
+    zeta = float(shapes.damping[mode])
+    eigenvalue = complex(-zeta * omega,
+                         omega * np.sqrt(complex(1.0 - zeta ** 2)).real)
+    modal_a = complex(shapes.modal_mass[mode])
+    carried = shapes.modal_damping
+    modal_b = (complex(carried[mode]) if carried is not None
+               else -eigenvalue * modal_a)
+    return eigenvalue, modal_a, modal_b
 
 
 def save(obj: Any, path: str | os.PathLike,

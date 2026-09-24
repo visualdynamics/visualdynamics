@@ -182,7 +182,8 @@ def test_the_staging_parser_agrees_with_the_update_check():
     — so the two are held to one answer here, alpha and release alike."""
     from visualdynamics.update import parse_version
 
-    for text in ('0.1.0', '0.1.0a1', '0.2.0b3', '1.0.0rc1', '0.10.2'):
+    for text in ('0.1.0', '0.1.0a1', '0.1.0a10', '0.2.0b3', '1.0.0rc1',
+                 '0.10.2'):
         assert version_of(f'VisualDynamics-{text}-macos-arm64.dmg') == \
             parse_version(text), text
 

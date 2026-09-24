@@ -1192,9 +1192,9 @@ class TimeHistory(DataArray):
         """(frequencies, one-sided scale, channel -> windowed frames).
 
         The framing a PSD and a CPSD share: the same rfft grid, the same
-        DC-and-Nyquist-unhalved scaling, and the same cutting of a
-        channel into frames, so the two cannot drift apart in what they
-        mean by an average.
+        one-sided scaling (DC and Nyquist not doubled), and the same
+        cutting of a channel into frames, so the two cannot drift apart
+        in what they mean by an average.
 
         Without an `averaging` each record is its own frame, whole and
         unwindowed — a burst-random run saved as 20 captures is already
@@ -1559,12 +1559,15 @@ class TimeHistory(DataArray):
         across the frames.
 
         Welch's method where each average is already its own frame:
-        rectangular window, no overlap, Gxx = 2|X|²/(fs·N) with DC and
-        Nyquist unhalved, the frames' powers averaged. Power is
-        phase-insensitive, so burst random's random phase costs
-        nothing here. Values land in (SI unit)²/Hz with the Psd
-        dimension convention ('acceleration**2/frequency'); a channel
-        with undefined units stays undefined, its hint squared along.
+        rectangular window, no overlap, Gxx = 2|X|²/(fs·N) except at DC
+        and Nyquist, which have no mirror image to fold in and so are
+        |X|²/(fs·N) — as scipy's welch has it, and what makes the
+        spectrum's total the record's mean square. The frames' powers
+        are averaged. Power is phase-insensitive, so burst random's
+        random phase costs nothing here. Values land in (SI unit)²/Hz
+        with the Psd dimension convention ('acceleration**2/frequency');
+        a channel with undefined units stays undefined, its hint squared
+        along.
 
         Parameters
         ----------
@@ -1618,7 +1621,7 @@ class TimeHistory(DataArray):
         frames — every channel against every channel, not just each
         against itself.
 
-        Gxy = 2·conj(X)·Y/(fs·N) with DC and Nyquist unhalved, which is
+        Gxy = 2·conj(X)·Y/(fs·N), not doubled at DC and Nyquist, which is
         `compute_psds` on the diagonal, where conj(X)·X is |X|². The
         cross terms are how two channels move together, which is most of
         what a CPSD is for, and they are what a PSD throws away.

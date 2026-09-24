@@ -158,8 +158,9 @@ def fourier_factor(omega0: float = OMEGA0) -> float:
     which is exact for *their* normalization — unit energy, whose
     `sqrt(s)` factor tilts the response across scales and moves the
     peak. Their form is the one usually quoted, and taking it while
-    normalizing for amplitude reports every frequency 1.4% low
-    (measured, 2026-08-27). The two are a pair with the normalization,
+    normalizing for amplitude reports every frequency 1.4% high — a
+    100 Hz tone at 101.37 (measured 2026-08-27, and again 2026-09-23,
+    when this line was found saying "low"). The two are a pair with the normalization,
     not interchangeable constants.
     """
     return 2.0 * np.pi / omega0

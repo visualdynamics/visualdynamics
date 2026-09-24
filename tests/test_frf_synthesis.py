@@ -6,6 +6,14 @@ H_jk = sum_r phi_jr phi_kr / (m_r (w_r^2 - w^2 + 2i z_r w_r w)),
 scaled to each measurement's quantity by powers of iw. The survey
 fixtures were generated from exactly this modal model, so the full-mode
 synthesis must reproduce the measured FRFs to machine precision.
+
+**That is a consistency check, not a verification.** The fixture FRFs
+were made by this same function (`testdata/generate_plate.py`), so a
+convention error shared by the two would pass here at machine
+precision. What verifies the synthesis is elsewhere: exact physics in
+`test_frf_synthesis_exact.py` and sdynpy's own synthesis in
+`test_modal_frf_oracle.py`. This file is kept for what only it covers
+— signed DOFs, mode subsets, rigid modes at 0 Hz and the overlay.
 """
 
 from __future__ import annotations

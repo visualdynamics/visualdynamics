@@ -83,7 +83,7 @@ from .units import (
 #: alpha, said in the version itself so the dialog, the About text, the
 #: installers and latest.json all say the same thing, and the first
 #: non-alpha release is offered as an upgrade (Brandon, 2026-09-11)
-__version__ = '0.1.0a9'
+__version__ = '0.1.0a10'
 
 
 def launch_gui(*paths: str, in_process: bool | None = None) -> Any:

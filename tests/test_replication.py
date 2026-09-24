@@ -191,6 +191,24 @@ def test_level_is_blind_to_a_shape_the_waveform_error_catches():
         assert row['waveform'] > 50.0, 'and are not the same waveform'
 
 
+def test_level_counts_a_steady_offset_once():
+    """The level is the ratio of the two frames' mean squares, a steady
+    offset included. Until 2026-09-23 it was worked out from a private
+    PSD that doubled the DC and Nyquist lines along with the rest, so an
+    offset counted twice; here that read 18.5 dB for a true 15.5."""
+    spec = _target()
+    history = _measured(spec, repeats=2)
+    offset = 0.5 * np.abs(spec.ordinate).max()
+    history.ordinate[:, FRAME:2 * FRAME] += offset
+    target = np.asarray(spec.ordinate)
+    measured = history.ordinate[:, FRAME:2 * FRAME]
+    want = 10 * np.log10(np.mean(measured ** 2, axis=1)
+                         / np.mean(target ** 2, axis=1))
+    rows = [r for r in compare(history, spec, frame=1) if r['frame'] == 1]
+    assert [r['level'] for r in rows] == pytest.approx(want, abs=1e-9)
+    assert want.min() > 1.0, 'the offset is a real part of the level'
+
+
 def test_every_repeat_is_reported_and_none_is_singled_out():
     """Which playing was the bad one is a judgment about what the
     article is for, not a measurement. An earlier version reduced these

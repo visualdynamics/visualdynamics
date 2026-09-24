@@ -92,6 +92,9 @@ def test_a_pre_release_sorts_below_its_release():
     assert parse_version('0.1.0a1') < parse_version('0.1.0a2') \
         < parse_version('0.1.0b1') < parse_version('0.1.0rc1') \
         < parse_version('0.1.0') < parse_version('0.1.1a1')
+    assert newer('0.1.0a10', '0.1.0a9'), (
+        'the stage number is a number: a text compare puts a10 below a9, '
+        'and 0.1.0a10 is the first release where that could bite')
     assert newer('0.1.0', '0.1.0a1'), 'the first non-alpha is the upgrade'
     assert not newer('0.1.0a1', '0.1.0')
     assert parse_version('malformed') == parse_version('nonsense'), \

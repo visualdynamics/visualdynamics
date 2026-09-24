@@ -250,24 +250,20 @@ def lag_of(measured: TimeHistory, specification: DataArray,
     return best
 
 
-def _psd(frame, sample_rate):
-    """One-sided auto-power of a rectangular frame, and its lines."""
-    n = len(frame)
-    spectrum = np.fft.rfft(frame)
-    return (np.fft.rfftfreq(n, 1.0 / sample_rate),
-            2.0 * np.abs(spectrum) ** 2 / (sample_rate * n))
+def _level_db(measured_frame, spec_frame):
+    """The level the frame came out at against the target, in dB.
 
-
-def _level_db(measured_frame, spec_frame, sample_rate):
-    """The level the frame came out at against the target, in dB."""
-    from .compliance import rms
-
-    f, gm = _psd(measured_frame, sample_rate)
-    _f, gs = _psd(spec_frame, sample_rate)
-    got, want = rms(f, gm), rms(f, gs)
+    The ratio of mean squares, which by Parseval is the ratio of the two
+    PSDs' totals — so it is read as a PSD level — without a PSD to get
+    wrong. It used to go through one, a second PSD implementation beside
+    `TimeHistory.compute_psds` that doubled the DC and Nyquist lines with
+    the rest, and so counted a steady offset twice (2026-09-23).
+    """
+    got = float(np.mean(np.square(measured_frame)))
+    want = float(np.mean(np.square(spec_frame)))
     if not (np.isfinite(got) and np.isfinite(want)) or want <= 0.0:
         return float('nan')
-    return 20.0 * np.log10(got / want)
+    return 10.0 * np.log10(got / want)
 
 
 def _srs_db(measured_frame, want, sample_rate, band, q):
@@ -407,7 +403,7 @@ def compare(measured: TimeHistory, specification: DataArray,
                 found['srs'] = (_srs_db(block, aimed, rate, band, q)
                                 if band is not None else float('nan'))
             if 'level' in metrics:
-                found['level'] = _level_db(block, target, rate)
+                found['level'] = _level_db(block, target)
             out.append(found)
     return out
 

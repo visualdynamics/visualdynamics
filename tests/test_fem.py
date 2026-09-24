@@ -63,6 +63,27 @@ def test_a_rectangle_bends_differently_about_its_two_axes():
     assert section.j < 0.35 * section.polar
 
 
+@pytest.mark.parametrize('aspect,beta', [
+    (1.0, 0.141), (1.2, 0.166), (1.5, 0.196), (2.0, 0.229), (2.5, 0.249),
+    (3.0, 0.263), (4.0, 0.281), (5.0, 0.291), (10.0, 0.312)])
+def test_a_rectangles_torsion_constant_matches_the_tabulated_values(
+        aspect, beta):
+    """J = beta * long * short^3, beta as Timoshenko & Goodier tabulate it
+    to three figures. Either side can be the long one. Roark's closed
+    approximation, used until 2026-09-23, misses 1.2 by 0.0007."""
+    for width, height in [(0.01 * aspect, 0.01), (0.01, 0.01 * aspect)]:
+        section = fem.Section.rectangle('bar', width, height)
+        got = section.j / (0.01 * aspect * 0.01 ** 3)
+        assert got == pytest.approx(beta, abs=5e-4)
+
+
+def test_a_thin_strips_torsion_constant_tends_to_a_third():
+    """The thin-strip limit, long * short^3 / 3, less the end effect."""
+    section = fem.Section.rectangle('strip', 1.0, 0.001)
+    assert section.j / (1.0 * 0.001 ** 3) == pytest.approx(
+        1 / 3 * (1 - 0.630 * 0.001), rel=1e-6)
+
+
 def test_a_square_tube_is_stiffer_in_torsion_than_an_open_section():
     tube = fem.Section.square_tube('tube', width=0.016, wall=0.0015)
     assert tube.area == pytest.approx(0.016 ** 2 - 0.013 ** 2)

@@ -256,8 +256,13 @@ frequency, damping, modal mass and the DOF set. Where visualdynamics has both a
 visualdynamics), the format has one field — what the user typed wins.
 
 **Mode shapes** go to UNV as one dataset 55 per mode — the standard nodal
-mode-shape record, carrying frequency, modal mass and damping ratio with
-the vector at each node. Exodus stores them the way it stores any nodal
+mode-shape record. Real modes are written as normal modes (analysis type
+2), carrying frequency, modal mass and damping ratio with the vector at
+each node. Complex modes are written as complex eigenvalues (analysis
+type 3), carrying the eigenvalue, modal A and modal B, which is where
+curve fitters put them and where readers look for them. Both types are
+read back. A complex set's modal A is what `ShapeSet.synthesize_frf`
+scales it by. Exodus stores them the way it stores any nodal
 result: one "time step" per mode, with the mode's frequency as the step's
 time value, and nodal variables `DispX`/`DispY`/`DispZ` (plus `RotX`/`RotY`
 /`RotZ` when the shape carries rotations). Damping and modal mass ride

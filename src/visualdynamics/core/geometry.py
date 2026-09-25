@@ -11,7 +11,7 @@ interchange vocabulary.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -363,7 +363,8 @@ class Geometry:
                  elem_block: Ids | None = None,
                  block_id: Ids | None = None,
                  block_name: Sequence[str] | None = None,
-                 length_unit: str | None = None) -> None:
+                 length_unit: str | None = None,
+                 block_properties: Mapping[int, Any] | None = None) -> None:
         # coordinates are taken as given; length_unit records what they are
         # in (None = undefined, values are the file's raw numbers)
         self.length_unit: str | None = length_unit
@@ -421,6 +422,19 @@ class Geometry:
             if block_id is not None else found)
         self.block_name: list[str] = (list(block_name) if block_name is not None
                                       else [''] * len(self.block_id))
+        # What each block is made of, when the geometry is a model in
+        # waiting: {block id: fem.BlockProperties} — a material and a
+        # thickness for a block of plates, a material and a section for
+        # a block of beams. This is how every finite element format
+        # states a structure, one property set per block of one
+        # element type, and it is what `fem.Model.from_geometry` builds
+        # from (Brandon, 2026-09-25). Held here rather than in the
+        # model so it is saved with the geometry and comes back. The
+        # values are the FE module's own classes; this module only
+        # carries them.
+        self.block_properties: dict[int, Any] = (
+            {int(k): v for k, v in block_properties.items()}
+            if block_properties else {})
         self.elem_conn: list[IdArray] = [
             np.asarray(c, dtype=np.int64) for c in (elem_conn or [])]
         # a source states both what an element is and which nodes it
@@ -1144,6 +1158,8 @@ class Geometry:
             reassigned = int(stale.sum())
             self.elem_block[stale] = fallback
         self.block_name = [name for name, k in zip(self.block_name, keep) if k]
+        for block in wanted:                 # a deleted block's properties go with it
+            self.block_properties.pop(block, None)
         self.block_id = self.block_id[keep]
         return {'blocks': removed, 'elements_reassigned': reassigned}
 

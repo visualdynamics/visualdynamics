@@ -81,6 +81,60 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         if properties.scaled:
             group.attrs['mass'] = properties.mass
             group.attrs['inertia'] = np.asarray(properties.inertia)
+    # what each block is made of, one subgroup per block that has it:
+    # the material's numbers, and a thickness or a section — the model
+    # a geometry can build of itself (2026-09-25)
+    blocks = getattr(geom, 'block_properties', None) or {}
+    if blocks:
+        holder = group.create_group('block_properties')
+        for block, props in blocks.items():
+            entry = holder.create_group(str(int(block)))
+            entry.attrs['material_name'] = props.material.name
+            entry.attrs['youngs_modulus'] = float(props.material.youngs_modulus)
+            entry.attrs['density'] = float(props.material.density)
+            entry.attrs['poissons_ratio'] = float(props.material.poissons_ratio)
+            if props.material.modulus_of_rigidity is not None:
+                entry.attrs['modulus_of_rigidity'] = float(
+                    props.material.modulus_of_rigidity)
+            if props.thickness is not None:
+                entry.attrs['thickness'] = float(props.thickness)
+            if props.section is not None:
+                entry.attrs['section_name'] = props.section.name
+                entry.attrs['section'] = np.array(
+                    [props.section.area, props.section.iy,
+                     props.section.iz, props.section.j], dtype=np.float64)
+            if props.orientation is not None:
+                entry.attrs['orientation'] = np.asarray(props.orientation,
+                                                       dtype=np.float64)
+
+
+def _load_block_properties(group) -> dict:
+    if 'block_properties' not in group:
+        return {}
+    from ..core.fem import BlockProperties, Material, Section
+
+    out = {}
+    for key, entry in group['block_properties'].items():
+        attrs = entry.attrs
+        material = Material(
+            str(attrs.get('material_name', '')),
+            float(attrs['youngs_modulus']), float(attrs['density']),
+            float(attrs['poissons_ratio']),
+            (float(attrs['modulus_of_rigidity'])
+             if 'modulus_of_rigidity' in attrs else None))
+        section = None
+        if 'section' in attrs:
+            area, iy, iz, j = (float(v) for v in attrs['section'])
+            section = Section(str(attrs.get('section_name', '')),
+                              area, iy, iz, j)
+        out[int(key)] = BlockProperties(
+            material,
+            thickness=(float(attrs['thickness']) if 'thickness' in attrs
+                       else None),
+            section=section,
+            orientation=(tuple(float(v) for v in attrs['orientation'])
+                         if 'orientation' in attrs else None))
+    return out
 
 
 def _load_mass_properties(group):
@@ -109,6 +163,7 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data['traceline_conn'] = _read_ragged(group, 'traceline_conn')
     data['elem_conn'] = _read_ragged(group, 'elem_conn')
     data['length_unit'] = group.attrs.get('length_unit', '') or None
+    data['block_properties'] = _load_block_properties(group)
     geometry = Geometry(**data)
     geometry.mass_properties = _load_mass_properties(group)
     return geometry

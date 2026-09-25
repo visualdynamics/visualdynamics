@@ -6,6 +6,7 @@ import contextlib
 import os
 import sys
 import time
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -5623,7 +5624,7 @@ class MainWindow(QMainWindow):
     def _import_paths(self, paths: Sequence[str]) -> list[str]:
         pictures = [path for path in paths
                     if os.path.splitext(path)[1].lower() in PHOTO_FORMATS]
-        imported, failures, announced = [], [], False
+        imported, failures, notes, announced = [], [], [], False
         if pictures:
             imported.append(self._add_photos(pictures, failures))
         remaining = [path for path in paths if path not in pictures]
@@ -5676,9 +5677,16 @@ class MainWindow(QMainWindow):
                         continue
                     options = {**options, **window}
                     # a lone project file reports per object; in a
-                    # multi-file drop the files themselves are the steps
-                    result = io.import_file(
-                        path, progress=None if many else tick, **options)
+                    # multi-file drop the files themselves are the steps.
+                    # What a reader warns about on the way — a value it
+                    # read differently from how the file wrote it — is
+                    # kept for the dialog below: a warning to stderr is
+                    # a warning nobody at the window sees (2026-09-25)
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter('always')
+                        result = io.import_file(
+                            path, progress=None if many else tick, **options)
+                    notes += [str(w.message) for w in caught]
                 except Exception as e:  # noqa: BLE001 — see below
                     # Any exception, not only ValueError and OSError. A
                     # file refused *by the objects* raises ValueError,
@@ -5720,7 +5728,11 @@ class MainWindow(QMainWindow):
             bar.hide()
         if failures:
             QMessageBox.warning(
-                self, 'Some files could not be imported', '\n\n'.join(failures))
+                self, 'Some files could not be imported',
+                '\n\n'.join(failures + notes))
+        elif notes:
+            QMessageBox.information(
+                self, 'Imported, with a note', '\n\n'.join(notes))
         # a .vdyn can arrive already stale — saved settings moved after
         # its derived objects were computed
         self._refresh_stale_badges()

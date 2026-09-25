@@ -38,8 +38,11 @@ frequency trajectory, its target level along it, and the warning and
 abort bands around that. Selecting the specification opens on the
 **stage** — frequency across, time receding, amplitude up, one
 surface per tone — and the 3-D toggle stands it down to the flat
-per-channel reading shown here; picking rows in the grid below
-restricts either reading to the tones picked.
+per-channel reading shown here. The rows under the specification are
+its control DOFs, one per row, and picking rows restricts either
+reading to those DOFs; the tone is a drop-down on the bar. The stage
+draws every chosen DOF at once, each in its own color; the flat reading
+draws one at a time, the pair box on the bar choosing which.
 
 ![The imported sweep: the specification's four tones, each with its
 own schedule and its own tolerance

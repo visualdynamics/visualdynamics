@@ -187,7 +187,7 @@ def _icon_source(obj, kind):
         # a pair of modes, and neither of them is this object's to
         # declare units for — the shape sets own that
         return lambda _i: child_icon('mode', 'ShapeSet', True)
-    if kind == 'tone':
+    if kind == 'dof':
         declared = getattr(obj, 'ordinate_unit', True) is not None
         return lambda _i: child_icon(
             'record', 'SineSweepSpecification', declared)
@@ -239,7 +239,7 @@ def grid_plan(obj: Any) -> GridPlan | None:
         return _photo_plan(obj)
     from ..core.sine import SineLevelSet, SineSweepSpecification
     if isinstance(obj, (SineSweepSpecification, SineLevelSet)):
-        return _tone_plan(obj)
+        return _dof_plan(obj)
     return None
 
 
@@ -339,15 +339,32 @@ def _mode_plan(shapes):
     return GridPlan('mode', rows, [key.dof for key in rows], [''], cells)
 
 
-def _tone_plan(grouped):
-    """One row per tone. A sine specification is a set of sweeps and
-    an extraction is the set of their levels; picking rows is how a
-    subset of either is plotted — the records-and-modes habits."""
-    names = ([tone.name for tone in grouped.tones]
-             if hasattr(grouped, 'tones') else list(grouped.tone_names))
-    rows = [RowKey(name, 'tone', 0) for name in names]
+def sine_dofs(grouped) -> list[str]:
+    """The control DOFs a sine specification or a level set covers, in
+    order: the specification's own, or the union of its levels' — a
+    tone the instructions windowed may have been read at fewer."""
+    if hasattr(grouped, 'tones'):
+        return [str(dof) for dof in grouped.response_dof]
+    out: list[str] = []
+    for level in grouped.levels:
+        for dof in level.response_dof:
+            if str(dof) not in out:
+                out.append(str(dof))
+    return out
+
+
+def _dof_plan(grouped):
+    """One row per control DOF, as every other object's rows are its
+    channels. A sine specification is a requirement at each control
+    DOF and an extraction is the level read at each; picking rows
+    plots those DOFs — the records-and-modes habits — and the tone is
+    the pick on the bar. The rows were the tones until 2026-09-25,
+    with the DOF on the bar, which inverted the rest of the tree:
+    Brandon expanded a three-DOF specification expecting three rows
+    and found one."""
+    rows = [RowKey(dof, 'dof', 0) for dof in sine_dofs(grouped)]
     cells = {(i, 0): i for i in range(len(rows))}
-    return GridPlan('tone', rows, [key.dof for key in rows], [''], cells)
+    return GridPlan('dof', rows, [key.dof for key in rows], [''], cells)
 
 
 def _match_plan(matched):

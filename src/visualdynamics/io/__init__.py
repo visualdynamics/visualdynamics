@@ -39,6 +39,7 @@ from . import (
 )
 from .exporters import export_file, exporters, register_exporter
 from .native import TestContents, load, save, save_test
+from .notes import ImportNote
 from .sep005 import from_sep005
 
 
@@ -243,6 +244,6 @@ register_exporter('report_template', 'Report template (.vdreport)',
 register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)
 
-__all__ = ['TestContents', 'export_file', 'exporters', 'from_sep005',
+__all__ = ['ImportNote', 'TestContents', 'export_file', 'exporters', 'from_sep005',
            'import_file', 'importers', 'load', 'native', 'project_type_of',
            'register_exporter', 'register_importer', 'save', 'save_test']

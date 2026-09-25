@@ -125,8 +125,11 @@ def test_the_check_trusts_certifi_when_the_packaged_openssl_trusts_nothing():
     and every HTTPS request failed: "could not reach visualdynamics.org"
     on a Mac that was online (Brandon, 2026-09-15). When the default
     store is empty the Mozilla bundle certifi ships is loaded; when it
-    is not, the platform's own store is left alone."""
+    is not, the platform's own store is left alone. This is the path
+    *without* `truststore`, which otherwise answers first with the
+    operating system's own store (2026-09-25)."""
     import ssl
+    import sys
 
     from visualdynamics import update
 
@@ -142,6 +145,7 @@ def test_the_check_trusts_certifi_when_the_packaged_openssl_trusts_nothing():
 
     empty = Bare()
     with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(sys.modules, 'truststore', None)   # the fallback path
         patch.setattr(ssl, 'create_default_context', lambda: empty)
         context = update.trust_store()
     assert context is empty
@@ -150,6 +154,7 @@ def test_the_check_trusts_certifi_when_the_packaged_openssl_trusts_nothing():
     full = Bare()
     full.loaded.append('platform')
     with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(sys.modules, 'truststore', None)
         patch.setattr(ssl, 'create_default_context', lambda: full)
         update.trust_store()
     assert full.loaded == ['platform'], 'a store that has certificates is kept'
@@ -176,6 +181,7 @@ def test_an_empty_store_with_no_certifi_is_returned_not_raised():
 
     empty = Bare()
     with pytest.MonkeyPatch.context() as patch:
+        patch.setitem(sys.modules, 'truststore', None)   # the fallback path
         patch.setattr(ssl, 'create_default_context', lambda: empty)
         patch.setitem(sys.modules, 'certifi', None)   # `import certifi` raises
         assert update.trust_store() is empty

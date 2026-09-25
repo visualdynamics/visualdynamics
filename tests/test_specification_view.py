@@ -341,6 +341,51 @@ def test_a_specification_with_no_limits_still_reads_as_the_reference(qt_app):
     assert colors['specification_curve'].lower() in drawn
 
 
+def _spec_and_response_widths(limits, alone=False):
+    """{color: pen width} for the same pair, or for the specification
+    drawn on its own."""
+    import pyqtgraph as pg
+
+    from visualdynamics.core.data import Psd, Specification
+    from visualdynamics.plot import build_plots
+
+    axis = np.linspace(1.0, 100.0, 64)
+    level = np.atleast_2d(np.full(64, 1e-3))
+    spec = Specification(abscissa=axis, ordinate=level,
+                         response_dof=['101Z+'],
+                         ordinate_dim=['acceleration**2/frequency'],
+                         **{bound: level * factor
+                            for bound, factor in limits.items()})
+    measured = Psd(abscissa=axis, ordinate=level * 1.1,
+                   response_dof=['101Z+'], reference_dof=['101Z+'],
+                   ordinate_dim=['acceleration**2/frequency'])
+    layout = pg.GraphicsLayoutWidget()
+    build_plots(layout, [('spec', spec, None)] if alone
+                else [('measured', measured, None), ('spec', spec, None)])
+    plot = next(item for item in layout.ci.items
+                if hasattr(item, 'listDataItems'))
+    return {c.opts['pen'].color().name().lower(): c.opts['pen'].widthF()
+            for c in data_curves(plot)}
+
+
+def test_the_reference_that_stands_back_is_twice_as_wide(qt_app):
+    """At one pixel a gray requirement under a dense measurement
+    vanished — Brandon could not find the specification under the sine
+    levels (2026-09-25). Stood back, it is drawn at two, as the stage
+    has always drawn its target; the measurement over it stays at one,
+    and a specification alone, being what is looked at, stays at one."""
+    from visualdynamics.theme import theme as resolve_theme
+
+    colors = resolve_theme(None)
+    widths = _spec_and_response_widths(
+        {'warning_upper': 2.0, 'warning_lower': 0.5,
+         'abort_upper': 4.0, 'abort_lower': 0.25})
+    assert widths[colors['specification_curve'].lower()] == 2.0
+    assert widths[colors['response_curve'].lower()] == 1.0
+    alone = _spec_and_response_widths({}, alone=True)
+    assert set(alone.values()) == {1.0}
+
+
 def test_the_bounded_case_is_colored_the_same_way(qt_app):
     """The other half, so the two cannot drift apart — which is the whole
     complaint: a random run and a transient run drew the same selection

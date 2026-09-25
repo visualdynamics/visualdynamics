@@ -10,6 +10,10 @@ unverifiable certificate. Nothing is downloaded and nothing runs;
 
 from __future__ import annotations
 
+import ssl
+import sys
+
+import pytest
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
 
@@ -114,6 +118,30 @@ def test_the_asked_for_check_is_the_patient_one(window, pump, monkeypatch):
     assert asked['timeout'] == update.ASKED_TIMEOUT, (
         f'the menu asked with {asked["timeout"]}, not the patient deadline'
     )
+
+
+def test_the_check_trusts_what_the_machine_trusts():
+    """The context verifies against the operating system's own store,
+    where a corporate network's inspecting authority is installed and
+    where a Python bundle of Mozilla's roots never looks. Brandon's work
+    machine failed on exactly that, "unable to get local issuer
+    certificate", while curl and the browser trusted the same site
+    (2026-09-25)."""
+    truststore = pytest.importorskip('truststore')
+    context = update.trust_store()
+    assert isinstance(context, truststore.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+def test_without_truststore_the_older_arrangement_stands(monkeypatch):
+    """A checkout without the package still verifies: the default
+    context, or the Mozilla bundle when the packaged OpenSSL's store
+    is empty."""
+    monkeypatch.setitem(sys.modules, 'truststore', None)
+    context = update.trust_store()
+    assert type(context) is ssl.SSLContext
+    assert context.get_ca_certs(), 'a store with something in it'
 
 
 def test_each_failure_is_named_by_its_cause():

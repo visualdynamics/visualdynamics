@@ -5681,12 +5681,15 @@ class MainWindow(QMainWindow):
                     # What a reader warns about on the way — a value it
                     # read differently from how the file wrote it — is
                     # kept for the dialog below: a warning to stderr is
-                    # a warning nobody at the window sees (2026-09-25)
+                    # a warning nobody at the window sees (2026-09-25).
+                    # Only a reader's own notes: a library's unclosed
+                    # socket went into the dialog the first day
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter('always')
                         result = io.import_file(
                             path, progress=None if many else tick, **options)
-                    notes += [str(w.message) for w in caught]
+                    notes += [str(w.message) for w in caught
+                              if issubclass(w.category, io.ImportNote)]
                 except Exception as e:  # noqa: BLE001 — see below
                     # Any exception, not only ValueError and OSError. A
                     # file refused *by the objects* raises ValueError,
@@ -6543,12 +6546,13 @@ class MainWindow(QMainWindow):
             elif isinstance(obj, MatchedModes):
                 matches.append((name, obj))
             elif isinstance(obj, (SineSweepSpecification, SineLevelSet)):
-                # picked tones restrict either object, exactly as
-                # picked records restrict a data object
+                # picked DOF rows restrict either object, exactly as
+                # picked records restrict a data object; the tone is
+                # the bar's pick
                 into = (sine_specs
                         if isinstance(obj, SineSweepSpecification)
                         else sine_levels)
-                if kind == 'tone':
+                if kind == 'dof':
                     for entry_name, _obj, picks in into:
                         if entry_name == name and picks is not None:
                             picks.append(detail)
@@ -12448,7 +12452,10 @@ class MainWindow(QMainWindow):
         through that space, and the 3D toggle stands down to the
         flat per-channel reading as everywhere. The **bars** read
         the comparison as one signed number per tone per channel.
-        Tone picks on either object's rows restrict every reading.
+        The rows under either object are its control DOFs, and picks
+        on them restrict every reading; the tone is the drop-down on
+        the bar (2026-09-25 — the rows were the tones, which inverted
+        the rest of the tree).
         """
         import numpy as np
 
@@ -12457,20 +12464,26 @@ class MainWindow(QMainWindow):
         from ..plot.bars import replication_chart
         from ..viz.sinespec import add_sine_stage
         from ..viz.waterfall import place_camera
+        from .record_grid import sine_dofs
 
         spec_name, spec, spec_picks = (spec_entry if spec_entry
                                        else (None, None, None))
-        picked_names = None
+        # the rows are the DOFs (2026-09-25): a pick on either object's
+        # rows restricts the DOFs drawn, and the two objects' picks add
+        picked_dofs: list[str] = []
         if spec is not None and spec_picks:
-            picked_names = [spec.tones[i].name
-                            for i in sorted(set(spec_picks))]
-
-        measured = []
+            all_dofs = sine_dofs(spec)
+            picked_dofs += [all_dofs[i] for i in sorted(set(spec_picks))
+                            if i < len(all_dofs)]
+        level_set = None
         if level_entries:
             _set_name, level_set, level_picks = level_entries[0]
-            rows = (sorted(set(level_picks)) if level_picks
-                    else range(len(level_set.levels)))
-            measured += [level_set.levels[i] for i in rows]
+            if level_picks:
+                all_dofs = sine_dofs(level_set)
+                picked_dofs += [all_dofs[i] for i in sorted(set(level_picks))
+                                if i < len(all_dofs)
+                                and all_dofs[i] not in picked_dofs]
+        measured = list(level_set.levels) if level_set is not None else []
         measured += [obj for _n, obj, _r in series
                      if isinstance(obj, SineLevel)]
         stray = [name for name, obj, _records in series
@@ -12479,7 +12492,12 @@ class MainWindow(QMainWindow):
                 f' — {", ".join(stray)} not drawn: deselect the sine '
                 'objects to plot other data with them')
 
-        def stage(spec_shown, levels_shown, dof, tones, what):
+        def chosen(dofs):
+            """The DOFs to draw: the picks, else every one."""
+            return [d for d in dofs if d in picked_dofs] if picked_dofs \
+                else list(dofs)
+
+        def stage(spec_shown, levels_shown, dofs, tone, what):
             pane = self.data_pane
             pane.show_waterfall(True)
             pane.graphics.clear()
@@ -12490,85 +12508,96 @@ class MainWindow(QMainWindow):
             plotter.set_background(colors['scene_background'],
                                    top=colors['scene_background_top'])
             add_sine_stage(plotter, specification=spec_shown,
-                           levels=levels_shown, dof=dof,
+                           levels=levels_shown, dofs=dofs,
                            unit_system=self.unit_system,
-                           theme=self.theme_name, tones=tones)
+                           theme=self.theme_name, tones=[tone])
             place_camera(plotter)
             plotter.render()
-            return (f'{dof}: {what} on the stage — frequency across, '
+            return (f'{tone}: {what} on the stage — frequency across, '
                     'time receding, amplitude up' + note)
+
+        def pick_tone(names):
+            """The tone on the bar's drop-down, sticky by index."""
+            self.data_pane.show_events(list(names))
+            pick = self.data_pane.chosen_event() or 0
+            return names[min(pick, len(names) - 1)]
+
+        def flat_dofs(dofs):
+            """The one DOF the flat plot draws when several are chosen:
+            the pair box on the bar picks it, as the spectra comparison's
+            does — several requirements and their bands stacked on one
+            axis were a thicket with no comparison in it. The stage draws
+            them all, spread in color."""
+            if len(dofs) < 2:
+                self.data_pane.show_pairs([])
+                return list(dofs)
+            self.data_pane.show_pairs([(d, d) for d in dofs])
+            chosen = self.data_pane.chosen_pair()
+            return [chosen[0] if chosen is not None and chosen[0] in dofs
+                    else dofs[0]]
 
         if spec is None:
             # levels alone
             if not measured:
                 return 'nothing to draw' + note
-            dofs = list(measured[0].response_dof)
-            self.data_pane.show_events(dofs)
-            self.data_pane.show_srs_views(False)
-            pick = self.data_pane.chosen_event() or 0
-            dof = dofs[min(pick, len(dofs) - 1)]
             names = [level.tone for level in measured]
+            tone = pick_tone(names)
+            self.data_pane.show_srs_views(False)
+            levels_shown = [level for level in measured if level.tone == tone]
+            dofs = chosen(sine_dofs(SineLevelSet(levels_shown)))
             if self.data_pane.showing_waterfall:
-                return stage(None, measured, dof,
-                             None, f'{len(names)} extracted '
-                             f'level{"s" * (len(names) != 1)}')
+                self.data_pane.show_pairs([])
+                return stage(None, levels_shown, dofs, tone,
+                             f'the extracted level at {len(dofs)} '
+                             f'DOF{"s" * (len(dofs) != 1)}')
+            dofs = flat_dofs(dofs)
             drawn = []
-            for level in measured:
+            for level in levels_shown:
                 keep = [i for i in range(level.num_records)
-                        if str(level.response_dof[i]) == dof]
+                        if str(level.response_dof[i]) in dofs]
                 if keep:
                     drawn.append((f'{level.tone} level', level, keep))
             build_plots(self.data_pane.graphics, drawn,
                         unit_system=self.unit_system,
                         theme=self.theme_name)
-            return (f'{dof}: {len(drawn)} extracted '
-                    f'level{"s" * (len(drawn) != 1)}' + note)
+            return (f'{tone} at {", ".join(dofs)}: the extracted level'
+                    + note)
 
         known = {tone.name for tone in spec.tones}
-        if picked_names is not None:
-            known &= set(picked_names)
         matched = [level for level in measured if level.tone in known]
-        tones = ([level.tone for level in matched] if matched
-                 else [name for name in (picked_names
-                                         or [tone.name
-                                             for tone in spec.tones])
-                       if name in {tone.name for tone in spec.tones}])
-
+        tones = [tone.name for tone in spec.tones]
         self.data_pane.show_srs_views(bool(matched))
         showing_bars = matched and self.data_pane.srs_view != 'curves'
         if not showing_bars:
-            dofs = list(spec.response_dof)
-            self.data_pane.show_events(dofs)
-            pick = self.data_pane.chosen_event() or 0
-            dof = dofs[min(pick, len(dofs) - 1)]
-            row = [dofs.index(dof)]
+            tone = pick_tone(tones)
+            dofs = chosen(sine_dofs(spec))
+            levels_shown = [level for level in matched if level.tone == tone]
+            what = (f'{len(levels_shown)} level'
+                    f'{"s" * (len(levels_shown) != 1)} against ' if matched
+                    else '')
             if self.data_pane.showing_waterfall:
-                what = (f'{len(matched)} level'
-                        f'{"s" * (len(matched) != 1)} against '
-                        if matched else '')
-                return stage(spec, matched, dof, tones,
-                             f'{what}{len(tones)} '
-                             f'tone{"s" * (len(tones) != 1)} of '
-                             f'{spec_name}')
+                self.data_pane.show_pairs([])
+                return stage(spec, levels_shown, dofs, tone,
+                             f'{what}the requirement at {len(dofs)} '
+                             f'DOF{"s" * (len(dofs) != 1)} of {spec_name}')
+            dofs = flat_dofs(dofs)
             drawn = []
-            for level in matched:
+            for level in levels_shown:
                 keep = [i for i in range(level.num_records)
-                        if str(level.response_dof[i]) == dof]
+                        if str(level.response_dof[i]) in dofs]
                 if keep:
                     drawn.append((f'{level.tone} level', level, keep))
-            for tone in tones:
-                drawn.append((f'{tone} requirement',
-                              spec.tone_curve(tone), row))
+            rows = [i for i, dof in enumerate(sine_dofs(spec)) if dof in dofs]
+            drawn.append((f'{tone} requirement', spec.tone_curve(tone), rows))
             build_plots(self.data_pane.graphics, drawn,
                         unit_system=self.unit_system,
                         theme=self.theme_name)
-            what = (f'{len(matched)} level{"s" * (len(matched) != 1)} '
-                    f'against ' if matched else '')
-            return (f'{dof}: {what}{len(tones)} '
-                    f'tone{"s" * (len(tones) != 1)} of {spec_name}'
-                    + note)
+            return (f'{tone} at {", ".join(dofs)}: {what}the requirement '
+                    f'of {spec_name}' + note)
         self.data_pane.show_events([])
         rows = sine_errors(spec, matched)
+        if picked_dofs:
+            rows = [row for row in rows if row[0] in picked_dofs]
         if not rows:
             return 'nothing here can be scored' + note
         dofs = []

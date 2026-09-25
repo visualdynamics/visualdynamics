@@ -54,7 +54,16 @@ A geometry is also a finite element model once its blocks say what
 they are made of. The Blocks table's property columns take, per
 block, a material (name, E, ν, ρ) and either a thickness — for a block
 of quads or triangles — or a section (name, A, Iy, Iz, J) and an
-orientation vector for a block of beams, SI throughout; they land on
+orientation vector for a block of beams, SI throughout. The Material
+cell is a drop-down over a small library — 6061-T6, 7075-T6, 2024-T3,
+1018, A36 and 4130 steel, 304, 316 and 17-4 PH stainless, Ti-6Al-4V,
+AZ31B magnesium, C26000 brass, C11000 copper, Inconel 718, acrylic,
+polycarbonate, ABS and nylon 6/6 — and picking one fills the row with
+the handbook's typical room-temperature values (`fem.material(name)`
+in a script; `fem.MATERIAL_LIBRARY` carries each entry's note). They
+are typical values, not the part's: with a certification in hand, type
+its numbers over them, and any name typed into the cell is accepted as
+a name. The properties land on
 `geometry.block_properties` as
 [`fem.BlockProperties`](../api/visualdynamics.core.fem.md) and ride
 the native file. *Solve Modes* (`project.solve_modes`) then builds the

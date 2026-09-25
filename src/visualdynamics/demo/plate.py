@@ -47,11 +47,9 @@ SIDE = 12.0 * 0.0254                      #: m
 THICKNESS = 0.5 * 0.0254                  #: m
 
 #: 6061-T6 as the handbook states it — E = 10.0e6 psi,
-#: rho = 0.098 lb/in^3, nu = 0.33 — converted exactly to SI
-ALUMINUM = fem.Material('6061-T6',
-                        youngs_modulus=10.0e6 * 6894.757293168361,
-                        density=0.098 * 27679.90471020312,
-                        poissons_ratio=0.33)
+#: rho = 0.098 lb/in^3, nu = 0.33 — converted exactly to SI, which is
+#: what the material library holds for it
+ALUMINUM = fem.material('6061-T6')
 
 #: elements per side. 12 puts the first six elastic modes within a
 #: percent of converged and solves in a fifth of a second; the tests

@@ -134,6 +134,84 @@ class Material:
         return self.youngs_modulus / (2.0 * (1.0 + self.poissons_ratio))
 
 
+#: US handbooks state a modulus in psi and a density in lb/in^3, and the
+#: library keeps their numbers rather than a rounding of a conversion —
+#: the same choice the demonstration plate made for its 6061-T6
+PSI = 6894.757293168361                   #: Pa
+LB_PER_IN3 = 27679.90471020312            #: kg/m^3
+
+
+@dataclass(frozen=True)
+class LibraryMaterial:
+    """A material the library offers, with where its numbers came from.
+
+    The note names the kind of source and what the values are typical
+    of, because a handbook's typical modulus and density are what a
+    modal solution wants and also not what a particular heat of a
+    particular alloy measures: a person with the part's certification
+    in hand types those numbers over the library's.
+    """
+
+    material: Material
+    note: str
+
+
+def _handbook(name, modulus_msi, density_lb_in3, poissons_ratio, note):
+    return LibraryMaterial(
+        Material(name, youngs_modulus=modulus_msi * 1e6 * PSI,
+                 density=density_lb_in3 * LB_PER_IN3,
+                 poissons_ratio=poissons_ratio), note)
+
+
+_METALS = 'typical room-temperature handbook values for the wrought alloy'
+_PLASTIC = ('typical room-temperature values; a plastic varies by grade '
+            'and supplier more than a metal does')
+
+#: The materials the Blocks table offers and `material()` answers to:
+#: common structural alloys and a few plastics, each as the handbooks
+#: state it. Typical values, to be checked against the part's own
+#: certification when it matters; every entry says so in its note.
+MATERIAL_LIBRARY: tuple[LibraryMaterial, ...] = (
+    _handbook('6061-T6', 10.0, 0.098, 0.33, _METALS + ' (aluminum)'),
+    _handbook('7075-T6', 10.4, 0.101, 0.33, _METALS + ' (aluminum)'),
+    _handbook('2024-T3', 10.6, 0.100, 0.33, _METALS + ' (aluminum)'),
+    _handbook('1018 steel', 29.0, 0.284, 0.29, _METALS + ' (carbon steel)'),
+    _handbook('A36 steel', 29.0, 0.284, 0.26, _METALS + ' (carbon steel)'),
+    _handbook('4130 steel', 29.7, 0.283, 0.29, _METALS + ' (alloy steel)'),
+    _handbook('304 stainless', 28.0, 0.289, 0.29, _METALS + ' (austenitic)'),
+    _handbook('316 stainless', 28.0, 0.289, 0.27, _METALS + ' (austenitic)'),
+    _handbook('17-4 PH stainless', 28.5, 0.282, 0.27,
+              _METALS + ' (precipitation hardening, H900)'),
+    _handbook('Ti-6Al-4V', 16.5, 0.160, 0.342, _METALS + ' (titanium)'),
+    _handbook('AZ31B magnesium', 6.5, 0.0639, 0.35, _METALS + ' (magnesium)'),
+    _handbook('C26000 brass', 16.0, 0.308, 0.375, _METALS + ' (cartridge brass)'),
+    _handbook('C11000 copper', 17.0, 0.323, 0.33, _METALS + ' (ETP copper)'),
+    _handbook('Inconel 718', 29.0, 0.296, 0.29, _METALS + ' (nickel superalloy)'),
+    _handbook('acrylic (PMMA)', 0.45, 0.0426, 0.37, _PLASTIC),
+    _handbook('polycarbonate', 0.35, 0.0433, 0.37, _PLASTIC),
+    _handbook('ABS', 0.33, 0.038, 0.35, _PLASTIC),
+    _handbook('nylon 6/6', 0.41, 0.0412, 0.39, _PLASTIC),
+)
+
+#: the library by name, for a lookup
+MATERIALS: dict[str, Material] = {entry.material.name: entry.material
+                                  for entry in MATERIAL_LIBRARY}
+
+
+def material(name: str) -> Material:
+    """A library material by name — `material('6061-T6')` — the same
+    entry the Blocks table's Material drop-down fills a row from.
+
+    Raises `KeyError` naming the library when the name is not in it,
+    so a typo reads as one rather than as a missing material.
+    """
+    try:
+        return MATERIALS[name]
+    except KeyError:
+        raise KeyError(f'{name!r} is not in the material library; it '
+                       f'has {", ".join(MATERIALS)}') from None
+
+
 @dataclass(frozen=True)
 class Section:
     """A beam cross section, as the four numbers the element needs.

@@ -62,6 +62,8 @@ from .io import (
 from .project import (
     ASK,
     Project,
+    mixed_report,
+    mixed_run,
     random_vibration_report,
     random_vibration_run,
     system_id_report,
@@ -83,7 +85,7 @@ from .units import (
 #: alpha, said in the version itself so the dialog, the About text, the
 #: installers and latest.json all say the same thing, and the first
 #: non-alpha release is offered as an upgrade (Brandon, 2026-09-11)
-__version__ = '0.1.0a10'
+__version__ = '0.1.0a11'
 
 
 def launch_gui(*paths: str, in_process: bool | None = None) -> Any:
@@ -179,6 +181,8 @@ __all__ = [
     'importers',
     'launch_gui',
     'load',
+    'mixed_report',
+    'mixed_run',
     'random_vibration_report',
     'random_vibration_run',
     'register_importer',

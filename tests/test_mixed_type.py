@@ -125,6 +125,27 @@ def test_a_mixed_run_imports_as_the_type_and_generates_its_report(
     assert [r.title for r in reports] == ['Random and Sine Test Report']
 
 
+def test_mixed_run_refuses_a_run_with_no_sweep():
+    """Half of what was asked for is not what was asked for."""
+    from conftest import fixture_path
+
+    with pytest.raises(ValueError, match='no sine sweep specification'):
+        visualdynamics.mixed_run(fixture_path('plate', 'random.nc4'))
+
+
+@needs_stress
+def test_the_one_call_writes_the_report_for_a_mixed_run(tmp_path):
+    path = visualdynamics.mixed_report(os.path.join(STRESS, 'mixed.nc4'),
+                                       tmp_path / 'mixed.html')
+    html = (tmp_path / 'mixed.html').read_text(encoding='utf-8')
+    assert str(path) == str(tmp_path / 'mixed.html')
+    assert 'Random and Sine Test Report' in html
+    for caption in ('Control against specification',
+                    'extracted level against the requirement',
+                    'Sine level deviation by tone and channel'):
+        assert caption in html, caption
+
+
 @needs_stress
 def test_the_real_mixed_run_renders_both_halves(tmp_path):
     """The plate's random with the quiet sweep under it, worked up the

@@ -35,6 +35,7 @@ from typing import Any
 from PySide6.QtCore import (
     QByteArray,
     QFile,
+    QMimeData,
     QObject,
     QSize,
     Qt,
@@ -137,6 +138,19 @@ class _Bridge(QObject):
         if image.isNull():
             return False
         QApplication.clipboard().setImage(image)
+        return True
+
+    @Slot(str, str, result=bool)
+    def copy_table(self, text: str, html: str) -> bool:
+        """A table from the page, as tab-separated text and as HTML in
+        one clipboard entry, so a spreadsheet pastes cells and a
+        document or a mail pastes a table."""
+        if not text.strip():
+            return False
+        mime = QMimeData()
+        mime.setText(text)
+        mime.setHtml(html)
+        QApplication.clipboard().setMimeData(mime)
         return True
 
 

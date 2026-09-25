@@ -70,6 +70,18 @@ for a specification comparison `plot_bars(measured, specification)`,
 `plot_comparison(...)`, `plot_ratio(...)` and `plot_replication(...)`
 — each the figure the app shows, each taking `path=`.
 
+## Copying what is shown
+
+Whenever something is drawn, the plot bar or the 3-D view's bar ends
+in a copy button. It puts what the pane shows on the clipboard as an image — the flat plot or the
+stage, whichever is up, in the current theme at the screen's own pixel
+density — for pasting into a document, a chat or an email without a
+screenshot. Every table in the application carries the same button in
+its top-right corner while the pointer is over it; a table copies whole,
+headers and all, as cells for a spreadsheet and as a table for a
+document or a mail. The report's figures, tables and photographs have
+the same button ([Reports](reports.md#copying-a-figure-a-table-or-a-photo)).
+
 ## A plot from a script is the app's own pane
 
 Shown rather than written to a file, a plot comes up in the same widget

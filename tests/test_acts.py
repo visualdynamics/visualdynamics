@@ -63,7 +63,7 @@ def _bar(pane):
 def test_a_lone_object_offers_its_own_acts_on_the_plots_bar(window, pump):
     _populate(window, pump)
     _select(window, pump, 'Run')
-    assert _bar(window.data_pane) == ['Integrate']
+    assert _bar(window.data_pane) == ['Integrate', 'Copy']
     assert _bar(window.scene) == []
     assert window._item_for_object('Run').icon(1).isNull(), \
         'no calculator in the tree'
@@ -76,20 +76,22 @@ def test_a_lone_object_offers_its_own_acts_on_the_plots_bar(window, pump):
     assert button.toolTip().startswith('Integrate — '), \
         'the verb leads the tooltip, since the icon is all that shows'
     _select(window, pump, 'Modes')
-    assert _bar(window.data_pane) == [] and _bar(window.scene) == []
+    # no verb applies to a shape set alone, but what is drawn copies —
+    # on whichever bar is up
+    assert _bar(window.data_pane) + _bar(window.scene) == ['Copy']
 
 
 def test_a_combination_offers_only_what_it_can_take_together(window, pump):
     _populate(window, pump)
     _select(window, pump, 'Run', 'Modes')
-    assert _bar(window.data_pane) == ['Transform to Modal Responses'], \
+    assert _bar(window.data_pane) == ['Transform to Modal Responses', 'Copy'], \
         'not Integrate: that applies to one member alone'
     window.data_pane._acts['actions']['transform'].trigger()
     pump()
     assert 'Run Modal Responses' in window.project, \
         'the button runs the same verb the API has'
     _select(window, pump, 'Run Modal Responses', 'Modes')
-    assert _bar(window.data_pane) == ['Expand to Physical Responses']
+    assert _bar(window.data_pane) == ['Expand to Physical Responses', 'Copy']
 
 
 def test_siblings_of_one_type_offer_merge(window, pump):
@@ -99,7 +101,7 @@ def test_siblings_of_one_type_offer_merge(window, pump):
         ordinate_dim='acceleration')
     window.add_object('Run 2', other)
     _select(window, pump, 'Run', 'Run 2')
-    assert _bar(window.data_pane) == ['Merge into One']
+    assert _bar(window.data_pane) == ['Merge into One', 'Copy']
     window.merge_selected()
     pump()
     assert 'Run' not in window.project and 'Run 2' not in window.project

@@ -14,7 +14,14 @@ from collections.abc import Sequence
 from typing import Any
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QImage,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -40,6 +47,31 @@ from .shock_panel import ShockPanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
+
+
+def copy_act(pane: Any, what: str) -> tuple:
+    """The copy act a pane's bar carries beside the selection's acts:
+    what the pane shows, onto the clipboard as an image (Brandon,
+    2026-09-24: every plot, table and figure should copy like a chat's
+    code blocks do). An act rather than a standing control, because the
+    bar shows exactly when something on it applies, and a copy applies
+    exactly when something is drawn. One glyph and one tooltip shape on
+    both bars, so it reads as the same act."""
+    return ('copy', 'Copy', 'copy', pane.copy_view,
+            f'Copy the {what} to the clipboard as an image')
+
+
+def image_of(pixels: Any) -> QImage:
+    """A rendered (rows, columns, 3 or 4) array of bytes as a QImage
+    that owns its memory — the array a screenshot hands back is freed
+    with it, and a QImage over it would read garbage."""
+    import numpy as np
+
+    pixels = np.ascontiguousarray(pixels)
+    rows, columns, depth = pixels.shape
+    layout = (QImage.Format.Format_RGBA8888 if depth == 4
+              else QImage.Format.Format_RGB888)
+    return QImage(pixels.data, columns, rows, depth * columns, layout).copy()
 
 
 def offer_acts(toolbar: Any, state: dict, acts: Sequence[tuple]) -> None:
@@ -111,6 +143,8 @@ class DataPane(QWidget):
 
     #: a reading choice moved; draw the same data again
     reread = Signal()
+    #: what was copied to the clipboard, for the status line
+    copied = Signal(str)
     #: the diagonal filter went down (True) or came back up (False)
     drive_points_toggled = Signal(bool)
     #: an FRF beside a shape set should read this way: 'fit' | 'overlay'
@@ -720,6 +754,38 @@ class DataPane(QWidget):
             self.pair_group.actions(),
         ])
         return toolbar
+
+    def copy_view(self) -> bool:
+        """What the pane shows, onto the clipboard as an image: the 3-D
+        stage when it is up, the flat plot otherwise. The plot is drawn
+        by the same exporter the report figures and the headless plots
+        use, on the theme's own background — the exporter paints one of
+        its own and defaults to black — at the screen's pixel density, so
+        a retina display copies a retina image."""
+        from PySide6.QtWidgets import QApplication
+
+        if (self.waterfall_plotter is not None
+                and not self.graphics.isVisibleTo(self)):
+            image = image_of(self.waterfall_plotter.screenshot(return_img=True))
+            what = 'stage'
+        else:
+            from pyqtgraph.exporters import ImageExporter
+
+            exporter = ImageExporter(self.graphics.scene())
+            colors = resolve_theme(self.theme_name)
+            exporter.parameters()['background'] = QColor(
+                colors['plot_background'])
+            exporter.parameters()['width'] = int(
+                self.graphics.width() * self.graphics.devicePixelRatioF())
+            image = exporter.export(toBytes=True)
+            what = 'plot'
+        if image is None or image.isNull():
+            self.copied.emit('Nothing drawn to copy')
+            return False
+        QApplication.clipboard().setImage(image)
+        self.copied.emit(f'{what.capitalize()} copied to the clipboard '
+                         f'({image.width()} × {image.height()})')
+        return True
 
     #: the readings, as (action attribute, wanted flag, panel attribute).
     #: One list, so that adding a fifth reading is one entry rather than
@@ -1493,6 +1559,9 @@ class ScenePane(QWidget):
     from. Anyone placing the pane can add their own actions to that bar.
     """
 
+    #: what was copied to the clipboard, for the status line
+    copied = Signal(str)
+
     #: a view choice moved; draw the same scene again
     reread = Signal()
 
@@ -1580,6 +1649,19 @@ class ScenePane(QWidget):
         self.rigid_action.setVisible(False)
         self._rigid_fence.setVisible(False)
         return toolbar
+
+    def copy_view(self) -> bool:
+        """The 3-D view as it stands, onto the clipboard as an image."""
+        from PySide6.QtWidgets import QApplication
+
+        if self.plotter is None:
+            self.copied.emit('The 3-D view is not built yet')
+            return False
+        image = image_of(self.plotter.screenshot(return_img=True))
+        QApplication.clipboard().setImage(image)
+        self.copied.emit(f'3-D view copied to the clipboard '
+                         f'({image.width()} × {image.height()})')
+        return True
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
         """The acts the selection can take, on this bar (`offer_acts`)."""

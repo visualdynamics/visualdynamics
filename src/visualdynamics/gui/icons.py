@@ -816,6 +816,26 @@ def _draw_ratio(painter, color):
         (12 + i, 50 - 6 * math.sin(i / 40 * math.pi)) for i in range(41)]))
 
 
+def _draw_copy(painter, color):
+    """Two sheets, one behind the other: the copy button every plot,
+    scene and table carries (Brandon, 2026-09-24)."""
+    from PySide6.QtCore import QRectF
+
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(24, 22, 26, 30), 4, 4)
+    path = QPainterPath()
+    path.moveTo(16, 40)
+    path.lineTo(12, 40)
+    path.quadTo(8, 40, 8, 36)
+    path.lineTo(8, 12)
+    path.quadTo(8, 8, 12, 8)
+    path.lineTo(32, 8)
+    path.quadTo(36, 8, 36, 12)
+    path.lineTo(36, 16)
+    painter.drawPath(path)
+
+
 def _draw_refresh(painter, color):
     """A circular arrow: this object no longer matches its source's
     settings, click to recompute it."""
@@ -1464,7 +1484,8 @@ def control_icon(name: str) -> QIcon:
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'sine': _draw_sine,
-     'refresh': _draw_refresh}.get(name, _draw_default)(painter, CONTROL_COLOR)
+     'refresh': _draw_refresh,
+     'copy': _draw_copy}.get(name, _draw_default)(painter, CONTROL_COLOR)
     painter.end()
     return QIcon(pixmap)
 

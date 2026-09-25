@@ -86,8 +86,9 @@ section { margin: 1.6rem 0; position: relative; }
   color: var(--ink); border: 1px solid var(--line); border-radius: 5px;
   background: color-mix(in srgb, var(--paper) 85%, transparent);
   opacity: 0; transition: opacity .15s; }
-section:hover > .copy, .gridcell:hover > .copy, .copy:focus-visible {
-  opacity: 1; }
+section:hover > .copy, .gridcell:hover > .copy, .photoholder:hover > .copy,
+.copy:focus-visible { opacity: 1; }
+.photoholder { position: relative; display: inline-block; max-width: 100%; }
 .copy svg { width: 15px; height: 15px; display: block; }
 .caption { color: var(--faint); font-size: .9rem; margin-top: .35rem; }
 .note { margin-top: .3rem; padding-left: .6rem;
@@ -2055,7 +2056,12 @@ DATA.blocks.forEach(block => {
     const img = document.createElement('img');
     img.className = 'photo'; img.src = block.src;
     img.alt = block.caption || 'photo';
-    s.insertBefore(img, s.firstChild);
+    // a holder the copy button can sit in the corner of: an image may
+    // be narrower than the page, and a button at the page's edge would
+    // float over nothing
+    const holder = document.createElement('div');
+    holder.className = 'photoholder'; holder.appendChild(img);
+    s.insertBefore(holder, s.firstChild);
   } else if (block.kind === 'plot') plotBlock(block);
   else if (block.kind === 'grid') gridBlock(block);
   else if (block.kind === 'verdict') verdictBlock(block);
@@ -2124,11 +2130,43 @@ function copyCanvas(canvas) {
     return Promise.reject(new Error('this browser has no image clipboard'));
   return navigator.clipboard.write([new ClipboardItem({'image/png': png()})]);
 }
-function copyButton(canvas) {
+/* a photo copies as the image it is: drawn onto a canvas of its own
+   pixel size — a data: image is same-origin, so the canvas stays
+   readable — and out through the same door as a figure */
+function copyImage(img) {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+  canvas.getContext('2d').drawImage(img, 0, 0);
+  return copyCanvas(canvas);
+}
+/* a table copies as text and as HTML at once: the text is tab-separated
+   rows, which a spreadsheet takes as cells, and the HTML is the table
+   itself, which a document or a mail takes as a table */
+function tableText(table) {
+  return Array.from(table.rows, row =>
+    Array.from(row.cells, cell => cell.textContent.replace(/\t|\n/g, ' '))
+      .join('\t')).join('\n');
+}
+function copyTable(table) {
+  const text = tableText(table), html = table.outerHTML;
+  const bridge = window.__bridge;
+  if (bridge && bridge.copy_table)
+    return new Promise((resolve, reject) => bridge.copy_table(text, html,
+      ok => ok ? resolve() : reject(new Error('the clipboard refused it'))));
+  if (!navigator.clipboard || !window.ClipboardItem)
+    return Promise.reject(new Error('this browser has no rich clipboard'));
+  return navigator.clipboard.write([new ClipboardItem({
+    'text/plain': new Blob([text], {type: 'text/plain'}),
+    'text/html': new Blob([html], {type: 'text/html'})})]);
+}
+/* tables and photos carry the same button as the figures (the rest of
+   Brandon's request): a photo as an image, a table as text and HTML */
+function copyButton(target, copier, what) {
   const button = document.createElement('button');
   button.className = 'copy'; button.type = 'button';
-  button.title = 'Copy this figure as an image';
-  button.setAttribute('aria-label', 'Copy figure');
+  const idle = 'Copy this ' + what;
+  button.title = idle;
+  button.setAttribute('aria-label', 'Copy ' + what.split(' ')[0]);
   button.innerHTML = COPY_ICON;
   let restore = null;
   const settle = (ok, why) => {
@@ -2140,17 +2178,25 @@ function copyButton(canvas) {
     button.dataset.last = ok ? 'copied' : 'failed';
     clearTimeout(restore);
     restore = setTimeout(() => { button.innerHTML = COPY_ICON;
-      button.title = 'Copy this figure as an image';
+      button.title = idle;
       button.classList.remove('copied'); }, 1500);
   };
   button.addEventListener('click', event => {
     event.stopPropagation();
-    copyCanvas(canvas).then(() => settle(true),
-                            err => settle(false, err && err.message));
+    copier(target).then(() => settle(true),
+                        err => settle(false, err && err.message));
   });
-  canvas.parentElement.insertBefore(button, canvas.nextSibling);
+  target.parentElement.insertBefore(button, target.nextSibling);
 }
-document.querySelectorAll('section canvas').forEach(copyButton);
+document.querySelectorAll('section canvas').forEach(
+  canvas => copyButton(canvas, copyCanvas, 'figure as an image'));
+document.querySelectorAll('.photoholder img').forEach(
+  img => copyButton(img, copyImage, 'photo'));
+// the button hangs on the section, not the scrolling wrap: a wide
+// table scrolls sideways inside its wrap and would carry it away
+document.querySelectorAll('section .tablewrap').forEach(
+  wrap => copyButton(wrap, () => copyTable(wrap.querySelector('table')),
+                     'table as cells and as a table'));
 
 // dark / light toggle: starts from the OS preference (or the reader's
 // last choice), and repaints every canvas in the new ink

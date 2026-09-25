@@ -12,6 +12,7 @@ and a block of spreadsheet cells pastes back in.
 
 from __future__ import annotations
 
+import html
 import pathlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from typing import Any
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
@@ -49,9 +51,12 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionComboBox,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
+from .icons import control_icon
 
 NO_PARENT = QModelIndex()      # Qt's default parent for a flat table
 
@@ -548,6 +553,18 @@ class CopyPasteTableView(QTableView):
         self._filling = None       # (rows, columns) being dragged down from
         self._fill_to = None       # the row the cursor is over, while dragging
         self.viewport().setMouseTracking(True)   # to show the drag cursor
+        # the copy button in the corner, shown while the pointer is over
+        # the table — the same button every figure and report table
+        # carries (Brandon, 2026-09-24)
+        self._copy_button: QToolButton = QToolButton(self)
+        self._copy_button.setIcon(control_icon('copy'))
+        self._copy_button.setToolTip(
+            'Copy the whole table — as cells for a spreadsheet, as a '
+            'table for a document or a mail')
+        self._copy_button.setAutoRaise(True)
+        self._copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_button.clicked.connect(self.copy_table)
+        self._copy_button.hide()
 
     # ---- clipboard ----------------------------------------------------------
 
@@ -587,6 +604,73 @@ class CopyPasteTableView(QTableView):
         if text:
             QApplication.clipboard().setText(text)
         return text
+
+    def table_cells(self) -> tuple[list[str], list[list[str]]]:
+        """(headers, rows) of the whole table, as text."""
+        model = self.model()
+        if model is None:
+            return [], []
+        columns = range(model.columnCount())
+        headers = [str(model.headerData(c, Qt.Orientation.Horizontal,
+                                        Qt.ItemDataRole.DisplayRole) or '')
+                   for c in columns]
+        rows = [[str(model.data(model.index(r, c), Qt.ItemDataRole.EditRole)
+                     or '') for c in columns]
+                for r in range(model.rowCount())]
+        return headers, rows
+
+    def copy_table(self) -> bool:
+        """The whole table, headers and all, as tab-separated text and
+        as HTML in one clipboard entry: a spreadsheet pastes cells, a
+        document or a mail pastes a table. The copy button in the
+        corner (Brandon, 2026-09-24), and what a selection copy is not:
+        that stays bare cells, which is what a paste back into a sheet
+        wants."""
+        headers, rows = self.table_cells()
+        if not rows:
+            return False
+        lines = [headers] + rows
+        text = '\n'.join('\t'.join(v.replace('\t', ' ').replace('\n', ' ')
+                                  for v in line) for line in lines)
+
+        def cell(tag, value):
+            return f'<{tag}>{html.escape(value)}</{tag}>'
+
+        body = ''.join('<tr>' + ''.join(cell('td', v) for v in row) + '</tr>'
+                       for row in rows)
+        markup = ('<table><thead><tr>'
+                  + ''.join(cell('th', h) for h in headers)
+                  + '</tr></thead><tbody>' + body + '</tbody></table>')
+        mime = QMimeData()
+        mime.setText(text)
+        mime.setHtml(markup)
+        QApplication.clipboard().setMimeData(mime)
+        return True
+
+    def _place_copy_button(self) -> None:
+        """The copy button sits in the top-right corner of the cells,
+        clear of the scroll bar, wherever the view is resized to."""
+        button = self._copy_button
+        viewport = self.viewport()
+        corner = viewport.mapTo(self, viewport.rect().topRight())
+        button.move(corner.x() - button.width() - 6, corner.y() + 6)
+        button.raise_()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._place_copy_button()
+
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        self._copy_button.setVisible(self.whole_table_copy
+                                     and self.model() is not None
+                                     and self.model().rowCount() > 0)
+        self._place_copy_button()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        if not self._copy_button.underMouse():
+            self._copy_button.hide()
 
     def paste(self) -> tuple[int, int]:
         """Paste tab-separated text over the selection's top-left corner.
@@ -868,7 +952,7 @@ class CopyPasteTableView(QTableView):
 
         if self.whole_table_copy:
             copy_all = QAction('Copy Whole Table', self)
-            copy_all.triggered.connect(lambda: self.copy(whole_table=True))
+            copy_all.triggered.connect(self.copy_table)
             menu.addAction(copy_all)
 
         paste = QAction('Paste', self)

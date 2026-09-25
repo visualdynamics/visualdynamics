@@ -3586,6 +3586,66 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
     return written if len(written) > 1 else written[0]
 
 
+
+def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
+              last: float | None = None,
+              geometry: str | os.PathLike | None = None,
+              length_unit: str | None = None,
+              photos: Any = None) -> Project:
+    """A Rattlesnake random run with a sine sweep under it, worked up
+    into a project: both halves.
+
+        project = visualdynamics.mixed_run('run.nc4')
+
+    Everything `random_vibration_run` does — the run imported, the PSDs
+    averaged and banded, the specification banded, the coherence
+    measured, the geometry and photographs brought in — and then the
+    sine half: each tone's level extracted from the same recording
+    against the sweep specification the file carried. The run says it
+    is both, so the project comes back declared Random and Sine. A run
+    with no sine specification is refused by name rather than worked
+    up as half of what was asked for; `random_vibration_run` is the
+    call for it. The keywords are `random_vibration_run`'s.
+    """
+    project = random_vibration_run(run, per_octave, last=last,
+                                   geometry=geometry,
+                                   length_unit=length_unit, photos=photos)
+    from .core.sine import SineSweepSpecification
+
+    if not any(isinstance(obj, SineSweepSpecification)
+               for _name, obj in project.items()):
+        raise ValueError(
+            f'{run} holds no sine sweep specification: it is not a random '
+            'and sine run — random_vibration_run is the call for it')
+    project.extract_sine(project.time_history)
+    return project
+
+
+def mixed_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
+                 last: float | None = None,
+                 geometry: Any = None,
+                 photos: Any = None,
+                 per_octave: int | None = None,
+                 unit_system: Any = None) -> Any:
+    """A Rattlesnake random-and-sine run in, an HTML report out.
+
+        visualdynamics.mixed_report('run.nc4', 'report.html')
+        visualdynamics.mixed_report()                   # ask for both
+        visualdynamics.mixed_report('run.nc4', 'reports/')
+
+    `random_vibration_report`'s twin for a run that was both: the same
+    asking when the run is left out, the same batch and folder rules,
+    the workup of `mixed_run`, and the Random and Sine report — both
+    halves judged from one recording — written as one self-contained
+    HTML file. Returns the path written, or the list of them when
+    several runs were chosen.
+    """
+    return _one_call_reports(
+        run, path, geometry, unit_system, 'mixed',
+        lambda one, geo: mixed_run(one, per_octave, last=last, geometry=geo,
+                                   photos=photos))
+
+
 def system_id_report(run: Any = ASK,
                      path: str | os.PathLike | None = None, *,
                      last: float | None = None,

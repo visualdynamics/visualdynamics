@@ -740,6 +740,8 @@ class MainWindow(QMainWindow):
         #: moved — read by the badges, refreshed at every settings edit
         self._stale: dict[str, str] = {}
         self.data_pane.reread.connect(self.render_current)
+        self.data_pane.copied.connect(self._show_status)
+        self.scene.copied.connect(self._show_status)
         self.data_pane.log_frequency_action.triggered.connect(
             self._frequency_axis_toggled)
         self.data_pane.drive_points_toggled.connect(self._toggle_drive_points)
@@ -2909,6 +2911,16 @@ class MainWindow(QMainWindow):
         off the other. Nothing during a fit, which owns the bar."""
         acts = [] if self.fit is not None else self.acts_for()
         plot_up = self.data_pane.isVisibleTo(self)
+        # and whatever is drawn can be copied (Brandon, 2026-09-24): the
+        # plot or the stage when the plot pane is up, the 3-D view
+        # otherwise — last on the bar, after the selection's own acts
+        drawn = (self.fit is None and not self.test_item.isSelected()
+                 and any(kind in ('object', 'record') for kind, _name, _obj,
+                         _detail in self.selected_references()))
+        if drawn:
+            from .panes import copy_act
+            acts = acts + [copy_act(self.data_pane, 'plot') if plot_up
+                           else copy_act(self.scene, '3-D view')]
         self.data_pane.show_acts(acts if plot_up else [])
         self.scene.show_acts([] if plot_up else acts)
 

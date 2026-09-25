@@ -21,7 +21,7 @@ repository) and lands at `stressdata/plate/mixed.nc4`.
 |---|---|---|
 | Import the run | drag the `.nc4` onto the window | `project.import_file(path)` |
 | Both specifications | arrive with the run — the random's and the sweep's | (read from the file's two environments) |
-| The random half | PSDs, octave bands and coherence, as the random workflow does | `visualdynamics.random_vibration_run(path)` does all of it |
+| The random half | PSDs, octave bands and coherence, as the random workflow does | `visualdynamics.mixed_run(path)` does this and the next |
 | The sine half | Extract Sine Levels on the time history's bar | `project.extract_sine(project.time_history)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('mixed')` |
@@ -83,12 +83,24 @@ kurtosis is 1.5, so a channel under three is the sweep, not clipping.
 ```python
 import visualdynamics
 
-project = visualdynamics.random_vibration_run('mixed.nc4')
-project.extract_sine(project.time_history)
+project = visualdynamics.mixed_run('mixed.nc4')      # both halves worked up
 project.generate_report('mixed')
 project.export_report(project.report, 'mixed_report.html')
 project.save('mixed.vdyn')
 ```
+
+Or the whole thing in one call, the way `random_vibration_report` does
+it for a random run — the same asking when the run is left out, the same
+batch and folder rules:
+
+```python
+visualdynamics.mixed_report('mixed.nc4', 'mixed_report.html')
+visualdynamics.mixed_report()                       # ask for the run
+```
+
+A run with no sine specification is refused by name: `mixed_run` will
+not work up half of what was asked for, and `random_vibration_run` is
+the call for it.
 
 ## Where judgment lives
 

@@ -1167,7 +1167,16 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                     pair_colors.setdefault(pair, color)
             style = (Qt.PenStyle.DashLine if dashed
                      else Qt.PenStyle.SolidLine)
-            pen = pg.mkPen(color, width=1, style=style)
+            # The reference that stands back is drawn twice as wide as
+            # the measurement over it, as the 3-D stage has always drawn
+            # its stood-back target. At one pixel a gray requirement
+            # under a dense level trace vanished entirely — Brandon
+            # could not find the specification under the sine levels
+            # (2026-09-25) — and at two it shows through as the band the
+            # measurement is being read against, still behind the data.
+            stands_back = bool(follower and bounded_pairs
+                               and pair in bounded_pairs)
+            pen = pg.mkPen(color, width=2 if stands_back else 1, style=style)
             named = {} if paired and dashed else {'name': label}
             curve, drawn_x, drawn_y = _draw_shaped(plot, x, magnitude, shape,
                                                    pen, widths=widths,

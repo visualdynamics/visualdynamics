@@ -469,11 +469,14 @@ def _zero_negative_frequencies(frequency, path):
         description[i] = (f'frequency {frequency[i]:.3g} Hz in the file, '
                           'read as 0 (a rigid-body mode)')
     listed = ', '.join(f'{frequency[i]:.3g}' for i in negative)
+    from .notes import ImportNote
+
     warnings.warn(
         f'{os.path.basename(str(path))}: {negative.size} mode'
         f'{"s" if negative.size > 1 else ""} with a negative frequency '
         f'({listed} Hz) read as 0 Hz, a rigid-body mode; the file\'s '
-        'values are kept on each mode\'s description', stacklevel=3)
+        'values are kept on each mode\'s description', ImportNote,
+        stacklevel=3)
     return fixed, description
 
 

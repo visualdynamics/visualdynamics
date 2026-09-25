@@ -44,7 +44,7 @@ clear, and the bar carries the project's one act, *Generate Report*.
 | Coherence | The map: frequency across, channel down, pinned 0 to 1. |
 | SRS | Every event of a channel on log axes. |
 | Shock specification | The required SRS with its band. |
-| Sine sweep specification, sine levels | The tones and their levels. |
+| Sine sweep specification, sine levels | One row per control DOF, the tone on the bar's drop-down: the requirement, the extracted level, or the level against the requirement when both are selected. |
 | Shape set | The table of modes: frequency, damping and the shape's label; a mode picked in the grid is the one the table highlights. |
 | Matched modes | The table of committed pairs, both sets' parameters side by side. |
 | Report | The report editor: the page as the export will read it, its acts on the bar ([Reports](reports.md)). |

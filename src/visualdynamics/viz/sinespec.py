@@ -17,6 +17,7 @@ raw values and the axis says so by giving no unit.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -96,7 +97,8 @@ def add_sine_stage(plotter: Any, specification: Any = None,
                    levels: Any = None, dof: str | None = None,
                    unit_system: UnitSystem | None = None,
                    theme: Any = None, lines: int = LINES,
-                   tones: Any = None) -> dict[str, Any]:
+                   tones: Any = None,
+                   dofs: Sequence[str] | None = None) -> dict[str, Any]:
     """Draw the specification's stage into a plotter.
 
     The stage takes either half or both: a specification's tones
@@ -111,11 +113,25 @@ def add_sine_stage(plotter: Any, specification: Any = None,
     time) when the tone is known, and left in recording seconds
     otherwise. Returns the arrays dict with ``points`` added — the
     vertex count a size test can pin.
+
+    `dofs` draws several control DOFs at once, one entry per (tone,
+    DOF) — the rows a person picked in the tree, with the tone on the
+    bar (2026-09-25); `dof` is the one-DOF form the report and the
+    specification-alone view keep. An entry is named by its tone when
+    one DOF is drawn and by tone and DOF when several are, and a level
+    path takes the color of the entry it belongs to.
     """
     import pyvista as pv
 
     colors = resolve_theme(theme)
     us = unit_system or DEFAULT_SYSTEM
+    if dofs is None:
+        dofs = [dof] if dof is not None else [None]
+    dofs = list(dofs)
+
+    def entry_name(tone_name, one_dof):
+        return tone_name if len(dofs) == 1 else f'{tone_name} {one_dof}'
+
     spec_tones = []
     zlabel = 'amplitude'
     spec_dim = getattr(specification, 'ordinate_dim', None)
@@ -123,56 +139,68 @@ def add_sine_stage(plotter: Any, specification: Any = None,
                     and specification.ordinate_unit is not None
                     and spec_dim and spec_dim != UNKNOWN)
     if specification is not None:
-        channel = 0
-        if dof is not None and dof in specification.response_dof:
-            channel = list(specification.response_dof).index(dof)
-        arrays = sine_stage_arrays(specification, channel, unit_system,
-                                   lines, tones)
-        spec_tones = arrays['tones']
-        zlabel = arrays['zlabel']
+        known = [str(d) for d in specification.response_dof]
+        for one in dofs:
+            channel = known.index(one) if one in known else 0
+            arrays = sine_stage_arrays(specification, channel, unit_system,
+                                       lines, tones)
+            for entry in arrays['tones']:
+                entry['tone'] = entry['name']
+                entry['name'] = entry_name(entry['name'], known[channel])
+            spec_tones += arrays['tones']
+            zlabel = arrays['zlabel']
+        arrays = {'tones': spec_tones, 'zlabel': zlabel,
+                  'channel': ', '.join(d for d in dofs if d)}
     else:
-        arrays = {'tones': [], 'zlabel': zlabel, 'channel': dof or ''}
+        arrays = {'tones': [], 'zlabel': zlabel,
+                  'channel': ', '.join(d for d in dofs if d)}
 
     starts = ({tone.name: tone.start_time
                for tone in specification.tones}
               if specification is not None else {})
     spec_by_name = ({tone.name: tone for tone in specification.tones}
                     if specification is not None else {})
-    spec_channel = 0
-    if (specification is not None and dof is not None
-            and dof in specification.response_dof):
-        spec_channel = list(specification.response_dof).index(dof)
+    spec_known = ([str(d) for d in specification.response_dof]
+                  if specification is not None else [])
     paths = []
     for level in (levels or []):
         if level.seconds is None:
             continue
-        rows = [i for i, d in enumerate(level.response_dof)
-                if dof is None or str(d) == dof]
-        if not rows:
-            continue
-        amplitude = np.abs(np.asarray(
-            level.display_ordinate(us, rows[:1])[0]))
-        seconds = np.asarray(level.seconds, dtype=float)
-        if level.tone in starts:
-            seconds = seconds - level.onset + starts[level.tone]
-        frequencies = np.asarray(level.abscissa, dtype=float)
-        # the abort limits at this path's own frequencies, in the same
-        # display units, so the exceedance marks land where the 2-D
-        # comparison would box them
-        aborts = {}
-        tone = spec_by_name.get(level.tone)
-        if tone is not None:
-            for limit in ('abort_upper', 'abort_lower'):
-                if limit not in tone.limits:
-                    continue
-                values = tone.target(frequencies,
-                                     curve=limit)[:, spec_channel]
-                if convert_spec:
-                    values = us.from_si(values, spec_dim)
-                aborts[limit] = values
-        paths.append({'name': level.tone, 't': seconds,
-                      'f': frequencies, 'amplitude': amplitude,
-                      'aborts': aborts})
+        level_dofs = [str(d) for d in level.response_dof]
+        for one in dofs:
+            rows = [i for i, d in enumerate(level_dofs)
+                    if one is None or d == one]
+            if not rows:
+                continue
+            drawn_dof = level_dofs[rows[0]]
+            spec_channel = (spec_known.index(drawn_dof)
+                            if drawn_dof in spec_known else 0)
+            amplitude = np.abs(np.asarray(
+                level.display_ordinate(us, rows[:1])[0]))
+            seconds = np.asarray(level.seconds, dtype=float)
+            if level.tone in starts:
+                seconds = seconds - level.onset + starts[level.tone]
+            frequencies = np.asarray(level.abscissa, dtype=float)
+            # the abort limits at this path's own frequencies, in the
+            # same display units, so the exceedance marks land where
+            # the 2-D comparison would box them
+            aborts = {}
+            tone = spec_by_name.get(level.tone)
+            if tone is not None:
+                for limit in ('abort_upper', 'abort_lower'):
+                    if limit not in tone.limits:
+                        continue
+                    values = tone.target(frequencies,
+                                         curve=limit)[:, spec_channel]
+                    if convert_spec:
+                        values = us.from_si(values, spec_dim)
+                    aborts[limit] = values
+            paths.append({'name': entry_name(level.tone, drawn_dof),
+                          'tone': level.tone, 't': seconds,
+                          'f': frequencies, 'amplitude': amplitude,
+                          'aborts': aborts})
+            if one is None:
+                break
     arrays['levels'] = paths
     sx, sy, sz = STAGE
 

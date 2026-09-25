@@ -70,19 +70,33 @@ def newer(available: str, running: str = __version__) -> bool:
 
 
 def trust_store() -> ssl.SSLContext:
-    """The TLS context the check verifies visualdynamics.org with.
+    """The TLS context the check verifies visualdynamics.org with: what
+    the operating system trusts.
 
-    A packaged build carries its own OpenSSL, and the one the wheels
-    bring was built elsewhere: its compiled-in certificate directory
-    is a folder in the builder's own home (read off the library with
-    `strings`, 2026-09-15) and exists on nobody else's machine, so the
-    default context trusts nothing and every HTTPS request fails —
-    which the check reported as "could not reach visualdynamics.org"
-    on a Mac that was online (Brandon, 2026-09-15). When the default store is empty, the
-    Mozilla bundle certifi ships is loaded instead; it is already in
-    every package as netCDF4's dependency, and is what the Python
-    ecosystem uses for exactly this.
+    `truststore` (MIT; what pip itself uses) verifies against the
+    system's own store — the Keychain on macOS, the certificate store
+    on Windows, OpenSSL's system bundle on Linux. That is where a
+    corporate network's own certificate authority lives: a network that
+    inspects HTTPS re-signs every site with it, IT installs it on the
+    machine, and `curl` and the browser trust it while a Python bundle
+    of Mozilla's roots has never heard of it. Brandon's work machine
+    reported exactly that, "unable to get local issuer certificate", on
+    a network where `curl` got a 200 (2026-09-25).
+
+    Without `truststore` — a bare checkout without it installed — the
+    older arrangement stands: a packaged build carries its own OpenSSL,
+    and the one the wheels bring was built elsewhere with a compiled-in
+    certificate directory that exists on nobody else's machine (read
+    off the library with `strings`, 2026-09-15), so the default context
+    trusts nothing; when it is empty the Mozilla bundle certifi ships
+    is loaded instead.
     """
+    try:
+        import truststore
+    except ImportError:
+        pass
+    else:
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context = ssl.create_default_context()
     if not context.get_ca_certs():
         try:
@@ -137,7 +151,8 @@ def reason_for(error: BaseException, timeout: float) -> str:
                 or getattr(error, 'reason', None) or error)
         return (f'visualdynamics.org could not be verified: {said}. A '
                 'network that inspects HTTPS re-signs it with its own '
-                'authority, which this build does not trust')
+                'authority; the check trusts what this machine trusts, '
+                'so that authority has to be installed here')
     if isinstance(error, TimeoutError):      # socket.timeout is this alias
         return f'visualdynamics.org did not answer within {timeout:g} s'
     if isinstance(error, (ValueError, UnicodeDecodeError)):

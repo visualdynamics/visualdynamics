@@ -42,7 +42,9 @@ def _modal_file(tmp_path, frequencies):
 
 def test_negative_frequencies_import_as_rigid_body_modes_and_say_so(tmp_path):
     path = _modal_file(tmp_path, [-3.2e-7, -1.1e-8, 12.5])
-    with pytest.warns(UserWarning, match=r'2 modes with a negative frequency '
+    from visualdynamics.io import ImportNote
+
+    with pytest.warns(ImportNote, match=r'2 modes with a negative frequency '
                       r'\(-3\.2e-07, -1\.1e-08 Hz\) read as 0 Hz'):
         back = visualdynamics.import_file(path)
     shapes = back['shapes']
@@ -92,6 +94,30 @@ def test_the_window_shows_the_note_and_keeps_the_shapes(window, pump,
     title, text = shown[0]
     assert title == 'Imported, with a note'
     assert '1 mode with a negative frequency (-3.2e-07 Hz) read as 0 Hz' in text
+
+
+def test_a_librarys_warning_is_not_a_note(window, pump, tmp_path, monkeypatch):
+    """Only a reader's own ImportNote reaches the dialog. The first day
+    an unclosed-socket ResourceWarning from somewhere under an import
+    went into "Imported, with a note", which is not what it was."""
+    from visualdynamics.gui import main_window as window_module
+
+    shown = []
+    _answer_dialogs(window_module, monkeypatch, shown)
+    real = window_module.io.import_file
+
+    def noisy(path, **options):
+        warnings.warn('unclosed <socket.socket fd=51>', ResourceWarning,
+                      stacklevel=2)
+        warnings.warn('something old', DeprecationWarning, stacklevel=2)
+        return real(path, **options)
+
+    monkeypatch.setattr(window_module.io, 'import_file', noisy)
+    path = _modal_file(tmp_path, [0.0, 0.0, 12.5])
+    window.import_paths([path])
+    pump()
+    assert any(isinstance(o, ShapeSet) for o in window.objects.values())
+    assert shown == [], 'no dialog for a warning that is not about the file'
 
 
 def test_a_failure_and_a_note_share_the_one_dialog(window, pump, tmp_path,

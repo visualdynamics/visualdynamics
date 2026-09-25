@@ -396,8 +396,11 @@ def test_the_spec_draws_its_tones_with_bands(window, pump):
     window.data_pane.waterfall_action.setChecked(False)
     window.render_current()
     pump()
-    assert _curve_count(window) >= 2, \
-        'both tones drawn at the chosen control channel'
+    assert _curve_count(window) == 1, \
+        'one tone at one DOF: the tone from its box, the DOF from the pair box'
+    box = window.data_pane.event_box
+    assert [box.itemText(i) for i in range(box.count())] == ['Up', 'Down']
+    assert window.data_pane.pair_box.count() == 2
 
 
 def test_levels_draw_over_the_spec_and_the_bars_judge_them(window, pump):
@@ -423,8 +426,10 @@ def test_levels_draw_over_the_spec_and_the_bars_judge_them(window, pump):
     window.data_pane.waterfall_action.setChecked(False)
     window.render_current()
     pump()
-    assert _curve_count(window) >= 4, \
-        'flat: two levels and two requirement curves share the plot'
+    assert _curve_count(window) >= 2, \
+        'flat: the level and the requirement of one DOF share the plot'
+    pairs = window.data_pane.pair_box
+    assert pairs.count() == 2, 'and the other DOF is a pick away'
     window.data_pane.srs_view = 'error'
     window.render_current()
     pump()
@@ -518,32 +523,64 @@ def test_the_spec_alone_takes_the_stage(window, pump):
     window.render_current()
     pump()
     assert not pane._waterfall_page.isVisible()
-    assert _curve_count(window) >= 2, 'the flat curves come back'
+    assert _curve_count(window) == 1, \
+        'the flat curve comes back: one tone at one DOF'
 
 
 
-def test_picked_tones_restrict_the_plot(window, pump):
-    """The specification expands into one row per tone, and picking
-    rows plots just those sweeps — records and modes habits."""
+def test_the_rows_are_the_dofs_and_the_tone_is_on_the_bar(window, pump):
+    """The specification expands into one row per control DOF, as
+    every other object's rows are its channels, and the tone is the
+    drop-down on the bar. Until 2026-09-25 it was the other way
+    round: Brandon expanded a three-DOF specification expecting three
+    rows and found one tone. Picking rows plots just those DOFs —
+    records and modes habits — and the drop-down picks the tone."""
     spec = _spec()
     window.add_object('Sine Specification', spec)
     item = window._item_for_object('Sine Specification')
     item.setSelected(True)
     pump()
     grid = window.record_grids['Sine Specification']
-    assert grid.kind == 'tone'
-    assert grid.responses == ['Up', 'Down']
-    grid.select_records([1])
-    window.render_current()
-    pump()
-    names = [name for name in window.data_pane.waterfall_plotter.actors
-             if name.startswith('sine-') and 'target' in name]
-    assert len(names) == 1, 'one tone picked, one sweep on the stage'
+    assert grid.kind == 'dof'
+    assert grid.responses == ['101Z+', '104Z+']
+    box = window.data_pane.event_box
+    assert [box.itemText(i) for i in range(box.count())] == ['Up', 'Down']
+
+    def targets():
+        return [name for name in window.data_pane.waterfall_plotter.actors
+                if name.startswith('sine-') and name.endswith('-target')]
+
+    assert len(targets()) == 2, 'one tone, both DOFs on the stage'
+    # flat, several DOFs are a thicket: the pair box on the bar picks
+    # the one drawn, as the spectra comparison's does
     window.data_pane.waterfall_action.setChecked(False)
     window.render_current()
     pump()
-    assert _curve_count(window) == 1, \
-        'the flat reading honors the same pick'
+    pairs = window.data_pane.pair_box
+    assert [pairs.itemData(i)[0] for i in range(pairs.count())] == \
+        ['101Z+', '104Z+']
+    assert _curve_count(window) == 1, 'one DOF at a time flat'
+    pairs.setCurrentIndex(1)
+    pump()
+    assert '104Z+' in window.statusBar().currentMessage(), \
+        'the pair box moves the flat reading to the other DOF'
+    window.data_pane.waterfall_action.setChecked(True)
+    grid.select_records([1])
+    window.render_current()
+    pump()
+    assert len(targets()) == 1, 'one DOF picked, one requirement'
+    assert 'the requirement at 1 DOF' in window.statusBar().currentMessage()
+    window.data_pane.waterfall_action.setChecked(False)
+    window.render_current()
+    pump()
+    assert _curve_count(window) == 1, 'the flat reading honors the same pick'
+    assert not window.data_pane.pair_action.isVisible(), \
+        'one DOF chosen, nothing for the pair box to choose'
+    # the drop-down moves the tone, the pick stays
+    box.setCurrentIndex(1)
+    pump()
+    assert window.statusBar().currentMessage().startswith('Down at ')
+    assert _curve_count(window) == 1
 
 
 def test_the_comparison_stage_aligns_the_two_clocks():

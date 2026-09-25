@@ -72,7 +72,11 @@ without the network.
 version exists and says so — up to date, newer (with the download
 page to open), or unreachable. It never downloads or replaces
 anything itself: a newer version is installed the way the first one
-was.
+was. The connection is verified against what the operating system
+trusts, so on a network that inspects HTTPS the check works once the
+network's own certificate authority is installed on the machine, as it
+is for the browser; failing that, the status line says which part of
+the check failed.
 
 The command is created by the install, in the environment's own `bin`
 directory — it is on your `PATH` exactly when that environment is

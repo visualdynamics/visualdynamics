@@ -1918,6 +1918,62 @@ class Project(dict):
             name or f'{source} Rigid Body Modes',
             recipe=('generate_rigid_body_modes', {}))
 
+    def solve_modes(self, source: Any, *,
+                    maximum_frequency: float | None = None,
+                    num_modes: int | None = None, damping: float = 0.0,
+                    name: str | None = None) -> str:
+        """The normal modes of a geometry whose blocks carry their
+        properties (Solve Modes): the finite element model built from
+        the blocks, solved, and the shapes added in the geometry's
+        group.
+
+        The geometry is the model: each block a material and a thickness
+        or a section (`fem.BlockProperties`, set in the Blocks table or
+        on `geometry.block_properties`), every quad a plate, every
+        triangle a triangle, every two-node line a beam
+        (`fem.Model.from_geometry`). The solution is free-free unless the
+        geometry says otherwise later; the six rigid-body modes come
+        back at exactly 0 Hz with the elastic ones after them.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        maximum_frequency : float, optional
+            Solve for every mode up to this frequency, in Hz.
+        num_modes : int, optional
+            Or for this many modes, rigid ones included.
+        damping : float, default 0.0
+            The fraction of critical damping every mode is given; a
+            finite element model has none of its own.
+        name : str, optional
+            What to call the result. Defaults to the geometry's name
+            with ' Modes' after it.
+
+        Returns
+        -------
+        str
+            The name the shape set was added under.
+        """
+        from .core.fem import Model
+
+        source = self.name_of(source)
+        geometry = self[source]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{source!r} is not a geometry')
+        if not geometry.block_properties:
+            raise ValueError(
+                f'{source} has no block properties: give each block a '
+                'material and a thickness or a section, in the Blocks '
+                'table or on geometry.block_properties')
+        model = Model.from_geometry(geometry, name=source)
+        shapes = model.eigensolution(maximum_frequency=maximum_frequency,
+                                     num_modes=num_modes, damping=damping)
+        params = {'maximum_frequency': maximum_frequency,
+                  'num_modes': num_modes, 'damping': damping}
+        return self._derive(source, shapes, name or f'{source} Modes',
+                            recipe=('solve_modes', params))
+
     def fit_modes(self, source: str, *, bounds: tuple[float, float] | None
                   = None, limit: int = 30, name: str | None = None,
                   at: Sequence[tuple[float, float]] | None = None,
@@ -2812,6 +2868,8 @@ class Project(dict):
         ('SpecificationDraft(',
          'from visualdynamics.core.author import SpecificationDraft'),
         ('np.array(', 'import numpy as np'),
+        ('BlockProperties(',
+         'from visualdynamics.core.fem import BlockProperties, Material, Section'),
     )
 
     def session_script(self) -> str:
@@ -2956,6 +3014,9 @@ _VERB_APPLIES: tuple = (
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
     ('generate_rigid_body_modes', lambda p, o: isinstance(o, Geometry)),
+    # a geometry is a model once its blocks say what they are made of
+    ('solve_modes', lambda p, o: (isinstance(o, Geometry)
+                                  and bool(o.block_properties))),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
     ('project_onto_basis', _two_shape_sets),
@@ -3040,7 +3101,7 @@ _JOURNALED_VERBS = (
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
-    'differentiate', 'fit_modes', 'generate_rigid_body_modes',
+    'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale',

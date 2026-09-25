@@ -74,7 +74,21 @@ body { margin: 0 auto; padding: 2rem 1.5rem 4rem;
 .text { max-width: 900px; }
 h1 { font-size: 1.6rem; border-bottom: 1px solid var(--line);
      padding-bottom: .4rem; }
-section { margin: 1.6rem 0; }
+section { margin: 1.6rem 0; position: relative; }
+/* the copy button in a figure's corner: shown on hover, like the one on
+   a chat's code blocks (Brandon, 2026-09-24), and kept off the printed
+   page — a PDF is not a page to copy from. `.gridcell` is positioned
+   too, so a grid's cells each carry their own. */
+.gridcell { position: relative; }
+.copy { position: absolute; top: 8px; right: 8px; z-index: 4;
+  width: 28px; height: 28px; padding: 0; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  color: var(--ink); border: 1px solid var(--line); border-radius: 5px;
+  background: color-mix(in srgb, var(--paper) 85%, transparent);
+  opacity: 0; transition: opacity .15s; }
+section:hover > .copy, .gridcell:hover > .copy, .copy:focus-visible {
+  opacity: 1; }
+.copy svg { width: 15px; height: 15px; display: block; }
 .caption { color: var(--faint); font-size: .9rem; margin-top: .35rem; }
 .note { margin-top: .3rem; padding-left: .6rem;
         border-left: 3px solid var(--line); font-style: italic; }
@@ -134,7 +148,7 @@ th { background: color-mix(in srgb, var(--line) 30%, transparent); }
    rather than flat. */
 td.mark-over { background: rgba(229, 83, 75, 0.30); }
 td.mark-under { background: rgba(76, 146, 217, 0.30); }
-@media print { canvas { break-inside: avoid; } }
+@media print { canvas { break-inside: avoid; } .copy { display: none; } }
 """
 
 _JS = r"""
@@ -2074,6 +2088,70 @@ DATA.blocks.forEach(block => {
   }
 });
 
+/* ---- copy a figure to the clipboard ------------------------------------ */
+/* Every figure gets a copy button in its corner, so a plot goes into a
+   document, a chat or an email without a screenshot (Brandon,
+   2026-09-24). The canvas is copied as it is drawn — the current theme,
+   at its own backing-store resolution, so a retina reader gets a retina
+   image. One button, two ways off the page: inside the application the
+   bytes cross the web channel to Python, which owns the real clipboard
+   (the view's own clipboard permission differs by Qt version); the
+   exported file, open in a browser, uses the browser's clipboard, with
+   the blob handed over as a promise because Safari wants the item built
+   inside the click. A grid figure is a canvas per cell and each cell
+   copies on its own; the headings are text the canvases do not hold.
+   The click stays on the button: in edit mode a click on a section
+   selects the block, and copying a figure is not choosing it. */
+const COPY_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.5"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>'
+  + '<path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>'
+  + '</svg>';
+const COPIED_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor"'
+  + ' stroke-width="1.8"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
+function copyCanvas(canvas) {
+  const png = () => new Promise((resolve, reject) => canvas.toBlob(
+    blob => blob ? resolve(blob) : reject(new Error('the figure gave no image')),
+    'image/png'));
+  const bridge = window.__bridge;
+  if (bridge && bridge.copy_image)
+    return png().then(blob => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => bridge.copy_image(reader.result,
+        ok => ok ? resolve() : reject(new Error('the clipboard refused it')));
+      reader.readAsDataURL(blob); }));
+  if (!navigator.clipboard || !window.ClipboardItem)
+    return Promise.reject(new Error('this browser has no image clipboard'));
+  return navigator.clipboard.write([new ClipboardItem({'image/png': png()})]);
+}
+function copyButton(canvas) {
+  const button = document.createElement('button');
+  button.className = 'copy'; button.type = 'button';
+  button.title = 'Copy this figure as an image';
+  button.setAttribute('aria-label', 'Copy figure');
+  button.innerHTML = COPY_ICON;
+  let restore = null;
+  const settle = (ok, why) => {
+    button.innerHTML = ok ? COPIED_ICON : COPY_ICON;
+    button.title = ok ? 'Copied' : 'Could not copy: ' + why;
+    button.classList.toggle('copied', ok);
+    // what the last click came to, kept past the 1.5 s the check mark
+    // shows for, so a test can ask after the clipboard has filled
+    button.dataset.last = ok ? 'copied' : 'failed';
+    clearTimeout(restore);
+    restore = setTimeout(() => { button.innerHTML = COPY_ICON;
+      button.title = 'Copy this figure as an image';
+      button.classList.remove('copied'); }, 1500);
+  };
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    copyCanvas(canvas).then(() => settle(true),
+                            err => settle(false, err && err.message));
+  });
+  canvas.parentElement.insertBefore(button, canvas.nextSibling);
+}
+document.querySelectorAll('section canvas').forEach(copyButton);
+
 // dark / light toggle: starts from the OS preference (or the reader's
 // last choice), and repaints every canvas in the new ink
 (() => {
@@ -2117,6 +2195,9 @@ _EDIT_JS = r"""
    channel and the exported file never carried any of this. */
 new QWebChannel(qt.webChannelTransport, channel => {
   const bridge = channel.objects.bridge;
+  // the figures' copy buttons send their image through here rather
+  // than the view's own clipboard (`copyCanvas`)
+  window.__bridge = bridge;
   const sections = Array.from(document.querySelectorAll('section'));
   window.__select = index => {
     sections.forEach((s, position) => {

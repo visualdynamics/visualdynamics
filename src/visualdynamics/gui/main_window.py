@@ -2942,6 +2942,7 @@ class MainWindow(QMainWindow):
                                     ('&Transient', 'transient'),
                                     ('&Shock', 'shock'),
                                     ('S&ine Sweep', 'sine'),
+                                    ('Random &and Sine', 'mixed'),
                                     ('S&ystem ID', 'sysid'),
                                     ('&Empty', 'empty')):
                 menu.addAction(f'Generate {label} Report',

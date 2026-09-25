@@ -45,8 +45,9 @@ been checked against themselves:
   modal masses, damping 1.2% to 8%) as displacement, velocity and
   acceleration, once with real shapes and once with complex ones
   (`tests/test_modal_frf_oracle.py`). Complex shapes take the
-  pole-plus-conjugate form with modal A. sdynpy stores modal A as a
-  real number, so a real modal A is what is frozen. Closed-form physics
+  pole-plus-conjugate form with modal A. sdynpy divides the conjugate
+  term by modal A rather than its conjugate, which is right only for a
+  real modal A, so a real one is what is frozen. Closed-form physics
   checks both forms independently, a complex modal A included
   (`tests/test_frf_synthesis_exact.py`).
 - `octave.npz` — PSD banding at 1, 3, 6 and 12 bands per octave, real

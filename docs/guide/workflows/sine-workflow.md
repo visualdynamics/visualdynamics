@@ -130,12 +130,15 @@ project.save('sine.vdyn')
 
 ## Where judgment lives
 
-- **A mixed run imports both specifications.** A random environment
+- **A mixed run is a project type of its own.** A random environment
   over a quiet sweep — the qualification-with-a-tracked-tone case —
-  arrives with the random specification leading and the sine one
-  beside it, and each is judged by its own workflow. Which
-  specification the run was *for* is the engineer's call, not the
-  file's.
+  arrives as a *Random and Sine* project: both specifications import,
+  the tree shows both halves' slots, and *Generate Report* writes one
+  report that judges the random against its PSD and each tone against
+  its level, with the recording and the data-quality readings once.
+  The control spectra in it are of the whole recording, sweep
+  included, and the report says so where a reader would otherwise take
+  the tone for an exceedance.
 - **The extraction is per-tone, not per-band.** Each tone is read
   along its own trajectory, and all of them together, so two tones
   crossing — or running close for seconds — do not corrupt each

@@ -505,7 +505,13 @@ PASSIVE_KINDS = frozenset({'time'})
 PROJECT_FOR_KIND = {'modal': 'Modal Test', 'random': 'Random Vibration',
                     'transient': 'Transient', 'sine': 'Sine Sweep'}
 
-#: which half of a mixed run names the project, in order. Both halves'
+#: the one mixed run that is a project type of its own: a random
+#: environment with a sine sweep under it, whose project shows both
+#: halves' slots and whose report holds both judgments (Brandon,
+#: 2026-09-24). Keyed by the set of kinds that drove the article.
+MIXED_PROJECTS = {frozenset({'random', 'sine'}): 'Random and Sine'}
+
+#: which half names any other mixed run, in order. Both halves'
 #: specifications import and both analyses work whatever the type says;
 #: the type only decides which slots and report the tree leads with,
 #: and the person can switch. Random leads because its workflow is the
@@ -599,7 +605,9 @@ def project_type(path: str | os.PathLike) -> str | None:
     """The visualdynamics project this file is a run of, or None if visualdynamics has no
     project of that kind — or the file never said what kind it was.
 
-    A mixed run answers with its leading half (`MIXED_PRECEDENCE`):
+    A random run with a sine sweep under it is a 'Random and Sine'
+    project (`MIXED_PROJECTS`), whose report holds both halves. Any
+    other mixed run answers with its leading half (`MIXED_PRECEDENCE`):
     every environment's specification imports regardless, so the type
     only chooses which workflow the tree leads with.
     """
@@ -617,6 +625,9 @@ def project_type(path: str | os.PathLike) -> str | None:
             return 'System ID'
     kind = _run_kind(kinds)
     if kind == 'mixed':
+        driving = frozenset(kinds - PASSIVE_KINDS)
+        if driving in MIXED_PROJECTS:
+            return MIXED_PROJECTS[driving]
         kind = next((k for k in MIXED_PRECEDENCE if k in kinds), None)
     return PROJECT_FOR_KIND.get(kind)
 
@@ -1365,9 +1376,15 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
                 continue
             indices = np.asarray(
                 group.variables['control_channel_indices'][()], dtype=int)
-            scales = [scales_dims[ci][0] for ci in indices]
-            control_dims = {scales_dims[ci][1] for ci in indices}
-            control_units = {scales_dims[ci][2] for ci in indices}
+            # over the control channels, or over the rows of a response
+            # transformation when the sweep controlled a virtual point —
+            # the same answer the random specification reads (a sine
+            # with a transformation beside an untransformed random
+            # failed to load here, 2026-09-24)
+            controlled = _control_channels(group, indices, dofs, scales_dims)
+            scales = [kind[0] for _dof, kind in controlled]
+            control_dims = {kind[1] for _dof, kind in controlled}
+            control_units = {kind[2] for _dof, kind in controlled}
             if len(control_dims) > 1:
                 raise ValueError(
                     f'{env_name}: control channels mix quantities '
@@ -1408,7 +1425,7 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             unit = (control_units.pop()
                     if len(control_units) == 1 else None)
             out[f'{env_name}_specification'] = SineSweepSpecification(
-                tones=tones, response_dof=[dofs[ci] for ci in indices],
+                tones=tones, response_dof=[dof for dof, _kind in controlled],
                 ordinate_dim=dim, ordinate_unit=unit,
                 comment=f'sine tones from the {env_name} environment')
 

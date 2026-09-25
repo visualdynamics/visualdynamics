@@ -2261,18 +2261,11 @@ class Project(dict):
             within the project — a clash gets a numbered suffix.
         """
         from .core.report import (
+            TEMPLATE_BUILDERS,
             Report,
-            modal_template,
-            random_template,
-            shock_template,
-            sine_template,
-            sysid_template,
-            transient_template,
         )
 
-        builders = {'modal': modal_template, 'random': random_template,
-                    'shock': shock_template, 'transient': transient_template,
-                    'sine': sine_template, 'sysid': sysid_template}
+        builders = TEMPLATE_BUILDERS
         if template in builders:
             report = builders[template](self, links=self.links)
         elif template == 'empty':

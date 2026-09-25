@@ -94,16 +94,25 @@ def test_a_transient_run_is_recognized_as_one(tmp_path):
 
 def test_random_and_a_sine_sweep_together_are_mixed_mode(tmp_path):
     """Two environments driving the article at once is a kind of its
-    own, not whichever of them the file happens to list first. The
-    *project type* answers with the leading half by MIXED_PRECEDENCE —
-    random before sine, the established workflow first — regardless of
-    the file's own environment order; every half's specification
-    imports either way."""
+    own, not whichever of them the file happens to list first. Random
+    with a sweep under it is the one mixed run that is a project type
+    of its own (Brandon, 2026-09-24), whatever order the file lists
+    the two in; every half's specification imports either way."""
     for order in ((('Background', RANDOM), ('Sweep', SINE)),
                   (('Sweep', SINE), ('Background', RANDOM))):
         path = written(tmp_path / f'mixed_{order[0][0]}.nc4', *order)
         assert run_kind(path) == 'mixed'
-        assert project_type(path) == 'Random Vibration'
+        assert project_type(path) == 'Random and Sine'
+
+
+def test_any_other_mixed_run_takes_its_leading_half(tmp_path):
+    """A random with a transient beside it has no type of its own, so
+    the project answers with the leading half by MIXED_PRECEDENCE —
+    random first, the established workflow."""
+    path = written(tmp_path / 'odd.nc4', ('Background', RANDOM),
+                   ('Drop', TRANSIENT))
+    assert run_kind(path) == 'mixed'
+    assert project_type(path) == 'Random Vibration'
 
 
 def test_a_sine_sweep_alone_is_not_mixed_mode(tmp_path):

@@ -33,6 +33,8 @@ not. Open each `.vdyn` once in that alpha and save it again.
   tolerance band
 - [The sine sweep workflow](workflows/sine-workflow.md) — tones tracked
   through a sweep, against what was asked for
+- [The random and sine workflow](workflows/mixed-workflow.md) — a sweep
+  under a random, both judged from one recording
 - [The system identification workflow](workflows/sysid-workflow.md) —
   a plant measured, and how well
 - [The wavelet reading](wavelet.md) — a time history as a scalogram

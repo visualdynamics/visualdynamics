@@ -124,8 +124,8 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     popped = []
     monkeypatch.setattr(window, '_pop_menu', lambda menu: popped.append(menu))
     window.generate_report_act()
-    assert popped and len(popped[0].actions()) == 7, \
-        'untyped: the choice of templates'
+    assert popped and len(popped[0].actions()) == 8, \
+        'untyped: the choice of templates, one per built-in and Empty'
     window.set_project_type('Modal Test')
     pump()
     window.generate_report_act()

@@ -136,7 +136,7 @@ def test_the_report_bar_saves_a_template_and_the_menu_offers_it(
     window.generate_report_act()
     texts = [a.text() for a in popped[-1].actions() if not a.isSeparator()]
     assert texts[-1] == f'Generate {name} Report (saved template)'
-    assert len(texts) == 8, 'the seven built-in, then the saved one'
+    assert len(texts) == 9, 'the eight built-in, then the saved one'
     window.set_project_type('Modal Test')
     pump()
     window.generate_report_act()

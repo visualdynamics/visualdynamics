@@ -538,12 +538,20 @@ def takes_shapes(block: Mapping[str, Any]) -> bool:
 # sample by sample. They are different tests with different targets, and
 # calling both 'shock' is what makes the difference hard to see. A
 # controller can run the second today; the first it cannot.
+# A **random and sine** test is the two run at once on the same shakers
+# — a random environment held to its PSD with a sweep riding under it,
+# the qualification-with-a-tracked-tone case, and the only way Brandon
+# has ever run a sweep. Each half is judged by its own workflow, and the
+# type exists so one project shows both halves' slots and one report
+# holds both judgments (Brandon, 2026-09-24). Until then a mixed run
+# took the random type and carried the sine half beside it.
 PROJECT_TYPES = ('Modal Test', 'Random Vibration', 'Transient', 'Shock',
-                 'Sine Sweep', 'System ID')
+                 'Sine Sweep', 'Random and Sine', 'System ID')
 # which template a typed project's generic Generate Report uses
 PROJECT_TEMPLATES = {'Modal Test': 'modal', 'Random Vibration': 'random',
                      'Transient': 'transient', 'Shock': 'shock',
-                     'Sine Sweep': 'sine', 'System ID': 'sysid'}
+                     'Sine Sweep': 'sine', 'Random and Sine': 'mixed',
+                     'System ID': 'sysid'}
 
 
 #: the side of a typed project's skeleton that has no name: every
@@ -624,7 +632,7 @@ def project_expectations(
     """
     from ..names import display_name
 
-    def raw():
+    def raw(project_type):
         from .channel_table import ChannelTable
         from .data import (
             Frf,
@@ -750,6 +758,15 @@ def project_expectations(
                     ('Sine Levels', SineLevelSet, 'SineLevelSet', 1,
                      False, 'Basis'),
                     ('Report', Report, 'Report', 1, False, None)]
+        if project_type == 'Random and Sine':
+            # the union of the two halves' slots: the random's whole,
+            # then what the sine's adds — its specification and its
+            # levels — and the one report last. Composed rather than
+            # retyped, so a slot added to either half arrives here too.
+            random = raw('Random Vibration')
+            have = {icon for _label, _cls, icon, _n, _opt, _side in random}
+            added = [slot for slot in raw('Sine Sweep') if slot[2] not in have]
+            return random[:-1] + added + [random[-1]]
         if project_type == 'System ID':
             # the two save forms fill this differently, and the slots have
             # to serve both: a time-data save brings the channel table and
@@ -823,7 +840,7 @@ def project_expectations(
     return [(display_name(icon if cls.__name__.startswith('_') else
                           cls.__name__),
              cls, icon, count, optional, side)
-            for _label, cls, icon, count, optional, side in raw()]
+            for _label, cls, icon, count, optional, side in raw(project_type)]
 
 def _expected_narrowly(obj: Any, cls: type, classes: Sequence[type],
                        banded: bool | None = None) -> bool:
@@ -1630,21 +1647,91 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
     ])
 
 
+def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The sine half's judgment: one comparison figure per tone, the
+    prose that reads them, and the deviation bars — shared by the sine
+    report and the random-and-sine one, so the two cannot drift.
+
+    One figure per tone, because each tone sweeps its own frequencies
+    on its own clock; overlaying them would draw different requirements
+    over each other. The extracted levels present in the project name
+    the figures; a project not yet extracted gets one symbolic figure so
+    the outline shows what is missing.
+    """
+    from .sine import SineLevel, SineLevelSet
+
+    blocks: list[dict[str, Any]] = []
+    grouped = [(name, obj) for name, obj in objects.items()
+               if isinstance(obj, SineLevelSet)]
+    loose = [name for name, obj in objects.items()
+             if isinstance(obj, SineLevel)]
+    if grouped:
+        name, level_set = grouped[0]
+        for tone in level_set.tone_names:
+            blocks.append(
+                {'kind': 'plot', 'source': name, 'tone': tone,
+                 'mode': 'curves',
+                 'specification': '@basis:SineSweepSpecification',
+                 'caption': f'{tone}: extracted level against the '
+                 'requirement'})
+    elif loose:
+        for name in loose:
+            blocks.append(
+                {'kind': 'plot', 'source': name, 'mode': 'curves',
+                 'specification': '@basis:SineSweepSpecification',
+                 'caption': f'{objects[name].tone}: extracted level '
+                 'against the requirement'})
+    else:
+        blocks.append(
+            {'kind': 'plot', 'source': '@basis:SineLevelSet',
+             'mode': 'curves',
+             'specification': '@basis:SineSweepSpecification',
+             'caption': 'Extracted levels against the requirement'})
+    blocks.append({'kind': 'text', 'text':
+        '## Level Against Requirement\n\n'
+        'One figure per tone, because each tone sweeps its own '
+        'frequencies on its own clock and overlaying them would draw '
+        'different requirements over each other. Each shows the level '
+        'extracted from the recording against the amplitude that tone '
+        'was required to hold, with the warning and abort bands drawn '
+        'around it.\n\n'
+        'The frequency coverage in each figure is the coverage: a '
+        'sweep stopped early, or a tone the instructions windowed, '
+        'extracts fewer lines, and the comparison shows exactly how '
+        'much of the required range was actually run rather than '
+        'reporting that everything was. The level itself is '
+        'demodulated from the recording and corrected for the noise '
+        'inside each tracking window — a controller\'s own live '
+        'display reads high under a noisy background, because it '
+        'counts that noise as signal and backs its drive off '
+        'accordingly.'})
+    blocks.append({'kind': 'text', 'text':
+        '## Deviation\n\n'
+        'The same comparison as a number ({{figure:Sine level '
+        'deviation}}): signed RMS decibels, a bar per tone per '
+        'control channel. Signed, because over-testing and '
+        'under-testing are different faults rather than degrees '
+        'of one — an over-test may have damaged the article, an '
+        'under-test proves less than it claims. This is where a '
+        'run with many tones and many channels is scanned: the '
+        'figures above are read one at a time, and this one '
+        'answers which of them to read first.'})
+    blocks.append({'kind': 'bars', 'mode': 'sine',
+                   'source': '@basis:SineSweepSpecification',
+                   'measured': '@basis:SineLevelSet',
+                   'caption': 'Sine level deviation by tone and channel'})
+    return blocks
+
+
 def sine_template(objects: Mapping[str, Any],
                   links: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A sine sweep report: the tones, and the levels they reached.
 
-    One comparison figure per tone, because each tone sweeps its own
-    frequencies on its own clock — overlaying them would draw
-    different requirements over each other. The extracted levels
-    present in the project name the figures; a project not yet
-    extracted gets one symbolic figure so the outline shows what is
-    missing. The deviation bars judge every tone at every control
-    channel in one chart, the same signed three-decibel reading the
-    random and shock reports give.
+    The level figures and the deviation bars are `_sine_level_blocks`,
+    shared with the random-and-sine report: the bars judge every tone
+    at every control channel in one chart, the same signed
+    three-decibel reading the random and shock reports give.
     """
-    from .sine import SineLevel, SineLevelSet
-
     time = '@basis:TimeHistory'
 
     def ref(name: str, field: str) -> str:
@@ -1692,50 +1779,7 @@ def sine_template(objects: Mapping[str, Any],
             'Measured time histories',
             'Measured {quantity} time histories'),
     ]
-    grouped = [(name, obj) for name, obj in objects.items()
-               if isinstance(obj, SineLevelSet)]
-    loose = [name for name, obj in objects.items()
-             if isinstance(obj, SineLevel)]
-    if grouped:
-        name, level_set = grouped[0]
-        for tone in level_set.tone_names:
-            blocks.append(
-                {'kind': 'plot', 'source': name, 'tone': tone,
-                 'mode': 'curves',
-                 'specification': '@basis:SineSweepSpecification',
-                 'caption': f'{tone}: extracted level against the '
-                 'requirement'})
-    elif loose:
-        for name in loose:
-            blocks.append(
-                {'kind': 'plot', 'source': name, 'mode': 'curves',
-                 'specification': '@basis:SineSweepSpecification',
-                 'caption': f'{objects[name].tone}: extracted level '
-                 'against the requirement'})
-    else:
-        blocks.append(
-            {'kind': 'plot', 'source': '@basis:SineLevelSet',
-             'mode': 'curves',
-             'specification': '@basis:SineSweepSpecification',
-             'caption': 'Extracted levels against the requirement'})
-    blocks.append({'kind': 'text', 'text':
-        '## Level Against Requirement\n\n'
-        'One figure per tone, because each tone sweeps its own '
-        'frequencies on its own clock and overlaying them would draw '
-        'different requirements over each other. Each shows the level '
-        'extracted from the recording against the amplitude that tone '
-        'was required to hold, with the warning and abort bands drawn '
-        'around it.\n\n'
-        'The frequency coverage in each figure is the coverage: a '
-        'sweep stopped early, or a tone the instructions windowed, '
-        'extracts fewer lines, and the comparison shows exactly how '
-        'much of the required range was actually run rather than '
-        'reporting that everything was. The level itself is '
-        'demodulated from the recording and corrected for the noise '
-        'inside each tracking window — a controller\'s own live '
-        'display reads high under a noisy background, because it '
-        'counts that noise as signal and backs its drive off '
-        'accordingly.'})
+    blocks += _sine_level_blocks(objects)
     blocks += [
         {'kind': 'text', 'text':
             '## The Shape Of The Recording\n\n'
@@ -1748,21 +1792,6 @@ def sine_template(objects: Mapping[str, Any],
             'neighbors, which is a channel that clipped or rattled '
             'while the tracked level was extracted from it '
             'regardless.'},
-        {'kind': 'text', 'text':
-            '## Deviation\n\n'
-            'The same comparison as a number ({{figure:Sine level '
-            'deviation}}): signed RMS decibels, a bar per tone per '
-            'control channel. Signed, because over-testing and '
-            'under-testing are different faults rather than degrees '
-            'of one — an over-test may have damaged the article, an '
-            'under-test proves less than it claims. This is where a '
-            'run with many tones and many channels is scanned: the '
-            'figures above are read one at a time, and this one '
-            'answers which of them to read first.'},
-        {'kind': 'bars', 'mode': 'sine',
-         'source': '@basis:SineSweepSpecification',
-         'measured': '@basis:SineLevelSet',
-         'caption': 'Sine level deviation by tone and channel'},
         kurtosis_block(),
         {'kind': 'text', 'text':
             '## Conclusions\n\n'
@@ -2383,86 +2412,21 @@ def _comparisons(psd_token: str, spec_token: str, caption: str,
             for label in labels]
 
 
-def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A random vibration report: what was asked for, what arrived, and
-    by how much they differ.
+def _random_control_blocks(objects: Mapping[str, Any],
+                           links: Sequence[Mapping[str, Any]] | None
+                           ) -> list[dict[str, Any]]:
+    """The random half's judgment: the control spectra against the
+    specification, the two compliance readings, and the same on octave
+    bands — shared by the random report and the random-and-sine one, so
+    the two cannot drift.
 
-    Ordered the standing way (Brandon, 2026-08-23): the front matter —
-    geometry, the DOF scenes excitation-first, photographs, the
-    channel table — then the time data, then the spectra, then the
-    computed judgments. Within the spectra the specification still
-    leads: it is what the article was required to see, and the control
-    PSDs against it are the whole claim. Coherence stays last among
-    the judgments — it is how you tell a real exceedance from a bad
-    channel, a question asked only once the comparison has raised it.
-
-    Sources bind symbolically, like the modal template's, so the report
-    finds its objects under the names the typed project's tree
-    suggested, and every unbound slot is invisible — a run with no
-    geometry still renders.
+    The specification is not drawn on its own, in either form. It is
+    the shaded band behind every comparison, and a figure of the
+    requirement with nothing measured against it was a page the reader
+    had already seen (Brandon, 2026-09-21).
     """
-    time = '@basis:TimeHistory'
-    psd = '@basis:Psd'
-    coherence = '@basis:MultipleCoherence'
     controls = control_channel_labels(objects, links)
-
-    def ref(name: str, field: str) -> str:
-        return '{{' + f'{name}.{field}' + '}}'
-
-    def present(token: str) -> bool:
-        """Whether the prose may speak of what a token binds: yes in
-        an empty project (the outline), otherwise only when it binds.
-        A reference to what is not there stays on the page as written
-        — the page's rule for an unmatched reference, right for an
-        author and wrong for a reader (Brandon, 2026-09-19) — so the
-        prose says only what the project holds."""
-        return not objects or resolve_binding(token, objects, links) in objects
-
-    return prune_unbound(Report('Random Vibration Test Report', [
-        # the verdict first, under the title: whether the environment
-        # passed, read off the octave-band comparison, so a reader
-        # opening the report knows before reading a word (Brandon,
-        # 2026-09-20)
-        {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
-         'measured': '@basis:OctavePsd'},
-        {'kind': 'text', 'text':
-            '## Test Summary\n\n'
-            'A random vibration test was run: the article was driven '
-            'with a broadband random excitation held to a required '
-            'power spectral density at the control channels. This '
-            'report documents the instrumentation, the record the '
-            'analysis was made from, the specification the run was '
-            'controlled to, how closely each control channel held it, '
-            'and the checks that say whether those numbers can be '
-            'trusted.\n\n'
-            f'The run was recorded on {ref(time, "num_channels")} '
-            f'channels at {ref(time, "sample_rate")} over '
-            f'{ref(time, "duration")}. The control spectra are '
-            f'averaged over {ref(time, "num_frames")} frames of '
-            f'{ref(time, "frame_length")} samples with a '
-            f'{ref(time, "window")} window at {ref(time, "overlap")} '
-            'overlap'
-            + (f', giving {ref(psd, "frequency_resolution")} resolution '
-               f'out to {ref(psd, "max_frequency")}.' if present(psd)
-               else '.')},
-        {'kind': 'text', 'text': instrumentation_text(objects, links)},
-        *front_matter(objects, links, time),
-        {'kind': 'text', 'text':
-            '## Measured Data\n\nThe measured time histories, one '
-            'figure per quantity, with the frames a PSD is averaged '
-            'over marked on them ({{figure:Measured}}) — which part '
-            'of the run was analyzed, and under what window.'},
-        *time_data_blocks(
-            time, objects, links,
-            'Measured time histories, with the frames the spectra '
-            'are averaged over',
-            'Measured {quantity} time histories, with the frames '
-            'the spectra are averaged over'),
-        # The specification is not drawn on its own, in either form.
-        # It is the shaded band behind every comparison below, and a
-        # figure of the requirement with nothing measured against it
-        # was a page the reader had already seen (Brandon,
-        # 2026-09-21).
+    return [
         {'kind': 'text', 'text':
             '## Control\n\nThe measured control spectra against the '
             'specification, '
@@ -2538,6 +2502,84 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
          'measured': '@basis:OctavePsd',
          'caption': 'Band outside the abort limits, by control channel, '
                     'octave bands'},
+    ]
+
+
+def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+    """A random vibration report: what was asked for, what arrived, and
+    by how much they differ.
+
+    Ordered the standing way (Brandon, 2026-08-23): the front matter —
+    geometry, the DOF scenes excitation-first, photographs, the
+    channel table — then the time data, then the spectra, then the
+    computed judgments. Within the spectra the specification still
+    leads: it is what the article was required to see, and the control
+    PSDs against it are the whole claim. Coherence stays last among
+    the judgments — it is how you tell a real exceedance from a bad
+    channel, a question asked only once the comparison has raised it.
+
+    Sources bind symbolically, like the modal template's, so the report
+    finds its objects under the names the typed project's tree
+    suggested, and every unbound slot is invisible — a run with no
+    geometry still renders.
+    """
+    time = '@basis:TimeHistory'
+    psd = '@basis:Psd'
+    coherence = '@basis:MultipleCoherence'
+
+    def ref(name: str, field: str) -> str:
+        return '{{' + f'{name}.{field}' + '}}'
+
+    def present(token: str) -> bool:
+        """Whether the prose may speak of what a token binds: yes in
+        an empty project (the outline), otherwise only when it binds.
+        A reference to what is not there stays on the page as written
+        — the page's rule for an unmatched reference, right for an
+        author and wrong for a reader (Brandon, 2026-09-19) — so the
+        prose says only what the project holds."""
+        return not objects or resolve_binding(token, objects, links) in objects
+
+    return prune_unbound(Report('Random Vibration Test Report', [
+        # the verdict first, under the title: whether the environment
+        # passed, read off the octave-band comparison, so a reader
+        # opening the report knows before reading a word (Brandon,
+        # 2026-09-20)
+        {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
+         'measured': '@basis:OctavePsd'},
+        {'kind': 'text', 'text':
+            '## Test Summary\n\n'
+            'A random vibration test was run: the article was driven '
+            'with a broadband random excitation held to a required '
+            'power spectral density at the control channels. This '
+            'report documents the instrumentation, the record the '
+            'analysis was made from, the specification the run was '
+            'controlled to, how closely each control channel held it, '
+            'and the checks that say whether those numbers can be '
+            'trusted.\n\n'
+            f'The run was recorded on {ref(time, "num_channels")} '
+            f'channels at {ref(time, "sample_rate")} over '
+            f'{ref(time, "duration")}. The control spectra are '
+            f'averaged over {ref(time, "num_frames")} frames of '
+            f'{ref(time, "frame_length")} samples with a '
+            f'{ref(time, "window")} window at {ref(time, "overlap")} '
+            'overlap'
+            + (f', giving {ref(psd, "frequency_resolution")} resolution '
+               f'out to {ref(psd, "max_frequency")}.' if present(psd)
+               else '.')},
+        {'kind': 'text', 'text': instrumentation_text(objects, links)},
+        *front_matter(objects, links, time),
+        {'kind': 'text', 'text':
+            '## Measured Data\n\nThe measured time histories, one '
+            'figure per quantity, with the frames a PSD is averaged '
+            'over marked on them ({{figure:Measured}}) — which part '
+            'of the run was analyzed, and under what window.'},
+        *time_data_blocks(
+            time, objects, links,
+            'Measured time histories, with the frames the spectra '
+            'are averaged over',
+            'Measured {quantity} time histories, with the frames '
+            'the spectra are averaged over'),
+        *_random_control_blocks(objects, links),
         {'kind': 'text', 'text':
             '## Data Quality\n\n'
             + ('Two checks stand behind every number above, and a '
@@ -2595,3 +2637,159 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'fault. A channel clean on both and still outside '
             'tolerance is a real exceedance.'},
     ]), objects, links)
+
+
+def mixed_template(objects: Mapping[str, Any],
+                   links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+    """A random-and-sine report: both halves of a run that was both.
+
+    A random environment held to its PSD with a sweep riding under it
+    — the qualification-with-a-tracked-tone case, and the only way a
+    sweep has been run here. The two halves are judged by their own
+    workflows, and the report holds both judgments in the standing
+    order: the front matter once, the recording once, then the random's
+    control comparisons and compliance (`_random_control_blocks`), then
+    the sine's levels and deviation (`_sine_level_blocks`), then the
+    data-quality readings and the conclusions, each written for a run
+    that was both. Nothing here is a third copy of either half: the
+    judgment blocks are the very functions the two single-environment
+    reports call (Brandon, 2026-09-24).
+
+    Two things a reader of one half's report would not have to know are
+    said here. The control spectra are of the whole recording, sweep
+    included, so a tone adds its power across the band it swept and a
+    channel reading high there may be the tone rather than the random.
+    And the recording is not Gaussian by design: a pure tone's kurtosis
+    is 1.5, so a channel under three is the sweep, not clipping.
+    """
+    time = '@basis:TimeHistory'
+    psd = '@basis:Psd'
+    coherence = '@basis:MultipleCoherence'
+
+    def ref(name: str, field: str) -> str:
+        return '{{' + f'{name}.{field}' + '}}'
+
+    def present(token: str) -> bool:
+        return not objects or resolve_binding(token, objects, links) in objects
+
+    return prune_unbound(Report('Random and Sine Test Report', [
+        # the verdict is the random half's, read off the octave-band
+        # comparison as the random report reads it; the sine half is
+        # judged tone by tone in its own figures and bars below
+        {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
+         'measured': '@basis:OctavePsd'},
+        {'kind': 'text', 'text':
+            '## Test Summary\n\n'
+            'A random vibration test was run with a sine sweep under '
+            'it: the article was driven with a broadband random '
+            'excitation held to a required power spectral density at '
+            'the control channels, while one or more tones swept across '
+            'a frequency range at a controlled amplitude on the same '
+            'shakers. The two are judged separately here — the random '
+            'against its specification, each tone against the level it '
+            'was required to hold — because they are two requirements '
+            'met by one recording. This report documents the '
+            'instrumentation, the record both analyses were made from, '
+            'how closely the control channels held the random '
+            'specification, the level each tone actually reached '
+            'against what it was required to reach, and the checks that '
+            'say whether those numbers can be trusted.\n\n'
+            f'The run was recorded on {ref(time, "num_channels")} '
+            f'channels at {ref(time, "sample_rate")} over '
+            f'{ref(time, "duration")}. The control spectra are '
+            f'averaged over {ref(time, "num_frames")} frames of '
+            f'{ref(time, "frame_length")} samples with a '
+            f'{ref(time, "window")} window at {ref(time, "overlap")} '
+            'overlap'
+            + (f', giving {ref(psd, "frequency_resolution")} resolution '
+               f'out to {ref(psd, "max_frequency")}.' if present(psd)
+               else '.')},
+        {'kind': 'text', 'text': instrumentation_text(objects, links)},
+        *front_matter(objects, links, time),
+        {'kind': 'text', 'text':
+            '## Measured Data\n\nThe measured time histories, one '
+            'figure per quantity, with the frames a PSD is averaged '
+            'over marked on them ({{figure:Measured}}) — which part '
+            'of the run was analyzed for the random half, and under '
+            'what window. The sweep is read from the same record, '
+            'sample by sample along each tone\'s own trajectory rather '
+            'than by frames, so its faults show here first: a tone that '
+            'lost control, a dwell that sat too long, an amplitude that '
+            'stepped rather than swept.'},
+        *time_data_blocks(
+            time, objects, links,
+            'Measured time histories, with the frames the spectra '
+            'are averaged over',
+            'Measured {quantity} time histories, with the frames '
+            'the spectra are averaged over'),
+        *_random_control_blocks(objects, links),
+        {'kind': 'text', 'text':
+            '## The Sweep\n\n'
+            'The sine half of the same run. The control spectra above '
+            'are of the whole recording, sweep included: a tone adds '
+            'its power across the band it swept, so a control channel '
+            'reading high there may be the tone rather than the random. '
+            'The tone itself is judged below, along its own trajectory, '
+            'with the random treated as the noise it is extracted '
+            'from.'},
+        *_sine_level_blocks(objects),
+        {'kind': 'text', 'text':
+            '## Data Quality\n\n'
+            + ('Two checks stand behind every number above, and a '
+               'channel that fails either is one whose exceedance may '
+               'be the measurement rather than the article.\n\n'
+               if present(coherence) else
+               'One check stands behind every number above, and a '
+               'channel that fails it is one whose exceedance may be '
+               'the measurement rather than the article.\n\n')
+            + ('Multiple coherence ({{figure:Multiple coherence}}) says '
+               'how much of each response the drives account for. At '
+               'one the channel moved because the shakers moved it; '
+               'well below one something else did, and a control '
+               'channel in that state was being held to a level it '
+               'was not wholly responsible for. The sweep is driven by '
+               'the same shakers, so it does not lower the coherence; '
+               'what does is a channel moving on its own.\n\n'
+               if present(coherence) else '')
+            + 'Pearson kurtosis ({{figure:Pearson kurtosis}}) reads the '
+            'distribution of each channel rather than its level. Three '
+            'is Gaussian, which the random half alone would be; a pure '
+            'tone reads 1.5, and a sweep mixed with a random background '
+            'sits between, lower the louder the tone. So a channel '
+            'under three is the sweep, by design, and what the figure is '
+            'watched for is a channel far from its neighbors — one that '
+            'clipped or rattled — and a channel well above three, which '
+            'carried peaks neither requirement asked for.'},
+        {'kind': 'plot', 'source': '@basis:MultipleCoherence',
+         'mode': 'stage', 'caption': 'Multiple coherence'},
+        kurtosis_block(),
+        {'kind': 'text', 'text':
+            '## Conclusions\n\n'
+            'Whether the random half met its specification is read off '
+            'the control comparison and the two compliance charts under '
+            'it: the RMS error says how far each channel sat from the '
+            'level it was asked for, and the band outside abort how '
+            'much of each channel\'s band fell outside tolerance. A '
+            'channel can pass one and fail the other, which is why both '
+            'are there; the octave-band figures read the same run the '
+            'way a requirement is usually written. Where a control '
+            'channel is out only across the band the sweep passed '
+            'through, the tone is the first suspect.\n\n'
+            'Whether the sweep met its requirement is read off the '
+            'per-tone figures, where the extracted level spans exactly '
+            'the frequencies the sweep reached, and off the sine '
+            'deviation bars, tone by tone and channel by channel.\n\n'
+            'Where either half is out, the data-quality figures decide '
+            'whether the article or the measurement is at fault, read '
+            'knowing that a kurtosis under three is the sweep. A channel '
+            'clean on both and still outside tolerance is a real '
+            'exceedance.'},
+    ]), objects, links)
+
+
+#: every built-in report template by the key `Project.generate_report`
+#: takes — the one list the project, the menus and the tests read
+TEMPLATE_BUILDERS = {'modal': modal_template, 'random': random_template,
+                     'shock': shock_template, 'transient': transient_template,
+                     'sine': sine_template, 'mixed': mixed_template,
+                     'sysid': sysid_template}

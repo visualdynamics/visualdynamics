@@ -498,8 +498,9 @@ class ShapeSet:
         every imported complex set synthesized an answer rotated 90
         degrees and 2 w_d times too small, until 2026-09-23. Modal A is
         conjugated in the second term, where sdynpy's is not; the two
-        agree whenever modal A is real, which sdynpy's always is, and
-        only the conjugate is right when it is not.
+        agree whenever modal A is real, and only the conjugate is right
+        when it is not — sdynpy is 2.5% of peak off the exact FRF on the
+        complex modal A of the test system (measured 2026-09-24).
 
         `power` picks the response quantity: 0 displacement per force, 1
         velocity, 2 acceleration. It applies inside the sum because a

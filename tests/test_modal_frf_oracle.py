@@ -8,11 +8,12 @@ and read here as numbers — never an import (`AGENTS.md` hard rule 1).
 
 Real shapes in the second-order residue form, and complex shapes in the
 first-order pole-plus-conjugate form with the modal mass read as modal
-A — the branch Visual Dynamics gained on 2026-09-23. sdynpy holds modal
-A as a real number and divides the conjugate term by it rather than its
-conjugate, which is the same thing for a real modal A, so that is what
-is frozen; a complex modal A is checked against exact physics in
-`tests/test_frf_synthesis_exact.py`.
+A — the branch Visual Dynamics gained on 2026-09-23. sdynpy divides
+the conjugate term by modal A rather than its conjugate, which is right
+only for a real modal A, so a real modal A is what is frozen. A complex
+one is where sdynpy is wrong: 2.5% of peak on the non-proportionally
+damped system of `tests/test_frf_synthesis_exact.py` (measured
+2026-09-24), which checks ours against exact physics instead.
 
 The model has unequal modal masses and damping from 1.2% to 8%, and is
 compared as displacement, velocity and acceleration. Each cell of the

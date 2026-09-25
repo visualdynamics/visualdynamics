@@ -17,7 +17,7 @@ from visualdynamics.io import rattlesnake
 
 
 def _write_run(path, sine=True, random=False, band=True,
-               split_band=False):
+               split_band=False, sine_transformation=None):
     import netCDF4 as nc
 
     ds = nc.Dataset(str(path), 'w')
@@ -69,18 +69,32 @@ def _write_run(path, sine=True, random=False, band=True,
         var = g.createVariable('control_channel_indices', 'i4',
                                ('control_channels',))
         var[...] = [0, 1]
+        # the sweep's target per specification channel: the control
+        # channels, or the rows of a response transformation over them,
+        # laid out as the controller writes it
+        base_row = [2.0, 4.0]
+        if sine_transformation is not None:
+            matrix = np.asarray(sine_transformation, dtype=float)
+            g.createDimension('response_transformation_rows', matrix.shape[0])
+            g.createDimension('response_transformation_cols', matrix.shape[1])
+            g.createVariable(
+                'response_transformation_matrix', 'f8',
+                ('response_transformation_rows',
+                 'response_transformation_cols'))[...] = matrix
+            base_row = [3.0] * matrix.shape[0]
+        n_spec = len(base_row)
         specs = g.createGroup('specifications')
         tone = specs.createGroup('Sweep Up')
         tone.start_time = 2.0
         tone.createDimension('num_breakpoints', 2)
-        tone.createDimension('specification_channels', 2)
+        tone.createDimension('specification_channels', n_spec)
         tone.createDimension('two', 2)
         tone.createVariable('spec_frequency', 'f8',
                             ('num_breakpoints',))[...] = [100.0, 800.0]
         tone.createVariable(
             'spec_amplitude', 'f8',
             ('num_breakpoints', 'specification_channels'))[...] = \
-            [[2.0, 4.0], [2.0, 4.0]]
+            [base_row, base_row]
         tone.createVariable(
             'spec_phase', 'f8',
             ('num_breakpoints', 'specification_channels'))[...] = 0.0
@@ -95,10 +109,10 @@ def _write_run(path, sine=True, random=False, band=True,
                 f'spec_{kind}', 'f8',
                 ('num_breakpoints', 'two', 'two',
                  'specification_channels'))
-            values = np.full((2, 2, 2, 2), np.nan)
+            values = np.full((2, 2, 2, n_spec), np.nan)
             if band:
                 width = 3.0 if kind == 'warning' else 6.0
-                base = np.array([[2.0, 4.0], [2.0, 4.0]])
+                base = np.array([base_row, base_row])
                 values[:, 0, :, :] = (base
                                       * 10 ** (-width / 20))[:, None, :]
                 values[:, 1, :, :] = (base
@@ -165,11 +179,40 @@ def test_the_run_declares_itself_a_sine_sweep(tmp_path):
 def test_a_mixed_run_imports_both_specifications(tmp_path):
     path = _write_run(tmp_path / 'mixed.nc4', random=True)
     assert rattlesnake.run_kind(path) == 'mixed'
-    assert rattlesnake.project_type(path) == 'Random Vibration', \
-        'the established half leads; both analyses import regardless'
+    assert rattlesnake.project_type(path) == 'Random and Sine', \
+        'the one mixed run that is a type of its own'
     out = visualdynamics.import_file(path)
     assert isinstance(out['Sine_specification'], SineSweepSpecification)
     assert type(out['Random_specification']).__name__ == 'Specification'
+
+
+def test_a_sweep_over_a_virtual_point_beside_a_plain_random(tmp_path):
+    """Brandon's run (2026-09-24): the sine sweep controlled a virtual
+    point through a response transformation and the random controlled
+    the raw channels. The sine specification is over the matrix's rows,
+    and was scaled by the control channels' scales instead — one per
+    channel against one per row — so the file did not load at all.
+
+    It is over the rows now, numbered as the random reads them; the
+    rows' time histories ride the recording beside the raw channels,
+    which is what the sweep's levels are read from."""
+    matrix = [[0.5, 0.5]]
+    path = _write_run(tmp_path / 'mixed.nc4', random=True,
+                      sine_transformation=matrix)
+    out = visualdynamics.import_file(path)
+    sine = out['Sine_specification']
+    assert sine.response_dof == ['1'], 'the row, not the channels'
+    tone = sine.tone('Sweep Up')
+    assert tone.amplitude.shape == (2, 1)
+    assert tone.amplitude[0, 0] == pytest.approx(3.0)
+    assert tone.limits['warning_upper'][0, 0] == \
+        pytest.approx(3.0 * 10 ** (3 / 20))
+    assert sine.ordinate_unit == 'm/s**2', \
+        'the row shares its control channels\' unit'
+    assert out['Random_specification'].response_dof[:2] == \
+        ['101Z+', '104Z+'], 'the random still controls the raw channels'
+    history = out['time_data']
+    assert '1' in history.response_dof, 'the row is recorded as well'
 
 
 def test_control_channels_are_marked_from_the_sine_spec(tmp_path):

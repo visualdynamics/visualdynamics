@@ -6,7 +6,7 @@ template for the next project.
 
 ```python
 name = project.generate_report('modal')   # or 'random', 'transient',
-project.export_report(name, 'modal_report.html')  # 'shock', 'sine',
+project.export_report(name, 'modal_report.html')  # 'shock', 'sine', 'mixed',
                                                   # 'sysid', 'empty'
 ```
 
@@ -18,6 +18,16 @@ The export is one self-contained HTML file: plots, animated 3D
 scenes, tables, photos, all with their own interactive viewers and
 nothing third-party inside. It opens on a locked-down machine with no
 network.
+
+## Copying a figure
+
+Every figure has a copy button in its top-right corner, shown when the
+pointer is over it. It puts the figure on the clipboard as an image,
+as drawn — in the current theme, at the screen's own resolution — for
+pasting into a document, a chat or an email without a screenshot. It
+works in the report editor and in the exported file open in a browser
+alike, and never appears on a printed page. A grid figure copies a cell
+at a time.
 
 ## Classification markings
 

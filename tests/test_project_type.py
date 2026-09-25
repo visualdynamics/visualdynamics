@@ -108,19 +108,11 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
     """
     from visualdynamics.core.report import (
         PROJECT_TEMPLATES,
+        TEMPLATE_BUILDERS,
         binding_tokens,
-        modal_template,
-        random_template,
-        shock_template,
-        sine_template,
-        sysid_template,
-        transient_template,
     )
 
-    builders = {'modal': modal_template, 'random': random_template,
-                'shock': shock_template, 'transient': transient_template,
-                'sine': sine_template, 'sysid': sysid_template}
-    report = builders[PROJECT_TEMPLATES[project_type]](
+    report = TEMPLATE_BUILDERS[PROJECT_TEMPLATES[project_type]](
         visualdynamics.Project(), links=[])
     types = binding_tokens()
     wanted = {token for block in report.blocks

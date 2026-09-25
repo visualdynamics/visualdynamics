@@ -3,4 +3,5 @@
 - [The shock workflow](shock-workflow.md)
 - [The random vibration workflow](random-workflow.md)
 - [The sine sweep workflow](sine-workflow.md)
+- [The random and sine workflow](mixed-workflow.md)
 - [The system identification workflow](sysid-workflow.md)

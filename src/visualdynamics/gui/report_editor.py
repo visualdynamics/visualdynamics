@@ -32,11 +32,22 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QFile, QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QAction
+from PySide6.QtCore import (
+    QByteArray,
+    QFile,
+    QObject,
+    QSize,
+    Qt,
+    QTimer,
+    QUrl,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QAction, QImage
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFormLayout,
     QLabel,
@@ -104,13 +115,29 @@ TEXT_DEBOUNCE_MS = 400
 _log = logging.getLogger(__name__)
 
 class _Bridge(QObject):
-    """The single slot the page talks to; one JSON operation per call."""
+    """What the page talks to: one JSON operation per `apply`, and a
+    figure's image for the clipboard."""
 
     operated = Signal(dict)
 
     @Slot(str)
     def apply(self, payload: str) -> None:
         self.operated.emit(json.loads(payload))
+
+    @Slot(str, result=bool)
+    def copy_image(self, data_url: str) -> bool:
+        """A figure's PNG, as the page's copy button sends it, onto the
+        system clipboard. The page cannot reach the clipboard on its own
+        from inside a `QWebEngineView` without a permission grant that
+        differs by Qt version, and this process owns the clipboard
+        anyway; the answer goes back so the button can say whether it
+        copied (Brandon, 2026-09-24)."""
+        _header, _, encoded = data_url.partition(',')
+        image = QImage.fromData(QByteArray.fromBase64(encoded.encode('ascii')))
+        if image.isNull():
+            return False
+        QApplication.clipboard().setImage(image)
+        return True
 
 
 class ReportEditor(QWidget):

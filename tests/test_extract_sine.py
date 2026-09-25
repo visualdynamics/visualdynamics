@@ -340,6 +340,38 @@ def test_the_real_mixed_run_reads_the_sweep_under_the_random():
         f'{spread_db:+.2f} dB from the 0.5 target')
 
 
+@needs_stress
+def test_a_sweep_over_a_virtual_point_is_read_at_its_rows():
+    """The same mixed run, with the sweep controlling a virtual point —
+    three rows of a response transformation over the eight control
+    channels — while the random controls the raw channels (Brandon,
+    2026-09-24: a run like this did not load). The levels are read from
+    the rows' own time histories, which ride the recording beside the
+    raw channels, and graded against the controller's tracker on the
+    same rows: the untransformed run's envelope holds (measured -3.5 to
+    -3.8 dB by row).
+
+    Regenerate with `generate_plate_sine.py mixed_transformed` in the
+    generators repository."""
+    path = os.path.join(STRESS, 'mixed_transformed.nc4')
+    if not os.path.exists(path):
+        pytest.skip('regenerate with generate_plate_sine.py mixed_transformed')
+    project = visualdynamics.Project('mixed_transformed')
+    project.import_file(path)
+    spec = project.sine_sweep_specification
+    assert spec.response_dof == ['1', '2', '3']
+    project.extract_sine(project.time_history)
+    level = project['Sine Levels'].levels[0]
+    assert level.ordinate.shape[0] == 3, 'one level per row'
+    control_npz = os.path.join(STRESS, 'mixed_transformed_sine_control.npz')
+    frequency, tracked = _controller_levels(control_npz, 0)
+    for row, error in enumerate(_against_controller(level, frequency,
+                                                    tracked)):
+        assert -12.0 < error < 0.5, (
+            f'row {row + 1}: {error:+.2f} dB from the controller '
+            'under the random')
+
+
 # ---- the GUI reading ----------------------------------------------------
 
 def _curve_count(window):

@@ -90,6 +90,11 @@ root attributes:
             traceline_conn_flat / _offsets,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,
             elem_block, block_id, block_name
+    block_properties/<block id>/   (only blocks given properties)
+            attrs   material_name, youngs_modulus, density, poissons_ratio,
+                    modulus_of_rigidity (when set), thickness (plates) or
+                    section_name + section [area, iy, iz, j] (beams),
+                    orientation (beams, when set)
 
 ## `data/` — every measurement class
 

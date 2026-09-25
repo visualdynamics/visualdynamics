@@ -2,18 +2,23 @@
 
 visualdynamics is an analysis toolset, so this is deliberately the smallest
 modeling capability that produces something worth analyzing: three-dimensional
-two-node beams, four-node rectangular flat-shell plates (MITC4) and lumped
-masses, assembled into mass and stiffness matrices and solved for real
-normal modes. It exists because a demonstration needs a
+two-node beams, flat-shell plates — four-node rectangles (MITC4) and
+three-node triangles (MITC3) — and lumped masses, assembled into mass and
+stiffness matrices and solved for real normal modes. It exists because a demonstration needs a
 *truth* model — a dense analytical answer the measured one can be compared
 against — and because building one should not require reaching for another
 package.
 
-There are two ways in. Build a structure member by member, as the example
-below does; or draw a shape as a surface mesh and let `from_geometry` put a
-member along every edge of it and share the mass over its nodes. The second
-is the shorter road from any geometry — imported or built — to a set of
-modes, and `visualdynamics.demo.drone` is built that way throughout.
+There are three ways in. Build a structure member by member, as the
+example below does. Give a geometry's blocks their properties — a material
+and a thickness for a block of plates, a material and a section for a
+block of beams (`BlockProperties`) — and let `from_geometry` build every
+element as the element it is, which is how an exodus file means a
+structure and the way a user builds a model of a simple article. Or draw
+a shape as a surface mesh and let `from_geometry`, given one material and
+one section, put a member along every edge of it and share the mass over
+its nodes: the shorter road from any geometry to *some* set of modes, and
+how `visualdynamics.demo.drone` is built throughout.
 
 What it is not: a general finite element code. The plate is rectangular
 only — a skewed or warped quad is refused rather than solved badly — and
@@ -207,6 +212,34 @@ class Section:
 
 
 @dataclass
+class BlockProperties:
+    """What a block of a geometry is made of, for `Model.from_geometry`.
+
+    One property set per block of one element type, the way every
+    finite element format states a structure: a material for any
+    block, plus a thickness for a block of plates (triangles or
+    quads) or a section — and an orientation vector for the roll, as
+    `Model.add_beam` takes it — for a block of beams. A block given
+    both, or neither, is refused when the model is built, by name.
+    """
+
+    material: Material
+    thickness: float | None = None            #: m, for a block of plates
+    section: Section | None = None            #: for a block of beams
+    orientation: tuple[float, float, float] | None = None
+
+    @property
+    def kind(self) -> str:
+        """'plate', 'beam', or what is wrong with it."""
+        if self.thickness is not None and self.section is None:
+            return 'plate'
+        if self.section is not None and self.thickness is None:
+            return 'beam'
+        return ('both a thickness and a section' if self.section is not None
+                else 'neither a thickness nor a section')
+
+
+@dataclass
 class Beam:
     """One two-node beam element."""
 
@@ -245,6 +278,30 @@ class Plate:
     """
 
     nodes: tuple[int, int, int, int]
+    material: Material
+    thickness: float               #: m
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class Triangle:
+    """One three-node triangular plate-bending element.
+
+    The quad's sibling, so a mesh of triangles and a mesh of rectangles
+    are one theory: a flat shell with plane-stress membrane action in
+    its own plane and Mindlin bending out of it, the transverse shear
+    tied along the three edges (MITC3, Lee & Bathe 2004). The tying is
+    what keeps a linear triangle from locking in shear as the plate
+    gets thin — a plain linear Mindlin triangle is the worst locker
+    there is. Any flat triangle is a valid element; only a degenerate
+    one (zero area) is refused.
+
+    Nodes run around the perimeter, counterclockwise about the normal
+    the element takes as its own +z.
+    """
+
+    nodes: tuple[int, int, int]
     material: Material
     thickness: float               #: m
     color: int = 1
@@ -343,6 +400,7 @@ class Model:
         self._node_group: dict[int, str] = {}
         self.beams: list[Beam] = []
         self.plates: list[Plate] = []
+        self.triangles: list[Triangle] = []
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
 
@@ -401,6 +459,24 @@ class Model:
         self.plates.append(plate)
         return plate
 
+    def add_triangle(self, nodes: Sequence[int], material: Material,
+                     thickness: float, color: int = 1,
+                     group: str = '') -> Triangle:
+        """One triangular plate element over three existing nodes."""
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) != 3 or len(set(nodes)) != 3:
+            raise ValueError('a triangle spans three distinct nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(
+                    f'triangle names node {node}, which is not in the model')
+        if float(thickness) <= 0.0:
+            raise ValueError('a triangle needs a positive thickness')
+        _triangle_frame(*[self._nodes[n] for n in nodes])
+        triangle = Triangle(nodes, material, float(thickness), color, group)
+        self.triangles.append(triangle)
+        return triangle
+
     def add_mass(self, node: int, mass: float,
                  inertia: Sequence[float] = (0.0, 0.0, 0.0),
                  name: str = '') -> LumpedMass:
@@ -424,8 +500,8 @@ class Model:
         return face
 
     @classmethod
-    def from_geometry(cls, geometry: Geometry, material: Material,
-                      section: Section,
+    def from_geometry(cls, geometry: Geometry, material: Material | None = None,
+                      section: Section | None = None,
                       total_mass: float | None = None,
                       tracelines: bool = False, name: str = '',
                       groups: dict[int, str] | None = None,
@@ -448,6 +524,20 @@ class Model:
         mode families it has — which is the question a display model usually
         raises first.
 
+        **A geometry whose blocks carry properties builds itself.** When
+        `geometry.block_properties` names what each block is made of
+        (`BlockProperties`), every element becomes the element it is:
+        a quad a plate, a triangle a triangle, a two-node line a beam,
+        each with its block's material and thickness or section. That
+        is the model an exodus file means, one property set per block
+        of one element type (Brandon, 2026-09-25), and the demonstration
+        plate rebuilt from its own geometry this way is the same model
+        to the last digit (`tests/test_block_model.py`). A block with no
+        properties, or an element type the solver has no element for,
+        is refused by name; `material` and `section` are not consulted.
+        Without block properties the grillage below is built, and
+        `material` and `section` are required for it.
+
         `tracelines` wires the display polylines too, which is what a
         wireframe geometry with no elements needs to hold together at all.
         `groups` labels the nodes by the part they belong to; a Geometry
@@ -459,6 +549,16 @@ class Model:
         """
         model = cls(name or getattr(geometry, 'name', '') or 'geometry',
                     length_unit=geometry.length_unit or 'm')
+        properties = dict(getattr(geometry, 'block_properties', {}) or {})
+        if properties:
+            return _from_blocks(model, geometry, properties, total_mass,
+                                groups)
+        if material is None or section is None:
+            raise ValueError(
+                'the geometry carries no block properties, so a material '
+                'and a section are needed to make a grillage of it — or '
+                'give each block its properties (fem.BlockProperties) and '
+                'the elements build themselves')
         labels = dict(groups or {})
         if not labels:
             # A geometry that carries element blocks says for itself which
@@ -552,6 +652,11 @@ class Model:
         for plate in self.plates:
             for k, node in enumerate(plate.nodes):
                 other = plate.nodes[(k + 1) % 4]
+                neighbors[node].add(other)
+                neighbors[other].add(node)
+        for triangle in self.triangles:
+            for k, node in enumerate(triangle.nodes):
+                other = triangle.nodes[(k + 1) % 3]
                 neighbors[node].add(other)
                 neighbors[other].add(node)
         return connected_pieces(neighbors)
@@ -685,6 +790,10 @@ class Model:
         for plate in self.plates:
             _, a, b = _plate_frame(*[self._nodes[n] for n in plate.nodes])
             plates += plate.material.density * plate.thickness * a * b
+        for triangle in self.triangles:
+            _, xy = _triangle_frame(*[self._nodes[n] for n in triangle.nodes])
+            plates += (triangle.material.density * triangle.thickness
+                       * _triangle_area(xy))
         return beams + plates
 
     @property
@@ -737,6 +846,20 @@ class Model:
             m = transform.T @ m_local @ transform
             rows = np.concatenate([np.arange(index[n], index[n] + 6)
                                    for n in plate.nodes])
+            grid = np.ix_(rows, rows)
+            stiffness[grid] += k
+            mass[grid] += m
+
+        for triangle in self.triangles:
+            corners = [self._nodes[n] for n in triangle.nodes]
+            rotation, xy = _triangle_frame(*corners)
+            transform = _block_diagonal(rotation, 6)
+            k_local, m_local = _triangle_matrices(triangle.material,
+                                                  triangle.thickness, xy)
+            k = transform.T @ k_local @ transform
+            m = transform.T @ m_local @ transform
+            rows = np.concatenate([np.arange(index[n], index[n] + 6)
+                                   for n in triangle.nodes])
             grid = np.ix_(rows, rows)
             stiffness[grid] += k
             mass[grid] += m
@@ -896,6 +1019,10 @@ class Model:
             connectivity.append(list(plate.nodes))
             types.append(44)
             colors.append(plate.color)
+        for triangle in self.triangles:
+            connectivity.append(list(triangle.nodes))
+            types.append(41)
+            colors.append(triangle.color)
         for face in self.faces:
             connectivity.append(list(face.nodes))
             types.append(44 if len(face.nodes) == 4 else 41)
@@ -911,6 +1038,7 @@ class Model:
         parts, blocks = {}, []
         for part in ([b.group for b in (self.beams if beams else ())]
                      + [p.group for p in self.plates]
+                     + [t.group for t in self.triangles]
                      + [f.group for f in self.faces]):
             blocks.append(parts.setdefault(part or 'body', len(parts) + 1))
         return Geometry(
@@ -923,6 +1051,91 @@ class Model:
             block_id=list(parts.values()) or None,
             block_name=list(parts) or None,
             length_unit=self.length_unit)
+
+
+def _from_blocks(model: Model, geometry: Geometry,
+                 properties: dict[int, BlockProperties],
+                 total_mass: float | None, groups) -> Model:
+    """`from_geometry`'s block path: nodes, then every element as
+    itself, then the same checks the grillage path makes."""
+    labels = dict(groups or {}) or _labels_from_blocks(geometry)
+    for node, xyz in zip(geometry.node_id, geometry.node_xyz):
+        model.add_node(int(node), *[float(v) for v in xyz],
+                       group=labels.get(int(node), ''))
+    if not _element_by_block(model, geometry, properties):
+        raise ValueError('the geometry has no elements to build from')
+    joined = {n for beam in model.beams for n in (beam.node_a, beam.node_b)}
+    joined |= {n for plate in model.plates for n in plate.nodes}
+    joined |= {n for triangle in model.triangles for n in triangle.nodes}
+    loose = sorted(set(model.node_ids) - joined)
+    if loose:
+        raise ValueError(
+            f'{len(loose)} nodes are connected to nothing, so they would '
+            'carry mass with no stiffness and the solution would not '
+            'factorize: ' + ', '.join(str(n) for n in loose[:8]))
+    pieces = model.pieces()
+    if len(pieces) > 1:
+        sizes = ', '.join(str(len(p)) for p in pieces[:6])
+        raise ValueError(
+            f'the geometry is {len(pieces)} disconnected pieces ({sizes} '
+            'nodes); a model is one structure')
+    if total_mass is not None:
+        model.distribute_mass(total_mass)
+    return model
+
+
+def _element_by_block(model: Model, geometry: Geometry,
+                      properties: dict[int, BlockProperties]) -> int:
+    """Every element as the element it is, with its block's properties.
+    Returns how many were built."""
+    ids = np.asarray(getattr(geometry, 'block_id', []), dtype=np.int64)
+    names = list(getattr(geometry, 'block_name', []))
+    block_name = {int(b): (names[i] if i < len(names) else '')
+                  for i, b in enumerate(ids)}
+    blocks = np.asarray(getattr(geometry, 'elem_block', []), dtype=np.int64)
+
+    def named(block: int) -> str:
+        label = block_name.get(block, '')
+        return f'block {block}' + (f' ({label})' if label else '')
+
+    built = 0
+    for index, (kind, conn) in enumerate(zip(geometry.elem_type,
+                                             geometry.elem_conn)):
+        block = int(blocks[index]) if index < len(blocks) else 0
+        props = properties.get(block)
+        if props is None:
+            raise ValueError(
+                f'{named(block)} has no properties: give every block a '
+                'material and a thickness or a section (fem.BlockProperties)')
+        if props.kind not in ('plate', 'beam'):
+            raise ValueError(f'{named(block)} has {props.kind}: a block of '
+                             'plates takes a thickness, a block of beams a '
+                             'section, never both')
+        nodes = [int(n) for n in conn]
+        shape_name, _count, shape = ELEMENT_TYPES.get(
+            int(kind), (f'type {int(kind)}', 0, 'unknown'))
+        label = block_name.get(block, '')
+        if shape == 'face' and len(nodes) == 3 and props.kind == 'plate':
+            model.add_triangle(nodes, props.material, props.thickness,
+                               group=label)
+        elif shape == 'face' and len(nodes) == 4 and props.kind == 'plate':
+            model.add_plate(nodes, props.material, props.thickness,
+                            group=label)
+        elif shape == 'line' and len(nodes) == 2 and props.kind == 'beam':
+            model.add_beam(nodes[0], nodes[1], props.material, props.section,
+                           props.orientation, group=label)
+        else:
+            wanted = ('a thickness' if shape == 'face' else 'a section'
+                      if shape == 'line' else 'an element this solver has')
+            raise ValueError(
+                f'{named(block)} holds {shape_name} elements, which take '
+                f'{wanted}; it was given {props.kind} properties'
+                if shape in ('face', 'line') and len(nodes) in (2, 3, 4)
+                else f'{named(block)} holds {shape_name} elements, and the '
+                     'solver has no element for them: two-node beams, '
+                     'three-node triangles and four-node quads only')
+        built += 1
+    return built
 
 
 def _block_labels(geometry) -> list[str]:
@@ -1184,6 +1397,159 @@ def _plate_matrices(material: Material, thickness: float, a: float,
             weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
             consistent += area_weight * (fields.T @ weights @ fields)
 
+    return stiffness, consistent
+
+
+def _triangle_frame(p1: np.ndarray, p2: np.ndarray,
+                    p3: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The element's own axes and its corners in its own plane.
+
+    Local x runs along edge 1-2, local z is the normal the corners
+    turn counterclockwise about, local y completes the frame. Returns
+    the rotation (rows are the axes) and the 3x2 corner coordinates in
+    it, node 1 at the origin. A zero-area triangle is refused.
+    """
+    p1 = np.asarray(p1, dtype=np.float64)
+    edge_x = np.asarray(p2, dtype=np.float64) - p1
+    edge_3 = np.asarray(p3, dtype=np.float64) - p1
+    normal = np.cross(edge_x, edge_3)
+    a = float(np.linalg.norm(edge_x))
+    twice_area = float(np.linalg.norm(normal))
+    if a == 0.0 or twice_area <= 1e-12 * max(a, float(np.linalg.norm(edge_3))) ** 2:
+        raise ValueError('a triangle has no area: its corners are collinear '
+                         'or coincide')
+    e1 = edge_x / a
+    e3 = normal / twice_area
+    e2 = np.cross(e3, e1)
+    rotation = np.array([e1, e2, e3])
+    xy = np.array([[0.0, 0.0],
+                   [a, 0.0],
+                   [float(edge_3 @ e1), float(edge_3 @ e2)]])
+    return rotation, xy
+
+
+def _triangle_area(xy: np.ndarray) -> float:
+    (x1, y1), (x2, y2), (x3, y3) = xy
+    return 0.5 * abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1))
+
+
+def _triangle_matrices(material: Material, thickness: float,
+                       xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Local stiffness and consistent mass for the triangular shell.
+
+    18x18, six DOFs per node in DIRECTIONS order, corners at `xy` in
+    the element's own plane. Linear shape functions throughout, so
+    the membrane strains and the curvatures are constant over the
+    element and their products integrate exactly with the area. The
+    transverse shear is the MITC3 assumed field: the covariant shear
+    along each natural direction is taken at that edge's midpoint and
+    the field is completed with the one linear term that makes the
+    third edge's tangential shear agree at its midpoint —
+
+        e_rt = e_rt(P1) + c s,   e_st = e_st(P2) - c r,
+        c = e_rt(P3) - e_rt(P1) - e_st(P3) + e_st(P2),
+
+    P1, P2, P3 the midpoints of the edges along r, along s, and the
+    hypotenuse. Derived here by matching the linear raw field at the
+    three tying points rather than copied, and the same field falls
+    out of the constant Jacobian either way. Linear in (r, s), so its
+    energy integrates exactly with the three-point midpoint rule, and
+    the consistent mass with it.
+
+    Sign conventions are the quad's, written down there: curvatures
+    (theta_y,x | -theta_x,y | theta_y,y - theta_x,x), shears
+    (w,x + theta_y | w,y - theta_x), the drilling tie penalizing
+    theta_z against (v,x - u,y)/2, and the rotary inertias
+    rho t^3/12 with a thousandth of that on the drilling rotation.
+    Rigid motion strains none of it, which the rigid-mode test holds
+    to machine zero.
+    """
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    G, rho, t = material.shear_modulus, material.density, thickness
+    plane = E / (1.0 - nu * nu) * np.array([[1.0, nu, 0.0],
+                                            [nu, 1.0, 0.0],
+                                            [0.0, 0.0, (1.0 - nu) / 2.0]])
+    d_membrane = t * plane
+    d_bending = t ** 3 / 12.0 * plane
+    d_shear = SHEAR_CORRECTION * G * t * np.eye(2)
+
+    area = _triangle_area(xy)
+    (x1, y1), (x2, y2), (x3, y3) = xy
+    # the linear shape functions' constant gradients (N_i = a_i + b_i x + c_i y)
+    dx = np.array([y2 - y3, y3 - y1, y1 - y2]) / (2.0 * area)
+    dy = np.array([x3 - x2, x1 - x3, x2 - x1]) / (2.0 * area)
+    # natural coordinates r, s with node 1 at the origin, node 2 at r = 1
+    # and node 3 at s = 1: x = x1 + r (x2 - x1) + s (x3 - x1), so the
+    # Jacobian rows are the two edges from node 1, constant everywhere
+    jacobian = np.array([[x2 - x1, y2 - y1],
+                         [x3 - x1, y3 - y1]])
+    inverse = np.linalg.inv(jacobian)
+
+    def basis(r: float, s: float) -> np.ndarray:
+        return np.array([1.0 - r - s, r, s])
+
+    def raw_shear(r: float, s: float) -> np.ndarray:
+        """gamma_xz = w,x + theta_y and gamma_yz = w,y - theta_x at a
+        point, as rows over the 18 DOFs."""
+        n = basis(r, s)
+        rows = np.zeros((2, 18))
+        for i in range(3):
+            rows[0, 6 * i + 2] = dx[i]
+            rows[0, 6 * i + 4] = n[i]
+            rows[1, 6 * i + 2] = dy[i]
+            rows[1, 6 * i + 3] = -n[i]
+        return rows
+
+    def covariant(r: float, s: float) -> np.ndarray:
+        # e_rt = x,r gamma_xz + y,r gamma_yz, e_st likewise with ,s
+        return jacobian @ raw_shear(r, s)
+
+    tie_r = covariant(0.5, 0.0)      # P1, the midpoint of the r edge
+    tie_s = covariant(0.0, 0.5)      # P2, the midpoint of the s edge
+    tie_h = covariant(0.5, 0.5)      # P3, the midpoint of the hypotenuse
+    c = tie_h[0] - tie_r[0] - tie_h[1] + tie_s[1]
+
+    def assumed_shear(r: float, s: float) -> np.ndarray:
+        e = np.vstack([tie_r[0] + s * c, tie_s[1] - r * c])
+        return inverse @ e                # back to gamma_xz, gamma_yz
+
+    b_membrane = np.zeros((3, 18))
+    b_bending = np.zeros((3, 18))
+    b_drilling = np.zeros((1, 18))
+    for i in range(3):
+        col = 6 * i
+        b_membrane[0, col] = dx[i]
+        b_membrane[1, col + 1] = dy[i]
+        b_membrane[2, col] = dy[i]
+        b_membrane[2, col + 1] = dx[i]
+        b_bending[0, col + 4] = dx[i]
+        b_bending[1, col + 3] = -dy[i]
+        b_bending[2, col + 3] = -dx[i]
+        b_bending[2, col + 4] = dy[i]
+        b_drilling[0, col] = dy[i] / 2.0
+        b_drilling[0, col + 1] = -dx[i] / 2.0
+    # the constant parts integrate exactly with the area; the drilling
+    # tie's theta_z term and the assumed shear vary linearly, so they
+    # and the mass take the three-point midpoint rule, exact for
+    # quadratics
+    stiffness = area * (b_membrane.T @ d_membrane @ b_membrane
+                        + b_bending.T @ d_bending @ b_bending)
+    consistent = np.zeros((18, 18))
+    spin = rho * t ** 3 / 12.0
+    weights = np.diag([rho * t] * 3 + [spin, spin, spin * 1e-3])
+    for r, s in ((0.5, 0.0), (0.0, 0.5), (0.5, 0.5)):
+        n = basis(r, s)
+        drilling = b_drilling.copy()
+        fields = np.zeros((6, 18))
+        for i in range(3):
+            drilling[0, 6 * i + 5] = n[i]
+            for field in range(6):
+                fields[field, 6 * i + field] = n[i]
+        b_shear = assumed_shear(r, s)
+        stiffness += area / 3.0 * (
+            b_shear.T @ d_shear @ b_shear
+            + DRILLING_FRACTION * G * t * (drilling.T @ drilling))
+        consistent += area / 3.0 * (fields.T @ weights @ fields)
     return stiffness, consistent
 
 

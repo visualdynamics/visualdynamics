@@ -885,6 +885,149 @@ def test_the_plate_appears_in_the_geometry_as_a_structural_quad():
     assert len(geometry.elem_conn) == 4
 
 
+# ---- the triangle, against the same tables ------------------------------
+
+
+def triangle_plate(mesh, side=1.0, thickness=0.01, material=ALUMINUM):
+    """The free square plate as triangles: each cell split along a
+    diagonal, the diagonal alternating cell to cell so the mesh carries
+    no preferred direction."""
+    model = fem.Model('triangles')
+    for j in range(mesh + 1):
+        for i in range(mesh + 1):
+            model.add_node(1 + j * (mesh + 1) + i,
+                           i * side / mesh, j * side / mesh, 0.0)
+    for j in range(mesh):
+        for i in range(mesh):
+            n = 1 + j * (mesh + 1) + i
+            a, b, c, d = n, n + 1, n + mesh + 2, n + mesh + 1
+            if (i + j) % 2:
+                model.add_triangle((a, b, d), material, thickness)
+                model.add_triangle((b, c, d), material, thickness)
+            else:
+                model.add_triangle((a, b, c), material, thickness)
+                model.add_triangle((a, c, d), material, thickness)
+    return model
+
+
+def test_free_square_plate_of_triangles_matches_the_classical_values():
+    """The MITC3 triangle against the same free-plate table the quad is
+    held to: six exact rigid modes and the elastic ones from above.
+    Measured at this mesh (2026-09-25): 0.6/0.8/1.3/2.5/2.5/4.1
+    percent — a little stiffer than the quad on the same grid, as the
+    element is known to be, and converging at the same second order."""
+    shapes = triangle_plate(12).eigensolution(num_modes=12)
+    assert int(np.sum(shapes.frequency == 0.0)) == 6
+    lambdas = plate_lambdas(shapes, 1.0, 0.01, ALUMINUM, 6)
+    for computed, exact, room in zip(lambdas, FREE_SQUARE_PLATE,
+                                     (1.01, 1.015, 1.02, 1.035, 1.035, 1.05)):
+        assert exact <= computed <= exact * room, (
+            f'lambda^2 {computed:.3f} against the classical {exact}')
+
+
+def test_refining_the_triangle_mesh_closes_on_the_classical_values():
+    """From above, and by four when the mesh halves — the error runs as
+    h^2, which is what a tied linear element promises. Measured 8 to 16:
+    1.23 to 0.29 percent on the first mode."""
+    coarse = plate_lambdas(triangle_plate(8).eigensolution(num_modes=12),
+                           1.0, 0.01, ALUMINUM, 6)
+    fine = plate_lambdas(triangle_plate(16).eigensolution(num_modes=12),
+                         1.0, 0.01, ALUMINUM, 6)
+    assert np.all(fine < coarse), 'convergence is from above'
+    ratio = (coarse - FREE_SQUARE_PLATE) / (fine - FREE_SQUARE_PLATE)
+    assert np.all(ratio > 3.0), f'second order: the error falls by {ratio}'
+
+
+def test_triangles_and_quads_agree_on_the_same_plate():
+    """Two elements, one theory: on the same grid the two meshes land
+    within two percent of each other on every mode of the benchmark."""
+    quads = plate_lambdas(square_plate(12).eigensolution(num_modes=12),
+                          1.0, 0.01, ALUMINUM, 6)
+    tris = plate_lambdas(triangle_plate(12).eigensolution(num_modes=12),
+                         1.0, 0.01, ALUMINUM, 6)
+    assert np.allclose(tris, quads, rtol=0.02)
+
+
+def test_triangle_frequencies_do_not_depend_on_orientation():
+    flat = triangle_plate(6).eigensolution(num_modes=10)
+    tilted = fem.Model('tilted')
+    spin = np.array([[0.36, -0.48, 0.8],
+                     [0.8, 0.6, 0.0],
+                     [-0.48, 0.64, 0.6]])
+    for j in range(7):
+        for i in range(7):
+            point = spin @ np.array([i / 6.0, j / 6.0, 0.0]) + 2.5
+            tilted.add_node(1 + j * 7 + i, *point)
+    for j in range(6):
+        for i in range(6):
+            n = 1 + j * 7 + i
+            a, b, c, d = n, n + 1, n + 8, n + 7
+            if (i + j) % 2:
+                tilted.add_triangle((a, b, d), ALUMINUM, 0.01)
+                tilted.add_triangle((b, c, d), ALUMINUM, 0.01)
+            else:
+                tilted.add_triangle((a, b, c), ALUMINUM, 0.01)
+                tilted.add_triangle((a, c, d), ALUMINUM, 0.01)
+    assert np.allclose(tilted.eigensolution(num_modes=10).frequency,
+                       flat.frequency, rtol=1e-8, atol=1e-6)
+
+
+def test_a_triangles_winding_does_not_matter():
+    """Clockwise or counterclockwise, the element takes the normal the
+    corners turn about as its own +z, and the answer is the same."""
+    forward = fem.Model('forward')
+    backward = fem.Model('backward')
+    for model in (forward, backward):
+        for k, (x, y) in enumerate(((0, 0), (1, 0), (1, 1), (0, 1)), 1):
+            model.add_node(k, x, y, 0.0)
+    forward.add_triangle((1, 2, 3), ALUMINUM, 0.01)
+    forward.add_triangle((1, 3, 4), ALUMINUM, 0.01)
+    backward.add_triangle((3, 2, 1), ALUMINUM, 0.01)
+    backward.add_triangle((4, 3, 1), ALUMINUM, 0.01)
+    assert np.allclose(forward.eigensolution(num_modes=10).frequency,
+                       backward.eigensolution(num_modes=10).frequency,
+                       rtol=1e-8, atol=1e-6)
+
+
+def test_triangle_rigid_modes_are_exactly_zero():
+    shapes = triangle_plate(4).eigensolution(num_modes=8)
+    assert np.all(shapes.frequency[:6] == 0.0)
+
+
+def test_triangle_structural_mass_is_density_times_volume():
+    model = triangle_plate(4, side=2.0, thickness=0.05)
+    assert model.structural_mass == pytest.approx(2700 * 2.0 * 2.0 * 0.05)
+
+
+def test_a_flat_triangle_is_refused():
+    model = fem.Model('flat')
+    model.add_node(1, 0.0, 0.0, 0.0)
+    model.add_node(2, 1.0, 0.0, 0.0)
+    model.add_node(3, 2.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match='no area'):
+        model.add_triangle((1, 2, 3), ALUMINUM, 0.01)
+    with pytest.raises(ValueError, match='three distinct'):
+        model.add_triangle((1, 2, 2), ALUMINUM, 0.01)
+
+
+def test_the_triangle_appears_in_the_geometry_as_a_structural_tri():
+    geometry = triangle_plate(2).geometry()
+    assert list(geometry.elem_type) == [41] * 8
+    assert all(len(c) == 3 for c in geometry.elem_conn)
+    assert geometry.pieces() if hasattr(geometry, 'pieces') else True
+
+
+def test_triangle_drilling_artifacts_live_far_above_the_physical_band():
+    shapes = triangle_plate(6, thickness=0.0127).eigensolution()
+    for frequency, mode in zip(shapes.frequency, shapes.shape_matrix):
+        spin = np.abs(mode[5::6]).max()
+        rest = np.abs(np.concatenate(
+            [mode[d::6] for d in range(5)])).max()
+        if spin > 100 * rest:
+            assert frequency > 50_000, (
+                f'a drilling artifact at {frequency:.0f} Hz, in the band')
+
+
 def test_drilling_artifacts_live_far_above_the_physical_band():
     """The drilling DOF's penalty-against-inertia modes are artifacts,
     and artifacts must not sit where a user can solve: at full rotary

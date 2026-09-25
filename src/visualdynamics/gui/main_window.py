@@ -2870,6 +2870,7 @@ class MainWindow(QMainWindow):
         ('project_onto_basis', 'Project onto Basis DOFs', 'project',
          'project_onto_basis'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
+        ('solve_modes', 'Solve Modes', 'quad', 'solve_modes_act'),
     )
 
     def acts_for(self, names=None):
@@ -10243,6 +10244,40 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'{added}: 6 modes {self._describe_rigid(obj, properties)}, '
             f'linked to {name}')
+
+    def solve_modes_act(self) -> None:
+        """The normal modes of the selected geometry, built from its
+        blocks' properties: the two numbers the solution takes are asked
+        for once, and the shapes land in the geometry's group."""
+        obj = self.current_object()
+        if not (isinstance(obj, Geometry) and obj.block_properties):
+            self._show_status('Select a geometry whose blocks carry their '
+                              'properties (the Blocks table) to solve')
+            return
+        top, ok = QInputDialog.getDouble(
+            self, 'Solve Modes', 'Highest frequency to solve for [Hz]:',
+            2000.0, 0.0, 1e9, 1)
+        if not ok:
+            return
+        percent, ok = QInputDialog.getDouble(
+            self, 'Solve Modes',
+            'Damping to give every mode [% of critical]:', 2.0, 0.0,
+            100.0, 2)
+        if not ok:
+            return
+        acted = self._act_on(
+            Geometry, 'Select a geometry to solve', self.project.solve_modes,
+            maximum_frequency=top, damping=percent / 100.0)
+        if acted is None:
+            return
+        name, _geometry, added = acted
+        shapes = self.objects[added]
+        rigid = int(np.sum(shapes.frequency == 0.0))
+        # after the show, which writes its own count to the status bar
+        self.show_object(added)
+        self._show_status(
+            f'{added}: {shapes.num_shapes} modes to {top:g} Hz, {rigid} '
+            f'rigid, {percent:g}% damping — linked to {name}')
 
     def integrate_history(self) -> None:
         """One integration of the selected time history — acceleration

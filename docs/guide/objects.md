@@ -50,6 +50,20 @@ the centroid with no mass. *Generate Rigid Body Mode Shapes*
 (`project.generate_rigid_body_modes`) makes the six-mode shape set in
 the geometry's group, previewed on the model as the point is set.
 
+A geometry is also a finite element model once its blocks say what
+they are made of. The Blocks table's property columns take, per
+block, a material (name, E, ν, ρ) and either a thickness — for a block
+of quads or triangles — or a section (name, A, Iy, Iz, J) and an
+orientation vector for a block of beams, SI throughout; they land on
+`geometry.block_properties` as
+[`fem.BlockProperties`](../api/visualdynamics.core.fem.md) and ride
+the native file. *Solve Modes* (`project.solve_modes`) then builds the
+model from the blocks (`fem.Model.from_geometry`) and adds its normal
+modes in the geometry's group — free-free, the six rigid-body modes at
+0 Hz first — asking for the highest frequency wanted and the damping to
+give every mode. A block with no properties, or the wrong kind for its
+elements, is refused by name.
+
 ## Photos — [`core.photos`](../api/visualdynamics.core.photos.md)
 
 Kind `photos`. Setup photographs as they arrived — `names`, `formats`
@@ -278,7 +292,7 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes` |
+| a geometry | `generate_rigid_body_modes`; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |
 | two shape sets | `project_onto_basis`, `match_modes` |

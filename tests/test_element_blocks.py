@@ -259,7 +259,9 @@ def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
     model = window.table.model()
     headers = [model.headerData(c, Qt.Orientation.Horizontal)
                for c in range(model.columnCount())]
-    assert headers == ['Block', 'Name', 'Elements']
+    assert headers[:3] == ['Block', 'Name', 'Elements']
+    assert headers[3] == 'Material', (
+        'then what the block is made of — tests/test_solve_modes.py')
     assert model.rowCount() == 2
     assert model.data(model.index(0, 1)) == 'wing'
     # the elements it holds, by id and as runs — not a count, which is

@@ -341,15 +341,25 @@ def test_end_to_end_the_pages_button_fills_the_clipboard(window, pump):
     window.render_current()
     pump()
     editor = window.report_editor
-    answer = web_read(
-        editor.view,
+    # Click once, whatever the asking: `web_read` re-asks a page whose
+    # answer it counts lost after 10 s, and on a loaded CI runner the
+    # first asking clicked while the page was still settling (the chart
+    # 767 px wide, a scrollbar up), the second clicked again at 785 px
+    # and answered that — while the clipboard already held the first
+    # copy (2026-09-25). So the size is the canvas's at the click, kept
+    # on the window, and the clicks are counted.
+    expression = (
         "(() => {" + READY +
         "if (!window.__bridge || !window.__bridge.copy_image) return null;"
-        "const canvas = document.querySelector('section canvas');"
-        "document.querySelector('.copy').click();"
-        "return JSON.stringify({width: canvas.width,"
-        "                       height: canvas.height}); })()")
-    size = json.loads(answer)
+        "if (!window.__clicks) {"
+        "  const canvas = document.querySelector('section canvas');"
+        "  window.__size = {width: canvas.width, height: canvas.height};"
+        "  window.__clicks = 1;"
+        "  document.querySelector('.copy').click(); }"
+        "return JSON.stringify({size: window.__size,"
+        "                       clicks: window.__clicks}); })()")
+    answer = web_read(editor.view, expression)
+    size = json.loads(answer)['size']
     import time
 
     deadline = time.monotonic() + 30.0
@@ -360,6 +370,11 @@ def test_end_to_end_the_pages_button_fills_the_clipboard(window, pump):
     assert not image.isNull(), 'the page put an image on the clipboard'
     assert (image.width(), image.height()) == (size['width'], size['height']), (
         'the copy is the canvas at its own backing-store resolution'
+    )
+    # asked again, as a lost answer makes web_read do, the page clicks
+    # no second time
+    assert json.loads(web_read(editor.view, expression))['clicks'] == 1, (
+        'a re-asked page copied twice'
     )
     # and the bridge's answer reached the button: a slot with no return
     # value fills the clipboard and leaves the button saying it failed

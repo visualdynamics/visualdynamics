@@ -1005,6 +1005,116 @@ def traceline_table_model(geometry: Geometry,
                           lambda g: len(g.traceline_conn), parent)
 
 
+#: the Blocks table's property columns: (title, field of the property
+#: set or of its material/section, kind)
+_PROPERTY_FIELDS = (
+    ('Material', 'material', 'name'),
+    ('E [Pa]', 'material', 'youngs_modulus'),
+    ('ν', 'material', 'poissons_ratio'),
+    ('ρ [kg/m³]', 'material', 'density'),
+    ('Thickness [m]', '', 'thickness'),
+    ('Section', 'section', 'name'),
+    ('A [m²]', 'section', 'area'),
+    ('Iy [m⁴]', 'section', 'iy'),
+    ('Iz [m⁴]', 'section', 'iz'),
+    ('J [m⁴]', 'section', 'j'),
+    ('Orientation', '', 'orientation'),
+)
+
+
+def _properties_of(geometry, row):
+    return geometry.block_properties.get(int(geometry.block_id[row]))
+
+
+def _property_value(geometry, row, holder, field):
+    props = _properties_of(geometry, row)
+    if props is None:
+        return ''
+    owner = getattr(props, holder) if holder else props
+    if owner is None:
+        return ''
+    value = getattr(owner, field)
+    if value is None:
+        return ''
+    if field == 'orientation':
+        return ', '.join(f'{v:g}' for v in value)
+    return value
+
+
+def _set_property(holder, field):
+    """A setter that rewrites the block's property set with one field
+    changed — a material or a section made on first touch with the
+    other fields blank, so a person can fill a row cell by cell."""
+    from dataclasses import replace
+
+    from ..core.fem import BlockProperties, Material, Section
+
+    def set_value(geometry, row, text):
+        block = int(geometry.block_id[row])
+        props = geometry.block_properties.get(block)
+        text = str(text).strip()
+        if field == 'name':
+            value = text
+        elif field == 'orientation':
+            parts = [float(v) for v in text.replace(',', ' ').split()]
+            if text and len(parts) != 3:
+                raise ValueError('an orientation is three numbers')
+            value = tuple(parts) if text else None
+        else:
+            value = float(text) if text else None
+        if props is None:
+            props = BlockProperties(Material('', 0.0, 0.0, 0.3))
+        if holder == 'material':
+            props = replace(props, material=replace(props.material,
+                                                    **{field: value}))
+        elif holder == 'section':
+            section = props.section or Section('', 0.0, 0.0, 0.0, 0.0)
+            if field == 'name' and not text and props.section is None:
+                return
+            props = replace(props, section=replace(section, **{field: value}))
+        else:
+            props = replace(props, **{field: value})
+        geometry.block_properties[block] = props
+
+    return set_value
+
+
+def _property_journal(geometry, row, _text):
+    """The block's whole property set, as the line that rebuilds it."""
+    block = int(geometry.block_id[row])
+    props = geometry.block_properties.get(block)
+    if props is None:
+        return f'.block_properties.pop({block}, None)'
+    m = props.material
+    material = (f'Material({m.name!r}, {m.youngs_modulus!r}, {m.density!r}, '
+                f'{m.poissons_ratio!r}'
+                + (f', {m.modulus_of_rigidity!r}'
+                   if m.modulus_of_rigidity is not None else '') + ')')
+    parts = [material]
+    if props.thickness is not None:
+        parts.append(f'thickness={props.thickness!r}')
+    if props.section is not None:
+        s = props.section
+        parts.append(f'section=Section({s.name!r}, {s.area!r}, {s.iy!r}, '
+                     f'{s.iz!r}, {s.j!r})')
+    if props.orientation is not None:
+        parts.append(f'orientation={tuple(props.orientation)!r}')
+    return (f'.block_properties[{block}] = BlockProperties('
+            + ', '.join(parts) + ')')
+
+
+def _property_columns():
+    columns = []
+    for title, holder, field in _PROPERTY_FIELDS:
+        kwargs = ({'alignment': LEFT} if field in ('name', 'orientation')
+                  else {})
+        columns.append(Column(
+            title, (lambda g, r, h=holder, f=field: _property_value(g, r, h, f)),
+            set=_set_property(holder, field), journal=_property_journal,
+            **kwargs))
+    return columns
+
+
 def block_label(geometry: Geometry, row: int) -> str:
     """How a block reads in a list: its name, or its id when unnamed.
 
@@ -1118,6 +1228,14 @@ def block_table_model(geometry: Geometry,
                journal=lambda g, _r, _t: '.elem_block = np.array('
                f'{[int(b) for b in g.elem_block]!r})',
                alignment=LEFT),
+        # What the block is made of, for a model built from the
+        # geometry (Brandon, 2026-09-25): a material for any block, a
+        # thickness for a block of plates, a section for a block of
+        # beams. SI throughout, as the model is inside; blank until
+        # set. Every cell's journal line restates the whole property
+        # set, so a replay lands on the same object whichever cell was
+        # edited last.
+        *_property_columns(),
     ]
     return TableModel(geometry, columns, lambda g: len(g.block_id), parent)
 

@@ -90,7 +90,10 @@ such a file back is `load(steps='time')` or `load(steps='frequency')`
 — the file cannot say what its own step axis means, so the reader is
 told; the default reading stays one-mode-per-step. Exodus records no
 units either way: values go out in the display system and come back
-raw, the variable's stem kept as a quantity hint.
+raw, the variable's stem kept as a quantity hint. A mode whose step
+time is negative — an eigensolver's rigid-body mode, whose eigenvalue
+comes out a hair either side of zero — is read as 0 Hz, the file's own
+number kept on the mode's description, and the import says so.
 
 ² **ADF** — the I-DEAS Associated Data Files that Siemens
 NX read natively. Written files were verified by reading them back

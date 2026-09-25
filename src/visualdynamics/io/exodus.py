@@ -25,6 +25,7 @@ units. See "Exodus beyond the mesh" in PLAN.md.
 from __future__ import annotations
 
 import os
+import warnings
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -401,8 +402,9 @@ def _read_shapes(path, node_ids):
                   for i, name in enumerate(names) if name in _MODE_VARIABLES]
         if not wanted:
             return None
-        frequency = np.asarray(ds.variables['time_whole'][:]) \
+        frequency = np.asarray(ds.variables['time_whole'][:], dtype=np.float64) \
             if 'time_whole' in ds.variables else np.arange(1.0)
+        frequency, description = _zero_negative_frequencies(frequency, path)
         columns = {component: np.asarray(ds.variables[f'vals_nod_var{i + 1}'][:])
                    for i, component in wanted}
         # a complex shape's imaginary part rides as <name>_IM beside the
@@ -437,7 +439,42 @@ def _read_shapes(path, node_ids):
         coordinate=coordinate,
         shape_matrix=shape_matrix,
         modal_mass=modal_mass,
+        description=description,
     )
+
+
+def _zero_negative_frequencies(frequency, path):
+    """A negative frequency read as zero, and a note per mode saying so.
+
+    An eigensolver reports a rigid-body mode's eigenvalue as a number
+    near zero of either sign, and a solver that writes the frequency as
+    a step time writes the negative ones as they came out: -3.2e-7 Hz.
+    A ShapeSet refuses a negative frequency, so such a file did not
+    import at all (Brandon, 2026-09-25). The mode is a rigid-body mode
+    and its frequency is zero — the value the FRF synthesis tests for —
+    so that is what it becomes, with the file's own number kept on the
+    mode's description and said once as a warning, so the person who
+    imported it knows and a script's log shows it. Nothing is clamped
+    silently: a frequency of -50 Hz means something else is wrong with
+    the file, and the note carries the number so that reads as what it
+    is.
+    """
+    negative = np.flatnonzero(frequency < 0.0)
+    if negative.size == 0:
+        return frequency, None
+    fixed = frequency.copy()
+    fixed[negative] = 0.0
+    description = [''] * len(frequency)
+    for i in negative:
+        description[i] = (f'frequency {frequency[i]:.3g} Hz in the file, '
+                          'read as 0 (a rigid-body mode)')
+    listed = ', '.join(f'{frequency[i]:.3g}' for i in negative)
+    warnings.warn(
+        f'{os.path.basename(str(path))}: {negative.size} mode'
+        f'{"s" if negative.size > 1 else ""} with a negative frequency '
+        f'({listed} Hz) read as 0 Hz, a rigid-body mode; the file\'s '
+        'values are kept on each mode\'s description', stacklevel=3)
+    return fixed, description
 
 
 # exodus stores modes the way it stores any nodal result: one "time step"

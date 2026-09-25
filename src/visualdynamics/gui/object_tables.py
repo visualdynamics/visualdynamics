@@ -1047,12 +1047,18 @@ def _set_property(holder, field):
     other fields blank, so a person can fill a row cell by cell."""
     from dataclasses import replace
 
-    from ..core.fem import BlockProperties, Material, Section
+    from ..core.fem import MATERIALS, BlockProperties, Material, Section
 
     def set_value(geometry, row, text):
         block = int(geometry.block_id[row])
         props = geometry.block_properties.get(block)
         text = str(text).strip()
+        if holder == 'material' and field == 'name' and text in MATERIALS:
+            # a library name fills the row; any other name is a name
+            geometry.block_properties[block] = replace(
+                props or BlockProperties(MATERIALS[text]),
+                material=MATERIALS[text])
+            return
         if field == 'name':
             value = text
         elif field == 'orientation':
@@ -1104,10 +1110,16 @@ def _property_journal(geometry, row, _text):
 
 
 def _property_columns():
+    from ..core.fem import MATERIALS
+
     columns = []
     for title, holder, field in _PROPERTY_FIELDS:
         kwargs = ({'alignment': LEFT} if field in ('name', 'orientation')
                   else {})
+        if holder == 'material' and field == 'name':
+            # the library as a shortlist, not a rule: pick one and the
+            # row fills, or type any name and fill the row yourself
+            kwargs.update(choices=list(MATERIALS), choices_editable=True)
         columns.append(Column(
             title, (lambda g, r, h=holder, f=field: _property_value(g, r, h, f)),
             set=_set_property(holder, field), journal=_property_journal,

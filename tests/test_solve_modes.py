@@ -225,3 +225,61 @@ def test_a_saved_geometry_solves_to_the_same_modes(tmp_path):
     again.solve_modes('Skin', num_modes=8)
     assert np.allclose(again['Skin Modes'].frequency,
                        project['Skin Modes'].frequency)
+
+
+# ---- the material library (the third slice, 2026-09-25) ----------------
+
+def test_the_library_is_typical_handbook_values_each_with_its_note():
+    from visualdynamics.core.fem import MATERIAL_LIBRARY, MATERIALS, LibraryMaterial, material
+
+    names = [entry.material.name for entry in MATERIAL_LIBRARY]
+    assert len(names) == len(set(names)) == len(MATERIALS) >= 18
+    for entry in MATERIAL_LIBRARY:
+        assert isinstance(entry, LibraryMaterial) and entry.note, entry
+        m = entry.material
+        assert 1e9 < m.youngs_modulus < 500e9, m
+        assert 900 < m.density < 20000, m
+        assert 0.2 <= m.poissons_ratio < 0.5, m
+        assert m.modulus_of_rigidity is None, 'isotropic, derived'
+        assert material(m.name) is m
+    with pytest.raises(KeyError, match="'unobtainium' is not in the "
+                                        'material library; it has 6061-T6'):
+        material('unobtainium')
+
+
+def test_the_demo_plate_is_made_of_the_librarys_6061():
+    from visualdynamics.core.fem import PSI, material
+    from visualdynamics.demo import plate
+
+    assert plate.ALUMINUM is material('6061-T6')
+    assert plate.ALUMINUM.youngs_modulus == 10.0e6 * PSI, (
+        'the handbook number, converted exactly, not a rounding')
+
+
+def test_picking_a_library_material_fills_the_row(qt_app):
+    from visualdynamics.core.fem import MATERIALS, material
+
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    column = model.columns[_column(model, 'Material')]
+    assert column.choices == list(MATERIALS) and column.choices_editable, (
+        'the library as a drop-down that still takes a typed name')
+    _set(model, 'Material', 'Ti-6Al-4V')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.material is material('Ti-6Al-4V')
+    shown = float(model.data(model.index(0, _column(model, 'E [Pa]'))))
+    assert shown == pytest.approx(16.5e6 * 6894.757293168361, rel=1e-5), (
+        'the row shows the library number')
+    assert float(model.data(model.index(0, _column(model, 'ν')))) == 0.342
+    # the thickness the row had stays; a second pick swaps the material
+    _set(model, 'Thickness [m]', '0.005')
+    _set(model, 'Material', '304 stainless')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.material is material('304 stainless')
+    assert props.thickness == 0.005
+    # a name outside the library is a name, and the numbers are the user's
+    _set(model, 'Material', 'my alloy')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.material.name == 'my alloy'
+    assert props.material.density == material('304 stainless').density, (
+        'renaming keeps the numbers already in the row')

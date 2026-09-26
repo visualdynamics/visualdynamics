@@ -219,6 +219,11 @@ class GridPlan(NamedTuple):
     #: columns are coordinates — a rename is the channel's, not the
     #: point's, so the column's quantity goes with its coordinate
     column_keys: list | None = None
+    #: one flag per row where the rows are channels that can be the
+    #: references of an FRF — a time history's — drawn as a leading
+    #: column of check boxes headed Ref (Brandon, 2026-09-25: see which
+    #: channels are the references, and tick or untick them there)
+    checks: list[bool] | None = None
 
 
 def grid_plan(obj: Any) -> GridPlan | None:
@@ -293,9 +298,19 @@ def _data_plan(data):
     # labels come from the unique rows, not the per-record keys: a 12 x 2
     # FRF has 24 keys but 12 rows, and labeling rows by the first 12 keys
     # silently shifted every header after the first repeat
+    checks = None
+    if hasattr(data, 'reference_channels'):
+        # a row is a reference when any record in it is one: the
+        # identity is the channel's, the same in every capture
+        chosen = set(data.reference_channels())
+        by_row: dict[int, bool] = {}
+        for (row, _column), index in cells.items():
+            identity = (data.response_dof[index], data.ordinate_dim[index])
+            by_row[row] = by_row.get(row, False) or identity in chosen
+        checks = [by_row.get(row, False) for row in range(len(rows))]
     return GridPlan('record', rows, row_labels(rows), columns, cells,
                     column_marks=marks, column_dofs=column_dofs,
-                    column_keys=column_keys)
+                    column_keys=column_keys, checks=checks)
 
 
 def _channel_plan(table):
@@ -413,12 +428,24 @@ class RecordGrid(QTableWidget):
     row_renamed = Signal(int, str)
     #: (column, new text) — a reference channel's coordinate typed over
     column_renamed = Signal(int, str)
+    #: (row, checked) — a row's Ref box ticked or unticked
+    reference_toggled = Signal(int, bool)
 
     owner = None        # the object name, set and maintained by the window
 
     def __init__(self, data: Any, parent: QWidget | None = None) -> None:
         plan = grid_plan(data)
-        super().__init__(len(plan.rows), len(plan.columns), parent)
+        # The Ref column, where the rows are channels that can be
+        # references. It is the *last* logical column, moved to the front
+        # of the header's visual order: the record cells keep the
+        # column numbers everything else counts on (`item(row, 0)` is
+        # the first record, in the window and in every test), and the
+        # boxes still read first, where a person looks for them.
+        self.check_column: int | None = (len(plan.columns)
+                                         if plan.checks is not None else None)
+        super().__init__(len(plan.rows),
+                         len(plan.columns) + (self.check_column is not None),
+                         parent)
         self.kind: str = plan.kind
         self.row_keys: list[Any] = plan.rows
         # The header says the DOF and nothing else. What a row *measures* is
@@ -429,7 +456,14 @@ class RecordGrid(QTableWidget):
         self.references: list[str] = plan.columns
         self.column_keys: list = plan.column_keys or [None] * len(plan.columns)
         self._icon_for = _icon_source(data, plan.kind)
-        self.setHorizontalHeaderLabels(short_labels(plan.columns))
+        self.setHorizontalHeaderLabels(
+            short_labels(plan.columns)
+            + (['Ref'] if self.check_column is not None else []))
+        if self.check_column is not None:
+            self.column_keys.append(None)
+            self.horizontalHeaderItem(self.check_column).setToolTip(
+                'The reference channels: what FRFs and multiple coherence '
+                'are computed against. Tick a channel to make it one.')
         # a marked column wears its quantity as the icon the cells
         # already use — '101Z+ (force)' spelled out is the width lesson
         # the row headers learned long ago
@@ -446,7 +480,9 @@ class RecordGrid(QTableWidget):
             except KeyError:     # a quantity with no icon: say the word
                 item.setText(f'{plan.columns[column]} ({mark})')
         # a single unlabeled column has no header worth a strip of pixels
-        self.horizontalHeader().setVisible(plan.columns != [''])
+        # — unless the Ref column is there to be named
+        self.horizontalHeader().setVisible(plan.columns != ['']
+                                           or self.check_column is not None)
         self.setVerticalHeaderLabels(self.responses)
         # A qualified row label — '101Z+ [acceleration]' — is twice the width
         # of a DOF, and left to size the header it took 130 px of a 250 px
@@ -476,7 +512,20 @@ class RecordGrid(QTableWidget):
         self.setIconSize(QSize(16, 16))
 
         self._records = {}
+        self._building = True
         for row, key in enumerate(plan.rows):
+            if self.check_column is not None:
+                box = QTableWidgetItem()
+                # checkable and enabled, never selectable: a tick is a
+                # setting, not a pick of the row's records
+                box.setFlags(Qt.ItemFlag.ItemIsEnabled
+                             | Qt.ItemFlag.ItemIsUserCheckable)
+                box.setCheckState(Qt.CheckState.Checked if plan.checks[row]
+                                  else Qt.CheckState.Unchecked)
+                box.setToolTip(f'{key.dof} \u2014 '
+                               f'{shown_dimension(key.quantity)} as a '
+                               'reference')
+                self.setItem(row, self.check_column, box)
             for column, reference in enumerate(plan.columns):
                 cell = QTableWidgetItem()
                 cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -496,7 +545,11 @@ class RecordGrid(QTableWidget):
                         + (f' ({mark})' if reference and mark else ''))
                     self._records[(row, column)] = index
                 self.setItem(row, column, cell)
+        self._building = False
         self.itemSelectionChanged.connect(self.selection_changed)
+        if self.check_column is not None:
+            self.itemChanged.connect(self._box_changed)
+            header.moveSection(self.check_column, 0)
         # A row label is typed over where it is the user's to say: a
         # photograph's name, and the coordinate of a record or a
         # channel — where the wrong assignment was made at the
@@ -515,6 +568,39 @@ class RecordGrid(QTableWidget):
             self.horizontalHeader().setSectionsClickable(True)
             self.horizontalHeader().sectionDoubleClicked.connect(
                 self.edit_column_label)
+
+    def _box_changed(self, item: QTableWidgetItem) -> None:
+        if self._building or item.column() != self.check_column:
+            return
+        self.reference_toggled.emit(
+            item.row(), item.checkState() == Qt.CheckState.Checked)
+
+    def reference_rows(self) -> list[int]:
+        """The rows whose Ref box is ticked."""
+        if self.check_column is None:
+            return []
+        return [row for row in range(self.rowCount())
+                if self.item(row, self.check_column).checkState()
+                == Qt.CheckState.Checked]
+
+    def set_reference_rows(self, rows: Sequence[int]) -> None:
+        """Restate the boxes without announcing a change."""
+        if self.check_column is None:
+            return
+        wanted = set(rows)
+        self._building = True
+        try:
+            for row in range(self.rowCount()):
+                self.item(row, self.check_column).setCheckState(
+                    Qt.CheckState.Checked if row in wanted
+                    else Qt.CheckState.Unchecked)
+        finally:
+            self._building = False
+
+    def row_records(self, row: int) -> list[int]:
+        """The record indices in a row, in column order."""
+        return [index for (r, _c), index in sorted(self._records.items())
+                if r == row]
 
     def edit_row_label(self, row: int) -> None:
         """Open an editor over the row's header, in place.

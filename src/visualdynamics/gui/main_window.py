@@ -2411,6 +2411,9 @@ class MainWindow(QMainWindow):
         grid.column_renamed.connect(
             lambda column, text, grid=grid: self._apply_dof_rename(
                 grid.owner, *grid.column_keys[column], text))
+        grid.reference_toggled.connect(
+            lambda row, checked, grid=grid: self._grid_reference_toggled(
+                grid, row, checked))
         # the grid is a widget, so the tree's context menu never sees a
         # right-click inside it; without this, records have no route to
         # the units pane
@@ -10355,6 +10358,27 @@ class MainWindow(QMainWindow):
                                        text=photos.names[index])
         if ok:
             self._apply_photo_name(name, index, (new or '').strip())
+
+    def _grid_reference_toggled(self, grid, row, checked):
+        """A Ref box ticked or unticked: the channel joins or leaves
+        the history's references. Stored on the object and journaled
+        like a dragged averaging span, and the FRFs and coherence
+        derived from it wear the refresh badge from this moment."""
+        history = self.objects.get(grid.owner)
+        records = grid.row_records(row)
+        if history is None or not records:
+            return
+        index = records[0]
+        identity = (history.response_dof[index], history.ordinate_dim[index])
+        references = [pair for pair in history.reference_channels()
+                      if pair != identity]
+        if checked:
+            references.append(identity)
+        history.references = references
+        self.project.record_setting(history, 'references', references)
+        self._refresh_stale_badges()
+        named = ', '.join(f'{dof} ({quantity})' for dof, quantity in references)
+        self._show_status(f'{grid.owner} references: {named or "none"}')
 
     def _grid_row_renamed(self, grid, row, text):
         """A grid's row label typed over: a photo's name, or the

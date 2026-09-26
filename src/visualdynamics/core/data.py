@@ -1289,6 +1289,18 @@ class TimeHistory(DataArray):
     #: whatever is here at the time.
     truncation = None
 
+    #: which channels are the references — the drives an FRF and a
+    #: multiple coherence are computed against — as (DOF, quantity)
+    #: pairs, when someone has said. None means the guess from the
+    #: quantities (`drive_dofs`): every force or voltage channel. A
+    #: reference is a channel, not a point (Brandon, 2026-09-25): a
+    #: drive point's load cell and its accelerometer can both be
+    #: references, or either alone, and an accelerometer as a reference
+    #: gives acceleration-over-acceleration FRFs — transmissibilities.
+    #: Set in the grid's Ref column and read by both computations, so
+    #: the coherence beside an FRF is that FRF's coherence.
+    references = None
+
     def suggest_truncation(self) -> Any:
         """The whole record — the only neutral span.
 
@@ -1689,6 +1701,59 @@ class TimeHistory(DataArray):
             dof for dof, dim in zip(self.response_dof, self.ordinate_dim)
             if dim in self.EXCITATION_DIMS))
 
+    def channel_identities(self) -> list[tuple[str, str]]:
+        """Every channel as (DOF, quantity), in first-record order —
+        the identity `references` names a channel by."""
+        return list(dict.fromkeys(zip(self.response_dof, self.ordinate_dim)))
+
+    def reference_channels(self, references: Sequence[Any] | None = None
+                           ) -> list[tuple[str, str]]:
+        """The channels an FRF or a coherence would take as references,
+        as (DOF, quantity) pairs, in the order they were asked for.
+
+        The one resolution both computations and the grid's Ref column
+        read. `references` may name channels as (DOF, quantity) pairs
+        or by bare DOF; omitted, the history's own `references` stand,
+        and failing those the guess from the quantities (`drive_dofs`).
+        A bare DOF picks the excitation channel there — the force at a
+        drive point, not the accelerometer beside it, which is what a
+        controller computes against — and only where there is none does
+        the DOF alone decide: a reference named by a caller who has no
+        force there is still a reference. A pair picks exactly that
+        channel, whatever else sits at the point.
+
+        Parameters
+        ----------
+        references : sequence of str or (str, str), optional
+            What to resolve instead of the history's own setting.
+
+        Returns
+        -------
+        list of (str, str)
+            The reference channels, each once; a name that matches no
+            channel is left out, and the caller says so.
+        """
+        if references is None:
+            references = self.references
+        if references is None:
+            references = self.drive_dofs()
+        identities = self.channel_identities()
+        chosen: list[tuple[str, str]] = []
+        for item in references:
+            if isinstance(item, str):
+                at = [identity for identity in identities if identity[0] == item]
+                driven = [identity for identity in at
+                          if identity[1] in self.EXCITATION_DIMS]
+                picked = (driven or at)[:1]
+            else:
+                dof, quantity = item
+                picked = [identity for identity in identities
+                          if identity == (str(dof), str(quantity))]
+            for identity in picked:
+                if identity not in chosen:
+                    chosen.append(identity)
+        return chosen
+
     def _cross_spectral_frame(self, what, references=None, averaging=None):
         """The pieces every cross-spectral estimate is built from.
 
@@ -1705,32 +1770,29 @@ class TimeHistory(DataArray):
         reference or how the record was framed, and then the coherence
         beside an FRF would not be that FRF's coherence.
 
-        `references` names the drives **by DOF**; without it they are
-        guessed from the quantities (`drive_dofs`). A DOF is not a
-        channel: a drive point carries a force record *and* an
-        acceleration record at the same DOF, and the reference is the
-        force. Naming one picks the excitation channel there, and the
-        accelerometer at the same DOF stays a response — which is what
-        a controller computes against.
+        `references` names the drives, by channel — (DOF, quantity) —
+        or by bare DOF; `reference_channels` is the one resolution of
+        either, and of the history's own `references` and the
+        quantity guess when nothing is passed.
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
         keys = list(groups)
-        wanted = list(references) if references is not None \
-            else self.drive_dofs()
+        chosen = self.reference_channels(references)
         drives = []
-        for dof in wanted:
-            # the excitation channel at that DOF, and only if there is
-            # none does the DOF alone decide — a reference named by a
-            # caller who has no force there is still a reference
-            at = [i for i, key in enumerate(keys) if key[0] == dof]
-            driven = [i for i in at if keys[i][1] in self.EXCITATION_DIMS]
-            chosen = (driven or at)
-            if chosen and chosen[0] not in drives:
-                drives.append(chosen[0])
+        for identity in chosen:
+            # a channel key is (DOF, quantity, unit hint); the identity
+            # is its first two, and a channel is one key
+            at = [i for i, key in enumerate(keys) if key[:2] == identity]
+            if at and at[0] not in drives:
+                drives.append(at[0])
         if not drives:
+            if references is None:
+                references = self.references
+            wanted = (list(references) if references is not None
+                      else 'the excitation quantities')
             raise ValueError(
                 f'{what} needs reference channels; none of '
-                f'{wanted or "the excitation quantities"} is in this history')
+                f'{wanted} is in this history')
         responses = [i for i in range(len(keys)) if i not in drives]
         if not responses:
             raise ValueError('every channel is a reference; there is '

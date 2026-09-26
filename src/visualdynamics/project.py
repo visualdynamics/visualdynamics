@@ -2542,8 +2542,13 @@ class Project(dict):
     #: the dependency, so changing the shocks never marks a PSD stale
     _VERB_READS: ClassVar[dict[str, str]] = {
         'compute_spectra': 'averaging', 'compute_psds': 'averaging',
-        'compute_cpsds': 'averaging', 'compute_frfs': 'averaging',
-        'compute_multiple_coherence': 'averaging',
+        'compute_cpsds': 'averaging',
+        # the two read the references as well as the framing; the
+        # fingerprint stays an 'averaging' one with the references folded
+        # in only when set, so a project saved before the setting
+        # existed opens with nothing marked stale
+        'compute_frfs': 'averaging+references',
+        'compute_multiple_coherence': 'averaging+references',
         'compute_srs': 'shocks', 'compute_octave': 'content',
         # the filter reads the settings riding the source; integration
         # and differentiation read the record's bytes, so refreshing a
@@ -2586,10 +2591,19 @@ class Project(dict):
             digest.update(','.join(obj.response_dof).encode())
             digest.update(','.join(other.coordinate).encode())
             return ('content', digest.hexdigest())
-        if reads == 'averaging':
+        if reads in ('averaging', 'averaging+references'):
             averaging = getattr(obj, 'averaging', None)
-            return ('averaging', None if averaging is None
-                    else asdict(averaging))
+            state = None if averaging is None else asdict(averaging)
+            references = getattr(obj, 'references', None)
+            if reads.endswith('references') and references is not None:
+                # the composite kind only once a choice exists: with
+                # none, the fingerprint is the plain averaging one it
+                # always was, and an older project opens with nothing
+                # marked stale
+                return ('averaging+references',
+                        {'averaging': state,
+                         'references': [list(pair) for pair in references]})
+            return ('averaging', state)
         if reads == 'filtering':
             filtering = getattr(obj, 'filtering', None)
             return ('filtering', None if filtering is None
@@ -3297,6 +3311,10 @@ def _state_tuple(state):
     kind, value = state
     if kind in _STATE_CLASSES and value is not None:
         value = _named_state(kind, value)
+    elif kind == 'averaging+references' and value['averaging'] is not None:
+        # the framing inside normalizes the way a bare one does
+        value = dict(value, averaging=_named_state('averaging',
+                                                   value['averaging']))
     return json.loads(json.dumps([kind, value]))
 
 
@@ -3308,6 +3326,11 @@ def _summarize_state(state):
         named = _named_state(kind, value)
         return (f'{named["frames"]} frames of {named["frame_length"]} '
                 f'({named["window"]})')
+    if kind == 'averaging+references':
+        framing = _summarize_state(('averaging', value['averaging']))
+        named = ', '.join(f'{dof} {quantity}'
+                          for dof, quantity in value['references'])
+        return f'{framing}, references {named or "none"}'
     if kind == 'shocks':
         return f'{len(value)} window{"s" * (len(value) != 1)}'
     if kind == 'filtering':

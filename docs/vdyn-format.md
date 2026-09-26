@@ -129,10 +129,12 @@ Present only where they mean something:
            _detrend, and _window_parameter when the window takes one
            filtering_low, _high, _order   the filter reading, when set
            truncation_start, _stop        the truncate reading, when set
-  references   dataset of strings, DOF then quantity, flat — the
-               channels a time history's FRFs and coherence are computed
-               against, when someone has said; empty is a choice too,
-               absent means the guess from the quantities
+  roles        dataset of strings, DOF, quantity and role in threes,
+               flat — each channel's role (reference, response or
+               monitor) where something has said; a channel not named,
+               or a file without the dataset, takes the default for its
+               quantity (a force a reference, a motion a response,
+               anything else a monitor)
 
 ## `shapes/`
 

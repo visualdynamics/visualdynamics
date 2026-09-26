@@ -49,9 +49,9 @@ screen](../images/sysid-import.png)
 **H1**: the plant is measured driving through *known* excitation, so
 the noise is on the response side, which is exactly the assumption H1
 makes. This is the estimator the controller itself uses for the same
-measurement. The drives are the channels ticked in the history's
-**Ref** column — the force or voltage channels unless you say otherwise
-([the tree](../project-tree.md)).
+measurement. The drives are the channels whose role is `ref` in the
+history's **Role** column — the channels the file says were driven —
+and a channel marked `mon` is in no FRF ([the tree](../project-tree.md)).
 
 ![The measured plant: the FRF matrix, one curve per response and
 drive pair](../images/sysid-frfs.png)

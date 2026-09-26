@@ -129,7 +129,7 @@ on the time history is not corrected on the table, or the reverse.
 
 | kind | class | what it is | what it adds |
 | --- | --- | --- | --- |
-| `time_history` | `TimeHistory` | the record as acquired, against time; carries its `averaging`, `shocks` and `references` readings so every derivation reads one description | `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_frfs`, `compute_multiple_coherence`, `compute_srs`, `integrate`, `differentiate`, `filter`, `truncate`, `split_into_frames`, `sample_rate`, `drive_dofs` |
+| `time_history` | `TimeHistory` | the record as acquired, against time; carries its `averaging`, `shocks` and `roles` readings so every derivation reads one description | `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_frfs`, `compute_multiple_coherence`, `compute_srs`, `integrate`, `differentiate`, `filter`, `truncate`, `split_into_frames`, `sample_rate`, `drive_dofs` |
 | `transient_specification` | `TransientSpecification` | a target waveform: what a transient test was controlled to, sample by sample | everything a time history does |
 | `spectrum` | `Spectrum` | the complex average of a record's frames — amplitude and phase per line | `animate` |
 | `psd` | `Psd` | the power average: real autospectra, complex cross spectra; `bin_widths` when the bins are not even | `area`, `to_octave`, `bin_bounds`, `principal_shapes`, `animate` |

@@ -419,13 +419,13 @@ class ChannelTable:
                 raise ValueError(
                     f'{name} {coerced} already exists — it is the join key '
                     'and must be unique')
-        if name == 'role' and coerced != 'response' and self.controls()[row]:
-            raise ValueError('this channel is marked Control, and a control '
-                             'channel is a response — uncheck Control first')
-        if name == 'control' and _parse_flag(str(coerced)) and str(
-                self.frame.loc[row, 'role']) != 'response':
-            raise ValueError('a control channel is a response — set the '
-                             'role first')
+        # Control and role are two questions, answered independently
+        # (Brandon, 2026-09-26): what the controller drove the test to
+        # match, and what the channel is to an FRF. A controlled force
+        # can be an FRF's reference, a controlled voltage too, and
+        # either can be a monitor. The schema once refused every
+        # control channel that was not a response, as "the one nonsense
+        # pair"; force and voltage control are why it was not one.
         if name == 'unit' and coerced:
             self._agrees_with_type(row, str(coerced))
         self.frame.loc[row, name] = coerced

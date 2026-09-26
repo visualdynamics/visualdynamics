@@ -245,6 +245,13 @@ class SpecificationDraft:
         motion channel when none is flagged — each in the quantity
         its channel type declares.
 
+        A flagged channel of any declared type is taken: a test can be
+        controlled to a force or a voltage as well as to a motion
+        (Brandon, 2026-09-26), and a specification written at a force
+        is a force specification. The motions are only the fallback
+        for a table that flags nothing, where they are the likely
+        control channels.
+
         Parameters
         ----------
         table : ChannelTable
@@ -257,13 +264,22 @@ class SpecificationDraft:
         """
         dofs, types = table.dof_strings(), table.types()
         flagged = table.controls()
-        rows = [i for i in range(len(dofs))
-                if (flagged[i] if flagged.any() else True)
-                and types[i] in MOTIONS and dofs[i]]
-        if not rows:
-            raise ValueError('the channel table has no motion channel to '
-                             'write a specification at — declare the '
-                             'channel types, or flag the control channels')
+        if flagged.any():
+            rows = [i for i in range(len(dofs))
+                    if flagged[i] and types[i] and dofs[i]]
+            if not rows:
+                raise ValueError('the channel table\'s control channels '
+                                 'declare no channel type, so a '
+                                 'specification at them would be in '
+                                 'nothing — declare their types')
+        else:
+            rows = [i for i in range(len(dofs))
+                    if types[i] in MOTIONS and dofs[i]]
+            if not rows:
+                raise ValueError('the channel table has no motion channel to '
+                                 'write a specification at — declare the '
+                                 'channel types, or flag the control '
+                                 'channels')
         return cls.at_dofs([dofs[i] for i in rows], [types[i] for i in rows])
 
     @classmethod

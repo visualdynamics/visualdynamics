@@ -234,14 +234,13 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     # how a time history is to be cut into frames, when something has
     # said — from the file it was imported from, or from the averaging
     # view. Five attributes rather than a group: it is five numbers.
-    # the reference channels, when someone has said which — (DOF,
-    # quantity) pairs, as `TimeHistory.references` holds them
-    references = getattr(data, 'references', None)
-    if references is not None:
-        # flat, DOF then quantity, so an empty choice (every box
-        # unticked) is an empty dataset and still a choice on reload
-        _write_strings(group, 'references',
-                       [str(v) for pair in references for v in pair])
+    # each channel's role, when something has said — DOF, quantity and
+    # role in threes, flat, as `TimeHistory.roles` holds them keyed
+    roles = getattr(data, 'roles', None)
+    if roles is not None:
+        _write_strings(group, 'roles',
+                       [str(v) for (dof, quantity), role in roles.items()
+                        for v in (dof, quantity, role)])
     averaging = getattr(data, 'averaging', None)
     if averaging is not None:
         group.attrs['averaging_frame_length'] = averaging.frame_length
@@ -353,9 +352,10 @@ def load_data(group: h5py.Group) -> DataArray:
     averaging = _load_averaging(group)
     if averaging is not None:
         data.averaging = averaging
-    if 'references' in group:
-        flat = _read_strings(group, 'references')
-        data.references = list(zip(flat[::2], flat[1::2]))
+    if 'roles' in group:
+        flat = _read_strings(group, 'roles')
+        data.roles = {(dof, quantity): role for dof, quantity, role
+                      in zip(flat[::3], flat[1::3], flat[2::3])}
     if 'filtering_low' in group.attrs or 'filtering_high' in group.attrs:
         from ..core.filters import Filtering
 

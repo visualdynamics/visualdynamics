@@ -136,6 +136,25 @@ def test_at_dofs_and_at_control_channels():
     assert set(draft.dims) == {'acceleration'}
 
 
+def test_a_force_controlled_table_starts_a_force_specification():
+    """A test controlled to a force (Brandon, 2026-09-26): the flagged
+    channels are taken whatever they measure, each in its own quantity;
+    the motions are only the fallback when nothing is flagged."""
+    from visualdynamics.core.channel_table import ChannelTable
+
+    table = ChannelTable({
+        'channel': [1, 2, 3], 'node': [1, 2, 3],
+        'direction': ['Z+', 'Z+', 'Z+'], 'unit': ['N', 'm/s**2', 'V'],
+        'control': ['True', 'False', 'True']})
+    draft = SpecificationDraft.at_control_channels(table)
+    assert draft.channels == ['1Z+', '3Z+']
+    assert draft.dims == ['force', 'voltage']
+    table.set_cell('control', 0, 'False')
+    table.set_cell('control', 2, 'False')
+    assert SpecificationDraft.at_control_channels(table).channels == ['2Z+'], (
+        'nothing flagged: the motion channels')
+
+
 def test_from_specification_opens_what_the_sheet_can_hold():
     """Cross terms that hold one coherence and phase over frequency
     come in as such; ones that vary are left unstated and said; bands

@@ -132,6 +132,19 @@ th, td { border: 1px solid var(--line); padding: .25rem .55rem;
                  margin-bottom: .3rem; }
 .verdict.pass .word { color: #2e8b57; }
 .verdict.fail .word { color: #c0392b; }
+/* the test level, a box beside the verdict and left of it (Brandon,
+   2026-09-26): the level every comparison below was judged at, in the
+   verdict's own size and weight, in the page's neutral colors — a
+   level is neither a pass nor a fail */
+.verdictrow { display: flex; gap: 1rem; align-items: stretch;
+              flex-wrap: wrap; }
+.verdictrow > div { flex: 1 1 16rem; }
+.verdictrow > .testlevel { flex: 0 1 14rem; }
+.testlevel { border-radius: 8px; padding: 1rem 1.25rem; border: 2px solid
+             var(--line); line-height: 1.5;
+             background: color-mix(in srgb, var(--line) 12%, var(--paper)); }
+.testlevel .word { font-size: 2rem; font-weight: 700; letter-spacing: .02em;
+                   margin-bottom: .3rem; }
 /* the grid figure: headings across, node labels down, a cell's own
    legend, controls and caption at a size that leaves room for the plot */
 .grid { display: grid; gap: .5rem .6rem; align-items: start; }
@@ -2014,8 +2027,38 @@ function gridBlock(block) {
    the environment passed, in one word and one color, with the two
    readings it was decided on — so a reader opening the report knows
    before reading anything else. */
+/* Left of it, the test level the verdict was decided at: the one
+   number that changes what every comparison below means, in the same
+   large bold as PASS or FAIL (Brandon, 2026-09-26). */
+function testLevelText(db) {
+  if (db === 0) return '0 dB';
+  return (db > 0 ? '+' : '\u2212') + Math.abs(db) + ' dB';
+}
 function verdictBlock(block) {
-  const s = section(null);
+  const row = section(null);
+  row.className = 'verdictrow';
+  if (block.test_level_db !== undefined) {
+    const level = document.createElement('div'); level.className = 'testlevel';
+    const big = document.createElement('div'); big.className = 'word';
+    big.textContent = testLevelText(block.test_level_db);
+    level.appendChild(big);
+    const said = document.createElement('div');
+    const label = block.level_label || 'Test level';
+    said.textContent = block.test_level_db === 0 ? label + ': full level'
+      : label + ', relative to the specification';
+    level.appendChild(said);
+    const how = document.createElement('div'); how.className = 'hint';
+    how.textContent = block.level_source === 'set'
+      ? 'As set in the Scaling field.'
+      : (block.test_level_db === 0
+         ? 'Detected from the data; no scaling applied.'
+         : 'Detected from the data; every comparison is scaled '
+           + testLevelText(-block.test_level_db) + ' to the specification.');
+    level.appendChild(how);
+    row.appendChild(level);
+  }
+  const s = document.createElement('div');
+  row.appendChild(s);
   s.className = 'verdict ' + (block.passed ? 'pass' : 'fail');
   const word = document.createElement('div'); word.className = 'word';
   word.textContent = block.passed ? 'PASS' : 'FAIL';

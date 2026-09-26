@@ -517,23 +517,32 @@ def _build_block(block, objects, us, links=None):
         measured = objects.get(block.get('measured'))
         if source is None or measured is None:
             return None
-        return _verdict_block(source, measured)
+        return _verdict_block(source, measured,
+                              block.get('level_label') or 'Test level')
     return None
 
 
-def _verdict_block(specification, measured):
+def _verdict_block(specification, measured, level_label='Test level'):
     """The pass/fail box: `compliance.verdict` over the comparison of
     `measured` against `specification`, the scale resolved once for
     the pair the way the bar charts resolve it. None when the two
     have no channel in common or cannot be compared."""
     from ..core.compliance import compare_all, comparison_scale_db, verdict
 
-    rows = compare_all(specification, measured,
-                       scale_db=comparison_scale_db(specification, measured))
+    scale = comparison_scale_db(specification, measured)
+    rows = compare_all(specification, measured, scale_db=scale)
     read = verdict(rows)
     if read['passed'] is None:
         return None
+    # the test level the comparison was judged at, beside the verdict
+    # it decided (Brandon, 2026-09-26): the scale is what was *added*
+    # to the measurement, so the level the run was at is its negative,
+    # and whether it was detected or set by hand is said with it
+    held = getattr(measured, 'scale_db', None) is not None
     return {'kind': 'verdict', 'passed': bool(read['passed']),
+            'test_level_db': -float(scale) + 0.0,
+            'level_source': 'set' if held else 'detected',
+            'level_label': str(level_label),
             'channels': int(read['channels']),
             'lines_percent': _compact(read['lines_percent']),
             'rms_percent': _compact(read['rms_percent']),

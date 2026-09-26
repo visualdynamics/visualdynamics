@@ -127,3 +127,58 @@ def test_octave_band_figures_read_on_a_log_axis_and_narrowband_ones_linear():
         'rows'][0]['cells'][0][0].get('logx')
     # the specification is no longer drawn on its own, in either form
     assert not [key for key in grids if key.startswith('Test specification')]
+
+
+def test_the_box_carries_the_test_level_it_was_judged_at():
+    """Left of PASS/FAIL, the test level every comparison was judged at
+    (Brandon, 2026-09-26) — the negative of the scale added, and
+    whether it was detected or set."""
+    from test_comparison_scale import _measured, _spec
+
+    from visualdynamics.report import _verdict_block
+
+    channels = tuple(f'{n}Z+' for n in range(101, 109))
+    spec = _spec(channels)
+    run = _measured(spec, [6.0] * 8, wiggle=0.3)
+    box = _verdict_block(spec, run)
+    assert box['test_level_db'] == -6.0 and box['level_source'] == 'detected'
+    run.scale_db = 3
+    box = _verdict_block(spec, run)
+    assert box['test_level_db'] == -3.0 and box['level_source'] == 'set'
+    full = _verdict_block(spec, _measured(spec, [0.0] * 8, wiggle=0.3))
+    assert full['test_level_db'] == 0.0
+    assert str(full['test_level_db']) == '0.0', 'never a negative zero'
+
+
+def test_a_mixed_report_says_the_level_is_the_randoms():
+    """The mixed report's verdict and level are its random half's; the
+    sine is compared as measured. The box says which (Brandon,
+    2026-09-26)."""
+    from test_comparison_scale import _measured, _spec
+
+    from visualdynamics.core.report import mixed_template, random_template
+    from visualdynamics.report import _verdict_block
+    from visualdynamics.report.page import _JS
+
+    mixed = [b for b in mixed_template({}).blocks if b['kind'] == 'verdict']
+    assert mixed[0]['level_label'] == 'Random test level'
+    plain = [b for b in random_template({}).blocks if b['kind'] == 'verdict']
+    assert 'level_label' not in plain[0], 'a random report says Test level'
+    spec = _spec(('101Z+', '102Z+'))
+    run = _measured(spec, [0.0, 0.0], wiggle=0.3)
+    assert _verdict_block(spec, run)['level_label'] == 'Test level'
+    assert _verdict_block(spec, run, 'Random test level')['level_label'] == \
+        'Random test level'
+    assert "const label = block.level_label || 'Test level';" in _JS
+
+
+def test_the_page_puts_the_level_left_of_the_verdict():
+    from visualdynamics.report.page import _CSS, _JS
+
+    body = _JS[_JS.index('function verdictBlock'):]
+    body = body[:body.index('\n}\n')]
+    assert body.index("level.className = 'testlevel'") < body.index(
+        "s.className = 'verdict '"), 'the level box goes in first'
+    assert "big.textContent = testLevelText(block.test_level_db);" in body
+    assert '.testlevel .word { font-size: 2rem; font-weight: 700;' in _CSS
+    assert '.verdictrow { display: flex;' in _CSS

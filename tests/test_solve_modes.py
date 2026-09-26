@@ -12,6 +12,8 @@ takes.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from conftest import edit_category, select_objects
@@ -96,8 +98,9 @@ def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
     titles = [model.headerData(c, Qt.Orientation.Horizontal)
               for c in range(model.columnCount())]
     assert titles == ['Block', 'Name', 'Elements', 'Material', 'E [Pa]', 'ν',
-                      'ρ [kg/m³]', 'Thickness [m]', 'Section', 'A [m²]',
-                      'Iy [m⁴]', 'Iz [m⁴]', 'J [m⁴]', 'Orientation']
+                      'ρ [kg/m³]', 'Thickness [m]', 'Section', 'Shape',
+                      'Dimensions [m]', 'A [m²]', 'Iy [m⁴]', 'Iz [m⁴]',
+                      'J [m⁴]', 'Orientation']
     assert model.data(model.index(0, _column(model, 'E [Pa]'))) == '', \
         'blank until set'
     _set(model, 'Material', '6061-T6')
@@ -150,6 +153,11 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     window.import_paths([str(path)])
     pump()
     assert 'Geometry' in window.project
+    # the table shows the display system (2026-09-26); this test is
+    # about the journal, so it types SI, as a person would after picking
+    # it from the unit menu
+    window.unit_combo.setCurrentText('m-kg-N-s')
+    pump()
     edit_category(window, pump, 'Blocks')
     model = window.table.model()
     _set(model, 'Material', 'Al')
@@ -283,3 +291,211 @@ def test_picking_a_library_material_fills_the_row(qt_app):
     assert props.material.name == 'my alloy'
     assert props.material.density == material('304 stainless').density, (
         'renaming keeps the numbers already in the row')
+
+
+
+# ---- the Blocks table in the display unit system (2026-09-26) ----------
+
+def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
+    """Brandon: the Blocks table should show, and expect, the current
+    display unit system. Held in SI on the geometry and in the journal,
+    as the model is inside."""
+    from visualdynamics.core.fem import material
+    from visualdynamics.units import SYSTEMS
+
+    inch = SYSTEMS['in-slinch-lbf-s']
+    psi, inches = 6894.757293168361, 0.0254
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry, inch)
+    titles = [model.headerData(c, Qt.Orientation.Horizontal)
+              for c in range(model.columnCount())]
+    for title in ('E [psi]', 'ρ [slinch/in³]', 'Thickness [in]', 'A [in²]',
+                  'Iy [in⁴]', 'Iz [in⁴]', 'J [in⁴]', 'ν', 'Material'):
+        assert title in titles, (title, titles)
+    # a library pick reads in psi and slinch/in³
+    _set(model, 'Material', '6061-T6')
+    assert float(model.data(model.index(0, _column(model, 'E [psi]')))) == \
+        pytest.approx(10.0e6)
+    assert float(model.data(model.index(0, _column(model, 'ρ [slinch/in³]')))) \
+        == pytest.approx(0.098 / 386.08858, rel=1e-6)
+    # typed in inches, stored in meters
+    _set(model, 'Thickness [in]', '0.5')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.thickness == pytest.approx(0.5 * inches)
+    assert props.material is material('6061-T6')
+    # typed in psi, stored in pascals; ν has no unit and is not scaled
+    _set(model, 'E [psi]', '1e7')
+    _set(model, 'ν', '0.33')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.material.youngs_modulus == pytest.approx(1e7 * psi)
+    assert props.material.poissons_ratio == 0.33
+    # a section's second moments in in⁴
+    _set(model, 'Iy [in⁴]', '2')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.section.iy == pytest.approx(2 * inches ** 4)
+
+
+def test_the_blocks_table_journals_in_si_whatever_it_shows(qt_app):
+    from visualdynamics.units import SYSTEMS
+
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry, SYSTEMS['mm-kg-N-s'])
+    lines = []
+    model.edit_journaled.connect(lines.append)
+    _set(model, 'Thickness [mm]', '5')
+    assert lines[-1].endswith('thickness=0.005)'), lines[-1]
+
+
+def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
+    """The table follows the unit menu: the same thickness reads in
+    inches, then in millimeters."""
+    from conftest import edit_category
+
+    geometry = _plate_geometry()           # 0.01 m thick, SI inside
+    path_name = 'Geometry'
+    window.add_object(path_name, geometry)
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    pump()
+    edit_category(window, pump, 'Blocks')
+    model = window.table.model()
+    assert float(model.data(model.index(0, _column(model, 'Thickness [in]')))) \
+        == pytest.approx(0.01 / 0.0254)
+    window.unit_combo.setCurrentText('mm-kg-N-s')
+    pump()
+    model = window.table.model()
+    assert float(model.data(model.index(0, _column(model, 'Thickness [mm]')))) \
+        == pytest.approx(10.0)
+
+
+def test_switching_the_unit_system_restates_the_node_table(window, pump):
+    """The same gap, found through the Blocks table: an open node table
+    kept the coordinates' unit of the moment it was opened."""
+    from conftest import edit_category
+
+    window.add_object('Geometry', _plate_geometry())
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    pump()
+    edit_category(window, pump, 'Nodes')
+    model = window.table.model()
+    headers = [model.headerData(c, Qt.Orientation.Horizontal)
+               for c in range(model.columnCount())]
+    assert 'X [in]' in headers
+    window.unit_combo.setCurrentText('mm-kg-N-s')
+    pump()
+    model = window.table.model()
+    headers = [model.headerData(c, Qt.Orientation.Horizontal)
+               for c in range(model.columnCount())]
+    assert 'X [mm]' in headers
+
+
+
+# ---- sections from their shapes (2026-09-26) -----------------------------
+
+def _section_of(geometry):
+    return geometry.block_properties[int(geometry.block_id[0])].section
+
+
+def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
+    """Pick a shape, the Dimensions cell says what it wants; type them in
+    the display units, and A, Iy, Iz and J are the shape's."""
+    from visualdynamics.units import SYSTEMS
+
+    inch = 0.0254
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry, SYSTEMS['in-slinch-lbf-s'])
+    shape_column = model.columns[_column(model, 'Shape')]
+    assert shape_column.choices == ['round tube', 'rod', 'rectangle',
+                                    'rectangular tube', 'I-beam', 'channel',
+                                    'angle', 'custom']
+    _set(model, 'Section', 'strut')
+    assert model.data(model.index(0, _column(model, 'Shape'))) == 'custom'
+    _set(model, 'Shape', 'round tube')
+    dims = model.index(0, _column(model, 'Dimensions [in]'))
+    assert model.data(dims) == 'D=?, t=?', 'the shape says what it wants'
+    _set(model, 'Dimensions [in]', '1, 0.065')
+    section = _section_of(geometry)
+    assert section == Section.round_tube('strut', 1 * inch, 0.065 * inch)
+    assert model.data(dims) == 'D=1, t=0.065'
+    j = float(model.data(model.index(0, _column(model, 'J [in⁴]'))))
+    assert j == pytest.approx(math.pi * (1 - 0.87 ** 4) / 32)
+    # the labels are accepted as shown, in any order they were written
+    _set(model, 'Dimensions [in]', 'D=1.25, t=0.049')
+    assert _section_of(geometry).dimensions == pytest.approx(
+        (1.25 * inch, 0.049 * inch))
+
+
+def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    _set(model, 'Shape', 'rectangle')
+    _set(model, 'Dimensions [m]', 'b=0.01, h=0.03')
+    said = []
+    model.edit_rejected.connect(said.append)
+    assert not model.setData(model.index(0, _column(model, 'Iy [m⁴]')),
+                             '1e-6', EDIT)
+    assert said and 'choose Custom in Shape' in said[0]
+    # Custom keeps the numbers and lets them be typed
+    _set(model, 'Shape', 'custom')
+    assert _section_of(geometry).shape == ''
+    _set(model, 'Iy [m⁴]', '1e-6')
+    assert _section_of(geometry).iy == 1e-6
+    assert _section_of(geometry).area == pytest.approx(3e-4), 'kept'
+
+
+def test_wrong_dimensions_are_refused_by_name(qt_app):
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    said = []
+    model.edit_rejected.connect(said.append)
+    index = model.index(0, _column(model, 'Dimensions [m]'))
+    assert not model.setData(index, '0.1, 0.2', EDIT)
+    assert 'choose a shape first' in said[-1]
+    _set(model, 'Shape', 'I-beam')
+    assert not model.setData(index, '0.2, 0.1', EDIT)
+    assert 'an I-beam takes 4 dimensions' in said[-1], said[-1]
+    assert 'd (depth), bf (flange width)' in said[-1]
+    assert not model.setData(index, '0.02, 0.05, 0.011, 0.005', EDIT)
+    assert 'do not make an I' in said[-1]
+
+
+def test_an_angle_says_where_to_point_it(qt_app):
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    _set(model, 'Shape', 'angle')
+    shown = _set(model, 'Dimensions [m]', '0.1, 0.1, 0.01')
+    assert shown.endswith('; orient 45.0° from the long leg'), shown
+    # and what it shows is taken back as typed: the note is ignored
+    _set(model, 'Dimensions [m]', shown)
+    assert _section_of(geometry).dimensions == pytest.approx((0.1, 0.1, 0.01))
+
+
+def test_an_unfinished_section_is_refused_when_the_model_is_built():
+    frame = visualdynamics.Geometry(
+        node_id=[1, 2, 3], node_xyz=[[0, 0, 0], [0, 0, 1], [1, 0, 1]],
+        elem_id=[1, 2], elem_type=[21, 21], elem_conn=[[1, 2], [2, 3]],
+        elem_block=[1, 1], block_id=[1], block_name=['frame'],
+        length_unit='m',
+        block_properties={1: BlockProperties(
+            ALUMINUM, section=Section('tube', 0, 0, 0, 0, 'round tube', ()),
+            orientation=(0.0, 1.0, 0.0))})
+    with pytest.raises(ValueError, match=r'block 1 \(frame\): the section is '
+                                          r'not finished — its round tube has '
+                                          r'no dimensions yet'):
+        Model.from_geometry(frame)
+
+
+def test_a_shaped_section_journals_and_saves_by_its_dimensions(qt_app,
+                                                              tmp_path):
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    lines = []
+    model.edit_journaled.connect(lines.append)
+    _set(model, 'Section', 'beam')
+    _set(model, 'Shape', 'channel')
+    _set(model, 'Dimensions [m]', '0.15, 0.05, 0.009, 0.006')
+    assert ("section=Section.of_shape('beam', 'channel', "
+            '[0.15, 0.05, 0.009, 0.006])') in lines[-1]
+    visualdynamics.save(geometry, tmp_path / 'g.vdyn')
+    back = visualdynamics.load(tmp_path / 'g.vdyn')
+    assert _section_of(back) == _section_of(geometry)
+    assert _section_of(back).shape == 'channel'

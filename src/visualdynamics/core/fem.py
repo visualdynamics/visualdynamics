@@ -223,6 +223,23 @@ class Section:
     torsional stiffness; the constructors below carry the right formula for
     the shapes they build.
 
+    **The shapes** (`SHAPES`): a section built from one remembers it —
+    `shape` and its `dimensions` in meters, in the order the constructor
+    takes them — so a table can show the dimensions and a file or a
+    session script rebuilds the section from them. One rule for which way
+    a shape faces: its width or flanges run along local **y** and its
+    depth or height along local **z**, so the orientation vector (which
+    names local y) points across the flanges, and `iy` is the
+    strong-axis bending of an I-beam or a channel. An angle is the
+    exception, because its leg axes are not principal and the element has
+    no product term: its `iy` and `iz` are its principal moments, and the
+    orientation vector points along the major principal axis
+    (`angle_major_axis` says where that is relative to the legs).
+
+    The element assumes the shear center is the centroid. For the
+    symmetric shapes it is; a channel's and an angle's are not, and the
+    twisting a load through their centroid causes is not in the model.
+
     `polar` is the *inertia* term, always the true polar second moment
     (iy + iz), because rotary inertia about the axis is a property of where
     the material is and has nothing to do with warping.
@@ -233,31 +250,67 @@ class Section:
     iy: float                      #: m^4, bending about local y
     iz: float                      #: m^4, bending about local z
     j: float                       #: m^4, St Venant torsion constant
+    shape: str = ''                #: one of `SHAPES`, '' for four numbers
+    dimensions: tuple[float, ...] = ()   #: m, in the constructor's order
 
     @property
     def polar(self) -> float:
         return self.iy + self.iz
 
     @classmethod
+    def of_shape(cls, name: str, shape: str,
+                 dimensions: Sequence[float]) -> Section:
+        """The section of a named shape (`SHAPES`), given its dimensions
+        in meters in the order the shape's constructor takes them.
+
+        Parameters
+        ----------
+        name : str
+            What to call the section.
+        shape : str
+            A key of `SHAPES`.
+        dimensions : sequence of float
+            The shape's dimensions, in meters.
+
+        Returns
+        -------
+        Section
+        """
+        if shape not in SHAPES:
+            raise ValueError(f'{shape!r} is not a section shape: '
+                             + ', '.join(SHAPES))
+        method, names = SHAPES[shape]
+        if len(dimensions) != len(names):
+            raise ValueError(f'{with_article(shape)} takes {len(names)} '
+                             'dimensions — ' + ', '.join(names))
+        return getattr(cls, method)(name, *(float(v) for v in dimensions))
+
+    @classmethod
     def round_tube(cls, name: str, outer: float, wall: float) -> Section:
         """A circular tube, given its outside diameter and wall thickness."""
         ro, ri = outer / 2.0, outer / 2.0 - wall
-        if ri < 0:
-            raise ValueError(f'{name}: wall {wall} is thicker than the radius')
+        if ri < 0 or wall <= 0 or outer <= 0:
+            raise ValueError(f'{name}: a round tube needs a wall between 0 '
+                             'and the radius')
         area = math.pi * (ro ** 2 - ri ** 2)
         i = math.pi * (ro ** 4 - ri ** 4) / 4.0
         # a closed circular section is the one case where torsion is the
         # polar moment exactly: it does not warp
-        return cls(name, area, i, i, 2.0 * i)
+        return cls(name, area, i, i, 2.0 * i, 'round tube',
+                   (float(outer), float(wall)))
 
     @classmethod
     def rod(cls, name: str, diameter: float) -> Section:
         """A solid circular rod."""
-        return cls.round_tube(name, diameter, diameter / 2.0)
+        section = cls.round_tube(name, diameter, diameter / 2.0)
+        return cls(name, section.area, section.iy, section.iz, section.j,
+                   'rod', (float(diameter),))
 
     @classmethod
     def rectangle(cls, name: str, width: float, height: float) -> Section:
         """A solid rectangle, `width` along local y and `height` along z."""
+        if width <= 0 or height <= 0:
+            raise ValueError(f'{name}: a rectangle needs a width and a height')
         area = width * height
         iz = width ** 3 * height / 12.0     # bending in the local x-y plane
         iy = width * height ** 3 / 12.0     # bending in the local x-z plane
@@ -272,21 +325,165 @@ class Section:
                    for n in range(1, 200, 2))
         j = long * short ** 3 / 3.0 * (
             1.0 - 192.0 / math.pi ** 5 * (short / long) * tail)
-        return cls(name, area, iy, iz, j)
+        return cls(name, area, iy, iz, j, 'rectangle',
+                   (float(width), float(height)))
+
+    @classmethod
+    def rectangular_tube(cls, name: str, width: float, height: float,
+                         wall: float) -> Section:
+        """A rectangular tube of one wall thickness, `width` along local y
+        and `height` along z, both outside dimensions."""
+        inner_w, inner_h = width - 2.0 * wall, height - 2.0 * wall
+        if wall <= 0 or inner_w <= 0 or inner_h <= 0:
+            raise ValueError(f'{name}: wall {wall} closes the section')
+        area = width * height - inner_w * inner_h
+        iy = (width * height ** 3 - inner_w * inner_h ** 3) / 12.0
+        iz = (width ** 3 * height - inner_w ** 3 * inner_h) / 12.0
+        # Bredt's thin-wall formula, J = 4 A_m^2 t / s: A_m the area inside
+        # the wall's centreline, s that centreline's length
+        mean_w, mean_h = width - wall, height - wall
+        j = 4.0 * (mean_w * mean_h) ** 2 * wall / (2.0 * (mean_w + mean_h))
+        return cls(name, area, iy, iz, j, 'rectangular tube',
+                   (float(width), float(height), float(wall)))
 
     @classmethod
     def square_tube(cls, name: str, width: float, wall: float) -> Section:
-        """A square tube, given its outside width and wall thickness."""
-        inner = width - 2.0 * wall
-        if inner <= 0:
-            raise ValueError(f'{name}: wall {wall} closes the section')
-        area = width ** 2 - inner ** 2
-        i = (width ** 4 - inner ** 4) / 12.0
-        # Bredt's thin-wall formula: J = 4 A_m^2 t / s, with A_m the area
-        # inside the wall centreline and s that centreline's length
-        mean = width - wall
-        j = 4.0 * (mean ** 2) ** 2 * wall / (4.0 * mean)
-        return cls(name, area, i, i, j)
+        """A square tube, given its outside width and wall thickness — a
+        rectangular tube of equal sides."""
+        return cls.rectangular_tube(name, width, width, wall)
+
+    @classmethod
+    def i_beam(cls, name: str, depth: float, flange_width: float,
+               flange_thickness: float, web_thickness: float) -> Section:
+        """A doubly symmetric I-beam: overall `depth` along local z,
+        flanges `flange_width` wide along y. Fillets are left out, which
+        puts area and torsion a few percent under a rolled shape's table
+        values (a W8x31: 8.99 in² against 9.13, J 0.50 in⁴ against 0.54)."""
+        d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
+        web = d - 2.0 * tf
+        if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
+            raise ValueError(f'{name}: the flanges and web do not make an I')
+        area = 2.0 * bf * tf + web * tw
+        iy = (bf * d ** 3 - (bf - tw) * web ** 3) / 12.0
+        iz = 2.0 * tf * bf ** 3 / 12.0 + web * tw ** 3 / 12.0
+        # an open thin-walled section: the sum of b t^3 / 3 over its
+        # plates, the web taken between the flanges' mid-planes
+        j = (2.0 * bf * tf ** 3 + (d - tf) * tw ** 3) / 3.0
+        return cls(name, area, iy, iz, j, 'I-beam',
+                   (float(d), float(bf), float(tf), float(tw)))
+
+    @classmethod
+    def channel(cls, name: str, depth: float, flange_width: float,
+                flange_thickness: float, web_thickness: float) -> Section:
+        """A channel: overall `depth` along local z, the flanges
+        `flange_width` wide (web included) running along +y from the web.
+        `iz` is about the centroid, which sits off the web; the shear
+        center sits further off it the other way, and the element does
+        not know. The flanges are of one thickness: a rolled channel's
+        taper toward their tips, and its table flange thickness is an
+        average, so this `iz` runs high for one (a C6x10.5: 1.06 in⁴
+        against the table's 0.86) — a bent-plate channel it gives
+        exactly."""
+        d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
+        web = d - 2.0 * tf
+        if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
+            raise ValueError(f'{name}: the flanges and web do not make a '
+                             'channel')
+        flange_area, web_area = bf * tf, web * tw
+        area = 2.0 * flange_area + web_area
+        iy = (bf * d ** 3 - (bf - tw) * web ** 3) / 12.0
+        # centroid along y, from the back of the web
+        centroid = (2.0 * flange_area * bf / 2.0 + web_area * tw / 2.0) / area
+        iz = (2.0 * (tf * bf ** 3 / 12.0
+                     + flange_area * (bf / 2.0 - centroid) ** 2)
+              + web * tw ** 3 / 12.0 + web_area * (tw / 2.0 - centroid) ** 2)
+        j = (2.0 * bf * tf ** 3 + (d - tf) * tw ** 3) / 3.0
+        return cls(name, area, iy, iz, j, 'channel',
+                   (float(d), float(bf), float(tf), float(tw)))
+
+    @classmethod
+    def angle(cls, name: str, long_leg: float, short_leg: float,
+              thickness: float) -> Section:
+        """An angle of one thickness. Its leg axes are not principal and
+        the element has no product term, so `iy` and `iz` are the
+        principal moments — major and minor — and the orientation vector
+        is to point along the major principal axis (`angle_major_axis`)."""
+        a, b, t = long_leg, short_leg, thickness
+        if min(a, b, t) <= 0 or t >= min(a, b) or b > a:
+            raise ValueError(f'{name}: an angle needs a long leg, a short '
+                             'leg no longer, and a thickness under both')
+        area, (i_major, i_minor), _theta = _angle_properties(a, b, t)
+        j = (a + b - t) * t ** 3 / 3.0
+        return cls(name, area, i_major, i_minor, j, 'angle',
+                   (float(a), float(b), float(t)))
+
+
+def _angle_properties(a: float, b: float, t: float
+                      ) -> tuple[float, tuple[float, float], float]:
+    """(area, (I major, I minor), angle of the major axis) for an angle
+    with its long leg `a` along y and short leg `b` along z from the
+    heel, both `t` thick: two rectangles, their centroidal moments and
+    product about the combined centroid, and the principal values of
+    that tensor. The angle is in degrees from the long leg toward the
+    short one."""
+    # the long leg: y in [0, a], z in [0, t]; the short leg above it:
+    # y in [0, t], z in [t, b]
+    parts = [(a, t, a / 2.0, t / 2.0), (t, b - t, t / 2.0, t + (b - t) / 2.0)]
+    area = sum(w * h for w, h, _y, _z in parts)
+    cy = sum(w * h * y for w, h, y, _z in parts) / area
+    cz = sum(w * h * z for w, h, _y, z in parts) / area
+    iyy = sum(w * h ** 3 / 12.0 + w * h * (z - cz) ** 2
+              for w, h, _y, z in parts)            # about y: z squared
+    izz = sum(h * w ** 3 / 12.0 + w * h * (y - cy) ** 2
+              for w, h, y, _z in parts)            # about z: y squared
+    iyz = sum(w * h * (y - cy) * (z - cz) for w, h, y, z in parts)
+    tensor = np.array([[iyy, -iyz], [-iyz, izz]])
+    values, vectors = np.linalg.eigh(tensor)
+    major = vectors[:, 1]                          # the larger moment's axis
+    theta = math.degrees(math.atan2(major[1], major[0])) % 180.0
+    return area, (float(values[1]), float(values[0])), theta
+
+
+def with_article(shape: str) -> str:
+    """'a channel', 'an I-beam', 'an angle' — a shape named in a
+    sentence."""
+    return ('an ' if shape[:1].lower() in 'aeio' or shape.startswith('I-')
+            else 'a ') + shape
+
+
+def angle_major_axis(long_leg: float, short_leg: float,
+                     thickness: float) -> float:
+    """Where an angle's major principal axis lies — the direction its
+    orientation vector points — in degrees from the long leg, turning
+    toward the short leg. 45 for an equal angle.
+
+    Parameters
+    ----------
+    long_leg, short_leg, thickness : float
+        The angle's dimensions, in any one unit.
+
+    Returns
+    -------
+    float
+        Degrees from the long leg, 0 to 180.
+    """
+    return _angle_properties(long_leg, short_leg, thickness)[2]
+
+
+#: the shapes a section can be built from: {shape: (constructor, the
+#: dimensions it takes, in order)} — what the Blocks table offers, and
+#: what a file or a session script rebuilds a section from
+SHAPES: dict[str, tuple[str, tuple[str, ...]]] = {
+    'round tube': ('round_tube', ('outer diameter', 'wall')),
+    'rod': ('rod', ('diameter',)),
+    'rectangle': ('rectangle', ('width', 'height')),
+    'rectangular tube': ('rectangular_tube', ('width', 'height', 'wall')),
+    'I-beam': ('i_beam', ('depth', 'flange width', 'flange thickness',
+                          'web thickness')),
+    'channel': ('channel', ('depth', 'flange width', 'flange thickness',
+                            'web thickness')),
+    'angle': ('angle', ('long leg', 'short leg', 'thickness')),
+}
 
 
 @dataclass
@@ -1189,6 +1386,17 @@ def _element_by_block(model: Model, geometry: Geometry,
             raise ValueError(f'{named(block)} has {props.kind}: a block of '
                              'plates takes a thickness, a block of beams a '
                              'section, never both')
+        if props.kind == 'beam' and not min(
+                props.section.area, props.section.iy, props.section.iz,
+                props.section.j) > 0.0:
+            # a shape picked in the table and its dimensions not yet typed,
+            # or a number left blank: a beam of no stiffness is a
+            # singular model, said here rather than by the eigensolver
+            what = (f'its {props.section.shape} has no dimensions yet'
+                    if props.section.shape and not props.section.dimensions
+                    else 'its A, Iy, Iz and J must all be positive')
+            raise ValueError(f'{named(block)}: the section is not finished — '
+                             f'{what}')
         nodes = [int(n) for n in conn]
         shape_name, _count, shape = ELEMENT_TYPES.get(
             int(kind), (f'type {int(kind)}', 0, 'unknown'))

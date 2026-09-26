@@ -53,8 +53,25 @@ the geometry's group, previewed on the model as the point is set.
 A geometry is also a finite element model once its blocks say what
 they are made of. The Blocks table's property columns take, per
 block, a material (name, E, ν, ρ) and either a thickness — for a block
-of quads or triangles — or a section (name, A, Iy, Iz, J) and an
-orientation vector for a block of beams, SI throughout. The Material
+of quads or triangles — or a section and an orientation vector for a
+block of beams. A section is built from its **shape**: round tube, rod,
+rectangle, rectangular tube, I-beam, channel or angle, picked in the
+Shape column, whose Dimensions cell then says what it needs (`D=?, t=?`
+for a round tube) and computes A, Iy, Iz and the torsion constant J
+from what is typed; **custom** takes the four numbers typed instead.
+Every shape puts its width or flanges along the section's local y and
+its depth along local z, and the orientation vector names local y — so
+for an I-beam or a channel it points across the flanges, and Iy is the
+strong axis. An angle's leg axes are not principal, so its Iy and Iz are
+its principal moments and its Dimensions cell says where to point the
+orientation (45° from the long leg for an equal angle). A channel's and
+an angle's shear center is off the centroid, and the twisting that
+causes is not modeled; a rolled channel's tapered flanges put its
+weak-axis Iz under the uniform-flange value given here. All of it is
+shown and typed in the
+current display unit system (psi and in⁴ in the inch system, MPa and mm⁴
+in millimeters), the unit in the column's header, and held in SI; the
+table follows the unit menu while it is open. The Material
 cell is a drop-down over a small library — 6061-T6, 7075-T6, 2024-T3,
 1018, A36 and 4130 steel, 304, 316 and 17-4 PH stainless, Ti-6Al-4V,
 AZ31B magnesium, C26000 brass, C11000 copper, Inconel 718, acrylic,

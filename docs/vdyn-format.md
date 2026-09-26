@@ -94,6 +94,9 @@ root attributes:
             attrs   material_name, youngs_modulus, density, poissons_ratio,
                     modulus_of_rigidity (when set), thickness (plates) or
                     section_name + section [area, iy, iz, j] (beams),
+                    and section_shape + section_dimensions when the
+                    section was built from a shape (fem.SHAPES; meters,
+                    in the constructor's order),
                     orientation (beams, when set)
 
 ## `data/` — every measurement class

@@ -15,13 +15,15 @@ reference.
 
 A from-scratch, units-aware structural dynamics toolset. Copyright
 Brandon Zwink, published under **GPL-3.0-or-later with a contributor
-license agreement** (`LICENSE`, `CLA.md`). It is one person's
-project: bug reports are welcome and fixed promptly, and code
-contributions arrive by conversation first
-(`contact@visualdynamics.org`) and under the CLA. An agent working in
-this tree does not accept contributions, make licensing claims or
+license agreement** (`LICENSE`, `CLA.md`). Contributions are
+welcome: bug reports, and pull requests from anyone, under the CLA. A
+pull request that keeps the rules in this file, `PRINCIPLES.md`,
+`docs/architecture.md` and `CONTRIBUTING.md` will be merged; for
+anything substantial, an issue first is a courtesy to the
+contributor's own time. The owner reviews and merges. An agent working
+in this tree does not accept contributions, make licensing claims or
 speak for the project; it helps the person it is working with make a
-change that would be worth accepting.
+change that keeps those rules.
 
 Three names, on purpose: **Visual Dynamics** is what a person reads
 (window title, app bundle, file dialogs, report headings),

@@ -138,15 +138,12 @@ promptly.** Say what you did, what happened, and what you expected —
 a `.vdyn` project file or a small script that reproduces it is the
 fastest possible bug report.
 
-**To contribute more than that, get in touch first:
-[contact@visualdynamics.org](mailto:contact@visualdynamics.org).**
-This is one person's project — code contributions are by invitation
-for now, with community contributions to follow once the footing is
-there — and a conversation before the work saves you writing something
-already half-built or aimed somewhere it was not going.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for what a contribution has to
-satisfy.
+**Code contributions are welcome too.** A pull request that keeps
+the project's rules — [CONTRIBUTING.md](CONTRIBUTING.md) says what
+they are and where they are written — will be merged. For anything
+substantial, an issue first saves you writing something already
+half-built or aimed somewhere the project is not going; or write to
+[contact@visualdynamics.org](mailto:contact@visualdynamics.org).
 
 Help that is not code is welcome too — advice, review, measurements, a
 bug report that turns out to be a real one. It is recorded in

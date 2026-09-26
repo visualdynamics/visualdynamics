@@ -12602,6 +12602,11 @@ class MainWindow(QMainWindow):
             names = [level.tone for level in measured]
             tone = pick_tone(names)
             self.data_pane.show_srs_views(False)
+            # both readings exist, so the 2D/3D toggle is on the bar:
+            # branching on it without offering it left the button
+            # hidden and the drawing following whatever the last object
+            # left the toggle at (Brandon, 2026-09-25)
+            self.data_pane.offer_waterfall(True)
             levels_shown = [level for level in measured if level.tone == tone]
             dofs = chosen(sine_dofs(SineLevelSet(levels_shown)))
             if self.data_pane.showing_waterfall:
@@ -12629,6 +12634,9 @@ class MainWindow(QMainWindow):
         showing_bars = matched and self.data_pane.srs_view != 'curves'
         if not showing_bars:
             tone = pick_tone(tones)
+            # the stage and the flat plot are both readings of this; the
+            # bars are one flat picture and keep the toggle off the bar
+            self.data_pane.offer_waterfall(True)
             dofs = chosen(sine_dofs(spec))
             levels_shown = [level for level in matched if level.tone == tone]
             what = (f'{len(levels_shown)} level'

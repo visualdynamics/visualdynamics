@@ -438,6 +438,53 @@ def test_levels_draw_over_the_spec_and_the_bars_judge_them(window, pump):
     assert 'within' in text or 'dB' in text
 
 
+def test_every_sine_reading_with_two_forms_offers_the_2d_3d_toggle(window,
+                                                                  pump):
+    """The toggle is on the bar wherever the stage and the flat plot
+    are both readings: the specification alone, the levels alone, and
+    the two together. The tests above flip it with `setChecked`, which
+    a hidden button accepts just the same — and the button was hidden:
+    the renderer branched on the toggle without ever offering it, so
+    the drawing followed whatever the last object had left it at
+    (Brandon, 2026-09-25). The bars are one flat picture and do not
+    offer it."""
+    spec = _spec()
+    for tone in spec.tones:
+        tone.limits['warning_lower'] = tone.amplitude * 10 ** (-3 / 20)
+        tone.limits['warning_upper'] = tone.amplitude * 10 ** (3 / 20)
+    window.add_object('Sine Specification', spec)
+    window.add_object('Time History', _recording(spec))
+    window.add_object('Sine Levels',
+                      extract_sine(window.project['Time History'], spec))
+    pane = window.data_pane
+    toggle = pane.waterfall_action
+
+    def show(*names):
+        window.tree.clearSelection()
+        for name in names:
+            window._item_for_object(name).setSelected(True)
+        pump()
+
+    # a flat reading first, so the button's state is not the default
+    show('Time History')
+    for names in (('Sine Specification',), ('Sine Levels',),
+                  ('Sine Specification', 'Sine Levels')):
+        show(*names)
+        assert toggle.isVisible(), f'no 2D/3D button for {names}'
+        # and it works both ways from the bar
+        toggle.trigger()
+        pump()
+        flat = not pane._waterfall_page.isVisible()
+        toggle.trigger()
+        pump()
+        assert flat != (not pane._waterfall_page.isVisible()), names
+    pane.srs_view = 'error'
+    window.render_current()
+    pump()
+    assert window.bar_chart is not None
+    assert not toggle.isVisible(), 'the bars have no depth to add'
+
+
 # ---- the report ---------------------------------------------------------
 
 def test_the_sine_report_renders_its_comparison_and_bars():

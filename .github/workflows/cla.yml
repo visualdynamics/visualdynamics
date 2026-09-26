@@ -51,10 +51,10 @@ jobs:
           allowlist: 'bzwink,dependabot[bot]'
           custom-notsigned-prcomment: >-
             Thank you for the pull request. Code contributions to Visual
-            Dynamics are by invitation and arrive under the contributor
-            license agreement — please read it at the link, and if you
-            agree, reply to this comment with the sentence below. Signing
-            once covers every later pull request.
+            Dynamics arrive under the contributor license agreement —
+            please read it at the link, and if you agree, reply to this
+            comment with the sentence below. Signing once covers every
+            later pull request.
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
           custom-allsigned-prcomment: 'All contributors have signed the CLA.'
           lock-pullrequest-aftermerge: false

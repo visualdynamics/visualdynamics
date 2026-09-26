@@ -77,8 +77,13 @@ green or **FAIL** in red, read off the octave-band comparison, with
 the two readings it was decided on beside it — the share of control
 channels that had more than a tenth of their band outside the abort
 limits, failing at a fifth of them, and the share more than 3 dB off
-in RMS, failing at a tenth. Someone opening the report knows whether
-the environment passed before reading a word. The octave-band
+in RMS, failing at a tenth. Left of it, a box of the same size gives
+the **test level** the comparison was judged at, in the same large
+bold — 0 dB for a run at full level, −6 dB for one captured 6 dB below
+the specification — and says whether it was detected from the data or
+set in the Scaling field. Someone opening the report knows whether
+the environment passed, and at what level, before reading a word. The
+octave-band
 figures read on a log frequency axis, the narrowband ones on a
 linear one.
 
@@ -252,9 +257,25 @@ project.save('random.vdyn')
 - **Whether the comparison scale is right.** A run captured below the
   requirement is compared scaled up to the 0 dB specification —
   standard practice — and the scale is detected only when the data
-  supports it: every channel at or above a corroborated offset. Type
-  a number in the Scaling field to hold it (0 holds it unscaled),
-  clear the field to detect again. The data itself is never changed.
+  supports it. A controller scales every channel together, so the
+  level is read once for the whole test, in sixth-octave bands: every
+  band of every compared channel votes for its nearest 3 dB step, and
+  the most common step is taken as the level only when the bands agree
+  on it — three quarters of them within 1.5 dB of it, their median
+  within 0.75 dB of the step — the total power agrees with it within
+  3 dB, and it is a level a controller would command (between 6 dB
+  over and 24 dB under the specification). A run that failed — a controller that went unstable
+  and ran hot, one that held its resonant peaks and little else, one
+  under-driven between steps — is shown as measured, not scaled to
+  look like a reduced-level run; so is a run whose specification bounds
+  monitors as well as controls, whose monitors spread the bands. One
+  failure no rule can see: a full-level test held 3 dB low everywhere
+  looks exactly like a run commanded at −3 dB, and is read as one —
+  which is why the report's test-level box says what was detected. Type a number in the Scaling
+  field to hold it (0 holds it unscaled), clear the field to detect
+  again. The data itself is never changed. A script that calls
+  `compare_all` without a scale is warned (`ScaleWarning`) when it
+  detected one.
 - **What the run was allowed to do.** The warning and abort lines
   come from the specification; whether a brush against the warning
   line matters is the test engineer's sentence to write in the

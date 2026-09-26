@@ -571,15 +571,6 @@ def bounds(specification: Specification, record: int, pair: str,
 #: at any threshold from 20 to 60 dB.
 DETECTION_RANGE_DB = 40.0
 
-#: how large a detected offset must be before it is believed. Runs are
-#: commanded in steps of 3 dB and 6; a detected 1 or 2 dB is not a
-#: commanded level but the ordinary spread of a test that held its
-#: channels imperfectly — and dividing that out would erase exactly
-#: the control error the comparison exists to show. Below this the
-#: answer is zero, and the Scaling field is there for anyone who
-#: really did command a 2 dB step.
-DETECTION_DEADBAND_DB = 2
-
 
 def significant_band(want: np.ndarray, good: np.ndarray) -> np.ndarray:
     """`good`, narrowed to where the specification has real content.
@@ -603,56 +594,131 @@ def significant_band(want: np.ndarray, good: np.ndarray) -> np.ndarray:
 #: scale is still any whole decibel.
 SCALE_STEP_DB = 3
 
+#: the commanded levels a detected scale may stand for, as what is
+#: *added* to the measurement: a run at -12 dB needs +12, a run at
+#: +6 dB needs -6. Controllers command on a ladder near 0 dB — run-ups
+#: from -12 or -24, now and then +3 or +6 — and nobody commands +54.
+#: Past this a measurement that far off its specification is a fault to
+#: show, never a level to divide out (2026-09-26: a controller that blew
+#: up ran 50 dB hot on every channel, eight of them agreeing within
+#: 2 dB, and was charted -54 dB "scaled" — an overtest read as an
+#: undertest). Lopsided on purpose: a measurement hotter than its
+#: specification is the most dangerous thing a compliance check
+#: reports, so that side gets the least room.
+DETECTION_MIN_DB = -6
+DETECTION_MAX_DB = 24
+
+
+class ScaleWarning(UserWarning):
+    """A comparison scaled the measurement by a level it detected from
+    the data rather than one it was given — said aloud, because the
+    charts built from `channel_errors` do not carry the scale."""
+
+
+#: how tightly the bands must agree before their mode is read as a
+#: commanded level: at least this share of every compared band within
+#: half a ladder step of the mode. This is the spread test, and the only
+#: one: a standard deviation (tried first, at 2 dB) is dominated by tails,
+#: and real control has them — on 22 real runs held on level, a few deep
+#: bands of under-driven out-of-plane channels put σ at 2.4-4.7 dB with
+#: 89% of the bands within 1.5 dB, and σ showed them unscaled. A robust
+#: spread (the scaled MAD) fixed that, but with this share and the rung
+#: test below it could never decide alone — its one possible case, two
+#: groups straddling a rung, puts the median off the rung — and the
+#: campaign's 242 scaled copies read the same with it or without it: 210
+#: exact, none wrong (the other session's check, 2026-09-26).
+DETECTION_AGREEMENT = 0.75
+
+#: and the bands must center on the rung: their median within this of
+#: it. Tight bands between two rungs are a controller that held the
+#: wrong level — 1.6 dB low sits 1.4 dB from +3, inside half a step of
+#: it on every band, and without this reads as a run at -3 dB.
+DETECTION_RUNG_DB = 0.75
+
 
 def detect_scale_db(specification: Specification, measured: DataArray,
                     spec_records: Sequence[int] | None = None,
-                    measured_records: Sequence[int] | None = None) -> int:
+                    measured_records: Sequence[int] | None = None,
+                    controls: Sequence[str] | None = None) -> int:
     """The offset, on the 3 dB ladder from zero, that best lays the
     measurement on the specification — what a run captured at -6 dB
-    needs added to be compared against the 0 dB requirement.
+    needs added to be compared against the 0 dB requirement — or zero
+    when the data does not say so plainly.
 
-    Each common channel answers with the median dB difference across
-    the lines it shares with the specification — the median because a
-    resonance or a notch is exactly the kind of departure the
-    comparison exists to show, and a mean would let it vote on the
-    level — snapped to the nearest multiple of `SCALE_STEP_DB`, since
-    that is the ladder runs are commanded on; a level error of a
-    decibel or two reads as its nearest step, and the Scaling field is
-    there to type the truth. (Whole decibels until 2026-09-19.)
+    **The mode of the band levels, when the bands agree on it**
+    (Brandon, 2026-09-26). Both are banded to sixth octaves (`octave.
+    PER_OCTAVE`; a pair already banded is used as it is). Every band of
+    every compared channel gives the dB it would need added, each
+    snapped to its nearest multiple of `SCALE_STEP_DB`; the most common
+    rung is the candidate. It is read as the test's level only if
 
-    Across channels the answer is the **smallest offset at least two
-    channels agree on**, not the median of all of them. A specification
-    usually bounds monitors as well as controls, each monitor sitting
-    its own distance under its envelope, and the median of that spread
-    lands wherever the monitors happen to pile up — measured on a real
-    36-channel run it said +8 dB for a section commanded at -6. The
-    controls are the channels *on* their specification, every one at
-    exactly the commanded offset, which makes the commanded level the
-    smallest value with corroboration; requiring two keeps one broken
-    channel from answering alone. No agreement anywhere, the median of
-    the channel answers; no channels, zero.
+    - it lies within `DETECTION_MIN_DB` to `DETECTION_MAX_DB` — a level
+      a controller would command (a run 50 dB hot is a failure, not a
+      level);
+    - at least `DETECTION_AGREEMENT` of the bands sit within half a step
+      of it, and their median is within `DETECTION_RUNG_DB` of it — the
+      bands agree on one level, and it is a rung;
+    - the pooled energy agrees with it within `ERROR_DB` — a level moves
+      the band median and the total power together. A run low between
+      its resonances and hot at them has most bands agreeing tightly on
+      a low level while its power sits at the peaks; the bands' share
+      does not see the peaks, being a minority, and the energy does.
 
-    And one physical veto over whichever answer wins: **a commanded
-    level is a floor**. In a genuine run-up every channel sits at or
-    above the commanded offset — controls exactly on it, monitors above
-    it — so a channel whose band-median lands well *below* the
-    candidate falsifies the scaled-run premise outright — provided
-    that channel is itself behaving (a channel sitting over its own
-    envelope is a fault, and a fault vetoes nothing). The plate's
-    demonstration run is the case that demanded it: two shakers cannot
-    hold eight channels to the specification, the drive point ended
-    dead on spec and the rest scattered 3-14 dB low, and two of them
-    happening to agree at +4 read as a well-controlled -4 dB run. When
-    the floor contradicts the candidate the answer is zero: scaling a
+    Otherwise zero, and the comparison is shown as measured: scaling a
     comparison silently on doubtful evidence is worse than showing the
-    mismatch, and the Scaling field is right there to be typed in.
+    mismatch, and a wrong scale can turn a failed test into a passed
+    one. The Scaling field is there to type the truth.
+
+    **Why the mode, and why bands.** A controller scales every channel
+    together, so the level is one number for the whole test; the controls
+    pile into its rung while monitors, each its own distance under its
+    envelope, scatter across many — so the mode finds the controls where
+    a median of everything finds wherever the monitors pile up. In
+    narrowband each line is a noisy estimate, most lines sit in the top
+    decade, and many in anti-resonances no controller holds: runs at full
+    level read +14, +9 and +4 dB there and 0 in sixth-octave bands (a
+    22-run campaign scored in another session). The verdict is read off
+    the octave comparison, too, so the level and the verdict come from
+    the same bands.
+
+    **What no rule can see.** A full-level test the controller held 3 dB
+    low everywhere is, in the data, a test commanded at -3 dB: tight,
+    on a rung, and read as one. The commanded level is not in a
+    Rattlesnake file, so a detected level is always said where it is
+    used — the report's test-level box, the captions, `ScaleWarning`.
+
+    This replaced, the same day, a per-channel vote with a floor veto and
+    gates (three hot controls outvoted twenty-one), then a pooled median
+    (monitors outvoted the controls). A specification bounding many
+    monitors now spreads its bands and reads zero; `controls` names the
+    control channels (by DOF, or by the label `matched_records` gives)
+    for a caller that knows them, and only they are counted.
+
+    The bands are those where the specification has real content
+    (`significant_band`, per channel): a waveform's spectrum ending at
+    2 kHz left half a transient's bands 40 dB apart saying nothing about
+    level.
     """
-    per_channel = []
-    for _label, spec_index, measured_index in matched_records(
+    from .octave import PER_OCTAVE
+
+    if comparable(specification, measured) is not None:
+        return 0
+    if getattr(measured, 'bandwidth', None) is None:
+        if not (hasattr(specification, 'to_octave')
+                and hasattr(measured, 'to_octave')):
+            return 0
+        specification = specification.to_octave(PER_OCTAVE)
+        measured = measured.to_octave(PER_OCTAVE)
+    wanted = None if controls is None else {str(c) for c in controls}
+    offsets, asked_total, held_total = [], 0.0, 0.0
+    for label, spec_index, measured_index in matched_records(
             specification, measured, spec_records, measured_records):
-        # cell by cell, the same cells the comparison is judged on —
-        # each a density: the power asked and held over the same
-        # stretch, over that stretch's width
+        if wanted is not None and label not in wanted and str(
+                specification.response_dof[spec_index]) not in wanted:
+            continue
+        # band by band, the same cells the comparison is judged on —
+        # each a density: the power asked and held over the same band,
+        # over its width
         level = judge(specification, measured, spec_index, measured_index,
                       None, True, scale_db=0)
         width = np.array([cell['width'] for cell in level['cells']],
@@ -661,53 +727,46 @@ def detect_scale_db(specification: Specification, measured: DataArray,
             want = level['asked'] / width
             got = level['held'] / width
         good = np.isfinite(want) & (want > 0.0) & np.isfinite(got) & (got > 0.0)
-        # only where the requirement says something about level —
-        # see `significant_band`
+        # the power over every finite band, as `compare` sums it
+        whole = np.isfinite(level['asked']) & np.isfinite(level['held'])
+        asked_total += float(np.sum(level['asked'][whole]))
+        held_total += float(np.sum(level['held'][whole]))
         good = significant_band(want, good)
-        if good.any():
-            median = float(np.median(10.0 * np.log10(want[good] / got[good])))
-            per_channel.append(round(median / SCALE_STEP_DB) * SCALE_STEP_DB)
-    if not per_channel:
+        offsets.append(10.0 * np.log10(want[good] / got[good]))
+    offsets = np.concatenate(offsets) if offsets else np.array([])
+    if not offsets.size or not asked_total > 0.0 or not held_total > 0.0:
         return 0
-    agreed = [value for value in set(per_channel)
-              if per_channel.count(value) >= 2]
-    candidate = (min(agreed) if agreed
-                 else round(float(np.median(per_channel))))
-    # The floor veto listens only to channels behaving like channels:
-    # an offset below -2 means the channel sits over its own envelope
-    # on a band-median basis, which is a fault (or a wild resonance),
-    # not a statement about the commanded level — the broken-channel
-    # test pins that such a channel cannot answer alone, and it must
-    # not veto alone either. 2 dB of slack both ways lets a slightly
-    # hot control sit under the commanded level without canceling a
-    # real run-up.
-    plausible = [value for value in per_channel if value >= -2]
-    if plausible and min(plausible) < candidate - 2:
-        return 0
-    # and a deadband: a level nobody commanded is not a level. The
-    # smallest-agreed rule reads a control/monitor split, and a run
-    # whose channels all sit within a couple of dB of their
-    # specification has no such split to read — it is simply a test
-    # that held. Answering the dB two channels happened to share
-    # there (the drone transient's -1) would divide out the control
-    # error rather than show it.
-    if abs(candidate) <= DETECTION_DEADBAND_DB:
+    rungs = np.round(offsets / SCALE_STEP_DB) * SCALE_STEP_DB
+    values, counts = np.unique(rungs, return_counts=True)
+    # the most common rung; a tie goes to the one nearest zero, the
+    # answer that scales least
+    best = counts.max()
+    candidate = int(min(values[counts == best], key=abs))
+    agreement = float(np.mean(np.abs(offsets - candidate)
+                              <= SCALE_STEP_DB / 2))
+    if (not DETECTION_MIN_DB <= candidate <= DETECTION_MAX_DB
+            or agreement < DETECTION_AGREEMENT
+            or abs(float(np.median(offsets)) - candidate) > DETECTION_RUNG_DB
+            or abs(10.0 * np.log10(asked_total / held_total) - candidate)
+            > ERROR_DB):
         return 0
     return candidate
 
 
 def comparison_scale_db(specification: Specification, measured: DataArray,
                         spec_records: Sequence[int] | None = None,
-                        measured_records: Sequence[int] | None = None) -> int:
+                        measured_records: Sequence[int] | None = None,
+                        controls: Sequence[str] | None = None) -> int:
     """The decibels every comparison adds to `measured`: the value the
     user holds on the object (`scale_db`, 0 included), or the detected
-    one when nothing is held. The one resolver, so the drawn curves,
-    the error metrics and the report cannot disagree."""
+    one when nothing is held — `controls`, when known, naming the
+    channels the detection pools. The one resolver, so the drawn
+    curves, the error metrics and the report cannot disagree."""
     held = getattr(measured, 'scale_db', None)
     if held is not None:
         return int(held)
     return detect_scale_db(specification, measured,
-                           spec_records, measured_records)
+                           spec_records, measured_records, controls)
 
 
 def matched_records(specification: Specification, measured: DataArray,
@@ -995,10 +1054,26 @@ def compare_all(specification: Specification, measured: DataArray,
     (the report's own octave banding) passes the scale it resolved on
     the original, so the two gridings cannot round to different
     decibels.
+
+    A scale *detected* here (nothing passed, nothing held on the
+    measurement) that is not zero is raised as a `ScaleWarning`: every
+    row carries it as `scale_db`, but `channel_errors` and the charts
+    built from it do not, and a whole campaign was once scored on
+    shifted numbers without a word (2026-09-26). Pass `scale_db=0` to
+    compare as measured.
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured,
                                        spec_records, measured_records)
+        if scale_db and getattr(measured, 'scale_db', None) is None:
+            import warnings
+
+            warnings.warn(
+                f'the measurement was scaled by {scale_db:+g} dB, detected '
+                f'from the data as a run at {-scale_db:+g} dB; pass '
+                'scale_db=0 to compare it as measured, or set '
+                'measured.scale_db to the level it was run at',
+                ScaleWarning, stacklevel=2)
     return [(label, compare(specification, measured, spec_index,
                             measured_index, scale_db=scale_db))
             for label, spec_index, measured_index in matched_records(

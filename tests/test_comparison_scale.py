@@ -61,15 +61,19 @@ def test_a_quiet_run_detects_its_commanded_level():
 
 def test_detection_snaps_to_the_three_decibel_ladder():
     """Runs are commanded at +3, 0, -3, -6 … (Brandon, 2026-09-19,
-    from whole decibels): the detected offset lands on that ladder,
-    and a level error of a decibel or two reads as its nearest step —
-    the Scaling field is there to type the truth."""
-    from visualdynamics.core.compliance import SCALE_STEP_DB
+    from whole decibels): the detected offset lands on that ladder. A
+    level whose bands center within `DETECTION_RUNG_DB` of a rung reads
+    as that rung; one between rungs is a controller that held the wrong
+    level, not a commanded step, and reads zero (2026-09-26 — it used
+    to snap to the nearest rung, dividing out part of the control
+    error)."""
+    from visualdynamics.core.compliance import DETECTION_RUNG_DB, SCALE_STEP_DB
 
-    assert SCALE_STEP_DB == 3
+    assert (SCALE_STEP_DB, DETECTION_RUNG_DB) == (3, 0.75)
     spec = _spec()
-    for offset, snapped in ((6.4, 6), (5.6, 6), (7.4, 6), (7.6, 9),
-                            (1.4, 0), (1.6, 3), (-4.4, -3), (-4.6, -6)):
+    for offset, snapped in ((6.4, 6), (5.6, 6), (8.5, 9), (-3.5, -3),
+                            (7.4, 0), (7.6, 0), (4.2, 0), (1.6, 0),
+                            (-4.6, 0)):
         assert detect_scale_db(spec, _measured(spec, [offset])) == snapped, offset
 
 
@@ -87,17 +91,30 @@ def test_monitors_cannot_outvote_the_controls():
     # other well above the controls
     offsets = [6.0, 6.0, 8.0, 8.0, 8.0, 12.0, 16.0, 20.0, 22.0, 25.0]
     psds = _measured(spec, offsets, wiggle=1.0)
-    assert detect_scale_db(spec, psds) == 6
+    # read from the band levels (2026-09-26): monitors under their
+    # envelopes spread the bands, and spread bands are not a level, so
+    # unnamed the answer is zero — shown unscaled — never the monitors'
+    # rung; with the controls named, only they are counted
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=['101Z+', '102Z+']) == 6
+    # even with the controls the majority, a few monitors far under
+    # their envelopes spread the bands past the limit
+    majority = _measured(spec, [6.0] * 7 + [12.0, 16.0, 22.0], wiggle=1.0)
+    assert detect_scale_db(spec, majority) == 0
+    assert detect_scale_db(spec, majority, controls=channels[:7]) == 6
 
 
 def test_one_broken_channel_cannot_answer_alone():
     """Smaller than the controls but alone: a single channel over its
-    limit does not drag the detected level down."""
+    limit does not drag the detected level to a hotter rung. Pooled
+    with two controls and two monitors it is no one controlled test,
+    so zero; with the controls named, their level."""
     channels = tuple(f'{n}Z+' for n in range(101, 106))
     spec = _spec(channels)
     offsets = [-4.0, 6.0, 6.0, 9.0, 14.0]      # one channel 4 dB over
     psds = _measured(spec, offsets, wiggle=1.0)
-    assert detect_scale_db(spec, psds) == 6
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=['102Z+', '103Z+']) == 6
 
 
 def test_the_held_scale_outranks_detection():
@@ -302,16 +319,18 @@ def test_banding_carries_the_held_scale():
 # ---- one measurement, one scale ---------------------------------------------
 
 def _tilted(spec):
-    """A channel at +7.4 dB below 300 Hz and +7.6 above: the narrowband
-    median (linear grid, most lines high) snaps to 9, the octave
-    median (log bands, most bands low) snaps to 6 — the snapping
-    disagreement between gridings that one-resolution exists to kill
-    (5 and 6 on the whole-decibel rule, until 2026-09-19)."""
+    """A channel at +6.5 dB below 300 Hz and +6.2 above. It was built to
+    make the narrowband and octave gridings detect different levels (5
+    and 6 on the whole-decibel rule, until 2026-09-19; 9 and 6 on the
+    nearest rung, until 2026-09-26) — the disagreement one resolution
+    exists to kill. Detection now reads sixth-octave bands whatever it
+    is given, so the two cannot disagree; the fixture sits on the 6
+    rung and the test pins that the report's bands use the one level."""
     from visualdynamics.core.compliance import log_interpolate
 
     f = np.linspace(20.0, 2000.0, 400)
     base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
-    offset = np.where(f < 300.0, 7.4, 7.6)
+    offset = np.where(f < 300.0, 6.5, 6.2)
     return Psd(f, np.array([base * 10.0 ** (-offset / 10.0)]),
                response_dof=['101Z+'],
                ordinate_dim='acceleration**2/frequency',
@@ -329,16 +348,19 @@ def test_the_report_resolves_one_scale_for_every_grid():
 
     spec = _spec()
     psds = _tilted(spec)
-    assert detect_scale_db(spec, psds) == 9
+    assert detect_scale_db(spec, psds) == 6
     # bands compare only with the same bands (2026-09-19): the banded
     # pair is the specification banded too, and a curve against bands
     # is not compared at all
     assert detect_scale_db(spec, psds.to_octave(6)) == 0, 'refused, not detected'
+    # detection reads sixth-octave bands whatever it is given
+    # (2026-09-26), so the narrowband pair and the banded pair are read
+    # from the same bands and cannot disagree
     on_bands = detect_scale_db(spec.to_octave(6), psds.to_octave(6))
-    assert on_bands in (6, 9), 'the banded pair reads its own decibel'
+    assert on_bands == 6, 'the banded pair reads the same bands'
     bars = _bars_block({'mode': 'error', 'octave': 6, 'caption': 'Bands'},
                        spec, psds, visualdynamics.SI)
-    assert 'scaled +9 dB' in bars['caption'], (
+    assert 'scaled +6 dB' in bars['caption'], (
         'the octave blocks use the scale resolved on the narrowband')
 
 
@@ -414,13 +436,16 @@ def test_the_plate_demonstration_run_detects_full_level():
     assert detect_scale_db(spec, psds) == 0
 
 
-def test_the_floor_veto_spares_a_real_run_up():
-    """A -6 run with monitors above the commanded level everywhere:
-    nothing sits below the floor, so the detection stands."""
-    spec = _spec(('101Z+', '113Z+', '1301Z+', '1313Z+',
-                  '404Z+', '410Z+'))
+def test_a_real_run_up_with_its_monitors_reads_its_level():
+    """A -6 run, three controls on the commanded level and three
+    monitors under their envelopes: half the pool on the rung is not a
+    majority, so unnamed it reads zero; named, the controls' -6. (This
+    was the floor veto's test until detection pooled, 2026-09-26.)"""
+    dofs = ('101Z+', '113Z+', '1301Z+', '1313Z+', '404Z+', '410Z+')
+    spec = _spec(dofs)
     psds = _measured(spec, [6.0, 6.0, 6.0, 8.0, 11.0, 15.0])
-    assert detect_scale_db(spec, psds) == 6
+    assert detect_scale_db(spec, psds) == 0
+    assert detect_scale_db(spec, psds, controls=dofs[:3]) == 6
 
 
 def test_a_force_record_stored_first_cannot_steal_the_pairing():
@@ -496,10 +521,274 @@ def test_a_run_that_merely_held_imperfectly_is_not_a_scaled_run():
                      wiggle=0.5)
     assert detect_scale_db(spec, psds) == 0
 
-    # but a commanded step is still read, and is not swallowed
-    assert detect_scale_db(
-        spec, _measured(spec, [3.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0, 14.0],
-                        wiggle=0.5)) == 3
+    # but a commanded step is still read, and is not swallowed — here
+    # two controls among six monitors, so named
+    stepped = _measured(spec, [3.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0, 14.0],
+                        wiggle=0.5)
+    assert detect_scale_db(spec, stepped, controls=channels[:2]) == 3
     assert detect_scale_db(
         spec, _measured(spec, [6.0] * 2 + [9.0, 12.0, 14.0, 18.0, 20.0,
-                                           25.0], wiggle=1.0)) == 6
+                                           25.0], wiggle=1.0),
+        controls=channels[:2]) == 6
+
+
+# ---- the plausible-level and explains-the-data gates (2026-09-26) -------
+#
+# Scoring a 22-run control campaign, three runs were rescaled as if run
+# at reduced level: two controllers that blew up (~50 dB hot on every
+# channel) charted at -54 and -51 dB — an overtest read as an undertest
+# — and an under-controlled run charted at +9. Each gate can only turn
+# a detected level into zero.
+
+EIGHT = tuple(f'{n}Z+' for n in range(101, 109))
+
+
+def test_a_hot_failure_is_shown_not_scaled():
+    """Every channel ~52 dB over its specification and agreeing within
+    two: no channel is plausible, so the floor cannot veto, and two
+    agreeing is easy. No controller commands +52 dB."""
+    spec = _spec(EIGHT)
+    hot = _measured(spec, [-52.0, -51.0, -52.0, -53.0, -51.0, -52.0,
+                           -52.0, -51.0], wiggle=0.3)
+    assert detect_scale_db(spec, hot) == 0
+
+
+def _peaks_held(spec, channels):
+    """Over specification at five resonant peaks, 9 dB low between
+    them: the line median says +9, on its rung, and the RMS barely
+    moves — a control failure, which moves the two differently, where
+    a level moves both. On the rung on purpose, so only the energy
+    disagreement can refuse it."""
+    from visualdynamics.core.compliance import log_interpolate
+
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    peaks = np.zeros(f.size, dtype=bool)
+    for center in (150.0, 300.0, 450.0, 900.0, 1500.0):
+        peaks |= np.abs(f - center) < 0.05 * center
+    rng = np.random.default_rng(0)
+    rows = [base * np.where(peaks, 10.0 ** 0.6, 10.0 ** -0.9)
+            * 10.0 ** (0.02 * rng.standard_normal(f.size))
+            for _ in channels]
+    return Psd(f, np.array(rows), response_dof=list(channels),
+               ordinate_dim='acceleration**2/frequency',
+               ordinate_unit='m/s**2')
+
+
+def test_broad_under_drive_with_the_peaks_held_is_not_a_level():
+    channels = EIGHT[:4]
+    spec = _spec(channels)
+    measured = _peaks_held(spec, channels)
+    rows = compare_all(spec, measured, scale_db=0)
+    assert all(abs(r['difference_db']) < 3.0 for _label, r in rows), (
+        'as measured, every channel is within the RMS tolerance')
+    from visualdynamics.core.compliance import judge
+
+    level = judge(spec, measured, 0, 0, None, True, scale_db=0)
+    median = float(np.median(10.0 * np.log10(level['asked'] / level['held'])))
+    assert abs(median - 9.0) < 0.75, 'the median alone would read +9'
+    assert detect_scale_db(spec, measured) == 0
+
+
+def test_a_genuine_reduced_level_run_is_still_detected():
+    """The rule must not be too strict: runs commanded at -3 through
+    -24 dB read their level — every channel a control, or the controls
+    named among as many monitors — and -27 is past the window."""
+    spec = _spec(EIGHT)
+    for level in (3.0, 6.0, 12.0, 24.0):
+        run = _measured(spec, [level] * 8, wiggle=0.5)
+        assert detect_scale_db(spec, run) == level, level
+        half = _measured(spec, [level] * 4 + [level + 3.0, level + 5.0,
+                                              level + 8.0, level + 11.0],
+                         wiggle=0.5)
+        assert detect_scale_db(spec, half, controls=EIGHT[:4]) == level, level
+    assert detect_scale_db(spec, _measured(spec, [27.0] * 8, wiggle=0.5)) == 0
+
+
+@pytest.mark.parametrize(('offset', 'expected'), [
+    (-9.0, 0),      # 9 dB hot: past the -6 edge, a fault
+    (-6.0, -6),     # a run at +6 dB, the hottest believed
+    (24.0, 24),     # a run-up from -24 dB
+    (27.0, 0),      # past the +24 edge
+])
+def test_the_window_of_commanded_levels(offset, expected):
+    spec = _spec(EIGHT)
+    assert detect_scale_db(spec, _measured(spec, [offset] * 8,
+                                           wiggle=0.3)) == expected
+
+
+def test_a_detected_scale_is_said_aloud_to_a_script():
+    """`channel_errors` drops the scale, so a script charting with it
+    could not see one: `compare_all` warns when it detected a level
+    itself, and not when the scale was given or held."""
+    import warnings
+
+    from visualdynamics.core.compliance import ScaleWarning
+
+    spec = _spec(EIGHT)
+    run = _measured(spec, [6.0] * 8, wiggle=0.3)
+    with pytest.warns(ScaleWarning, match=r'scaled by \+6 dB, detected '
+                                          r'from the data as a run at -6 dB'):
+        compare_all(spec, run)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', ScaleWarning)
+        compare_all(spec, run, scale_db=0)
+        compare_all(spec, run, scale_db=6)
+        run.scale_db = 6
+        compare_all(spec, run)
+        run.scale_db = None
+        compare_all(spec, _measured(spec, [0.0] * 8, wiggle=0.3))
+
+
+# ---- the beat-zero gate (2026-09-26, the note's second pass) -----------
+
+TWENTY_FOUR = tuple(f'{n}Z+' for n in range(101, 125))
+
+
+def test_a_hot_minority_does_not_outvote_an_on_level_majority():
+    """21 controls on specification and 3 running 1.6 dB hot: their
+    medians snap to 0 and -3, the smallest agreed is -3, and every
+    on-spec channel "explains" a one-step shift within the 3 dB RMS
+    tolerance. A real level moves the majority to the candidate; this
+    candidate holds 3 channels within half a step against zero's 21."""
+    spec = _spec(TWENTY_FOUR)
+    run = _measured(spec, [0.0] * 21 + [-1.6] * 3, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_a_mixed_under_drive_is_not_a_level():
+    """Half the channels on specification, half 3 dB low: no level
+    could put both halves there. A uniform 3 dB under-drive, on the
+    other hand, is indistinguishable from a run at -3 dB and reads as
+    one — the limit no gate can remove, and why a detected scale is
+    always said."""
+    spec = _spec(TWENTY_FOUR)
+    assert detect_scale_db(spec, _measured(spec, [0.0] * 12 + [3.0] * 12,
+                                           wiggle=0.3)) == 0
+    assert detect_scale_db(spec, _measured(spec, [3.0] * 24,
+                                           wiggle=0.3)) == 3
+
+
+# ---- one level for the whole test (2026-09-26, the note's third pass) ---
+
+
+def test_a_hot_minority_run_at_minus_six_reads_minus_six():
+    """The per-channel vote read this +3 — a wrong level applied. Pooled,
+    the 21 controls on their level set the median, and the three hot
+    ones cannot move it."""
+    spec = _spec(TWENTY_FOUR)
+    run = _measured(spec, [6.0] * 21 + [4.4] * 3, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 6
+
+
+def test_monitors_in_the_majority_read_zero_never_their_rung():
+    """A specification bounding more monitors than controls, nothing
+    naming the controls: the pooled median is the monitors'. Pooling
+    everything, as first proposed, read a -12 dB run as +15 and a -6
+    as +9; the majority test reads zero, and the Scaling field says the
+    rest."""
+    spec = _spec(TWENTY_FOUR)
+    for run, controls in (
+            ([6.0] * 8 + [9.0, 11.0, 14.0, 8.5, 12.0, 10.0] * 2
+             + [7.5, 13.0, 9.5, 15.0], 6),
+            ([12.0] * 8 + [15.0] * 10 + [18.0] * 6, 12)):
+        measured = _measured(spec, run, wiggle=0.3)
+        assert detect_scale_db(spec, measured) == 0
+        assert detect_scale_db(spec, measured,
+                               controls=TWENTY_FOUR[:8]) == controls
+
+
+# ---- the mode of the band levels (2026-09-26, Brandon's rule) -----------
+
+
+def test_the_level_is_read_in_sixth_octave_bands():
+    """Narrowband lines are noisy, weighted to the top decade and the
+    anti-resonances; detection bands both to sixth octaves first, so a
+    narrowband pair and its banded copy read the same level."""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [6.0] * 8, wiggle=1.0)
+    assert detect_scale_db(spec, run) == 6
+    assert detect_scale_db(spec.to_octave(6), run.to_octave(6)) == 6
+
+
+def test_tight_bands_between_rungs_are_not_a_level():
+    """A full-level test the controller held 1.6 dB low: every band
+    within half a step of +3 and a tiny spread — only the bands'
+    median, 1.4 dB off the rung, says it is not a commanded -3."""
+    spec = _spec(EIGHT)
+    assert detect_scale_db(spec, _measured(spec, [1.6] * 8, wiggle=0.3)) == 0
+
+
+def test_bands_that_split_between_two_rungs_are_not_a_level():
+    """Five channels 3 dB low and three on level at full level: the mode
+    is +3, the spread small, the median on the rung — but only 5 in 8
+    bands agree with it."""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [0.0] * 3 + [3.0] * 5, wiggle=0.3)
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_the_top_decade_cannot_outvote_the_band():
+    """A full-level run whose controller lost 3 dB above 400 Hz — where
+    authority runs out first. Lines are evenly spaced in hertz, so four
+    in five lie above 400 Hz and a narrowband reading has them agree,
+    tightly, on a run at -3 dB; sixth-octave bands are evenly spaced as
+    the specification is written, a third of them lie up there, and the
+    level they agree on is full level."""
+    from visualdynamics.core.compliance import log_interpolate
+
+    spec = _spec(EIGHT)
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    rng = np.random.default_rng(1)
+    rows = [base * np.where(f > 400.0, 10.0 ** -0.3, 1.0)
+            * 10.0 ** (0.02 * rng.standard_normal(f.size)) for _ in EIGHT]
+    run = Psd(f, np.array(rows), response_dof=list(EIGHT),
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='m/s**2')
+    high = float(np.mean(f > 400.0))
+    assert high > 0.75, 'most narrowband lines are in the top decade'
+    assert detect_scale_db(spec, run) == 0
+
+
+def test_a_few_deep_bands_do_not_hide_a_level():
+    """Real control has tails (the other session's 22 runs, 2026-09-26):
+    runs held on level with 89% of their bands within 1.5 dB had σ of
+    4.3 dB from a few deep bands of under-driven out-of-plane channels,
+    and a σ test showed them unscaled. The share of agreeing bands reads
+    the bulk, and the level stands."""
+    from visualdynamics.core.compliance import judge, log_interpolate
+
+    spec = _spec(EIGHT)
+    f = np.linspace(20.0, 2000.0, 400)
+    base = log_interpolate(f, spec.abscissa, spec.ordinate[0])
+    rng = np.random.default_rng(2)
+    rows = []
+    for k, _dof in enumerate(EIGHT):
+        # a run at -6 dB; two out-of-plane channels 15 dB under above
+        # 1.2 kHz, where the shakers could not reach them
+        deep = (k >= 6) & (f > 1200.0)
+        rows.append(base * 10.0 ** (-(6.0 + 15.0 * deep) / 10.0)
+                    * 10.0 ** (0.03 * rng.standard_normal(f.size)))
+    run = Psd(f, np.array(rows), response_dof=list(EIGHT),
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='m/s**2')
+    s, m = spec.to_octave(6), run.to_octave(6)
+    d = np.concatenate([10.0 * np.log10(judge(s, m, i, i, None, True,
+                                              scale_db=0)['asked']
+                                        / judge(s, m, i, i, None, True,
+                                                scale_db=0)['held'])
+                        for i in range(8)])
+    assert np.std(d) > 2.0, 'a σ test at 2 dB would refuse it'
+    assert detect_scale_db(spec, run) == 6
+
+
+def test_two_groups_straddling_a_rung_are_not_one_level():
+    """Half the channels 1.4 dB over the -6 rung and half 1.4 under:
+    every band is within half a step of +6, but the bulk is spread
+    across a whole step — two levels, not one — and the median lands on
+    one of the two groups, off the rung. (The robust spread tried here,
+    2026-09-26, could only have caught this, and the rung test does.)"""
+    spec = _spec(EIGHT)
+    run = _measured(spec, [4.6] * 4 + [7.4] * 4, wiggle=0.05)
+    assert detect_scale_db(spec, run) == 0

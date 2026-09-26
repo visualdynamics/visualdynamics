@@ -113,7 +113,10 @@ the call for it.
 - **The verdict is the random's.** It is read off the octave-band
   comparison, as the random report reads it. The sweep is judged tone
   by tone in its own figures and bars, which is how a sweep is judged
-  anywhere.
+  anywhere. So is the level beside the verdict, labeled **Random test
+  level**: the random half's comparison is scaled to its specification
+  when the run was at reduced level, and the sine half is always
+  compared as measured.
 - **Which specification the run was *for* is still the engineer's
   call.** Both are in the project and both are in the report; the
   type only says that both belong there.

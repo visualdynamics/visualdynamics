@@ -181,7 +181,9 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
             "return JSON.stringify({captions: Array.from("
             "  document.querySelectorAll('.caption'), c => c.textContent),"
             " canvases: document.querySelectorAll('canvas').length,"
-            " verdict: document.querySelectorAll('.verdict').length});"
+            " verdict: document.querySelectorAll('.verdict').length,"
+            " level: (document.querySelector('.testlevel') || {}).textContent"
+            "});"
             " })()")
     finally:
         web_close(view)
@@ -192,4 +194,7 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     assert 'Sine level deviation by tone and channel' in captions
     assert 'RMS error by control channel' in captions
     assert found['verdict'] == 1
+    assert found['level'].startswith(('0 dB', '+', '\u2212')), found['level']
+    assert 'Random test level' in found['level'], (
+        "the level beside the verdict is the random half's")
     assert found['canvases'] > 8

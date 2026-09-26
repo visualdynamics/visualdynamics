@@ -50,10 +50,11 @@ class Report:
         (a bar reading: kurtosis per channel, SRS levels against the
         target, or sine levels against their tones)
       {'kind': 'verdict', 'source': Specification-name,
-                          'measured': Psd-name}
+                          'measured': Psd-name, 'level_label': str}
         (the pass/fail box: whether the run passed, read off the
         octave-band comparison of `measured` against `source` —
-        `compliance.verdict`)
+        `compliance.verdict` — with the test level it was judged at
+        beside it, under `level_label`, 'Test level' when absent)
 
     'select' filters a curves plot to the records the GUI's own filters
     would pick: 'drive' is the response==reference diagonal of an FRF,
@@ -2675,9 +2676,12 @@ def mixed_template(objects: Mapping[str, Any],
     return prune_unbound(Report('Random and Sine Test Report', [
         # the verdict is the random half's, read off the octave-band
         # comparison as the random report reads it; the sine half is
-        # judged tone by tone in its own figures and bars below
+        # judged tone by tone in its own figures and bars below. So is
+        # the level beside it, and it says so (Brandon, 2026-09-26): the
+        # sine is compared as measured, never scaled
         {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
-         'measured': '@basis:OctavePsd'},
+         'measured': '@basis:OctavePsd',
+         'level_label': 'Random test level'},
         {'kind': 'text', 'text':
             '## Test Summary\n\n'
             'A random vibration test was run with a sine sweep under '

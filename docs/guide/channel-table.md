@@ -22,7 +22,7 @@ imported with](images/channel-table.png)
 | **Channel** | the number the hardware reports. Positive, whole, and unique — it is how a row is identified, so two rows cannot claim one number |
 | **Node** | the node it sits on. A whole number, or blank when nobody wrote it down |
 | **Direction** | one of `X+ X- Y+ Y- Z+ Z-` and the six rotations |
-| **Role** | `reference` (it drives), `response` (it answers), or `monitor` (recorded, judged as neither) |
+| **Role** | `reference` (it drives), `response` (it answers), or `monitor` (recorded, judged as neither). Linked with the time data it describes, this column shows the data's roles and an edit here is the data's — see [the tree](project-tree.md) |
 | **Control** | whether the controller controlled to it. A check box |
 | **Channel Type** | what it measures: acceleration, velocity, displacement, force, pressure, strain, voltage, temperature |
 | **Unit** | the engineering unit, narrowed to ones the type could be in |
@@ -82,10 +82,12 @@ state cannot be written: a channel is not both the input and the output
 of the same estimation. Blank means undeclared, exactly as an
 undeclared unit does.
 
-**A control channel is a response**, and that is enforced from both
-directions — checking Control on a monitor is refused, and so is
-changing a control channel's role out from under its check. Both
-refusals say why, in the status bar.
+**Control and Role are separate questions.** Control says what the
+controller drove the test to match; Role says what the channel is to an
+FRF. A test can be controlled to a force or a voltage as well as to a
+motion, so a control channel can have any role — a controlled force
+can be the reference of the FRFs, a controlled accelerometer can be set
+aside as a monitor.
 
 A controller run declares these for you. A channel with a feedback
 device is a drive, which is Rattlesnake's own rule, so it imports as a

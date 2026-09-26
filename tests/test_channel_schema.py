@@ -68,18 +68,22 @@ def test_role_vocabulary_is_enforced():
         table.set_cell('role', 0, 'drive')
 
 
-def test_control_implies_response_both_ways():
-    """The one nonsense pair is unrepresentable from either door."""
+def test_control_and_role_are_set_independently():
+    """What the controller drove the test to match, and what the
+    channel is to an FRF, are two questions (Brandon, 2026-09-26): a
+    controlled force can be a reference, a controlled voltage a monitor,
+    in either order. The schema once refused every control channel that
+    was not a response."""
     table = bare()
-    with pytest.raises(ValueError, match='control channel is a response'):
-        table.set_cell('control', 0, 'True')
+    table.set_cell('role', 0, 'reference')
+    table.set_cell('control', 0, 'True')
+    assert bool(table.controls()[0]) and table.roles()[0] == 'reference'
+    table.set_cell('role', 0, 'monitor')
+    assert bool(table.controls()[0]) and table.roles()[0] == 'monitor'
+    table.set_cell('control', 0, 'False')
     table.set_cell('role', 0, 'response')
     table.set_cell('control', 0, 'True')
-    assert bool(table.controls()[0])
-    with pytest.raises(ValueError, match='uncheck Control first'):
-        table.set_cell('role', 0, 'reference')
-    table.set_cell('control', 0, 'False')
-    table.set_cell('role', 0, 'reference')     # now it may drive
+    assert bool(table.controls()[0]) and table.roles()[0] == 'response'
 
 
 def test_channel_numbers_stay_unique():

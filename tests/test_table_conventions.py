@@ -362,12 +362,13 @@ def test_a_checkbox_cell_toggles_and_still_speaks_text(qt_app):
     view.selectionModel().select(
         index, QItemSelectionModel.SelectionFlag.Select)
     assert view.to_tsv().strip() == 'True'
-    # and the guard holds through the box as through the keyboard
+    # and the box sets Control whatever the role, as the keyboard does:
+    # control and role are independent (Brandon, 2026-09-26 — a test
+    # can be controlled to a force or a voltage)
     table.set_cell('control', 0, 'False')
     table.set_cell('role', 0, 'monitor')
-    assert not model.setData(index, Qt.CheckState.Checked, check), (
-        'a monitor cannot be a control channel'
-    )
+    assert model.setData(index, Qt.CheckState.Checked, check)
+    assert bool(table.controls()[0]) and table.roles()[0] == 'monitor'
 
 
 def test_a_filled_unit_carries_its_type_down(qt_app):

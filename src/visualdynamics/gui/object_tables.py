@@ -146,7 +146,8 @@ def _column_journal(name, index):
 
 def channel_table_model(table: ChannelTable, parent: QObject | None = None,
                         rows: Sequence[int] | None = None,
-                        geometry: Geometry | None = None) -> TableModel:
+                        geometry: Geometry | None = None,
+                        set_role: Callable | None = None) -> TableModel:
     """A channel table: every column editable, every column typed.
 
     With a `geometry`, the derived columns follow: each channel's
@@ -166,6 +167,11 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
     `rows` shows only those channels — picking cells in the tree's grid
     is picking rows here too, so the table beside the model shows what
     the selection says and nothing else.
+
+    `set_role(row, role)`, when given, takes the Role column's edits
+    instead of the table: a table linked with the time data it
+    describes shows that data's roles, and a change made here is the
+    data's (`Project.set_channel_role`), journaled there.
     """
     rows = None if rows is None else [int(r) for r in rows]
     index = (lambda row: row) if rows is None else rows.__getitem__
@@ -183,10 +189,14 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
         if spec.kind == 'choice':
             shown = ([shown_dimension(c) for c in spec.choices]
                      if name == 'channel_type' else list(spec.choices))
+            routed = name == 'role' and set_role is not None
             columns.append(Column(
                 title, _shown_getter(name, index),
-                set=_column_setter(name, index),
-                journal=_column_journal(name, index),
+                set=((lambda _t, r, text, i=index: set_role(i(r), text))
+                     if routed else _column_setter(name, index)),
+                # the verb journals itself
+                journal=((lambda _t, _r, _text: None) if routed
+                         else _column_journal(name, index)),
                 choices=shown,
                 # a direction moves the derived columns beside it
                 affects_row=name in ('channel_type', 'direction'),

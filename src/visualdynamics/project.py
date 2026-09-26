@@ -452,6 +452,9 @@ class Project(dict):
                                  or group.get('side') == 'experimental'
                                  and not group.get('role')) else None}
             for group in (links or [])]
+        #: the roles the last link moved, (history, channel, was, now)
+        #: — a front end says so rather than letting FRFs move silently
+        self.last_role_changes: list = []
         #: how each derived object was computed — {name: {'verb',
         #: 'source', 'params', 'state'}} with 'state' the fingerprint
         #: of the analysis settings read at compute time. Staleness is
@@ -858,6 +861,9 @@ class Project(dict):
         self.links = kept + [{'members': merged, 'role': role}]
         if role is not None:
             self.set_role(merged[0], role)
+        # a channel table joining time data it describes brings its
+        # roles; the history is the truth from then on
+        self._sync_linked_roles(merged)
         return merged
 
     def unlink(self, *names: str) -> None:
@@ -1063,6 +1069,156 @@ class Project(dict):
         except (ValueError, KeyError):
             self.links = before
             raise
+
+    def set_channel_role(self, source: Any, dof: str, quantity: str,
+                         role: str) -> list[str]:
+        """Give one channel a role — reference, response or monitor —
+        on a time history or on a channel table, and on whatever is
+        linked with it.
+
+        The time history's role is the truth: it is what FRFs and
+        multiple coherence read. A channel table linked with a history
+        whose channels it describes shows the history's roles, so a
+        change made on either lands on both (Brandon, 2026-09-25: *the
+        channel table is just a pointer to the linked time data's
+        role*). A channel table with no such history holds its own
+        roles, as it always did.
+
+        Parameters
+        ----------
+        source : str or object
+            The time history or channel table, by name or as itself.
+        dof : str
+            The channel's degree of freedom, '101Z+'.
+        quantity : str
+            What it measures, as a history's `ordinate_dim` or a
+            table's channel type names it ('acceleration', 'force',
+            'length' for a displacement).
+        role : str
+            'reference', 'response' or 'monitor'.
+
+        Returns
+        -------
+        list of str
+            The objects whose roles changed.
+        """
+        from .core.channel_table import ROLES
+
+        if role not in ROLES:
+            raise ValueError(f'{role!r} is not a role: ' + ', '.join(ROLES))
+        name = self.name_of(source)
+        obj = self[name]
+        asked = (str(dof), str(quantity))
+        if isinstance(obj, TimeHistory):
+            targets = [(name, asked)]
+        elif isinstance(obj, ChannelTable):
+            rows = [row for row, own in enumerate(_table_identities(obj, None))
+                    if own == asked]
+            if not rows:
+                raise ValueError(f'{name} has no channel {dof} ({quantity})')
+            # the table row names a channel of each linked history —
+            # through its channel type, or its DOF alone when the type
+            # is blank and the DOF has one channel there
+            targets = [(other, mapped[row]) for other, mapped
+                       in self._role_partners(name) for row in rows
+                       if mapped[row] is not None]
+            if not targets:
+                # no time data it describes: the table's own record
+                for row in rows:
+                    obj.set_cell('role', row, role)
+                return [name]
+        else:
+            raise TypeError(f'{name!r} is neither time data nor a channel '
+                            'table')
+        for history_name, identity in targets:
+            if identity not in self[history_name].channel_identities():
+                raise ValueError(f'{history_name} has no channel {identity[0]} '
+                                 f'({identity[1]})')
+        changed = []
+        for history_name, identity in targets:
+            history = self[history_name]
+            roles = history.channel_roles()
+            roles[identity] = role
+            history.roles = roles
+            changed.append(history_name)
+            changed += self._push_roles(history_name)
+        return list(dict.fromkeys(changed))
+
+    def _role_partners(self, name: str) -> list[tuple[str, list]]:
+        """The objects in `name`'s group on the other side of the
+        history/table pairing, each with the table's rows mapped to the
+        history's channels — only the compatible ones: a table none of
+        whose rows names one of the history's channels describes some
+        other recording, and is left alone."""
+        group = self.group_of(name) or []
+        obj = self[name]
+        out = []
+        for other in group:
+            if other == name:
+                continue
+            partner = self[other]
+            if isinstance(obj, TimeHistory) and isinstance(partner, ChannelTable):
+                history, table = obj, partner
+            elif isinstance(obj, ChannelTable) and isinstance(partner,
+                                                                TimeHistory):
+                history, table = partner, obj
+            else:
+                continue
+            rows = _table_identities(table, history)
+            if any(found is not None for found in rows):
+                out.append((other, rows))
+        return out
+
+    def _push_roles(self, history_name: str) -> list[str]:
+        """Show a history's roles on every compatible channel table
+        linked with it; returns the tables changed."""
+        roles = self[history_name].channel_roles()
+        changed = []
+        for table_name, rows in self._role_partners(history_name):
+            table = self[table_name]
+            current = table.roles()
+            for row, identity in enumerate(rows):
+                if identity is not None and current[row] != roles[identity]:
+                    table.set_cell('role', row, roles[identity])
+                    if table_name not in changed:
+                        changed.append(table_name)
+        return changed
+
+    def _sync_linked_roles(self, members: Sequence[str]
+                           ) -> list[tuple[str, tuple[str, str], str, str]]:
+        """Linking is the moment a channel table starts describing time
+        data, and it is treated as an import is (Brandon, 2026-09-25):
+        every role the table *declares* is given to the history's channel
+        it names; a channel the table leaves blank keeps the history's
+        role. From then on the history's roles are the truth and the
+        table shows them — so a table linked after the fact, with the
+        monitors marked on it, is not overwritten by the roles the data
+        already had.
+
+        Returns the roles the link changed, (history, channel, was,
+        now), so the front end can say so: a role moving silently would
+        move FRFs silently.
+        """
+        changes = []
+        for name in members:
+            history = self.get(name)
+            if not isinstance(history, TimeHistory):
+                continue
+            for table_name, rows in self._role_partners(name):
+                stated = self[table_name].roles()
+                current = history.channel_roles()
+                declared = {identity: stated[row]
+                            for row, identity in enumerate(rows)
+                            if identity is not None and stated[row]}
+                moved = {identity: role for identity, role in declared.items()
+                         if current[identity] != role}
+                if declared and (moved or history.roles is None):
+                    history.roles = {**current, **declared}
+                changes += [(name, identity, current[identity], role)
+                            for identity, role in moved.items()]
+            self._push_roles(name)
+        self.last_role_changes = changes
+        return changes
 
     def set_role(self, name: str, role: str | None) -> None:
         """Name what a group is. The Basis is unique: taking the role
@@ -2543,12 +2699,12 @@ class Project(dict):
     _VERB_READS: ClassVar[dict[str, str]] = {
         'compute_spectra': 'averaging', 'compute_psds': 'averaging',
         'compute_cpsds': 'averaging',
-        # the two read the references as well as the framing; the
-        # fingerprint stays an 'averaging' one with the references folded
-        # in only when set, so a project saved before the setting
-        # existed opens with nothing marked stale
-        'compute_frfs': 'averaging+references',
-        'compute_multiple_coherence': 'averaging+references',
+        # the two read the channels' roles as well as the framing; the
+        # fingerprint stays an 'averaging' one with the roles folded in
+        # only when set, so a project saved before roles existed opens
+        # with nothing marked stale
+        'compute_frfs': 'averaging+roles',
+        'compute_multiple_coherence': 'averaging+roles',
         'compute_srs': 'shocks', 'compute_octave': 'content',
         # the filter reads the settings riding the source; integration
         # and differentiation read the record's bytes, so refreshing a
@@ -2591,18 +2747,24 @@ class Project(dict):
             digest.update(','.join(obj.response_dof).encode())
             digest.update(','.join(other.coordinate).encode())
             return ('content', digest.hexdigest())
-        if reads in ('averaging', 'averaging+references'):
+        if reads in ('averaging', 'averaging+roles'):
             averaging = getattr(obj, 'averaging', None)
             state = None if averaging is None else asdict(averaging)
-            references = getattr(obj, 'references', None)
-            if reads.endswith('references') and references is not None:
-                # the composite kind only once a choice exists: with
-                # none, the fingerprint is the plain averaging one it
-                # always was, and an older project opens with nothing
-                # marked stale
-                return ('averaging+references',
+            resolved = (obj.channel_roles()
+                        if reads.endswith('roles')
+                        and getattr(obj, 'roles', None) is not None else None)
+            if resolved is not None and resolved != obj.channel_roles(
+                    stated=False):
+                # the composite kind only where the roles differ from the
+                # guess: otherwise the fingerprint is the plain averaging
+                # one it always was, so an older project opens with
+                # nothing stale, and stating what the guess already said
+                # (an import seeding from its table) changes nothing
+                return ('averaging+roles',
                         {'averaging': state,
-                         'references': [list(pair) for pair in references]})
+                         'roles': sorted([dof, quantity, role] for
+                                         (dof, quantity), role
+                                         in resolved.items())})
             return ('averaging', state)
         if reads == 'filtering':
             filtering = getattr(obj, 'filtering', None)
@@ -2972,6 +3134,33 @@ _SETTLING = frozenset({'author_specification'})
 #: what the journal records. Reads (names, stale, table) say nothing a
 #: script needs to replay. Wrapped in one pass rather than decorated at
 #: thirty definition sites, so the list of what journals is one list.
+def _has_both_sides(history) -> bool:
+    """Whether a history's roles give an FRF something to estimate."""
+    return bool(history.reference_channels()) and bool(
+        history.response_channels())
+
+
+def _table_identities(table, history) -> list:
+    """Each channel-table row as the (DOF, quantity) channel it names —
+    the table's channel type is the quantity, the same word — or None
+    where it names none of `history`'s channels. A row with no channel
+    type names the history's channel at that DOF when there is exactly
+    one. With no history, each row's own (DOF, type)."""
+    dofs, types = table.dof_strings(), table.types()
+    if history is None:
+        return list(zip(dofs, types))
+    identities = history.channel_identities()
+    known = set(identities)
+    out = []
+    for dof, kind in zip(dofs, types):
+        if kind:
+            out.append((dof, kind) if (dof, kind) in known else None)
+        else:
+            at = [identity for identity in identities if identity[0] == dof]
+            out.append(at[0] if len(at) == 1 else None)
+    return out
+
+
 def _is_time(project, obj):
     return isinstance(obj, TimeHistory)
 
@@ -3015,10 +3204,12 @@ _VERB_APPLIES: tuple = (
     ('compute_psds', _is_time),
     ('compute_cpsds', _is_time),
     ('compute_srs', _is_time),
-    ('compute_frfs', lambda p, o: (_is_time(p, o)
-                                   and bool(o.drive_dofs()))),
+    # offered where the roles give both sides: a history with no
+    # reference, or none but references and monitors, has nothing to
+    # estimate
+    ('compute_frfs', lambda p, o: (_is_time(p, o) and _has_both_sides(o))),
     ('compute_multiple_coherence', lambda p, o: (
-        _is_time(p, o) and bool(o.drive_dofs()))),
+        _is_time(p, o) and _has_both_sides(o))),
     ('extract_sine', lambda p, o: (_is_time(p, o) and any(
         isinstance(other, SineSweepSpecification)
         for other in p.values()))),
@@ -3111,7 +3302,7 @@ PARTNER_VERBS = frozenset(verb for verb, _applies in _SELECTION_APPLIES)
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
     'relink',
-    'place', 'set_role', 'set_basis', 'merge',
+    'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
@@ -3311,7 +3502,7 @@ def _state_tuple(state):
     kind, value = state
     if kind in _STATE_CLASSES and value is not None:
         value = _named_state(kind, value)
-    elif kind == 'averaging+references' and value['averaging'] is not None:
+    elif kind == 'averaging+roles' and value['averaging'] is not None:
         # the framing inside normalizes the way a bare one does
         value = dict(value, averaging=_named_state('averaging',
                                                    value['averaging']))
@@ -3326,10 +3517,10 @@ def _summarize_state(state):
         named = _named_state(kind, value)
         return (f'{named["frames"]} frames of {named["frame_length"]} '
                 f'({named["window"]})')
-    if kind == 'averaging+references':
+    if kind == 'averaging+roles':
         framing = _summarize_state(('averaging', value['averaging']))
-        named = ', '.join(f'{dof} {quantity}'
-                          for dof, quantity in value['references'])
+        named = ', '.join(f'{dof} {quantity}' for dof, quantity, role
+                          in value['roles'] if role == 'reference')
         return f'{framing}, references {named or "none"}'
     if kind == 'shocks':
         return f'{len(value)} window{"s" * (len(value) != 1)}'

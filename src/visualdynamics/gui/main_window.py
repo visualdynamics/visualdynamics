@@ -2411,9 +2411,9 @@ class MainWindow(QMainWindow):
         grid.column_renamed.connect(
             lambda column, text, grid=grid: self._apply_dof_rename(
                 grid.owner, *grid.column_keys[column], text))
-        grid.reference_toggled.connect(
-            lambda row, checked, grid=grid: self._grid_reference_toggled(
-                grid, row, checked))
+        grid.role_changed.connect(
+            lambda row, role, grid=grid: self._grid_role_changed(
+                grid, row, role))
         # the grid is a widget, so the tree's context menu never sees a
         # right-click inside it; without this, records have no route to
         # the units pane
@@ -3186,6 +3186,21 @@ class MainWindow(QMainWindow):
             self._show_status(message[:1].upper() + message[1:])
             return False
         self._links_changed()
+        moved = self.project.last_role_changes
+        if moved:
+            # a channel table linked after the fact brings its roles: say
+            # which it moved, since each one moves an FRF
+            self._roles_moved(list(dict.fromkeys(
+                [history for history, *_rest in moved]
+                + [n for n in merged
+                   if isinstance(self.objects.get(n), ChannelTable)])))
+            shown = ', '.join(f'{dof} ({quantity}) {was} \u2192 {now}'
+                              for _h, (dof, quantity), was, now in moved[:4])
+            more = f' and {len(moved) - 4} more' if len(moved) > 4 else ''
+            self._show_status(
+                'Linked ' + ', '.join(merged) + f'. The channel table set '
+                f'{len(moved)} role{"s" * (len(moved) != 1)}: {shown}{more}')
+            return True
         if announce:
             self._show_status('Linked ' + ', '.join(merged))
         return True
@@ -10146,7 +10161,7 @@ class MainWindow(QMainWindow):
             self._show_status(f'{name}: {refusal}')
             return
         coherence = self.objects[added]
-        drives = len(obj.drive_dofs())
+        drives = len(obj.reference_channels())
         self.show_object(added)
         self._show_status(
             f'{added}: {coherence.num_records} '
@@ -10359,26 +10374,61 @@ class MainWindow(QMainWindow):
         if ok:
             self._apply_photo_name(name, index, (new or '').strip())
 
-    def _grid_reference_toggled(self, grid, row, checked):
-        """A Ref box ticked or unticked: the channel joins or leaves
-        the history's references. Stored on the object and journaled
-        like a dragged averaging span, and the FRFs and coherence
-        derived from it wear the refresh badge from this moment."""
+    def _grid_role_changed(self, grid, row, role):
+        """A channel's role picked in the grid's Role column."""
         history = self.objects.get(grid.owner)
         records = grid.row_records(row)
         if history is None or not records:
             return
         index = records[0]
-        identity = (history.response_dof[index], history.ordinate_dim[index])
-        references = [pair for pair in history.reference_channels()
-                      if pair != identity]
-        if checked:
-            references.append(identity)
-        history.references = references
-        self.project.record_setting(history, 'references', references)
+        self._apply_channel_role(grid.owner, history.response_dof[index],
+                                 history.ordinate_dim[index], role)
+
+    def _apply_channel_role(self, name, dof, quantity, role):
+        """Give a channel a role through the project's verb — from the
+        time data's grid or its linked channel table, the one rule for
+        both — and restate everything showing it."""
+        try:
+            changed = self.project.set_channel_role(name, dof, quantity, role)
+        except (ValueError, TypeError) as refusal:
+            # the grid already shows the pick and the table model its
+            # edit: a refusal puts both back to what is true
+            self._roles_moved([name] + [other for other, _rows
+                                        in self.project._role_partners(name)])
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._roles_moved(changed)
+        histories = [n for n in changed
+                     if isinstance(self.objects.get(n), TimeHistory)]
+        summary = ''
+        if histories:
+            roles = self.objects[histories[0]].channel_roles()
+            counts = [sum(r == kind for r in roles.values())
+                      for kind in ('reference', 'response', 'monitor')]
+            summary = (f' — {counts[0]} reference{"s" * (counts[0] != 1)}, '
+                       f'{counts[1]} response{"s" * (counts[1] != 1)}, '
+                       f'{counts[2]} monitor{"s" * (counts[2] != 1)}')
+        self._show_status(f'{dof} ({quantity}) is a {role} on '
+                          + ', '.join(changed) + summary)
+
+    def _roles_moved(self, changed):
+        """Restate the Role columns and the channel table that show the
+        roles of `changed`, and the refresh badges they move."""
+        for name in changed:
+            obj = self.objects.get(name)
+            grid = self.record_grids.get(name)
+            if isinstance(obj, TimeHistory) and grid is not None:
+                roles = obj.channel_roles()
+                grid.show_roles([
+                    roles[(obj.response_dof[grid.row_records(row)[0]],
+                           obj.ordinate_dim[grid.row_records(row)[0]])]
+                    if grid.row_records(row) else 'response'
+                    for row in range(grid.rowCount())])
+        if isinstance(self.current_object(), ChannelTable) and any(
+                self.objects.get(name) is self.current_object()
+                for name in changed):
+            self.render_current()
         self._refresh_stale_badges()
-        named = ', '.join(f'{dof} ({quantity})' for dof, quantity in references)
-        self._show_status(f'{grid.owner} references: {named or "none"}')
 
     def _grid_row_renamed(self, grid, row, text):
         """A grid's row label typed over: a photo's name, or the
@@ -12972,9 +13022,17 @@ class MainWindow(QMainWindow):
         # the geometry the table answers to — its group's, else the
         # active one — brings the derived direction columns with it
         found = self.project.geometry_for(name) if name is not None else None
+        # linked with the time data it describes, the Role column is a
+        # view of that data's roles, and an edit here is the data's
+        set_role = None
+        if name is not None and self.project._role_partners(name):
+            dofs, types = table.dof_strings(), table.types()
+            set_role = (lambda row, text: self._apply_channel_role(
+                name, dofs[row], types[row], text))
         self._set_table_model(channel_table_model(
             table, self, rows=rows,
-            geometry=None if found is None else found[1]))
+            geometry=None if found is None else found[1],
+            set_role=set_role))
         self._arm_row_deletion(name, 'channel', rows)
         if rows is not None:
             return f'{len(rows)} of {table.num_channels} channels'

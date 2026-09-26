@@ -149,7 +149,10 @@ def test_a_history_that_is_all_drives_says_so():
     only = TimeHistory(t, np.ones((2, 2048)),
                        response_dof=['200Z+', '210Z+'],
                        ordinate_dim=['force'] * 2)
-    with pytest.raises(ValueError, match='nothing left to explain'):
+    # the refusal names the missing side since channels have roles
+    # (2026-09-25): every channel is a reference or a monitor
+    with pytest.raises(ValueError, match='needs response channels; every '
+                                          'channel is a reference'):
         only.compute_multiple_coherence()
 
 

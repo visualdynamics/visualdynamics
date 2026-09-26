@@ -279,7 +279,8 @@ class AveragingPanel(QWidget):
         # only what applies (principle 3): the reference-driven
         # estimates need excitation channels, and a button that can
         # only refuse is a question, not a control
-        driven = bool(history.drive_dofs())
+        driven = (bool(history.reference_channels())
+                  and bool(history.response_channels()))
         self.frfs_button.setVisible(driven)
         self.coherence_button.setVisible(driven)
         self.set_averaging(averaging)

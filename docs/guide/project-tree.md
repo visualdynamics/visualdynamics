@@ -25,16 +25,34 @@ measures. Selecting cells picks records; a whole object is the object's
 row. A coordinate is typed over by double-clicking it
 ([The objects](objects.md#the-data-arrays-coredata)).
 
-A time history's grid has one more column, first: **Ref**, a check box
-per channel, ticked on the channels its FRFs and multiple coherence are
-computed against. Until you say otherwise that is every force or
-voltage channel. Tick an accelerometer and it becomes a reference too —
-its FRFs come out as acceleration over acceleration, a transmissibility;
-untick a load cell and it becomes a response. A reference is a channel,
-not a point: a drive point's load cell and the accelerometer beside it
-are two boxes. The choice rides the history (`history.references`, as
-`(DOF, quantity)` pairs), is saved with it and journaled, and anything
-computed from it under the old choice wears the refresh badge.
+A time history's grid has one more column, first: **Role**, what each
+channel is to an FRF — `ref` (a reference: it drives), `resp` (a
+response: it answers) or `mon` (a monitor: recorded, in no FRF). FRFs
+and multiple coherence run from the references to the responses. Click
+a role to change it. With no channel table, a force starts as a
+reference, an acceleration, velocity or displacement as a response, and
+anything else — volts, pressure, strain, temperature, a channel whose
+quantity is not declared — as a monitor (a moment and a rotation follow
+the force and the motion). A history imported with its channel table
+takes the roles the table states — a Rattlesnake file marks the
+channels it drove.
+
+**The time data's roles are the truth**, and a channel table linked
+with the data it describes shows them: change a role on the data's grid
+or in the table's Role column and both change. Linking a channel table
+to time data afterwards counts as the table's import — every role the
+table declares is given to the data, a channel it leaves blank keeps
+the data's role, and the status bar says which roles the link moved. A
+table that describes none of the data's channels is left alone. A
+channel's Control check and its role are independent: a controlled
+channel can be a reference, a response or a monitor. A role is a
+channel's,
+not a point's: a drive point's load cell and the accelerometer beside
+it are two rows, and making the accelerometer the reference gives
+acceleration over acceleration, a transmissibility. The roles ride the
+history (`history.roles`, `{(DOF, quantity): role}`), are saved with it
+and journaled, and anything computed under the old roles wears the
+refresh badge.
 
 Clicking the **project row** shows nothing on the right — the panes
 clear, and the bar carries the project's one act, *Generate Report*.

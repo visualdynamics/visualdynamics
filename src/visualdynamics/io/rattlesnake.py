@@ -1276,6 +1276,17 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
             if averaging is not None:
                 averaging = _started(history, averaging, kind)
             history.averaging = averaging
+            # each channel's role, from the table read beside it — the
+            # file's own statement (a feedback device makes a
+            # reference), so FRFs start from the channels the
+            # controller drove; the virtual rows are the controlled
+            # responses they are
+            table_roles = table.roles()
+            roles = {(dof, dim): (table_roles[i] or 'response')
+                     for i, dof, dim in zip(rows, rows_dof, rows_dim)}
+            for dof, dim in zip(rows_dof[len(rows):], rows_dim[len(rows):]):
+                roles[(dof, dim)] = 'response'
+            history.roles = roles
             out[key] = history
 
         # rattlesnake's own spectral save keeps only the environment group;

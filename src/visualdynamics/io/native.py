@@ -103,6 +103,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
                 entry.attrs['section'] = np.array(
                     [props.section.area, props.section.iy,
                      props.section.iz, props.section.j], dtype=np.float64)
+                # a section built from a shape keeps it, so the table
+                # shows its dimensions again (the four numbers stay, for
+                # a reader that knows nothing of shapes)
+                if props.section.shape:
+                    entry.attrs['section_shape'] = props.section.shape
+                    entry.attrs['section_dimensions'] = np.asarray(
+                        props.section.dimensions, dtype=np.float64)
             if props.orientation is not None:
                 entry.attrs['orientation'] = np.asarray(props.orientation,
                                                        dtype=np.float64)
@@ -126,7 +133,10 @@ def _load_block_properties(group) -> dict:
         if 'section' in attrs:
             area, iy, iz, j = (float(v) for v in attrs['section'])
             section = Section(str(attrs.get('section_name', '')),
-                              area, iy, iz, j)
+                              area, iy, iz, j,
+                              str(attrs.get('section_shape', '')),
+                              tuple(float(v) for v in
+                                    attrs.get('section_dimensions', ())))
         out[int(key)] = BlockProperties(
             material,
             thickness=(float(attrs['thickness']) if 'thickness' in attrs

@@ -6366,6 +6366,11 @@ class MainWindow(QMainWindow):
     def _units_changed(self, name):
         self.unit_system = SYSTEMS[name]
         self.render_current()
+        # an open geometry edit table was built once, in the system of
+        # its day: the nodes' coordinates and the blocks' properties
+        # are shown in the display system, and follow it (2026-09-26)
+        if self.editing is not None:
+            self._reload_edit_table()
 
     def _status_for(self, obj):
         """How big the object is, and anything wrong with it."""

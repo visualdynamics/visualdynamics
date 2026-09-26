@@ -1018,17 +1018,20 @@ def traceline_table_model(geometry: Geometry,
 #: the Blocks table's property columns: (title, field of the property
 #: set or of its material/section, kind)
 _PROPERTY_FIELDS = (
-    ('Material', 'material', 'name'),
-    ('E [Pa]', 'material', 'youngs_modulus'),
-    ('ν', 'material', 'poissons_ratio'),
-    ('ρ [kg/m³]', 'material', 'density'),
-    ('Thickness [m]', '', 'thickness'),
-    ('Section', 'section', 'name'),
-    ('A [m²]', 'section', 'area'),
-    ('Iy [m⁴]', 'section', 'iy'),
-    ('Iz [m⁴]', 'section', 'iz'),
-    ('J [m⁴]', 'section', 'j'),
-    ('Orientation', '', 'orientation'),
+    # (title, holder, field, dimension — None where there is no unit)
+    ('Material', 'material', 'name', None),
+    ('E', 'material', 'youngs_modulus', 'pressure'),
+    ('ν', 'material', 'poissons_ratio', None),
+    ('ρ', 'material', 'density', 'mass/length**3'),
+    ('Thickness', '', 'thickness', 'length'),
+    ('Section', 'section', 'name', None),
+    ('Shape', 'section', 'shape', None),
+    ('Dimensions', 'section', 'dimensions', 'length'),
+    ('A', 'section', 'area', 'length**2'),
+    ('Iy', 'section', 'iy', 'length**4'),
+    ('Iz', 'section', 'iz', 'length**4'),
+    ('J', 'section', 'j', 'length**4'),
+    ('Orientation', '', 'orientation', None),
 )
 
 
@@ -1036,25 +1039,64 @@ def _properties_of(geometry, row):
     return geometry.block_properties.get(int(geometry.block_id[row]))
 
 
-def _property_value(geometry, row, holder, field):
+#: the short names a shape's dimensions are written with in the table,
+#: in the constructor's order (`fem.SHAPES`)
+_SHAPE_LABELS = {
+    'round tube': ('D', 't'), 'rod': ('D',), 'rectangle': ('b', 'h'),
+    'rectangular tube': ('b', 'h', 't'),
+    'I-beam': ('d', 'bf', 'tf', 'tw'), 'channel': ('d', 'bf', 'tf', 'tw'),
+    'angle': ('a', 'b', 't'),
+}
+CUSTOM = 'custom'
+
+
+def _dimensions_text(section, unit_system):
+    """'D=1, t=0.065' in the display system, the shape's own labels; a
+    shape with nothing typed yet shows what it wants ('D=?, t=?'); an
+    angle adds where its orientation points."""
+    labels = _SHAPE_LABELS[section.shape]
+    if not section.dimensions:
+        return ', '.join(f'{label}=?' for label in labels)
+    shown = [float(unit_system.from_si(v, 'length')) if unit_system else v
+             for v in section.dimensions]
+    text = ', '.join(f'{label}={value:.6g}'
+                     for label, value in zip(labels, shown))
+    if section.shape == 'angle':
+        from ..core.fem import angle_major_axis
+
+        text += (f'; orient {angle_major_axis(*section.dimensions):.1f}° '
+                 'from the long leg')
+    return text
+
+
+def _property_value(geometry, row, holder, field, dimension=None,
+                    unit_system=None):
     props = _properties_of(geometry, row)
     if props is None:
         return ''
     owner = getattr(props, holder) if holder else props
     if owner is None:
         return ''
+    if holder == 'section' and field == 'shape':
+        return owner.shape or CUSTOM
+    if holder == 'section' and field == 'dimensions':
+        return _dimensions_text(owner, unit_system) if owner.shape else ''
     value = getattr(owner, field)
     if value is None:
         return ''
     if field == 'orientation':
         return ', '.join(f'{v:g}' for v in value)
+    if dimension is not None and unit_system is not None:
+        # held in SI, shown in the display system
+        return float(unit_system.from_si(float(value), dimension))
     return value
 
 
-def _set_property(holder, field):
+def _set_property(holder, field, dimension=None, unit_system=None):
     """A setter that rewrites the block's property set with one field
     changed — a material or a section made on first touch with the
-    other fields blank, so a person can fill a row cell by cell."""
+    other fields blank, so a person can fill a row cell by cell. A
+    number is typed in the display system and stored in SI."""
     from dataclasses import replace
 
     from ..core.fem import MATERIALS, BlockProperties, Material, Section
@@ -1063,6 +1105,16 @@ def _set_property(holder, field):
         block = int(geometry.block_id[row])
         props = geometry.block_properties.get(block)
         text = str(text).strip()
+        if holder == 'section' and field in ('shape', 'dimensions'):
+            geometry.block_properties[block] = _set_section_shape(
+                props, field, text, unit_system)
+            return
+        if (holder == 'section' and props is not None
+                and props.section is not None and props.section.shape
+                and field in ('area', 'iy', 'iz', 'j')):
+            raise ValueError(f'computed from the {props.section.shape}’s '
+                             'dimensions — choose Custom in Shape to type '
+                             'it')
         if holder == 'material' and field == 'name' and text in MATERIALS:
             # a library name fills the row; any other name is a name
             geometry.block_properties[block] = replace(
@@ -1078,6 +1130,9 @@ def _set_property(holder, field):
             value = tuple(parts) if text else None
         else:
             value = float(text) if text else None
+            if (value is not None and dimension is not None
+                    and unit_system is not None):
+                value = float(unit_system.to_si(value, dimension))
         if props is None:
             props = BlockProperties(Material('', 0.0, 0.0, 0.3))
         if holder == 'material':
@@ -1093,6 +1148,57 @@ def _set_property(holder, field):
         geometry.block_properties[block] = props
 
     return set_value
+
+
+def _set_section_shape(props, field, text, unit_system):
+    """The block's properties with its section's shape or dimensions
+    changed. A shape picked keeps the dimensions it can (the same shape,
+    or as many as the new one takes are there — not guessed); Custom
+    keeps the four numbers and lets them be typed. Dimensions are typed
+    in the display system as numbers in order or as the labels shown
+    ('D=1, t=0.065'), anything after a ';' ignored."""
+    from dataclasses import replace
+
+    from ..core.fem import SHAPES, BlockProperties, Material, Section, with_article
+
+    if props is None:
+        props = BlockProperties(Material('', 0.0, 0.0, 0.3))
+    section = props.section or Section('', 0.0, 0.0, 0.0, 0.0)
+    if field == 'shape':
+        shape = text.strip()
+        if shape in ('', CUSTOM):
+            return replace(props, section=replace(section, shape='',
+                                                  dimensions=()))
+        if shape not in SHAPES:
+            raise ValueError(f'{shape!r} is not a section shape: '
+                             + ', '.join([*SHAPES, CUSTOM]))
+        if shape == section.shape:
+            return props
+        # a new shape starts empty: its dimensions mean different things
+        return replace(props, section=Section(section.name, 0.0, 0.0, 0.0,
+                                              0.0, shape, ()))
+    if not section.shape:
+        raise ValueError('choose a shape first — the Shape column — or '
+                         'type A, Iy, Iz and J for a custom section')
+    labels = _SHAPE_LABELS[section.shape]
+    values = []
+    for token in text.split(';')[0].replace(',', ' ').split():
+        if '=' in token:
+            label, _eq, token = token.partition('=')
+            if label.strip() not in labels:
+                raise ValueError(f'{with_article(section.shape)} is given '
+                                 'as ' + ', '.join(labels))
+        values.append(float(token))
+    if len(values) != len(labels):
+        names = SHAPES[section.shape][1]
+        raise ValueError(f'{with_article(section.shape)} takes '
+                         f'{len(labels)} dimensions: '
+                         + ', '.join(f'{label} ({name})' for label, name
+                                     in zip(labels, names)))
+    if unit_system is not None:
+        values = [float(unit_system.to_si(v, 'length')) for v in values]
+    return replace(props, section=Section.of_shape(section.name,
+                                                   section.shape, values))
 
 
 def _property_journal(geometry, row, _text):
@@ -1111,30 +1217,57 @@ def _property_journal(geometry, row, _text):
         parts.append(f'thickness={props.thickness!r}')
     if props.section is not None:
         s = props.section
-        parts.append(f'section=Section({s.name!r}, {s.area!r}, {s.iy!r}, '
-                     f'{s.iz!r}, {s.j!r})')
+        if s.shape and s.dimensions:
+            # a shaped section replays from its dimensions
+            parts.append(f'section=Section.of_shape({s.name!r}, '
+                         f'{s.shape!r}, {list(s.dimensions)!r})')
+        else:
+            parts.append(f'section=Section({s.name!r}, {s.area!r}, '
+                         f'{s.iy!r}, {s.iz!r}, {s.j!r}'
+                         + (f', {s.shape!r}' if s.shape else '') + ')')
     if props.orientation is not None:
         parts.append(f'orientation={tuple(props.orientation)!r}')
     return (f'.block_properties[{block}] = BlockProperties('
             + ', '.join(parts) + ')')
 
 
-def _property_columns():
+def _property_columns(unit_system=None):
+    """The property columns, in the display system (Brandon,
+    2026-09-26: the table should show and expect the current display
+    units). Held in SI on the geometry, as the model is inside, and
+    journaled in SI, as every table edit is; the header names the unit.
+    Without a system, SI."""
     from ..core.fem import MATERIALS
 
     columns = []
-    for title, holder, field in _PROPERTY_FIELDS:
-        kwargs = ({'alignment': LEFT} if field in ('name', 'orientation')
-                  else {})
+    from ..core.fem import SHAPES
+
+    for title, holder, field, dimension in _PROPERTY_FIELDS:
+        kwargs = ({'alignment': LEFT}
+                  if field in ('name', 'orientation', 'shape', 'dimensions')
+                  else {'format': lambda v: v if v == '' else f'{v:.6g}'})
         if holder == 'material' and field == 'name':
             # the library as a shortlist, not a rule: pick one and the
             # row fills, or type any name and fill the row yourself
             kwargs.update(choices=list(MATERIALS), choices_editable=True)
+        if field == 'shape':
+            kwargs.update(choices=[*SHAPES, CUSTOM])
+        if dimension is not None:
+            unit = (unit_system.label_text(dimension)
+                    if unit_system is not None
+                    else _SI_LABELS[dimension])
+            title = f'{title} [{unit}]'
         columns.append(Column(
-            title, (lambda g, r, h=holder, f=field: _property_value(g, r, h, f)),
-            set=_set_property(holder, field), journal=_property_journal,
-            **kwargs))
+            title, (lambda g, r, h=holder, f=field, d=dimension:
+                    _property_value(g, r, h, f, d, unit_system)),
+            set=_set_property(holder, field, dimension, unit_system),
+            journal=_property_journal, **kwargs))
     return columns
+
+
+#: the headers with no display system to ask
+_SI_LABELS = {'pressure': 'Pa', 'mass/length**3': 'kg/m³', 'length': 'm',
+              'length**2': 'm²', 'length**4': 'm⁴'}
 
 
 def block_label(geometry: Geometry, row: int) -> str:
@@ -1257,7 +1390,7 @@ def block_table_model(geometry: Geometry,
         # set. Every cell's journal line restates the whole property
         # set, so a replay lands on the same object whichever cell was
         # edited last.
-        *_property_columns(),
+        *_property_columns(unit_system),
     ]
     return TableModel(geometry, columns, lambda g: len(g.block_id), parent)
 

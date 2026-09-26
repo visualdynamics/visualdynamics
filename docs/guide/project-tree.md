@@ -25,6 +25,17 @@ measures. Selecting cells picks records; a whole object is the object's
 row. A coordinate is typed over by double-clicking it
 ([The objects](objects.md#the-data-arrays-coredata)).
 
+A time history's grid has one more column, first: **Ref**, a check box
+per channel, ticked on the channels its FRFs and multiple coherence are
+computed against. Until you say otherwise that is every force or
+voltage channel. Tick an accelerometer and it becomes a reference too —
+its FRFs come out as acceleration over acceleration, a transmissibility;
+untick a load cell and it becomes a response. A reference is a channel,
+not a point: a drive point's load cell and the accelerometer beside it
+are two boxes. The choice rides the history (`history.references`, as
+`(DOF, quantity)` pairs), is saved with it and journaled, and anything
+computed from it under the old choice wears the refresh badge.
+
 Clicking the **project row** shows nothing on the right — the panes
 clear, and the bar carries the project's one act, *Generate Report*.
 

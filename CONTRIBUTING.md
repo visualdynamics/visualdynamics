@@ -2,24 +2,28 @@
 
 Thanks for taking a look.
 
-**Bug reports are very welcome, and I will try to fix them promptly.**
-That is the contribution that helps most right now: a clear report of
-something wrong — what you did, what happened, what you expected — is
-worth more to this project than a patch, because it is the part I
-cannot do alone.
+**Contributions are welcome** — bug reports, fixes, features,
+documentation, tests. Open an issue or a pull request; nobody needs
+an invitation.
 
-**Code contributions are by invitation.** It is one person's project,
-and what goes into the tree is decided in conversation, not by pull
-request. If you would like to discuss contributing, write to
-[contact@visualdynamics.org](mailto:contact@visualdynamics.org): say
-what you would like to change and why, and we will find the shape of
-it together — or find that it was already half-built, or aimed
-somewhere it was not going, before you have written it.
+**A bug report is the easiest place to start**, and I will try to fix
+what is reported promptly: what you did, what happened, what you
+expected. A report of something wrong is worth a great deal to this
+project, because it is the part I cannot do alone.
 
-This is a start, not a policy for ever. The plan is to open the code
-to community contributions later; it starts small — a person or two,
-by conversation — while the project finds its footing in other
-people's hands.
+**A pull request that keeps the project's rules will be merged.** The
+rules are written down, and they are the same ones every change here
+is held to, mine included: the principles (`PRINCIPLES.md`), the
+architecture and its conventions (`docs/architecture.md`), the rules
+for working in the tree (`AGENTS.md`) and the three conditions below.
+Meeting them is what a review looks for. When a change is declined or
+needs work, the review says which rule and why.
+
+**For anything substantial, open an issue first.** Not a requirement
+— a courtesy to your own time. A sentence about what you would like to
+change and why can save you writing something already half-built, or
+aimed somewhere the project is not going. You can also write to
+[contact@visualdynamics.org](mailto:contact@visualdynamics.org).
 
 How the package is put together, and the conventions a change is
 expected to keep — the layers, the one-workflow rule, the docstring
@@ -130,23 +134,20 @@ to the toolset are stated on a three-quad strip in `tests/test_fem.py`.
 - **Docstrings that say why.** Reference documentation is generated from
   them (`docs/api`), and the guides in `docs/guide` explain reasoning.
   Comments earn their place by stating a constraint the code cannot.
-- **No code the Project does not own in the package.** sdynpy,
-  rattlesnake and forcefinder are GPL-3.0, and importing one from the
-  package would put every future licensing choice out of reach —
-  not because the licenses clash, but because the lines would not be
-  the owner's to relicense. File formats are read as
-  the documented formats they are, and the methods are written here.
+- **No code the Project does not own in the package.** Importing a
+  package whose license would restrict the Project's licensing — a
+  copyleft one in particular — would put every future licensing choice
+  out of reach: not because the licenses clash, but because the lines
+  would not be the owner's to relicense. File formats are read as the
+  documented formats they are, and the methods are written here.
   `tests/test_license_boundary.py` checks this on every run rather than
-  trusting anyone to remember it.
-
-  There is no exception. The three generators that drove the real
-  controller — `rattlesnake_profiles.py`, `generate_plate_runs.py` and
-  `generate_drone.py` — used to be one, justified by never being
-  distributed. They live in the `visualdynamics-generators` repository
-  now, so no file here combines with a GPL-3 package at runtime and
-  none needs a license note when this is published. The generators
-  that remain under `testdata/` import nothing copyleft; what the
-  suite reads is their committed output.
+  trusting anyone to remember it. There is no exception, including for
+  tooling that is never distributed; the scripts under `testdata/` that
+  make the suite's data import nothing copyleft, and what the suite
+  reads is their committed output.
+- **Every bug fixed comes with a test that fails without the fix.**
+  Break the change on purpose and watch the test fail before calling it
+  done; a test that passes either way is testing nothing.
 
 `PRINCIPLES.md` is the standard a change is measured against — worth
 reading before a substantial one.

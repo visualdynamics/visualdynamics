@@ -24,8 +24,9 @@
 >    that the work is yours to give, not an employer's to claim, and
 >    carries no third-party code with obligations of its own.
 >
-> Contributions are by invitation (`CONTRIBUTING.md`): bug reports
-> need no agreement and are welcome from anyone.
+> Code contributions are welcome by pull request and arrive under
+> this agreement (`CONTRIBUTING.md`); bug reports need no agreement and
+> are welcome from anyone.
 
 Thank you for your interest in Visual Dynamics ("the Project"), owned
 by Brandon Zwink ("the Owner"). This agreement sets out the terms under

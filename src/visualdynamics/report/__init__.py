@@ -26,6 +26,8 @@ from numpy.typing import ArrayLike
 from ..decimate import peak_decimate
 from ..plot import (
     MEASURED_WIDTH,
+    PHASE_LIMITS,
+    PHASE_TICKS,
     STOOD_BACK_WIDTH,
     as_power_law,
     bin_edges,
@@ -1633,6 +1635,11 @@ def _plot_block(block, source, objects, us):
              'xlabel': f'{source.abscissa_dim} '
                        f'[{us.label_text(source.abscissa_dim)}]',
              'ylabel': ylabel, 'curves': curves}
+    if tag == 'phase':
+        # the app's phase axis: every quarter turn labeled, with room for
+        # the ±180° labels at its ends (`plot.PHASE_LIMITS`, `PHASE_TICKS`)
+        built['yrange'] = list(PHASE_LIMITS)
+        built['yticks'] = list(PHASE_TICKS)
     thinning = _thinned_note(thinned_to, thinned_from)
     if thinning:
         built['note'] = thinning

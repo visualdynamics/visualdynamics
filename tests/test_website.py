@@ -230,7 +230,7 @@ def test_the_example_tiles_wear_pictures_of_what_is_inside():
     examples = page.split('class="downloads examples"')[1].split('</div>')[0]
     assert 'mark.png' not in examples
     seen = []
-    for name in ('plate.png', 'drone.png'):
+    for name in ('plate.png', 'drone.png', 'barc.png'):
         assert f'src="{name}"' in examples, f'the tile shows {name}'
         image = QImage(str(ROOT_DIR / 'web' / 'launch' / name))
         assert not image.isNull(), name
@@ -243,4 +243,5 @@ def test_the_example_tiles_wear_pictures_of_what_is_inside():
                      if image.pixelColor(x, y).alpha() > 0)
         assert opaque > 40, f'{name} shows something'
         seen.append(image)
-    assert seen[0] != seen[1], 'two different things'
+    assert all(a != b for n, a in enumerate(seen) for b in seen[n + 1:]), \
+        'a different thing on each tile'

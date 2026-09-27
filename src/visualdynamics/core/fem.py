@@ -78,6 +78,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
+from typing import Any
 
 import numpy as np
 
@@ -110,6 +111,12 @@ DIRECTIONS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
 #: different questions, and only the energy asks the second.
 ZERO_ENERGY = 1e-12
 
+#: past this many degrees of freedom `Model.eigensolution` solves sparse
+#: rather than dense: the dense solve of a 662-node plate model (3972
+#: DOF) already took ten seconds and 2.2 GB, peaking near ten times its
+#: two matrices (2026-09-26)
+SPARSE_ABOVE = 3000
+
 
 @dataclass(frozen=True)
 class Material:
@@ -126,6 +133,14 @@ class Material:
     density: float                 #: kg/m^3
     poissons_ratio: float = 0.3
     modulus_of_rigidity: float | None = None    #: Pa, derived when None
+
+    @property
+    def is_rigid(self) -> bool:
+        """Whether this is `RIGID`: a link, not a material. A modulus
+        left blank in the Blocks table (None) is a material not yet
+        finished, not a link."""
+        return (self.youngs_modulus is not None
+                and math.isinf(self.youngs_modulus))
 
     @property
     def shear_modulus(self) -> float:
@@ -193,9 +208,21 @@ MATERIAL_LIBRARY: tuple[LibraryMaterial, ...] = (
     _handbook('nylon 6/6', 0.41, 0.0412, 0.39, _PLASTIC),
 )
 
-#: the library by name, for a lookup
+#: A block of two-node lines made of this is a set of rigid, massless
+#: links (Brandon, 2026-09-26): each joins two nodes so that one moves as
+#: the other plus its rotation about it, and adds no mass. What a bolt
+#: joining two plates whose mid-surfaces do not meet is, in a model built
+#: from planes. Not a material with a very large modulus — that makes the
+#: stiffness matrix ill-conditioned and the higher modes wrong — but an
+#: exact constraint the eigensolution eliminates (`Model.add_rigid_link`).
+RIGID = Material('rigid (massless)', youngs_modulus=math.inf, density=0.0,
+                 poissons_ratio=0.0)
+
+#: the library by name, for a lookup — and the rigid link, which is not a
+#: handbook material but is picked where one is
 MATERIALS: dict[str, Material] = {entry.material.name: entry.material
                                   for entry in MATERIAL_LIBRARY}
+MATERIALS[RIGID.name] = RIGID
 
 
 def material(name: str) -> Material:
@@ -505,7 +532,11 @@ class BlockProperties:
 
     @property
     def kind(self) -> str:
-        """'plate', 'beam', or what is wrong with it."""
+        """'plate', 'beam', 'rigid', or what is wrong with it. A rigid
+        block takes no thickness and no section, and any left from before
+        the material was picked are ignored."""
+        if self.material.is_rigid:
+            return 'rigid'
         if self.thickness is not None and self.section is None:
             return 'plate'
         if self.section is not None and self.thickness is None:
@@ -584,6 +615,17 @@ class Triangle:
 
 
 @dataclass
+class RigidLink:
+    """Two nodes held rigidly together, with no mass of their own: the
+    second moves as the first does, translated by the first's rotation
+    about it (`RIGID`)."""
+
+    node_a: int
+    node_b: int
+    group: str = ''
+
+
+@dataclass
 class LumpedMass:
     """A rigid item carried at a node: a motor, a battery, a camera.
 
@@ -646,13 +688,15 @@ def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
 class Model:
     """Nodes, beams and lumped masses, and the modes they imply.
 
-    Assembly is dense. The matrices are (6 x nodes) square, so a
-    three-hundred-node model is a 1800 x 1800 pair — 26 MB and a couple of
-    seconds to solve — and a thousand nodes is 290 MB and a minute or two.
-    That is the working ceiling, and it is a deliberate one: a sparse
-    assembly and a subspace solver would raise it by an order of magnitude
-    and cost more code than the models this is here to build need. Measure
-    before assuming it is the problem.
+    Two assemblies of one set of element matrices. Dense (`matrices`):
+    (6 x nodes) square, every mode solved whole — exact, and the path for a
+    model up to `SPARSE_ABOVE` degrees of freedom. Sparse
+    (`sparse_matrices`): only the nonzeros, the lowest modes by
+    shift-invert Lanczos. The dense path was the only one, and its ceiling
+    (~1000 nodes) deliberate, until a plate model of a small real
+    structure met it: the BARC at a quarter inch, 1,500 nodes, is ~13 GB
+    dense; sparse, its eighth-inch mesh of 6,150 nodes solves in three
+    seconds in under half a gigabyte (2026-09-26).
 
     Attributes:
         name: What the model is called; it becomes the geometry's name
@@ -676,6 +720,7 @@ class Model:
         self.beams: list[Beam] = []
         self.plates: list[Plate] = []
         self.triangles: list[Triangle] = []
+        self.rigid_links: list[RigidLink] = []
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
 
@@ -751,6 +796,50 @@ class Model:
         triangle = Triangle(nodes, material, float(thickness), color, group)
         self.triangles.append(triangle)
         return triangle
+
+    def add_rigid_link(self, node_a: int, node_b: int,
+                       group: str = '') -> RigidLink:
+        """Join two nodes rigidly, adding no mass.
+
+        Links that share nodes join into one rigid body, however they are
+        chained; each body moves as its first node does (the one added to
+        the model first), and the others follow it exactly. The
+        eigensolution eliminates the followers' degrees of freedom rather
+        than stiffening anything, so the answer is the limit of an
+        infinitely stiff member and the matrices stay well conditioned.
+
+        Parameters
+        ----------
+        node_a, node_b : int
+            The nodes, both already in the model, and different.
+        group : str, optional
+            The part the link belongs to — its block, from a geometry.
+
+        Returns
+        -------
+        RigidLink
+        """
+        for node in (node_a, node_b):
+            if int(node) not in self._nodes:
+                raise ValueError(f'rigid link names node {node}, which is not '
+                                 'in the model')
+        if int(node_a) == int(node_b):
+            raise ValueError(f'a rigid link joins two nodes; it names node '
+                             f'{node_a} twice')
+        link = RigidLink(int(node_a), int(node_b), group)
+        self.rigid_links.append(link)
+        return link
+
+    def rigid_bodies(self) -> list[list[int]]:
+        """The groups of nodes the rigid links join, each in the model's
+        node order — its first node is the one the others follow."""
+        neighbors: dict[int, set[int]] = {}
+        for link in self.rigid_links:
+            neighbors.setdefault(link.node_a, set()).add(link.node_b)
+            neighbors.setdefault(link.node_b, set()).add(link.node_a)
+        order = {node: i for i, node in enumerate(self._nodes)}
+        return [sorted(piece, key=order.__getitem__)
+                for piece in connected_pieces(neighbors)]
 
     def add_mass(self, node: int, mass: float,
                  inertia: Sequence[float] = (0.0, 0.0, 0.0),
@@ -934,6 +1023,9 @@ class Model:
                 other = triangle.nodes[(k + 1) % 3]
                 neighbors[node].add(other)
                 neighbors[other].add(node)
+        for link in self.rigid_links:
+            neighbors[link.node_a].add(link.node_b)
+            neighbors[link.node_b].add(link.node_a)
         return connected_pieces(neighbors)
 
     def wire_faces(self, material: Material, section: Section,
@@ -1081,17 +1173,11 @@ class Model:
 
     # ---- the matrices -----------------------------------------------------
 
-    def matrices(self) -> tuple[np.ndarray, np.ndarray]:
-        """Assemble the global mass and stiffness matrices.
-
-        Rows and columns run structural node by structural node in
-        insertion order, six per node in `DIRECTIONS` order, which is what
-        `dof_strings()` spells out. Display nodes are absent: they carry
-        nothing, so there is nothing of theirs to assemble.
-        """
-        n = self.num_dof
-        mass = np.zeros((n, n), dtype=np.float64)
-        stiffness = np.zeros((n, n), dtype=np.float64)
+    def _contributions(self):
+        """Every element's (rows, stiffness, mass) in global coordinates,
+        and every lumped mass's (rows, None, mass) — what both assemblies
+        scatter, so the dense and the sparse matrices cannot differ in
+        anything but storage."""
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
 
         for beam in self.beams:
@@ -1107,9 +1193,7 @@ class Model:
             m = transform.T @ _beam_mass(beam.material, beam.section, length) @ transform
             rows = np.r_[index[beam.node_a]:index[beam.node_a] + 6,
                          index[beam.node_b]:index[beam.node_b] + 6]
-            grid = np.ix_(rows, rows)
-            stiffness[grid] += k
-            mass[grid] += m
+            yield rows, k, m
 
         for plate in self.plates:
             corners = [self._nodes[n] for n in plate.nodes]
@@ -1117,13 +1201,10 @@ class Model:
             transform = _block_diagonal(rotation, 8)
             k_local, m_local = _plate_matrices(plate.material,
                                                plate.thickness, a, b)
-            k = transform.T @ k_local @ transform
-            m = transform.T @ m_local @ transform
             rows = np.concatenate([np.arange(index[n], index[n] + 6)
                                    for n in plate.nodes])
-            grid = np.ix_(rows, rows)
-            stiffness[grid] += k
-            mass[grid] += m
+            yield (rows, transform.T @ k_local @ transform,
+                   transform.T @ m_local @ transform)
 
         for triangle in self.triangles:
             corners = [self._nodes[n] for n in triangle.nodes]
@@ -1131,25 +1212,74 @@ class Model:
             transform = _block_diagonal(rotation, 6)
             k_local, m_local = _triangle_matrices(triangle.material,
                                                   triangle.thickness, xy)
-            k = transform.T @ k_local @ transform
-            m = transform.T @ m_local @ transform
             rows = np.concatenate([np.arange(index[n], index[n] + 6)
                                    for n in triangle.nodes])
-            grid = np.ix_(rows, rows)
-            stiffness[grid] += k
-            mass[grid] += m
+            yield (rows, transform.T @ k_local @ transform,
+                   transform.T @ m_local @ transform)
 
         for item in self.masses:
             start = index[item.node]
-            for offset in range(3):
-                mass[start + offset, start + offset] += item.mass
-            for offset, inertia in enumerate(item.inertia):
-                mass[start + 3 + offset, start + 3 + offset] += inertia
+            yield (np.arange(start, start + 6), None,
+                   np.diag([item.mass] * 3 + list(item.inertia)))
 
+    def matrices(self) -> tuple[np.ndarray, np.ndarray]:
+        """Assemble the global mass and stiffness matrices, dense.
+
+        Rows and columns run structural node by structural node in
+        insertion order, six per node in `DIRECTIONS` order, which is what
+        `dof_strings()` spells out. Display nodes are absent: they carry
+        nothing, so there is nothing of theirs to assemble.
+        """
+        n = self.num_dof
+        mass = np.zeros((n, n), dtype=np.float64)
+        stiffness = np.zeros((n, n), dtype=np.float64)
+        for rows, k, m in self._contributions():
+            grid = np.ix_(rows, rows)
+            if k is not None:
+                stiffness[grid] += k
+            mass[grid] += m
         # assembly is symmetric by construction, but floating point addition
         # is not associative and the halves drift apart in the last bits;
         # eigh reads only one triangle, so an asymmetry here is silent
         return (mass + mass.T) / 2.0, (stiffness + stiffness.T) / 2.0
+
+    def sparse_matrices(self) -> tuple[Any, Any]:
+        """The same mass and stiffness matrices as `matrices`, stored
+        sparse (scipy CSR): each node couples only to the nodes of the
+        elements it touches, so a row holds a few dozen entries of
+        thousands, and the storage grows with the nodes rather than
+        their square.
+
+        Returns
+        -------
+        tuple of scipy.sparse.csr_matrix
+            (mass, stiffness), symmetric.
+        """
+        from scipy import sparse
+
+        n = self.num_dof
+        rows_k, cols_k, vals_k, rows_m, cols_m, vals_m = [], [], [], [], [], []
+        for rows, k, m in self._contributions():
+            r = len(rows)
+            i, j = np.repeat(rows, r), np.tile(rows, r)
+            if k is not None:
+                rows_k.append(i)
+                cols_k.append(j)
+                vals_k.append(k.ravel())
+            rows_m.append(i)
+            cols_m.append(j)
+            vals_m.append(m.ravel())
+
+        def gather(rows, cols, vals):
+            if not rows:
+                return sparse.csr_matrix((n, n))
+            matrix = sparse.coo_matrix(
+                (np.concatenate(vals), (np.concatenate(rows),
+                                        np.concatenate(cols))),
+                shape=(n, n)).tocsr()
+            return ((matrix + matrix.T) / 2.0).tocsr()
+
+        return gather(rows_m, cols_m, vals_m), gather(rows_k, cols_k, vals_k)
 
     def rigid_body_vectors(self) -> np.ndarray:
         """The six rigid-body motions, as columns over the model's DOFs.
@@ -1180,50 +1310,59 @@ class Model:
 
     def eigensolution(self, maximum_frequency: float | None = None,
                       num_modes: int | None = None, damping: float = 0.0,
-                      fixed: Sequence[str] = ()) -> ShapeSet:
+                      fixed: Sequence[str] = (),
+                      solver: str = 'auto') -> ShapeSet:
         """Real normal modes, mass-normalized, as a ShapeSet.
 
         `fixed` names degrees of freedom to ground: '101X+' fixes one,
-        '101' fixes all six of that node. The remaining problem is the
-        symmetric generalized one, K phi = lambda M phi, solved by
-        factoring M (Cholesky), reducing to a standard symmetric problem
-        and transforming back — which is what makes the shapes come out
-        mass-normalized to machine precision rather than normalized and
-        then rescaled.
+        '101' fixes all six of that node. Rigid links are eliminated
+        exactly (`constraint_transform`).
+
+        Two solvers, one answer. **Dense** (a model of up to
+        `SPARSE_ABOVE` degrees of freedom): the symmetric generalized
+        problem K phi = lambda M phi solved whole, by factoring M
+        (Cholesky), reducing to a standard symmetric problem and
+        transforming back — every mode, mass-normalized to machine
+        precision. **Sparse** (larger models): the matrices stored as
+        their nonzeros (`sparse_matrices`) and the lowest modes found by
+        shift-invert Lanczos (ARPACK, `scipy.sparse.linalg.eigsh`), the
+        family the large finite element codes use; it finds the lowest
+        `num_modes`, or every mode up to `maximum_frequency`, and one of
+        the two must be said. Memory grows with the nodes instead of
+        their square: a plate model of 1,500 nodes, ~13 GB dense, is tens
+        of megabytes sparse (Brandon, 2026-09-26, for the BARC example —
+        the dense ceiling, deliberate until then, measured and met).
 
         `damping` is a fraction of critical, applied uniformly. A model
         has no damping of its own; it is stated so the modes can
         synthesize an FRF that looks like a measurement.
+
+        Parameters
+        ----------
+        maximum_frequency : float, optional
+            Keep every mode up to this frequency, in Hz.
+        num_modes : int, optional
+            Keep this many, the lowest, rigid ones included.
+        damping : float, default 0.0
+            The fraction of critical damping every mode is given.
+        fixed : sequence of str
+            Degrees of freedom to ground.
+        solver : {'auto', 'dense', 'sparse'}, default 'auto'
+            Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees
+            of freedom and sparse beyond.
+
+        Returns
+        -------
+        ShapeSet
         """
-        mass, stiffness = self.matrices()
-        free = self._free_dofs(fixed)
-        if not len(free):
-            raise ValueError('every degree of freedom is fixed')
-        reduced_m = mass[np.ix_(free, free)]
-        reduced_k = stiffness[np.ix_(free, free)]
-
-        try:
-            factor = np.linalg.cholesky(reduced_m)
-        except np.linalg.LinAlgError:
-            starved = [self.dof_strings()[free[i]]
-                       for i in np.flatnonzero(np.diag(reduced_m) <= 0.0)]
-            raise ValueError(
-                'the mass matrix is not positive definite, so these degrees '
-                'of freedom carry no mass and no rotary inertia: '
-                + (', '.join(starved[:6]) or 'none on the diagonal, so the '
-                   'model is nearly a mechanism')) from None
-
-        # M = L L^T, so K phi = lambda M phi becomes A y = lambda y with
-        # A = L^-1 K L^-T and phi = L^-T y. y orthonormal then gives
-        # phi^T M phi = y^T y = I exactly, which is the normalization we
-        # want and not something applied afterwards.
-        temporary = np.linalg.solve(factor, reduced_k)
-        standard = np.linalg.solve(factor, temporary.T).T
-        eigenvalues, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
-        shapes = np.linalg.solve(factor.T, vectors)
-
-        full = np.zeros((self.num_dof, shapes.shape[1]), dtype=np.float64)
-        full[free] = shapes
+        if solver not in ('auto', 'dense', 'sparse'):
+            raise ValueError(f'{solver!r} is not a solver: auto, dense, sparse')
+        if solver == 'sparse' or (solver == 'auto'
+                                  and self.num_dof > SPARSE_ABOVE):
+            eigenvalues, full, stiffness = self._sparse_modes(
+                fixed, maximum_frequency, num_modes)
+        else:
+            eigenvalues, full, stiffness = self._dense_modes(fixed)
         # a rigid-body eigenvalue is zero plus round-off, and comes out
         # either side of it; the negative ones are not oscillations
         frequency = np.sqrt(np.clip(eigenvalues, 0.0, None)) / (2.0 * np.pi)
@@ -1244,6 +1383,185 @@ class Model:
                         shape_matrix=full[:, keep].T,
                         mass_unit='kg',
                         comment=self.name or '')
+
+    def _dense_modes(self, fixed):
+        """(eigenvalues, shapes at every DOF, stiffness) solved whole."""
+        mass, stiffness = self.matrices()
+        # u = T q: q the degrees of freedom that remain — every node's,
+        # less those grounded and those following a rigid link's first
+        # node — and T writes every one of the model's in terms of them
+        transform = self.constraint_transform(fixed)
+        free = np.arange(transform.shape[1])
+        if not len(free):
+            raise ValueError('every degree of freedom is fixed')
+        reduced_m = transform.T @ mass @ transform
+        reduced_k = transform.T @ stiffness @ transform
+
+        try:
+            factor = np.linalg.cholesky(reduced_m)
+        except np.linalg.LinAlgError:
+            names = self.dof_strings()
+            kept = [names[int(np.flatnonzero(column)[0])]
+                    for column in transform.T]
+            starved = [kept[i]
+                       for i in np.flatnonzero(np.diag(reduced_m) <= 0.0)]
+            raise ValueError(
+                'the mass matrix is not positive definite, so these degrees '
+                'of freedom carry no mass and no rotary inertia: '
+                + (', '.join(starved[:6]) or 'none on the diagonal, so the '
+                   'model is nearly a mechanism')) from None
+
+        # M = L L^T, so K phi = lambda M phi becomes A y = lambda y with
+        # A = L^-1 K L^-T and phi = L^-T y. y orthonormal then gives
+        # phi^T M phi = y^T y = I exactly, which is the normalization we
+        # want and not something applied afterwards.
+        temporary = np.linalg.solve(factor, reduced_k)
+        standard = np.linalg.solve(factor, temporary.T).T
+        eigenvalues, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
+        shapes = np.linalg.solve(factor.T, vectors)
+
+        full = transform @ shapes
+        return eigenvalues, full, stiffness
+
+    def _sparse_modes(self, fixed, maximum_frequency, num_modes):
+        """(eigenvalues, shapes at every DOF, stiffness) for the lowest
+        modes, by shift-invert Lanczos on the sparse matrices."""
+        from scipy import sparse
+        from scipy.linalg import eigh as scipy_eigh
+        from scipy.sparse.linalg import eigsh, splu
+
+        if num_modes is None and maximum_frequency is None:
+            raise ValueError(
+                f'a model of {self.num_dof} degrees of freedom is solved '
+                'for its lowest modes: say how many (num_modes) or up to '
+                'what frequency (maximum_frequency)')
+        mass, stiffness = self.sparse_matrices()
+        transform = self.constraint_transform(fixed, sparse=True)
+        reduced_m = (transform.T @ mass @ transform).tocsc()
+        reduced_k = (transform.T @ stiffness @ transform).tocsc()
+        size = reduced_m.shape[0]
+        if not size:
+            raise ValueError('every degree of freedom is fixed')
+        # a shift just below zero: the rigid-body modes (eigenvalue 0) are
+        # nearest it, so they come first, and K - sigma M = K + |sigma| M
+        # is positive definite even when K alone is singular (free-free)
+        sigma = -(2.0 * np.pi) ** 2
+        # Symmetric diagonal scaling, S K S and S M S with S = 1/sqrt of
+        # the shifted diagonal: the same eigenvalues, the modes S phi'. A
+        # model of plates mixes meters with radians, and rigid links fold
+        # lever arms into the rotations — the rigid-link test model's
+        # shifted matrix had a condition number of 4e12, and Lanczos,
+        # which converges no better than its linear solves, left residuals
+        # of 1e-2. Scaled it is 4e9 (2026-09-26).
+        scale = sparse.diags(1.0 / np.sqrt(
+            (reduced_k - sigma * reduced_m).diagonal()))
+        reduced_k = (scale @ reduced_k @ scale).tocsc()
+        reduced_m = (scale @ reduced_m @ scale).tocsc()
+        limit = (None if maximum_frequency is None
+                 else (2.0 * np.pi * float(maximum_frequency)) ** 2)
+        count = int(num_modes) if num_modes is not None else 24
+        while True:
+            count = max(1, min(count, size - 1))
+            try:
+                eigenvalues, vectors = eigsh(reduced_k, k=count, M=reduced_m,
+                                             sigma=sigma, which='LM')
+            except RuntimeError as failure:
+                empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
+                                       & (reduced_k.diagonal() <= 0.0))
+                raise ValueError(
+                    'the model could not be factored: degrees of freedom '
+                    'with neither mass nor stiffness'
+                    + (f' ({len(empty)} of them)' if len(empty) else '')
+                    + f' — {failure}') from None
+            if (limit is None or eigenvalues.max() > limit
+                    or count >= size - 1):
+                break
+            count *= 2
+        # Polish: two steps of inverse iteration with the shifted factor,
+        # each followed by Rayleigh-Ritz — the small projected problem
+        # solved densely. What is left of the conditioning after scaling
+        # still bounds Lanczos' own accuracy; this brings the residuals to
+        # ~1e-6 and the frequencies onto the dense solver's (measured on
+        # the rigid-link model: 1e-4 residual before, 1.5e-6 after). The
+        # Ritz step also makes the modes mass-normal exactly.
+        factor = splu((reduced_k - sigma * reduced_m).tocsc())
+        for step in range(3):
+            if step:
+                vectors = factor.solve(reduced_m @ vectors)
+            eigenvalues, ritz = scipy_eigh(vectors.T @ (reduced_k @ vectors),
+                                           vectors.T @ (reduced_m @ vectors))
+            vectors = vectors @ ritz
+        return eigenvalues, transform @ (scale @ vectors), stiffness
+
+    def constraint_transform(self, fixed: Sequence[str] = (),
+                             sparse: bool = False) -> Any:
+        """T, with u = T q: every degree of freedom of the model written
+        in terms of those that remain free — grounded ones gone, and each
+        rigid body's followers written through its first node, u_b = u_a +
+        θ_a × (x_b − x_a) and θ_b = θ_a. The identity's columns when there
+        is nothing to constrain.
+
+        Parameters
+        ----------
+        fixed : sequence of str
+            Degrees of freedom to ground, as `eigensolution` takes them. A
+            rigid body is grounded through its first node; naming one of
+            its followers is refused, since fixing a follower alone would
+            fix part of a rigid body and not the rest.
+
+        sparse : bool, default False
+            Return it as a scipy CSR matrix, for the sparse solver.
+
+        Returns
+        -------
+        numpy.ndarray or scipy.sparse.csr_matrix
+            (num_dof, remaining) and real.
+        """
+        index = {node: 6 * i for i, node in enumerate(self.node_ids)}
+        follows: dict[int, int] = {}
+        for body in self.rigid_bodies():
+            for node in body[1:]:
+                follows[node] = body[0]
+        free = self._free_dofs(fixed)
+        followers = {index[node] + k for node in follows for k in range(6)}
+        held = sorted(set(range(self.num_dof)) - {int(i) for i in free})
+        clash = sorted({self.node_ids[i // 6] for i in held if i in followers})
+        if clash:
+            raise ValueError(
+                'node ' + ', '.join(str(n) for n in clash) + ' follows a '
+                'rigid link; ground the node it follows instead')
+        kept = [int(i) for i in free if int(i) not in followers]
+        column = {dof: k for k, dof in enumerate(kept)}
+        entries = [(dof, k, 1.0) for dof, k in column.items()]
+        for node, lead in follows.items():
+            r = self._nodes[node] - self._nodes[lead]
+            # θ × r = -[r]× θ: the lead's rotation moves the follower
+            arm = np.array([[0.0, r[2], -r[1]],
+                            [-r[2], 0.0, r[0]],
+                            [r[1], -r[0], 0.0]])
+            rows = index[node]
+            lead_row = index[lead]
+            for k in range(6):
+                source = lead_row + k
+                if source not in column:
+                    continue                  # the lead is grounded there
+                entries.append((rows + k, column[source], 1.0))
+                if k >= 3:
+                    entries.extend((rows + axis, column[source],
+                                    float(arm[axis, k - 3]))
+                                   for axis in range(3) if arm[axis, k - 3])
+        shape = (self.num_dof, len(kept))
+        if sparse:
+            from scipy import sparse as sp
+
+            if not entries:
+                return sp.csr_matrix(shape)
+            i, j, v = zip(*entries, strict=True)
+            return sp.coo_matrix((v, (i, j)), shape=shape).tocsr()
+        transform = np.zeros(shape, dtype=np.float64)
+        for i, j, v in entries:
+            transform[i, j] = v
+        return transform
 
     def _free_dofs(self, fixed) -> np.ndarray:
         """Which rows survive after grounding what `fixed` names."""
@@ -1288,6 +1606,12 @@ class Model:
             connectivity.append([beam.node_a, beam.node_b])
             types.append(21)
             colors.append(beam.color)
+        # rigid links are two-node lines too, in blocks of their own — a
+        # geometry given `RIGID` on those blocks rebuilds them
+        for link in self.rigid_links:
+            connectivity.append([link.node_a, link.node_b])
+            types.append(21)
+            colors.append(1)
         # plates are structural quads and appear as such — unlike faces,
         # which are drawings; both shade, only one carries stiffness
         for plate in self.plates:
@@ -1312,6 +1636,8 @@ class Model:
         # five of the drone's blade members into the frame block.
         parts, blocks = {}, []
         for part in ([b.group for b in (self.beams if beams else ())]
+                     + [link.group or 'rigid links'
+                        for link in self.rigid_links]
                      + [p.group for p in self.plates]
                      + [t.group for t in self.triangles]
                      + [f.group for f in self.faces]):
@@ -1382,7 +1708,7 @@ def _element_by_block(model: Model, geometry: Geometry,
             raise ValueError(
                 f'{named(block)} has no properties: give every block a '
                 'material and a thickness or a section (fem.BlockProperties)')
-        if props.kind not in ('plate', 'beam'):
+        if props.kind not in ('plate', 'beam', 'rigid'):
             raise ValueError(f'{named(block)} has {props.kind}: a block of '
                              'plates takes a thickness, a block of beams a '
                              'section, never both')
@@ -1410,6 +1736,12 @@ def _element_by_block(model: Model, geometry: Geometry,
         elif shape == 'line' and len(nodes) == 2 and props.kind == 'beam':
             model.add_beam(nodes[0], nodes[1], props.material, props.section,
                            props.orientation, group=label)
+        elif shape == 'line' and len(nodes) == 2 and props.kind == 'rigid':
+            model.add_rigid_link(nodes[0], nodes[1], group=label)
+        elif props.kind == 'rigid':
+            raise ValueError(f'{named(block)} holds {shape_name} elements; a '
+                             'rigid (massless) block holds two-node lines, '
+                             'one link each')
         else:
             wanted = ('a thickness' if shape == 'face' else 'a section'
                       if shape == 'line' else 'an element this solver has')
@@ -1480,7 +1812,7 @@ def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
     energy = np.sum(shapes * (stiffness @ shapes), axis=0)
     # the same sum with every cancellation removed: how big the terms were
     # before they annihilated each other
-    magnitude = np.sum(np.abs(shapes) * (np.abs(stiffness) @ np.abs(shapes)),
+    magnitude = np.sum(np.abs(shapes) * (abs(stiffness) @ np.abs(shapes)),
                        axis=0)
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = np.abs(energy) / magnitude

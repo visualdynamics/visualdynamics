@@ -1,14 +1,16 @@
-"""The two example-project tiles' pictures: the plate and the quadcopter.
+"""The example-project tiles' pictures: the plate, the quadcopter, the BARC.
 
-The downloads page offers two example bundles, and each tile wears a
+The downloads page offers example bundles, and each tile wears a
 picture of the thing inside it rather than the application's mark
 (Brandon, 2026-09-16) — a render of the geometry itself, from the same
 scene the app draws, on a transparent ground so the tile's own panel
 shows through. The plate is the test fixture's mesh; the quadcopter is
 the demonstration airframe's drawing (no eigensolution, so this takes
-seconds).
+seconds). The BARC is its demonstration mesh at the website figure's
+coarser size, stood up (`barc.upright`) — built y-up, it would lie on
+its side in a z-up scene.
 
-    python tools/make_example_icons.py          # write web/launch/{plate,drone}.png
+    python tools/make_example_icons.py          # write web/launch/{plate,drone,barc}.png
 
 Renders are not byte-stable across VTK builds, so there is no --check;
 `tests/test_website.py` holds the files to their shape instead.
@@ -43,6 +45,12 @@ def drone():
     return shape.geometry()
 
 
+def barc():
+    sys.path.insert(0, str(ROOT / 'src'))
+    from visualdynamics.demo import barc as article
+    return article.upright(article.geometry(0.25))
+
+
 def render(geometry, path: pathlib.Path, *, azimuth: float, elevation: float,
            zoom: float) -> None:
     """The geometry alone — no axes, no labels, no ground — as a PNG."""
@@ -67,7 +75,8 @@ def render(geometry, path: pathlib.Path, *, azimuth: float, elevation: float,
 def main() -> int:
     render(plate(), SITE / 'plate.png', azimuth=30.0, elevation=25.0, zoom=1.0)
     render(drone(), SITE / 'drone.png', azimuth=45.0, elevation=50.0, zoom=1.2)
-    for name in ('plate.png', 'drone.png'):
+    render(barc(), SITE / 'barc.png', azimuth=30.0, elevation=0.0, zoom=1.0)
+    for name in ('plate.png', 'drone.png', 'barc.png'):
         print(f'wrote {SITE / name} ({(SITE / name).stat().st_size // 1024} KB)')
     return 0
 

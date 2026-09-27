@@ -88,11 +88,13 @@
 
   <h2 id="examples">Example projects</h2>
   <p>
-    Something to open on the first day: complete projects, one per
-    workflow, with the report already generated. Every run is
+    Something to open on the first day: complete projects with the
+    work already done. The plate and the quadcopter are one project
+    per workflow, each with its report generated. Every run in them is
     synthetic — a virtual test article driven through the same
     controller the real ones are — and the photographs are renders of
-    the geometry.
+    the geometry. The BARC is a finite element model, solved and
+    matched against the reference modes shared for the same structure.
   </p>
   <div class="downloads examples">
     <a class="dl" href="https://github.com/visualdynamics/visualdynamics/releases/download/examples/VisualDynamics-examples-plate.zip">
@@ -105,12 +107,21 @@
       <span class="text"><span class="os">The quadcopter</span>
       <span class="file">four projects · modal, random, shock, transient · 272 MB</span></span>
     </a>
+    <a class="dl" href="https://github.com/visualdynamics/visualdynamics/releases/download/examples/VisualDynamics-examples-barc.zip">
+      <img class="app" src="barc.png" alt="The BARC, as the app draws it" width="320" height="320">
+      <span class="text"><span class="os">The BARC</span>
+      <span class="file">one project · a finite element model matched to its reference · 5 MB</span></span>
+    </a>
   </div>
   <p class="note">
     The plate is the data the figures on the <a href="examples.html">Examples</a>
     page and the guide's screenshots come from; the quadcopter is the
-    same workflows on a model the size of a real test article. Unzip,
-    then File → Open. They are <code>.vdyn</code> files, and are re-cut
+    same workflows on a model the size of a real test article. The
+    BARC is the documentation's
+    <a href="documentation/guide/workflows/fem-workflow/">finite element workflow</a>
+    carried out, against the reference shared on the
+    <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring Focus Group wiki</a>.
+    Unzip, then File → Open. They are <code>.vdyn</code> files, and are re-cut
     when the project file moves to <code>.escdf</code>.
   </p>
 

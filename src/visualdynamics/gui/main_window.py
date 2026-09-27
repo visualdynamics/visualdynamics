@@ -1676,6 +1676,18 @@ class MainWindow(QMainWindow):
                 lambda _checked, k=kind: self._element_type_chosen(k))
             self.element_type_actions[kind] = action
 
+        # which block new elements go into (Brandon, 2026-09-26): the
+        # geometry's blocks and a new one. Before this every element went
+        # into the first block, and a beam added to a model of plates —
+        # a rigid link, a stiffener — landed in a plate block that then
+        # refused to build
+        self.element_block_box: QComboBox = QComboBox()
+        self.element_block_box.setToolTip('Add elements into this block')
+        self.element_block_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._element_block_handle = toolbar.addWidget(self.element_block_box)
+        self._element_block_handle.setVisible(False)
+
         self.rotate_action: QAction = QAction(control_icon('rotate'), '', self)
         self.rotate_action.setCheckable(True)
         self.rotate_action.setToolTip(
@@ -2874,6 +2886,8 @@ class MainWindow(QMainWindow):
          'project_onto_basis'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
         ('solve_modes', 'Solve Modes', 'quad', 'solve_modes_act'),
+        ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
+         'merge_nodes_act'),
     )
 
     def acts_for(self, names=None):
@@ -4732,18 +4746,78 @@ class MainWindow(QMainWindow):
             action.setVisible(turning)
 
     def _update_element_type_actions(self):
-        """Show the element-type buttons only while adding elements."""
+        """Show the element-type buttons, and the block new elements go
+        into, only while adding elements."""
         adding = (self.add_mode and self.editing is not None
                   and self.editing[1] == 'elements')
         for action in self.element_type_actions.values():
             action.setVisible(adding)
+        self._element_block_handle.setVisible(adding)
+        if adding:
+            self._fill_element_blocks()
+
+    #: the drop-down's last entry: new elements start a block of their own
+    NEW_BLOCK = 'New block'
+
+    def _fill_element_blocks(self, keep: int | None = None):
+        """The geometry's blocks and a new one, choosing `keep` when
+        given, else the default: the first block while it holds the kind
+        of element being added (or nothing), a new block otherwise — so a
+        beam never lands among plates."""
+        geometry = self.objects.get(self.editing[0]) if self.editing else None
+        box = self.element_block_box
+        blocked = box.blockSignals(True)
+        box.clear()
+        if geometry is not None:
+            for k, block in enumerate(geometry.block_id):
+                name = geometry.block_name[k]
+                box.addItem(f'Block {int(block)}' + (f' — {name}' if name
+                                                     else ''), int(block))
+        box.addItem(self.NEW_BLOCK, None)
+        if keep is not None and box.findData(keep) >= 0:
+            box.setCurrentIndex(box.findData(keep))
+        else:
+            box.setCurrentIndex(self._default_block_index(geometry))
+        box.blockSignals(blocked)
+
+    def _default_block_index(self, geometry) -> int:
+        box = self.element_block_box
+        if geometry is None or not len(geometry.block_id):
+            return box.count() - 1
+        first = int(geometry.block_id[0])
+
+        def kind(code):
+            # the element's shape and node count: a file's four-node shell
+            # (94) and the quad add mode makes (44) are one kind of element
+            _name, count, shape = ELEMENT_TYPES.get(int(code), ('', 0, ''))
+            return count, shape
+
+        adding = kind(self.element_type[0])
+        held = {kind(t) for t, b in zip(geometry.elem_type, geometry.elem_block)
+                if int(b) == first}
+        return 0 if held <= {adding} else box.count() - 1
 
     def _element_type_chosen(self, kind):
-        """A different element type: drop a part-built element and say so."""
+        """A different element type: drop a part-built element and say so,
+        and default the block for it again."""
         self._picked_nodes = []
         self._draw_picked()
         if self.add_mode and self.editing is not None:
+            if self.editing[1] == 'elements':
+                self._fill_element_blocks()
             self._show_status(self._add_mode_hint())
+
+    def _element_block(self, geometry) -> int:
+        """The block the next element goes into — made now when the
+        drop-down says a new one, and chosen in it from then on, so every
+        element picked after it joins the same new block."""
+        chosen = self.element_block_box.currentData()
+        if chosen is not None:
+            return int(chosen)
+        block = geometry.add_block()
+        self.project.record_call(geometry, 'add_block')
+        self._fill_element_blocks(keep=block)
+        return block
 
     @property
     def element_type(self) -> tuple[int, int]:
@@ -4834,10 +4908,11 @@ class MainWindow(QMainWindow):
                 code, count = self.element_type
                 if len(nodes) != count:
                     code = None      # Enter with fewer picks: fit the count
-                geometry.add_element(nodes, elem_type=code)
+                block = self._element_block(geometry)
+                geometry.add_element(nodes, elem_type=code, block=block)
                 self.project.record_call(
                     geometry, 'add_element', [int(n) for n in nodes],
-                    elem_type=code)
+                    elem_type=code, block=block)
                 kind = ELEMENT_TYPES[int(geometry.elem_type[-1])][0]
                 message = f'Added {kind} element'
         except ValueError as e:
@@ -10267,6 +10342,43 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'{added}: 6 modes {self._describe_rigid(obj, properties)}, '
             f'linked to {name}')
+
+    def merge_nodes_act(self) -> None:
+        """Make the selected geometry's coincident nodes one node — how
+        planes meshed apart are tied where they meet. The tolerance is
+        asked in the display unit."""
+        obj = self.current_object()
+        if not isinstance(obj, Geometry):
+            self._show_status('Select a geometry to merge its coincident '
+                              'nodes')
+            return
+        low, high = obj.extent
+        default = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+        defined = obj.units_defined
+        unit = self.unit_system.label_text('length') if defined else 'units'
+        shown = (float(self.unit_system.from_si(default, 'length'))
+                 if defined else default)
+        typed, ok = QInputDialog.getDouble(
+            self, 'Merge Coincident Nodes',
+            f'Nodes closer than this are one node [{unit}]:', shown, 0.0,
+            1e9, 9)
+        if not ok:
+            return
+        tolerance = (float(self.unit_system.to_si(typed, 'length'))
+                     if defined else typed)
+        name = self.object_item().text(0)
+        try:
+            found = self.project.merge_coincident_nodes(name, tolerance)
+        except (ValueError, TypeError) as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._refresh_item(self.object_item(), obj)
+        self.render_current()
+        self._show_status(
+            f'{name}: merged {found["merged"]} node'
+            f'{"s" * (found["merged"] != 1)} into {found["into"]} — '
+            f'{obj.num_nodes} nodes remain' if found['merged'] else
+            f'{name}: no two nodes are within {typed:g} {unit} of each other')
 
     def solve_modes_act(self) -> None:
         """The normal modes of the selected geometry, built from its

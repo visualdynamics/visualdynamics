@@ -1047,6 +1047,98 @@ class Geometry:
         return {'nodes': removed_nodes, 'tracelines': len(orphan_lines),
                 'elements': len(orphan_elements)}
 
+    def coincident_nodes(self, tolerance: float) -> dict[int, int]:
+        """{node: the node it coincides with}: every node within
+        `tolerance` of another, mapped to the lowest id among those it is
+        joined to — the one a merge keeps. Chains join: a within tolerance
+        of b and b of c are one point.
+
+        Parameters
+        ----------
+        tolerance : float
+            How close two nodes must be to be one point, as the
+            coordinates are held: meters once units are defined.
+
+        Returns
+        -------
+        dict of int to int
+            Only the nodes that would go, each to the node it becomes.
+        """
+        from scipy.spatial import cKDTree
+
+        if len(self.node_id) < 2:
+            return {}
+        pairs = cKDTree(self.node_xyz).query_pairs(float(tolerance))
+        parent = list(range(len(self.node_id)))
+
+        def root(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i, j in pairs:
+            a, b = root(i), root(j)
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+        groups: dict[int, list[int]] = {}
+        for i in range(len(self.node_id)):
+            groups.setdefault(root(i), []).append(i)
+        out = {}
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            ids = sorted(int(self.node_id[i]) for i in members)
+            for other in ids[1:]:
+                out[other] = ids[0]
+        return out
+
+    def merge_coincident_nodes(self, tolerance: float) -> dict[str, int]:
+        """Make nodes that are one point one node: every element and
+        traceline naming a node within `tolerance` of another is renamed
+        to the lowest id among them, and the rest are removed. Plates
+        connect only where they share nodes, so this is what ties a model
+        built from planes together at its corners.
+
+        Refused, with the element named, when the tolerance would fold an
+        element onto itself — two of its own corners within it — since
+        that is a tolerance larger than the mesh, not a coincidence.
+
+        Parameters
+        ----------
+        tolerance : float
+            How close two nodes must be to be one, as the coordinates are
+            held: meters once units are defined.
+
+        Returns
+        -------
+        dict of str to int
+            'merged', the nodes removed, and 'into', the nodes they
+            became.
+        """
+        mapping = self.coincident_nodes(tolerance)
+        if not mapping:
+            return {'merged': 0, 'into': 0}
+        for i, conn in enumerate(self.elem_conn):
+            renamed = [mapping.get(int(n), int(n)) for n in conn]
+            if len(set(renamed)) < len(renamed):
+                raise ValueError(
+                    f'a tolerance of {tolerance:g} folds element '
+                    f'{int(self.elem_id[i])} onto itself — two of its own '
+                    'nodes are within it; use a smaller tolerance')
+        self.elem_conn = [np.asarray([mapping.get(int(n), int(n))
+                                      for n in conn], dtype=np.int64)
+                          for conn in self.elem_conn]
+        self.traceline_conn = [np.asarray([mapping.get(int(n), int(n))
+                                           for n in conn], dtype=np.int64)
+                               for conn in self.traceline_conn]
+        keep = ~np.isin(self.node_id, list(mapping))
+        for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
+            setattr(self, name, getattr(self, name)[keep])
+        self.node_xyz = self.node_xyz[keep]
+        self.validate()
+        return {'merged': len(mapping), 'into': len(set(mapping.values()))}
+
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
         """Remove coordinate systems, reassigning any node that used them.
 

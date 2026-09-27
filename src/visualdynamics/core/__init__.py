@@ -9,7 +9,7 @@ kind — what it stores, where it comes from, what can be done with it
 — and points back here for the signatures.
 """
 
-from . import fem
+from . import fem, mesh
 from .channel_table import ChannelTable
 from .data import (
     DataArray,
@@ -39,4 +39,5 @@ __all__ = [
     'TimeHistory',
     'TransientSpecification',
     'fem',
+    'mesh',
 ]

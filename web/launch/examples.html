@@ -37,9 +37,11 @@
     scroll to zoom.
   </p>
   <p>
-    The subject throughout is one job: a modal survey of a rectangular
+    The first three follow one job: a modal survey of a rectangular
     plate — the record as it was measured, the plant computed from it,
-    and the finite element model it was run against.
+    and the finite element model it was run against. The last is a
+    finite element model built from scratch and checked against a
+    published one.
   </p>
 
   <h2>The measured record</h2>
@@ -77,6 +79,59 @@
     nothing about how it bends.
   </p>
 
+  <h2>A model from planes: the BARC</h2>
+  <p>
+    The BARC — Box Assembly with Removable Component — is a small bolted
+    aluminum structure the structural dynamics community shares as a
+    common test article, its solid model, test data and a finite element
+    model's modes published on the
+    <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring
+    Focus Group wiki</a>. Here it is built the way a simple plate model
+    is built in Visual Dynamics: each part as the planes it is made of,
+    each given its material and thickness, the bolts as rigid links over
+    each washer's area, and Solve Modes.
+  </p>
+  <div class="figure">
+    <iframe src="examples/barc.html" loading="lazy" scrolling="no"
+            title="Animated finite element mode shapes of the BARC"></iframe>
+  </div>
+  <p class="caption">
+    The first eight elastic modes of the model, drawn from a quarter-inch
+    mesh of 1,445 nodes. Choose one from the list and it animates; drag
+    to turn it.
+  </p>
+  <p>
+    Against the published model's modes, matched by shape (MAC) at its
+    59 points, from the eighth-inch model the comparison is made with:
+  </p>
+  <!-- the rows are visualdynamics.demo.barc.compare() — pinned by
+       tests/test_demo_barc.py, which fails if the page and the model part -->
+  <div class="scrolls">
+  <table class="formats" id="barc-comparison">
+    <thead>
+      <tr><th>Published (Hz)</th><th>Visual Dynamics (Hz)</th><th>Difference</th><th>MAC</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>185.7</td><td>193.0</td><td>+4.0%</td><td>0.996</td></tr>
+      <tr><td>206.2</td><td>210.6</td><td>+2.1%</td><td>0.994</td></tr>
+      <tr><td>264.8</td><td>257.0</td><td>&minus;2.9%</td><td>0.990</td></tr>
+      <tr><td>439.2</td><td>455.7</td><td>+3.8%</td><td>0.990</td></tr>
+      <tr><td>466.7</td><td>486.7</td><td>+4.3%</td><td>0.978</td></tr>
+      <tr><td>555.0</td><td>569.6</td><td>+2.6%</td><td>0.972</td></tr>
+      <tr><td>570.2</td><td>590.0</td><td>+3.5%</td><td>0.917</td></tr>
+      <tr><td>660.9</td><td>674.3</td><td>+2.0%</td><td>0.916</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="caption">
+    The first eight modes pair one-to-one and in order, within a few
+    percent — the model consistently a little stiff, and left that way
+    rather than tuned: a check tuned to agree says nothing.
+    <a href="documentation/guide/workflows/fem-workflow/">The whole
+    workflow</a>, from the planes to this table, and
+    <a href="downloads.html#examples">the project itself</a>, solved
+    and matched, to open in the app.
+  </p>
   <h2>About these figures</h2>
   <p>
     They are drawn by the report renderer rather than by anything

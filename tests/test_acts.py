@@ -200,3 +200,30 @@ def test_every_verb_has_a_home_on_a_bar_or_a_pane(window):
         (single | paired) ^ (acts | PANE_VERBS | TABLE_VERBS)
     assert not hasattr(window, 'CALCULATOR_MENU')
     assert not hasattr(window, '_computations_for')
+
+
+def test_no_two_acts_share_an_icon(qt_app):
+    """An icon says what a button does. Merge Coincident Nodes first wore
+    Merge into One's (2026-09-26): which one showed depended on the
+    selection, and a person who knew the icon expected the wrong act.
+    Every act draws a glyph of its own, and none is the fallback."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from visualdynamics.gui.icons import control_icon
+    from visualdynamics.gui.main_window import MainWindow
+
+    def pixels(name):
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        control_icon(name).pixmap(64, 64).toImage().save(buffer, 'PNG')
+        return bytes(data)
+
+    icons = [icon for _verb, _label, icon, _handler in MainWindow.ACTS]
+    assert len(icons) == len(set(icons)), sorted(
+        icon for icon in set(icons) if icons.count(icon) > 1)
+    fallback = pixels('no such glyph')
+    drawn = {icon: pixels(icon) for icon in icons}
+    assert all(image != fallback for image in drawn.values()), [
+        icon for icon, image in drawn.items() if image == fallback]
+    assert len(set(drawn.values())) == len(drawn), 'two names, one picture'

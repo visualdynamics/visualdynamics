@@ -12,7 +12,14 @@ halves and a flat bar bolted across their tops. Its solid model, test
 data and a finite element model's modes are shared on the SEM Dynamic
 Substructuring Focus Group wiki, <https://wiki.sem.org/wiki/BARC>. Every
 dimension below comes from that solid model; the reference modes the
-model is checked against come from that shared data.
+model is checked against come from that shared data, and are another
+group's work: R. Schultz, T. Schoenherr and B. Owens, "A Proposed
+Standard Random Vibration Environment for BARC and the Boundary
+Condition Challenge," IMAC 2021 — the field-configuration modes of their
+finite element model of the BARC, in the "Random Vibration Data"
+shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki.
+The demo's project carries the same credit as its **About the Reference**
+report.
 
 Every step is in the app; the whole model is also a demonstration
 module, `visualdynamics.demo.barc`, so each can be checked against it or

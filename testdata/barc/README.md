@@ -7,6 +7,14 @@ Dynamic Substructuring Focus Group wiki:
 `BARC_field_and_lab_data.mat`, its `field_modes` and `field_geometry`).
 Frozen by `testdata/freeze_barc_reference.py`.
 
+**Credit.** R. Schultz, T. Schoenherr and B. Owens, "A Proposed Standard
+Random Vibration Environment for BARC and the Boundary Condition
+Challenge," IMAC 2021: the field-configuration modes of their finite
+element model of the BARC, in the data
+shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki
+(`visualdynamics.demo.barc.CITATION` says the same, and travels with the
+reference into every project and download).
+
 Unlike everything else in `testdata/`, these numbers are not the
 package's own: they are the published reference that
 `visualdynamics.demo.barc` — built from planes with this package — is

@@ -90,6 +90,21 @@ BOLTS = ([((x, z), BOX_MID, FOOT_Y, WASHER_RADIUS['foot'])
 
 #: the reference model's frame is this model's moved by (0, −3, −1.5) in
 REFERENCE_OFFSET = np.array([0.0, 3.0, 1.5])
+
+#: where the reference comes from, as it is credited everywhere the
+#: reference travels — the docs, the download, the project itself. The
+#: one sanctioned mention of a laboratory in this project is the
+#: source of third-party work, in this fixed phrase, cited (Brandon,
+#: 2026-09-26); `tests/test_public_tree.py` allows the name nowhere else
+SOURCE = 'shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki'
+WIKI = 'https://wiki.sem.org/wiki/BARC'
+CITATION = (
+    'R. Schultz, T. Schoenherr and B. Owens, "A Proposed Standard Random '
+    'Vibration Environment for BARC and the Boundary Condition Challenge," '
+    'IMAC 2021. The reference modes are the field-configuration modes of '
+    'their finite element model of the BARC, from the "Random Vibration '
+    f'Data" (BARC_field_and_lab_data.mat) {SOURCE}, {WIKI}, used here '
+    'unchanged as the reference this model is checked against.')
 INCH = 0.0254
 
 
@@ -252,7 +267,7 @@ def reference_shapes(path: str | pathlib.Path | None = None
     shapes = ShapeSet(ref['frequency'],
                       np.full(len(ref['frequency']), 0.01), ref['dof'],
                       np.asarray(ref['shape']).T,
-                      comment='BARC reference modes (SEM wiki)')
+                      comment=CITATION)
     return shapes, geometry
 
 
@@ -296,6 +311,7 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
     out.add('Reference Geometry', points)
     out.add('Reference Modes', shapes)
     out.link('Reference Geometry', 'Reference Modes')
+    out.add('About the Reference', about_the_reference())
     if solved:
         modes = out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
         mac = out.comparison_mac('Reference Modes', modes)
@@ -307,6 +323,28 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
                         pairs=[(int(row), int(np.argmax(mac[row])))
                                for row in elastic])
     return out
+
+
+def about_the_reference() -> Any:
+    """The credit for the reference, as a report in the project: a
+    comment on the shape set is never shown, and whoever opens the
+    project should see whose modes these are without leaving the app.
+
+    Returns
+    -------
+    Report
+    """
+    from visualdynamics.core.report import Report
+
+    about = Report('About the Reference')
+    about.blocks.append({'kind': 'text', 'text': (
+        '## The reference\n\n'
+        '**Reference Geometry** and **Reference Modes** are not this '
+        'package\'s work. ' + CITATION + '\n\n'
+        '**BARC** is a model built from the shared solid model\'s '
+        'dimensions with this package, and checked against them: see the '
+        'finite element workflow in the Visual Dynamics documentation.')})
+    return about
 
 
 #: a quarter turn about x: the solid model's up (+y) to the 3-D scene's

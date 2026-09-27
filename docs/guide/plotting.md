@@ -210,3 +210,54 @@ frf.plot(unit_system=SYSTEMS['in-slinch-lbf-s'])
 `.png` or `.svg` — the extension picks the exporter. 3D scenes use
 `screenshot=` rather than `path=`, because a scene renders through
 its own plotter.
+
+## Figures for print
+
+A printed figure is laid out at its printed size — in logical pixels,
+inches times 96 — and written at a print resolution, so every font
+prints at its set size:
+
+```python
+import visualdynamics.plot as vdplot
+
+vdplot.EXPORT_DPI = 300                       # every standalone .png
+psd.save_plot('psd.png', size=(328, 240))     # 3.42 in by 2.5 in
+
+vdplot.save_image(layout, 'fig.png', dpi=300) # a layout of your own
+```
+
+`save_image` paints the laid-out plot at a ratio of dpi/96 — text,
+pens and layout together — and writes the resolution into the file.
+The legend's text is `vdplot.LEGEND_TEXT_SIZE`, 8 pt. A 3-D scene
+takes the same two numbers:
+
+```python
+from visualdynamics.viz.geometry import plot_dofs
+
+plot_dofs(geometry, frf, 'acceleration', screenshot='dofs.png',
+          size_in=(4.5, 3.25), dpi=300, bounds=False)
+```
+
+The window is the printed size, labels print as points, and nodes,
+lines and the bounds box's labels scale with it; `bounds=False` and
+`orientation=False` leave the box and the corner triad out.
+
+## One figure as an interactive page
+
+`visualdynamics.export_html` writes one figure — the report's own, with
+zoom, pan and the readout on a plot, turning and animation on a scene —
+as a single HTML file that opens offline and fills whatever frame holds
+it, an iframe or a box on a slide:
+
+```python
+import visualdynamics
+
+visualdynamics.export_html('spec.html', psd, specification=spec,
+                           channel='101Z+', theme='light')
+visualdynamics.export_html('modes.html', geometry=geometry, shapes=modes)
+visualdynamics.export_html('dofs.html', geometry=geometry,
+                           dofs=('acceleration', frf))
+```
+
+`theme` fixes the figure's colors; left out, it follows the reader's.
+`fill=False` lays it out as a report page does.

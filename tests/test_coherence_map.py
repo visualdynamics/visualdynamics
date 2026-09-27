@@ -115,3 +115,22 @@ def test_it_works_on_the_real_file(qt_app):
     assert drawn == data.num_records
     values = image_of(plot).image
     assert values.min() >= 0.0 and values.max() <= 1.0 + 1e-9
+
+
+def test_the_channel_axis_fits_its_longest_name(qt_app):
+    """pyqtgraph drops a tick label wider than its axis without a word:
+    the channel axis is measured for its widest name, as the bar charts'
+    is (2026-09-26, found again by the band-average paper, whose
+    "band-average, update" vanished while the shorter labels drew)."""
+    import pyqtgraph as pg
+    from PySide6.QtGui import QFontMetrics
+
+    layout = pg.GraphicsLayoutWidget()
+    build_coherence_map(layout, [('band-average, update', channels(2), None),
+                                 ('pseudoinverse', channels(2), None)])
+    axis = layout.getItem(0, 0).getAxis('left')
+    widest = max(QFontMetrics(axis.font()).horizontalAdvance(label)
+                 for _position, label in axis._tickLevels[0])
+    assert widest > 100, 'labels long enough to need the room'
+    # the width it is held to — its geometry follows once laid out
+    assert axis.minimumWidth() >= widest

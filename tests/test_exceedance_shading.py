@@ -301,3 +301,136 @@ def test_each_theme_brings_its_own(qt_app, name):
     fills, _plot = shaded(qt_app, spec(abort_upper=4.0),
                           measured(lines, over), theme=name)
     assert color_of(fills[0]) == resolve_theme(name)['exceed_over']
+
+
+# ---- the key: what the shading means (2026-09-26) -------------------------
+
+
+def legend_names(plot):
+    return [label.text for _sample, label in plot.legend.items]
+
+
+def swatch_colors(plot):
+    """The legend's area swatches, by name: a square filled like the
+    fill it names."""
+    import pyqtgraph as pg
+    from PySide6.QtGui import QColor
+
+    return {label.text: pg.mkBrush(sample.item.opts['brush']).color().name(
+        QColor.NameFormat.HexArgb)
+        for sample, label in plot.legend.items
+        if isinstance(sample.item, pg.BarGraphItem)}
+
+
+def test_the_legend_names_the_zones_and_the_marks(qt_app):
+    """A printed figure is read without its caption: the legend names the
+    measurement and the specification, and now the warning band, each
+    zone past abort and the marks — with the decibels the specification
+    holds them at, when it holds one value everywhere."""
+    lines = np.linspace(20.0, 2000.0, 120)
+
+    def over(v):
+        v = v.copy()
+        v[30:36] *= 9.0
+        return v
+
+    specification = spec(warning_upper=10 ** 0.3, warning_lower=10 ** -0.3,
+                         abort_upper=10 ** 0.6, abort_lower=10 ** -0.6)
+    _fills, plot = shaded(qt_app, specification, measured(lines, over))
+    names = legend_names(plot)
+    for expected in ('warning band (±3 dB)', 'above abort (+6 dB)',
+                     'below abort (−6 dB)', 'line over abort'):
+        assert expected in names, names
+    assert 'line under abort' not in names, 'only what was drawn'
+    assert sum(name.startswith(('S', 'M')) for name in names) == 2
+
+
+def test_a_swatch_is_the_fill_it_names(qt_app):
+    from PySide6.QtGui import QColor
+
+    lines = np.linspace(20.0, 2000.0, 120)
+
+    def over(v):
+        v = v.copy()
+        v[30:36] *= 9.0
+        return v
+
+    fills, plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
+                         measured(lines, over))
+    argb = QColor.NameFormat.HexArgb
+    swatches = swatch_colors(plot)
+    assert swatches['line over abort'] == fills[0].brush().color().name(argb)
+    zone_fills = [item for item in plot.items
+                  if type(item).__name__ == 'FillBetweenItem'
+                  and not getattr(item, 'is_exceedance', False)]
+    assert swatches['above abort (+6 dB)'] in {
+        f.brush().color().name(argb) for f in zone_fills}
+
+
+def test_limits_that_move_are_named_without_a_number(qt_app):
+    moving = Specification(
+        abscissa=BREAKS, ordinate=np.atleast_2d(LEVELS),
+        response_dof=['101Z+'], ordinate_dim=['acceleration**2/frequency'],
+        abort_upper=np.atleast_2d(LEVELS * np.array([4.0, 4.0, 8.0, 8.0])),
+        abort_lower=np.atleast_2d(LEVELS * 0.25))
+    _fills, plot = shaded(qt_app, moving, measured(np.linspace(20, 2000, 120)))
+    names = legend_names(plot)
+    assert 'above abort' in names and 'below abort (−6 dB)' in names
+
+
+def test_runs_against_one_specification_each_take_a_color(qt_app):
+    """One measurement reads against its specification in the foreground
+    color; five runs of the channel all came out in that one color
+    (2026-09-26). Each run takes the color cycle now, the specification
+    still stands back in gray."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import build_plots
+
+    lines = np.linspace(20.0, 2000.0, 120)
+    runs = [measured(lines, lambda v, k=k: v * (1 + 0.1 * k)) for k in range(3)]
+    layout = pg.GraphicsLayoutWidget()
+    _ALIVE.append(layout)
+    build_plots(layout, [('S', spec(abort_upper=4.0, abort_lower=0.25), None)]
+                + [(f'run {k}', run, None) for k, run in enumerate(runs)],
+                theme='light')
+    plot = next(item for item in layout.ci.items
+                if hasattr(item, 'listDataItems'))
+    pens = {label.text: sample.item.opts['pen'].color().name()
+            for sample, label in plot.legend.items
+            if sample.item.opts.get('pen') is not None}
+    measured_colors = [pens[name] for name in pens if name.startswith('run')]
+    assert len(set(measured_colors)) == 3, pens
+    theme = resolve_theme('light')
+    assert [pens[n] for n in pens if n.startswith('S')] == [
+        pg.mkColor(theme['specification_curve']).name()]
+
+
+def test_one_run_keeps_the_foreground_color(qt_app):
+    import pyqtgraph as pg
+
+    lines = np.linspace(20.0, 2000.0, 120)
+    _fills, plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
+                          measured(lines))
+    pens = {label.text: sample.item.opts['pen'].color().name()
+            for sample, label in plot.legend.items
+            if sample.item.opts.get('pen') is not None}
+    assert [pens[n] for n in pens if n.startswith('M')] == [
+        pg.mkColor(resolve_theme('light')['response_curve']).name()]
+
+
+def test_the_legend_text_is_a_setting(qt_app):
+    """8 pt by default, a size print can still read; a script drawing
+    for print sets `LEGEND_TEXT_SIZE` or passes `text_size`."""
+    import visualdynamics.plot as plotting
+
+    lines = np.linspace(20.0, 2000.0, 120)
+    _fills, plot = shaded(qt_app, spec(abort_upper=4.0), measured(lines))
+    assert {label.opts['size'] for _s, label in plot.legend.items} == {'8pt'}
+    before = plotting.LEGEND_TEXT_SIZE
+    plotting.LEGEND_TEXT_SIZE = '10pt'
+    try:
+        _fills, plot = shaded(qt_app, spec(abort_upper=4.0), measured(lines))
+    finally:
+        plotting.LEGEND_TEXT_SIZE = before
+    assert {label.opts['size'] for _s, label in plot.legend.items} == {'10pt'}

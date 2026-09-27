@@ -95,7 +95,7 @@ class BarChart:
                  changed: Callable[..., None] | None = None,
                  label: str = '', units: str = '',
                  neutral: str = 'response_curve',
-                 baseline: float = 0.0) -> None:
+                 baseline: float = 0.0, summary: str = 'over') -> None:
         self.plot: Any = plot
         self.rows: list[Any] = list(rows)
         self.colors: dict[str, str] = colors
@@ -120,6 +120,13 @@ class BarChart:
         #: three it is the departure from Gaussian and reads both ways
         #: (Brandon, 2026-08-24).
         self.baseline: float = float(baseline)
+        #: where the count goes: 'over' the bars, as the app has always
+        #: put it; 'title', above the plot — at a quarter of a printed
+        #: page wide the count over the bars ran into them and was cut
+        #: off (the band-average paper, 2026-09-26); or 'none'
+        if summary not in ('over', 'title', 'none'):
+            raise ValueError(f"summary {summary!r}: 'over', 'title' or 'none'")
+        self.summary_place: str = summary
         #: the bars themselves, one item holding all of them
         self.bars: Any = None
         self.lines: list[Any] = []
@@ -216,7 +223,8 @@ class BarChart:
         chart scrolls perfectly well in both the app and the report.
         """
         import pyqtgraph as pg
-        from PySide6.QtGui import QFontMetrics
+
+        from . import fit_label_axis
 
         values = self.values()
         positions = np.arange(len(values), dtype=float)
@@ -231,15 +239,10 @@ class BarChart:
         self.plot.addItem(self.bars)
         axis = self.plot.getAxis('left')
         axis.setTicks([[(i, label) for i, (label, _v) in enumerate(self.rows)]])
-        # wide enough for the longest channel name, said outright.
-        # Left to size itself the axis settles on the width a number
-        # needs, and pyqtgraph draws no tick text that will not fit — so
-        # '101Z+' simply vanished, and the chart lost the one thing
-        # naming which bar is which.
-        metrics = QFontMetrics(axis.font())
-        widest = max((metrics.horizontalAdvance(label)
-                      for label, _v in self.rows), default=0)
-        axis.setWidth(widest + LABEL_MARGIN)
+        # wide enough for the longest channel name, said outright:
+        # left to size itself '101Z+' simply vanished, and the chart lost
+        # the one thing naming which bar is which
+        fit_label_axis(axis, [label for label, _v in self.rows], LABEL_MARGIN)
         self.plot.setLabel('bottom', self.label, units=self.units or None)
         self.plot.showGrid(x=True, y=False, alpha=0.25)
         self.plot.setYRange(-0.7, max(len(values) - 0.3, 0.3))
@@ -274,10 +277,11 @@ class BarChart:
             self.plot.addItem(zone, ignoreBounds=True)
             self.lines.append((which, zone))
 
-        self.summary = pg.TextItem(anchor=(0.5, 0.0),
-                                   color=self.colors['plot_foreground'])
-        self.summary.setZValue(25)
-        self.plot.addItem(self.summary, ignoreBounds=True)
+        if self.summary_place == 'over':
+            self.summary = pg.TextItem(anchor=(0.5, 0.0),
+                                       color=self.colors['plot_foreground'])
+            self.summary.setZValue(25)
+            self.plot.addItem(self.summary, ignoreBounds=True)
         self._restate()
 
     def _restate(self):
@@ -289,28 +293,67 @@ class BarChart:
             wanted = self.low if which == 'low' else self.high
             if wanted is not None:
                 zone.setRegion(self._span(which, wanted))
+        if self.summary_place == 'none':
+            return
+        text = self.summary_text()
+        if self.summary_place == 'title':
+            self.plot.setTitle(text, color=self.colors['plot_foreground'])
+            return
         if self.summary is None:
             return
-        if self.low is None:
-            # a level chart judges nothing: it says how many and which
-            # is highest, the way a table's eye runs down its column
-            finite = [(v, label) for label, v in self.rows if np.isfinite(v)]
-            top = max(finite, default=None)
-            self.summary.setText(
-                f'{len(self.rows)} channel{"s" * (len(self.rows) != 1)}'
-                + (f' — {top[1]} highest at {top[0]:.4g} {self.units}'
-                   .rstrip() if top else ''))
-        else:
-            share = self.share()
-            out = sum(1 for v in self.values() if self.beyond(v))
-            where = (f'over {self.low:g}{self.units}' if self.high is None
-                     else f'outside {self.low:g} to {self.high:g}{self.units}')
-            self.summary.setText(
-                f'{out} of {len(self.rows)} channels {where} — {share:.0f}%')
+        self.summary.setText(text)
         view = self.plot.getViewBox().viewRange()
         self.summary.setPos(
             (view[0][0] + view[0][1]) / 2.0,
             view[1][0] + (view[1][1] - view[1][0]) * SUMMARY_HEIGHT)
+
+    def summary_text(self) -> str:
+        """The count the chart states: how many channels are out, of how
+        many, and the share — or, with no thresholds, how many there are
+        and which is highest, the way a table's eye runs down its
+        column."""
+        if self.low is None:
+            finite = [(v, label) for label, v in self.rows if np.isfinite(v)]
+            top = max(finite, default=None)
+            return (f'{len(self.rows)} channel{"s" * (len(self.rows) != 1)}'
+                    + (f' — {top[1]} highest at {top[0]:.4g} {self.units}'
+                       .rstrip() if top else ''))
+        share = self.share()
+        out = sum(1 for v in self.values() if self.beyond(v))
+        where = (f'over {self.low:g}{self.units}' if self.high is None
+                 else f'outside {self.low:g} to {self.high:g}{self.units}')
+        return f'{out} of {len(self.rows)} channels {where} — {share:.0f}%'
+
+    def key(self, legend: Any) -> None:
+        """What the colors mean, into `legend` (`plot.legend_below`): the
+        bars inside, over and under the thresholds, and the ground past
+        each — a figure read on its own had no key for any of it
+        (2026-09-26). A chart with no thresholds colors nothing, and
+        adds nothing."""
+        import pyqtgraph as pg
+
+        if self.low is None:
+            return
+        # a word takes a space and a sign does not: 3 dB, 10%
+        units = (f' {self.units}' if self.units and self.units[0].isalpha()
+                 else self.units or '')
+        one_sided = self.high is None
+        top = self.low if one_sided else self.high
+        entries = [(self._brush(self.baseline if one_sided
+                                else (self.low + self.high) / 2.0),
+                    'within tolerance'),
+                   (self._brush(top + 1.0), 'over tolerance')]
+        if not one_sided:
+            entries.append((self._brush(self.low - 1.0), 'under tolerance'))
+        entries.append((self._zone_brush('high' if not one_sided else 'low'),
+                        f'past {top:+g}{units}'.replace('-', '\u2212')))
+        if not one_sided:
+            entries.append((self._zone_brush('low'),
+                            f'past {self.low:+g}{units}'.replace('-', '\u2212')))
+        for brush, name in entries:
+            swatch = pg.BarGraphItem(x=[0.0], height=[1.0], width=1.0,
+                                     pen=None, brush=brush)
+            legend.addItem(swatch, name)
 
     def _limit_zoom(self, values):
         """Fence the view so it cannot be zoomed out into empty ground.
@@ -408,7 +451,8 @@ class BarChart:
 def error_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
                 colors: Mapping[str, str], low: float = -ERROR_DB,
                 high: float = ERROR_DB,
-                changed: Callable[..., None] | None = None) -> BarChart:
+                changed: Callable[..., None] | None = None,
+                **options: Any) -> BarChart:
     """How far each channel's RMS sits from what was asked for, in dB.
 
     Two thresholds, moved independently: a specification is not always
@@ -417,16 +461,17 @@ def error_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
     """
     return BarChart(plot, [(label, value) for label, value, _p in rows],
                     colors, low=low, high=high, changed=changed,
-                    label='RMS error', units='dB')
+                    label='RMS error', units='dB', **options)
 
 
 def lines_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
                 colors: Mapping[str, str], low: float = LINES_PERCENT,
-                changed: Callable[..., None] | None = None) -> BarChart:
+                changed: Callable[..., None] | None = None,
+                **options: Any) -> BarChart:
     """How much of each channel's band fell outside its abort limits."""
     return BarChart(plot, [(label, percent) for label, _v, percent in rows],
                     colors, low=low, high=None, changed=changed,
-                    label='lines outside abort', units='%')
+                    label='lines outside abort', units='%', **options)
 
 
 def level_chart(plot: Any, rows: Sequence[tuple[str, float]],
@@ -473,8 +518,8 @@ REPLICATION_LABELS = {
 
 def replication_chart(plot: Any, rows: Sequence[tuple[str, float]], colors: Mapping[str, str],
                       which: str, low: float, high: float | None,
-                      changed: Callable[..., None] | None = None
-                      ) -> BarChart:
+                      changed: Callable[..., None] | None = None,
+                      **options: Any) -> BarChart:
     """One reading of a transient replication, a bar per control channel.
 
     `rows` is [(label, value)] already reduced to the reading wanted —
@@ -483,4 +528,4 @@ def replication_chart(plot: Any, rows: Sequence[tuple[str, float]], colors: Mapp
     """
     label, units = REPLICATION_LABELS[which]
     return BarChart(plot, list(rows), colors, low=low, high=high,
-                    changed=changed, label=label, units=units)
+                    changed=changed, label=label, units=units, **options)

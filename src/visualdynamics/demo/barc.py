@@ -31,12 +31,20 @@ decides the Bench's modes. Three were measured against the reference:
   softer at every mesh refinement — a point tie on a plate is a local
   singularity, not a joint;
 - each foot tied to the wall over its whole area: 5 to 20% stiff;
-- each bolt tied over its washer's area (`WASHER_RADIUS`): converged
-  (halving the mesh moves the frequencies about 1%), and at `SIZE` the
-  first ten modes pair one-to-one with the reference, in order, at MAC
-  0.83 to 0.996 and within −3 to +4% of its frequencies.
+- each bolt tied over its washer's area: every node within
+  `WASHER_RADIUS` of the bolt to the nearest node below — −3 to +4% of
+  the reference's frequencies, MAC 0.83 to 0.996;
+- each bolt tied over the elements its washer covers (`washer_patch`:
+  the elements whose centers lie within the washer's radius of the bolt
+  in both directions, 3 × 3 under a foot bolt and 4 × 4 under a beam
+  bolt at `SIZE`), tied to the part below with `mesh.tie` — what the
+  app's Tie does with the same elements picked (2026-09-26). At `SIZE`
+  the first ten modes pair one-to-one with the reference, in order, at
+  MAC 0.945 to 0.995 and 0 to +6% above its frequencies; halving the
+  mesh raises them 0.4 to 2.5% more.
 
-The last is what is built. What remains — the model a few percent stiff —
+The last is what is built, so the model a person builds in the app by
+the documentation's steps is this one, node for node and link for link. What remains — the model a few percent stiff —
 is left as it is rather than tuned away: the reference was a different
 model (not plates), its material values are not published, and a check
 that is tuned to agree says nothing.
@@ -124,32 +132,53 @@ def geometry(size: float = SIZE) -> Any:
     -------
     Geometry
         Blocks 'box', 'right channel', 'left channel', 'beam' (6061-T6
-        plates) and 'bolts' (rigid links over each washer's area).
+        plates) and 'bolts' (rigid links over the elements each washer
+        covers, `washer_patch`).
     """
     whole = mesh.assemble(*_planes(size))
-    xyz = whole.node_xyz / INCH
-
-    def on(surface_y):
-        return np.flatnonzero(np.abs(xyz[:, 1] - surface_y) < 1e-6)
-
-    bolts = whole.add_block('bolts')
-    for (bx, bz), lower, upper, radius in BOLTS:
-        below = on(lower)
-        for k in on(upper):
-            if np.hypot(xyz[k, 0] - bx, xyz[k, 2] - bz) > radius + 1e-9:
-                continue
-            nearest = below[np.argmin(np.linalg.norm(
-                xyz[below][:, [0, 2]] - xyz[k, [0, 2]], axis=1))]
-            whole.add_element([int(whole.node_id[nearest]),
-                               int(whole.node_id[k])], elem_type=21,
-                              block=bolts)
     whole.block_properties = {
-        int(block): (fem.BlockProperties(fem.RIGID)
-                     if whole.block_name[i] == 'bolts'
-                     else fem.BlockProperties(
-                         MATERIAL, THICKNESS[whole.block_name[i]] * INCH))
+        int(block): fem.BlockProperties(
+            MATERIAL, THICKNESS[whole.block_name[i]] * INCH)
         for i, block in enumerate(whole.block_id)}
+    for bolt in BOLTS:
+        patch, below = washer_patch(whole, bolt)
+        mesh.tie(whole, patch, below, block='bolts')
     return whole
+
+
+def washer_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
+    """The elements a bolt's washer covers, and the block it bolts them to:
+    the elements of the part on top whose centers lie within the washer's
+    radius of the bolt along both edges — at `SIZE`, the element the bolt
+    passes through and the eight around it under a foot, the 4 × 4 around
+    the node it passes through on the beam. A square rather than the
+    washer's circle because it is what a person picks: whole rows of
+    elements, countable in the view.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The BARC's planes, assembled.
+    bolt : tuple
+        One of `BOLTS`.
+
+    Returns
+    -------
+    (list of int, str)
+        The element ids, and the name of the block below.
+    """
+    (bx, bz), _lower, upper, radius = bolt
+    side = 'left channel' if bx < 0 else 'right channel'
+    top, below = ('beam', side) if upper == BEAM_Y else (side, 'box')
+    xyz = geometry.node_xyz / INCH
+    patch = []
+    for element in geometry.elements_in(top):
+        row = int(np.flatnonzero(geometry.elem_id == element)[0])
+        center = xyz[geometry.node_index(geometry.elem_conn[row])].mean(axis=0)
+        if (abs(center[1] - upper) < 1e-6 and abs(center[0] - bx) <= radius
+                and abs(center[2] - bz) <= radius):
+            patch.append(element)
+    return patch, below
 
 
 def build(size: float = SIZE) -> fem.Model:

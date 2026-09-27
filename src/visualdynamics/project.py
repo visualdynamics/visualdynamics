@@ -2126,6 +2126,115 @@ class Project(dict):
                     'it first')
         return geometry.merge_coincident_nodes(tolerance)
 
+    def new_geometry(self, name: str = 'Geometry', *,
+                     unit: str = 'm') -> str:
+        """An empty geometry, to build a model in (the project's **+**):
+        planes added with `add_plane`, links in the app's add mode.
+
+        Parameters
+        ----------
+        name : str, default 'Geometry'
+            What to call it.
+        unit : str, default 'm'
+            Its length unit. Coordinates are held in SI either way; this
+            is the unit it remembers it was built in.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project — a clash gets a numbered suffix.
+        """
+        return self.add(name, Geometry(node_id=[], node_xyz=np.empty((0, 3)),
+                                       length_unit=unit))
+
+    def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
+                  size: float, block: str = '', *, unit: str = 'm',
+                  tolerance: float | None = None) -> dict:
+        """Add a meshed rectangle of plates to a geometry (Add Plane): a
+        corner, two perpendicular edges and an element size, each edge
+        divided evenly into the whole number of elements nearest that
+        size (`mesh.plane`). Its nodes that fall on nodes already there
+        become them, so planes meeting along a line are tied there, and
+        the nodes already there keep their ids (`mesh.join`).
+
+        Planes given the same block name are one block — the five walls
+        of a box, each named 'box', are the box, given its material once
+        in the Blocks table.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        corner : array_like
+            One corner, (x, y, z).
+        edge_a, edge_b : array_like
+            The two edges from that corner, as vectors; perpendicular.
+        size : float
+            The element size aimed at.
+        block : str, optional
+            The block the plates go in, by name: an existing block of
+            that name, or a new one.
+        unit : str, default 'm'
+            The unit the lengths above are in. A geometry whose units
+            are not defined takes them as given.
+        tolerance : float, optional
+            How close a node must be to one already there to be it, in
+            meters. Defaults to a millionth of the size of the two
+            together.
+
+        Returns
+        -------
+        dict
+            'added', the nodes added; 'shared', the plane's nodes that
+            fell on nodes already there; 'elements', the plates added;
+            'blocks', the block they went into.
+        """
+        from .core import mesh
+
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        defined = geometry.units_defined or not geometry.num_nodes
+        part = mesh.plane(corner, edge_a, edge_b, size, block,
+                          unit=unit if defined else None)
+        return mesh.join(geometry, part, tolerance)
+
+    def tie_elements(self, source: Any, elements: Any, to: Any,
+                     block: str | None = None) -> dict:
+        """Tie a patch of a geometry's elements rigidly to the part under
+        it (Tie): each node of the patch linked by a rigid, massless link
+        to the nearest node of `to` — a bolted joint, from the elements
+        its washer covers (`mesh.tie`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        elements : sequence of int
+            The patch, by element id.
+        to : str, int or sequence of int
+            A block, by name or id, or a second patch, by element ids.
+        block : str, optional
+            The block the links go into, made rigid if new. Defaults to
+            the geometry's first rigid block, or a new one named 'ties'.
+
+        Returns
+        -------
+        dict
+            'links', how many were added; 'shared', patch nodes the
+            target already holds; 'block', where the links went.
+        """
+        from .core import mesh
+
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        to = to if isinstance(to, (str, int)) else [int(e) for e in to]
+        return mesh.tie(geometry, [int(e) for e in elements], to, block)
+
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
@@ -3279,6 +3388,8 @@ _VERB_APPLIES: tuple = (
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
                                              and len(o.elem_conn) > 0)),
+    # a plane goes into any geometry, an empty one above all
+    ('add_plane', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
     ('project_onto_basis', _two_shape_sets),
@@ -3364,7 +3475,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
-    'merge_coincident_nodes',
+    'merge_coincident_nodes', 'new_geometry', 'add_plane', 'tie_elements',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale',

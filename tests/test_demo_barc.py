@@ -60,9 +60,27 @@ def test_the_modes_answer_to_the_reference(solved):
     first = rows[:10]
     assert [row['mode'] for row in first] == list(range(1, 11)), (
         'the first ten pair one-to-one, in order')
-    assert all(row['mac'] > 0.8 for row in first), [r['mac'] for r in first]
-    assert all(abs(row['error']) < 5.0 for row in first), [
+    assert all(row['mac'] > 0.9 for row in first), [r['mac'] for r in first]
+    # a few percent stiff, consistently: the washer patches (0 to +6%)
+    assert all(-1.0 < row['error'] < 7.0 for row in first), [
         round(r['error'], 1) for r in first]
+
+
+def test_each_bolt_ties_the_elements_its_washer_covers():
+    """The rule the docs give a person to click: under a foot bolt the
+    element it passes through and the eight around it, under a beam bolt
+    the 4 x 4 around its node — each tied to the part below, every
+    patch node that part does not share linked once."""
+    from visualdynamics import mesh
+
+    planes = mesh.assemble(*barc._planes(barc.SIZE))
+    patches = [barc.washer_patch(planes, bolt) for bolt in barc.BOLTS]
+    assert [len(patch) for patch, _below in patches] == [9] * 8 + [16] * 2
+    assert [below for _patch, below in patches] == (
+        ['box'] * 8 + ['left channel', 'right channel'])
+    geometry = barc.geometry()
+    links = geometry.elements_in('bolts')
+    assert len(links) == 8 * 16 + 2 * 25
 
 
 def test_the_reference_is_the_shared_data():
@@ -125,9 +143,11 @@ def test_the_docs_page_builds_the_demos_mesh():
 
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    first = re.findall(r'```python\n(.*?)```', page, re.DOTALL)[0]
+    planes = next(block for block in
+                  re.findall(r'```python\n(.*?)```', page, re.DOTALL)
+                  if 'mesh.assemble' in block)
     room: dict = {}
-    exec(first, room)  # noqa: S102 — the page's own example
+    exec(planes, room)  # noqa: S102 — the page's own example
     built = room['barc']
     demo = barc.geometry()
     planes_only = demo.num_nodes                  # the links add no node
@@ -136,6 +156,43 @@ def test_the_docs_page_builds_the_demos_mesh():
                        np.sort(demo.node_xyz, axis=0))
     assert list(built.block_name) == ['box', 'right channel', 'left channel',
                                       'beam']
+
+
+def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
+    """The page's app steps: a new geometry in inches and the planes table
+    typed row by row into Add Plane (the project verb each Add records)
+    must give the demo's planes node for node — same ids, same places,
+    same plates — which is what lets the page say a model built by hand
+    solves to the same modes."""
+    import pathlib
+
+    import visualdynamics
+    from visualdynamics import mesh
+
+    page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
+            / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
+    table = page.split('| Plane | Block | Corner | Edge A | Edge B |')[1]
+    rows = [[cell.strip() for cell in line.strip('|').split('|')]
+            for line in table.split('\n\n')[0].splitlines()[2:]]
+
+    def vector(cell):
+        return tuple(float(v) for v in cell.replace('\u2212', '-')
+                     .strip('()').split(','))
+
+    project = visualdynamics.Project('p')
+    name = project.new_geometry(unit='in')
+    for _plane, block, corner, edge_a, edge_b in rows:
+        project.add_plane(name, vector(corner), vector(edge_a),
+                          vector(edge_b), barc.SIZE, block, unit='in')
+    typed = project[name]
+    demo = mesh.assemble(*barc._planes(barc.SIZE))
+    assert len(rows) == 12
+    assert np.array_equal(typed.node_id, demo.node_id)
+    assert np.allclose(typed.node_xyz, demo.node_xyz)
+    assert all(np.array_equal(a, b) for a, b in zip(typed.elem_conn,
+                                                    demo.elem_conn,
+                                                    strict=True))
+    assert list(typed.block_name) == list(demo.block_name)
 
 
 def test_the_websites_table_is_the_models(solved):

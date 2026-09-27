@@ -80,14 +80,23 @@ the two nodes of each link — every link picked joins that new block —
 and give the block *rigid (massless)* in the Blocks table. The drop-down
 defaults to the first block while it holds the kind of element being
 added, and to a new block otherwise, so a beam never lands among
-plates. Plates themselves connect only
-where they share nodes: a structure built from planes
-([`mesh`](../api/visualdynamics.core.mesh.md) — `mesh.plane` meshes one
-rectangle at its mid-thickness into a block of its own, `mesh.assemble`
-joins them) is tied along the lines where its planes meet by merging the
-nodes there. *Merge Coincident Nodes* on a geometry's bar does the same
-to any geometry, the tolerance asked in the display unit;
-`project.merge_coincident_nodes` from a script. All of it is
+plates. A bolted joint is quicker as a patch: select the elements under
+the washer (click one, Shift-click the rest) and press **Tie** on the
+bar — every node of the patch is linked to the nearest node of the block
+picked from its menu, or of a second patch picked next, and the links
+go into the geometry's rigid block, made the first time
+(`project.tie_elements`, `mesh.tie`). Plates themselves connect only
+where they share nodes: a structure built from planes is tied along the
+lines where its planes meet. **+** *New Geometry* on the project row's
+bar starts an empty geometry, and *Add Plane* on a geometry's bar meshes
+one rectangle at its mid-thickness — a corner, two perpendicular edges
+and an element size, in the display unit, drawn in the 3-D view as it is
+typed — into the block named, its nodes that fall on nodes already there
+becoming them (`project.new_geometry`, `project.add_plane`; in
+[`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
+and `mesh.assemble`). *Merge Coincident Nodes* on a geometry's bar ties
+any geometry the same way after the fact, the tolerance asked in the
+display unit; `project.merge_coincident_nodes` from a script. All of it is
 shown and typed in the
 current display unit system (psi and in⁴ in the inch system, MPa and mm⁴
 in millimeters), the unit in the column's header, and held in SI; the
@@ -338,7 +347,8 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
+| the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |
 | two shape sets | `project_onto_basis`, `match_modes` |

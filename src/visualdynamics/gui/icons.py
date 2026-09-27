@@ -1083,6 +1083,44 @@ def _draw_merge_nodes(painter, color):
     painter.drawEllipse(QPointF(32, 48), 11, 11)
 
 
+def _draw_plane(painter, color):
+    """A rectangle seen at an angle, divided into a grid: a plane meshed
+    into plates (Add Plane). Slanted so it reads as a surface laid in
+    space rather than the square of one plate element."""
+    corners = [QPointF(6, 46), QPointF(38, 56), QPointF(58, 18),
+               QPointF(26, 8)]
+
+    def along(a, b, t):
+        return QPointF(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()))
+
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolygon(corners)
+    painter.setPen(_pen(color, 3))
+    for t in (1 / 3, 2 / 3):
+        painter.drawLine(along(corners[0], corners[1], t),
+                         along(corners[3], corners[2], t))
+        painter.drawLine(along(corners[0], corners[3], t),
+                         along(corners[1], corners[2], t))
+
+
+def _draw_tie(painter, color):
+    """Two plates, one above the other, joined by short links with a node
+    at each end: a patch tied rigidly to the part under it (Tie)."""
+    painter.setPen(_pen(color, 6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawLine(QPointF(8, 16), QPointF(56, 16))
+    painter.drawLine(QPointF(8, 48), QPointF(56, 48))
+    painter.setPen(_pen(color, 3))
+    for x in (18, 32, 46):
+        painter.drawLine(QPointF(x, 16), QPointF(x, 48))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for x in (18, 32, 46):
+        painter.drawEllipse(QPointF(x, 16), 5, 5)
+        painter.drawEllipse(QPointF(x, 48), 5, 5)
+
+
 def _draw_sine(painter, color):
     """A sweep: a sine whose frequency rises across the icon."""
     painter.setPen(_pen(color, 5))
@@ -1502,6 +1540,7 @@ def control_icon(name: str) -> QIcon:
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
+     'plane': _draw_plane, 'tie': _draw_tie,
      'sine': _draw_sine,
      'refresh': _draw_refresh,
      'copy': _draw_copy}.get(name, _draw_default)(painter, CONTROL_COLOR)

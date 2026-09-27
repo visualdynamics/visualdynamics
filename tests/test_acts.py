@@ -120,7 +120,9 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     # everything the project holds drawn at once (Brandon, 2026-09-09)
     assert not window.data_pane.isVisibleTo(window), 'no plot for the project row'
     assert not window.table.isVisibleTo(window)
-    assert _bar(window.scene) == ['Generate Report'], "the 3-D view's bar, holding the space"
+    # and the project's **+**, somewhere to build a model (2026-09-26)
+    assert _bar(window.scene) == ['Generate Report', 'New Geometry'], \
+        "the 3-D view's bar, holding the space"
     assert window.scene.isVisibleTo(window)
     assert 'Generate Report is on the bar' in window.statusBar().currentMessage()
     popped = []

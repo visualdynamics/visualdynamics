@@ -368,20 +368,24 @@ def _spec_and_response_widths(limits, alone=False):
             for c in data_curves(plot)}
 
 
-def test_the_reference_that_stands_back_is_twice_as_wide(qt_app):
+def test_the_one_run_and_its_reference_are_both_drawn_wide(qt_app):
     """At one pixel a gray requirement under a dense measurement
     vanished — Brandon could not find the specification under the sine
-    levels (2026-09-25). Stood back, it is drawn at two, as the stage
-    has always drawn its target; the measurement over it stays at one,
-    and a specification alone, being what is looked at, stays at one."""
+    levels (2026-09-25) — so the reference that stands back is wider
+    than the line over it. And the one run read against it is wider than
+    one pixel too: in a small printed legend the two samples looked
+    alike (Brandon, 2026-09-27). A specification alone, being what is
+    looked at, stays at one."""
+    from visualdynamics.plot import MEASURED_WIDTH, STOOD_BACK_WIDTH
     from visualdynamics.theme import theme as resolve_theme
 
     colors = resolve_theme(None)
     widths = _spec_and_response_widths(
         {'warning_upper': 2.0, 'warning_lower': 0.5,
          'abort_upper': 4.0, 'abort_lower': 0.25})
-    assert widths[colors['specification_curve'].lower()] == 2.0
-    assert widths[colors['response_curve'].lower()] == 1.0
+    assert widths[colors['specification_curve'].lower()] == STOOD_BACK_WIDTH
+    assert widths[colors['response_curve'].lower()] == MEASURED_WIDTH
+    assert STOOD_BACK_WIDTH > MEASURED_WIDTH > 1
     alone = _spec_and_response_widths({}, alone=True)
     assert set(alone.values()) == {1.0}
 

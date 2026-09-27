@@ -99,14 +99,20 @@ def geometry_scene(geometry: Geometry, unit_system: UnitSystem | None = None,
                    opacity: float = 1.0,
                    labels: Sequence[str] | None = None,
                    off_screen: bool = False, theme: Any = None,
-                   components: Sequence[str] | None = None) -> Any:
+                   components: Sequence[str] | None = None,
+                   scale: float = 1.0, bounds: bool = True,
+                   orientation: bool = True) -> Any:
     """Build (or add to) a PyVista plotter showing the geometry.
 
     `theme` is 'light', 'dark', or a colors dict; it sets the scene
     background and annotation color. `components` limits what is drawn to a
     subset of {'nodes', 'tracelines', 'elements'} — selecting one in the
-    project tree shows just that part. Returns the plotter; call .show() on
-    it (or .screenshot() if off_screen).
+    project tree shows just that part. `scale` multiplies every size
+    given in pixels — nodes, lines, the bounds' labels — for a render at
+    print resolution (`print_plotter`). `bounds` and `orientation` are
+    the labeled box and the corner triad (`annotate_scene`); a print
+    figure may want neither. Returns the plotter; call .show() on it (or
+    .screenshot() if off_screen).
     """
     import pyvista as pv
 
@@ -116,33 +122,113 @@ def geometry_scene(geometry: Geometry, unit_system: UnitSystem | None = None,
         plotter = pv.Plotter(off_screen=off_screen)
     plotter.set_background(colors['scene_background'])
     axis_unit = add_geometry(plotter, geometry, unit_system=us,
-                             node_size=node_size, line_width=line_width,
+                             node_size=node_size * scale,
+                             line_width=line_width * scale,
                              show_edges=show_edges, opacity=opacity,
                              labels=labels, components=components,
                              text_color=colors['scene_text'])
-    annotate_scene(plotter, axis_unit, colors)
+    annotate_scene(plotter, axis_unit, colors, bounds=bounds,
+                   orientation=orientation, scale=scale)
     return plotter
+
+
+#: VTK's own dots per inch: a text actor's size in points is its size in
+#: pixels at 72
+VTK_DPI = 72.0
+#: the logical dots per inch a screen image is laid out at, which a print
+#: render is scaled from — the 2-D export's reference too
+SCREEN_DPI = 96.0
+#: the bounds box's label size in a print render, per unit of scale, as
+#: the cube axes' screen size. Calibrated so the box prints its labels at
+#: the size the scene's other labels print: a title stands about 2.1
+#: pixels per unit of screen size, and a 13-point label at a render
+#: window DPI of 72 × scale about 9.6 × scale pixels (measured,
+#: 2026-09-27). The screen's own 10 is twice that, and multiplied out
+#: it printed the box's titles at 14 to 16 pt and stacked the ticks on a
+#: thin axis (the band-average paper).
+PRINT_BOUNDS_SIZE = 4.6
+
+
+def print_plotter(size_in: tuple[float, float], dpi: float) -> tuple[Any, float]:
+    """An off-screen plotter for a figure `size_in` inches at `dpi`, and
+    the scale every pixel size in it is to be drawn at.
+
+    A 3-D screenshot at print resolution came out with its labels at
+    about 2 pt, and ``screenshot(scale=)`` dropped the point labels and
+    swelled the axis triad (the band-average paper, 2026-09-26). Here the
+    window is the printed size in pixels, the render window's DPI makes
+    every text actor's points print as points, and the returned scale —
+    how many print pixels a screen pixel becomes — is what the sizes VTK
+    takes in pixels (nodes, lines, the bounds' labels) are multiplied
+    by, so the figure prints as the screen shows it.
+
+    Parameters
+    ----------
+    size_in : (float, float)
+        Width and height of the printed figure, in inches.
+    dpi : float
+        Its resolution.
+
+    Returns
+    -------
+    (pyvista.Plotter, float)
+    """
+    import pyvista as pv
+
+    scale = float(dpi) / SCREEN_DPI
+    plotter = pv.Plotter(off_screen=True, window_size=(
+        max(1, round(size_in[0] * dpi)), max(1, round(size_in[1] * dpi))))
+    plotter.ren_win.SetDPI(round(VTK_DPI * scale))
+    return plotter, scale
 
 
 def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
                    bounds: bool = True,
-                   orientation: bool = True) -> None:
+                   orientation: bool = True, scale: float = 1.0) -> None:
     """Scene annotations, each independently switchable.
 
     `bounds` is the labeled box drawn around the geometry; `orientation` is
     the small triad in the corner. The 3D view toolbar toggles them
-    separately.
+    separately. `scale` other than one is a print render
+    (`print_plotter`): the box's labels, sized in screen pixels, are set
+    to print at the size the scene's other labels print
+    (`PRINT_BOUNDS_SIZE`).
     """
     if bounds:
-        plotter.show_bounds(xtitle=f'X {axis_unit}', ytitle=f'Y {axis_unit}',
-                            ztitle=f'Z {axis_unit}', grid='back',
-                            location='outer', color=colors['scene_text'])
+        box = plotter.show_bounds(xtitle=f'X {axis_unit}',
+                                  ytitle=f'Y {axis_unit}',
+                                  ztitle=f'Z {axis_unit}', grid='back',
+                                  location='outer', color=colors['scene_text'],
+                                  **_label_counts(plotter.bounds))
+        if scale != 1.0 and hasattr(box, 'SetScreenSize'):
+            # the box's labels are sized in screen pixels by the cube
+            # axes' own screen size — not by the font size, not by the
+            # render window's DPI (both measured, 2026-09-26) — so a
+            # print render sets that, to print as the other labels do
+            box.SetScreenSize(PRINT_BOUNDS_SIZE * scale)
     else:
         plotter.remove_bounds_axes()
     if orientation:
         plotter.add_axes(color=colors['scene_text'])
     else:
         plotter.hide_axes()
+
+
+#: an axis shorter than this share of the model's longest carries its
+#: title and no numbers
+THIN_AXIS = 0.1
+
+
+def _label_counts(bounds: Sequence[float]) -> dict[str, bool]:
+    """Which axes of the bounds box carry numbers: all of them, except
+    one much shorter than the model — a plate's thickness — whose five
+    numbers stacked into a smudge, on screen and in print alike, and
+    whose two end numbers still overlapped (the band-average paper,
+    2026-09-27). It keeps its title."""
+    extents = [abs(bounds[2 * k + 1] - bounds[2 * k]) for k in range(3)]
+    longest = max(extents) or 1.0
+    return {f'show_{axis}labels': bool(extent >= THIN_AXIS * longest)
+            for axis, extent in zip('xyz', extents)}
 
 
 def shared_points(points: ArrayLike) -> tuple[Any, np.ndarray]:
@@ -705,17 +791,25 @@ def add_geometry(plotter: Any, geometry: Geometry,
 
 def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
                   screenshot: str | None = None, theme: Any = None,
-                  show: bool = True, **kwargs: Any) -> Any:
+                  show: bool = True, size_in: tuple[float, float] | None = None,
+                  dpi: float | None = None, **kwargs: Any) -> Any:
     """Show the geometry interactively, or render to `screenshot` headlessly.
 
     Shown, it comes up in the app's own 3-D pane — the labeled axes and
     the orientation triad are toggles on the bar over it, exactly as in
     the window. Returns the pane (its `.plotter` is the PyVista one), or
-    the image array when rendering to a file.
+    the image array when rendering to a file. For print, `size_in` and
+    `dpi` render the figure at its printed size (`print_plotter`), every
+    label and line at the size the screen shows it.
     """
     if screenshot is not None:
-        plotter = geometry_scene(geometry, unit_system=unit_system,
-                                 theme=theme, off_screen=True, **kwargs)
+        if dpi is not None:
+            plotter, scale = print_plotter(size_in or (6.0, 4.5), dpi)
+            geometry_scene(geometry, unit_system=unit_system, theme=theme,
+                           plotter=plotter, scale=scale, **kwargs)
+        else:
+            plotter = geometry_scene(geometry, unit_system=unit_system,
+                                     theme=theme, off_screen=True, **kwargs)
         img = plotter.screenshot(screenshot)
         plotter.close()
         return img
@@ -733,13 +827,15 @@ def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
 def plot_dofs(geometry: Geometry, source: Any, quantity: str,
               unit_system: UnitSystem | None = None,
               screenshot: str | None = None, theme: Any = None,
-              show: bool = True, **kwargs: Any) -> Any:
+              show: bool = True, size_in: tuple[float, float] | None = None,
+              dpi: float | None = None, **kwargs: Any) -> Any:
     """The geometry with labeled arrows at every DOF `source` measures
     as `quantity` — the GUI's DOF-arrows toggle, from a script.
 
     Forces end on their node with the label at the base, responses
     leave it with the label at the tip, exactly as the desktop draws
-    them. `source` is a data object (or several).
+    them. `source` is a data object (or several). For print, `size_in`
+    and `dpi` render at the printed size, as `plot_geometry` does.
     """
     from ..core.report import EXCITATION_QUANTITIES, series_quantity_dofs
 
@@ -747,16 +843,20 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
     series = ([('', source, None)] if not isinstance(source, (list, tuple))
               else [('', obj, None) for obj in source])
     dofs = series_quantity_dofs(series, quantity)
-    def draw(plotter: Any) -> None:
+    def draw(plotter: Any, scale: float = 1.0) -> None:
         geometry_scene(geometry, unit_system=us, plotter=plotter,
-                       theme=theme, **kwargs)
+                       theme=theme, scale=scale, **kwargs)
         add_dof_arrows(plotter, geometry, dofs, unit_system=us,
                        incoming=quantity in EXCITATION_QUANTITIES)
 
     if screenshot is not None:
         import pyvista as pv
-        plotter = pv.Plotter(off_screen=True)
-        draw(plotter)
+        if dpi is not None:
+            plotter, scale = print_plotter(size_in or (6.0, 4.5), dpi)
+            draw(plotter, scale)
+        else:
+            plotter = pv.Plotter(off_screen=True)
+            draw(plotter)
         image = plotter.screenshot(str(screenshot))
         plotter.close()
         return image

@@ -35,10 +35,42 @@ MAX_LEGEND = 12
 #: legend entries per row to start from; the row refits itself to the
 #: axes' width once it knows it
 LEGEND_COLUMNS = 4
+#: the legend's text size. 8 pt, the size a printed figure can still be
+#: read at — it was 7, which printed at a third of a page wide came out
+#: smaller than anything else on the figure (2026-09-26, for the print
+#: figures of a paper). A script drawing for print may set it larger;
+#: `legend_below` reads it at each call.
+LEGEND_TEXT_SIZE = '8pt'
+
+
+#: room beyond the widest category label on an axis, in pixels: the tick
+#: marks themselves, and a gap so the text is not against the data
+LABEL_MARGIN = 14
+
+
+def fit_label_axis(axis: Any, labels: Iterable[str],
+                   margin: int = LABEL_MARGIN) -> None:
+    """Make a category axis wide enough for its widest label.
+
+    pyqtgraph draws no tick text that will not fit its axis, and says
+    nothing: left to size itself, a left axis settles on the width a
+    number needs, and a channel name or a label like "band-average,
+    update" simply vanishes while the shorter ones draw (the bar
+    charts found it first; the band-average paper again, 2026-09-26).
+    Measured with the axis's own font, the label that is there is the
+    label that is drawn.
+    """
+    from PySide6.QtGui import QFontMetrics
+
+    metrics = QFontMetrics(axis.font())
+    widest = max((metrics.horizontalAdvance(str(label)) for label in labels),
+                 default=0)
+    axis.setWidth(widest + margin)
 
 
 def legend_below(layout: Any, plot: Any, row: int,
-                 colors: dict | None = None) -> Any:
+                 colors: dict | None = None,
+                 text_size: str | None = None) -> Any:
     """A horizontal legend in its own layout row under the plot.
 
     pyqtgraph's default legend floats inside the view, anchored to a
@@ -52,6 +84,8 @@ def legend_below(layout: Any, plot: Any, row: int,
     Plots occupy the even rows of a layout (``2 * row``) and their
     legends the odd ones — the window's row walker keys on
     ``series_key``, which a legend does not carry, so it steps past.
+
+    `text_size` is the labels' size, `LEGEND_TEXT_SIZE` when omitted.
     """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
@@ -72,6 +106,14 @@ def legend_below(layout: Any, plot: Any, row: int,
 
         def __init__(self, view, **kwargs):
             super().__init__(**kwargs)
+            # pyqtgraph's legend ignores transformations — built to float
+            # over the data at a fixed screen size — so any drawing of the
+            # plot at a scale passed it by: printed at three times, every
+            # other item grew and the legend's text stayed a third of its
+            # size (the paper's print figures, 2026-09-26). In a layout row
+            # it is laid out like the axes, and scales with them.
+            self.setFlag(self.GraphicsItemFlag.ItemIgnoresTransformations,
+                         False)
             self._view = view
             self._fitting = False
             view.sigResized.connect(self.refit)
@@ -140,7 +182,7 @@ def legend_below(layout: Any, plot: Any, row: int,
     style = ({'labelTextColor': colors['plot_foreground']}
              if colors else {})
     legend = Row(plot.getViewBox(), colCount=LEGEND_COLUMNS, offset=None,
-                 labelTextSize='7pt', **style)
+                 labelTextSize=text_size or LEGEND_TEXT_SIZE, **style)
     layout.addItem(legend, row=2 * row + 1, col=0)
     grid = getattr(layout, 'ci', layout).layout
     grid.setAlignment(legend, Qt.AlignmentFlag.AlignHCenter)
@@ -178,6 +220,16 @@ def mac_frame_ratio(rows: int, columns: int) -> float:
 # anything that will ever be on screen; a factor rather than a constant
 # keeps it sane on a log axis, where the fill has to stay positive.
 BEYOND = 1e6
+
+#: a measurement's line when it is the one run read against its
+#: specification: wide enough to stand out from the gray specification
+#: behind it in a small printed legend, where at one pixel the two
+#: samples looked alike (Brandon, 2026-09-27: "maybe thicker line")
+MEASURED_WIDTH = 2
+#: the specification standing back behind that measurement: wider still,
+#: so it shows around the line over it — at one pixel under a dense
+#: measurement it vanished (Brandon, 2026-09-25)
+STOOD_BACK_WIDTH = 3
 
 # categorical curve colors: readable on both light and dark backgrounds
 CURVE_COLORS = [
@@ -537,6 +589,8 @@ def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Seq
     plot.setLabel('bottom', f'frequency [{us.label_html("frequency")}]')
     plot.setLabel('left', 'channel')
     plot.getAxis('left').setTicks([_map_ticks(labels)])
+    fit_label_axis(plot.getAxis('left'),
+                   [label for _position, label in _map_ticks(labels)])
     # the bar is what makes the colors readable as numbers
     bar = pg.ColorBarItem(values=(0.0, 1.0), colorMap=pg.colormap.get('viridis'),
                           label='coherence', interactive=False)
@@ -1138,6 +1192,16 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         with_spec = {c[5] for c in ordered if c[6] and not c[7]}
         with_measurement = {c[5] for c in ordered if not c[6]}
         bounded_pairs = with_spec & with_measurement
+        # how many measurements each pair has: one is read against its
+        # specification in the foreground color, several — five runs of
+        # one channel against its target — are told apart by the color
+        # cycle, and only the specification stands back in gray. All in
+        # one color, the runs could not be told apart (2026-09-26)
+        measurements = {}
+        for c in ordered:
+            if not c[6]:
+                measurements[c[5]] = measurements.get(c[5], 0) + 1
+        zones, exceeded, zone_db = set(), set(), {}
         for (label, x, values, is_frequency, bands, pair, follower,
              dashed, shape, widths, owner) in ordered:
             magnitude = (np.abs(values) if is_frequency
@@ -1153,9 +1217,13 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # is the reference for something", and there is nothing here
             # for it to be the reference for.
             paired = follower and pair in pair_colors
-            if bounded_pairs and pair in bounded_pairs:
+            if bounded_pairs and pair in bounded_pairs and (
+                    follower or measurements.get(pair, 0) == 1):
                 color = colors['specification_curve' if follower
                                else 'response_curve']
+            elif bounded_pairs and pair in bounded_pairs:
+                color = curve_color(index)
+                index += 1
             elif follower and pair in with_spec and not with_measurement:
                 color = colors['response_curve']
             elif paired:
@@ -1176,7 +1244,11 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # measurement is being read against, still behind the data.
             stands_back = bool(follower and bounded_pairs
                                and pair in bounded_pairs)
-            pen = pg.mkPen(color, width=2 if stands_back else 1, style=style)
+            read_against = bool(not follower and pair in bounded_pairs
+                                and measurements.get(pair, 0) == 1)
+            width = (STOOD_BACK_WIDTH if stands_back
+                     else MEASURED_WIDTH if read_against else 1)
+            pen = pg.mkPen(color, width=width, style=style)
             named = {} if paired and dashed else {'name': label}
             curve, drawn_x, drawn_y = _draw_shaped(plot, x, magnitude, shape,
                                                    pen, widths=widths,
@@ -1190,7 +1262,10 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # The zones say where the limits are. Drawn as lines too,
             # four more curves per record crowd the two that are being
             # compared and the shading behind them says the same thing.
-            _shade_limit_zones(plot, x, bands, colors, shape, widths)
+            zones |= _shade_limit_zones(plot, x, bands, colors, shape,
+                                        widths)
+            if bands and follower:
+                _zone_decibels(zone_db, bands, magnitude, ordinate_dim)
             for values in bands.values():
                 # they still set how far the view reaches, so a limit
                 # above everything measured is not cropped off
@@ -1223,7 +1298,10 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # the extents are known by now: every curve is drawn, and
             # the view is about to be locked to them
             reach = _reach(extents, log_ordinate)
-            _shade_exceedances(plot, lines, measured, verdicts, colors, reach)
+            exceeded |= _shade_exceedances(plot, lines, measured, verdicts,
+                                            colors, reach)
+        if getattr(plot, 'legend', None) is not None:
+            _legend_zones(plot.legend, zones, exceeded, zone_db, colors)
         add_mode_markers(plot, group_marks.get(key, []),
                          colors['plot_foreground'])
         # zoom and pan stay inside what the data covers — the opening
@@ -1309,17 +1387,20 @@ def _shade_exceedances(plot, x, y, verdicts, colors, reach):
     else on the plot is a thing Qt has to rasterize, and it crashed
     doing it about one run in three.
 
+    Returns which were drawn, of 'exceed_over' and 'exceed_under', for
+    the legend.
+
     One fill for each direction rather than one per violation. The fill
     runs the judged width, hugging the line wherever it is inside the
     limit — zero height there, so nothing shows — and opening out to
     the plot's edge only where it is not.
     """
     import pyqtgraph as pg
-    from PySide6.QtGui import QColor
 
+    drawn = set()
     all_edges = bin_edges(x)
     if all_edges.size != np.asarray(y).size + 1:
-        return
+        return drawn
     y = np.asarray(y, dtype=float)
     for bound, key, over in (('abort_upper', 'exceed_over', True),
                              ('abort_lower', 'exceed_under', False)):
@@ -1339,8 +1420,7 @@ def _shade_exceedances(plot, x, y, verdicts, colors, reach):
         base = np.where(out, verdict['level'], y)[keep]
         edge = reach[1] if over else reach[0]
         far = np.where(out[keep], edge, base)
-        color = QColor(colors[key])
-        color.setAlpha(EXCEED_ALPHA)
+        color = zone_colors(colors)[key]
         curves = []
         for values in (base, far):
             curve = plot.plot(edges, values, stepMode='center',
@@ -1351,6 +1431,8 @@ def _shade_exceedances(plot, x, y, verdicts, colors, reach):
         fill.setZValue(-5)     # over the zone shading, under the curves
         fill.is_exceedance = True
         plot.addItem(fill)
+        drawn.add(key)
+    return drawn
 
 
 def _reach(extents, log_ordinate):
@@ -1423,7 +1505,10 @@ def drawing_shape(data: Any, tagged: bool = False) -> str:
     integrated — and a specification (`'log_log'`) follows the power
     law its breakpoints mean. Anything that is a value at a frequency
     rather than an area — an FRF, a coherence, a linear spectrum, any
-    signed component — draws as the line it is.
+    signed component — draws as the line it is; except a value that
+    belongs to a whole band, which draws flat across it: a banded
+    coherence is one number for its band, not a sample at its center
+    (Brandon, 2026-09-27).
 
     One implementation, consulted by `build_plots` and by
     `viz.waterfall`, because a picture that disagrees with
@@ -1433,8 +1518,11 @@ def drawing_shape(data: Any, tagged: bool = False) -> str:
     """
     if tagged or data.abscissa_dim != 'frequency':
         return 'line'
-    return {'bin': 'steps', 'log_log': 'law'}.get(
-        getattr(data, 'interpolation', None), 'line')
+    shape = {'bin': 'steps', 'log_log': 'law'}.get(
+        getattr(data, 'interpolation', None))
+    if shape is None and getattr(data, 'bandwidth', None) is not None:
+        return 'steps'
+    return shape or 'line'
 
 
 def step_outline(centers: ArrayLike, values: ArrayLike,
@@ -1585,12 +1673,13 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
     warning limit the red starts at abort; each side is read on its own,
     since a specification may carry any of the four.
 
-    Fills are drawn behind everything, are not in the legend, and are not
-    counted in the extents: the zone beyond abort has no top, so letting
-    it vote on the view would zoom the data into a line.
+    Fills are drawn behind everything and are not counted in the
+    extents: the zone beyond abort has no top, so letting it vote on the
+    view would zoom the data into a line. Their key is added to the
+    legend after them (`_legend_zones`), from what this returns: which
+    of 'warning', 'above' and 'below' were drawn.
     """
     import pyqtgraph as pg
-    from PySide6.QtGui import QColor
 
     if shape == 'steps' and np.asarray(x).size > 1:
         # the zones step with the target they bound: a limit is a
@@ -1623,18 +1712,10 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
                      for bound, (grid, on_grid) in filled.items()}
             x = dense
 
-    warm = QColor(colors['limit_warning'])
-    warm.setAlpha(38)
-    # past abort, and which way: red above, blue below. Both were red,
-    # which said "out of tolerance" and left the direction to be read
-    # off the geometry — where every other mark on this plot already
-    # says over in red and under in blue.
-    hot = QColor(colors['exceed_over'])
-    hot.setAlpha(38)
-    cold = QColor(colors['exceed_under'])
-    cold.setAlpha(38)
+    shades = zone_colors(colors)
+    drawn = set()
 
-    def band(lower: np.ndarray, upper: np.ndarray, brush: Any) -> None:
+    def band(lower: np.ndarray, upper: np.ndarray, zone: str) -> None:
         """Fill between two curves, where both say something."""
         if lower is None or upper is None:
             return
@@ -1644,6 +1725,7 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
             # limits are per control channel, so a cross-spectral record
             # has none at all — nothing to shade rather than a fill of NaN
             return
+        drawn.add(zone)
         # the fill spans the band the limits are written over, and no
         # further: a zone edge with holes in it is a gapped path, which
         # is the shape `gapless` exists to keep away from pyqtgraph
@@ -1659,7 +1741,7 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
             # log axis. Marked so that anything counting the curves on a
             # plot can tell an edge from a measurement.
             curve.is_zone_edge = True
-        fill = pg.FillBetweenItem(low, high, brush=pg.mkBrush(brush))
+        fill = pg.FillBetweenItem(low, high, brush=pg.mkBrush(shades[zone]))
         fill.setZValue(-10)      # under the curves it describes
         plot.addItem(fill)
 
@@ -1672,12 +1754,119 @@ def _shade_limit_zones(plot, x, bands, colors, shape='line', widths=None):
 
     # upward: warning to abort in yellow, abort to the sky in red
     band(warning_upper, abort_upper if abort_upper is not None
-         else _beyond(warning_upper, up=True), warm)
-    band(abort_upper, _beyond(abort_upper, up=True), hot)
+         else _beyond(warning_upper, up=True), 'warning')
+    band(abort_upper, _beyond(abort_upper, up=True), 'above')
     # downward: the same read the other way
     band(abort_lower if abort_lower is not None
-         else _beyond(warning_lower, up=False), warning_lower, warm)
-    band(_beyond(abort_lower, up=False), abort_lower, cold)
+         else _beyond(warning_lower, up=False), warning_lower, 'warning')
+    band(_beyond(abort_lower, up=False), abort_lower, 'below')
+    return drawn
+
+
+#: how solid a limit zone's shading is: faint, since it lies behind
+#: everything it describes
+ZONE_ALPHA = 38
+
+
+def zone_colors(colors: Mapping[str, str]) -> dict:
+    """The fills of a specification's zones and of its exceedances, as
+    QColors — one place, so the legend's swatch is the plot's fill.
+
+    Yellow between warning and abort; past abort, which way: red above,
+    blue below. Both were red once, which said "out of tolerance" and
+    left the direction to be read off the geometry — where every other
+    mark on the plot already says over in red and under in blue. The
+    exceedance boxes are the same hues, stronger (`EXCEED_ALPHA`).
+    """
+    from PySide6.QtGui import QColor
+
+    def shade(name, alpha):
+        color = QColor(colors[name])
+        color.setAlpha(alpha)
+        return color
+
+    return {'warning': shade('limit_warning', ZONE_ALPHA),
+            'above': shade('exceed_over', ZONE_ALPHA),
+            'below': shade('exceed_under', ZONE_ALPHA),
+            'exceed_over': shade('exceed_over', EXCEED_ALPHA),
+            'exceed_under': shade('exceed_under', EXCEED_ALPHA)}
+
+
+def _zone_decibels(found: dict, bands: Mapping[str, Any], target: Any,
+                   ordinate_dim: str) -> None:
+    """Each limit's distance from the target it bounds, in decibels,
+    gathered into `found` per limit — for the legend to state when it
+    is one number everywhere. Ten log ten of a power quantity (a PSD's
+    dimension is a square), twenty of an amplitude, as `compliance`
+    reads them."""
+    per = 10.0 if '**2' in str(ordinate_dim) else 20.0
+    target = np.asarray(np.real(target), dtype=float)
+    for bound, values in bands.items():
+        values = np.asarray(np.real(values), dtype=float)
+        if values.shape != target.shape:
+            continue
+        with np.errstate(divide='ignore', invalid='ignore'):
+            db = per * np.log10(values / target)
+        db = db[np.isfinite(db)]
+        if db.size:
+            found.setdefault(bound, []).append(db)
+
+
+def _uniform_db(found: dict, bound: str) -> float | None:
+    """The one value a limit sits at in decibels, or None when it moves."""
+    values = found.get(bound)
+    if not values:
+        return None
+    every = np.concatenate(values)
+    if np.ptp(every) > 0.05:
+        return None
+    return float(np.round(np.mean(every), 1))
+
+
+def _signed_db(value: float) -> str:
+    return f'{value:+g} dB'.replace('-', '\u2212')
+
+
+def _legend_zones(legend: Any, zones: set, exceeded: set, found: dict,
+                  colors: Mapping[str, str]) -> None:
+    """Name the shading in the legend: the warning band, the zones past
+    abort and the exceedance marks, each only when this plot drew it,
+    and each band's decibels when the specification holds it at one
+    value. The measured curves and the specification name themselves as
+    they are drawn; the fills had no entries, and a reader of a printed
+    figure could not tell the yellow, red and blue apart without the
+    caption (2026-09-26)."""
+    import pyqtgraph as pg
+
+    def db_note(*bounds):
+        values = [_uniform_db(found, bound) for bound in bounds]
+        if any(v is None for v in values):
+            return ''
+        if len(values) == 2 and np.isclose(values[0], -values[1]):
+            return f' (\u00b1{abs(values[0]):g} dB)'
+        return ' (' + '/'.join(_signed_db(v) for v in values) + ')'
+
+    shades = zone_colors(colors)
+    entries = []
+    if 'warning' in zones:
+        entries.append(('warning', 'warning band'
+                        + db_note('warning_upper', 'warning_lower')))
+    if 'above' in zones:
+        entries.append(('above', 'above abort' + db_note('abort_upper')))
+    if 'below' in zones:
+        entries.append(('below', 'below abort' + db_note('abort_lower')))
+    if 'exceed_over' in exceeded:
+        entries.append(('exceed_over', 'line over abort'))
+    if 'exceed_under' in exceeded:
+        entries.append(('exceed_under', 'line under abort'))
+    for zone, name in entries:
+        # a swatch, not a mark on the plot: never added to the view,
+        # only drawn by the legend's sample. A bar's sample is a filled
+        # square, an area's key; a filled curve's is a triangle
+        swatch = pg.BarGraphItem(x=[0.0], height=[1.0], width=1.0,
+                                 pen=None, brush=pg.mkBrush(shades[zone]))
+        swatch.is_zone_edge = True
+        legend.addItem(swatch, name)
 
 
 def _beyond(values, up):
@@ -1782,6 +1971,109 @@ def save_plot(data: DataArray, path: str | os.PathLike,
                      size=size, path=path, **kwargs)
 
 
+#: the resolution a standalone plot is written to a .png at, in dots per
+#: inch, or None for one pixel per logical pixel (the screen's 96). For
+#: print: lay a figure out at its printed size — `size` in logical pixels
+#: is inches times 96 — and set this to 300; text, pens and layout scale
+#: together and every font prints at its set size (2026-09-26).
+EXPORT_DPI: float | None = None
+#: the logical pixels in an inch, which a device ratio is counted from
+LOGICAL_DPI = 96.0
+
+
+def render_image(widget: Any, ratio: float = 1.0,
+                 background: Any = None) -> Any:
+    """A widget painted into an image at `ratio` device pixels per
+    logical pixel.
+
+    The one way a plot becomes pixels. pyqtgraph's ImageExporter scales
+    the scene to a requested width, and not evenly: exported at three
+    times a plot's width, legend labels came out at a third of their set
+    size and QFont tick labels half again too large, while HTML titles
+    were right (the band-average paper's print figures, 2026-09-26).
+    Painted through a painter whose device carries the ratio, the scene
+    is laid out once, at its logical size, and every item — text, pens,
+    fills — is drawn scaled by the same factor, as a high-density screen
+    draws it.
+
+    Parameters
+    ----------
+    widget : QWidget
+        Laid out already, at its logical size.
+    ratio : float, default 1.0
+        Device pixels per logical pixel.
+    background : color, optional
+        What the image is filled with first; transparent when omitted.
+
+    Returns
+    -------
+    QImage
+    """
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsView
+
+    image = QImage(max(1, round(widget.width() * ratio)),
+                   max(1, round(widget.height() * ratio)),
+                   QImage.Format.Format_ARGB32)
+    image.fill(QColor(background) if background is not None
+               else Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+    if isinstance(widget, QGraphicsView):
+        # a view renders its scene into whatever target it is given,
+        # scaled to fill it — so the viewport into the whole image is
+        # the ratio. Scaled by the painter as well, or through an image
+        # carrying a device ratio, it was applied twice and the image
+        # held a ninth of the plot
+        widget.render(painter, QRectF(image.rect()), widget.viewport().rect())
+    else:
+        painter.scale(ratio, ratio)
+        widget.render(painter)
+    painter.end()
+    return image
+
+
+def save_image(widget: Any, path: str | os.PathLike, *,
+               dpi: float | None = None, theme: Any = None) -> str:
+    """A laid-out plot widget written to a .png, at `dpi` for print.
+
+    The widget is drawn at its logical size scaled by ``dpi / 96``
+    (`render_image`), on the theme's plot background, and the file says
+    its resolution, so a figure laid out at 3.42 in (328 logical pixels)
+    and saved at 300 dpi is 1026 pixels that print at 3.42 in, every
+    font at its set size.
+
+    Parameters
+    ----------
+    widget : QWidget
+        The plot, laid out at its printed size in logical pixels.
+    path : str or path-like
+        Where the .png goes.
+    dpi : float, optional
+        Dots per inch; one pixel per logical pixel when omitted.
+    theme : optional
+        Whose plot background to fill with.
+
+    Returns
+    -------
+    str
+        The path written.
+    """
+    colors = resolve_theme(theme)
+    ratio = 1.0 if dpi is None else float(dpi) / LOGICAL_DPI
+    image = render_image(widget, ratio, colors['plot_background'])
+    if dpi is not None:
+        dots = round(float(dpi) / 0.0254)
+        image.setDotsPerMeterX(dots)
+        image.setDotsPerMeterY(dots)
+    path = str(path)
+    if not image.save(path):
+        raise OSError(f'could not write {path}')
+    return path
+
+
 def _plot_window(build: Callable[[Any], Any], theme: Any = None,
                  path: str | os.PathLike | None = None,
                  show: bool = True, title: str | None = None,
@@ -1795,10 +2087,10 @@ def _plot_window(build: Callable[[Any], Any], theme: Any = None,
     (.png or .svg) and a bare layout widget is used, since a toolbar is
     not in the picture. Shown, it comes up in the app's own data pane,
     so a plot opened from a script wears the same bar as the one in the
-    window. Returns the pane, or the path.
+    window. Returns the pane, or the path. A .png is written by
+    `save_image`, at `EXPORT_DPI` when that is set.
     """
     import pyqtgraph as pg
-    from PySide6.QtGui import QColor
 
     app = _application()
     colors = resolve_theme(theme)
@@ -1821,16 +2113,12 @@ def _plot_window(build: Callable[[Any], Any], theme: Any = None,
     app.processEvents()
     path = str(path)
     if path.lower().endswith('.svg'):
-        exporter = pg.exporters.SVGExporter(widget.scene())
+        pg.exporters.SVGExporter(widget.scene()).export(path)
     else:
-        exporter = pg.exporters.ImageExporter(widget.scene())
-        exporter.parameters()['width'] = size[0]
-        # the exporter paints its own background and defaults to black,
-        # whatever the widget is set to — so a light-themed export came
-        # out on black, in a report page that is white
-        exporter.parameters()['background'] = QColor(
-            colors['plot_background'])
-    exporter.export(path)
+        # the theme's background, painted first: pyqtgraph's exporter
+        # painted its own and defaulted to black, so a light-themed
+        # export once came out on black in a report page that is white
+        save_image(widget, path, dpi=EXPORT_DPI, theme=theme)
     widget.close()
     return path
 
@@ -2280,7 +2568,8 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               theme: Any = None,
               path: str | os.PathLike | None = None,
               show: bool = True, title: str | None = None,
-              size: tuple[int, int] | None = None) -> Any:
+              size: tuple[int, int] | None = None,
+              summary: str = 'over') -> Any:
     """The comparison as a bar per control channel.
 
         visualdynamics.plot.plot_bars(psds, spec, 'error', path='error.png')
@@ -2297,6 +2586,9 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
     `low` and `high` are the thresholds, defaulting to +/-3 dB and 10%.
     The chart grows with the channel count rather than squeezing them
     in, so `size` defaults to whatever fits the channels there are.
+    Below it, a key to the colors. `summary` places the count: 'over'
+    the bars, in the plot's 'title' (what a narrow printed figure
+    wants), or 'none'.
     """
     from ..core.compliance import (
         ERROR_DB,
@@ -2334,21 +2626,24 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
         widget.clear()
         plot = widget.addPlot(row=0, col=0)
         if mode == 'error':
-            error_chart(plot, errors, colors,
-                        low=-ERROR_DB if low is None else low,
-                        high=ERROR_DB if high is None else high)
+            chart = error_chart(plot, errors, colors,
+                                low=-ERROR_DB if low is None else low,
+                                high=ERROR_DB if high is None else high,
+                                summary=summary)
         elif mode == 'srs':
             from ..core.compliance import SRS_ERROR_DB
             # both sides: the deviation is signed, and under-testing
             # is a different fault from over-testing, not a lesser one
-            replication_chart(plot, [(label, value)
-                                     for label, value, _p in errors],
-                              colors, 'srs_rms',
-                              low=-SRS_ERROR_DB if low is None else low,
-                              high=SRS_ERROR_DB if high is None else high)
+            chart = replication_chart(
+                plot, [(label, value) for label, value, _p in errors],
+                colors, 'srs_rms',
+                low=-SRS_ERROR_DB if low is None else low,
+                high=SRS_ERROR_DB if high is None else high, summary=summary)
         else:
-            lines_chart(plot, errors, colors,
-                        low=LINES_PERCENT if low is None else low)
+            chart = lines_chart(plot, errors, colors,
+                                low=LINES_PERCENT if low is None else low,
+                                summary=summary)
+        chart.key(legend_below(widget, plot, 0, colors))
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or {

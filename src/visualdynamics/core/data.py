@@ -2422,7 +2422,72 @@ class Frf(DataArray):
         return animate_ods(geometry, self, frequency=frequency, **kwargs)
 
 
-class _CoherenceBase(DataArray):
+class _Bands:
+    """The bins a frequency-domain array's lines stand for — shared by a
+    spectral density and a coherence, one rule for both.
+
+    `bandwidth` is the width of the band each line stands for when the
+    lines are not evenly spaced: None for a narrowband array, whose bins
+    are the midpoints between neighbors and exactly inferable; set by an
+    octave-banded one, whose bins are geometric and whose edges are a
+    standard's rather than its neighbors' — read off the centers they
+    are a hair out at every band and plainly wrong at the two ends. A
+    coherence computed from a banded CPSD carries the CPSD's bands and
+    draws flat across them the way it does (2026-09-26).
+    """
+
+    bandwidth: np.ndarray | None = None
+
+    def _take_bandwidth(self, bandwidth: ArrayLike | None) -> None:
+        if bandwidth is None:
+            return
+        bandwidth = np.asarray(bandwidth, dtype=np.float64)
+        if bandwidth.shape != self.abscissa.shape:
+            raise ValueError(
+                f'bandwidth has shape {bandwidth.shape}, expected '
+                f'{self.abscissa.shape} to match the abscissa')
+        self.bandwidth = bandwidth
+
+    def bin_widths(self) -> np.ndarray:
+        """The width of every line's own bin.
+
+        Its own when it has one, the midpoints between neighbors when
+        it does not — so a caller integrating never has to ask which
+        kind it is holding.
+
+        Returns
+        -------
+        numpy.ndarray
+        """
+        if self.bandwidth is not None:
+            return self.bandwidth
+        return np.gradient(np.asarray(self.abscissa, dtype=float))
+
+    def bin_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """(left, right) of every line's own bin — see `octave.bin_bounds`.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+        """
+        from .octave import bin_bounds
+
+        return bin_bounds(np.asarray(self.abscissa, dtype=float),
+                          self.bandwidth)
+
+    def bin_edges(self) -> np.ndarray:
+        """The edges a step plot lands on: one more than there are
+        lines, `bin_bounds` tiled.
+
+        Returns
+        -------
+        numpy.ndarray
+        """
+        left, right = self.bin_bounds()
+        return np.concatenate([left, right[-1:]])
+
+
+class _CoherenceBase(_Bands, DataArray):
     """How much of a response its references account for, from 0 to 1.
 
     A ratio of spectra, so dimensionless by construction — which makes it
@@ -2435,11 +2500,13 @@ class _CoherenceBase(DataArray):
     log_ordinate = False        # a 0..1 ratio says nothing on a log axis
     ordinate_limits = (0.0, 1.05)
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, bandwidth: ArrayLike | None = None,
+                 **kwargs: Any) -> None:
         # whatever a caller passes, a coherence is dimensionless
         kwargs['ordinate_dim'] = 'dimensionless'
         kwargs.setdefault('ordinate_unit', 'dimensionless')
         super().__init__(*args, **kwargs)
+        self._take_bandwidth(bandwidth)
 
     def plot_map(self, **kwargs: Any) -> Any:
         """The coherence map: frequency across, channel down, 0..1."""
@@ -2542,7 +2609,7 @@ def density_ratio(signal: Any, floor: Any):
     return np.asarray(signal.abscissa), np.asarray(rows), dofs, dims
 
 
-class Psd(DataArray):
+class Psd(_Bands, DataArray):
     #: the width of the band each line stands for, when the lines are
     #: not evenly spaced. `None` for a narrowband spectrum, where the
     #: bins are the midpoints between neighbors and inferring them is
@@ -2855,39 +2922,16 @@ class Psd(DataArray):
             return None
         return float(left[said].min()), float(right[said].max())
 
-    def bin_edges(self) -> np.ndarray:
-        """The edges a step plot of this spectrum lands on: one more
-        than there are lines, `bin_bounds` tiled."""
-        left, right = self.bin_bounds()
-        return np.concatenate([left, right[-1:]])
-
-
     function_type = 9
     abscissa_dim = 'frequency'
     complex_ordinate = True
-
-    #: the width of the band each line stands for, when the lines are
-    #: not evenly spaced. None for a narrowband spectrum, whose bins
-    #: are the midpoints between neighbors and exactly inferable. An
-    #: octave-band spectrum sets it: its bins are geometric, its edges
-    #: are a standard's rather than its neighbors', and reading them
-    #: off the centers is a hair out at every band and plainly wrong at
-    #: the two ends.
-    bandwidth: np.ndarray | None = None
-
 
     def __init__(self, *args: Any, bandwidth: ArrayLike | None = None,
                  **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         if not has_phase(self.ordinate):
             self.ordinate: np.ndarray = np.ascontiguousarray(self.ordinate.real)
-        if bandwidth is not None:
-            bandwidth = np.asarray(bandwidth, dtype=np.float64)
-            if bandwidth.shape != self.abscissa.shape:
-                raise ValueError(
-                    f'bandwidth has shape {bandwidth.shape}, expected '
-                    f'{self.abscissa.shape} to match the abscissa')
-            self.bandwidth = bandwidth
+        self._take_bandwidth(bandwidth)
 
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,
@@ -2979,23 +3023,54 @@ class Psd(DataArray):
         per_octave = PER_OCTAVE if per_octave is None else int(per_octave)
         return (per_octave, *bands(low, high, per_octave))
 
-    def bin_widths(self) -> np.ndarray:
-        """The width of every line's own bin.
+    def coherence(self) -> Coherence:
+        """The ordinary coherence of every cross term this CPSD holds:
+        |S_pq|² / (S_pp S_qq), from the cross spectrum and the two
+        autospectra beside it.
 
-        Its own when it has one, the midpoints between neighbors when
-        it does not — so a caller integrating a spectrum never has to
-        ask which kind it is holding.
+        Banded or not — a coherence of an octave-banded CPSD is the
+        banded quantity, each band's averaged cross spectrum against its
+        averaged autospectra, and keeps the bands so it draws flat
+        across them the way the CPSD does (2026-09-26, for the
+        band-average paper). It is not the average of a narrowband
+        coherence over the band, which would weight a band's lines
+        equally whatever their power.
+
+        Returns
+        -------
+        Coherence
+            One record per cross term, response against reference.
         """
-        if self.bandwidth is not None:
-            return self.bandwidth
-        return np.gradient(np.asarray(self.abscissa, dtype=float))
-
-    def bin_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        """(left, right) of every line's own bin — see `octave.bin_bounds`."""
-        from .octave import bin_bounds
-
-        return bin_bounds(np.asarray(self.abscissa, dtype=float),
-                          self.bandwidth)
+        if self.reference_dof is None:
+            raise ValueError('coherence needs a CPSD: records with a '
+                             'reference as well as a response')
+        autos = {}
+        for i, (p, q) in enumerate(zip(self.response_dof, self.reference_dof,
+                                       strict=True)):
+            if p == q:
+                autos.setdefault(str(p), i)
+        rows, responses, references = [], [], []
+        ordinate = np.asarray(self.ordinate)
+        for i, (p, q) in enumerate(zip(self.response_dof, self.reference_dof,
+                                       strict=True)):
+            if p == q:
+                continue
+            if str(p) not in autos or str(q) not in autos:
+                continue
+            with np.errstate(divide='ignore', invalid='ignore'):
+                value = (np.abs(ordinate[i]) ** 2
+                         / (np.real(ordinate[autos[str(p)]])
+                            * np.real(ordinate[autos[str(q)]])))
+            rows.append(np.clip(np.nan_to_num(value, nan=0.0), 0.0, 1.0))
+            responses.append(p)
+            references.append(q)
+        if not rows:
+            raise ValueError('no cross term has both its autospectra here')
+        return Coherence(np.asarray(self.abscissa), np.asarray(rows),
+                         response_dof=responses, reference_dof=references,
+                         bandwidth=self.bandwidth,
+                         comment=(f'coherence of {self.comment}'.strip()
+                                  if self.comment else 'coherence'))
 
     @classmethod
     def _si_units_for(cls, dimension):

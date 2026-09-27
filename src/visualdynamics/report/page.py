@@ -163,11 +163,21 @@ th { background: color-mix(in srgb, var(--line) 30%, transparent); }
 td.mark-over { background: rgba(229, 83, 75, 0.30); }
 td.mark-under { background: rgba(76, 146, 217, 0.30); }
 @media print { canvas { break-inside: avoid; } .copy { display: none; } }
+/* one figure filling whatever frame holds it — an iframe or a div in a
+   slide (`export_html`, 2026-09-27): no title, marking or toggle, no
+   page margin, and the figure's canvas takes the height left over
+   (`sized`) */
+html.fill body { padding: 0; margin: 0; overflow: hidden; }
+html.fill h1, html.fill .themetoggle, html.fill .marking { display: none; }
+html.fill section { margin: 0; }
+/* one figure needs no number */
+html.fill .caption strong { display: none; }
 """
 
 _JS = r"""
 'use strict';
 const DATA = JSON.parse(document.getElementById('data').textContent);
+if (DATA.fill) document.documentElement.classList.add('fill');
 const COLORS = ['#4c92d9','#ff8c2b','#3fb950','#e5534b','#a371f7',
                 '#b07d62','#e668c3','#8b949e','#d2c14e','#39c5cf'];
 const root = document.getElementById('report');
@@ -233,6 +243,16 @@ function sized(canvas, height) {
   // a height that knows its own width: a figure free to grow sideways
   // would otherwise stay 340 px tall and read as a letterboxed strip
   if (typeof height === 'function') height = Math.round(height(width));
+  // filling a frame: the height the window has left once everything
+  // else on the page — caption, controls, legend — has its own
+  if (document.documentElement.classList.contains('fill')) {
+    // the body's own height, not the document's scroll height: that
+    // never falls below the window, so with the canvas nudged small to
+    // be redrawn everything else measured as the whole window
+    const rest = document.body.getBoundingClientRect().height
+      - canvas.getBoundingClientRect().height;
+    height = Math.max(120, Math.floor(window.innerHeight - rest));
+  }
   canvas.width = width * scale; canvas.height = height * scale;
   canvas.style.height = height + 'px';
   const g = canvas.getContext('2d'); g.scale(scale, scale);
@@ -2242,24 +2262,36 @@ document.querySelectorAll('section .tablewrap').forEach(
                      'table as cells and as a table'));
 
 // dark / light toggle: starts from the OS preference (or the reader's
-// last choice), and repaints every canvas in the new ink
+// last choice), and repaints every canvas in the new ink — unless the
+// file was written in one theme (`export_html`), which it keeps without
+// touching the reader's saved choice
 (() => {
   const toggle = document.createElement('button');
   toggle.className = 'themetoggle';
-  const apply = theme => {
+  const apply = (theme, remember = true) => {
     document.documentElement.dataset.theme = theme;
     toggle.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
     REDRAWS.forEach(redraw => redraw());
+    if (!remember) return;
     try { localStorage.setItem('visualdynamics-report-theme', theme); }
     catch (e) { /* file: pages may refuse storage; the toggle still works */ }
   };
-  let theme = null;
-  try { theme = localStorage.getItem('visualdynamics-report-theme'); } catch (e) {}
-  if (theme !== 'dark' && theme !== 'light')
-    theme = window.matchMedia
-      && window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark' : 'light';
-  apply(theme);
+  if (DATA.theme === 'dark' || DATA.theme === 'light') {
+    apply(DATA.theme, false);
+  } else {
+    let theme = null;
+    try { theme = localStorage.getItem('visualdynamics-report-theme'); } catch (e) {}
+    if (theme !== 'dark' && theme !== 'light')
+      theme = window.matchMedia
+        && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark' : 'light';
+    apply(theme);
+  }
+  // a filled frame that changes height is redrawn to it: the viewers
+  // watch their canvas's size, so nudging it is what asks them
+  if (DATA.fill)
+    addEventListener('resize', () => document.querySelectorAll(
+      'section canvas').forEach(c => { c.style.height = '1px'; }));
   toggle.onclick = () => apply(
     document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
   document.body.appendChild(toggle);

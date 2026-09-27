@@ -63,6 +63,23 @@ def test_a_truncated_synthesis_drops_its_zero_singular_values(survey):
     assert drawn == 3, 'rank three, three curves'
 
 
+def test_a_single_cmif_keys_its_curves(survey):
+    """A CMIF of one FRF names each singular value in its legend — the
+    paper's printed CMIF showed none, which was the export shrinking the
+    legend away (2026-09-26), not the plot leaving it out."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import build_cmif
+
+    _shapes, frfs = survey
+    layout = pg.GraphicsLayoutWidget()
+    drawn = build_cmif(layout, [('FRF', frfs, None)])
+    plot = next(item for item in layout.ci.items
+                if hasattr(item, 'listDataItems'))
+    names = [label.text for _sample, label in plot.legend.items]
+    assert names == [f'CMIF {k + 1}' for k in range(drawn)]
+
+
 # ---- the toggle on the plot bar ---------------------------------------------
 
 @pytest.fixture

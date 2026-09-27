@@ -157,9 +157,15 @@ def test_the_view_still_reaches_the_limits(qt_app, spec):
 
 
 def test_the_bounds_stay_out_of_the_legend(qt_app, spec):
-    """Four more entries per record would bury the records themselves."""
+    """Four more entries per record would bury the records themselves.
+    The zones they bound are keyed once for the whole plot (2026-09-26:
+    a printed figure needs to say what the shading is), never per
+    record."""
     plot, _layout = drawn_plot(qt_app, spec)
-    assert len(plot.legend.items) == spec.num_records
+    names = [label.text for _sample, label in plot.legend.items]
+    curves = [n for n in names if 'abort' not in n and 'warning' not in n]
+    assert len(curves) == spec.num_records
+    assert len(names) - len(curves) <= 3, names
 
 
 def test_the_legend_sits_below_the_plot_in_a_row(qt_app, spec):
@@ -198,8 +204,9 @@ def test_the_legend_wraps_to_the_width_of_the_axes(qt_app, spec):
     assert entries >= 3, 'the fixture has enough records to wrap'
     # wide enough for one row in any font: Windows draws its fonts
     # wider and wrapped the row at the default width, a fault of the
-    # assertion and not the legend (a bug report, 2026-09-19)
-    layout.resize(1200, 600)
+    # assertion and not the legend (a bug report, 2026-09-19); and
+    # wider again since the zones joined the legend (2026-09-26)
+    layout.resize(2400, 600)
     for _ in range(10):
         qt_app.processEvents()
     wide = legend.sceneBoundingRect()
@@ -216,7 +223,7 @@ def test_the_legend_wraps_to_the_width_of_the_axes(qt_app, spec):
     assert abs(box.center().x() - view.center().x()) < 1, 'still centered'
     assert box.top() >= view.bottom()
 
-    layout.resize(1200, 600)
+    layout.resize(2400, 600)
     for _ in range(10):
         qt_app.processEvents()
     assert legend.rowCount == 1 and legend.columnCount == entries, 'unwrapped'

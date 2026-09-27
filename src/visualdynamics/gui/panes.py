@@ -17,7 +17,6 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
-    QColor,
     QImage,
     QKeySequence,
     QShortcut,
@@ -758,10 +757,10 @@ class DataPane(QWidget):
     def copy_view(self) -> bool:
         """What the pane shows, onto the clipboard as an image: the 3-D
         stage when it is up, the flat plot otherwise. The plot is drawn
-        by the same exporter the report figures and the headless plots
-        use, on the theme's own background — the exporter paints one of
-        its own and defaults to black — at the screen's pixel density, so
-        a retina display copies a retina image."""
+        the way the headless plots are (`plot.render_image`), on the
+        theme's own background, at the screen's pixel density, so a
+        retina display copies a retina image with every font at its
+        set size."""
         from PySide6.QtWidgets import QApplication
 
         if (self.waterfall_plotter is not None
@@ -769,15 +768,15 @@ class DataPane(QWidget):
             image = image_of(self.waterfall_plotter.screenshot(return_img=True))
             what = 'stage'
         else:
-            from pyqtgraph.exporters import ImageExporter
+            from ..plot import render_image
 
-            exporter = ImageExporter(self.graphics.scene())
+            # at the screen's density, drawn the one way a plot becomes
+            # pixels: pyqtgraph's exporter, asked for a retina width,
+            # shrank the legend's text and grew the ticks'
             colors = resolve_theme(self.theme_name)
-            exporter.parameters()['background'] = QColor(
-                colors['plot_background'])
-            exporter.parameters()['width'] = int(
-                self.graphics.width() * self.graphics.devicePixelRatioF())
-            image = exporter.export(toBytes=True)
+            image = render_image(self.graphics,
+                                 self.graphics.devicePixelRatioF(),
+                                 colors['plot_background'])
             what = 'plot'
         if image is None or image.isNull():
             self.copied.emit('Nothing drawn to copy')

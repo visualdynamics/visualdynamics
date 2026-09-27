@@ -15,6 +15,7 @@ from __future__ import annotations
 import html as html_escape
 import itertools
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
@@ -97,7 +98,8 @@ def render_html(report: Report, objects: Mapping[str, Any],
                 channel_js: str | None = None,
                 links: Sequence[Mapping[str, Any]] | None = None,
                 selected: int | None = None,
-                labels: list[tuple[str, str]] | None = None) -> str:
+                labels: list[tuple[str, str]] | None = None,
+                fill: bool = False, theme: str | None = None) -> str:
     """The report as one HTML document string.
 
     `links` is the project's link groups: symbolic bindings like
@@ -116,6 +118,10 @@ def render_html(report: Report, objects: Mapping[str, Any],
     `labels`, when given, is filled with (label, caption) for every
     numbered figure and table in order — what the editor's Reference
     menu offers, from the same numbering the page shows.
+
+    `fill` makes the page one figure filling its frame, without title,
+    marking or toggle (`export_html`); `theme`, 'light' or 'dark', fixes
+    the page's theme where it would otherwise follow the reader.
     """
     us = unit_system or DEFAULT_SYSTEM
     from ..theme import DARK, LIGHT, VIRIDIS
@@ -134,7 +140,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
                        'band': side['averaging_band'],
                        'window': side['averaging_window']}
                    for side in (LIGHT, DARK)},
-               'blocks': []}
+               'blocks': [], 'fill': bool(fill), 'theme': theme}
     if edit:
         payload['selected'] = -1 if selected is None else int(selected)
     figures = tables = 0
@@ -2843,3 +2849,104 @@ from .page import (
     _JS,
     _PAGE,
 )
+
+
+def export_html(path: str | os.PathLike, data: Any = None, *,
+                specification: Any = None, channel: str | None = None,
+                mode: str = 'curves', geometry: Any = None,
+                shapes: Any = None, dofs: tuple[str, Any] | None = None,
+                name: str | None = None, caption: str = '',
+                theme: str | None = None,
+                unit_system: UnitSystem | None = None,
+                fill: bool = True) -> str:
+    """One figure, interactive, as a single self-contained HTML file.
+
+        visualdynamics.export_html('spec.html', psd, specification=spec,
+                                   channel='101Z+', theme='light')
+        visualdynamics.export_html('modes.html', geometry=g, shapes=modes)
+
+    The figure the report draws — zoom, pan and the readout on a plot,
+    turning and animating on a scene — with nothing else: no title and
+    no marking, and with `fill` the figure takes whatever frame holds
+    it, an iframe or a box on a slide, redrawing when the frame changes
+    size (Brandon, 2026-09-27, for an interactive slide deck from the
+    scripts that draw a paper's printed figures). Everything the page
+    needs is in the file, so it opens offline.
+
+    A plot of `data` — against `specification` and its zones when one
+    is given, one `channel` of it when named, in `mode` ('curves',
+    'stage', 'cmif', 'mac' or 'map'); or, given a `geometry`, a scene of
+    it, its `shapes` animating or the `dofs` one object measures as a
+    quantity, ``('acceleration', frf)``, drawn as labeled arrows.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Where the .html goes.
+    data : DataArray or ShapeSet, optional
+        What a plot draws.
+    specification : Specification, optional
+        What `data` is drawn against.
+    channel : str, optional
+        The one control channel of a comparison to draw.
+    mode : str, default 'curves'
+        The plot's reading.
+    geometry : Geometry, optional
+        Makes the figure a scene.
+    shapes : ShapeSet, optional
+        What the scene animates.
+    dofs : (str, object), optional
+        A quantity and an object: its DOFs of that quantity, as arrows.
+    name : str, optional
+        What the legend calls `data`.
+    caption : str, optional
+        A line under the figure.
+    theme : {'light', 'dark'}, optional
+        Fixes the figure's theme; unset, it follows the reader's.
+    unit_system : UnitSystem, optional
+        The units it is drawn in.
+    fill : bool, default True
+        Fill the frame; False lays it out as the report page does.
+
+    Returns
+    -------
+    str
+        The path written.
+    """
+    import pathlib
+
+    from ..core.report import Report
+    from ..project import Project
+
+    holder = Project('Figure')
+    if geometry is not None:
+        holder.add('Geometry', geometry)
+        block = {'kind': 'scene', 'geometry': 'Geometry', 'shapes': '',
+                 'caption': caption}
+        if shapes is not None:
+            holder.add('Shapes', shapes)
+            holder.link('Geometry', 'Shapes')
+            block['shapes'] = 'Shapes'
+        if dofs is not None:
+            quantity, source = dofs
+            holder.add('Measured', source)
+            block.update(dofs=quantity, dofs_source='Measured')
+    elif data is not None:
+        label = name or ('Response' if specification is not None else 'Data')
+        holder.add(label, data)
+        block = {'kind': 'plot', 'source': label, 'mode': mode,
+                 'caption': caption}
+        if specification is not None:
+            holder.add('Specification', specification)
+            block['specification'] = 'Specification'
+        if channel is not None:
+            block['channel'] = channel
+    else:
+        raise ValueError('export_html needs data to plot or a geometry '
+                         'to show')
+    report = Report('', [block], marking='')
+    html = render_html(report, dict(holder.items()), unit_system,
+                       links=holder.links, fill=fill, theme=theme)
+    path = pathlib.Path(path)
+    path.write_text(html, encoding='utf-8')
+    return str(path)

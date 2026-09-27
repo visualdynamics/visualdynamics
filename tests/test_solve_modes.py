@@ -167,8 +167,8 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     pump()
     window.project.solve_modes('Geometry', maximum_frequency=500.0)
     script = window.project.session_script()
-    assert ('from visualdynamics.core.fem import BlockProperties, Material, '
-            'Section') in script
+    assert ('from visualdynamics.core.fem import RIGID, BlockProperties, '
+            'Material, Section') in script
     assert script.count('.block_properties[') == 4, 'one line per edit'
     assert ("BlockProperties(Material('Al', 70000000000.0, 2700.0, 0.3), "
             'thickness=0.01)') in script
@@ -241,7 +241,10 @@ def test_the_library_is_typical_handbook_values_each_with_its_note():
     from visualdynamics.core.fem import MATERIAL_LIBRARY, MATERIALS, LibraryMaterial, material
 
     names = [entry.material.name for entry in MATERIAL_LIBRARY]
-    assert len(names) == len(set(names)) == len(MATERIALS) >= 18
+    assert len(names) == len(set(names)) >= 18
+    # the lookup is the library and the rigid link, which is picked where
+    # a material is but is not one (2026-09-26)
+    assert set(MATERIALS) == set(names) | {'rigid (massless)'}
     for entry in MATERIAL_LIBRARY:
         assert isinstance(entry, LibraryMaterial) and entry.note, entry
         m = entry.material
@@ -499,3 +502,32 @@ def test_a_shaped_section_journals_and_saves_by_its_dimensions(qt_app,
     back = visualdynamics.load(tmp_path / 'g.vdyn')
     assert _section_of(back) == _section_of(geometry)
     assert _section_of(back).shape == 'channel'
+
+
+
+def test_a_rigid_link_is_picked_like_a_material_and_journals_by_name(qt_app):
+    """The Material drop-down offers the rigid link; its modulus, density
+    and ratio read blank and refuse typing, and its journal line names
+    it — its infinite modulus is not a number a script can replay."""
+    from visualdynamics.core.fem import RIGID
+
+    geometry = _plate_geometry(properties=False)
+    model = block_table_model(geometry)
+    assert 'rigid (massless)' in model.columns[_column(model, 'Material')].choices
+    lines = []
+    model.edit_journaled.connect(lines.append)
+    _set(model, 'Material', 'rigid (massless)')
+    props = geometry.block_properties[int(geometry.block_id[0])]
+    assert props.material is RIGID and props.kind == 'rigid'
+    assert model.data(model.index(0, _column(model, 'E [Pa]'))) == ''
+    assert lines[-1].endswith('BlockProperties(RIGID)'), lines[-1]
+    said = []
+    model.edit_rejected.connect(said.append)
+    assert not model.setData(model.index(0, _column(model, 'E [Pa]')), '1e9',
+                             EDIT)
+    assert 'has no modulus, density or ratio' in said[-1]
+    namespace = {}
+    replay = ('from visualdynamics.core.fem import RIGID, BlockProperties\n'
+              'props = ' + lines[-1].split(' = ', 1)[1])
+    exec(replay, namespace)  # noqa: S102 — the table's own journal line
+    assert namespace['props'].material is RIGID

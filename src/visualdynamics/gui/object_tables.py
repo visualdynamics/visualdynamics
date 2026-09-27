@@ -1077,6 +1077,9 @@ def _property_value(geometry, row, holder, field, dimension=None,
     owner = getattr(props, holder) if holder else props
     if owner is None:
         return ''
+    if (holder == 'material' and field != 'name' and owner.is_rigid):
+        # a link has no modulus, density or ratio: blank, not 'inf'
+        return ''
     if holder == 'section' and field == 'shape':
         return owner.shape or CUSTOM
     if holder == 'section' and field == 'dimensions':
@@ -1115,6 +1118,11 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             raise ValueError(f'computed from the {props.section.shape}’s '
                              'dimensions — choose Custom in Shape to type '
                              'it')
+        if (holder == 'material' and field != 'name' and props is not None
+                and props.material.is_rigid):
+            raise ValueError('a rigid (massless) link has no '
+                             'modulus, density or ratio — pick a material '
+                             'to give it one')
         if holder == 'material' and field == 'name' and text in MATERIALS:
             # a library name fills the row; any other name is a name
             geometry.block_properties[block] = replace(
@@ -1208,6 +1216,10 @@ def _property_journal(geometry, row, _text):
     if props is None:
         return f'.block_properties.pop({block}, None)'
     m = props.material
+    if m.is_rigid:
+        # the rigid link by name: its modulus is infinite, and 'inf' is
+        # not a number a script can replay
+        return f'.block_properties[{block}] = BlockProperties(RIGID)'
     material = (f'Material({m.name!r}, {m.youngs_modulus!r}, {m.density!r}, '
                 f'{m.poissons_ratio!r}'
                 + (f', {m.modulus_of_rigidity!r}'

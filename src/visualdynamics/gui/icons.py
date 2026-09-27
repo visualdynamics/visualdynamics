@@ -1065,6 +1065,24 @@ def _draw_merge(painter, color):
     painter.drawPolygon([QPointF(50, 24), QPointF(60, 32), QPointF(50, 40)])
 
 
+def _draw_merge_nodes(painter, color):
+    """Two open nodes closing on one filled node: coincident nodes made
+    one — a geometry's own points joined, not objects combined (its own
+    glyph, 2026-09-26: it had worn Merge into One's, and a person who
+    knew that icon expected the wrong thing)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QPointF(14, 14), 9, 9)
+    painter.drawEllipse(QPointF(50, 14), 9, 9)
+    painter.drawLine(QPointF(20, 21), QPointF(26, 30))
+    painter.drawLine(QPointF(44, 21), QPointF(38, 30))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawPolygon([QPointF(20, 31), QPointF(32, 38), QPointF(30, 24)])
+    painter.drawPolygon([QPointF(44, 31), QPointF(32, 38), QPointF(34, 24)])
+    painter.drawEllipse(QPointF(32, 48), 11, 11)
+
+
 def _draw_sine(painter, color):
     """A sweep: a sine whose frequency rises across the icon."""
     painter.setPen(_pen(color, 5))
@@ -1483,7 +1501,8 @@ def control_icon(name: str) -> QIcon:
      'rigid': _draw_rigid,
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
-     'merge': _draw_merge, 'sine': _draw_sine,
+     'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
+     'sine': _draw_sine,
      'refresh': _draw_refresh,
      'copy': _draw_copy}.get(name, _draw_default)(painter, CONTROL_COLOR)
     painter.end()

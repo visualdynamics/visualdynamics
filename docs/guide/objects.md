@@ -67,7 +67,27 @@ its principal moments and its Dimensions cell says where to point the
 orientation (45° from the long leg for an equal angle). A channel's and
 an angle's shear center is off the centroid, and the twisting that
 causes is not modeled; a rolled channel's tapered flanges put its
-weak-axis Iz under the uniform-flange value given here. All of it is
+weak-axis Iz under the uniform-flange value given here. A block of
+two-node lines may instead be made **rigid (massless)**, the last entry
+of the Material list: each line is then a rigid link, its second node
+moving exactly as its first does (translated by the first's rotation
+about it), adding no mass — what a bolt joining two plates whose
+mid-surfaces do not meet is. Such a block needs no section, and its
+modulus, density and ratio read blank. In the app a link is a beam
+element: edit the geometry's Elements, switch on add mode (**+**), choose
+the beam and, in the **Block** drop-down beside it, *New block*; click
+the two nodes of each link — every link picked joins that new block —
+and give the block *rigid (massless)* in the Blocks table. The drop-down
+defaults to the first block while it holds the kind of element being
+added, and to a new block otherwise, so a beam never lands among
+plates. Plates themselves connect only
+where they share nodes: a structure built from planes
+([`mesh`](../api/visualdynamics.core.mesh.md) — `mesh.plane` meshes one
+rectangle at its mid-thickness into a block of its own, `mesh.assemble`
+joins them) is tied along the lines where its planes meet by merging the
+nodes there. *Merge Coincident Nodes* on a geometry's bar does the same
+to any geometry, the tolerance asked in the display unit;
+`project.merge_coincident_nodes` from a script. All of it is
 shown and typed in the
 current display unit system (psi and in⁴ in the inch system, MPa and mm⁴
 in millimeters), the unit in the column's header, and held in SI; the

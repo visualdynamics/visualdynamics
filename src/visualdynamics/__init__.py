@@ -48,6 +48,7 @@ from .core import (
     TimeHistory,
     TransientSpecification,
     fem,
+    mesh,
 )
 from .core.data import frequency_axis
 from .io import (
@@ -181,6 +182,7 @@ __all__ = [
     'importers',
     'launch_gui',
     'load',
+    'mesh',
     'mixed_report',
     'mixed_run',
     'random_vibration_report',

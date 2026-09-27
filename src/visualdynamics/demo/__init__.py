@@ -23,4 +23,4 @@ wanted the mesh.
 #: drone` resolves one on its own, and importing it eagerly would mean
 #: `python -m visualdynamics.demo.drone` loads the module twice — which Python
 #: warns about, having already put the first copy in sys.modules.
-__all__ = ['drone', 'plate']
+__all__ = ['barc', 'drone', 'plate']

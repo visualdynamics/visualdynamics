@@ -206,5 +206,48 @@ def build():
     return 0
 
 
+#: the BARC figure's element size, inches: the website draws the model
+#: a quarter inch coarse where the comparison is made at an eighth — its
+#: modes differ by about a percent, and the page by a factor of four
+BARC_WEB_SIZE = 0.25
+BARC_MODES = 8
+
+
+def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
+    """The BARC's finite element modes, animated: the model built from
+    planes (`visualdynamics.demo.barc`), its first elastic modes. Needs
+    nothing outside the repository."""
+    import visualdynamics
+    import visualdynamics.report as report_module
+    from visualdynamics.core.report import Report
+    from visualdynamics.demo import barc
+
+    model = barc.build(size)
+    shapes = model.eigensolution(maximum_frequency=1300.0)
+    elastic = [i for i, f in enumerate(shapes.frequency) if f > 1.0][:BARC_MODES]
+    shapes.delete_modes([i for i in range(shapes.num_shapes)
+                         if i not in elastic])
+    geometry, shapes = barc.upright(barc.geometry(size), shapes)
+    demo = visualdynamics.Project('Examples')
+    demo.add('BARC', geometry)
+    demo.add('Modes', shapes)
+    demo.link('BARC', 'Modes')
+    report = Report('', [{
+        'kind': 'scene', 'geometry': 'BARC', 'shapes': 'Modes',
+        'caption': 'Finite element modes of the BARC, built from planes — '
+                   'pick one from the list, and drag to turn it'}])
+    report.marking = ''
+    html = report_module.render_html(report, dict(demo.items()),
+                                     visualdynamics.SI, links=demo.links)
+    html = html.replace('</body>', EMBED.strip() + '\n')
+    size_kb = len(html.encode('utf-8')) // 1024
+    if write:
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / 'barc.html').write_text(html, encoding='utf-8')
+    print(f'  barc.html      {size_kb:5d} KB  ({model.num_nodes} nodes)')
+    return size_kb
+
+
 if __name__ == '__main__':
+    build_barc()
     sys.exit(build())

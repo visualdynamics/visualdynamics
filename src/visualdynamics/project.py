@@ -2074,6 +2074,58 @@ class Project(dict):
             name or f'{source} Rigid Body Modes',
             recipe=('generate_rigid_body_modes', {}))
 
+    def merge_coincident_nodes(self, source: Any,
+                               tolerance: float | None = None) -> dict:
+        """Make a geometry's coincident nodes one node (Merge Coincident
+        Nodes): elements and tracelines renamed to the lowest id at each
+        point, the rest removed. Plates connect only where they share
+        nodes, so this is what ties planes meshed apart at the lines where
+        they meet.
+
+        Refused while an object linked with the geometry names a node the
+        merge would remove — its data would point at a node that is gone;
+        merge first, then measure or solve.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        tolerance : float, optional
+            How close two nodes must be to be one, in meters (as the
+            geometry holds its coordinates). Defaults to a millionth of
+            the geometry's size.
+
+        Returns
+        -------
+        dict
+            'merged', the nodes removed, and 'into', the nodes they
+            became.
+        """
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        if tolerance is None:
+            low, high = geometry.extent
+            tolerance = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+        going = geometry.coincident_nodes(tolerance)
+        for other in self.group_of(name) or []:
+            obj = self.get(other)
+            dofs = [*(getattr(obj, 'response_dof', None) or []),
+                    *(getattr(obj, 'reference_dof', None) or []),
+                    *(getattr(obj, 'coordinate', None) or [])]
+            if other == name or not dofs:
+                continue
+            named = {int(''.join(ch for ch in str(dof) if ch.isdigit()) or -1)
+                     for dof in dofs}
+            clash = sorted(named & set(going))
+            if clash:
+                raise ValueError(
+                    f'{other} names node {clash[0]}, which the merge would '
+                    'remove — merge before measuring or solving, or unlink '
+                    'it first')
+        return geometry.merge_coincident_nodes(tolerance)
+
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
@@ -3045,7 +3097,8 @@ class Project(dict):
          'from visualdynamics.core.author import SpecificationDraft'),
         ('np.array(', 'import numpy as np'),
         ('BlockProperties(',
-         'from visualdynamics.core.fem import BlockProperties, Material, Section'),
+         ('from visualdynamics.core.fem import RIGID, BlockProperties, '
+          'Material, Section')),
     )
 
     def session_script(self) -> str:
@@ -3222,6 +3275,10 @@ _VERB_APPLIES: tuple = (
     # a geometry is a model once its blocks say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.block_properties))),
+    # coincident nodes matter to connectivity, so a geometry of elements;
+    # a sensor layout of bare nodes has none to tie
+    ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
+                                             and len(o.elem_conn) > 0)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
     ('project_onto_basis', _two_shape_sets),
@@ -3307,6 +3364,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
+    'merge_coincident_nodes',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale',

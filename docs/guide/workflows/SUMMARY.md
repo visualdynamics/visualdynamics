@@ -5,3 +5,4 @@
 - [The sine sweep workflow](sine-workflow.md)
 - [The random and sine workflow](mixed-workflow.md)
 - [The system identification workflow](sysid-workflow.md)
+- [The finite element workflow: the BARC](fem-workflow.md)

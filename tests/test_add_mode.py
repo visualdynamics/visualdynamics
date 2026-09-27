@@ -215,3 +215,75 @@ def test_the_geometry_is_still_valid_after_all_of_that(plate, window, pump):
     pump()
     plate.validate()
     assert np.isfinite(plate.node_xyz).all()
+
+
+# ---- which block new elements go into (2026-09-26) ------------------------
+
+def _block_box(window):
+    box = window.element_block_box
+    return [box.itemText(i) for i in range(box.count())], box.currentText()
+
+
+def test_the_block_drop_down_is_offered_only_while_adding_elements(plate, window,
+                                                                  pump):
+    edit(window, pump, 'Elements')
+    assert not window._element_block_handle.isVisible()
+    window.set_add_mode(True)
+    assert window._element_block_handle.isVisible()
+    items, _current = _block_box(window)
+    assert items == ['Block 1 — body', 'New block']
+    edit(window, pump, 'Nodes')
+    window.set_add_mode(True)
+    assert not window._element_block_handle.isVisible()
+
+
+def test_the_default_block_is_the_first_while_it_holds_the_same_kind(plate,
+                                                                     window,
+                                                                     pump):
+    """A quad added to a model of quads joins them — a file's four-node
+    shells are the same kind as the quad add mode makes; a beam added to
+    it starts a block of its own, where a plate block would refuse it."""
+    edit(window, pump, 'Elements')
+    window.set_add_mode(True)
+    window.element_type_actions['quad'].trigger()
+    assert _block_box(window)[1] == 'Block 1 — body'
+    window.element_type_actions['beam'].trigger()
+    assert _block_box(window)[1] == 'New block'
+
+
+def test_links_picked_one_after_another_share_the_new_block(plate, window,
+                                                            pump):
+    """The first beam makes the block and the drop-down then shows it, so
+    every link picked after joins it — one block to make rigid."""
+    edit(window, pump, 'Elements')
+    window.set_add_mode(True)
+    window.element_type_actions['beam'].trigger()
+    screen = screen_of(window)
+    blocks_before = list(plate.block_id)
+    for a, b in ((0, 8), (2, 10)):
+        window.hover_at(*screen[a])
+        window._add_at(*screen[a])
+        window.hover_at(*screen[b])
+        window._add_at(*screen[b], extend=True)
+    pump()
+    new = [int(b) for b in plate.block_id if int(b) not in blocks_before]
+    assert len(new) == 1, 'one new block for both links'
+    assert [int(b) for b in plate.elem_block[-2:]] == new * 2
+    assert _block_box(window)[1] == f'Block {new[0]}'
+    journal = window.project.journal
+    assert any(line.endswith(".add_block()") for line in journal)
+    assert journal[-1].endswith(f'elem_type=21, block={new[0]})'), journal[-1]
+
+
+def test_a_block_picked_in_the_drop_down_is_honored(plate, window, pump):
+    edit(window, pump, 'Elements')
+    window.set_add_mode(True)
+    window.element_type_actions['beam'].trigger()
+    box = window.element_block_box
+    box.setCurrentIndex(box.findData(1))
+    screen = screen_of(window)
+    window.hover_at(*screen[0])
+    window._add_at(*screen[0])
+    window.hover_at(*screen[1])
+    window._add_at(*screen[1], extend=True)
+    assert int(plate.elem_block[-1]) == 1, 'where it was told, if not wisely'

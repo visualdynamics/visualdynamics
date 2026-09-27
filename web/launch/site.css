@@ -89,12 +89,20 @@ h3 { font-size: 1.05rem; margin: 2em 0 .4em; }
 @media (max-width: 52rem) {
   .downloads { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-/* two example sets, side by side and wide: the row-of-four tile shape
-   would squeeze "six projects · modal, random, ..." into a column */
-.downloads.examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.downloads.examples .dl { flex-direction: row; text-align: left;
-                          gap: .9rem; padding: 1.1rem 1.2rem; }
+/* three example sets in one row, picture above the words, rather than
+   two and one wrapped (2026-09-26, the BARC made three; the same call
+   as the packages' row of four). Below the four-across width they
+   stack one to a row, picture beside the words, which is what gives
+   "six projects · modal, random, ..." room. */
+.downloads.examples { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.downloads.examples .dl { flex-direction: column; text-align: center;
+                          gap: .6rem; padding: 1.1rem .9rem; }
 .downloads.examples .dl .app { width: 72px; height: 72px; }
+@media (max-width: 52rem) {
+  .downloads.examples { grid-template-columns: 1fr; }
+  .downloads.examples .dl { flex-direction: row; text-align: left;
+                            gap: .9rem; padding: 1.1rem 1.2rem; }
+}
 @media (max-width: 30rem) {
   .downloads { grid-template-columns: 1fr; }
 }

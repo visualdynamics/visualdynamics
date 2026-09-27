@@ -72,7 +72,9 @@ something that cannot be bought back.
    says anything says GPL-3.0-or-later; nothing else. And the project
    is **unaffiliated**: never name an employer, client, laboratory or
    institution anywhere in it — code, tests, docs, commit messages.
-   A test walks every tracked file for such names.
+   A test walks every tracked file for such names. The one exception
+   is credit: where third-party work is used, its source is cited in a
+   fixed phrase the test knows, and nowhere else.
 
 5. **Never commit generated data or large binaries.** Fixtures under
    `testdata/` are small and deliberate. Never `git add -A` without

@@ -56,10 +56,25 @@ def _barc(out_dir: str) -> None:
     barc.project(solved=True).save(os.path.join(out_dir, 'barc.vdyn'))
 
 
+def _barc_credit() -> str:
+    """Whose the reference is, cited — from the demo, where the credit
+    lives once (the project carries it too, as its About the Reference
+    report)."""
+    import textwrap
+
+    sys.path.insert(0, os.path.join(ROOT, 'src'))
+    from visualdynamics.demo import barc
+
+    return (textwrap.fill('Reference Geometry and Reference Modes are not '
+                          "Visual Dynamics' work. " + barc.CITATION, 72)
+            + '\n\nThe model is visualdynamics.demo.barc, rebuilt with\n'
+              'barc.project(solved=True).')
+
+
 #: asset name -> (where the projects come from: a folder under
 #: stressdata/, or a function writing them into a folder; the projects
 #: it takes; one sentence for the zip's own README; where the data came
-#: from, for the README)
+#: from, for the README — text, or a function returning it)
 SETS = {
     'VisualDynamics-examples-plate.zip': (
         'plate_projects',
@@ -81,10 +96,7 @@ SETS = {
          'and matched against the reference modes shared for the same '
          'structure — the documentation\'s finite element workflow, '
          'already carried out.'),
-        ('The reference modes and their points come from the data shared\n'
-         'on the SEM Dynamic Substructuring Focus Group wiki,\n'
-         'https://wiki.sem.org/wiki/BARC. The model is\n'
-         'visualdynamics.demo.barc, rebuilt with barc.project(solved=True).')),
+        _barc_credit),
 }
 
 README = """Visual Dynamics example projects — {title}
@@ -115,6 +127,7 @@ def cut(out_dir: str, names: list[str] | None = None) -> list[str]:
     written = []
     for name in names or list(SETS):
         source, projects, sentence, about = SETS[name]
+        about = about() if callable(about) else about
         with tempfile.TemporaryDirectory() as built:
             if callable(source):
                 source(built)

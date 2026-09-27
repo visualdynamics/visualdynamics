@@ -260,3 +260,34 @@ def test_the_downloadable_project_opens_on_the_answer(tmp_path):
                                                'BARC Modes')
     assert [tuple(p) for p in matched.pairs] == [(i, i) for i in range(6, 16)]
     assert min(matched.macs) > 0.8
+
+
+def test_the_reference_is_credited_wherever_it_travels():
+    """The reference modes are another group's finite element model
+    (Brandon, 2026-09-26: credit them, and link the wiki). The credit
+    rides with them — the project's own About the Reference report, the
+    shape set, the download's README — and stands on the pages that show
+    them: the workflow guide, the examples page, the downloads page."""
+    import importlib.util
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    authors = 'R. Schultz, T. Schoenherr and B. Owens'
+    assert barc.CITATION.startswith(authors) and barc.WIKI in barc.CITATION
+    project = barc.project()
+    about = project['About the Reference'].blocks[0]['text']
+    assert barc.CITATION in about
+    assert set(project['Reference Modes'].comment) == {barc.CITATION}, \
+        'every mode carries it'
+    spec = importlib.util.spec_from_file_location(
+        'cut_examples', root / 'tools' / 'cut_examples.py')
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    readme = ' '.join(tool._barc_credit().split())
+    assert barc.CITATION in readme
+    for page in ('docs/guide/workflows/fem-workflow.md',
+                 'web/launch/examples.html', 'web/launch/downloads.html',
+                 'testdata/barc/README.md'):
+        text = (root / page).read_text(encoding='utf-8')
+        assert barc.SOURCE in text, f'{page} does not credit the source'
+        assert 'Schoenherr' in text and 'IMAC 2021' in text, page

@@ -55,9 +55,12 @@ and journaled, and anything computed under the old roles wears the
 refresh badge.
 
 Clicking the **project row** shows nothing on the right — the panes
-clear, and the bar carries the project's one act, *Generate Report*.
+clear, and the bar carries the project's two acts: *Generate Report*,
+and **+** *New Geometry*, an empty geometry in the display length unit
+to build a model in with *Add Plane*
+([the finite element workflow](workflows/fem-workflow.md)).
 
-![The project row selected: the panes clear and Generate Report is on the bar](images/tree-project.png)
+![The project row selected: the panes clear, and Generate Report and New Geometry are on the bar](images/tree-project.png)
 
 ## One object at a time
 

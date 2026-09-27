@@ -88,8 +88,8 @@
     <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring
     Focus Group wiki</a>. Here it is built the way a simple plate model
     is built in Visual Dynamics: each part as the planes it is made of,
-    each given its material and thickness, the bolts as rigid links over
-    each washer's area, and Solve Modes.
+    each given its material and thickness, each bolt a rigid tie from
+    the elements its washer covers to the part below, and Solve Modes.
   </p>
   <div class="figure">
     <iframe src="examples/barc.html" loading="lazy" scrolling="no"
@@ -112,14 +112,14 @@
       <tr><th>Published (Hz)</th><th>Visual Dynamics (Hz)</th><th>Difference</th><th>MAC</th></tr>
     </thead>
     <tbody>
-      <tr><td>185.7</td><td>193.0</td><td>+4.0%</td><td>0.996</td></tr>
-      <tr><td>206.2</td><td>210.6</td><td>+2.1%</td><td>0.994</td></tr>
-      <tr><td>264.8</td><td>257.0</td><td>&minus;2.9%</td><td>0.990</td></tr>
-      <tr><td>439.2</td><td>455.7</td><td>+3.8%</td><td>0.990</td></tr>
-      <tr><td>466.7</td><td>486.7</td><td>+4.3%</td><td>0.978</td></tr>
-      <tr><td>555.0</td><td>569.6</td><td>+2.6%</td><td>0.972</td></tr>
-      <tr><td>570.2</td><td>590.0</td><td>+3.5%</td><td>0.917</td></tr>
-      <tr><td>660.9</td><td>674.3</td><td>+2.0%</td><td>0.916</td></tr>
+      <tr><td>185.7</td><td>194.5</td><td>+4.8%</td><td>0.995</td></tr>
+      <tr><td>206.2</td><td>212.5</td><td>+3.0%</td><td>0.995</td></tr>
+      <tr><td>264.8</td><td>265.3</td><td>+0.2%</td><td>0.989</td></tr>
+      <tr><td>439.2</td><td>461.8</td><td>+5.1%</td><td>0.964</td></tr>
+      <tr><td>466.7</td><td>494.9</td><td>+6.1%</td><td>0.945</td></tr>
+      <tr><td>555.0</td><td>581.0</td><td>+4.7%</td><td>0.985</td></tr>
+      <tr><td>570.2</td><td>593.5</td><td>+4.1%</td><td>0.969</td></tr>
+      <tr><td>660.9</td><td>681.4</td><td>+3.1%</td><td>0.946</td></tr>
     </tbody>
   </table>
   </div>

@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -688,6 +689,9 @@ class MainWindow(QMainWindow):
         self._hovered = None
         self._hover_mesh = None
         self._picked_mesh = None
+        self.plane_dialog: QDialog | None = None   # Add Plane's, while open
+        # Tie's first patch, while the second is being picked
+        self._tie_patch: list[int] | None = None
         self._framed = ()          # what the camera was last framed for
         self._rotating = None      # the ring gesture in progress
         self._rotate_observers = []
@@ -1656,6 +1660,17 @@ class MainWindow(QMainWindow):
         self.add_action.toggled.connect(self.set_add_mode)
         self._add_action_handle = toolbar.addAction(self.add_action)
         self.add_action.setVisible(False)
+
+        # a bolted joint in one step (Brandon, 2026-09-26): the elements
+        # under a washer, picked, tied to the part below. Checked while it
+        # waits for a second patch to tie the first to
+        self.tie_action: QAction = QAction(control_icon('tie'), '', self)
+        self.tie_action.setCheckable(True)
+        self.tie_action.setToolTip(
+            'Tie the selected elements rigidly to the part under them')
+        self.tie_action.triggered.connect(self.tie_selected)
+        toolbar.addAction(self.tie_action)
+        self.tie_action.setVisible(False)
 
         # what a click builds while adding elements; only on screen when
         # adding elements, since nothing else is built from a node count
@@ -2888,6 +2903,7 @@ class MainWindow(QMainWindow):
         ('solve_modes', 'Solve Modes', 'quad', 'solve_modes_act'),
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
+        ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
     )
 
     def acts_for(self, names=None):
@@ -2904,7 +2920,14 @@ class MainWindow(QMainWindow):
                 return [('generate_report', 'Generate Report', 'report',
                          self.generate_report_act,
                          ('Generate the report this project\'s type '
-                          'calls for'))]
+                          'calls for')),
+                        # somewhere to build a model: without it a
+                        # geometry could only be imported (Brandon,
+                        # 2026-09-26, a "+" on the project)
+                        ('new_geometry', 'New Geometry', 'add',
+                         self.new_geometry_act,
+                         ('An empty geometry, in the display units, to '
+                          'add planes to'))]
             names = list(dict.fromkeys(
                 name for kind, name, _obj, _detail
                 in self.selected_references()
@@ -4498,6 +4521,94 @@ class MainWindow(QMainWindow):
         if self.edit_toggle_action.isChecked() != editing:
             self.edit_toggle_action.setChecked(editing)
         self._update_rotate_actions()
+        self._update_tie_action()
+
+    def _update_tie_action(self):
+        """Tie shows while elements are being edited and some are
+        selected — or while it waits for the second patch — and never in
+        add mode, where a click builds rather than selects."""
+        if not hasattr(self, 'tie_action'):
+            return
+        elements = (self.editing is not None
+                    and self.editing[1] == 'elements' and not self.add_mode)
+        if not elements:
+            self._tie_patch = None
+        selected = elements and bool(
+            self.table.selectionModel()
+            and self.table.selectionModel().selectedRows())
+        self.tie_action.setVisible(
+            elements and (selected or self._tie_patch is not None))
+        self.tie_action.setChecked(self._tie_patch is not None)
+
+    def tie_selected(self) -> None:
+        """Tie the selected elements: to the nearest nodes of a block,
+        chosen from a menu, or to a second selection — picked next, and
+        tied on the second press."""
+        self.tie_action.setChecked(self._tie_patch is not None)
+        if self.editing is None or self.editing[1] != 'elements':
+            return
+        name = self.editing[0]
+        geometry = self.objects.get(name)
+        rows = sorted({index.row() for index
+                       in self.table.selectionModel().selectedRows()})
+        picked = [_entity_key(geometry, 'elements', row) for row in rows]
+        if self._tie_patch is not None:
+            if not picked:
+                self._show_status('Select the elements to tie the first '
+                                  'patch to, then press Tie again')
+                return
+            patch, self._tie_patch = self._tie_patch, None
+            self._tie(name, patch, list(picked), 'the second selection')
+            return
+        if not picked:
+            self._show_status('Select the elements to tie')
+            return
+        menu = QMenu(self)
+        heading = menu.addAction('Tie to the nearest nodes of')
+        heading.setEnabled(False)
+        names = list(geometry.block_name)
+        for k, block in enumerate(geometry.block_id):
+            properties = geometry.block_properties.get(int(block))
+            if (properties is not None and properties.material.is_rigid) \
+                    or not geometry.elements_in(int(block)):
+                continue
+            label = names[k] or f'Block {int(block)}'
+            target = names[k] if names[k] and names.count(names[k]) == 1 \
+                else int(block)
+            menu.addAction(label).triggered.connect(
+                lambda _checked=False, to=target, text=label:
+                self._tie(name, list(picked), to, text))
+        menu.addSeparator()
+        menu.addAction('A second selection…').triggered.connect(
+            lambda _checked=False: self._await_second_patch(list(picked)))
+        self._pop_menu(menu)
+
+    def _await_second_patch(self, patch):
+        self._tie_patch = patch
+        self.table.clearSelection()
+        self._update_tie_action()
+        self._show_status(f'{len(patch)} elements held — select the elements '
+                          'to tie them to, then press Tie again')
+
+    def _tie(self, name, patch, to, label):
+        """The project's `tie_elements`, and what it did, said."""
+        geometry = self.objects.get(name)
+        try:
+            found = self.project.tie_elements(name, patch, to)
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            self._update_tie_action()
+            return
+        block = geometry.block_name[
+            list(geometry.block_id).index(found['block'])] or \
+            f'Block {found["block"]}'
+        shared = (f'; {found["shared"]} nodes it shares already'
+                  if found['shared'] else '')
+        self._after_geometry_change(
+            name, geometry,
+            f'{name}: tied {len(patch)} elements to {label} — '
+            f'{found["links"]} rigid links in {block}{shared}')
+        self._update_tie_action()
 
     # ---- turning a coordinate system ---------------------------------------
 
@@ -4753,6 +4864,7 @@ class MainWindow(QMainWindow):
         for action in self.element_type_actions.values():
             action.setVisible(adding)
         self._element_block_handle.setVisible(adding)
+        self._update_tie_action()
         if adding:
             self._fill_element_blocks()
 
@@ -10379,6 +10491,106 @@ class MainWindow(QMainWindow):
             f'{"s" * (found["merged"] != 1)} into {found["into"]} — '
             f'{obj.num_nodes} nodes remain' if found['merged'] else
             f'{name}: no two nodes are within {typed:g} {unit} of each other')
+
+    def new_geometry_act(self) -> None:
+        """An empty geometry in the project, in the display length unit,
+        selected so its bar offers Add Plane."""
+        unit = self.unit_system.unit('length')
+        name = self.project.new_geometry('Geometry', unit=unit)
+        self.show_object(name)
+        self._show_status(f'{name}: an empty geometry, lengths in {unit} — '
+                          'Add Plane on its bar puts plates in it')
+
+    def add_plane_act(self) -> None:
+        """Planes typed into the selected geometry (`AddPlaneDialog`): the
+        reading and the preview asked of the core as the numbers change,
+        each Add the project's `add_plane`."""
+        from ..core import mesh
+        from .plane_dialog import AddPlaneDialog
+
+        obj = self.current_object()
+        if not isinstance(obj, Geometry):
+            self._show_status('Select a geometry to add a plane to')
+            return
+        name = self.object_item().text(0)
+        # an empty geometry takes the display unit; one whose units are
+        # undefined takes the numbers as given, as its nodes are
+        defined = obj.units_defined or not obj.num_nodes
+        unit = self.unit_system.unit('length') if defined else None
+        label = self.unit_system.label_text('length') if defined else 'units'
+
+        def plane(values):
+            return mesh.plane(values['corner'], values['edge_a'],
+                              values['edge_b'], values['size'],
+                              values['block'], unit=unit)
+
+        def reading(values):
+            try:
+                part = plane(values)
+            except ValueError as refusal:
+                self._draw_plane_preview(None)
+                text = str(refusal)
+                return f'{text[:1].upper()}{text[1:]}.', False
+            self._draw_plane_preview(part)
+            on, _rows = mesh.landing(obj, part)
+            first = part.node_xyz[part.node_index(part.elem_conn[0])]
+            if defined:
+                first = self.unit_system.from_si(first, 'length')
+            across = [float(np.linalg.norm(first[1] - first[0])),
+                      float(np.linalg.norm(first[2] - first[1]))]
+            block = values['block']
+            where = (f'block {block!r}' if block in obj.block_name else
+                     f'a new block {block!r}' if block else
+                     'an unnamed block of its own')
+            shared = int(on.sum())
+            text = (f'{len(part.elem_conn)} plates of {across[0]:.4g} by '
+                    f'{across[1]:.4g} {label}, into {where}: '
+                    f'{part.num_nodes - shared} nodes to add, {shared} on '
+                    'nodes already there.')
+            return text, True
+
+        def add(values):
+            found = self.project.add_plane(
+                name, values['corner'], values['edge_a'], values['edge_b'],
+                values['size'], values['block'], unit=unit or 'm')
+            self._refresh_item(self._item_for_object(name), obj)
+            self.render_current()
+            self._show_status(
+                f'{name}: added {found["elements"]} plates — '
+                f'{found["added"]} nodes, {found["shared"]} shared with '
+                f'the geometry; {obj.num_nodes} nodes in all')
+
+        if self.plane_dialog is not None:
+            self.plane_dialog.close()
+        self.plane_dialog = AddPlaneDialog(
+            self, name, label, list(obj.block_name), reading, add)
+        self.plane_dialog.finished.connect(
+            lambda _result: self._draw_plane_preview(None))
+        self.plane_dialog.show()
+
+    def _draw_plane_preview(self, part) -> None:
+        """The plane Add Plane would add, drawn over the scene in the
+        highlight color — or taken away. Drawn from `display_points`, the
+        one rule for where a node sits in the view."""
+        import pyvista as pv
+
+        from ..viz.geometry import display_points
+
+        plotter = self.scene.plotter
+        plotter.remove_actor('plane-preview', render=False)
+        if part is not None:
+            points, _ = display_points(part, self.unit_system)
+            faces = np.concatenate([[len(element), *part.node_index(element)]
+                                    for element in part.elem_conn])
+            plotter.add_mesh(
+                pv.PolyData(np.asarray(points, dtype=float), faces),
+                name='plane-preview', style='wireframe', line_width=2.0,
+                color=resolve_theme(self.theme_name)['scene_highlight'],
+                pickable=False, reset_camera=False, render=False)
+            current = self.current_object()
+            if isinstance(current, Geometry) and not current.num_nodes:
+                plotter.reset_camera(render=False)   # nothing else to frame
+        plotter.render()
 
     def solve_modes_act(self) -> None:
         """The normal modes of the selected geometry, built from its

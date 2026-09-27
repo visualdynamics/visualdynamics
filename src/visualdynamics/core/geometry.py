@@ -750,6 +750,38 @@ class Geometry:
             self.node_disp_cs, default_cs if disp_cs is None else int(disp_cs))
         return node_id
 
+    def add_nodes(self, xyz: ArrayLike) -> np.ndarray:
+        """Append nodes at `xyz` (SI), numbered after the highest id —
+        `add_node` for many at once, one copy of each array rather than
+        one per node, which is what keeps a meshed plane of thousands of
+        nodes from costing seconds.
+
+        Parameters
+        ----------
+        xyz : array_like
+            (n, 3) coordinates.
+
+        Returns
+        -------
+        ndarray
+            The new nodes' identifiers, in order.
+        """
+        xyz = np.asarray(xyz, dtype=np.float64).reshape(-1, 3)
+        first = self._next_id(self.node_id)
+        ids = np.arange(first, first + len(xyz), dtype=np.int64)
+        default_cs = int(self.cs_id[0]) if len(self.cs_id) else 1
+        self.node_id = np.concatenate([self.node_id, ids])
+        self.node_xyz = np.vstack([self.node_xyz, xyz])
+        self.node_color = np.concatenate(
+            [self.node_color, np.ones(len(xyz), dtype=self.node_color.dtype)])
+        self.node_def_cs = np.concatenate(
+            [self.node_def_cs, np.full(len(xyz), default_cs,
+                                       dtype=self.node_def_cs.dtype)])
+        self.node_disp_cs = np.concatenate(
+            [self.node_disp_cs, np.full(len(xyz), default_cs,
+                                        dtype=self.node_disp_cs.dtype)])
+        return ids
+
     def add_coordinate_system(self, origin: ArrayLike = (0.0, 0.0, 0.0),
                               rotation: ArrayLike | None = None,
                               cs_id: int | None = None, name: str = '',
@@ -929,6 +961,50 @@ class Geometry:
         self.elem_block = np.append(self.elem_block, block)
         self.elem_conn.append(nodes)
         return len(self.elem_conn) - 1
+
+    def add_elements(self, connectivity: Sequence[Ids],
+                     elem_types: Ids, blocks: Ids) -> None:
+        """Append elements — `add_element` for many at once, the nodes
+        checked once for all of them.
+
+        Parameters
+        ----------
+        connectivity : sequence of sequence of int
+            Each element's nodes, in order.
+        elem_types : sequence of int
+            Each element's type code.
+        blocks : sequence of int
+            The block each belongs to; a block not declared yet is.
+
+        Returns
+        -------
+        None
+        """
+        conn = [np.asarray([int(n) for n in element], dtype=np.int64)
+                for element in connectivity]
+        if not conn:
+            return
+        used = set(np.concatenate(conn).tolist())
+        unknown = used - set(self.node_id.tolist())
+        if unknown:
+            raise ValueError(f'unknown nodes {sorted(unknown)[:10]}')
+        types = [int(t) for t in elem_types]
+        wrong = sorted(set(types) - set(ELEMENT_TYPES))
+        if wrong:
+            raise ValueError(f'unknown element type {wrong[0]}')
+        blocks = [int(b) for b in blocks]
+        for block in dict.fromkeys(blocks):
+            if block not in self.block_id.tolist():
+                self.block_id = np.append(self.block_id, block)
+                self.block_name.append('')
+        first = self._next_id(self.elem_id)
+        self.elem_id = np.concatenate(
+            [self.elem_id, np.arange(first, first + len(conn))]).astype(np.int64)
+        self.elem_type = np.concatenate([self.elem_type, types]).astype(np.int64)
+        self.elem_color = np.concatenate(
+            [self.elem_color, np.ones(len(conn))]).astype(np.int64)
+        self.elem_block = np.concatenate([self.elem_block, blocks]).astype(np.int64)
+        self.elem_conn.extend(conn)
 
     # ---- deletion -----------------------------------------------------------
 

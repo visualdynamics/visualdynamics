@@ -40,8 +40,8 @@
     The first three follow one job: a modal survey of a rectangular
     plate — the record as it was measured, the plant computed from it,
     and the finite element model it was run against. The last is a
-    finite element model built from scratch and checked against a
-    published one.
+    finite element model built from scratch, from the planes a shared
+    test article is made of.
   </p>
 
   <h2>The measured record</h2>
@@ -83,8 +83,8 @@
   <p>
     The BARC — Box Assembly with Removable Component — is a small bolted
     aluminum structure the structural dynamics community shares as a
-    common test article, its solid model, test data and a finite element
-    model's modes published on the
+    common test article, its solid model, test data and finite element
+    models shared on the
     <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring
     Focus Group wiki</a>. Here it is built the way a simple plate model
     is built in Visual Dynamics: each part as the planes it is made of,
@@ -98,44 +98,12 @@
   <p class="caption">
     The first eight elastic modes of the model, drawn from a quarter-inch
     mesh of 1,445 nodes. Choose one from the list and it animates; drag
-    to turn it.
-  </p>
-  <p>
-    Against the published model's modes, matched by shape (MAC) at its
-    59 points, from the eighth-inch model the comparison is made with:
-  </p>
-  <!-- the rows are visualdynamics.demo.barc.compare() — pinned by
-       tests/test_demo_barc.py, which fails if the page and the model part -->
-  <div class="scrolls">
-  <table class="formats" id="barc-comparison">
-    <thead>
-      <tr><th>Published (Hz)</th><th>Visual Dynamics (Hz)</th><th>Difference</th><th>MAC</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>185.7</td><td>194.5</td><td>+4.8%</td><td>0.995</td></tr>
-      <tr><td>206.2</td><td>212.5</td><td>+3.0%</td><td>0.995</td></tr>
-      <tr><td>264.8</td><td>265.3</td><td>+0.2%</td><td>0.989</td></tr>
-      <tr><td>439.2</td><td>461.8</td><td>+5.1%</td><td>0.964</td></tr>
-      <tr><td>466.7</td><td>494.9</td><td>+6.1%</td><td>0.945</td></tr>
-      <tr><td>555.0</td><td>581.0</td><td>+4.7%</td><td>0.985</td></tr>
-      <tr><td>570.2</td><td>593.5</td><td>+4.1%</td><td>0.969</td></tr>
-      <tr><td>660.9</td><td>681.4</td><td>+3.1%</td><td>0.946</td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p class="caption">
-    The first eight modes pair one-to-one and in order, within a few
-    percent — the model consistently a little stiff, and left that way
-    rather than tuned: a check tuned to agree says nothing. The
-    published modes are R. Schultz, T. Schoenherr and B. Owens&rsquo;
-    finite element model of the BARC (&ldquo;A Proposed Standard Random
-    Vibration Environment for BARC and the Boundary Condition
-    Challenge,&rdquo; IMAC 2021), in the data
-    shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki.
+    to turn it. The model was checked against the finite element models
+    shared on the <a href="https://wiki.sem.org/wiki/BARC">wiki</a>.
     <a href="documentation/guide/workflows/fem-workflow/">The whole
-    workflow</a>, from the planes to this table, and
-    <a href="downloads.html#examples">the project itself</a>, solved
-    and matched, to open in the app.
+    workflow</a>, from the planes to these modes, and
+    <a href="downloads.html#examples">the project itself</a>, solved, to
+    open in the app.
   </p>
   <h2>About these figures</h2>
   <p>

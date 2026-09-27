@@ -93,4 +93,26 @@ def test_a_banded_coherence_draws_flat_across_its_bands(qt_app):
     banded = cpsd().to_octave(3).coherence()
     assert drawing_shape(banded) == 'steps'
     assert drawing_shape(cpsd().coherence()) == 'line'
-    assert drawing_shape(banded, tagged=True) == 'line'
+
+
+def test_a_banded_cross_terms_phase_draws_flat_too(qt_app):
+    """The phase of a banded cross term is its band's phase, and draws
+    flat across the band as its magnitude does (Brandon, 2026-09-27,
+    found by the band-average paper); a narrowband phase stays a line."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import build_plots, drawing_shape
+
+    values = cpsd(pq=1.0 + 1.0j)
+    banded = values.to_octave(3)
+    assert drawing_shape(banded, tagged=True) == 'steps'
+    assert drawing_shape(values, tagged=True) == 'line'
+    layout = pg.GraphicsLayoutWidget()
+    build_plots(layout, [('C', banded, [1])], component='phase')
+    plot = next(item for item in layout.ci.items
+                if hasattr(item, 'listDataItems'))
+    [curve] = [item for item in plot.listDataItems()
+               if not getattr(item, 'is_zone_edge', False)]
+    x, _y = curve.getData()
+    assert curve.opts.get('stepMode') in ('center', True), 'flat steps'
+    assert len(x) == banded.abscissa.size + 1, 'on the band edges'

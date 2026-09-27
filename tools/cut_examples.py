@@ -20,8 +20,8 @@ touching an application tag. `modal_hard` stays out: 5 GB exists to
 stress the fitter, not to be downloaded.
 
 The BARC (2026-09-26) is the exception to all of that: no runs, just a
-model and the reference it is checked against, so its one project is
-built, solved and matched from `visualdynamics.demo.barc` as the zip is
+model, so its one project is
+built and solved from `visualdynamics.demo.barc` as the zip is
 cut, needs nothing from `stressdata/`, and is under 10 MB. Name one
 zip to cut (and upload) only that one, leaving the others on the
 release as they are.
@@ -48,27 +48,12 @@ not photographs."""
 
 
 def _barc(out_dir: str) -> None:
-    """The BARC has no runs to cut: its project is built, solved and
-    matched from the demonstration module, in seconds, on any machine."""
+    """The BARC has no runs to cut: its project is built and solved
+    from the demonstration module, in seconds, on any machine."""
     sys.path.insert(0, os.path.join(ROOT, 'src'))
     from visualdynamics.demo import barc
 
     barc.project(solved=True).save(os.path.join(out_dir, 'barc.vdyn'))
-
-
-def _barc_credit() -> str:
-    """Whose the reference is, cited — from the demo, where the credit
-    lives once (the project carries it too, as its About the Reference
-    report)."""
-    import textwrap
-
-    sys.path.insert(0, os.path.join(ROOT, 'src'))
-    from visualdynamics.demo import barc
-
-    return (textwrap.fill('Reference Geometry and Reference Modes are not '
-                          "Visual Dynamics' work. " + barc.CITATION, 72)
-            + '\n\nThe model is visualdynamics.demo.barc, rebuilt with\n'
-              'barc.project(solved=True).')
 
 
 #: asset name -> (where the projects come from: a folder under
@@ -92,11 +77,14 @@ SETS = {
     'VisualDynamics-examples-barc.zip': (
         _barc,
         ('barc',),
-        ('The BARC: a finite element model built from planes, solved, '
-         'and matched against the reference modes shared for the same '
-         'structure — the documentation\'s finite element workflow, '
-         'already carried out.'),
-        _barc_credit),
+        ('The BARC: a finite element model built from planes and solved '
+         "— the documentation's finite element workflow, already carried "
+         'out.'),
+        ('The model is visualdynamics.demo.barc, rebuilt with\n'
+         'barc.project(solved=True). It was checked against the finite\n'
+         'element models shared on the SEM Dynamic Substructuring Focus\n'
+         'Group wiki, https://wiki.sem.org/wiki/BARC, where the BARC\'s\n'
+         'solid model, test data and models are.')),
 }
 
 README = """Visual Dynamics example projects — {title}
@@ -172,9 +160,8 @@ def upload(paths: list[str]) -> None:
              '--notes', ('Example projects for Visual Dynamics, linked from '
                          'https://visualdynamics.org/downloads — synthetic '
                          'runs on the plate and the quadcopter, one project '
-                         'per workflow, and the BARC finite element model '
-                         'matched against its shared reference. Re-cut '
-                         'whenever the project format moves.')],
+                         'per workflow, and the BARC finite element model. '
+                         'Re-cut whenever the project format moves.')],
             check=True)
     subprocess.run(['gh', 'release', 'upload', TAG, '--repo', REPO,
                     '--clobber', *paths], check=True)

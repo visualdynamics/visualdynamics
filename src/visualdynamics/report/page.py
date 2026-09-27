@@ -101,6 +101,10 @@ canvas { width: 100%; border: 1px solid var(--line); border-radius: 6px;
 .legend span::before { content: "—"; font-weight: 700; margin-right: .3rem;
                        color: var(--swatch); }
 .legend span.dashed::before { content: "╌"; }
+/* a zone's key is a swatch of its own fill, as the app's legend is */
+.legend span.zone::before { content: ""; display: inline-block;
+  width: .8em; height: .8em; margin-right: .35rem; vertical-align: -.08em;
+  background: var(--swatch); border: 1px solid var(--line); }
 .controls { display: flex; gap: .6rem; align-items: center;
             margin-top: .3rem; font-size: .85rem; }
 .controls button, .controls select {
@@ -180,6 +184,14 @@ const DATA = JSON.parse(document.getElementById('data').textContent);
 if (DATA.fill) document.documentElement.classList.add('fill');
 const COLORS = ['#4c92d9','#ff8c2b','#3fb950','#e5534b','#a371f7',
                 '#b07d62','#e668c3','#8b949e','#d2c14e','#39c5cf'];
+/* a specification's shading and the marks past abort, in one place so
+   the legend's swatch is the plot's own fill (`plot.zone_colors` is the
+   app's): the key names are `plot.zone_key`'s, sent with each channel */
+const ZONE_FILL = {warning: 'rgba(210, 193, 78, 0.16)',
+                   above: 'rgba(229, 83, 75, 0.16)',
+                   below: 'rgba(76, 146, 217, 0.16)',
+                   exceed_over: 'rgba(229, 83, 75, 0.60)',
+                   exceed_under: 'rgba(76, 146, 217, 0.60)'};
 const root = document.getElementById('report');
 const h1 = document.createElement('h1');
 h1.textContent = DATA.title; root.appendChild(h1);
@@ -564,16 +576,24 @@ function plotBlock(block, into) {
     block.curves.slice(0, 12).forEach((curve, i) => {
       const item = document.createElement('span');
       const which = curve.color === undefined ? i : curve.color;
-      item.style.setProperty('--swatch', COLORS[which % COLORS.length]);
+      item.style.setProperty('--swatch', curve.gray ? '#9a9aa2'
+        : curve.ink ? 'currentColor' : COLORS[which % COLORS.length]);
       if (curve.dash) item.className = 'dashed'; // the swatch says so too
       item.textContent = curve.label; legend.appendChild(item); });
+    /* and what the shading means, for the channel on show */
+    const ch = block.channels ? block.channels[picked] : null;
+    ((ch && ch.key) || []).forEach(([zone, name]) => {
+      const item = document.createElement('span');
+      item.className = 'zone';
+      item.style.setProperty('--swatch', ZONE_FILL[zone]);
+      item.textContent = name; legend.appendChild(item); });
   }
-  fillLegend();
-  s.appendChild(legend);
   /* one control channel is drawn and the rest are a pick away: six
      targets and two dozen limit lines stacked together are unreadable,
      which is the same reason the app draws one at a time */
   let picked = 0;
+  fillLegend();
+  s.appendChild(legend);
   const reset = controlBar(s, block, into ? '' :
     'drag to pan, wheel to zoom — over an axis, that axis alone; '
     + 'double-click also resets',
@@ -597,10 +617,8 @@ function plotBlock(block, into) {
       block.curves.length = 1;
       ch.responses.forEach(r =>
         block.curves.push({label: r.label, x: null, y: r.y}));
-      fillLegend();
-      return;
     }
-    legend.querySelectorAll('span')[0].textContent = ch.label;
+    fillLegend();
   }
   applyChannel();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -810,10 +828,8 @@ function plotBlock(block, into) {
       block.channels[picked].zones.forEach(zone => {
         /* past abort, and which way: red above, blue below — the same
            reading every other mark on the plot gives */
-        g.fillStyle = zone.severity !== 'abort'
-          ? 'rgba(210, 193, 78, 0.16)'
-          : zone.upper === null ? 'rgba(229, 83, 75, 0.16)'
-          : 'rgba(76, 146, 217, 0.16)';
+        g.fillStyle = zone.severity !== 'abort' ? ZONE_FILL.warning
+          : zone.upper === null ? ZONE_FILL.above : ZONE_FILL.below;
         const top = margin.top, bottom = margin.top + plotH;
         let open = false;
         g.beginPath();
@@ -851,8 +867,8 @@ function plotBlock(block, into) {
          whatever grid the target is drawn on */
       const xs = block.x;
       const top = margin.top, bottom = margin.top + plotH;
-      [['over', 'rgba(229, 83, 75, 0.60)', top],
-       ['under', 'rgba(76, 146, 217, 0.60)', bottom]].forEach(
+      [['over', ZONE_FILL.exceed_over, top],
+       ['under', ZONE_FILL.exceed_under, bottom]].forEach(
         ([key, color, edge]) => {
           const marks = ch[key];
           if (!marks) return;
@@ -878,7 +894,9 @@ function plotBlock(block, into) {
                     : curve.gray ? '#9a9aa2'
                     : COLORS[which % COLORS.length];
       g.setLineDash(curve.dash ? [6, 4] : []);
-      g.lineWidth = 1.2; g.beginPath();
+      /* the app's widths, sent with the curve: the one response read
+         against a specification and the specification behind it */
+      g.lineWidth = curve.width || 1.2; g.beginPath();
       let pen = false;
       /* a curve drawn on its own grid brings its own shape and edges —
          a banded specification stepped on its own bands beside a

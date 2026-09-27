@@ -75,7 +75,8 @@ def chosen_scheme() -> str:
     return system_scheme()
 
 
-def wear_appearance(app: Any = None, choice: str | None = None) -> None:
+def wear_appearance(app: Any = None, choice: str | None = None,
+                    refresh: bool = True) -> None:
     """Make the whole application wear the chosen appearance — the
     window chrome, the menus, every native widget — not only the parts
     this program draws itself.
@@ -90,6 +91,14 @@ def wear_appearance(app: Any = None, choice: str | None = None) -> None:
     every later repaint agrees. `choice` defaults to what
     `chosen_scheme` would answer: this launch's statement, else the
     remembered choice, else the platform's.
+
+    `refresh` also makes every widget already built re-read the palette
+    (`refresh_palettes`) — what a switch of appearance needs. A window
+    being built passes False: its widgets read the palette as they are
+    made, and walking every other top-level widget from its constructor
+    reached windows and web views from before that were closed and
+    waiting to be deleted — a segmentation fault in `refresh_palettes`
+    on a CI runner (2026-09-27, the Python 3.12 job after public #62).
     """
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
@@ -106,7 +115,8 @@ def wear_appearance(app: Any = None, choice: str | None = None) -> None:
     hints.setColorScheme({'light': Qt.ColorScheme.Light,
                           'dark': Qt.ColorScheme.Dark}.get(
                               choice, Qt.ColorScheme.Unknown))
-    refresh_palettes(app)
+    if refresh:
+        refresh_palettes(app)
 
 
 def refresh_palettes(app: Any = None) -> None:

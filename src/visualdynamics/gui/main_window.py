@@ -661,8 +661,11 @@ class MainWindow(QMainWindow):
         # the appearance chosen for this launch, remembered, or the
         # platform's — in that order (gui/preferences.py) — worn by the
         # whole application first, so the chrome and the drawn parts
-        # are built to the same scheme
-        wear_appearance()
+        # are built to the same scheme. Not refreshing the rest: this
+        # window's widgets read the palette as they are made, and other
+        # windows are not this constructor's to touch (a crash on CI,
+        # 2026-09-27: preferences.wear_appearance)
+        wear_appearance(refresh=False)
         self.theme_name: str = chosen_scheme()
         colors = resolve_theme(self.theme_name)
         pg.setConfigOption('background', colors['plot_background'])

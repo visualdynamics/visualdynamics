@@ -221,6 +221,15 @@ def mac_frame_ratio(rows: int, columns: int) -> float:
 # keeps it sane on a log axis, where the fill has to stay positive.
 BEYOND = 1e6
 
+#: a phase axis: every quarter turn labeled, and room past the half
+#: turns for their labels. Pinned at ±185° the ±180° labels sat a few
+#: pixels from the edge and pyqtgraph, which draws no label that does
+#: not fit, dropped them — the axis read -90, 0 and 90 alone (Brandon,
+#: 2026-09-27, through the band-average paper). The report's phase
+#: figures take the same two.
+PHASE_LIMITS = (-200.0, 200.0)
+PHASE_TICKS = (-180, -90, 0, 90, 180)
+
 #: a measurement's line when it is the one run read against its
 #: specification: wide enough to stand out from the gray specification
 #: behind it in a small printed legend, where at one pixel the two
@@ -1084,7 +1093,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             # wants 0..1 linear and the other decades of log
             key = (data.abscissa_dim, data.ordinate_dim[i],
                    data.dimension_hint[i], log_ordinate, log_abscissa,
-                   (-185.0, 185.0) if tag == 'phase'
+                   PHASE_LIMITS if tag == 'phase'
                    else data.ordinate_limits, tag)
             label = data.record_label(i)
             # a specification's limits ride along on the record they bound
@@ -1134,6 +1143,8 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         plot.showGrid(x=True, y=True, alpha=0.3)
         if tag == 'phase':
             left = 'phase [deg]'
+            plot.getAxis('left').setTicks(
+                [[(t, f'{t:g}') for t in PHASE_TICKS], []])
         else:
             left = axis_label(ordinate_dim, us, hint)
             if tag:

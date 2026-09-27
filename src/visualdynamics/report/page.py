@@ -645,6 +645,9 @@ function plotBlock(block, into) {
   // inside it, never beyond it
   const full = { x0, x1, y0: y0 - 0.05 * (y1 - y0),
                  y1: y1 + 0.05 * (y1 - y0) };
+  /* an axis the block pins — a phase, ±200° so the ±180° labels have
+     room — whatever the data's own extent (`plot.PHASE_LIMITS`) */
+  if (block.yrange) { full.y0 = block.yrange[0]; full.y1 = block.yrange[1]; }
   const home = Object.assign({}, full);
   if (block.home_x) {
     // the block brought its own opening window (the CMIF's mode band);
@@ -961,7 +964,9 @@ function plotBlock(block, into) {
       g.textAlign = 'center';
       g.fillText(label(t, block.logx), X, height - margin.bottom + 14);
     });
-    ticks(view.y0, view.y1, block.logy).forEach(t => {
+    (block.yticks
+      ? block.yticks.filter(t => t >= view.y0 && t <= view.y1)
+      : ticks(view.y0, view.y1, block.logy)).forEach(t => {
       const Y = py(t);
       if (Y < margin.top - 1 || Y > height - margin.bottom + 1) return;
       g.globalAlpha = 0.15; g.beginPath(); g.moveTo(margin.left, Y);

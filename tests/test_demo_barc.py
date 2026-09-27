@@ -1,13 +1,13 @@
-"""The BARC, built from planes, against the published model of it
-(Brandon, 2026-09-26; `visualdynamics.demo.barc`, the reference frozen
-in `testdata/barc/` from https://wiki.sem.org/wiki/BARC).
+"""The BARC, built from planes (Brandon, 2026-09-26;
+`visualdynamics.demo.barc`, from https://wiki.sem.org/wiki/BARC).
 
 What is pinned: the geometry is the solid model's — its mass within a
 percent of the solids' volumes, its parts where the drawing puts them,
-one connected structure; and the modes answer to the reference — the
-first ten paired one-to-one and in order by MAC, each within five
-percent. The joint model is what makes the last hold: tie each bolt at
-a point instead of over its washer and the check fails.
+one connected structure; the bolts are the patches the documentation
+tells a person to pick; and the modes stay where they were when the
+model was checked against the finite element models shared on the wiki
+(2026-09-27: the check was kept, and the wiki's modes left out of the
+project — Brandon).
 """
 
 from __future__ import annotations
@@ -53,17 +53,21 @@ def test_it_weighs_what_the_solid_model_does(solved):
     assert len(model.pieces()) == 1
 
 
-def test_the_modes_answer_to_the_reference(solved):
-    model, shapes = solved
+#: the first ten elastic modes of the model as built at `barc.SIZE`, Hz —
+#: the build that was checked against the wiki's models
+CHECKED = (194.5, 212.5, 265.3, 461.8, 494.9, 581.0, 593.5, 681.4,
+           1128.1, 1170.9)
+
+
+def test_the_modes_stay_where_they_were_checked(solved):
+    """Free-free, and the first ten elastic modes within half a percent
+    of the build that was checked against the wiki's models: a change to
+    the planes, the joints or the solver that moves them is a change to
+    look at, not a drift to accept."""
+    _model, shapes = solved
     assert int(np.sum(shapes.frequency == 0.0)) == 6, 'free-free'
-    rows = barc.compare(shapes, model)
-    first = rows[:10]
-    assert [row['mode'] for row in first] == list(range(1, 11)), (
-        'the first ten pair one-to-one, in order')
-    assert all(row['mac'] > 0.9 for row in first), [r['mac'] for r in first]
-    # a few percent stiff, consistently: the washer patches (0 to +6%)
-    assert all(-1.0 < row['error'] < 7.0 for row in first), [
-        round(r['error'], 1) for r in first]
+    elastic = [f for f in shapes.frequency if f > 1.0][:10]
+    assert np.allclose(elastic, CHECKED, rtol=0.005), np.round(elastic, 1)
 
 
 def test_each_bolt_ties_the_elements_its_washer_covers():
@@ -83,55 +87,18 @@ def test_each_bolt_ties_the_elements_its_washer_covers():
     assert len(links) == 8 * 16 + 2 * 25
 
 
-def test_the_reference_is_the_shared_data():
-    ref = barc.reference()
-    assert len(ref['frequency']) == 30 and np.all(ref['frequency'][:6] < 1.0)
-    assert ref['frequency'][6] == pytest.approx(185.7, abs=0.1)
-    assert len(ref['dof']) == 118 and ref['shape'].shape == (118, 30)
-    # moved into the solid model's frame: the Bench top is the beam's
-    # upper face, 5.125 in
-    assert ref['coordinates'][:, 1].max() / 0.0254 == pytest.approx(5.128,
-                                                                   abs=0.01)
-
-
-def test_the_apps_correlation_finds_every_reference_point():
-    """The reference's sensors sit on the parts' surfaces, the model's
-    nodes on their mid-surfaces: the box's are half a wall, 0.125 in,
-    away, and the correlation's tolerance dropped all 39 of them until
-    it allowed half the thickest plate (2026-09-26). Through the same
-    projection the comparison screen uses, every point is found, and the
-    MAC it reads agrees with the demo's own."""
-    from visualdynamics.core.correlate import project_shapes
-    from visualdynamics.core.shapes import cross_mac
-
-    model = barc.build()
-    shapes = model.eigensolution(maximum_frequency=1200.0)
-    reference_shapes, reference_geometry = barc.reference_shapes()
-    projected, report = project_shapes(shapes, barc.geometry(),
-                                       reference_shapes, reference_geometry)
-    assert report['matched'] == report['total'] == 59
-    assert not report['dropped']
-    mac = cross_mac(reference_shapes, projected)
-    rows = barc.compare(shapes, model)
-    for i, row in enumerate(rows[:8]):
-        assert mac[6 + i, 5 + row['mode']] == pytest.approx(row['mac'],
-                                                            abs=0.02)
-
-
 def test_the_project_is_the_app_workflow(tmp_path):
     """What the docs page walks through, as the project verbs the app
-    calls: solve the geometry, compare with the reference, match."""
+    calls: the saved project opened, and Solve Modes on it."""
     import visualdynamics
 
     project = barc.project()
+    assert list(project.keys()) == ['BARC'], 'the model alone'
     project.save(tmp_path / 'barc.vdyn')
     project = visualdynamics.load(tmp_path / 'barc.vdyn')
     solved = project.solve_modes('BARC', maximum_frequency=1200.0)
-    mac = project.comparison_mac('Reference Modes', solved)
-    assert mac.shape[0] == 30
-    first_elastic = [int(np.argmax(mac[6 + i])) for i in range(3)]
-    assert first_elastic == [6, 7, 8], 'the first three pair in order'
-    assert min(mac[6 + i, j] for i, j in enumerate(first_elastic)) > 0.98
+    elastic = [f for f in project[solved].frequency if f > 1.0][:3]
+    assert np.allclose(elastic, CHECKED[:3], rtol=0.005)
 
 
 def test_the_docs_page_builds_the_demos_mesh():
@@ -195,27 +162,6 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
     assert list(typed.block_name) == list(demo.block_name)
 
 
-def test_the_websites_table_is_the_models(solved):
-    """The examples page states the comparison as numbers; they must be
-    the model's, rounded as printed."""
-    import pathlib
-    import re
-
-    page = (pathlib.Path(__file__).resolve().parents[1] / 'web' / 'launch'
-            / 'examples.html').read_text(encoding='utf-8')
-    table = page.split('id="barc-comparison"')[1].split('</table>')[0]
-    printed = [[cell.replace('&minus;', '-') for cell in
-                re.findall(r'<td>(.*?)</td>', row)]
-               for row in re.findall(r'<tr>(.*?)</tr>', table)
-               if '<td>' in row]
-    model, shapes = solved
-    rows = barc.compare(shapes, model)[:len(printed)]
-    assert len(printed) == 8
-    for cells, row in zip(printed, rows, strict=True):
-        assert cells == [f"{row['reference']:.1f}", f"{row['model']:.1f}",
-                         f"{row['error']:+.1f}%", f"{row['mac']:.3f}"]
-
-
 def test_a_picture_of_the_barc_stands_it_up(solved):
     """The model is built y-up, as its solid model is; a 3-D scene is
     z-up, and the website's figure first drew the BARC lying on its
@@ -235,11 +181,9 @@ def test_a_picture_of_the_barc_stands_it_up(solved):
         'the model itself is not turned'
 
 
-def test_the_downloadable_project_opens_on_the_answer(tmp_path):
+def test_the_downloadable_project_opens_solved(tmp_path):
     """The downloads page's BARC is cut by tools/cut_examples.py from
-    `project(solved=True)`: the modes solved and the first ten elastic
-    reference modes matched, one-to-one and in order, as the docs'
-    table has them."""
+    `project(solved=True)`: the model and its modes, solved."""
     import importlib.util
     import pathlib
 
@@ -254,40 +198,5 @@ def test_the_downloadable_project_opens_on_the_answer(tmp_path):
         'VisualDynamics-examples-barc.zip']
     source(str(tmp_path))
     project = visualdynamics.Project.open(tmp_path / f'{projects[0]}.vdyn')
+    assert sorted(project.keys()) == ['BARC', 'BARC Modes']
     assert project['BARC Modes'].frequency.max() <= barc.SOLVE_TO
-    matched = project['Matched Modes']
-    assert (matched.first, matched.second) == ('Reference Modes',
-                                               'BARC Modes')
-    assert [tuple(p) for p in matched.pairs] == [(i, i) for i in range(6, 16)]
-    assert min(matched.macs) > 0.8
-
-
-def test_the_reference_is_credited_wherever_it_travels():
-    """The reference modes are another group's finite element model
-    (Brandon, 2026-09-26: credit them, and link the wiki). The credit
-    rides with them — the project's own About the Reference report, the
-    shape set, the download's README — and stands on the pages that show
-    them: the workflow guide, the examples page, the downloads page."""
-    import importlib.util
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parents[1]
-    authors = 'R. Schultz, T. Schoenherr and B. Owens'
-    assert barc.CITATION.startswith(authors) and barc.WIKI in barc.CITATION
-    project = barc.project()
-    about = project['About the Reference'].blocks[0]['text']
-    assert barc.CITATION in about
-    assert set(project['Reference Modes'].comment) == {barc.CITATION}, \
-        'every mode carries it'
-    spec = importlib.util.spec_from_file_location(
-        'cut_examples', root / 'tools' / 'cut_examples.py')
-    tool = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(tool)
-    readme = ' '.join(tool._barc_credit().split())
-    assert barc.CITATION in readme
-    for page in ('docs/guide/workflows/fem-workflow.md',
-                 'web/launch/examples.html', 'web/launch/downloads.html',
-                 'testdata/barc/README.md'):
-        text = (root / page).read_text(encoding='utf-8')
-        assert barc.SOURCE in text, f'{page} does not credit the source'
-        assert 'Schoenherr' in text and 'IMAC 2021' in text, page

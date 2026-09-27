@@ -1506,21 +1506,25 @@ def drawing_shape(data: Any, tagged: bool = False) -> str:
     law its breakpoints mean. Anything that is a value at a frequency
     rather than an area — an FRF, a coherence, a linear spectrum, any
     signed component — draws as the line it is; except a value that
-    belongs to a whole band, which draws flat across it: a banded
-    coherence is one number for its band, not a sample at its center
+    belongs to a whole band, which draws flat across it, whatever
+    component is read: a banded coherence, or the phase of a banded
+    cross term, is one number for its band, not a sample at its center
     (Brandon, 2026-09-27).
 
     One implementation, consulted by `build_plots` and by
     `viz.waterfall`, because a picture that disagrees with
     `Psd.area()` is a picture of a number nobody computed. `tagged`
     says a signed component (real/imag/phase) is being read, which is
-    never a density.
+    never a density — but of a banded array, still a band's value.
     """
-    if tagged or data.abscissa_dim != 'frequency':
+    if data.abscissa_dim != 'frequency':
         return 'line'
+    banded = getattr(data, 'bandwidth', None) is not None
+    if tagged:
+        return 'steps' if banded else 'line'
     shape = {'bin': 'steps', 'log_log': 'law'}.get(
         getattr(data, 'interpolation', None))
-    if shape is None and getattr(data, 'bandwidth', None) is not None:
+    if shape is None and banded:
         return 'steps'
     return shape or 'line'
 
@@ -1827,17 +1831,22 @@ def _signed_db(value: float) -> str:
     return f'{value:+g} dB'.replace('-', '\u2212')
 
 
-def _legend_zones(legend: Any, zones: set, exceeded: set, found: dict,
-                  colors: Mapping[str, str]) -> None:
-    """Name the shading in the legend: the warning band, the zones past
-    abort and the exceedance marks, each only when this plot drew it,
-    and each band's decibels when the specification holds it at one
-    value. The measured curves and the specification name themselves as
-    they are drawn; the fills had no entries, and a reader of a printed
-    figure could not tell the yellow, red and blue apart without the
-    caption (2026-09-26)."""
-    import pyqtgraph as pg
+def zone_key(zones: set, exceeded: set, found: Mapping[str, Any]
+             ) -> list[tuple[str, str]]:
+    """What a specification's shading is called in a legend: the warning
+    band, the zones above and below abort and the exceedance marks, each
+    only when drawn (`zones` of 'warning', 'above', 'below'; `exceeded`
+    of 'exceed_over', 'exceed_under'), with each band's decibels when the
+    specification holds it at one value (`found`, from `_zone_decibels`).
 
+    One rule for every plot that shades them — the app's (`build_plots`)
+    and the report's, which must always match (Brandon, 2026-09-27).
+
+    Returns
+    -------
+    list of (str, str)
+        (zone, name), in the order a legend lists them.
+    """
     def db_note(*bounds):
         values = [_uniform_db(found, bound) for bound in bounds]
         if any(v is None for v in values):
@@ -1846,7 +1855,6 @@ def _legend_zones(legend: Any, zones: set, exceeded: set, found: dict,
             return f' (\u00b1{abs(values[0]):g} dB)'
         return ' (' + '/'.join(_signed_db(v) for v in values) + ')'
 
-    shades = zone_colors(colors)
     entries = []
     if 'warning' in zones:
         entries.append(('warning', 'warning band'
@@ -1859,7 +1867,20 @@ def _legend_zones(legend: Any, zones: set, exceeded: set, found: dict,
         entries.append(('exceed_over', 'line over abort'))
     if 'exceed_under' in exceeded:
         entries.append(('exceed_under', 'line under abort'))
-    for zone, name in entries:
+    return entries
+
+
+def _legend_zones(legend: Any, zones: set, exceeded: set, found: dict,
+                  colors: Mapping[str, str]) -> None:
+    """Name the shading in the legend (`zone_key`), each swatch the
+    plot's own fill. The measured curves and the specification name
+    themselves as they are drawn; the fills had no entries, and a reader
+    of a printed figure could not tell the yellow, red and blue apart
+    without the caption (2026-09-26)."""
+    import pyqtgraph as pg
+
+    shades = zone_colors(colors)
+    for zone, name in zone_key(zones, exceeded, found):
         # a swatch, not a mark on the plot: never added to the view,
         # only drawn by the legend's sample. A bar's sample is a filled
         # square, an area's key; a filled curve's is a triangle

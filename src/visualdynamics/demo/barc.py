@@ -1,12 +1,12 @@
-"""The BARC, built from planes: a model checked against a published one.
+"""The BARC, built from planes.
 
 The BARC — Box Assembly with Removable Component — is a small bolted
 aluminum structure the structural dynamics community shares as a
 common test article: a square box tube with its top wall slotted in two,
 and on it the "Bench", two channels standing on the two halves and a
-flat bar bolted across their tops. Its solid model, test data and a
-finite element model's modes are shared on the SEM Dynamic
-Substructuring Focus Group wiki, https://wiki.sem.org/wiki/BARC.
+flat bar bolted across their tops. Its solid model, test data and
+finite element models are shared on the SEM Dynamic Substructuring
+Focus Group wiki, https://wiki.sem.org/wiki/BARC.
 
 Here it is built the way a person would build a simple plate model with
 this package (Brandon, 2026-09-26): each part as the planes it is made
@@ -16,47 +16,29 @@ links. Every dimension below comes from the shared solid model (inches):
 
     from visualdynamics.demo import barc
 
-    geometry = barc.geometry()             # blocks already given properties
     model = barc.build()
     shapes = model.eigensolution(maximum_frequency=2000)
-    for row in barc.compare(shapes, model):
-        print(row)
 
 **The joints are the model.** The parts meet through bolts, and their
 mid-surfaces do not touch — a channel's foot sits 0.1875 in above the
 box wall's mid-surface — so what joins them is a modeling choice, and it
-decides the Bench's modes. Three were measured against the reference:
+decides the Bench's modes. The choices were checked against the finite
+element models shared on the wiki while this was built: a single rigid
+link at each bolt came out soft, and softer at every mesh refinement (a
+point tie on a plate is a local singularity, not a joint), and each foot
+tied over its whole area came out stiff. What is built ties each bolt
+over the elements its washer covers (`washer_patch`), to the part below
+with `mesh.tie` — what the app's Tie does with the same elements picked
+(2026-09-26) — so the model a person builds in the app by the
+documentation's steps is this one, node for node and link for link.
 
-- each bolt a single rigid link between two nodes: 6 to 26% soft, and
-  softer at every mesh refinement — a point tie on a plate is a local
-  singularity, not a joint;
-- each foot tied to the wall over its whole area: 5 to 20% stiff;
-- each bolt tied over its washer's area: every node within
-  `WASHER_RADIUS` of the bolt to the nearest node below — −3 to +4% of
-  the reference's frequencies, MAC 0.83 to 0.996;
-- each bolt tied over the elements its washer covers (`washer_patch`:
-  the elements whose centers lie within the washer's radius of the bolt
-  in both directions, 3 × 3 under a foot bolt and 4 × 4 under a beam
-  bolt at `SIZE`), tied to the part below with `mesh.tie` — what the
-  app's Tie does with the same elements picked (2026-09-26). At `SIZE`
-  the first ten modes pair one-to-one with the reference, in order, at
-  MAC 0.945 to 0.995 and 0 to +6% above its frequencies; halving the
-  mesh raises them 0.4 to 2.5% more.
-
-The last is what is built, so the model a person builds in the app by
-the documentation's steps is this one, node for node and link for link. What remains — the model a few percent stiff —
-is left as it is rather than tuned away: the reference was a different
-model (not plates), its material values are not published, and a check
-that is tuned to agree says nothing.
-
-Run it directly to print the comparison:
+Run it directly to print the model and its first modes:
 
     python3 -m visualdynamics.demo.barc
 """
 
 from __future__ import annotations
 
-import pathlib
 from typing import Any
 
 import numpy as np
@@ -88,23 +70,8 @@ BOLTS = ([((x, z), BOX_MID, FOOT_Y, WASHER_RADIUS['foot'])
          + [((x, 1.5), TOP_Y, BEAM_Y, WASHER_RADIUS['top'])
             for x in (-2.0, 2.0)])
 
-#: the reference model's frame is this model's moved by (0, −3, −1.5) in
-REFERENCE_OFFSET = np.array([0.0, 3.0, 1.5])
-
-#: where the reference comes from, as it is credited everywhere the
-#: reference travels — the docs, the download, the project itself. The
-#: one sanctioned mention of a laboratory in this project is the
-#: source of third-party work, in this fixed phrase, cited (Brandon,
-#: 2026-09-26); `tests/test_public_tree.py` allows the name nowhere else
-SOURCE = 'shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki'
+#: where the BARC is shared: its solid model, test data and models
 WIKI = 'https://wiki.sem.org/wiki/BARC'
-CITATION = (
-    'R. Schultz, T. Schoenherr and B. Owens, "A Proposed Standard Random '
-    'Vibration Environment for BARC and the Boundary Condition Challenge," '
-    'IMAC 2021. The reference modes are the field-configuration modes of '
-    'their finite element model of the BARC, from the "Random Vibration '
-    f'Data" (BARC_field_and_lab_data.mat) {SOURCE}, {WIKI}, used here '
-    'unchanged as the reference this model is checked against.')
 INCH = 0.0254
 
 
@@ -211,93 +178,25 @@ def build(size: float = SIZE) -> fem.Model:
     return fem.Model.from_geometry(geometry(size), name='BARC')
 
 
-def reference(path: str | pathlib.Path | None = None) -> dict:
-    """The published reference modes: the arrays of
-    `testdata/barc/reference_modes.npz` (frozen from the wiki's shared
-    data), their coordinates moved into this model's frame, in meters.
-
-    Parameters
-    ----------
-    path : str or path, optional
-        The file; the repository's own copy when omitted.
-
-    Returns
-    -------
-    dict
-        'frequency', 'dof', 'shape' (DOFs x modes) and 'coordinates'
-        (m, this model's frame).
-    """
-    if path is None:
-        path = (pathlib.Path(__file__).resolve().parents[3]
-                / 'testdata' / 'barc' / 'reference_modes.npz')
-    with np.load(path) as data:
-        return {'frequency': data['frequency'],
-                'dof': [str(d) for d in data['dof']],
-                'shape': data['shape'],
-                'coordinates': (data['coordinates'] + REFERENCE_OFFSET) * INCH}
-
-
-def reference_shapes(path: str | pathlib.Path | None = None
-                     ) -> tuple[Any, Any]:
-    """The reference as the app holds it: its modes as a shape set and
-    its 59 points as a geometry, in this model's frame and in meters — so
-    the comparison screen (select both shape sets) projects the model's
-    modes onto the reference's points and reads the MAC, and Match Modes
-    commits the pairs.
-
-    Parameters
-    ----------
-    path : str or path, optional
-        As `reference` takes it.
-
-    Returns
-    -------
-    tuple of (ShapeSet, Geometry)
-    """
-    from visualdynamics.core.geometry import Geometry
-    from visualdynamics.core.shapes import ShapeSet
-
-    ref = reference(path)
-    points: dict[int, np.ndarray] = {}
-    for dof, xyz in zip(ref['dof'], ref['coordinates'], strict=True):
-        points.setdefault(int(dof[:-2]), xyz)
-    geometry = Geometry(node_id=list(points),
-                        node_xyz=np.array(list(points.values())),
-                        length_unit='in')
-    shapes = ShapeSet(ref['frequency'],
-                      np.full(len(ref['frequency']), 0.01), ref['dof'],
-                      np.asarray(ref['shape']).T,
-                      comment=CITATION)
-    return shapes, geometry
-
-
-#: how far the solved example project solves, Hz, and how many elastic
-#: reference modes it matches: the ten that pair one-to-one and in order
-#: (above them, where modes crowd, the pairing loosens below MAC 0.5)
+#: how far the solved example project solves, Hz
 SOLVE_TO = 2000.0
-MATCHED = 10
 
 
 def project(size: float = SIZE, solved: bool = False) -> Any:
     """A project to open in the app: the BARC's geometry, its blocks
-    given their properties, and the reference's geometry and modes,
-    linked. Solve Modes on 'BARC', then select 'Reference Modes' with the
-    solved modes: the comparison screen reads the MAC, and Match Modes
-    commits the pairs.
+    given their properties — Solve Modes on it gives its modes.
 
         barc.project().save('barc.vdyn')
 
-    With `solved`, those steps are already taken — the modes solved to
-    `SOLVE_TO` and the first `MATCHED` elastic reference modes matched to
-    the model's by MAC — which is the example project the downloads page
-    offers: it opens on the answer.
+    With `solved`, the modes are solved to `SOLVE_TO` already: the
+    example project the downloads page offers.
 
     Parameters
     ----------
     size : float
         The element size aimed at, in inches.
     solved : bool, default False
-        Solve the modes and match them to the reference as well.
+        Solve the modes as well.
 
     Returns
     -------
@@ -307,44 +206,9 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
 
     out = Project('BARC')
     out.add('BARC', geometry(size))
-    shapes, points = reference_shapes()
-    out.add('Reference Geometry', points)
-    out.add('Reference Modes', shapes)
-    out.link('Reference Geometry', 'Reference Modes')
-    out.add('About the Reference', about_the_reference())
     if solved:
-        modes = out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
-        mac = out.comparison_mac('Reference Modes', modes)
-        # pairs chosen by hand, as a person would on the comparison
-        # screen: the rigid-body modes left out (any rigid motion scores
-        # against any other), then each elastic mode's best partner
-        elastic = np.flatnonzero(shapes.frequency > 1.0)[:MATCHED]
-        out.match_modes('Reference Modes', modes,
-                        pairs=[(int(row), int(np.argmax(mac[row])))
-                               for row in elastic])
+        out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
     return out
-
-
-def about_the_reference() -> Any:
-    """The credit for the reference, as a report in the project: a
-    comment on the shape set is never shown, and whoever opens the
-    project should see whose modes these are without leaving the app.
-
-    Returns
-    -------
-    Report
-    """
-    from visualdynamics.core.report import Report
-
-    about = Report('About the Reference')
-    about.blocks.append({'kind': 'text', 'text': (
-        '## The reference\n\n'
-        '**Reference Geometry** and **Reference Modes** are not this '
-        'package\'s work. ' + CITATION + '\n\n'
-        '**BARC** is a model built from the shared solid model\'s '
-        'dimensions with this package, and checked against them: see the '
-        'finite element workflow in the Visual Dynamics documentation.')})
-    return about
 
 
 #: a quarter turn about x: the solid model's up (+y) to the 3-D scene's
@@ -358,8 +222,8 @@ def upright(points: Any, shapes: Any = None) -> Any:
     """The BARC stood up for a picture. The model is built in the solid
     model's frame, where y is up; a 3-D scene treats z as up and draws it
     lying on its side. The website figure and the downloads tile turn it;
-    the model, its comparison with the reference and the docs keep the
-    solid model's frame, so only pictures are turned.
+    the model and the docs keep the solid model's frame, so only
+    pictures are turned.
 
     Parameters
     ----------
@@ -392,65 +256,15 @@ def upright(points: Any, shapes: Any = None) -> Any:
                             shapes.shape_matrix, comment=shapes.comment)
 
 
-def compare(shapes: Any, model: fem.Model,
-            reference_modes: dict | None = None) -> list[dict]:
-    """Each elastic reference mode beside the model's that matches it
-    best by MAC, read at the reference's own points — the model's
-    nearest node to each, in the reference's direction.
-
-    Parameters
-    ----------
-    shapes : ShapeSet
-        The model's modes (`model.eigensolution`).
-    model : fem.Model
-        The model they came from, for where its nodes are.
-    reference_modes : dict, optional
-        `reference()`; read when omitted.
-
-    Returns
-    -------
-    list of dict
-        One per elastic reference mode, in order: 'reference' and
-        'model' (Hz), 'error' (percent), 'mac', and 'mode' (the model's
-        elastic mode number, from 1).
-    """
-    ref = reference() if reference_modes is None else reference_modes
-    nodes = model.node_ids
-    xyz = np.array([model.position(n) for n in nodes])
-    column = {dof: i for i, dof in enumerate(shapes.coordinate)}
-    rows = []
-    for dof, point in zip(ref['dof'], ref['coordinates'], strict=True):
-        node = nodes[int(np.argmin(np.linalg.norm(xyz - point, axis=1)))]
-        rows.append(column[f'{node}{dof[-2:]}'])
-    ours = np.asarray(shapes.shape_matrix)[:, rows].T          # DOFs x modes
-    theirs_all = np.asarray(ref['shape'])
-    ref_elastic = np.flatnonzero(ref['frequency'] > 0.0)
-    our_elastic = np.flatnonzero(np.asarray(shapes.frequency) > 0.0)
-    theirs, mine = theirs_all[:, ref_elastic], ours[:, our_elastic]
-    mac = ((theirs.T @ mine) ** 2
-           / np.outer((theirs ** 2).sum(0), (mine ** 2).sum(0)))
-    out = []
-    for i, r in enumerate(ref_elastic):
-        j = int(np.argmax(mac[i]))
-        f_ref = float(ref['frequency'][r])
-        f_model = float(shapes.frequency[our_elastic[j]])
-        out.append({'reference': f_ref, 'model': f_model,
-                    'error': 100.0 * (f_model / f_ref - 1.0),
-                    'mac': float(mac[i, j]), 'mode': j + 1})
-    return out
-
-
 def describe(size: float = SIZE, modes: int = 10) -> None:
-    """Print the model and its comparison with the reference."""
+    """Print the model and its first elastic modes."""
     model = build(size)
-    shapes = model.eigensolution(maximum_frequency=2000.0)
+    shapes = model.eigensolution(maximum_frequency=SOLVE_TO)
     print(f'BARC from planes: {model.num_nodes} nodes, {len(model.plates)} '
           f'plates, {len(model.rigid_links)} rigid links, '
           f'{model.structural_mass:.3f} kg')
-    print('  reference   model   error    MAC')
-    for row in compare(shapes, model)[:modes]:
-        print(f'  {row["reference"]:8.1f}  {row["model"]:7.1f}  '
-              f'{row["error"]:+5.1f}%  {row["mac"]:.3f}')
+    elastic = [f for f in shapes.frequency if f > 1.0][:modes]
+    print('  elastic modes (Hz): ' + ', '.join(f'{f:.1f}' for f in elastic))
 
 
 if __name__ == '__main__':

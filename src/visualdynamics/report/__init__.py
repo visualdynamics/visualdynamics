@@ -24,7 +24,13 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from ..decimate import peak_decimate
-from ..plot import as_power_law, bin_edges, drawing_shape
+from ..plot import (
+    MEASURED_WIDTH,
+    STOOD_BACK_WIDTH,
+    as_power_law,
+    bin_edges,
+    drawing_shape,
+)
 from ..theme import OVERLAY_ALPHA
 from ..units import DEFAULT_SYSTEM
 
@@ -1974,6 +1980,37 @@ LIMIT_ZONES = (
 )
 
 
+def _channel_key(channel: Mapping[str, Any], limits: Mapping[str, Any],
+                 target: Any, dimension: str) -> list[list[str]]:
+    """The legend's key to one channel's shading: which zones it shades
+    and which marks it draws, named by `plot.zone_key` with the decibels
+    the specification holds them at — the words the app's legend uses,
+    so a report's plot and the app's say the same (Brandon, 2026-09-27:
+    the report plots should always match the application plots).
+
+    `limits` and `target` are the channel's in display units, before
+    the page's own mapping; the ratio of the two is all that is read.
+    """
+    from ..plot import _zone_decibels, zone_key
+
+    zones = set()
+    for zone in channel.get('zones', []):
+        if zone['severity'] != 'abort':
+            zones.add('warning')
+        elif zone['upper'] is None:
+            zones.add('above')
+        elif zone['lower'] is None:
+            zones.add('below')
+    exceeded = {f'exceed_{side}' for side in ('over', 'under')
+                if any(v is not None for v in channel.get(side) or [])}
+    found: dict = {}
+    written = {name: values for name, values in limits.items()
+               if values is not None}
+    if written:
+        _zone_decibels(found, written, target, dimension)
+    return [list(entry) for entry in zone_key(zones, exceeded, found)]
+
+
 #: how finely the window shape is sampled for the report. The curve is
 #: smooth and a few dozen points draw it to the pixel.
 WINDOW_POINTS = 48
@@ -2123,12 +2160,16 @@ def _specification_channels(source, records, x, logy, us, measured=None):
             if len(edges) == 2 and not all(e is None for e in edges):
                 zones.append({'lower': edges[0], 'upper': edges[1],
                               'severity': severity})
+        target = np.asarray(source.display_ordinate(us, [record])[0]).real
         channel = {
             'label': _channel_label(source, record),
-            'y': mapped(np.asarray(
-                source.display_ordinate(us, [record])[0]).real),
+            'y': mapped(target),
             'zones': zones,
         }
+        channel['key'] = _channel_key(
+            channel, {name: None if values is None else values[record]
+                      for name, values in shown.items()},
+            target, source.known_dim(record))
         answer = answers.get(_pair_key(source, record))
         if answer is not None:
             channel['response'] = mapped(answer)
@@ -2239,9 +2280,12 @@ def _srs_comparison_block(block, measured, specification, us, caption):
             responses.append({'label': str(name) if name
                               else measured.record_label(i),
                               'y': mapped(np.abs(shown[i]))})
-        channels.append({'label': _channel_label(specification, record),
-                         'y': mapped(target), 'zones': zones,
-                         'responses': responses})
+        channel = {'label': _channel_label(specification, record),
+                   'y': mapped(target), 'zones': zones,
+                   'responses': responses}
+        channel['key'] = _channel_key(channel, edges, target,
+                                      specification.known_dim(record))
+        channels.append(channel)
 
     first = channels[0]
     if len(channels) > 1:
@@ -2262,7 +2306,8 @@ def _srs_comparison_block(block, measured, specification, us, caption):
              'ylabel': axis_label(measured.ordinate_dim[0], us,
                                   measured.dimension_hint[0]),
              'curves': [{'label': first['label'], 'x': None,
-                         'y': first['y'], 'gray': True}],
+                         'y': first['y'], 'gray': True,
+                         'width': STOOD_BACK_WIDTH}],
              'channels': channels, 'label': block.get('label')}
     return built
 
@@ -2389,15 +2434,20 @@ def _comparison_block(block, measured, specification, us, caption,
             factor = _display_factor(limits[name][record],
                                      specification.limits[name][record])
             channel[key] = mapped(verdict['level'] * factor)
+        channel['key'] = _channel_key(channel, edges, target,
+                                      specification.known_dim(record))
         channels.append(channel)
 
     first = channels[0]
     measured_label = (f'measured ({scale_db:+d} dB)' if scale_db
                       else 'measured')
+    # the app's widths: the one response read against its specification
+    # wide enough to stand apart from it, the specification wider still
+    # behind it (`plot.MEASURED_WIDTH`, `plot.STOOD_BACK_WIDTH`)
     curves = [{'label': first['label'], 'x': None, 'y': first['y'],
-               'gray': True},
+               'gray': True, 'width': STOOD_BACK_WIDTH},
               {'label': measured_label, 'x': None, 'y': first['response'],
-               'ink': True}]
+               'ink': True, 'width': MEASURED_WIDTH}]
     if banded:
         # the target on its own grid, stepped on its own edges; the
         # response keeps the block's grid and edges
@@ -2810,9 +2860,11 @@ def _replication_overlay_block(block, measured, specification, us):
             'x': x, 'xlabel': f'time [{us.label_text("time")}]',
             'ylabel': _axis_text(specification, us),
             'curves': [{'label': first['label'], 'x': None,
-                        'y': first['y'], 'gray': True},
+                        'y': first['y'], 'gray': True,
+                        'width': STOOD_BACK_WIDTH},
                        {'label': f'playing 1 of {count}', 'x': None,
-                        'y': first['response'], 'ink': True}],
+                        'y': first['response'], 'ink': True,
+                        'width': MEASURED_WIDTH}],
             'channels': channels}
 
 

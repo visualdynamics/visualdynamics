@@ -140,7 +140,8 @@ def test_a_fresh_window_wears_the_remembered_choice_first(window_factory,
 
     worn = []
     monkeypatch.setattr(main_window, 'wear_appearance',
-                        lambda app=None, choice=None: worn.append('called'))
+                        lambda app=None, choice=None, refresh=True:
+                        worn.append('called'))
     preferences.remember_appearance('light')
     later = window_factory()
     assert worn == ['called']
@@ -230,3 +231,26 @@ def test_a_refresh_leaves_the_themed_widgets_their_own_palette(window, pump):
     assert base_before == resolve_theme(window.theme_name)['scene_background'].lower()
     assert not window.statusBar().testAttribute(Qt.WidgetAttribute.WA_SetPalette), \
         'a refreshed widget does not come to own a palette'
+
+
+def test_a_window_being_built_leaves_the_other_windows_alone(qt_app,
+                                                             monkeypatch):
+    """A new window wears the chosen appearance without walking every
+    other top-level widget to refresh its palette: that walk, from the
+    constructor, reached windows and web views closed by earlier work and
+    waiting to be deleted, and segfaulted on a CI runner (2026-09-27).
+    A switch of appearance still refreshes everything."""
+    from visualdynamics.gui import main_window, preferences
+
+    walked = []
+    monkeypatch.setattr(preferences, 'refresh_palettes',
+                        lambda app=None: walked.append('walk'))
+    window = main_window.MainWindow(offscreen_3d=True)
+    try:
+        assert walked == [], 'building a window walks no other widget'
+        preferences.wear_appearance(choice='light')
+        assert walked == ['walk'], 'a switch of appearance does'
+    finally:
+        from conftest import destroy_window
+
+        destroy_window(window, qt_app)

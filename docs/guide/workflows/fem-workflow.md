@@ -1,29 +1,27 @@
 # The finite element workflow: the BARC
 
 A finite element model built from the planes a structure is made of,
-solved, and checked against a published model of the same structure —
-the geometry in a short script, everything after it in the app.
+tied where it is bolted, and solved — all of it in the app.
 
 The structure is the **BARC** (Box Assembly with Removable Component),
 a small bolted aluminum article the structural dynamics community
 shares as a common test piece: a square box tube whose top wall is
 slotted in two, and on it the *Bench* — two channels standing on the two
 halves and a flat bar bolted across their tops. Its solid model, test
-data and a finite element model's modes are shared on the SEM Dynamic
+data and finite element models are shared on the SEM Dynamic
 Substructuring Focus Group wiki, <https://wiki.sem.org/wiki/BARC>. Every
-dimension below comes from that solid model; the reference modes the
-model is checked against come from that shared data, and are another
-group's work: R. Schultz, T. Schoenherr and B. Owens, "A Proposed
-Standard Random Vibration Environment for BARC and the Boundary
-Condition Challenge," IMAC 2021 — the field-configuration modes of their
-finite element model of the BARC, in the "Random Vibration Data"
-shared by Sandia National Laboratories on the SEM Dynamic Substructuring Focus Group wiki.
-The demo's project carries the same credit as its **About the Reference**
-report.
+dimension below comes from that solid model, and the model was checked
+against the finite element models shared there.
 
 Every step is in the app; the whole model is also a demonstration
 module, `visualdynamics.demo.barc`, so each can be checked against it or
-skipped.
+skipped:
+
+```python
+from visualdynamics.demo import barc
+
+barc.project().save('barc.vdyn')    # the model this page builds, already built
+```
 
 | Step | Where | How |
 |---|---|---|
@@ -32,20 +30,6 @@ skipped.
 | Tie the bolted parts | the geometry's Elements | pick the elements under each washer, *Tie* to the part below |
 | Give each part its material and thickness | the Blocks table | pick a material, type a thickness |
 | Solve | the bar | *Solve Modes* |
-| Compare with the reference | select both shape sets | the MAC appears; *Match Modes* commits pairs |
-
-The reference the model is checked against comes in the demo's project,
-so start there — save it and open it in the app:
-
-```python
-from visualdynamics.demo import barc
-
-barc.project().save('barc.vdyn')    # the reference, and the demo's own model of it
-```
-
-It holds **Reference Geometry** and **Reference Modes** — the shared
-data's 59 points and 30 modes — and **BARC**, the model this page builds,
-already built. Build yours beside it, or skip to step 3 with BARC.
 
 ## 1. The geometry, from planes
 
@@ -126,20 +110,14 @@ the first does, carried by its rotation, adding no mass. A block of
 two-node lines given the material *rigid (massless)* is a set of them.
 
 How the links are laid out is the modeling decision that matters most
-here, and it was measured four ways against the reference:
-
-| Joint | First ten modes against the reference |
-|---|---|
-| each bolt a single link at its center | 6 to 26% soft, and softer at every mesh refinement — a point tie on a plate is a local singularity |
-| each foot tied over its whole area | 5 to 20% stiff |
-| each bolt tied at every node within its washer's radius | −3 to +4%, MAC 0.83 to 0.996 |
-| each bolt tied over **the elements its washer covers** | 0 to +6%, MAC 0.945 to 0.995 — what is built here |
-
-The last two are both the washer's area, and both converge: halving the
-mesh moves the frequencies about 1% for the first and 0.4 to 2.5% for
-the second. The elements are what
-is built because they are what a person picks: whole elements, countable
-in the view.
+here, and it was settled by checking the model against the wiki's: a
+single link at each bolt comes out soft, and softer at every mesh
+refinement — a point tie on a plate is a local singularity, not a
+joint — and each foot tied over its whole area comes out stiff. Tied
+over the washer's area, the model agrees and converges. The elements
+the washer covers are what is built, rather than every node within its
+radius, because elements are what a person picks: whole elements,
+countable in the view.
 
 So under each bolt the elements its washer covers are tied, every node
 of them, to the nearest nodes of the part below. There are ten bolts,
@@ -169,7 +147,7 @@ of a whole part might be the wrong one, *A second selection…* in the
 same menu ties the patch to a second patch picked next.)
 
 The same project with every step below already taken — the modes
-solved and the first ten matched — is on the website's
+solved — is on the website's
 [downloads page](https://visualdynamics.org/downloads#examples), and is
 `barc.project(solved=True)`.
 
@@ -199,53 +177,22 @@ table above are the demo's node for node, and the patches above are the
 demo's element for element, so a geometry built by hand solves to the
 same modes.
 
-## 4. Compare with the reference
+## What was checked
 
-Select **Reference Modes** and the solved modes together. The comparison
-screen reads the MAC between them, projecting the model's modes onto the
-reference's 59 points — its sensors are on the parts' surfaces and the
-model's nodes on their mid-surfaces, half a thickness away, which the
-projection allows for. Pick the matching squares and press **+** to
-commit the pairs; the matched-modes table gives each pair's frequency
-error and MAC.
+While the model was built, its modes were checked against the finite
+element models shared on the [wiki](https://wiki.sem.org/wiki/BARC);
+the joints above are the ones that agreed with them. The model is left
+as it is rather than tuned toward any one of them — a check tuned to
+agree says nothing — and against a measurement of a particular unit,
+measure the unit and model what was measured: hardware differs from its
+drawing, the box's wall thickness most of all.
 
-| Reference (Hz) | Model (Hz) | Difference | MAC |
-|---|---|---|---|
-| 185.7 | 194.5 | +4.8% | 0.995 |
-| 206.2 | 212.5 | +3.0% | 0.995 |
-| 264.8 | 265.3 | +0.2% | 0.989 |
-| 439.2 | 461.8 | +5.1% | 0.964 |
-| 466.7 | 494.9 | +6.1% | 0.945 |
-| 555.0 | 581.0 | +4.7% | 0.985 |
-| 570.2 | 593.5 | +4.1% | 0.969 |
-| 660.9 | 681.4 | +3.1% | 0.946 |
-| 1083.7 | 1128.1 | +4.1% | 0.990 |
-| 1147.3 | 1170.9 | +2.1% | 0.991 |
-
-The first ten elastic modes pair one-to-one and in order, the shapes
-agreeing at MAC 0.945 to 0.995 and the frequencies 0 to 6% above the
-reference's; the next two pair as well (1503.6 and 1609.2 Hz, MAC 0.89
-and 0.99). Above 1.7 kHz, where modes crowd, the pairing loosens (MAC
-under 0.5 for some): the two models there are no longer describing the
-same modes one for one.
-
-## What the check does and does not say
-
-The model is a few percent stiff, consistently, and it is left that way
-rather than tuned: the reference is a different kind of model (not
-plates), its material values are not published, and a check tuned to
-agree says nothing. The shared data's own notes also warn that the
-physical hardware differs from the drawing — the box's wall thickness
-most of all — so against a measurement of a particular unit, measure the
-unit and model what was measured.
-
-From a script, the same comparison is one call:
+From a script:
 
 ```python
 from visualdynamics.demo import barc
 
 model = barc.build()
 shapes = model.eigensolution(maximum_frequency=2000)
-for row in barc.compare(shapes, model):
-    print(row['reference'], row['model'], row['error'], row['mac'])
+print(shapes.frequency[6:16])                 # the first ten elastic modes
 ```

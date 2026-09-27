@@ -312,3 +312,33 @@ def test_the_report_cross_mac_binds_the_projected_set():
     assert np.asarray(cross['matrix']) == pytest.approx(expected)
     assert len(cross['rows']) == test_shapes.num_shapes
     assert len(cross['columns']) == projected.num_shapes
+
+def test_sensors_on_a_plates_surface_are_found_on_its_mid_surface():
+    """A plate model's nodes are on mid-surfaces and its sensors on
+    surfaces, half a thickness away. The match limit allows half the
+    thickest plate beyond its fraction of the extent — without it, the
+    BARC's box lost every sensor on its quarter-inch walls
+    (2026-09-26)."""
+    import numpy as np
+
+    from visualdynamics import fem, mesh
+    from visualdynamics.core.correlate import project_shapes
+    from visualdynamics.core.geometry import Geometry
+    from visualdynamics.core.shapes import ShapeSet
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.25, 'plate')
+    plate.block_properties = {1: fem.BlockProperties(
+        fem.material('6061-T6'), 0.1)}
+    dofs = [f'{n}Z+' for n in plate.node_id]
+    fem_shapes = ShapeSet([10.0], [0.0], dofs,
+                          plate.node_xyz[:, 0][np.newaxis] + 1.0)
+    corners = np.array([[0.0, 0.0, 0.05], [1.0, 0.0, 0.05],
+                        [0.0, 1.0, 0.05], [1.0, 1.0, 0.05]])
+    sensors = Geometry(node_id=[1, 2, 3, 4], node_xyz=corners,
+                       length_unit='m')
+    test_shapes = ShapeSet([10.0], [0.0], ['1Z+', '2Z+', '3Z+', '4Z+'],
+                           np.ones((1, 4)))
+    _projected, report = project_shapes(fem_shapes, plate, test_shapes,
+                                        sensors)
+    assert report['matched'] == report['total'] == 4
+    assert not report['dropped']

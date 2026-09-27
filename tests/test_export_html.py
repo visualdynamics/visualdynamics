@@ -113,3 +113,39 @@ def test_the_figure_fills_its_frame(qt_app, tmp_path):
         web_close(view)
     assert not got['title'] and not got['number']
     assert abs(got['body'] - got['inner']) <= 2, got
+
+
+def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
+    """The report's plots always match the app's (Brandon, 2026-09-27):
+    the legend names the warning band and the zones past abort in the
+    same words, and the one response and its specification are drawn at
+    the app's widths."""
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    from visualdynamics.plot import MEASURED_WIDTH, STOOD_BACK_WIDTH
+
+    measured, spec = _pair()
+    path = visualdynamics.export_html(tmp_path / 'spec.html', measured,
+                                      specification=spec, channel='101Z+')
+    _text, data = _payload(path)
+    [block] = data['blocks']
+    assert block['channels'][0]['key'] == [
+        ['warning', 'warning band (±3 dB)'],
+        ['above', 'above abort (+6 dB)'], ['below', 'below abort (−6 dB)']]
+    assert [c.get('width') for c in block['curves']] == [STOOD_BACK_WIDTH,
+                                                        MEASURED_WIDTH]
+    view = QWebEngineView()
+    view.resize(700, 400)
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    probe = ("(() => { const spans = document.querySelectorAll('.legend span');"
+             "if (!spans.length) return '';"
+             "return JSON.stringify(Array.from(spans, s => s.textContent)); })()")
+    try:
+        names = json.loads(web_read(view, probe))
+    finally:
+        web_close(view)
+    assert names[-3:] == ['warning band (±3 dB)', 'above abort (+6 dB)',
+                          'below abort (−6 dB)'], names

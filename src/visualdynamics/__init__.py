@@ -22,9 +22,8 @@ _os.environ.setdefault('QT_API', 'pyside6')
 # Windows-Qt5 compatibility alias, inside a suppress(ImportError) — so
 # it was loaded into the process by accident of a dependency. A
 # GPL-only module in the address space is exactly what the sanctioned
-# Qt set exists to keep out: this project's licensing is deliberately
-# undecided, and shipping combined with a GPL-only Qt add-on would
-# decide it by accident. `setdefault`, not assignment: a host process
+# Qt set exists to keep out: this project is MIT, and shipping combined
+# with a GPL-only Qt add-on would put its builds under the GPL. `setdefault`, not assignment: a host process
 # that loaded the module itself before importing visualdynamics made
 # its own licensing choice and is left alone. `None` in sys.modules
 # makes any later import raise ImportError, which qtpy's suppress

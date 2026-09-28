@@ -15,7 +15,7 @@ project, because it is the part I cannot do alone.
 rules are written down, and they are the same ones every change here
 is held to, mine included: the principles (`PRINCIPLES.md`), the
 architecture and its conventions (`docs/architecture.md`), the rules
-for working in the tree (`AGENTS.md`) and the three conditions below.
+for working in the tree (`AGENTS.md`) and the two conditions below.
 Meeting them is what a review looks for. When a change is declined or
 needs work, the review says which rule and why.
 
@@ -33,27 +33,21 @@ assistant? [`AGENTS.md`](AGENTS.md) is the same set of rules in the
 form an agent reads first, and it is what any such tool should be
 pointed at before it touches the tree.
 
-Three things any contributed code has to satisfy:
+Two things any contributed code has to satisfy:
 
-- **The contributor license agreement** ([`CLA.md`](CLA.md)), signed
-  once. You keep your copyright; the Project gets a license broad
-  enough that every line in it stays licensable by one person, which
-  is what keeps its future options open. A standard text, adapted from
-  Apache's. **Signing happens on your first pull request**: a bot
-  comments with the agreement and a sentence to reply with, and the
-  check stays red until that reply is on record, and a red check
-  cannot be merged. Once is enough.
 - **It has to be yours to give.** Your own work, not something an
   employer already has a claim on, and carrying no third-party code
-  with obligations of its own.
-- **No code from any package whose license would restrict the
-  Project's licensing.** Copyleft code in particular: taking it would
-  put lines in the tree that the Project does not own — the licenses
-  would be compatible and the ownership would not be, and that can
-  never be undone. File formats and published methods may be
-  reimplemented; code may not be copied or derived from.
-  `tests/test_license_boundary.py` checks this on every run for the
-  packages the Project is closest to.
+  with obligations of its own. By opening a pull request you offer
+  the change under the Project's MIT License, the same terms everyone
+  else receives it under.
+- **No code from any package under a copyleft license.** GPL or AGPL
+  code cannot live in an MIT project: taking it would make every build
+  that includes it subject to the copyleft terms, which the Project's
+  license does not allow and which cannot be undone once released.
+  File formats and published methods may be reimplemented; code may
+  not be copied or derived from. `tests/test_license_boundary.py`
+  checks this on every run for the packages the Project is closest
+  to.
 
 Help that is not code counts too, and is recorded in
 [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md) — thanks rather than a
@@ -61,13 +55,10 @@ rights record.
 
 ## Licensing
 
-**GPL-3.0-or-later** (`LICENSE`): free to install, use, copy and
-redistribute, with a distributed derivative staying under the same
-terms — and other terms available from the owner
-(contact@visualdynamics.org). Contributions arrive under
-[`CLA.md`](CLA.md) so that stays possible: every line in the tree is
-licensable by one person, which is what lets the owner offer the same
-code under other terms or relicense a future version.
+**MIT** (`LICENSE`): free to install, use, copy, change and
+redistribute, in open or closed work, as long as the copyright notice
+travels with it. Contributions come in under the same license they go
+out under; there is no separate agreement to sign.
 
 ## Getting set up
 
@@ -88,8 +79,8 @@ unaffected.
 ## How a change travels
 
 Work in a fork. The repository itself holds no working branches —
-`main`, the CLA bot's signature branch and the maintainer's publishing
-branches — and a ruleset refuses the creation of any other, the
+`main` and the maintainer's publishing branches — and a ruleset
+refuses the creation of any other, the
 maintainer included. Your fork is your own space: nobody else can
 name a branch there, and the fork's name says whose the branch is.
 
@@ -111,9 +102,9 @@ properdocs build --strict       # the docs site, if you touched docstrings
 
 CI runs the same on every pull request, on every push to `main`
 and on demand, on both Pythons the package promises. Nothing reaches
-`main` except through a pull request with four green checks — the
-tests on each Python, the documentation build and the CLA — and
-that holds for the owner too.
+`main` except through a pull request with its checks green — the
+tests on each Python, the documentation build and the branch name —
+and that holds for the owner too.
 
 The `slow` mark is the demonstration airframe
 (`visualdynamics.demo.drone`), which the website, the docs and the
@@ -134,11 +125,9 @@ to the toolset are stated on a three-quad strip in `tests/test_fem.py`.
 - **Docstrings that say why.** Reference documentation is generated from
   them (`docs/api`), and the guides in `docs/guide` explain reasoning.
   Comments earn their place by stating a constraint the code cannot.
-- **No code the Project does not own in the package.** Importing a
-  package whose license would restrict the Project's licensing — a
-  copyleft one in particular — would put every future licensing choice
-  out of reach: not because the licenses clash, but because the lines
-  would not be the owner's to relicense. File formats are read as the
+- **No copyleft code in the package.** Importing a GPL or AGPL
+  package would put the Project's builds under that package's terms,
+  which an MIT project cannot carry. File formats are read as the
   documented formats they are, and the methods are written here.
   `tests/test_license_boundary.py` checks this on every run rather than
   trusting anyone to remember it. There is no exception, including for

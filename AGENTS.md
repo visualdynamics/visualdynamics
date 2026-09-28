@@ -14,9 +14,9 @@ reference.
 ## What this is
 
 A from-scratch, units-aware structural dynamics toolset. Copyright
-Brandon Zwink, published under **GPL-3.0-or-later with a contributor
-license agreement** (`LICENSE`, `CLA.md`). Contributions are
-welcome: bug reports, and pull requests from anyone, under the CLA. A
+Brandon Zwink, published under the **MIT License** (`LICENSE`).
+Contributions are welcome: bug reports, and pull requests from anyone,
+offered under the same MIT License. A
 pull request that keeps the rules in this file, `PRINCIPLES.md`,
 `docs/architecture.md` and `CONTRIBUTING.md` will be merged; for
 anything substantial, an issue first is a courtesy to the
@@ -35,14 +35,11 @@ project file — provisional for the alpha, as the README says.
 These are not preferences. Each one exists because breaking it costs
 something that cannot be bought back.
 
-1. **No code from any package whose license would restrict this
-   project's licensing.** Copyleft code — GPL, AGPL, however
-   compatible with this project's own GPL — must never be imported,
+1. **No copyleft code.** GPL or AGPL code must never be imported,
    copied, or derived from (subclassing is deriving, even in code
-   that is never distributed). Under this project's GPL an import
-   would be *legal*; it would also put lines in the tree that the
-   project does not own, which ends every licensing option the owner
-   keeps, and that cannot be undone. Read such a package to
+   that is never distributed). It cannot live in an MIT project: one
+   import would put every build that carries it under the copyleft
+   terms, and a release cannot take that back. Read such a package to
    understand a method; write the method here yourself. Its
    *numbers* may be compared against as frozen data (a program's
    output is not a covered work); its code may not travel here.
@@ -52,9 +49,9 @@ something that cannot be bought back.
 
 2. **Nothing lands without the maintainer.** The public `main`
    accepts no direct push from anyone. A change arrives as a pull
-   request, under the CLA (a bot asks for the signature on your first
-   one), with CI green on both Pythons, the documentation build and
-   the CLA check — and the maintainer merges it, or does not. Do not
+   request, with CI green on both Pythons, the documentation build and
+   the branch-name check — and the maintainer merges it, or does
+   not. Do not
    try to route around that, and do not open a pull request on
    someone's behalf without their say-so.
 
@@ -69,7 +66,7 @@ something that cannot be bought back.
    never cap a version to work around a break.
 
 4. **Never claim a license the tree does not grant.** Every file that
-   says anything says GPL-3.0-or-later; nothing else. And the project
+   says anything says MIT; nothing else. And the project
    is **unaffiliated**: never name an employer, client, laboratory or
    institution anywhere in it — code, tests, docs, commit messages.
    A test walks every tracked file for such names. The one exception

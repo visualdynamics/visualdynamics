@@ -135,23 +135,53 @@ def test_renumbering_a_block_carries_its_elements(two_blocks):
         two_blocks.renumber_block(0, 9)
 
 
-def test_deleting_a_block_moves_its_elements_rather_than_losing_them(
-        two_blocks):
-    """The block is a label on the elements; deleting the label must not
-    delete the mesh under it."""
+def test_deleting_a_block_deletes_its_elements_and_its_own_nodes(two_blocks):
+    """A block deleted is the part deleted (Brandon, 2026-09-27): its
+    elements, and the nodes no other block's element uses. The nodes it
+    shares with the tail stay, so the tail is not cut into."""
     report = two_blocks.delete_blocks([7])
-    assert report == {'blocks': 1, 'elements_reassigned': 1}
+    assert report == {'blocks': 1, 'elements': 1, 'nodes': 2, 'tracelines': 0}
     assert list(two_blocks.block_id) == [9]
-    assert two_blocks.elements_in(9) == [10, 11], 'both, in the one left'
+    assert two_blocks.elements_in(9) == [11], 'the tail, whole'
+    assert list(two_blocks.node_id) == [2, 3, 5, 6], 'the shared edge kept'
     two_blocks.validate()
 
 
-def test_the_last_block_cannot_go_while_elements_name_one(two_blocks):
-    with pytest.raises(ValueError, match='needs a block'):
-        two_blocks.delete_blocks([7, 9])
-    two_blocks.delete_elements([10, 11])
+def test_deleting_every_block_leaves_no_mesh(two_blocks):
     two_blocks.delete_blocks([7, 9])
-    assert list(two_blocks.block_id) == [], 'nothing to hold, so none needed'
+    assert list(two_blocks.block_id) == [] and two_blocks.elem_conn == []
+    assert two_blocks.num_nodes == 0
+
+
+def test_blocks_of_one_kind_merge_into_the_first(two_blocks):
+    """Merge Blocks: the first keeps its id and name, the rest's elements
+    move into it."""
+    report = two_blocks.merge_blocks([9, 7])
+    assert report == {'into': 9, 'blocks': 1, 'elements': 1}
+    assert list(two_blocks.block_id) == [9]
+    assert two_blocks.block_name == ['tail']
+    assert two_blocks.elements_in(9) == [10, 11]
+    two_blocks.validate()
+
+
+def test_blocks_that_differ_are_not_merged(two_blocks, mixed_block):
+    """Different element types, or different properties, are different
+    parts: one material and thickness for both would change the model."""
+    from visualdynamics import fem
+
+    aluminum = fem.material('6061-T6')
+    two_blocks.block_properties = {7: fem.BlockProperties(aluminum, 0.01),
+                                   9: fem.BlockProperties(aluminum, 0.02)}
+    assert 'thickness' in two_blocks.merge_refusal([7, 9])
+    with pytest.raises(ValueError, match='differ in material'):
+        two_blocks.merge_blocks([7, 9])
+    two_blocks.block_properties[9] = fem.BlockProperties(aluminum, 0.01)
+    assert two_blocks.merge_refusal([7, 9]) is None
+    tri = two_blocks.add_block('fin')
+    two_blocks.add_element([3, 6, 5], block=tri)
+    assert two_blocks.merge_refusal([7, tri]) == \
+        'the blocks hold different element types'
+    assert two_blocks.merge_refusal([7]) == 'select two blocks or more to merge'
 
 
 @pytest.fixture
@@ -292,7 +322,9 @@ def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
     assert 'Added block 10' in window.statusBar().currentMessage()
 
 
-def test_deleting_a_block_row_keeps_its_elements(two_blocks, window, pump):
+def test_deleting_a_block_row_deletes_the_part(two_blocks, window, pump):
+    """From the Blocks table as from a script: the block, its elements
+    and its own nodes go (Brandon, 2026-09-27)."""
     item = _show_geometry(window, pump, two_blocks)
     window.tree.setCurrentItem(_category(item, 'Blocks'))
     window.edit_entities()
@@ -301,8 +333,9 @@ def test_deleting_a_block_row_keeps_its_elements(two_blocks, window, pump):
     window.delete_entity_rows()
     pump()
     assert list(two_blocks.block_id) == [9]
-    assert len(two_blocks.elem_id) == 2, 'the mesh is not the label on it'
-    assert 'elements reassigned' in window.statusBar().currentMessage()
+    assert list(two_blocks.elem_id) == [11], 'the wing went with its block'
+    assert 'Removed 1 blocks, 1 elements, 2 nodes' in \
+        window.statusBar().currentMessage()
 
 
 def test_picking_a_block_highlights_the_elements_it_holds(two_blocks, window,
@@ -436,3 +469,67 @@ def test_an_unknown_element_is_refused(qt_app, two_blocks):
     assert not model.setData(index, f'{text} 9999',
                              Qt.ItemDataRole.EditRole)
     assert said and 'unknown elements [9999]' in said[0]
+
+
+def _pick_blocks(window, pump, item, rows):
+    """Select these block rows under the geometry's Blocks category."""
+    blocks = _category(item, 'Blocks')
+    blocks.setExpanded(True)
+    pump()
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(blocks.child(rows[0]))
+    for row in rows:
+        blocks.child(row).setSelected(True)
+    pump()
+
+
+def test_two_blocks_of_one_kind_offer_merge_from_the_tree(two_blocks, window,
+                                                         pump):
+    """Picking two blocks that may be one puts Merge Blocks on the bar
+    (Brandon, 2026-09-27); pressing it makes them one, journaled."""
+    item = _show_geometry(window, pump, two_blocks)
+    _pick_blocks(window, pump, item, [0, 1])
+    acts = window.acts_for()
+    assert [(verb, icon) for verb, _label, icon, _h, _t in acts] == [
+        ('merge_blocks', 'merge_blocks')]
+    acts[0][3]()
+    pump()
+    assert list(two_blocks.block_id) == [7]
+    assert two_blocks.elements_in(7) == [10, 11]
+    assert window.project.journal[-1] == (
+        "project.merge_blocks('Geometry', [7, 9])")
+    assert 'merged 1 block into wing' in window.statusBar().currentMessage()
+
+
+def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
+    from visualdynamics import fem
+
+    aluminum = fem.material('6061-T6')
+    two_blocks.block_properties = {7: fem.BlockProperties(aluminum, 0.01),
+                                   9: fem.BlockProperties(aluminum, 0.02)}
+    item = _show_geometry(window, pump, two_blocks)
+    _pick_blocks(window, pump, item, [0, 1])
+    assert window.acts_for() == []
+    _pick_blocks(window, pump, item, [0])
+    assert window.acts_for() == [], 'one block has nothing to merge with'
+
+
+def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
+    from PySide6.QtCore import QItemSelectionModel
+
+    item = _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(_category(item, 'Blocks'))
+    window.edit_entities()
+    pump()
+    window.table.selectRow(0)
+    pump()
+    assert not window.merge_blocks_action.isVisible(), 'one row'
+    window.table.selectionModel().select(
+        window.table.model().index(1, 0),
+        QItemSelectionModel.SelectionFlag.Select
+        | QItemSelectionModel.SelectionFlag.Rows)
+    pump()
+    assert window.merge_blocks_action.isVisible()
+    window.merge_blocks_action.trigger()
+    pump()
+    assert list(two_blocks.block_id) == [7] and len(two_blocks.elem_id) == 2

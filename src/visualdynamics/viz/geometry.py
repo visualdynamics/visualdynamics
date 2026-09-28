@@ -300,6 +300,12 @@ DOF_DIRECTIONS = {
     'RY-': (0, -1, 0), 'RZ+': (0, 0, 1), 'RZ-': (0, 0, -1),
 }
 DOF_LABEL_LIMIT = 40
+#: a geometry shown on its own, with nothing measured to ask about, draws
+#: its arrows at every node's three translations — up to this many
+#: nodes. Past it the arrows are a solid hedge that says nothing, and
+#: the app says why they are missing instead (Brandon, 2026-09-27: a
+#: few thousand nodes of them hung the window)
+DOF_ARROW_NODE_LIMIT = 300
 
 
 def dof_axis(direction: str) -> int | None:
@@ -315,11 +321,13 @@ def dof_arrow_length(points: ArrayLike, extent: float) -> float:
     length = 0.12 * extent
     unique = np.unique(np.asarray(points, dtype=float), axis=0)
     if len(unique) > 1:
-        deltas = unique[:, np.newaxis, :] - unique[np.newaxis, :, :]
-        distances = np.sqrt((deltas ** 2).sum(axis=2))
-        distances[distances == 0] = np.inf
-        nearest = float(distances.min())
-        if np.isfinite(nearest):
+        from scipy.spatial import cKDTree
+
+        # each node's nearest neighbor, by tree: the all-pairs table this
+        # replaced was 600 MB at five thousand nodes (2026-09-27)
+        distances, _index = cKDTree(unique).query(unique, k=2)
+        nearest = float(distances[:, 1].min())
+        if np.isfinite(nearest) and nearest > 0:
             length = min(length, 0.9 * nearest)
     return length
 
@@ -330,7 +338,8 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    name: str | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
-    One arrow per DOF, colored by the axis it points along — X red,
+    One arrow per DOF (built into one mesh per color, so ten thousand
+    cost what ten do), colored by the axis it points along — X red,
     Y green, Z blue, the orientation marker's own convention. Response
     style starts at the node and points outward, label at the tip;
     `incoming` (forces) ends on the node instead, label at the base.
@@ -365,15 +374,30 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
         return 0
     length = dof_arrow_length([entry[0] for entry in entries], extent)
     label_spots = {0: [], 1: [], 2: []}
-    for index, (position, vector, axis, dof) in enumerate(entries):
+    starts = {0: [], 1: [], 2: []}
+    vectors = {0: [], 1: [], 2: []}
+    for position, vector, axis, dof in entries:
         start = position - vector * length if incoming else position
-        plotter.add_mesh(
-            pv.Arrow(start=start, direction=vector, scale=length),
-            color=AXIS_COLORS[axis],
-            name=None if name is None else f'{name}-arrow{index}')
+        starts[axis].append(start)
+        vectors[axis].append(vector)
         spot = (start - vector * length * 0.25 if incoming
                 else position + vector * length * 1.25)
         label_spots[axis].append((spot, dof))
+    # One mesh per axis color, every arrow of that color glyphed into
+    # it, added without a render. An actor per arrow — each add a
+    # synchronous render of the whole scene in the app — made a bare
+    # geometry's arrows at every node quadratic, and a model of a few
+    # thousand nodes hung the window for minutes (Brandon, 2026-09-27).
+    for axis in (0, 1, 2):
+        if not starts[axis]:
+            continue
+        base = pv.PolyData(np.asarray(starts[axis], dtype=float))
+        base['direction'] = np.asarray(vectors[axis], dtype=float)
+        plotter.add_mesh(
+            base.glyph(orient='direction', scale=False, factor=length,
+                       geom=pv.Arrow()),
+            color=AXIS_COLORS[axis], render=False,
+            name=None if name is None else f'{name}-arrows{axis}')
     # labels only while they can be read: past a few dozen arrows the
     # names overprint into noise, and the arrows alone say where
     if len(entries) <= DOF_LABEL_LIMIT:
@@ -385,7 +409,7 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                 [dof for _spot, dof in spots],
                 font_size=12, always_visible=True,
                 text_color=AXIS_COLORS[axis], shape=None,
-                fill_shape=False, show_points=False,
+                fill_shape=False, show_points=False, render=False,
                 name=None if name is None else f'{name}-labels{axis}')
     return len(entries)
 
@@ -789,6 +813,23 @@ def add_geometry(plotter: Any, geometry: Geometry,
     return axis_unit
 
 
+def place_view(plotter: Any, view: Any = None, render: bool = True) -> None:
+    """Turn the camera to `view` — a geometry's `View`, or the default
+    isometric when None — and fit what the plotter holds.
+
+    The one way a 3-D view of a geometry is opened: the app when it first
+    shows one and on Reset View, the script windows, the animations and
+    every exported figure, so a geometry opens the same way wherever it
+    is drawn. The report's scenes open on the same view through
+    `View.basis`.
+    """
+    from ..core.geometry import DEFAULT_VIEW
+
+    view = view or DEFAULT_VIEW
+    plotter.view_vector(view.eye, viewup=view.up, render=False)
+    plotter.reset_camera(render=render)
+
+
 def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
                   screenshot: str | None = None, theme: Any = None,
                   show: bool = True, size_in: tuple[float, float] | None = None,
@@ -810,6 +851,7 @@ def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
         else:
             plotter = geometry_scene(geometry, unit_system=unit_system,
                                      theme=theme, off_screen=True, **kwargs)
+        place_view(plotter, geometry.opening_view, render=False)
         img = plotter.screenshot(screenshot)
         plotter.close()
         return img
@@ -821,7 +863,7 @@ def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
                                        plotter=plotter, theme=theme,
                                        **kwargs),
         theme=theme, axis_unit=axis_unit_text(geometry, us),
-        title='Geometry', show=show)
+        title='Geometry', show=show, view=geometry.opening_view)
 
 
 def plot_dofs(geometry: Geometry, source: Any, quantity: str,
@@ -857,6 +899,7 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
         else:
             plotter = pv.Plotter(off_screen=True)
             draw(plotter)
+        place_view(plotter, geometry.opening_view, render=False)
         image = plotter.screenshot(str(screenshot))
         plotter.close()
         return image
@@ -864,4 +907,5 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
 
     return scene_window(draw, theme=theme,
                         axis_unit=axis_unit_text(geometry, us),
-                        title=f'DOFs — {quantity}', show=show)
+                        title=f'DOFs — {quantity}', show=show,
+                        view=geometry.opening_view)

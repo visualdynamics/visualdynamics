@@ -227,7 +227,7 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
     elastic = [i for i, f in enumerate(shapes.frequency) if f > 1.0][:BARC_MODES]
     shapes.delete_modes([i for i in range(shapes.num_shapes)
                          if i not in elastic])
-    geometry, shapes = barc.upright(barc.geometry(size), shapes)
+    geometry = barc.geometry(size)
     demo = visualdynamics.Project('Examples')
     demo.add('BARC', geometry)
     demo.add('Modes', shapes)

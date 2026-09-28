@@ -50,6 +50,26 @@ the centroid with no mass. *Generate Rigid Body Mode Shapes*
 (`project.generate_rigid_body_modes`) makes the six-mode shape set in
 the geometry's group, previewed on the model as the point is set.
 
+A geometry also carries its default `view` — how it opens in 3-D
+([`View`](../api/visualdynamics.core.geometry.md)): the direction from
+the model to the eye and which way is up, no distance or zoom, since
+every view fits the model. It is how the app opens the geometry and
+everything drawn on it (shapes, an ODS, the DOF arrows), where *Reset
+View* on the 3-D view's bar returns, and how the report's scenes and
+the exported figures (`plot`, `plot_dofs`, the animations) are drawn.
+In the app, turn the model the way you want it and use *Set Default
+View* on the geometry's bar; from a script,
+
+```python
+from visualdynamics import View
+
+project.set_view('BARC', View(eye=(1, 1, -1), up=(0, 1, 0)))  # built y-up
+```
+
+`None` goes back to the default, from +X+Y+Z with Z up. Only how the
+model is looked at changes; its nodes are not turned. The view is
+saved with the geometry.
+
 A geometry is also a finite element model once its blocks say what
 they are made of. The Blocks table's property columns take, per
 block, a material (name, E, ν, ρ) and either a thickness — for a block
@@ -347,7 +367,7 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_blocks`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |

@@ -191,3 +191,86 @@ def test_the_quantity_drop_down_needs_geometry_plus_data(window, pump,
     window.dofs_action.setChecked(False)
     pump()
     assert not window.dofs_combo_action.isVisible()
+
+
+# ---- many arrows (2026-09-27) ---------------------------------------------
+
+
+def _grid(nodes_per_side):
+    from visualdynamics import mesh
+
+    return mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0),
+                      1.0 / (nodes_per_side - 1))
+
+
+def test_arrows_are_one_mesh_per_color_added_without_a_render():
+    """An actor per arrow, each add a synchronous render of the whole
+    scene in the app, made a geometry's arrows at every node quadratic:
+    a model of a few thousand nodes hung the window for minutes
+    (Brandon, 2026-09-27). Three thousand arrows are three meshes, and
+    nothing renders while they are added."""
+    import pyvista as pv
+
+    from visualdynamics.viz.geometry import add_dof_arrows
+
+    geometry = _grid(32)                          # 1,024 nodes
+    dofs = [f'{node}{axis}' for node in geometry.node_id
+            for axis in ('X+', 'Y+', 'Z-')]
+    plotter = pv.Plotter(off_screen=True)
+    renders = []
+    plotter.render = lambda *a, **k: renders.append(1)
+    try:
+        drawn = add_dof_arrows(plotter, geometry, dofs,
+                               unit_system=visualdynamics.SI)
+        meshes = [actor.mapper.dataset for actor in
+                  plotter.renderer.actors.values()
+                  if getattr(actor, 'mapper', None) is not None
+                  and isinstance(actor.mapper.dataset, pv.PolyData)]
+    finally:
+        plotter.close()
+    assert drawn == len(dofs) == 3072
+    assert len(meshes) == 3, 'one mesh per axis color'
+    single = pv.Arrow().n_points
+    assert sum(m.n_points for m in meshes) == len(dofs) * single, (
+        'every arrow is in them')
+    assert renders == []
+
+
+def test_the_arrow_length_does_not_compare_every_pair():
+    """The nearest spacing by tree: the all-pairs table it replaced held
+    nodes² × 3 floats — 600 MB at five thousand nodes."""
+    from visualdynamics.viz.geometry import dof_arrow_length
+
+    rng = np.random.default_rng(0)
+    points = rng.uniform(0, 1, (20000, 3))
+    points[7] = points[3] + [0.0, 0.0, 1e-4]
+    assert dof_arrow_length(points, extent=1.0) == pytest.approx(0.9e-4)
+
+
+def test_a_large_bare_geometry_says_why_it_has_no_arrows(window, pump):
+    """A geometry alone draws arrows at every node — past a few hundred
+    nodes a solid hedge, so it draws none and the status bar says why."""
+    from visualdynamics.viz.geometry import DOF_ARROW_NODE_LIMIT
+
+    small, large = _grid(8), _grid(20)
+    assert small.num_nodes <= DOF_ARROW_NODE_LIMIT < large.num_nodes
+    window.add_object('Small', small)
+    window.add_object('Large', large)
+
+    def actors(name, arrows):
+        window.dofs_action.setChecked(arrows)
+        window.tree.clearSelection()
+        item = window._item_for_object(name)
+        item.setSelected(True)
+        window.tree.setCurrentItem(item)
+        window.render_current()
+        pump()
+        return len(window.scene.plotter.renderer.actors)
+
+    # 192 arrows, past the label limit: the three colors' meshes alone
+    assert actors('Small', True) - actors('Small', False) == 3
+    assert 'no DOF arrows' not in window.statusBar().currentMessage()
+    assert actors('Large', True) == actors('Large', False)
+    actors('Large', True)
+    message = window.statusBar().currentMessage()
+    assert f'no DOF arrows on {large.num_nodes:,} nodes' in message, message

@@ -32,12 +32,15 @@ def _run(app: Any, widget: Any, show: bool) -> Any:
 def scene_window(draw: Callable[[Any], Any], *, theme: Any = None,
                  title: str | None = None, axis_unit: str = '',
                  size: tuple[int, int] = (1000, 700),
-                 show: bool = True) -> ScenePane:
+                 show: bool = True, view: Any = None) -> ScenePane:
     """Draw into a ScenePane of its own and put it on screen.
 
     `draw(plotter)` adds whatever is being shown. `axis_unit` is what the
     labeled axes say, which the pane needs to re-annotate when the bar's
-    toggles move. Returns the pane; its `.plotter` is the PyVista one.
+    toggles move. `view` is the geometry's `View` it opens on and Reset
+    View returns to; without one — a MAC's bars, a waterfall — whatever
+    camera `draw` placed is kept and fitted. Returns the pane; its
+    `.plotter` is the PyVista one.
     """
     app = _application()
     pane = ScenePane(theme)
@@ -51,7 +54,11 @@ def scene_window(draw: Callable[[Any], Any], *, theme: Any = None,
     pane.axis_unit = axis_unit
     draw(pane.plotter)
     pane.apply_annotations()
-    pane.plotter.reset_camera()
+    pane.set_home_view(view)
+    if view is None:
+        pane.plotter.reset_camera()
+    else:
+        pane.reset_view()
     pane.plotter.render()
     return _run(app, pane, show)
 

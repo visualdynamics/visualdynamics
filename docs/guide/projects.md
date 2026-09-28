@@ -106,13 +106,16 @@ geometry.tracelines.delete([12])
 Everything is deleted by **id**, in all five groups. Deleting an id
 that is not there is not an error.
 
-A block is a *label on elements* rather than something with a shape of
-its own: it has an id and a name, and what it holds is read off the
-elements (`elements_in('wing')`, `block_of(elem_id)`). So deleting one
-moves its elements into the first block left rather than taking them
-with it, the last block cannot go while an element names one, and moving
-an element between blocks is an edit to the *element* — in the app, the
-Block column of the element table.
+A block is a part: it has an id and a name, and what it holds is read
+off the elements (`elements_in('wing')`, `block_of(elem_id)`). Deleting
+one deletes the part — its elements, and the nodes no other block's
+element uses; nodes it shares with another block stay, so the neighbor
+is not cut into. Blocks that hold the same element types and carry the
+same material and thickness or section can be made one
+(`merge_blocks([7, 9])`, the first keeping its id and name; in the app,
+select them in the tree or the Blocks table and press **Merge Blocks**).
+Moving an element between blocks is an edit to the *element* — in the
+app, the Block column of the element table.
 
 Node and coordinate-system ids are unique, because connectivity and
 node placement refer to them. A traceline or element id is a label, and

@@ -47,6 +47,7 @@ from .core import (
     Srs,
     TimeHistory,
     TransientSpecification,
+    View,
     fem,
     mesh,
 )
@@ -172,6 +173,7 @@ __all__ = [
     'TransientSpecification',
     'UnitSystem',
     'UnitsRequired',
+    'View',
     '__version__',
     'check_compatibility',
     'convert',

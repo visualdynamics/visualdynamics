@@ -1579,6 +1579,11 @@ class ScenePane(QWidget):
         self.bounds_visible: bool = False
         self.orientation_visible: bool = True
         self.axis_unit: str = ''
+        #: the view Reset View returns to: the shown geometry's own
+        #: (`Geometry.opening_view`), None while no geometry is shown
+        self.home_view: Any = None
+        self._home_owner: Any = None      # the geometry it belongs to
+        self._framed_owner: Any = None    # the last one turned to it
 
         self.toolbar: QToolBar = self._build_toolbar()
         layout = QVBoxLayout(self)
@@ -1614,6 +1619,16 @@ class ScenePane(QWidget):
         toolbar = QToolBar('3D view')
         toolbar.setMovable(False)
         toolbar.setIconSize(QSize(18, 18))
+        # there was no way back to where a geometry opened: a turned
+        # model stayed turned until another object was shown (2026-09-27)
+        self.reset_view_action: QAction = QAction(
+            control_icon('reset_view'), 'Reset View', self)
+        self.reset_view_action.setToolTip(
+            "Turn the view back to the geometry's default view and fit it")
+        self.reset_view_action.triggered.connect(self.reset_view)
+        self.reset_view_action.setVisible(False)
+        toolbar.addAction(self.reset_view_action)
+
         self.bounds_action: QAction = QAction(child_icon('bounds', 'Test'),
                                      'Plot axes', self)
         self.bounds_action.setCheckable(True)
@@ -1736,7 +1751,38 @@ class ScenePane(QWidget):
         placeholder.deleteLater()
         return self.plotter
 
+    def set_home_view(self, view: Any, owner: Any = None) -> None:
+        """The view Reset View returns to, and the geometry it is
+        `owner`'s; None hides it (a scene with no geometry in it has no
+        view of its own to return to)."""
+        self.home_view = view
+        self._home_owner = owner
+        self.reset_view_action.setVisible(view is not None)
+
+    def frame(self) -> None:
+        """Fit new content. Turned to the home view when its geometry is
+        new to the pane; otherwise only refitted, so a turn the user made
+        survives stepping from a geometry to the shapes drawn on it —
+        framing is for new content, and the view belongs to the user."""
+        if self.plotter is None:
+            return
+        if self.home_view is not None and \
+                self._home_owner is not self._framed_owner:
+            self._framed_owner = self._home_owner
+            self.reset_view()
+        else:
+            self.plotter.reset_camera()
+
+    def reset_view(self) -> None:
+        """Turn the camera to the home view and fit the scene."""
+        if self.plotter is None or self.home_view is None:
+            return
+        from ..viz.geometry import place_view
+
+        place_view(self.plotter, self.home_view)
+
     def clear(self) -> None:
+        self.set_home_view(None)
         if self.plotter is not None:
             self.plotter.clear()
             self.apply_background()

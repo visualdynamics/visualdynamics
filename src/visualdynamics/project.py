@@ -34,7 +34,7 @@ from .core.data import (
     TransientSpecification,
     _CoherenceBase,
 )
-from .core.geometry import Geometry
+from .core.geometry import Geometry, View
 from .core.matches import MatchedModes
 from .core.photos import Photos
 from .core.report import Report
@@ -2148,6 +2148,43 @@ class Project(dict):
         return self.add(name, Geometry(node_id=[], node_xyz=np.empty((0, 3)),
                                        length_unit=unit))
 
+    def set_view(self, source: Any, view: View | None = None) -> None:
+        """Set the view a geometry opens on in 3-D, in the app, the report
+        and every exported figure.
+
+        The app's Set Default View captures the view on screen; from a
+        script it is stated, a model built Y-up seen from the front and
+        above, say. Everything drawn on the geometry — its shapes, an
+        ODS, the DOF arrows — opens on it too, and Reset View returns to
+        it. The nodes are not turned: only how the model is looked at
+        (Brandon, 2026-09-27).
+
+        Parameters
+        ----------
+        source : str or Geometry
+            The geometry, by name or as the object itself.
+        view : View, optional
+            Where the eye is, seen from the model's center, and which way
+            is up; None goes back to the default isometric (from +X+Y+Z,
+            Z up).
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        >>> from visualdynamics import View
+        >>> project.set_view('BARC', View(eye=(1, 1, -1), up=(0, 1, 0)))  # doctest: +SKIP
+        """
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        if view is not None and not isinstance(view, View):
+            raise TypeError('view must be a View, or None for the default')
+        geometry.view = view
+
     def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
                   size: float, block: str = '', *, unit: str = 'm',
                   tolerance: float | None = None) -> dict:
@@ -2234,6 +2271,32 @@ class Project(dict):
             raise TypeError(f'{name!r} is not a geometry')
         to = to if isinstance(to, (str, int)) else [int(e) for e in to]
         return mesh.tie(geometry, [int(e) for e in elements], to, block)
+
+    def merge_blocks(self, source: Any, blocks: Any) -> dict:
+        """Merge a geometry's blocks into one (Merge Blocks): the first
+        keeps its id, name and properties and the others' elements move
+        into it — refused unless they hold the same element types and
+        carry the same material and thickness or section
+        (`Geometry.merge_refusal`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        blocks : sequence of int
+            The blocks, by id; the first is the one kept.
+
+        Returns
+        -------
+        dict
+            'into', the block kept; 'blocks', how many merged into it;
+            'elements', how many elements moved.
+        """
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        return geometry.merge_blocks([int(b) for b in blocks])
 
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
@@ -3086,7 +3149,7 @@ class Project(dict):
         if isinstance(value, os.PathLike):
             return repr(str(value))
         if isinstance(value, (str, int, float, bool, type(None),
-                              tuple, list)):
+                              tuple, list, View)):
             return repr(value)
         try:
             return repr(self.name_of(value))
@@ -3202,6 +3265,7 @@ class Project(dict):
         ('Photos(', 'from visualdynamics.core.photos import Photos'),
         ('MassProperties(',
          'from visualdynamics.core.rigid import MassProperties'),
+        ('View(', 'from visualdynamics import View'),
         ('SpecificationDraft(',
          'from visualdynamics.core.author import SpecificationDraft'),
         ('np.array(', 'import numpy as np'),
@@ -3390,6 +3454,7 @@ _VERB_APPLIES: tuple = (
                                              and len(o.elem_conn) > 0)),
     # a plane goes into any geometry, an empty one above all
     ('add_plane', lambda p, o: isinstance(o, Geometry)),
+    ('set_view', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
     ('project_onto_basis', _two_shape_sets),
@@ -3476,6 +3541,7 @@ _JOURNALED_VERBS = (
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'merge_coincident_nodes', 'new_geometry', 'add_plane', 'tie_elements',
+    'merge_blocks', 'set_view',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale',

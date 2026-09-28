@@ -1675,6 +1675,17 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.tie_action)
         self.tie_action.setVisible(False)
 
+        # the same act from the Blocks table: two rows or more that may
+        # be one block
+        self.merge_blocks_action: QAction = QAction(
+            control_icon('merge_blocks'), '', self)
+        self.merge_blocks_action.setToolTip(
+            'Merge Blocks — make the selected blocks one block: the first '
+            'keeps its name and properties')
+        self.merge_blocks_action.triggered.connect(self._merge_block_rows)
+        toolbar.addAction(self.merge_blocks_action)
+        self.merge_blocks_action.setVisible(False)
+
         # what a click builds while adding elements; only on screen when
         # adding elements, since nothing else is built from a node count
         self.element_type_group: QActionGroup = QActionGroup(self)
@@ -1902,8 +1913,9 @@ class MainWindow(QMainWindow):
                        self.scene.bounds_visible, self.scene.orientation_visible)
         self._caption_scene(caption)
         self._decorate_rigid()
+        self.scene.set_home_view(geometry.opening_view, geometry)
         if reframe:
-            self.scene.plotter.reset_camera()
+            self.scene.frame()
         else:
             self.scene.plotter.camera_position = camera
         self.scene.plotter.render()
@@ -2903,10 +2915,11 @@ class MainWindow(QMainWindow):
         ('project_onto_basis', 'Project onto Basis DOFs', 'project',
          'project_onto_basis'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
-        ('solve_modes', 'Solve Modes', 'quad', 'solve_modes_act'),
+        ('solve_modes', 'Solve Modes', 'solve_modes', 'solve_modes_act'),
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
+        ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
     )
 
     def acts_for(self, names=None):
@@ -2919,6 +2932,19 @@ class MainWindow(QMainWindow):
         object offers Recompute first, ahead of anything else it can do.
         """
         if names is None:
+            # two blocks or more of one geometry, picked in the tree, that
+            # may be one (Brandon, 2026-09-27): only when they may —
+            # a refused merge is not offered (principle 3)
+            picked = self._selected_entities()
+            if picked is not None and picked[1] == 'blocks':
+                geometry = self.objects.get(picked[0])
+                if (geometry is not None and len(picked[2]) > 1
+                        and geometry.merge_refusal(picked[2]) is None):
+                    return [('merge_blocks', 'Merge Blocks', 'merge_blocks',
+                             lambda: self.merge_blocks_act(picked[0],
+                                                           picked[2]),
+                             ('Make the selected blocks one block: the '
+                              'first keeps its name and properties'))]
             if self.test_item.isSelected():
                 return [('generate_report', 'Generate Report', 'report',
                          self.generate_report_act,
@@ -4542,6 +4568,52 @@ class MainWindow(QMainWindow):
         self.tie_action.setVisible(
             elements and (selected or self._tie_patch is not None))
         self.tie_action.setChecked(self._tie_patch is not None)
+        self.merge_blocks_action.setVisible(
+            self._block_rows_to_merge() is not None)
+
+    def _block_rows_to_merge(self):
+        """(geometry name, block ids) when the Blocks table has two rows
+        or more selected that may be one block, else None."""
+        if (self.editing is None or self.editing[1] != 'blocks'
+                or self.add_mode or self.table.selectionModel() is None):
+            return None
+        name = self.editing[0]
+        geometry = self.objects.get(name)
+        rows = sorted({index.row() for index
+                       in self.table.selectionModel().selectedRows()})
+        if geometry is None or len(rows) < 2:
+            return None
+        blocks = [_entity_key(geometry, 'blocks', row) for row in rows]
+        if geometry.merge_refusal(blocks) is not None:
+            return None
+        return name, blocks
+
+    def _merge_block_rows(self):
+        picked = self._block_rows_to_merge()
+        if picked is not None:
+            self.merge_blocks_act(*picked)
+
+    def merge_blocks_act(self, name, blocks):
+        """The project's `merge_blocks`, and what it did, said."""
+        geometry = self.objects.get(name)
+        try:
+            found = self.project.merge_blocks(name, blocks)
+        except (ValueError, TypeError) as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        kept = geometry.block_name[list(geometry.block_id).index(
+            found['into'])] or f'Block {found["into"]}'
+        message = (f'{name}: merged {found["blocks"]} block'
+                   f'{"s" * (found["blocks"] != 1)} into {kept} — '
+                   f'{found["elements"]} elements moved')
+        if self.editing is not None:
+            self._after_geometry_change(name, geometry, message)
+        else:
+            self._refresh_item(self._item_for_object(name), geometry)
+            self.refresh_compatibility()
+            self.render_current()
+            self._show_status(message)
+        self._update_tie_action()
 
     def tie_selected(self) -> None:
         """Tie the selected elements: to the nearest nodes of a block,
@@ -5286,6 +5358,7 @@ class MainWindow(QMainWindow):
                        self.scene.orientation_visible)
         # adding an element must not move the camera: an edit redraws the
         # scene, and a rebuilt scene would otherwise re-frame itself
+        self.scene.set_home_view(geometry.opening_view, geometry)
         self.scene.plotter.camera_position = camera
         self.scene.plotter.render()
 
@@ -7540,8 +7613,9 @@ class MainWindow(QMainWindow):
         annotate_scene(self.scene.plotter, self.scene.axis_unit, theme,
                        self.scene.bounds_visible, self.scene.orientation_visible)
         self._caption_scene(caption)
+        self.scene.set_home_view(first_pair[0].opening_view, first_pair[0])
         if reframe:
-            self.scene.plotter.reset_camera()
+            self.scene.frame()
         else:
             self.scene.plotter.camera_position = camera
         self.scene.plotter.render()
@@ -8452,20 +8526,27 @@ class MainWindow(QMainWindow):
 
         Drawn after the animator, because it builds the scene it is
         going to animate and anything added before is not in it.
+
+        Returns what the status bar should add: why a large bare
+        geometry has no arrows, or ''.
         """
         if not self.dofs_action.isChecked():
-            return
+            return ''
         from ..core.report import (
             EXCITATION_QUANTITIES,
             series_quantity_dofs,
         )
-        from ..viz.geometry import add_dof_arrows
+        from ..viz.geometry import DOF_ARROW_NODE_LIMIT, add_dof_arrows
 
         quantity = self.dofs_combo.currentData() if self._dof_series else None
+        skipped = []
         for geometry in geometries:
             if quantity:
                 dofs = series_quantity_dofs(self._dof_series, quantity)
             else:
+                if geometry.num_nodes > DOF_ARROW_NODE_LIMIT:
+                    skipped.append(geometry.num_nodes)
+                    continue
                 # nothing measured to ask about, so every node's own
                 # three translations. Written as plain DOF strings, so
                 # a node whose displacement coordinate system is turned
@@ -8478,6 +8559,11 @@ class MainWindow(QMainWindow):
             add_dof_arrows(self.scene.plotter, geometry, dofs,
                            unit_system=self.unit_system,
                            incoming=quantity in EXCITATION_QUANTITIES)
+        if not skipped:
+            return ''
+        return (f'no DOF arrows on {max(skipped):,} nodes — past '
+                f'{DOF_ARROW_NODE_LIMIT} they hide the model; select data '
+                'with it to see the DOFs it measures')
 
     def _shape_summary(self, shapes, geometries=None):
         """Mode shapes have no view of their own; say what is selected, and
@@ -8512,7 +8598,8 @@ class MainWindow(QMainWindow):
             components = entry['components'] or None
             entities = entry['entities']
             # one color per geometry so overlaid ones stay tellable apart
-            override = curve_color(i) if len(geometries) > 1 else None
+            override = (curve_color(i, colors) if len(geometries) > 1
+                        else None)
             if components or entities:
                 axis_unit = self._add_with_context(
                     geometry, components, entities, colors)
@@ -8520,17 +8607,25 @@ class MainWindow(QMainWindow):
                 axis_unit = add_geometry(
                     self.scene.plotter, geometry, unit_system=self.unit_system,
                     color_override=override, text_color=colors['scene_text'])
-        self._add_dof_arrows(entry['object'] for _name, entry in geometries)
+        arrows_note = self._add_dof_arrows(
+            entry['object'] for _name, entry in geometries)
         self.scene.axis_unit = axis_unit
         annotate_scene(self.scene.plotter, axis_unit, colors, self.scene.bounds_visible,
                        self.scene.orientation_visible)
+        # several geometries open on the first one's view — the one they
+        # are sorted after in `showing`, so the choice does not depend on
+        # the order they were clicked
+        first = dict(geometries)[showing[0]]['object'] if showing else None
+        self.scene.set_home_view(
+            first.opening_view if first is not None else None, first)
         if reframe:
-            self.scene.plotter.reset_camera()
+            self.scene.frame()
         else:
             # explicit: clearing a scene lets the next mesh reset the camera
             self.scene.plotter.camera_position = camera
         self.scene.plotter.render()
-        return self._geometry_status(geometries, ignored)
+        status = self._geometry_status(geometries, ignored)
+        return f'{status}  |  {arrows_note}' if arrows_note else status
 
     def _add_with_context(self, geometry, components, entities, colors):
         """Draw the whole geometry muted, with the selection standing out.
@@ -10594,6 +10689,29 @@ class MainWindow(QMainWindow):
             if isinstance(current, Geometry) and not current.num_nodes:
                 plotter.reset_camera(render=False)   # nothing else to frame
         plotter.render()
+
+    def set_view_act(self) -> None:
+        """Keep the view on screen as the selected geometry's default:
+        how it and everything drawn on it open, in the app, the report
+        and exported figures (Brandon, 2026-09-27)."""
+        from ..core.geometry import View
+
+        obj = self.current_object()
+        plotter = self.scene.plotter
+        if not isinstance(obj, Geometry) or plotter is None:
+            self._show_status('Select a geometry to set its default view')
+            return
+        position, focus, up = plotter.camera_position
+        # a unit direction, four decimals: how far away the camera stood
+        # is the fit's business, and no hand turns a model finer
+        eye = np.subtract(position, focus)
+        view = View(np.round(eye / np.linalg.norm(eye), 4),
+                    np.round(np.asarray(up) / np.linalg.norm(up), 4))
+        self.project.set_view(obj, view)
+        self.scene.set_home_view(obj.opening_view, obj)
+        self._report_content_changed(settling=True)
+        self._show_status(f'{self.project.name_of(obj)} opens on this view '
+                          'now — Reset View returns to it')
 
     def solve_modes_act(self) -> None:
         """The normal modes of the selected geometry, built from its

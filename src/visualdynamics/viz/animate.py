@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..units import DEFAULT_SYSTEM
-from .geometry import add_geometry, display_points, shared_points, shared_scalars
+from .geometry import (
+    add_geometry,
+    display_points,
+    place_view,
+    shared_points,
+    shared_scalars,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
@@ -234,6 +240,7 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
         animator.set_scale(scale)
         animator.set_parameter(0.0)
         annotate_scene(plotter, animator.axis_unit, colors)
+        place_view(plotter, geometry.opening_view, render=False)
         image = plotter.screenshot(str(screenshot))
         plotter.close()
         return image
@@ -249,7 +256,7 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
                                 unit_system=unit_system, colormap=colormap)
     animator.set_scale(scale)
     annotate_scene(plotter, animator.axis_unit, colors)
-    plotter.reset_camera()
+    place_view(plotter, geometry.opening_view)
 
     # the desktop's own two seconds a cycle, stepped on a wall clock so
     # the swing reads the same however fast the machine renders
@@ -329,6 +336,7 @@ def animate_envelope(geometry: Geometry, data: Any,
         plotter = pv.Plotter(off_screen=True)
         plotter.set_background(colors['scene_background'])
         build(plotter)
+        place_view(plotter, geometry.opening_view, render=False)
         image = plotter.screenshot(str(screenshot))
         plotter.close()
         return image
@@ -340,7 +348,7 @@ def animate_envelope(geometry: Geometry, data: Any,
     plotter = undeferred(BackgroundPlotter(title=caption, show=show))
     plotter.set_background(colors['scene_background'])
     build(plotter)
-    plotter.reset_camera()
+    place_view(plotter, geometry.opening_view)
     return plotter
 
 
@@ -394,6 +402,7 @@ def animate_ods(geometry: Geometry, data: Any,
         animator.set_scale(scale)
         animator.set_parameter(0.0)
         annotate_scene(plotter, animator.axis_unit, colors)
+        place_view(plotter, geometry.opening_view, render=False)
         image = plotter.screenshot(str(screenshot))
         plotter.close()
         return image
@@ -408,7 +417,7 @@ def animate_ods(geometry: Geometry, data: Any,
                                 unit_system=unit_system, colormap=colormap)
     animator.set_scale(scale)
     annotate_scene(plotter, animator.axis_unit, colors)
-    plotter.reset_camera()
+    place_view(plotter, geometry.opening_view)
 
     interval = 33
     step = 2 * np.pi * interval / (cycle_seconds * 1000.0)

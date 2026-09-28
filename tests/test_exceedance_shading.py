@@ -406,17 +406,47 @@ def test_runs_against_one_specification_each_take_a_color(qt_app):
         pg.mkColor(theme['specification_curve']).name()]
 
 
-def test_one_run_keeps_the_foreground_color(qt_app):
+def test_one_run_takes_a_curve_color(qt_app):
+    """In the foreground color, a near-black run over its gray
+    specification could not be told from it in print (Brandon,
+    2026-09-27); it takes the first curve color, translucent so the
+    specification shows through where the two lie on each other."""
     import pyqtgraph as pg
+
+    from visualdynamics.plot import MEASURED_ALPHA, curve_color
 
     lines = np.linspace(20.0, 2000.0, 120)
     _fills, plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
                           measured(lines))
-    pens = {label.text: sample.item.opts['pen'].color().name()
+    pens = {label.text: sample.item.opts['pen'].color()
             for sample, label in plot.legend.items
             if sample.item.opts.get('pen') is not None}
-    assert [pens[n] for n in pens if n.startswith('M')] == [
-        pg.mkColor(resolve_theme('light')['response_curve']).name()]
+    run = [pens[n] for n in pens if n.startswith('M')]
+    assert [c.name() for c in run] == [
+        pg.mkColor(curve_color(0, resolve_theme('light'))).name()]
+    assert abs(run[0].alphaF() - MEASURED_ALPHA) < 0.01
+    gray = [pens[n] for n in pens if n.startswith('S')]
+    assert [c.name() for c in gray] == [
+        pg.mkColor(resolve_theme('light')['specification_curve']).name()]
+    assert gray[0].alphaF() == 1.0
+
+
+def test_the_run_is_drawn_over_its_specification(qt_app):
+    """The gray is opaque and wider, so whichever is painted last is the
+    one seen: drawn after its response at the same depth it covered it,
+    and a compliant run showed no color anywhere it met its target (the
+    band-average paper, 2026-09-27). Qt paints by depth, then by the
+    order items were added; the specification is beneath either way,
+    and above the zone fills."""
+    lines = np.linspace(20.0, 2000.0, 120)
+    fills, plot = shaded(qt_app, spec(abort_upper=4.0, abort_lower=0.25),
+                         measured(lines))
+    items = [item for item in plot.listDataItems() if item.name()]
+    order = sorted(items, key=lambda item: (item.zValue(),
+                                            items.index(item)))
+    assert [item.name()[0] for item in order] == ['S', 'M'], \
+        [(item.name(), item.zValue()) for item in items]
+    assert all(fill.zValue() < order[0].zValue() for fill in fills)
 
 
 def test_the_legend_text_is_a_setting(qt_app):

@@ -467,10 +467,11 @@ def test_a_density_is_drawn_flat_across_its_own_bin():
     assert alone.get('steps', False) is False
 
 
-def test_the_reference_is_gray_and_the_measurement_is_the_page_ink():
+def test_the_reference_is_gray_and_the_measurement_is_a_curve_color():
     """The app's own reading of the pair: gray behind because it is the
-    reference, the page's ink in front because it is what is being
-    looked at."""
+    reference, the first curve color in front because it is what is
+    being looked at. It was the page's ink, which could not be told
+    from the gray in print (Brandon, 2026-09-27)."""
     from visualdynamics.report import _plot_block
 
     loaded = visualdynamics.import_file(fixture_path('plate', 'random.nc4'))
@@ -481,7 +482,8 @@ def test_the_reference_is_gray_and_the_measurement_is_the_page_ink():
          'mode': 'curves'}, psds, {'S': spec, 'P': psds}, visualdynamics.SI)
     target, measured = built['curves']
     assert target.get('gray') and not target.get('ink')
-    assert measured.get('ink') and not measured.get('gray')
+    assert measured.get('color') == 0
+    assert not measured.get('ink') and not measured.get('gray')
 
 
 # ---- the comparison as bars ---------------------------------------------

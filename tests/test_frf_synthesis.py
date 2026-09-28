@@ -215,13 +215,15 @@ def test_the_overlay_carries_mode_markers_in_the_theme_ink(shown, pump):
 # ---- specifications follow their measurement's color ------------------------
 
 def test_a_specification_and_its_response_are_a_pair(window, pump):
-    """One comparison is drawn at a time, so there is nothing to tell
-    apart by color: the response takes the foreground because it is
-    what is being looked at, the specification gray behind it because it
-    is the reference. They used to share a palette color, which is what
-    a plot of six comparisons at once needed and this is not."""
+    """One comparison is drawn at a time: the specification stands back
+    in gray because it is the reference, the response in the first curve
+    color over it — in the foreground color the two could not be told
+    apart in print (Brandon, 2026-09-27). They used to share a palette
+    color, which is what a plot of six comparisons at once needed and
+    this is not."""
     from PySide6.QtCore import Qt
 
+    from visualdynamics.plot import curve_color
     from visualdynamics.theme import theme as resolve_theme
 
     out = visualdynamics.import_file(fixture_path('plate', 'random_spectra.nc4'))
@@ -239,7 +241,7 @@ def test_a_specification_and_its_response_are_a_pair(window, pump):
     assert len(curves) == 2, 'one comparison, two curves'
     colors = {c.opts['pen'].color().name() for c in curves}
     palette = resolve_theme(window.theme_name)
-    assert colors == {palette['response_curve'],
+    assert colors == {curve_color(0, palette),
                       palette['specification_curve']}
     assert {c.opts['pen'].style() for c in curves} == {Qt.PenStyle.SolidLine}
 

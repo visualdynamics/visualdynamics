@@ -290,11 +290,13 @@ def test_beside_a_response_it_goes_back_to_gray(window, pump):
             item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
     window.render_current()
     pump()
+    from visualdynamics.plot import curve_color
+
     colors = resolve_theme(window.theme_name)
     drawn = {c.opts['pen'].color().name().lower()
              for c in data_curves(plot_of(window))}
     assert colors['specification_curve'].lower() in drawn
-    assert colors['response_curve'].lower() in drawn
+    assert curve_color(0, colors).lower() in drawn
 
 
 def _spec_and_response_colors(limits):
@@ -336,8 +338,10 @@ def test_a_specification_with_no_limits_still_reads_as_the_reference(qt_app):
     settled convention. Deciding it from the presence of limit curves
     made the same pair of objects draw two different ways depending on
     which environment produced them."""
+    from visualdynamics.plot import curve_color
+
     drawn, colors = _spec_and_response_colors({})
-    assert colors['response_curve'].lower() in drawn
+    assert curve_color(0, colors).lower() in drawn
     assert colors['specification_curve'].lower() in drawn
 
 
@@ -375,8 +379,15 @@ def test_the_one_run_and_its_reference_are_both_drawn_wide(qt_app):
     than the line over it. And the one run read against it is wider than
     one pixel too: in a small printed legend the two samples looked
     alike (Brandon, 2026-09-27). A specification alone, being what is
-    looked at, stays at one."""
-    from visualdynamics.plot import MEASURED_WIDTH, STOOD_BACK_WIDTH
+    looked at, is drawn at every curve's width. The reference shows a
+    pixel either side of the run, so where the two coincide both are
+    still seen (Brandon, 2026-09-27)."""
+    from visualdynamics.plot import (
+        CURVE_WIDTH,
+        MEASURED_WIDTH,
+        STOOD_BACK_WIDTH,
+        curve_color,
+    )
     from visualdynamics.theme import theme as resolve_theme
 
     colors = resolve_theme(None)
@@ -384,10 +395,11 @@ def test_the_one_run_and_its_reference_are_both_drawn_wide(qt_app):
         {'warning_upper': 2.0, 'warning_lower': 0.5,
          'abort_upper': 4.0, 'abort_lower': 0.25})
     assert widths[colors['specification_curve'].lower()] == STOOD_BACK_WIDTH
-    assert widths[colors['response_curve'].lower()] == MEASURED_WIDTH
-    assert STOOD_BACK_WIDTH > MEASURED_WIDTH > 1
+    assert widths[curve_color(0, colors).lower()] == MEASURED_WIDTH
+    assert STOOD_BACK_WIDTH - MEASURED_WIDTH >= 2
+    assert MEASURED_WIDTH > CURVE_WIDTH
     alone = _spec_and_response_widths({}, alone=True)
-    assert set(alone.values()) == {1.0}
+    assert set(alone.values()) == {CURVE_WIDTH}
 
 
 def test_the_bounded_case_is_colored_the_same_way(qt_app):
@@ -398,6 +410,8 @@ def test_the_bounded_case_is_colored_the_same_way(qt_app):
         {'warning_upper': 2.0, 'warning_lower': 0.5,
          'abort_upper': 4.0, 'abort_lower': 0.25})
     bare, _ = _spec_and_response_colors({})
+    from visualdynamics.plot import curve_color
+
     assert bounded == bare
-    assert colors['response_curve'].lower() in bounded
+    assert curve_color(0, colors).lower() in bounded
     assert colors['specification_curve'].lower() in bounded

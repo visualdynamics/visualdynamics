@@ -1505,13 +1505,26 @@ def test_a_geometry_alone_marks_its_own_degrees_of_freedom(window, pump):
     assert window.dofs_action.isVisible(), 'a geometry has DOFs to mark'
     assert not window.dofs_combo_action.isVisible(), (
         'and nothing measured to choose a quantity from')
-    bare = len(window.scene.plotter.renderer.actors)
+    import pyvista as pv
 
+    from visualdynamics.viz.geometry import AXIS_COLORS
+
+    bare = len(window.scene.plotter.renderer.actors)
     window.dofs_action.setChecked(True)
     window.render_current()
     pump()
     nodes = len(window.objects[geometry].node_id)
-    drawn = len(window.scene.plotter.renderer.actors) - bare
+    # the arrows are glyphed into one mesh per axis color (2026-09-27),
+    # so they are counted by the arrow shapes those meshes hold
+    colors = {pv.Color(color).hex_rgb for color in AXIS_COLORS}
+    arrows = [actor for actor in window.scene.plotter.renderer.actors.values()
+              if getattr(actor, 'prop', None) is not None
+              and pv.Color(actor.prop.color).hex_rgb in colors
+              and isinstance(getattr(actor.mapper, 'dataset', None),
+                             pv.PolyData)]
+    assert len(arrows) == 3, 'one mesh per axis color'
+    drawn = sum(actor.mapper.dataset.n_points
+                for actor in arrows) // pv.Arrow().n_points
     assert drawn == 3 * nodes, f'{drawn} arrows for {nodes} nodes'
 
     window.dofs_action.setChecked(False)

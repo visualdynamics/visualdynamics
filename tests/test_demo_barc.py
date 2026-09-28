@@ -162,23 +162,27 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
     assert list(typed.block_name) == list(demo.block_name)
 
 
-def test_a_picture_of_the_barc_stands_it_up(solved):
-    """The model is built y-up, as its solid model is; a 3-D scene is
-    z-up, and the website's figure first drew the BARC lying on its
-    side. `upright` turns it a quarter turn about x for the figure and
-    the downloads tile — nodes and every shape DOF with them."""
-    _model, shapes = solved
-    geometry = barc.geometry()
-    turned, moved = barc.upright(geometry, shapes)
-    height = turned.node_xyz.max(axis=0) - turned.node_xyz.min(axis=0)
-    assert np.argmax(height) == 2               # the Bench is on top
-    assert np.allclose(turned.node_xyz[:, 2], geometry.node_xyz[:, 1])
-    assert list(moved.coordinate[:6]) == ['1X+', '1Z+', '1Y-',
-                                          '1RX+', '1RZ+', '1RY-']
-    assert np.array_equal(moved.shape_matrix, shapes.shape_matrix)
-    assert np.array_equal(barc.upright(geometry).node_xyz, turned.node_xyz)
-    assert np.array_equal(geometry.node_xyz, barc.geometry().node_xyz), \
-        'the model itself is not turned'
+def test_the_barc_opens_upright_without_being_turned():
+    """The model is built y-up, as its solid model is, and every 3-D view
+    used to open z-up and draw it lying on its side; the website figure
+    turned its nodes to stand it up. It carries its own view now, and a
+    view is only how it is looked at (2026-09-27)."""
+    import pyvista as pv
+
+    from visualdynamics import View
+    from visualdynamics.viz.geometry import add_geometry, place_view
+
+    geometry = barc.geometry(0.5)
+    assert geometry.view == View(eye=(1, 1, -1), up=(0, 1, 0))
+    plotter = pv.Plotter(off_screen=True)
+    try:
+        add_geometry(plotter, geometry)
+        place_view(plotter, geometry.opening_view, render=False)
+        _position, _focus, up = plotter.camera_position
+    finally:
+        plotter.close()
+    # up on screen leans on y, the Bench's way up, not on z
+    assert np.argmax(np.abs(up)) == 1 and up[1] > 0
 
 
 def test_the_downloadable_project_opens_solved(tmp_path):

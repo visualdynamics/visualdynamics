@@ -83,7 +83,7 @@ def test_the_project_builds_a_model_from_nothing():
     name = project.new_geometry('Box', unit='in')
     assert project[name].num_nodes == 0 and project[name].length_unit == 'in'
     assert [verb for verb, _ in project.verbs(name)] == [
-        'generate_rigid_body_modes', 'add_plane'], \
+        'generate_rigid_body_modes', 'add_plane', 'set_view'], \
         'an empty geometry has no elements to merge or blocks to solve'
     first = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 2, 0), 1,
                               'box', unit='in')
@@ -126,7 +126,7 @@ def test_the_project_offers_a_new_geometry(window, pump):
     pump()
     geometry = window.objects['Geometry']
     assert geometry.num_nodes == 0 and geometry.length_unit == 'in'
-    assert [act[0] for act in window.acts_for()] == ['add_plane']
+    assert [act[0] for act in window.acts_for()] == ['add_plane', 'set_view']
 
 
 def test_add_plane_types_planes_in_display_units(window, pump):

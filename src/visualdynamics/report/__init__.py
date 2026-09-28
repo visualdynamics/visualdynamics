@@ -25,6 +25,10 @@ from numpy.typing import ArrayLike
 
 from ..decimate import peak_decimate
 from ..plot import (
+    CURVE_COLORS,
+    CURVE_COLORS_LIGHT,
+    CURVE_WIDTH,
+    MEASURED_ALPHA,
     MEASURED_WIDTH,
     PHASE_LIMITS,
     PHASE_TICKS,
@@ -148,7 +152,10 @@ def render_html(report: Report, objects: Mapping[str, Any],
                        'band': side['averaging_band'],
                        'window': side['averaging_window']}
                    for side in (LIGHT, DARK)},
-               'blocks': [], 'fill': bool(fill), 'theme': theme}
+               'blocks': [], 'fill': bool(fill), 'theme': theme,
+               'curve_width': CURVE_WIDTH,
+               'curve_colors': {'light': CURVE_COLORS_LIGHT,
+                                'dark': CURVE_COLORS}}
     if edit:
         payload['selected'] = -1 if selected is None else int(selected)
     figures = tables = 0
@@ -1765,13 +1772,23 @@ def _scene_geometry(geometry, us):
     return points, node_colors, lines, faces
 
 
+def _scene_home(geometry):
+    """A scene's home view as the page's (right, up) basis: the
+    geometry's own view, the one the app opens it on (`View.basis`).
+    The page used to hold an isometric of its own, which a geometry
+    could not change."""
+    return [[_compact(v) for v in axis]
+            for axis in geometry.opening_view.basis()]
+
+
 def _scene_block(block, geometry, shapes, us, objects):
     points, node_colors, lines, faces = _scene_geometry(geometry, us)
     node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
     built = {'kind': 'scene', 'caption': block.get('caption', ''),
              'points': [[_compact(v) for v in p] for p in points],
              'node_colors': node_colors,
-             'lines': lines, 'faces': faces, 'modes': []}
+             'lines': lines, 'faces': faces, 'modes': [],
+             'home': _scene_home(geometry)}
     quantity = block.get('dofs', '')
     if quantity:
         # a DOFs scene: labeled arrows where its one named data
@@ -1972,7 +1989,8 @@ def _overlay_block(block, objects, us, links=None):
             'flat': True,
             'points': [[_compact(v) for v in p] for p in points],
             'node_colors': node_colors, 'node_alphas': node_alphas,
-            'lines': lines, 'faces': faces, 'modes': modes}
+            'lines': lines, 'faces': faces, 'modes': modes,
+            'home': _scene_home(geo_a)}
 
 
 #: the zones a response must not be in, as the app shades them: between
@@ -2448,13 +2466,15 @@ def _comparison_block(block, measured, specification, us, caption,
     first = channels[0]
     measured_label = (f'measured ({scale_db:+d} dB)' if scale_db
                       else 'measured')
-    # the app's widths: the one response read against its specification
-    # wide enough to stand apart from it, the specification wider still
-    # behind it (`plot.MEASURED_WIDTH`, `plot.STOOD_BACK_WIDTH`)
+    # the app's pens: the one response read against its specification
+    # in the first curve color and wide enough to stand apart from it,
+    # the specification gray and wider still behind it
+    # (`plot.MEASURED_WIDTH`, `MEASURED_ALPHA`, `STOOD_BACK_WIDTH`)
     curves = [{'label': first['label'], 'x': None, 'y': first['y'],
                'gray': True, 'width': STOOD_BACK_WIDTH},
               {'label': measured_label, 'x': None, 'y': first['response'],
-               'ink': True, 'width': MEASURED_WIDTH}]
+               'color': 0, 'width': MEASURED_WIDTH,
+               'alpha': MEASURED_ALPHA}]
     if banded:
         # the target on its own grid, stepped on its own edges; the
         # response keeps the block's grid and edges
@@ -2870,8 +2890,9 @@ def _replication_overlay_block(block, measured, specification, us):
                         'y': first['y'], 'gray': True,
                         'width': STOOD_BACK_WIDTH},
                        {'label': f'playing 1 of {count}', 'x': None,
-                        'y': first['response'], 'ink': True,
-                        'width': MEASURED_WIDTH}],
+                        'y': first['response'], 'color': 0,
+                        'width': MEASURED_WIDTH,
+                        'alpha': MEASURED_ALPHA}],
             'channels': channels}
 
 

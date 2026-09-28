@@ -89,8 +89,9 @@ the application uses, with the same bar over it — so a control you would
 reach for in the window is there in a script too, and does not have to
 be known about in advance as an argument.
 
-`geometry.plot()` returns a `ScenePane`: the labeled axes and the
-orientation triad are toggles on its bar. `frf.plot()` returns a
+`geometry.plot()` returns a `ScenePane`, opened on the geometry's
+default view (`geometry.view`): *Reset View* returns to it, and the
+labeled axes and the orientation triad are toggles on its bar. `frf.plot()` returns a
 `DataPane`, and complex data gets the component box, so
 `frf.plot(component='imag')` sets where it starts rather than fixing it
 — you can switch to the real part without calling again. Both expose
@@ -227,8 +228,13 @@ vdplot.save_image(layout, 'fig.png', dpi=300) # a layout of your own
 ```
 
 `save_image` paints the laid-out plot at a ratio of dpi/96 — text,
-pens and layout together — and writes the resolution into the file.
-The legend's text is `vdplot.LEGEND_TEXT_SIZE`, 8 pt. A 3-D scene
+lines, markers and layout together — and writes the resolution into
+the file. The legend's text is `vdplot.LEGEND_TEXT_SIZE`, 8 pt. On
+screen a curve is one pixel wide (`vdplot.CURVE_WIDTH`), the width Qt
+draws fastest; an image of a plot — a .png, a print figure, a copy to
+the clipboard — draws every curve at least `vdplot.EXPORT_CURVE_WIDTH`
+(2) wide, since it is drawn once. On the light theme the curves take a
+darker shade of each color, 4.5:1 or better against white. A 3-D scene
 takes the same two numbers:
 
 ```python

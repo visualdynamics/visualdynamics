@@ -22,7 +22,7 @@ from .data import (
     TimeHistory,
     TransientSpecification,
 )
-from .geometry import Geometry
+from .geometry import Geometry, View
 from .shapes import ShapeSet
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     'Srs',
     'TimeHistory',
     'TransientSpecification',
+    'View',
     'fem',
     'mesh',
 ]

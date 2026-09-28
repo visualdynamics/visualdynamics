@@ -69,7 +69,8 @@ def test_the_3d_bar_copies_the_scene(window, pump):
     pump()
     QApplication.clipboard().clear()
     # last, after the geometry's own act (Add Plane, 2026-09-26)
-    assert _bar(window.scene) == ['Add Plane', 'Copy'], 'the 3-D bar offers it'
+    assert _bar(window.scene) == ['Add Plane', 'Set Default View', 'Copy'], \
+        'the 3-D bar offers it'
     assert window.scene.copy_view()
     image = QApplication.clipboard().image()
     assert not image.isNull() and image.width() > 0

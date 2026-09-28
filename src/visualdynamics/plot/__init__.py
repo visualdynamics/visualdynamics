@@ -230,28 +230,72 @@ BEYOND = 1e6
 PHASE_LIMITS = (-200.0, 200.0)
 PHASE_TICKS = (-180, -90, 0, 90, 180)
 
+#: every ordinary curve's line on screen, in the app, a standalone plot
+#: and the report page (sent in its payload). One pixel: anything wider
+#: leaves Qt's fast path, and two dozen dense FRFs at two repainted a
+#: cursor's strip in 41 ms where one takes 2.5, the whole plot in 113
+#: where one takes 31 (Retina, 2026-09-27). Brandon kept the speed; the
+#: light theme's darker palette and `EXPORT_CURVE_WIDTH` answer "the
+#: lines are hard to see" instead.
+CURVE_WIDTH = 1
+#: an image of a plot — a .png, a print figure, a copy to the clipboard
+#: — draws every data curve at least this wide. An image is drawn once,
+#: so the width costs nothing there, where on screen anything wider
+#: than one device pixel repaints about ten times slower; printed, a
+#: one-pixel curve is three quarters of a point (Brandon, 2026-09-27).
+#: Wider pens keep their width, so a specification still shows around
+#: the run over it.
+EXPORT_CURVE_WIDTH = 2
 #: a measurement's line when it is the one run read against its
-#: specification: wide enough to stand out from the gray specification
-#: behind it in a small printed legend, where at one pixel the two
-#: samples looked alike (Brandon, 2026-09-27: "maybe thicker line")
-MEASURED_WIDTH = 2
+#: specification: wider than the rest, so it stands out from the gray
+#: specification behind it in a small printed legend (Brandon,
+#: 2026-09-27: "maybe thicker line")
+MEASURED_WIDTH = 2.5
+#: and translucent, so where it lies exactly on its specification — a
+#: band value sitting on the narrowband target it was taken from — the
+#: gray still shows through it, not only at its edges. Dashes would
+#: have separated them too; Brandon does not want dashes (2026-09-27)
+MEASURED_ALPHA = 0.75
 #: the specification standing back behind that measurement: wider still,
-#: so it shows around the line over it — at one pixel under a dense
-#: measurement it vanished (Brandon, 2026-09-25)
-STOOD_BACK_WIDTH = 3
+#: a pixel of gray either side of the line over it — at one pixel under
+#: a dense measurement it vanished (Brandon, 2026-09-25), and a
+#: half-pixel edge was lost in print where the two coincided
+STOOD_BACK_WIDTH = 4.5
 
-# categorical curve colors: readable on both light and dark backgrounds
+#: categorical curve colors on a dark background
 CURVE_COLORS = [
     '#4c92d9', '#ff8c2b', '#3fb950', '#e5534b', '#a371f7',
     '#b07d62', '#e668c3', '#8b949e', '#d2c14e', '#39c5cf',
 ]
+#: the same hues on a light one, darkened to 4.5:1 against white. The
+#: dark set stood at 1.8:1 (yellow) to 3.7:1 there, and a one-pixel line
+#: that faint was hard to see (Brandon, 2026-09-27). Wider lines would
+#: have helped too and cost ten times the repaint; color costs nothing.
+CURVE_COLORS_LIGHT = [
+    '#2a77c6', '#bc5600', '#2e863a', '#df2d23', '#8c4df5',
+    '#9b694e', '#d223a1', '#6b7580', '#827621', '#218086',
+]
 
 
-def curve_color(index: int) -> str:
+def curve_colors(colors: Mapping[str, str] | None = None) -> list[str]:
+    """The curve palette for a theme's plot background: the light set
+    on a light background, the dark set on a dark one or with no theme
+    given."""
+    if colors is None:
+        return CURVE_COLORS
+    background = str(colors['plot_background']).lstrip('#')
+    red, green, blue = (int(background[i:i + 2], 16) for i in (0, 2, 4))
+    light = 0.299 * red + 0.587 * green + 0.114 * blue > 127
+    return CURVE_COLORS_LIGHT if light else CURVE_COLORS
+
+
+def curve_color(index: int, colors: Mapping[str, str] | None = None) -> str:
     """The nth curve's color, wrapping. The same cycle everywhere a
-    curve is drawn, so a record keeps its color between the app, a
-    standalone plot and the report."""
-    return CURVE_COLORS[index % len(CURVE_COLORS)]
+    curve is drawn, so a record keeps its place in it between the app,
+    a standalone plot and the report; `colors` (a resolved theme) picks
+    the light or dark shade of it."""
+    palette = curve_colors(colors)
+    return palette[index % len(palette)]
 
 
 def axis_label(dimension: str, unit_system: UnitSystem,
@@ -954,7 +998,7 @@ def build_cmif(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[int
             if paired:
                 color = pair_colors[key]
             else:
-                color = curve_color(index)
+                color = curve_color(index, colors)
                 index += 1
                 if not synthesized:
                     pair_colors[key] = color
@@ -967,7 +1011,7 @@ def build_cmif(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[int
             # SIGBUSes on them. Finite is also simply right — a gap, not
             # a line to infinity.
             curve = plot.plot(x, singular[k], connect='finite',
-                              pen=pg.mkPen(color, width=1, style=style),
+                              pen=pg.mkPen(color, width=CURVE_WIDTH, style=style),
                               **({} if paired else {'name': label}))
             # same treatment as every other line curve (see build_curve):
             # peak-keeping, so no singular-value peak is thinned away.
@@ -1204,10 +1248,11 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
         with_measurement = {c[5] for c in ordered if not c[6]}
         bounded_pairs = with_spec & with_measurement
         # how many measurements each pair has: one is read against its
-        # specification in the foreground color, several — five runs of
-        # one channel against its target — are told apart by the color
-        # cycle, and only the specification stands back in gray. All in
-        # one color, the runs could not be told apart (2026-09-26)
+        # specification drawn wider, several — five runs of one channel
+        # against its target — at the ordinary width. Either way each
+        # takes the color cycle and only the specification stands back
+        # in gray. All in one color, five runs could not be told apart
+        # (2026-09-26)
         measurements = {}
         for c in ordered:
             if not c[6]:
@@ -1217,30 +1262,29 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
              dashed, shape, widths, owner) in ordered:
             magnitude = (np.abs(values) if is_frequency
                          and np.iscomplexobj(values) else values.real)
-            # A specification and the response it bounds are a pair, and
-            # only one pair is ever drawn, so there is nothing to tell
-            # apart by color: the response takes the foreground because
-            # it is what is being looked at, the specification gray
-            # behind it because it is the reference.
+            # A specification and the response it bounds are a pair: the
+            # specification stands back in gray because it is the
+            # reference, and the response takes a curve color. It used
+            # to take the foreground, and printed, a near-black line
+            # over a gray one could not be told from it (Brandon,
+            # 2026-09-27, the band-average paper's figures).
             #
             # Alone, the specification *is* what is being looked at, so
             # it takes the foreground itself. Gray would be saying "this
             # is the reference for something", and there is nothing here
             # for it to be the reference for.
             paired = follower and pair in pair_colors
-            if bounded_pairs and pair in bounded_pairs and (
-                    follower or measurements.get(pair, 0) == 1):
-                color = colors['specification_curve' if follower
-                               else 'response_curve']
+            if bounded_pairs and pair in bounded_pairs and follower:
+                color = colors['specification_curve']
             elif bounded_pairs and pair in bounded_pairs:
-                color = curve_color(index)
+                color = curve_color(index, colors)
                 index += 1
             elif follower and pair in with_spec and not with_measurement:
                 color = colors['response_curve']
             elif paired:
                 color = pair_colors[pair]
             else:
-                color = curve_color(index)
+                color = curve_color(index, colors)
                 index += 1
                 if not follower:
                     pair_colors.setdefault(pair, color)
@@ -1258,13 +1302,24 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             read_against = bool(not follower and pair in bounded_pairs
                                 and measurements.get(pair, 0) == 1)
             width = (STOOD_BACK_WIDTH if stands_back
-                     else MEASURED_WIDTH if read_against else 1)
+                     else MEASURED_WIDTH if read_against else CURVE_WIDTH)
             pen = pg.mkPen(color, width=width, style=style)
+            if read_against:
+                shade = pen.color()
+                shade.setAlphaF(MEASURED_ALPHA)
+                pen.setColor(shade)
             named = {} if paired and dashed else {'name': label}
             curve, drawn_x, drawn_y = _draw_shaped(plot, x, magnitude, shape,
                                                    pen, widths=widths,
                                                    log_abscissa=log_abscissa,
                                                    **named)
+            if stands_back:
+                # beneath the measurements whatever order the series
+                # came in, and still over the zone fills (-5, -10): drawn
+                # after its response at the same depth, the opaque gray
+                # covered it and a compliant run showed no color at all
+                # (the band-average paper, 2026-09-27)
+                curve.setZValue(-1)
             extents.add(drawn_x, drawn_y, log_ordinate, log_abscissa)
             if shape == 'steps' and not follower:
                 measured_by_pair.setdefault(pair, (x, magnitude, owner))
@@ -2050,21 +2105,85 @@ def render_image(widget: Any, ratio: float = 1.0,
                    QImage.Format.Format_ARGB32)
     image.fill(QColor(background) if background is not None
                else Qt.GlobalColor.transparent)
+    if isinstance(widget, QGraphicsView):
+        # The image carries the ratio and the view renders into its
+        # logical rectangle, so the ratio is applied once; a target of
+        # the image's full device size as well applied it twice and the
+        # image held a ninth of the plot. Through the ratio, not a
+        # scaled target, because pyqtgraph's point markers are pixmaps
+        # drawn at the device ratio: through a scaled target a 12 px
+        # marker printed at 12 device pixels, a third of its size at
+        # 288 dpi (the band-average paper, 2026-09-27).
+        image.setDevicePixelRatio(ratio)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     if isinstance(widget, QGraphicsView):
-        # a view renders its scene into whatever target it is given,
-        # scaled to fill it — so the viewport into the whole image is
-        # the ratio. Scaled by the painter as well, or through an image
-        # carrying a device ratio, it was applied twice and the image
-        # held a ninth of the plot
-        widget.render(painter, QRectF(image.rect()), widget.viewport().rect())
+        restore = _widen_pens(widget.scene(), ratio)
+        try:
+            widget.render(painter, QRectF(0, 0, widget.width(),
+                                          widget.height()),
+                          widget.viewport().rect())
+        finally:
+            for item, pen in restore:
+                item.setPen(pen)
     else:
         painter.scale(ratio, ratio)
         widget.render(painter)
     painter.end()
     return image
+
+
+def _widen_pens(scene: Any, ratio: float) -> list:
+    """Every cosmetic line pen in a scene widened by `ratio`, and every
+    data curve to at least `EXPORT_CURVE_WIDTH` first; returns the
+    (item, pen) pairs to put back.
+
+    pyqtgraph's pens are cosmetic, and Qt draws a cosmetic pen's width
+    in device pixels whatever the painter's scale or the device's ratio:
+    at 288 dpi a 3 px curve printed a third as heavy as the text and
+    legend around it (the band-average paper, 2026-09-27). Widened for
+    the render, a line prints at its width in logical pixels, as
+    everything else in the figure does.
+    """
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QPen
+
+    saved, owned = [], set()
+    if scene is None:
+        return saved
+    for item in scene.items():
+        floor = 0.0
+        if isinstance(item, pg.PlotDataItem):
+            # through the data item, so its curve and its legend sample
+            # both take the wider pen
+            owned.add(id(item.curve))
+            pen = item.opts.get('pen')
+            if not getattr(item, 'is_zone_edge', False):
+                floor = EXPORT_CURVE_WIDTH
+        elif id(item) in owned:
+            continue
+        elif isinstance(item, pg.PlotCurveItem):
+            pen = item.opts.get('pen')
+        elif isinstance(item, pg.InfiniteLine):
+            pen = item.pen
+        elif isinstance(item, pg.AxisItem):
+            pen = item.pen()
+        else:
+            continue
+        if not isinstance(pen, QPen) or not pen.isCosmetic() or \
+                pen.style() == Qt.PenStyle.NoPen:
+            continue
+        # width 0 is Qt's one-device-pixel hairline
+        width = max(pen.widthF(), 1.0, floor) * ratio
+        if width == pen.widthF():
+            continue
+        wider = QPen(pen)
+        wider.setWidthF(width)
+        saved.append((item, pen))
+        item.setPen(wider)
+    return saved
 
 
 def save_image(widget: Any, path: str | os.PathLike, *,
@@ -2392,7 +2511,7 @@ def build_ratio(layout: Any, signal: Any, floor: Any,
         if not finite.any():
             continue
         plot.plot(abscissa[finite], row[finite],
-                  pen=pg.mkPen(curve_color(k), width=1.5),
+                  pen=pg.mkPen(curve_color(k, colors), width=1.5),
                   name=str(dof))
     zero = pg.InfiniteLine(
         pos=0.0, angle=0,

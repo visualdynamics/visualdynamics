@@ -1121,6 +1121,65 @@ def _draw_tie(painter, color):
         painter.drawEllipse(QPointF(x, 48), 5, 5)
 
 
+def _draw_merge_blocks(painter, color):
+    """Two small blocks of elements closing into one larger block: parts
+    of a geometry made one part (Merge Blocks) — its own glyph, apart
+    from Merge into One's objects and Merge Coincident Nodes' points."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for x in (6, 40):
+        painter.drawRect(QRectF(x, 6, 18, 18))
+    painter.drawLine(QPointF(15, 26), QPointF(26, 36))
+    painter.drawLine(QPointF(49, 26), QPointF(38, 36))
+    painter.setPen(_pen(color, 5))
+    painter.drawRect(QRectF(16, 38, 32, 20))
+    painter.setPen(_pen(color, 2))
+    painter.drawLine(QPointF(32, 38), QPointF(32, 58))
+
+
+def _draw_set_view(painter, color):
+    """A camera: keep the view it is looking from."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(8, 20, 48, 32), 5, 5)
+    painter.drawEllipse(QPointF(32, 36), 9, 9)
+    painter.drawLine(QPointF(22, 20), QPointF(26, 12))
+    painter.drawLine(QPointF(26, 12), QPointF(38, 12))
+    painter.drawLine(QPointF(38, 12), QPointF(42, 20))
+
+
+def _draw_reset_view(painter, color):
+    """A cube seen corner-on: the view a geometry opens on."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    top, left, right = QPointF(32, 8), QPointF(11, 20), QPointF(53, 20)
+    center, bottom = QPointF(32, 32), QPointF(32, 56)
+    painter.drawPolygon([top, right, QPointF(53, 44), bottom,
+                         QPointF(11, 44), left])
+    painter.drawLine(left, center)
+    painter.drawLine(right, center)
+    painter.drawLine(center, bottom)
+
+
+def _draw_solve_modes(painter, color):
+    """A plate's mesh bent into its first bending mode (Solve Modes): a
+    grid in perspective whose lengthwise lines follow a half sine — the
+    geometry and the mode shape the solve finds on it at once. It had
+    worn the quadrilateral element's square, which read as nothing more
+    than a square (Brandon, 2026-09-27)."""
+    def at(u, v):
+        return QPointF(8 + 40 * u + 10 * v,
+                       46 - 22 * v - 16 * math.sin(math.pi * u))
+
+    for k, v in enumerate((0.0, 0.5, 1.0)):
+        painter.setPen(_pen(color, 5 if k != 1 else 3))
+        painter.drawPath(_curve([(at(u / 24, v).x(), at(u / 24, v).y())
+                                 for u in range(25)]))
+    for k, u in enumerate((0.0, 0.25, 0.5, 0.75, 1.0)):
+        painter.setPen(_pen(color, 5 if k in (0, 4) else 3))
+        painter.drawLine(at(u, 0.0), at(u, 1.0))
+
+
 def _draw_sine(painter, color):
     """A sweep: a sine whose frequency rises across the icon."""
     painter.setPen(_pen(color, 5))
@@ -1541,6 +1600,8 @@ def control_icon(name: str) -> QIcon:
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
      'plane': _draw_plane, 'tie': _draw_tie,
+     'merge_blocks': _draw_merge_blocks, 'solve_modes': _draw_solve_modes,
+     'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
      'sine': _draw_sine,
      'refresh': _draw_refresh,
      'copy': _draw_copy}.get(name, _draw_default)(painter, CONTROL_COLOR)

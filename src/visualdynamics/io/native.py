@@ -81,6 +81,12 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         if properties.scaled:
             group.attrs['mass'] = properties.mass
             group.attrs['inertia'] = np.asarray(properties.inertia)
+    # the view it opens on, when one was set — absent otherwise, so a
+    # file from before views existed reads back as the default
+    view = getattr(geom, 'view', None)
+    if view is not None:
+        group.attrs['view_eye'] = np.asarray(view.eye, dtype=np.float64)
+        group.attrs['view_up'] = np.asarray(view.up, dtype=np.float64)
     # what each block is made of, one subgroup per block that has it:
     # the material's numbers, and a thickness or a section — the model
     # a geometry can build of itself (2026-09-25)
@@ -176,6 +182,11 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data['block_properties'] = _load_block_properties(group)
     geometry = Geometry(**data)
     geometry.mass_properties = _load_mass_properties(group)
+    if 'view_eye' in group.attrs:
+        from ..core.geometry import View
+
+        geometry.view = View(tuple(group.attrs['view_eye']),
+                             tuple(group.attrs['view_up']))
     return geometry
 
 

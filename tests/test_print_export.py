@@ -183,7 +183,7 @@ def _scene(dpi):
     from visualdynamics.demo import barc
     from visualdynamics.viz.geometry import plot_geometry
 
-    image = plot_geometry(barc.upright(barc.geometry(0.25)),
+    image = plot_geometry(barc.geometry(0.25),
                           screenshot=str(_scene.dir / f'g{dpi}.png'),
                           theme='light', size_in=(3.0, 2.25), dpi=dpi)
     return np.asarray(image, dtype=float).mean(axis=2)
@@ -285,3 +285,85 @@ def test_a_thin_axis_keeps_its_title_and_drops_its_numbers():
     assert _label_counts((0, 12, 0, 12, -0.5, 0)) == {
         'show_xlabels': True, 'show_ylabels': True, 'show_zlabels': False}
     assert all(_label_counts((0, 12, 0, 6, 0, 3)).values())
+
+
+# ---- lines and markers at print resolution (2026-09-27) -----------------
+
+
+def test_lines_and_markers_print_at_their_logical_size(qt_app):
+    """pyqtgraph's pens are cosmetic — Qt draws their width in device
+    pixels whatever the scale — and its markers are pixmaps drawn at the
+    device ratio: at 288 dpi a 3 px line printed 3 device pixels and a
+    12 px marker 11, a third as heavy as the text and legend beside
+    them (the band-average paper, 2026-09-27). Both now scale with
+    everything else, the legend's sample with its curve, and the pen is
+    the plot's own again after."""
+    import pyqtgraph as pg
+    from PySide6.QtGui import QImage
+
+    from visualdynamics.plot import legend_below, render_image
+    from visualdynamics.theme import theme as resolve_theme
+
+    layout = pg.GraphicsLayoutWidget(size=(328, 240))
+    _ALIVE.append(layout)
+    plot = layout.addPlot(row=0, col=0)
+    legend_below(layout, plot, 0, resolve_theme('light'))
+    line = plot.plot([1, 3], [2, 2], pen=pg.mkPen('#0000ff', width=3),
+                     name='line')
+    plot.plot([2], [1.5], pen=None, symbol='s', symbolSize=12,
+              symbolBrush='#ff0000', symbolPen=None)
+    layout.show()
+    for _ in range(5):
+        qt_app.processEvents()
+
+    def measure(ratio):
+        image = render_image(layout, ratio, '#ffffff').convertToFormat(
+            QImage.Format.Format_RGB888)
+        rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(
+            image.height(), image.bytesPerLine())
+        pixels = rows[:, :image.width() * 3].reshape(
+            image.height(), image.width(), 3).astype(int)
+        blue = (pixels[..., 2] > 150) & (pixels[..., 0] < 100)
+        red = (pixels[..., 0] > 150) & (pixels[..., 2] < 100)
+        column = int(plot.vb.sceneBoundingRect().center().x() * ratio)
+        top = int(plot.legend.sceneBoundingRect().top() * ratio)
+        rows = np.flatnonzero(red.any(axis=1))
+        return (int(blue[:top, column].sum()), int(np.ptp(rows)) + 1,
+                int(blue[top:].any(axis=1).sum()))
+
+    screen, printed = measure(1.0), measure(3.0)
+    assert screen[0] >= 3 and screen[2] >= 3
+    for on_screen, in_print in zip(screen, printed):
+        assert abs(in_print - 3 * on_screen) <= 2, (screen, printed)
+    assert line.opts['pen'].widthF() == 3
+
+
+def test_an_image_draws_curves_at_least_the_export_width(qt_app):
+    """An image is drawn once, so its curves can be heavier than the
+    screen's one pixel at no cost (Brandon, 2026-09-27): a 1 px curve
+    renders at `EXPORT_CURVE_WIDTH`, a wider one keeps its width, a zone
+    edge is left alone, and every pen is the plot's own again after."""
+    import pyqtgraph as pg
+    from PySide6.QtGui import QPen
+
+    from visualdynamics.plot import EXPORT_CURVE_WIDTH, _widen_pens
+
+    layout = pg.GraphicsLayoutWidget(size=(300, 200))
+    _ALIVE.append(layout)
+    plot = layout.addPlot()
+    thin = plot.plot([1, 2], [1, 1], pen=pg.mkPen('#0000ff', width=1))
+    wide = plot.plot([1, 2], [2, 2], pen=pg.mkPen('#00ff00', width=4.5))
+    edge = plot.plot([1, 2], [3, 3], pen=pg.mkPen('#ff0000', width=1))
+    edge.is_zone_edge = True
+    for ratio in (1.0, 3.0):
+        saved = _widen_pens(layout.scene(), ratio)
+        try:
+            widths = [c.opts['pen'].widthF() for c in (thin, wide, edge)]
+        finally:
+            for item, pen in saved:
+                item.setPen(pen)
+        assert widths == [EXPORT_CURVE_WIDTH * ratio, 4.5 * ratio,
+                          1.0 * ratio], (ratio, widths)
+    assert [QPen(c.opts['pen']).widthF() for c in (thin, wide, edge)] == [
+        1.0, 4.5, 1.0]
+    assert EXPORT_CURVE_WIDTH >= 2

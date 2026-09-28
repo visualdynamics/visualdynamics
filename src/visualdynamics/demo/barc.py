@@ -43,7 +43,7 @@ from typing import Any
 
 import numpy as np
 
-from visualdynamics import fem, mesh
+from visualdynamics import View, fem, mesh
 
 #: element size aimed at, inches: 0.125 converges the first ten modes to
 #: about a percent (0.0625 moves them no more) and solves in a few
@@ -100,6 +100,15 @@ def _planes(size: float) -> list:
     ]
 
 
+#: how the BARC opens in 3-D. It is built in its solid model's frame,
+#: where y is up, and every 3-D view used to open z-up and draw it lying
+#: on its side; the website figure and the downloads tile turned the
+#: nodes to stand it up. A geometry says how it is seen now (2026-09-27),
+#: so the model keeps its frame and opens upright everywhere: from the
+#: front, above and to the right, y up.
+VIEW = View(eye=(1.0, 1.0, -1.0), up=(0.0, 1.0, 0.0))
+
+
 def geometry(size: float = SIZE) -> Any:
     """The BARC as a geometry of plates and rigid links, every block
     given what it is made of — ready for `fem.Model.from_geometry`, or
@@ -115,9 +124,10 @@ def geometry(size: float = SIZE) -> Any:
     Geometry
         Blocks 'box', 'right channel', 'left channel', 'beam' (6061-T6
         plates) and 'bolts' (rigid links over the elements each washer
-        covers, `washer_patch`).
+        covers, `washer_patch`), opening on `VIEW`.
     """
     whole = mesh.assemble(*_planes(size))
+    whole.view = VIEW
     whole.block_properties = {
         int(block): fem.BlockProperties(
             MATERIAL, THICKNESS[whole.block_name[i]] * INCH)
@@ -209,51 +219,6 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
     if solved:
         out.solve_modes('BARC', maximum_frequency=SOLVE_TO)
     return out
-
-
-#: a quarter turn about x: the solid model's up (+y) to the 3-D scene's
-#: (+z), its depth (+z) to -y — each DOF axis to the one it becomes, a
-#: rotation with its translation, and the old axes that land negative
-_UPRIGHT = {'X': 'X', 'Y': 'Z', 'Z': 'Y', 'RX': 'RX', 'RY': 'RZ', 'RZ': 'RY'}
-_FLIPPED = {'Z', 'RZ'}
-
-
-def upright(points: Any, shapes: Any = None) -> Any:
-    """The BARC stood up for a picture. The model is built in the solid
-    model's frame, where y is up; a 3-D scene treats z as up and draws it
-    lying on its side. The website figure and the downloads tile turn it;
-    the model and the docs keep the solid model's frame, so only
-    pictures are turned.
-
-    Parameters
-    ----------
-    points : Geometry
-        The geometry to turn (a copy is returned).
-    shapes : ShapeSet, optional
-        Shapes on it, whose DOFs are renamed by the same turn.
-
-    Returns
-    -------
-    Geometry, or (Geometry, ShapeSet) when `shapes` is given
-    """
-    import copy
-
-    from visualdynamics.core.shapes import ShapeSet
-
-    turned = copy.deepcopy(points)
-    x, y, z = points.node_xyz.T
-    turned.node_xyz = np.column_stack([x, -z, y])
-    if shapes is None:
-        return turned
-    names = []
-    for dof in shapes.coordinate:
-        node = dof.rstrip('+-XYZR')
-        axis, sign = dof[len(node):-1], dof[-1]
-        if axis in _FLIPPED:
-            sign = '-' if sign == '+' else '+'
-        names.append(f'{node}{_UPRIGHT[axis]}{sign}')
-    return turned, ShapeSet(shapes.frequency, shapes.damping, names,
-                            shapes.shape_matrix, comment=shapes.comment)
 
 
 def describe(size: float = SIZE, modes: int = 10) -> None:

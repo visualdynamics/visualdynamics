@@ -182,8 +182,12 @@ _JS = r"""
 'use strict';
 const DATA = JSON.parse(document.getElementById('data').textContent);
 if (DATA.fill) document.documentElement.classList.add('fill');
-const COLORS = ['#4c92d9','#ff8c2b','#3fb950','#e5534b','#a371f7',
-                '#b07d62','#e668c3','#8b949e','#d2c14e','#39c5cf'];
+/* the app's curve palette, its light or dark shade by the page's
+   theme (`plot.curve_colors`), sent rather than restated here */
+const curveColor = which => {
+  const set = DATA.curve_colors[darkPage() ? 'dark' : 'light'];
+  return set[which % set.length];
+};
 /* a specification's shading and the marks past abort, in one place so
    the legend's swatch is the plot's own fill (`plot.zone_colors` is the
    app's): the key names are `plot.zone_key`'s, sent with each channel */
@@ -577,7 +581,7 @@ function plotBlock(block, into) {
       const item = document.createElement('span');
       const which = curve.color === undefined ? i : curve.color;
       item.style.setProperty('--swatch', curve.gray ? '#9a9aa2'
-        : curve.ink ? 'currentColor' : COLORS[which % COLORS.length]);
+        : curve.ink ? 'currentColor' : curveColor(which));
       if (curve.dash) item.className = 'dashed'; // the swatch says so too
       item.textContent = curve.label; legend.appendChild(item); });
     /* and what the shading means, for the channel on show */
@@ -593,6 +597,7 @@ function plotBlock(block, into) {
      which is the same reason the app draws one at a time */
   let picked = 0;
   fillLegend();
+  REDRAWS.push(fillLegend);     // its swatches take the theme's shade
   s.appendChild(legend);
   const reset = controlBar(s, block, into ? '' :
     'drag to pan, wheel to zoom — over an axis, that axis alone; '
@@ -895,11 +900,14 @@ function plotBlock(block, into) {
          own ink, exactly as the app colors the pair */
       g.strokeStyle = curve.ink ? ink
                     : curve.gray ? '#9a9aa2'
-                    : COLORS[which % COLORS.length];
+                    : curveColor(which);
       g.setLineDash(curve.dash ? [6, 4] : []);
       /* the app's widths, sent with the curve: the one response read
          against a specification and the specification behind it */
-      g.lineWidth = curve.width || 1.2; g.beginPath();
+      g.lineWidth = curve.width || DATA.curve_width || 1;
+      /* and its translucency, so a response lying on its specification
+         lets the gray show through */
+      g.globalAlpha = curve.alpha || 1; g.beginPath();
       let pen = false;
       /* a curve drawn on its own grid brings its own shape and edges —
          a banded specification stepped on its own bands beside a
@@ -933,7 +941,7 @@ function plotBlock(block, into) {
           pen ? g.lineTo(X, Y) : g.moveTo(X, Y); pen = true;
         }
       }
-      g.stroke();
+      g.stroke(); g.globalAlpha = 1;
     });
     g.setLineDash([]);
     // mode bookmarks: a dashed line and staggered frequency label at
@@ -1273,10 +1281,10 @@ function sceneBlock(block) {
   let extent = Math.sqrt(Math.max(...P.map(p =>
     (p[0] - center[0]) ** 2 + (p[1] - center[1]) ** 2
     + (p[2] - center[2]) ** 2))) || 1;
-  // home view: isometric with Z up, the GUI's own opening view
-  const forward = normalized([-1, -1, -1]);
-  const iso_right = normalized(cross3([0, 0, 1], forward));
-  const view = orbitView(canvas, [iso_right, cross3(forward, iso_right)],
+  /* home view: the geometry's own (`Geometry.opening_view`), sent as
+     the basis the app's camera sees — the page used to keep an
+     isometric of its own, which a geometry could not change */
+  const view = orbitView(canvas, block.home,
                          () => { if (!playing) draw(); });
   resetView.onclick = () => { view.home(); draw(); };
   // fit to what the home view actually projects, not the bounding
@@ -1297,6 +1305,10 @@ function sceneBlock(block) {
 
   function draw() {
     const [g, width, height] = sized(canvas, 420);
+    // published as the stage publishes its own: the view is a fact
+    // about the figure, not something to read off its pixels
+    canvas.dataset.view = JSON.stringify(
+      {basis: view.basis, zoom: view.zoom});
     // 2.3 half-widths across leaves ~13% margin for deflection swing
     const scale = Math.min(width / (2.3 * fitX),
                            height / (2.3 * fitY)) * view.zoom;

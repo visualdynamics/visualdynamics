@@ -293,6 +293,91 @@ def face_corners(code: int) -> int:
     return 3 if name.startswith('tri') else 4
 
 
+class View:
+    """The way a geometry opens in 3-D: where the eye is, seen from the
+    model's center, and which way is up on screen.
+
+    Only a direction: every view is fitted to what it shows, so there is
+    no distance or zoom to keep. Set once on a geometry, it is how the
+    app opens it and everything drawn on it, how Reset View returns, and
+    how the report's scenes and exported figures are drawn
+    (Brandon, 2026-09-27) — a model built Y-up opens upright without its
+    nodes being turned.
+
+    Parameters
+    ----------
+    eye : sequence of 3 floats, default (1, 1, 1)
+        The direction from the model toward the eye, in the global frame;
+        any length.
+    up : sequence of 3 floats, default (0, 0, 1)
+        Which way is up on screen. Only its part across the line of sight
+        counts, so it need not be exactly perpendicular to `eye`.
+
+    Examples
+    --------
+    A model built with Y up, seen from the front, above and to the right:
+
+    >>> geometry.view = View(eye=(1, 1, -1), up=(0, 1, 0))  # doctest: +SKIP
+    """
+
+    __slots__ = ('eye', 'up')
+
+    def __init__(self, eye: ArrayLike = (1.0, 1.0, 1.0),
+                 up: ArrayLike = (0.0, 0.0, 1.0)) -> None:
+        # kept as written, so a view reads back the way it was stated;
+        # every use goes through `_unit`
+        self.eye: tuple[float, ...] = tuple(
+            float(v) for v in np.asarray(eye, dtype=float).reshape(3))
+        self.up: tuple[float, ...] = tuple(
+            float(v) for v in np.asarray(up, dtype=float).reshape(3))
+        eye_length = float(np.linalg.norm(self.eye))
+        if not np.isfinite(eye_length) or eye_length == 0.0:
+            raise ValueError('a view needs a direction to look from')
+        up_length = float(np.linalg.norm(self.up))
+        if not np.isfinite(up_length) or up_length == 0.0:
+            raise ValueError('a view needs a direction for up')
+        # the part of `up` across the line of sight is what the screen
+        # shows as up; along it, there is none to show
+        if np.linalg.norm(np.cross(self.eye, self.up)) < \
+                1e-9 * eye_length * up_length:
+            raise ValueError('up cannot lie along the line of sight')
+
+    def _unit(self) -> tuple[np.ndarray, np.ndarray]:
+        """(eye, up) as unit vectors, up made square to the eye."""
+        eye = np.asarray(self.eye) / np.linalg.norm(self.eye)
+        up = np.asarray(self.up) - np.dot(self.up, eye) * eye
+        return eye, up / np.linalg.norm(up)
+
+    def basis(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        """(right, up) on screen, as unit vectors in the global frame —
+        the camera's own: right is the line of sight crossed with up."""
+        eye, up = self._unit()
+        return (tuple(float(v) for v in np.cross(up, eye)),
+                tuple(float(v) for v in up))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, View):
+            return NotImplemented
+        return all(np.allclose(a, b) for a, b in zip(self._unit(),
+                                                     other._unit()))
+
+    def __hash__(self) -> int:
+        eye, up = self._unit()
+        return hash((tuple(np.round(eye, 9)), tuple(np.round(up, 9))))
+
+    def __repr__(self) -> str:
+        def short(vector):
+            return '(' + ', '.join(repr(round(v, 4) + 0.0)
+                                   for v in vector) + ')'
+        return f'View(eye={short(self.eye)}, up={short(self.up)})'
+
+
+#: how a geometry with no view of its own opens: from +X+Y+Z, Z up, the
+#: isometric every 3-D view opened on before a geometry could say
+#: otherwise
+DEFAULT_VIEW = View()
+
+
 class Geometry:
     """Nodes, coordinate systems, tracelines, elements and blocks.
 
@@ -452,8 +537,16 @@ class Geometry:
         #: sets, riding the geometry the way averaging rides a time
         #: history (`core.rigid`); None until set or adopted
         self.mass_properties: MassProperties | None = None
+        #: how it opens in 3-D (`View`); None opens on `DEFAULT_VIEW`
+        self.view: View | None = None
 
         self.validate()
+
+    @property
+    def opening_view(self) -> View:
+        """The view it opens on in 3-D: its own `view`, else the default
+        isometric."""
+        return self.view if self.view is not None else DEFAULT_VIEW
 
     @staticmethod
     def _default(value, n, fill, arange=False):
@@ -1291,14 +1384,16 @@ class Geometry:
         return {'tracelines': len(rows)}
 
     def delete_blocks(self, block_ids: Ids) -> dict[str, int]:
-        """Remove blocks, moving anything in them into the first one left.
+        """Remove blocks with what they hold: their elements, and the
+        nodes no element outside them uses.
 
-        Deleting the grouping must not delete what was grouped — an
-        element is a piece of the mesh and a block is a label on it — so
-        the elements move rather than go, the way a node whose coordinate
-        system is deleted is reassigned. The last block cannot go while
-        any element names one; with no elements at all there is nothing
-        to hold and the geometry may have none.
+        Deleting a part deletes the part (Brandon, 2026-09-27). It used to
+        move a deleted block's elements into the first block left, which
+        made a delete a merge; merging is its own act now
+        (`merge_blocks`). A node an element of another block also uses
+        stays, so a neighboring part is not cut into along the line the
+        two share — and a traceline through a removed node goes with it,
+        as `delete_nodes` has it.
 
         Parameters
         ----------
@@ -1308,28 +1403,93 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many of each kind were removed, including the
-            dependents that went with them.
+            How many blocks, elements, nodes and tracelines went.
         """
         wanted = {int(block) for block in block_ids}
         keep = ~np.isin(self.block_id, list(wanted))
         removed = int((~keep).sum())
         if not removed:
-            return {'blocks': 0, 'elements_reassigned': 0}
-        if keep.sum() == 0 and len(self.elem_block):
-            raise ValueError(
-                'a geometry with elements needs a block to put them in')
-        reassigned = 0
-        if keep.sum():
-            fallback = int(self.block_id[keep][0])
-            stale = np.isin(self.elem_block, list(wanted))
-            reassigned = int(stale.sum())
-            self.elem_block[stale] = fallback
+            return {'blocks': 0, 'elements': 0, 'nodes': 0, 'tracelines': 0}
+        inside, outside = set(), set()
+        doomed = []
+        for row, conn in enumerate(self.elem_conn):
+            nodes = {int(n) for n in conn}
+            if int(self.elem_block[row]) in wanted:
+                inside |= nodes
+                doomed.append(int(self.elem_id[row]))
+            else:
+                outside |= nodes
+        self.delete_elements(doomed)
+        gone = self.delete_nodes(sorted(inside - outside))
         self.block_name = [name for name, k in zip(self.block_name, keep) if k]
         for block in wanted:                 # a deleted block's properties go with it
             self.block_properties.pop(block, None)
         self.block_id = self.block_id[keep]
-        return {'blocks': removed, 'elements_reassigned': reassigned}
+        return {'blocks': removed, 'elements': len(doomed),
+                'nodes': gone['nodes'], 'tracelines': gone['tracelines']}
+
+    def merge_refusal(self, block_ids: Ids) -> str | None:
+        """Why these blocks cannot be one, or None when they can: they
+        must hold the same element types and carry the same properties.
+        A merged block is given one material and one thickness or
+        section, so merging different ones would change the model
+        without saying so.
+
+        Parameters
+        ----------
+        block_ids : sequence of int
+            The blocks, by identifier.
+
+        Returns
+        -------
+        str or None
+        """
+        ids = list(dict.fromkeys(int(b) for b in block_ids))
+        if len(ids) < 2:
+            return 'select two blocks or more to merge'
+        missing = [b for b in ids if b not in self.block_id.tolist()]
+        if missing:
+            return f'no block {missing[0]}'
+        kinds = {frozenset(int(t) for t in
+                           self.elem_type[self.elem_block == block])
+                 for block in ids}
+        if len(kinds) > 1:
+            return 'the blocks hold different element types'
+        held = [self.block_properties.get(block) for block in ids]
+        if any(other != held[0] for other in held[1:]):
+            return ('the blocks differ in material, thickness or section')
+        return None
+
+    def merge_blocks(self, block_ids: Ids) -> dict[str, int]:
+        """One block from several (Merge Blocks, Brandon 2026-09-27): the
+        elements of the rest moved into the first, the rest removed —
+        refused, with the reason, unless `merge_refusal` allows it.
+
+        Parameters
+        ----------
+        block_ids : sequence of int
+            The blocks; the first keeps its id, name and properties.
+
+        Returns
+        -------
+        dict of str to int
+            'into', the block kept; 'blocks', how many were merged into
+            it; 'elements', how many elements moved.
+        """
+        reason = self.merge_refusal(block_ids)
+        if reason is not None:
+            raise ValueError(reason)
+        ids = list(dict.fromkeys(int(b) for b in block_ids))
+        into, others = ids[0], set(ids[1:])
+        moved = np.isin(self.elem_block, list(others))
+        self.elem_block[moved] = into
+        keep = ~np.isin(self.block_id, list(others))
+        self.block_name = [name for name, k in zip(self.block_name, keep) if k]
+        for block in others:
+            self.block_properties.pop(block, None)
+        self.block_id = self.block_id[keep]
+        return {'into': into, 'blocks': len(others),
+                'elements': int(moved.sum())}
 
     def delete_elements(self, elem_ids: Ids) -> dict[str, int]:
         """Remove elements by id. Ids that are not there are ignored.

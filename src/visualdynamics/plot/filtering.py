@@ -50,7 +50,7 @@ class FilterOverlay:
         from scipy.signal import sosfiltfilt
 
         from ..core.filters import design
-        from . import curve_color
+        from . import CURVE_WIDTH, curve_color
 
         self.filtering = filtering
         self._take_down()
@@ -65,7 +65,8 @@ class FilterOverlay:
         # the filtered record, the thing actually being decided, from
         # the drabber of the two lines. Gray-for-the-reference is what
         # a specification and its response already do here.
-        stood_back = pg.mkPen(self.colors['specification_curve'], width=1)
+        stood_back = pg.mkPen(self.colors['specification_curve'],
+                              width=CURVE_WIDTH)
         for index, curve in enumerate(self._sources):
             x, y = curve.getData()
             if y is None or len(y) < 12:
@@ -73,7 +74,8 @@ class FilterOverlay:
             curve.setPen(stood_back)
             preview = pg.PlotDataItem(
                 x, sosfiltfilt(sos, np.asarray(y, dtype=float)),
-                pen=pg.mkPen(curve_color(index), width=1))
+                pen=pg.mkPen(curve_color(index, self.colors),
+                             width=CURVE_WIDTH))
             # over the raw trace: the preview is what is being decided
             preview.setZValue(15)
             self.plot.addItem(preview)

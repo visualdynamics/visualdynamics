@@ -154,7 +154,7 @@ def _merge_geometry(objects):
                 types[cs] = int(obj.cs_type[i])
                 matrices[cs] = obj.cs_matrix[i]
 
-    return Geometry(
+    merged = Geometry(
         node_id=concat('node_id'), node_xyz=concat('node_xyz'),
         node_def_cs=concat('node_def_cs'),
         node_disp_cs=concat('node_disp_cs'),
@@ -172,6 +172,10 @@ def _merge_geometry(objects):
         elem_type=concat('elem_type'), elem_color=concat('elem_color'),
         elem_conn=listed('elem_conn'),
         length_unit=objects[0].length_unit)
+    # one frame, so the first view any of them was given still fits
+    merged.view = next((obj.view for obj in objects
+                        if obj.view is not None), None)
+    return merged
 
 
 # ---- shapes -----------------------------------------------------------------

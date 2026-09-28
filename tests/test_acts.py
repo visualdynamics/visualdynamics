@@ -229,3 +229,37 @@ def test_no_two_acts_share_an_icon(qt_app):
     assert all(image != fallback for image in drawn.values()), [
         icon for icon, image in drawn.items() if image == fallback]
     assert len(set(drawn.values())) == len(drawn), 'two names, one picture'
+
+
+def test_no_act_wears_an_edit_bar_buttons_glyph():
+    """Solve Modes wore the quadrilateral element's square, and read as
+    nothing but a square (Brandon, 2026-09-27). An act has a glyph of its
+    own, not one of the edit bar's element types or modes."""
+    from visualdynamics.gui.main_window import MainWindow
+
+    # 'edit', the pencil, is left out: Fit Modal Model wears it still,
+    # which is Brandon's call (STATUS.md, 2026-09-27)
+    borrowed = {'beam', 'tri', 'quad', 'add', 'rotate', 'reset', 'tie'}
+    icons = {verb: icon for verb, _label, icon, _handler in MainWindow.ACTS}
+    assert not borrowed & set(icons.values()), icons
+    assert icons['solve_modes'] == 'solve_modes'
+
+
+def test_merge_blocks_has_a_glyph_of_its_own(qt_app):
+    """Merge Blocks is offered for a block selection, off the ACTS list,
+    so the uniqueness test above does not see it: its glyph is drawn and
+    is neither Merge into One's nor Merge Coincident Nodes'."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from visualdynamics.gui.icons import control_icon
+
+    def pixels(name):
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        control_icon(name).pixmap(64, 64).toImage().save(buffer, 'PNG')
+        return bytes(data)
+
+    drawn = {name: pixels(name) for name in
+             ('merge_blocks', 'merge', 'merge_nodes', 'no such glyph')}
+    assert len(set(drawn.values())) == 4

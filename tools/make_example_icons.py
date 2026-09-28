@@ -7,8 +7,8 @@ scene the app draws, on a transparent ground so the tile's own panel
 shows through. The plate is the test fixture's mesh; the quadcopter is
 the demonstration airframe's drawing (no eigensolution, so this takes
 seconds). The BARC is its demonstration mesh at the website figure's
-coarser size, stood up (`barc.upright`) — built y-up, it would lie on
-its side in a z-up scene.
+coarser size, seen from its own view (`Geometry.view`): built y-up, it
+opens upright without its nodes being turned.
 
     python tools/make_example_icons.py          # write web/launch/{plate,drone,barc}.png
 
@@ -48,7 +48,7 @@ def drone():
 def barc():
     sys.path.insert(0, str(ROOT / 'src'))
     from visualdynamics.demo import barc as article
-    return article.upright(article.geometry(0.25))
+    return article.geometry(0.25)
 
 
 def render(geometry, path: pathlib.Path, *, azimuth: float, elevation: float,
@@ -57,14 +57,15 @@ def render(geometry, path: pathlib.Path, *, azimuth: float, elevation: float,
     import pyvista as pv
 
     from visualdynamics.theme import theme as resolve_theme
-    from visualdynamics.viz.geometry import add_geometry
+    from visualdynamics.viz.geometry import add_geometry, place_view
 
     colors = resolve_theme('dark')
     plotter = pv.Plotter(off_screen=True, window_size=(SIZE, SIZE))
     add_geometry(plotter, geometry, node_size=0.0, line_width=1.0,
                  show_edges=True, text_color=colors['scene_text'],
                  components=['elements', 'tracelines'])
-    plotter.view_isometric()
+    # the geometry's own view, then the tile's turn from it
+    place_view(plotter, geometry.opening_view, render=False)
     plotter.camera.azimuth = azimuth
     plotter.camera.elevation = elevation
     plotter.camera.zoom(zoom)

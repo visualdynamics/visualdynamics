@@ -118,13 +118,18 @@ def test_the_figure_fills_its_frame(qt_app, tmp_path):
 def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
     """The report's plots always match the app's (Brandon, 2026-09-27):
     the legend names the warning band and the zones past abort in the
-    same words, and the one response and its specification are drawn at
-    the app's widths."""
+    same words, and the one response and its specification are drawn in
+    the app's colors and at its widths."""
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
     from PySide6.QtWebEngineWidgets import QWebEngineView
 
-    from visualdynamics.plot import MEASURED_WIDTH, STOOD_BACK_WIDTH
+    from visualdynamics.plot import (
+        CURVE_WIDTH,
+        MEASURED_ALPHA,
+        MEASURED_WIDTH,
+        STOOD_BACK_WIDTH,
+    )
 
     measured, spec = _pair()
     path = visualdynamics.export_html(tmp_path / 'spec.html', measured,
@@ -136,6 +141,14 @@ def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
         ['above', 'above abort (+6 dB)'], ['below', 'below abort (−6 dB)']]
     assert [c.get('width') for c in block['curves']] == [STOOD_BACK_WIDTH,
                                                         MEASURED_WIDTH]
+    # and colored as the app colors them: the specification gray, the
+    # response the first curve color, translucent over it — not the
+    # page's ink, which could not be told from the gray in print
+    gray, response = block['curves']
+    assert gray.get('gray') and not response.get('ink')
+    assert response.get('color') == 0
+    assert response.get('alpha') == MEASURED_ALPHA
+    assert data['curve_width'] == CURVE_WIDTH
     view = QWebEngineView()
     view.resize(700, 400)
     view.load(QUrl.fromLocalFile(str(path)))

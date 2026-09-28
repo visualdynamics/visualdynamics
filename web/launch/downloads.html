@@ -178,7 +178,20 @@ pip install -e .</pre>
   </ul>
   <p class="note">
     The 3-D views want a working OpenGL stack, which any ordinary
-    desktop has. Nothing here phones home on its own or needs an account — <em>File → Check for Updates…</em> asks visualdynamics.org only when you ask it to.
+    desktop has. Nothing here phones home on its own or needs an account — <em>File → Check for Updates…</em> asks visualdynamics.org only when you ask it to. The <a href="privacy.html">privacy policy</a> has the details.
+  </p>
+
+  <h2 id="signing">Code signing</h2>
+  <p>
+    The macOS images are signed with the author's Apple Developer ID
+    and notarized by Apple. The Windows installer is to be signed
+    through the SignPath Foundation, which provides free code signing
+    for open source projects: free code signing provided by SignPath.io,
+    certificate by SignPath Foundation. Until that is in place the
+    installer is unsigned, and Windows SmartScreen asks before running
+    it. The <a href="code-signing.html">code signing policy</a> says
+    what is signed, who approves it, and what the program sends over
+    the network.
   </p>
 </main>
 <script>

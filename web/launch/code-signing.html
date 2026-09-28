@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code signing policy — Visual Dynamics</title>
+<meta name="description" content="How the Visual Dynamics installers are signed, who can release them, and what the program sends over the network.">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="Code signing policy — Visual Dynamics">
+<meta property="og:description" content="How the Visual Dynamics installers are signed, who can release them, and what the program sends over the network.">
+<meta property="og:image" content="mark.png">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div class="top">
+  <a class="home" href="index.html"><img src="favicon.png" alt="">Visual Dynamics</a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="workflows.html">Workflows</a>
+    <a href="examples.html">Examples</a>
+    <a href="documentation/">Documentation</a>
+    <a href="downloads.html">Downloads</a>
+    <a href="requests.html">Requests</a>
+    <a href="about.html">About</a>
+  </nav>
+</div>
+<main>
+  <header><h1>Code signing policy</h1></header>
+
+  <p class="lede">
+    Visual Dynamics is open source under the
+    <a href="https://github.com/visualdynamics/visualdynamics/blob/main/LICENSE">MIT License</a>.
+    Its installers are built from the public repository by GitHub
+    Actions and signed so that your operating system can confirm
+    where they came from.
+  </p>
+
+  <h2>Windows</h2>
+  <p>
+    Free code signing provided by
+    <a href="https://signpath.io">SignPath.io</a>, certificate by
+    <a href="https://signpath.org">SignPath Foundation</a>. The
+    application to the SignPath Foundation's program for open source
+    projects was made in September 2026; until it is accepted, the
+    Windows installer is unsigned and Windows SmartScreen warns before
+    running it.
+  </p>
+  <p>
+    Only release builds are signed: the installer the release workflow
+    builds from a version tag in the
+    <a href="https://github.com/visualdynamics/visualdynamics">public repository</a>,
+    and the application inside it. Nothing built on a personal machine
+    is submitted for signing.
+  </p>
+
+  <h2>macOS</h2>
+  <p>
+    The macOS disk images are signed with the author's Apple Developer
+    ID and notarized by Apple.
+  </p>
+
+  <h2>Team roles</h2>
+  <ul>
+    <li><strong>Committers and reviewers:</strong> Brandon Zwink
+      (<a href="https://github.com/bzwink">@bzwink</a>). Changes from
+      anyone else arrive as pull requests and are reviewed before they
+      are merged.</li>
+    <li><strong>Approvers:</strong> Brandon Zwink. Every signing request
+      is approved by hand.</li>
+  </ul>
+  <p>
+    Everyone with these roles uses multi-factor authentication on
+    GitHub and on SignPath.
+  </p>
+
+  <h2>Privacy policy</h2>
+  <p>
+    This program will not transfer any information to other networked
+    systems unless specifically requested by the user or the person
+    installing or operating it.
+  </p>
+  <p class="note">
+    The one request it can make is <em>File → Check for Updates…</em>,
+    and only when you choose it from the menu. The full
+    <a href="privacy.html">privacy policy</a> says what that request
+    carries.
+  </p>
+</main>
+<footer>
+  <a href="mailto:contact@visualdynamics.org">contact@visualdynamics.org</a><br>
+  &copy; 2026 Brandon Zwink.
+</footer>
+</body>
+</html>

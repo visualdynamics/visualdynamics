@@ -249,25 +249,27 @@ that means for whoever you hand a build to:
   `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarization takes a few
   minutes per submission, twice per image.
 - **Windows** — SmartScreen warns until the signature earns
-  reputation. **The plan is SignPath Foundation** (Brandon,
-  2026-08-28, reaffirmed 2026-09-03 under the copyleft-with-a-CLA
-  plan: nothing is sold under other terms and may never be, so in
-  practice this is a plain copyleft project and their no-dual-licensing condition
-  is met for as long as that stays true — the day it does not, the
-  paid fallback at the end takes over). Their conditions:
+  reputation. **SignPath Foundation**, applied for 2026-09-28, the
+  day the project went MIT with no commercial terms (Brandon, first
+  planned 2026-08-28). Their conditions, read that day:
   - The certificate is the Foundation's, so the publisher line in
     SmartScreen and the installer reads **"SignPath Foundation"** —
     not the author's name. Accepted as the price of free; the macOS
     side still carries the author's own Apple identity.
-  - They require an OSI license **without commercial dual-licensing**
-    — a plain copyleft license qualifies; a copyleft-plus-commercial
-    plan would not, which is why no commercial terms are offered.
-  - They sign projects that are *already released*, so the sequence
-    is: public grant → first Windows release unsigned → apply at
-    signpath.org → wire their GitHub Action into the release
-    workflow's Windows job. Signing is release two, not day one.
-  - The download page must say what the software does; `web/launch/`
-    already does.
+  - An OSI license **without commercial dual-licensing** and no
+    proprietary components. MIT, with nothing offered under other
+    terms, meets it plainly.
+  - They sign projects that are *already released*: apply at
+    signpath.org/apply (the form creates the SignPath account), then
+    wire their GitHub Action into the release workflow's Windows job.
+  - The download page must say what the software does and name the
+    SignPath Foundation as its code signer, and a code signing policy
+    page must list the team's roles and the privacy statement
+    (`web/launch/code-signing.html`). The app sends nothing anywhere
+    unless asked: *Check for Updates* is the one network call, and
+    only from the menu.
+  - Everyone on the project uses multi-factor authentication on
+    SignPath and on GitHub.
 
   The paid fallbacks, if the Foundation declines or the posture
   changes: **Azure Artifact Signing** (was "Trusted Signing"),

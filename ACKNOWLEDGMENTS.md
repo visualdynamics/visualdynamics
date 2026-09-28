@@ -11,8 +11,7 @@ records are kept apart on purpose:
 | record | what it means | where |
 | --- | --- | --- |
 | this page | thanks, freely given, at the author's discretion | here |
-| the terms of the work itself | GPL-3.0-or-later | [`LICENSE`](LICENSE) |
-| what a contribution is given under | the contributor license agreement | [`CLA.md`](CLA.md) |
+| the terms of the work itself, and of every contribution to it | MIT | [`LICENSE`](LICENSE) |
 | third-party licenses | attribution the dependencies *require* | [`NOTICE.md`](NOTICE.md) |
 
 Being thanked here is not a claim on anything — authorship, ownership or otherwise. See
@@ -77,7 +76,7 @@ what shaped it.
   still says what a channel is and what it measures.
 - **sdynpy**, **Rattlesnake** and **forcefinder**, for showing what
   these tools should do. Nothing is taken from them: all three are
-  GPL-3.0, and taking their code would have settled this project's
-  licensing by accident — so their methods were read and then written
-  from scratch here. `tests/test_license_boundary.py`
+  GPL-3.0, and their code could not have been taken into an
+  MIT project — so their methods were read and then written from
+  scratch here. `tests/test_license_boundary.py`
   enforces that on every run, and `AGENTS.md` rule 1 says why.

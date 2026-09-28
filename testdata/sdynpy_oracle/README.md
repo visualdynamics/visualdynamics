@@ -8,8 +8,8 @@ already trusts.
 
 ## Why data, and never an import
 
-sdynpy is GPL-3.0, and Visual Dynamics keeps every licensing option
-open by never importing it (`AGENTS.md` hard rule 1;
+sdynpy is GPL-3.0, and GPL code cannot live in Visual Dynamics, which
+is MIT, so it is never imported (`AGENTS.md` hard rule 1;
 `tests/test_license_boundary.py` enforces it over the package *and*
 the tests). Running a GPL program privately carries no conditions
 (GPLv3 §2), and a program's numerical output is not a covered work

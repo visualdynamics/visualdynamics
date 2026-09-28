@@ -144,7 +144,8 @@ happens on its own once 6 is done.
    so nobody needs to be at the Mac.
 3. Swap the grant (the copyleft license with a CLA — decided
    2026-09-03, PLAN.md "Open source, revisited"; **done — merged
-   into `main` 2026-09-13**): `LICENSE` becomes
+   into `main` 2026-09-13**; *superseded 2026-09-28: the tree is MIT
+   and the CLA is retired, PLAN.md "MIT, and the CLA retired"*): `LICENSE` becomes
    the license text (`packaging/licenses/` holds a copy) with
    the "or any later version" statement at its head, `license` in
    `pyproject.toml` becomes the matching SPDX expression (it reads
@@ -152,7 +153,7 @@ happens on its own once 6 is done.
    Upload` classifier comes out of `pyproject.toml` (PyPI refuses an
    upload that carries it, and the `pypi` job uploads the real
    package), the README's license badge
-   follows, and `CLA.md` is published beside `CONTRIBUTING.md`, which
+   follows, and the CLA is published beside `CONTRIBUTING.md`, which
    already names it. Commit.
 4. Sync the shared repository from this tree — `tools/sync_public.sh
    "<title>"`, which opens a pull request that merges itself once CI
@@ -174,11 +175,11 @@ happens on its own once 6 is done.
    before going further.
 6. Publish the draft release. This is the step that cannot be walked
    back. (The first release also made the repository public and put
-   branch protection on `main` — a pull request with four green
-   checks, `test (3.12)`, `test (3.13)`, `docs` and `cla`,
-   administrators enforced, linear history — which is what makes the
-   CLA bot a gate rather than a comment and what `tools/sync_public.sh`
-   leans on. Both are done and stay done.)
+   branch protection on `main` — a pull request with its checks
+   green, administrators enforced, linear history — which is what
+   `tools/sync_public.sh` leans on. Both are done and stay done. The
+   `cla` check was one of those checks until the CLA was retired on
+   2026-09-28.)
 7. **The site deploys itself when the release is published** (Brandon,
    2026-09-01, "option 1"): the release workflow's `site` job builds
    the documentation into `web/launch/documentation/`, writes
@@ -196,16 +197,17 @@ happens on its own once 6 is done.
    publishing (packaging/README.md, "PyPI" — the pending publisher
    and the `pypi` environment have to exist, and the name is held by
    the placeholder from the `reserve` run).
-8. Afterwards: apply to SignPath Foundation for Windows signing
-   (Brandon, 2026-09-03: "I'm not selling this yet and I may never").
-   Read their current conditions first — the August note says no
-   commercial dual-licensing, and today nothing is sold under other
-   terms, so the project is a plain copyleft project in practice. If they
-   accept, wire their GitHub Action into the release workflow's
-   Windows job; the day a commercial license is actually sold, move to
-   Azure Artifact Signing (about $10 a month, packaging/README.md)
-   rather than keep a subsidy on false pretenses. If they decline,
-   the paid signer from the start. (The Apple side is done: Brandon
+8. Afterwards: apply to SignPath Foundation for Windows signing.
+   **In progress 2026-09-28**, the day the tree went MIT with no
+   commercial terms, which is the Foundation's condition met plainly
+   (their terms, read that day: an OSI license, no commercial
+   dual-licensing, no proprietary components, already released, the
+   download page naming the Foundation as signer, a code signing
+   policy page, MFA for everyone on the project). Brandon applies
+   through signpath.org/apply, which creates the SignPath account for
+   him; on acceptance, wire their GitHub Action into the release
+   workflow's Windows job. If they decline, Azure Artifact Signing
+   (about $10 a month, packaging/README.md). (The Apple side is done: Brandon
    joined the Developer Program on 2026-09-02.)
 
 - **A verifying updater, after signing.** *File → Check for Updates…*

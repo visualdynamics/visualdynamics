@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/visualdynamics/visualdynamics/actions/workflows/ci.yml/badge.svg)](https://github.com/visualdynamics/visualdynamics/actions/workflows/ci.yml)
 [![ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![license: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![python: 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](pyproject.toml)
 
 Units-aware structural dynamics analysis toolset. Geometry, test data (time
@@ -152,16 +152,17 @@ than authorship.
 
 ## License
 
-Copyright (c) 2026 Brandon Zwink. Visual Dynamics is free software
-under the [GNU General Public License, version 3 or any later
-version](LICENSE): install it, use it, read it, change it, and pass it
-on — a distributed derivative stays under the same terms. The outputs
-are yours: plots, reports, exported files, numbers you put in a paper
-or hand to a customer. Nothing here claims any interest in your data
-or in what the software tells you about it.
+Copyright (c) 2026 Brandon Zwink. Visual Dynamics is released under
+the [MIT License](LICENSE): install it, use it, read it, change it,
+build it into your own work, open or closed, and pass it on, keeping
+the copyright notice with it. The outputs are yours: plots, reports,
+exported files, numbers you put in a paper or hand to a customer.
+Nothing here claims any interest in your data or in what the software
+tells you about it.
 
-Other terms are available from the copyright holder
-(contact@visualdynamics.org). Contributions are accepted under
-[CLA.md](CLA.md), which is what keeps that possible; see
+Versions 0.1.0a1 through 0.1.0a14 were released under the GNU General
+Public License, version 3 or later. The copyright holder grants them
+under the MIT License as well, so every version so far can be used on
+MIT terms. Contributions are accepted under the same MIT License; see
 [CONTRIBUTING.md](CONTRIBUTING.md). Third-party licenses are listed in
 [NOTICE.md](NOTICE.md).

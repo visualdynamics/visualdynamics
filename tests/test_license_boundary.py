@@ -1,17 +1,19 @@
 """The line visualdynamics must not cross, enforced rather than remembered.
 
-visualdynamics is owned outright, and its licensing is deliberately
-still open: nothing has been granted, and every option — permissive,
-copyleft, commercial, or nothing at all — is still available. sdynpy,
-rattlesnake and forcefinder are GPL-3.0, and one import would settle
-the question by accident and for ever.
+visualdynamics is released under the MIT License (2026-09-28).
+sdynpy, rattlesnake and forcefinder are GPL-3.0, and GPL code cannot
+live in an MIT project: one import would put every build that carries
+it under the GPL, which the project's license does not allow and a
+release cannot take back.
 
 **Copyleft inherited is not copyleft chosen.** Code taken from
 somebody else's GPL project can never be relicensed, because it is not
-ours to relicense — so the choice would not merely be made, it would
-be made permanently, by whoever wrote the import rather than by
-anyone deciding. Permissive code may travel into a copyleft work; the
-reverse never holds.
+ours to relicense — so the choice would be made permanently, by
+whoever wrote the import rather than by anyone deciding. Permissive
+code may travel into a copyleft work; the reverse never holds. (Under
+the GPL plan this project followed until 0.1.0a14 the import was
+legal and the rule stood for ownership; the rule is older than either
+license.)
 
 The rule has always been written down: use their *file formats*, which
 are documented interfaces and not copyrightable expression, and never

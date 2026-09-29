@@ -118,6 +118,12 @@ dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005"]
 # add it later and a capability most users cannot reach is not a
 # capability (Brandon, 2026-09-01).
 step = ["cadquery-ocp"]
+# MIT. The packaged macOS app updates itself through Sparkle
+# (2026-09-28), an Objective-C framework the app reaches through
+# pyobjc's runtime alone (`gui/updater.py`); every packaged build
+# installs this extra, and a pip install, which has no Sparkle to
+# drive, goes without it and keeps the manifest check.
+app = ["pyobjc-core; sys_platform == 'darwin'"]
 # The API reference is generated from the code at build time by
 # mkdocstrings rather than committed, so the docstrings *are* the
 # reference. All of these are permissive (BSD-2 / MIT / ISC) and none of

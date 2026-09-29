@@ -68,15 +68,25 @@ the software is offered as is, its numbers are the user's to check —
 and **File → About Visual Dynamics…** shows the version, readable
 without the network.
 
-**File → Check for Updates…** asks visualdynamics.org whether a newer
-version exists and says so — up to date, newer (with the download
-page to open), or unreachable. It never downloads or replaces
-anything itself: a newer version is installed the way the first one
-was. The connection is verified against what the operating system
-trusts, so on a network that inspects HTTPS the check works once the
-network's own certificate authority is installed on the machine, as it
-is for the browser; failing that, the status line says which part of
-the check failed.
+**File → Check for Updates…** checks only when you choose it.
+
+- **The macOS app updates itself.** Sparkle opens its own window, shows
+  what is new, and installs the update in place when you say so. It
+  usually downloads only what changed between your version and the new
+  one, and it verifies the update's signature before installing it.
+- **A pip install** is told the command that updates it, for its own
+  Python, with a button that copies it:
+  `python -m pip install --upgrade visualdynamics`. Only the package
+  itself is downloaded. An editable install (a checkout) is not offered
+  one, since `git pull` is how a checkout updates.
+- **Windows and Linux builds** are told a newer version exists, with the
+  download page to open.
+
+Outside the macOS app the check asks visualdynamics.org, verified
+against what the operating system trusts, so on a network that
+inspects HTTPS it works once the network's own certificate authority
+is installed on the machine, as it is for the browser; failing that,
+the status line says which part of the check failed.
 
 The command is created by the install, in the environment's own `bin`
 directory — it is on your `PATH` exactly when that environment is

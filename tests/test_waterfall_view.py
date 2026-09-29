@@ -106,6 +106,41 @@ def test_the_camera_survives_a_reread_and_resets_on_a_new_object(window,
     assert np.allclose(camera_of(plotter), home)
 
 
+def test_one_choice_for_the_plots_and_the_mac_remembered(window, pump,
+                                                        window_factory):
+    """Brandon, 2026-09-28: the 2D/3D toggle persists across the MAC and
+    across launches. A click on either toggle sets both and is stored;
+    the next window opens the way the last one was left."""
+    from visualdynamics.gui.preferences import remembered_3d
+
+    pane = window.data_pane
+    assert pane.waterfall_action.isChecked() and window.mac_bars_action.isChecked()
+    assert remembered_3d(), '3-D until the toggle is left on 2-D'
+    pane.waterfall_action.trigger()                 # flat, on the plots
+    pump()
+    assert not window.mac_bars_action.isChecked(), 'the MAC follows'
+    assert not remembered_3d()
+    later = window_factory()                        # the next launch
+    assert not later.data_pane.waterfall_action.isChecked()
+    assert not later.mac_bars_action.isChecked()
+    later.mac_bars_action.trigger()                 # 3-D, on the MAC
+    pump()
+    assert later.data_pane.waterfall_action.isChecked(), 'the plots follow'
+    assert remembered_3d()
+
+
+def test_a_view_holding_itself_flat_does_not_move_the_choice(window, pump):
+    """Only a click is a choice: a view that draws flat for a while —
+    the specification sheet's `flat_only`, a fixture's setChecked —
+    neither moves the other toggle nor overwrites what is remembered."""
+    from visualdynamics.gui.preferences import remembered_3d
+
+    window.data_pane.waterfall_action.setChecked(False)
+    pump()
+    assert window.mac_bars_action.isChecked()
+    assert remembered_3d()
+
+
 def test_the_choice_stays_armed_across_selections(window, pump):
     """Unchecked on one object stays unchecked on the next — the
     reading is a view choice, not a per-object setting."""

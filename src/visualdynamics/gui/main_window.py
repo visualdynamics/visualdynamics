@@ -897,6 +897,7 @@ class MainWindow(QMainWindow):
             'The MAC as 3-D bars, height and color the value — '
             'click picks a pair, Shift adds it, exactly as on the grid')
         self.mac_bars_action.triggered.connect(self._rerender_mac)
+        self._wire_reading_choice()
         # the 2D/3D toggle leads this bar, as it leads the data pane's
         # (Brandon, 2026-08-30): the same control sits in the same
         # place whichever view is up
@@ -5567,11 +5568,19 @@ class MainWindow(QMainWindow):
         could not check, and an afternoon of commands to find out why).
         This menu item is the only place the application checks; there
         is no check on startup.
+
+        The packaged macOS app hands the whole job to Sparkle instead
+        (`updater.py`, 2026-09-28): it checks, downloads, verifies the
+        update's signature and replaces the app, in its own window.
         """
         import threading
 
         from .. import update
+        from . import updater
 
+        if updater.check():
+            self._show_status('Checking for updates…')
+            return
         self._show_status('Checking for updates…')
         if not getattr(self, '_update_wired', False):
             self._update_answer.connect(self._report_update)
@@ -5603,13 +5612,29 @@ class MainWindow(QMainWindow):
         box.setText(f'Visual Dynamics {version} is available '
                     f'(this is {__version__}).')
         notes = str(manifest.get('notes', '')).strip()
-        if notes:
+        # a pip install updates with pip, and only the package moves:
+        # the command, this environment's own, with a button that copies
+        # it (Brandon, 2026-09-28: show it, do not run it)
+        command = update.upgrade_command()
+        if command:
+            box.setInformativeText(
+                (notes + '\n\n' if notes else '')
+                + 'To update, run:\n' + command)
+            box.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
+        elif notes:
             box.setInformativeText(notes)
         url = str(manifest.get('url', '')).strip()
-        opener = box.addButton('Open download page',
-                               QMessageBox.ButtonRole.AcceptRole)
+        if command:
+            copier = box.addButton('Copy command',
+                                   QMessageBox.ButtonRole.AcceptRole)
+            copier.clicked.connect(lambda: self._copy_command(command))
+        opener = box.addButton('Open release page' if command
+                               else 'Open download page',
+                               QMessageBox.ButtonRole.ActionRole
+                               if command else QMessageBox.ButtonRole.AcceptRole)
         box.addButton(QMessageBox.StandardButton.Close)
-        box.setDefaultButton(opener)
+        box.setDefaultButton(copier if command else opener)
         if url:
             opener.clicked.connect(
                 lambda: QDesktopServices.openUrl(QUrl(url)))
@@ -5617,6 +5642,12 @@ class MainWindow(QMainWindow):
             opener.setEnabled(False)
         self._update_box = box               # kept alive while open
         box.open()
+
+    def _copy_command(self, command: str) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.clipboard().setText(command)
+        self._show_status('Copied — paste it into a terminal: ' + command)
 
     def import_files(self) -> None:
         filters = ('Importable files (*.vdyn *.vdreport *.npz *.exo *.e *.exo2 *.g *.gen '
@@ -11653,6 +11684,38 @@ class MainWindow(QMainWindow):
                                     connect='finite')
             curve.setZValue(-5)         # context, beneath the evidence
             plot.addItem(curve, ignoreBounds=True)
+
+    def _wire_reading_choice(self) -> None:
+        """One 2D/3D choice for the data plots and the MAC, remembered.
+
+        The two toggles were separate settings, each forgotten at quit
+        (Brandon, 2026-09-28: *make the 2D/3D toggle persist across the
+        MAC and launch*). Both start from the remembered choice, and a
+        click on either sets the other and stores the choice. Only a
+        click: `triggered`, not `toggled`, so a view that holds its own
+        drawing flat for a while — the specification sheet — neither
+        moves the other toggle nor forgets the choice.
+        """
+        from .preferences import remember_3d, remembered_3d
+
+        chosen = remembered_3d()
+        self.data_pane.waterfall_action.setChecked(chosen)
+        self.mac_bars_action.setChecked(chosen)
+
+        def chose(on: bool, other: QAction, redraw) -> None:
+            other.setChecked(on)
+            remember_3d(on)
+            # the other view redrawn only where it is offered: a hidden
+            # toggle is a view that is not up, and it reads the choice
+            # when it next draws
+            if other.isVisible():
+                redraw()
+
+        self.data_pane.waterfall_action.triggered.connect(
+            lambda on: chose(on, self.mac_bars_action, self._rerender_mac))
+        self.mac_bars_action.triggered.connect(
+            lambda on: chose(on, self.data_pane.waterfall_action,
+                             self.data_pane.reread.emit))
 
     def _rerender_mac(self):
         """The 3D toggle redraws whichever MAC is up. During a fit,

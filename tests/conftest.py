@@ -290,6 +290,10 @@ def window(qt_app, no_swallowed_errors):
     for kind in doors:
         setattr(QMessageBox, kind, refuse(kind))
 
+    # the 2D/3D choice is remembered between launches, and the tests
+    # share one settings file: each window starts from the default
+    from visualdynamics.gui.preferences import THREE_D_KEY, settings
+    settings().remove(THREE_D_KEY)
     window = MainWindow(offscreen_3d=True)
     window.resize(1400, 800)
     window.show()
@@ -362,7 +366,9 @@ def survey():
 def window_factory(qt_app):
     """Extra fresh windows, for tests that move things between projects."""
     from visualdynamics.gui.main_window import MainWindow
+    from visualdynamics.gui.preferences import THREE_D_KEY, settings
 
+    settings().remove(THREE_D_KEY)      # the default, as `window` starts
     windows = []
 
     def make():

@@ -15,6 +15,7 @@
 # packages than a hand-written list would. What is here is the rest: the
 # entry point, what to leave out, and the platform wrapping.
 
+import platform
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, SPECPATH)          # noqa: F821
 from system_libraries import strip_system_libraries  # noqa: E402
 from visualdynamics import __version__  # noqa: E402
+from visualdynamics.update import SPARKLE_FEED, SPARKLE_PUBLIC_KEY  # noqa: E402
 
 MAC = sys.platform == 'darwin'
 WINDOWS = sys.platform == 'win32'
@@ -104,6 +106,16 @@ analysis = Analysis(                                       # noqa: F821
 # the measurement.
 analysis.binaries = strip_system_libraries(analysis.binaries, sys.platform)
 
+# Static libraries are for linking a program, never loaded by one, and
+# PySide6's qml tree carries one: the signing loop signed it as Mach-O,
+# codesign kept that signature in extended attributes, and Sparkle
+# refuses to make a delta update across such a file (2026-09-28). Out
+# of the bundle on every platform; nothing asks for it.
+analysis.datas = [entry for entry in analysis.datas
+                  if not entry[0].endswith('.a')]
+analysis.binaries = [entry for entry in analysis.binaries
+                     if not entry[0].endswith('.a')]
+
 pyz = PYZ(analysis.pure)                                   # noqa: F821
 
 executable = EXE(                                          # noqa: F821
@@ -171,5 +183,16 @@ if MAC:
                 'CFBundleTypeRole': 'Editor',
                 'LSHandlerRank': 'Owner',
             }],
+            # Sparkle (gui/updater.py): this architecture's own feed —
+            # the arm64 and Intel builds are separate apps, and an
+            # update meant for one must never reach the other — the
+            # key every update is verified against, and checks only
+            # when asked (Brandon, 2026-09-28): no automatic check, no
+            # asking to, no downloading in the background
+            'SUFeedURL': SPARKLE_FEED.format(arch=platform.machine()),
+            'SUPublicEDKey': SPARKLE_PUBLIC_KEY,
+            'SUEnableAutomaticChecks': False,
+            'SUAllowsAutomaticUpdates': False,
+            'SUAutomaticallyUpdate': False,
         },
     )

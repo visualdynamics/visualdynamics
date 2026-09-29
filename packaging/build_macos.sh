@@ -75,6 +75,23 @@ rm -rf build dist
 "$PYTHON" -m PyInstaller packaging/visualdynamics.spec --noconfirm \
   --distpath dist --workpath build
 
+# Sparkle, the updater (src/visualdynamics/gui/updater.py): its
+# framework into Contents/Frameworks, where the app looks for it, before
+# anything is signed so the loop below signs it with the rest. From the
+# unpacked official release (SPARKLE, by default the release folder in
+# Application Support; packaging/README.md, "Updates"). Its XPC services
+# are left out: Sparkle needs them only in a sandboxed app, and this one
+# is not. Without the framework the app still builds, and its Check for
+# Updates falls back to saying what is available.
+SPARKLE=${SPARKLE:-"$HOME/Library/Application Support/visualdynamics-release/sparkle/Sparkle.framework"}
+if [[ -d $SPARKLE ]]; then
+  ditto "$SPARKLE" "$APP/Contents/Frameworks/Sparkle.framework"
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" \
+         "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
+else
+  echo "warning: no Sparkle.framework at $SPARKLE — this build cannot update itself" >&2
+fi
+
 if [[ -n $SIGN ]]; then
   # --deep is deprecated and unreliable for nested code; sign inside
   # out. Every Mach-O *by content*, not by name: the first notarized
@@ -108,6 +125,10 @@ if [[ -n $SIGN ]]; then
     rm -f "$ZIP"
     xcrun stapler staple -q "$APP"
     spctl --assess --type execute -v "$APP"
+    # what Sparkle downloads: the notarized, stapled app, zipped the way
+    # Sparkle unpacks it, and the base the next release's deltas are
+    # made against (packaging/release_updates.sh)
+    ditto -c -k --keepParent "$APP" "dist/VisualDynamics-${VERSION}-macos-${ARCH}.zip"
   else
     echo "warning: signed but not notarized — neither the login-keychain" \
          "item '$NOTARY_ITEM' nor the notarytool profile '$NOTARY_PROFILE'" \

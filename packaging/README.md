@@ -337,21 +337,51 @@ tool.
 
 ## Updating an installed copy
 
-There is no auto-updater, on purpose. `src/visualdynamics/update.py`
-asks `https://visualdynamics.org/latest.json` whether a newer version
-exists and says so; it downloads and executes nothing. An updater that
-runs what it fetched without verifying a signature is remote code
-execution with a friendly name. The macOS builds now carry an Apple
-identity to verify against; Windows waits on its signing route.
-Sparkle and WinSparkle do this properly and can be adopted when both
-halves are signed.
+**The macOS app updates itself through Sparkle** (2026-09-28,
+`src/visualdynamics/gui/updater.py`). *Check for Updates* opens
+Sparkle's own window: it reads `appcast-<arch>.xml` from the newest
+published release, downloads a binary delta from the installed version
+when the release carries one (the whole archive otherwise), verifies
+its EdDSA signature and the new app's Developer ID, replaces the app
+and relaunches. It checks only when asked: the Info.plist turns every
+automatic check off (Brandon, 2026-09-28), so the privacy policy's
+one-request promise holds.
+
+Everywhere else — the Windows and Linux builds, a pip install —
+`src/visualdynamics/update.py` asks
+`https://visualdynamics.org/latest.json` whether a newer version exists
+and says so; it downloads and executes nothing. Windows gets WinSparkle
+once its installer is signed.
+
+What the updater needs on this machine, all under
+`~/Library/Application Support/visualdynamics-release/`:
+
+- `sparkle/`: the official Sparkle 2.10.0 release, unpacked
+  (`Sparkle-2.10.0.tar.xz` from github.com/sparkle-project/Sparkle,
+  its sha256 checked against the release's digest). `build_macos.sh`
+  copies `Sparkle.framework` into the app, less its XPC services (only
+  a sandboxed app needs them), and the signing loop signs it with the
+  rest; `bin/` holds `generate_appcast`.
+- `updates/<arch>/`: the archive store, the last three releases' update
+  zips per architecture — each release's deltas are made against the
+  archives before it, so these must survive between releases.
+- The signing key: a login-keychain item made by `generate_keys
+  --account visualdynamics`; its public half is `SPARKLE_PUBLIC_KEY` in
+  `update.py`. **Keep a backup** (`generate_keys --account
+  visualdynamics -x <file>`, then somewhere safe and offline): with the
+  key lost, installed copies cannot take another update through
+  Sparkle, and everyone downloads a dmg once more.
 
 Publishing a new version therefore means: sync the public tree
 (`tools/sync_public.sh`), tag `v<version>` there, let the draft
 release build, build and notarize the macOS pair here
 (`build_macos.sh`, `build_macos_intel.sh`, unattended from the
-keychain item above), attach them with `packaging/attach_macos.sh
-v<version>`, read the Windows smoke screenshot, and publish. The
+keychain item above — each writes a `.dmg` and a `.zip`, and each
+starts by clearing `dist/`, so move the first pair out before the
+second build and back after), attach the images with
+`packaging/attach_macos.sh v<version>`, add the updates with
+`packaging/release_updates.sh v<version>`, read the Windows smoke
+screenshot, and publish. The
 order in full is REMAINING-TASKS.md "Release". The release
 workflow's `site` job writes
 `web/launch/latest.json` from the published release and redeploys the

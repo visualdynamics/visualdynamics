@@ -105,3 +105,19 @@ def test_the_release_script_survives_a_first_release():
     for line in script.splitlines():
         if line.strip().startswith('rm -f') and '*' in line:
             assert '(N)' in line, line
+
+
+def test_signing_needs_nobody_at_the_mac():
+    """generate_appcast reading the keychain item itself raised a
+    prompt and waited on it for sixteen minutes of the unattended
+    0.1.0a15 release (2026-09-28). The key comes from generate_keys,
+    which made the item and reads it silently, through a private
+    folder the script removes on the way out."""
+    script = (ROOT / 'packaging' / 'release_updates.sh').read_text(
+        encoding='utf-8')
+    call = script[script.index('"$tools/generate_appcast"'):]
+    call = call[:call.index('"$dir"\n')]
+    assert '--ed-key-file' in call and '--account' not in call
+    assert 'generate_keys" --account visualdynamics -x' in script
+    assert "trap 'rm -rf \"$keydir\"' EXIT" in script
+    assert 'chmod 700 "$keydir"' in script

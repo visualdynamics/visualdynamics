@@ -44,6 +44,19 @@ else
     touch "$work/SHA256SUMS"
 fi
 
+# The signing key, exported for the length of this script into a folder
+# only this user can open, and deleted on the way out whatever happens.
+# generate_keys made the keychain item, so macOS lets it read the key
+# without asking; generate_appcast reading the item itself raised a
+# keychain prompt and sat waiting on it for sixteen minutes of the
+# unattended 0.1.0a15 release (2026-09-28). generate_keys writes only to
+# a path that does not exist yet, so not to a pipe.
+keydir=$(mktemp -d)
+chmod 700 "$keydir"
+trap 'rm -rf "$keydir"' EXIT
+"$tools/generate_keys" --account visualdynamics -x "$keydir/key" > /dev/null
+[[ -s $keydir/key ]] || { echo "the signing key could not be read from the keychain" >&2; exit 1; }
+
 uploads=()
 # VD_ARCHES narrows it to one architecture, for a test
 for arch in ${=VD_ARCHES:-arm64 x86_64}; do
@@ -60,7 +73,7 @@ for arch in ${=VD_ARCHES:-arm64 x86_64}; do
     # (N): a first release has no old deltas, and zsh stops on a glob
     # that matches nothing
     rm -f "$dir"/*.delta(N) "$dir"/appcast-*.xml(N)
-    "$tools/generate_appcast" --account visualdynamics \
+    "$tools/generate_appcast" --ed-key-file "$keydir/key" \
         --download-url-prefix "https://github.com/$repo/releases/download/$tag/" \
         --embed-release-notes --link https://visualdynamics.org \
         --maximum-versions 1 --maximum-deltas 2 \

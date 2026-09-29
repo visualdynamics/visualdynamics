@@ -1,5 +1,5 @@
-"""What the application remembers between launches: today, the
-appearance.
+"""What the application remembers between launches: the appearance,
+and whether the plots read in 3-D.
 
 One `QSettings` under one name, so a preference set on one launch is
 read on the next; the tests point the store at a temporary folder
@@ -60,6 +60,25 @@ def remember_appearance(choice: str) -> None:
         store.remove(KEY)
     else:
         store.setValue(KEY, choice)
+    store.sync()
+
+
+#: the 2D/3D reading, one choice for the data plots and the MAC alike
+THREE_D_KEY = 'reading_3d'
+
+
+def remembered_3d() -> bool:
+    """Whether the plots open in 3-D: True, the default (Brandon's
+    call), until the toggle was last left on 2-D (Brandon, 2026-09-28:
+    the choice persists across the MAC and across launches)."""
+    said = settings().value(THREE_D_KEY, True)
+    return str(said).strip().lower() not in ('false', '0', 'no')
+
+
+def remember_3d(on: bool) -> None:
+    """Store the 2D/3D choice."""
+    store = settings()
+    store.setValue(THREE_D_KEY, bool(on))
     store.sync()
 
 

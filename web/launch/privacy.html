@@ -44,13 +44,17 @@
   </p>
   <p>
     The one request it can make is <em>File → Check for Updates…</em>,
-    and only when you choose it from the menu. It reads
-    <code>visualdynamics.org/latest.json</code>, and the only thing it
-    says about itself is its version, in the request's user agent
+    and only when you choose it from the menu. On Windows and Linux,
+    and for a pip install, it reads
+    <code>visualdynamics.org/latest.json</code>. The macOS app asks
+    GitHub instead, for the list of updates attached to the newest
+    release, and downloads the update from GitHub only if you choose
+    to install it. The only thing either says about the program is its
+    version, in the request's user agent
     (<code>VisualDynamics/0.1.0a14</code>, for example). Like any web
-    request, it reaches the site's host from your IP address. Nothing
-    about you, your machine or your data is sent, and the program
-    keeps no record of the check.
+    request, it reaches the host from your IP address. Nothing about
+    you, your machine or your data is sent, and the program keeps no
+    record of the check.
   </p>
 
   <h2>This website</h2>
@@ -63,9 +67,9 @@
     <a href="https://www.cloudflare.com/privacypolicy/">its own privacy policy</a>.
   </p>
   <p>
-    Downloads, source code, bug reports and feature requests live on
-    GitHub, and the Python package on PyPI; visiting those pages is
-    covered by
+    Downloads, updates, source code, bug reports and feature requests
+    live on GitHub, and the Python package on PyPI; those requests and
+    visits are covered by
     <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's</a>
     and <a href="https://policies.python.org/pypi.org/Privacy-Notice/">PyPI's</a>
     privacy policies.

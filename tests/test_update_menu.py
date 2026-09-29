@@ -62,6 +62,8 @@ def test_a_newer_version_is_offered_as_a_page_to_open(window, pump,
     from PySide6.QtGui import QDesktopServices
     monkeypatch.setattr(QDesktopServices, 'openUrl',
                         staticmethod(lambda url: opened.append(url.toString())))
+    # a copy updated by download, not by pip
+    monkeypatch.setattr(update, 'upgrade_command', lambda: None)
     said = _answer(window, pump, monkeypatch, {
         'version': '99.0.0', 'url': 'https://visualdynamics.org/get',
         'notes': 'Everything works now.'})
@@ -75,6 +77,64 @@ def test_a_newer_version_is_offered_as_a_page_to_open(window, pump,
     pump(3)
     assert opened == ['https://visualdynamics.org/get'], (
         'the page opens in the browser; nothing is downloaded here')
+
+
+def test_a_pip_install_is_shown_its_command(window, pump, monkeypatch):
+    """A pip install updates with pip, and only the package moves; the
+    offer carries the command for this environment and a button that
+    copies it (Brandon, 2026-09-28). The app does not run it."""
+    from PySide6.QtWidgets import QApplication
+
+    command = '/opt/python -m pip install --upgrade visualdynamics'
+    monkeypatch.setattr(update, 'upgrade_command', lambda: command)
+    _answer(window, pump, monkeypatch, {
+        'version': '99.0.0', 'url': 'https://example.org/r',
+        'notes': 'Everything works now.'})
+    box = window.findChild(QMessageBox)
+    assert command in box.informativeText()
+    assert 'Everything works now.' in box.informativeText()
+    copier = next(b for b in box.buttons() if b.text() == 'Copy command')
+    assert box.defaultButton() is copier
+    QApplication.clipboard().setText('')
+    copier.click()
+    pump(3)
+    assert QApplication.clipboard().text() == command
+    assert command in window.statusBar().currentMessage()
+
+
+def _distribution(direct_url):
+    class Distribution:
+        def read_text(self, name):
+            return direct_url if name == 'direct_url.json' else None
+    return Distribution()
+
+
+def test_the_command_is_offered_only_where_pip_is_the_way(monkeypatch):
+    """This interpreter's own pip, so the update lands in this
+    environment; never for the packaged app, and never for an editable
+    install, where pip would swap the checkout for the PyPI release."""
+    import importlib.metadata
+    import json
+
+    monkeypatch.setattr(sys, 'frozen', False, raising=False)
+    monkeypatch.setattr(importlib.metadata, 'distribution',
+                        lambda name: _distribution(None))
+    command = update.upgrade_command()
+    assert command.endswith(' -m pip install --upgrade visualdynamics')
+    assert sys.executable in command
+    monkeypatch.setattr(importlib.metadata, 'distribution',
+                        lambda name: _distribution(json.dumps(
+                            {'url': 'file:///src', 'dir_info': {'editable': True}})))
+    assert update.upgrade_command() is None, 'a checkout updates with git'
+
+    def missing(name):
+        raise importlib.metadata.PackageNotFoundError(name)
+    monkeypatch.setattr(importlib.metadata, 'distribution', missing)
+    assert update.upgrade_command() is None, 'a source tree, uninstalled'
+    monkeypatch.setattr(importlib.metadata, 'distribution',
+                        lambda name: _distribution(None))
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    assert update.upgrade_command() is None, 'the packaged app downloads'
 
 
 def test_the_reason_is_what_reaches_the_status_line(window, pump, monkeypatch):

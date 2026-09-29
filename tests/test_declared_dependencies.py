@@ -40,7 +40,9 @@ DISTRIBUTION = {'PySide6': 'pyside6', 'netCDF4': 'netcdf4',
                 # the `vtk` wheel is what puts `vtkmodules` on the path
                 'vtkmodules': 'vtk',
                 # the STEP kernel's bindings ride the cadquery-ocp wheel
-                'OCP': 'cadquery-ocp'}
+                'OCP': 'cadquery-ocp',
+                # the Objective-C bridge the macOS updater speaks through
+                'objc': 'pyobjc-core'}
 
 
 def third_party_imports():
@@ -72,19 +74,21 @@ def third_party_imports():
 
 def declared():
     """The distribution names pyproject declares — the runtime
-    `dependencies`, plus the `step` extra: its import lives behind a
-    graceful refusal that names the extra, which is the one shape an
-    optional import is allowed to take here. The dev/docs extras stay
-    out — hiding a runtime import in them would be the bug this test
-    exists to catch."""
+    `dependencies`, plus the `step` and `app` extras: each import lives
+    behind a graceful fallback (a refusal that names the extra; the
+    manifest check where no Sparkle can be driven), which is the one
+    shape an optional import is allowed to take here. The dev/docs
+    extras stay out — hiding a runtime import in them would be the bug
+    this test exists to catch."""
     import tomllib
 
     with open(ROOT / 'pyproject.toml', 'rb') as handle:
         data = tomllib.load(handle)
     names = list(data['project']['dependencies'])
     names += data['project']['optional-dependencies'].get('step', [])
-    return {name.split('[')[0].split('>')[0].split('=')[0].strip().lower()
-            for name in names}
+    names += data['project']['optional-dependencies'].get('app', [])
+    return {name.split(';')[0].split('[')[0].split('>')[0].split('=')[0]
+            .strip().lower() for name in names}
 
 
 def excluded():

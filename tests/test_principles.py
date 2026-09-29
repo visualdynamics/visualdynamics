@@ -111,8 +111,10 @@ def test_no_dependency_is_capped_or_pinned():
     installable beside whatever else the user already has."""
     offenders = []
     for spec in dependency_specs():
-        # strip the extras bracket so 'mkdocstrings[python]' is clean
-        bare = re.sub(r'\[.*?\]', '', spec)
+        # strip the extras bracket so 'mkdocstrings[python]' is clean,
+        # and the environment marker, which says where a dependency
+        # applies — "sys_platform == 'darwin'" — and pins nothing
+        bare = re.sub(r'\[.*?\]', '', spec.split(';')[0])
         for op in CAPPING:
             if op in bare:
                 offenders.append(f'{spec} (contains {op!r})')

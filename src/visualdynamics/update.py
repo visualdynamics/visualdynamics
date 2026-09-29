@@ -4,12 +4,14 @@ A check, not an updater. It asks one URL for one small JSON file, and
 the answer goes in a status line: *0.1.0 is available*. Nothing is
 downloaded, nothing is replaced, nothing runs with privileges.
 
-That is a deliberate stopping point. A real auto-updater has to verify
-what it downloaded before executing it, which means signing keys and a
-threat model — an unverified one is a remote code execution feature
-with a friendly name. Sparkle (macOS) and WinSparkle do it properly and
-can be adopted later; until there is a signing identity to verify
-against, telling the user beats pretending.
+That was a deliberate stopping point, and it still is everywhere but
+the packaged macOS app. A real updater has to verify what it downloaded
+before running it — an unverified one is a remote code execution
+feature with a friendly name. The macOS app does it through Sparkle
+since 2026-09-28 (`gui/updater.py`): every update is signed with an
+EdDSA key held in the release machine's keychain, and the app refuses
+anything that does not verify against `SPARKLE_PUBLIC_KEY`. Windows
+waits for its signing (WinSparkle), and a pip install updates with pip.
 
 The manifest lives on `visualdynamics.org`, a static host with no
 server to run — the release workflow writes it from each published
@@ -30,6 +32,19 @@ from . import __version__
 
 MANIFEST = 'https://visualdynamics.org/latest.json'
 TIMEOUT = 4.0
+
+#: the macOS app's Sparkle feed, one per architecture — the two builds
+#: are separate apps, so each has its own list. A release asset rather
+#: than a page on the site: GitHub answers `latest/download/<name>` with
+#: whatever the newest published release carries, so the list and the
+#: archives it names are published in the one step that publishes the
+#: release (`packaging/release_updates.sh`)
+SPARKLE_FEED = ('https://github.com/visualdynamics/visualdynamics/releases/'
+                'latest/download/appcast-{arch}.xml')
+#: the public half of the EdDSA key every Sparkle update is signed with;
+#: the private half is in the release machine's login keychain, under
+#: the account `visualdynamics` (`generate_keys --account visualdynamics`)
+SPARKLE_PUBLIC_KEY = 'mm825xk4k0HFYxuJGzmsi/df6IEdrv9GtBmMP+KzB/A='
 
 
 def parse_version(text: str) -> tuple[int, ...]:
@@ -213,3 +228,39 @@ def check(url: str = MANIFEST, timeout: float = TIMEOUT) -> dict[str, Any] | Non
         return None
     version = str(manifest.get('version', ''))
     return manifest if version and newer(version) else None
+
+
+def upgrade_command() -> str | None:
+    """The one line that updates this copy, when pip is how it updates.
+
+    A pip install downloads only what changed — the package, a few MB,
+    not a 480 MB application — so the news that a version is available
+    comes with the command to take it, spelled with this interpreter's
+    own path so it lands in this environment rather than whichever
+    `pip` the shell finds first (Brandon, 2026-09-28: show the command,
+    with a copy button; the app does not run it).
+
+    None where pip is not the way: the packaged application (a download,
+    or Sparkle on macOS), and an editable install — a checkout, where
+    `pip install --upgrade` would swap the working tree for the PyPI
+    release and `git pull` is the update.
+    """
+    import importlib.metadata
+    import shlex
+    import sys
+
+    if getattr(sys, 'frozen', False):
+        return None
+    try:
+        distribution = importlib.metadata.distribution('visualdynamics')
+    except importlib.metadata.PackageNotFoundError:
+        return None                    # run from a source tree, uninstalled
+    try:
+        direct = json.loads(distribution.read_text('direct_url.json') or '{}')
+    except ValueError:
+        direct = {}
+    if direct.get('dir_info', {}).get('editable'):
+        return None
+    python = (f'"{sys.executable}"' if sys.platform == 'win32'
+              else shlex.quote(sys.executable))
+    return f'{python} -m pip install --upgrade visualdynamics'

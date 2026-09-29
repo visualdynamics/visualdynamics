@@ -34,7 +34,7 @@ if [[ ! -x "$VENV/bin/python" ]]; then
     "$BASE/python/bin/python3.13" -m venv "$VENV"
 fi
 echo '== the project and its build tools, as x86_64 wheels'
-"$VENV/bin/python" -m pip install -q --prefer-binary '.[step]' pyinstaller pillow
+"$VENV/bin/python" -m pip install -q --prefer-binary '.[step,app]' pyinstaller pillow
 
 # The x86_64 PyInstaller thins its bootloader with lipo, and the
 # signing and notarizing that follow call codesign, notarytool and

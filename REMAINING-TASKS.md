@@ -171,8 +171,10 @@ happens on its own once 6 is done.
    builds Linux and Windows there and opens a **draft** release with
    them and a `SHA256SUMS` attached; then `packaging/attach_macos.sh
    v<version>` uploads the two macOS images built here and adds their
-   lines to that file, and read the Windows smoke-test screenshots
-   before going further.
+   lines to that file, `packaging/release_updates.sh v<version>` adds
+   the Sparkle updates (the two update zips, their deltas and the two
+   appcasts; since 2026-09-28), and read the Windows smoke-test
+   screenshots before going further.
 6. Publish the draft release. This is the step that cannot be walked
    back. (The first release also made the repository public and put
    branch protection on `main` — a pull request with its checks

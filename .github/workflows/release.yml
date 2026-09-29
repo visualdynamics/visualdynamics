@@ -63,7 +63,7 @@ jobs:
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step]' pyinstaller pillow
+      - run: pip install -e '.[step,app]' pyinstaller pillow
       - name: Build
         env:
           # appimagetool is itself an AppImage and needs FUSE, which a
@@ -88,7 +88,7 @@ jobs:
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step]' pyinstaller pillow
+      - run: pip install -e '.[step,app]' pyinstaller pillow
       - run: powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
       # Run what was just built, on the real Windows this runner is:
       # install silently, open a project in the installed application,
@@ -115,7 +115,7 @@ jobs:
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
-      - run: pip install -e '.[step]' pyinstaller pillow
+      - run: pip install -e '.[step,app]' pyinstaller pillow
       - run: packaging/build_macos.sh
       - uses: actions/upload-artifact@v4
         with: {name: macos, path: dist/*.dmg, retention-days: 1}

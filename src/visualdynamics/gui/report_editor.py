@@ -46,6 +46,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QAction, QImage
 from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -183,6 +184,15 @@ class ReportEditor(QWidget):
         layout.addWidget(self.toolbar)
         self.split: QSplitter = QSplitter(Qt.Orientation.Horizontal)
         self.view: QWebEngineView = QWebEngineView()
+        #: the page, made here and owned here rather than by the view:
+        #: a view deletes a page it made itself in the same call that
+        #: detaches it (`QWebEngineViewPrivate::bindPageAndView`), so
+        #: its live web contents were always torn down with the widget
+        #: they drew into still standing — the hang `stand_down` exists
+        #: for. A page the view does not own is only detached by
+        #: `setPage(None)`, and its teardown can be sequenced.
+        self.page: QWebEnginePage = QWebEnginePage(self)
+        self.view.setPage(self.page)
         #: the loadFinished slot of the navigation in flight, if any
         self._restore = None
         #: the one timer that scrolls a freshly loaded page back to
@@ -207,7 +217,7 @@ class ReportEditor(QWidget):
         self.bridge.operated.connect(self._operate)
         self.channel: QWebChannel = QWebChannel(self)
         self.channel.registerObject('bridge', self.bridge)
-        self.view.page().setWebChannel(self.channel)
+        self.page.setWebChannel(self.channel)
         self._scroll = 0
         self._page_path = None
         self._channel_js = None
@@ -627,7 +637,7 @@ class ReportEditor(QWidget):
         self._offer()
 
     def _scroll_back(self) -> None:
-        self.view.page().runJavaScript(f'window.scrollTo(0, {self._scroll_to});')
+        self.page.runJavaScript(f'window.scrollTo(0, {self._scroll_to});')
 
     def stand_down(self) -> None:
         """Leave the page with nothing for the view's destructor to wait on.
@@ -651,10 +661,26 @@ class ReportEditor(QWidget):
         change are pumped before the caller goes on to destroy
         anything. The scroll-restoring slot of a navigation in flight
         is dropped too, since it would fire into the discarded page.
+
+        Then the discard itself hung (2026-09-28, a stack this time:
+        `setLifecycleState(Discarded)` never returning from
+        `WebContentsAdapter::discard()`). Qt's source says why it can:
+        discard asks the render process to shut down and then destroys
+        the live web contents synchronously, right there — the same
+        teardown the destructor did — while the page is still bound
+        to the widget it drew into, with that widget's compositor and
+        surfaces alive to be waited on. The view's destructor never
+        did better: it deletes an owned page in the very call that
+        detaches it. So the page is detached from the view *first*,
+        the events that carry the widget away are pumped, and only
+        then is the page discarded, with nothing left to wait on but
+        the renderer it is asking to leave. Which is a mechanism, not
+        a witnessed cure — the hang wants a starved machine and never
+        reproduced alone — so the log still records each step.
         """
         from PySide6.QtWidgets import QApplication
 
-        page = self.view.page()
+        page = self.page
         # the witness the stall's record asks for (PLAN.md "The 98 %
         # stall, named"): the page's state at the moment of the
         # discard, on the debug log — the faulthandler dump names the
@@ -669,12 +695,16 @@ class ReportEditor(QWidget):
         self._scroll_timer.stop()
         self.view.stop()
         self.view.hide()
-        # the enum through the page rather than a QtWebEngineCore
-        # import: the rulebook's sanctioned Qt modules are the ones
-        # already imported, and the page carries its own states
+        # detached before discarded: the view forgets a page it does
+        # not own without deleting it, and the widget the page drew
+        # into goes away on the events pumped here
+        self.view.setPage(None)
+        for _ in range(20):
+            QApplication.processEvents()
+        _log.debug('stand_down: detached')
         with contextlib.suppress(RuntimeError):
-            page.setLifecycleState(type(page).LifecycleState.Discarded)
-        _log.debug('stand_down: discarded')
+            page.setLifecycleState(QWebEnginePage.LifecycleState.Discarded)
+        _log.debug('stand_down: discarded, state=%s', page.lifecycleState())
         for _ in range(20):
             QApplication.processEvents()
 

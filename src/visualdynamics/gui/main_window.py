@@ -693,6 +693,7 @@ class MainWindow(QMainWindow):
         self._hover_mesh = None
         self._picked_mesh = None
         self.plane_dialog: QDialog | None = None   # Add Plane's, while open
+        self.block_dialog: QDialog | None = None   # Add Block's, while open
         # Tie's first patch, while the second is being picked
         self._tie_patch: list[int] | None = None
         self._framed = ()          # what the camera was last framed for
@@ -2920,6 +2921,7 @@ class MainWindow(QMainWindow):
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
+        ('add_block', 'Add Block', 'block', 'add_block_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
     )
 
@@ -10697,20 +10699,102 @@ class MainWindow(QMainWindow):
             lambda _result: self._draw_plane_preview(None))
         self.plane_dialog.show()
 
+    def add_block_act(self) -> None:
+        """Blocks of bricks typed into the selected geometry
+        (`AddBlockDialog`): Add Plane with a third edge, the reading and
+        the preview asked of the core as the numbers change, each Add
+        the project's `add_block` (2026-09-30)."""
+        from ..core import mesh
+        from .plane_dialog import AddBlockDialog
+
+        obj = self.current_object()
+        if not isinstance(obj, Geometry):
+            self._show_status('Select a geometry to add a block to')
+            return
+        name = self.object_item().text(0)
+        defined = obj.units_defined or not obj.num_nodes
+        unit = self.unit_system.unit('length') if defined else None
+        label = self.unit_system.label_text('length') if defined else 'units'
+
+        def block(values):
+            return mesh.block(values['corner'], values['edge_a'],
+                              values['edge_b'], values['edge_c'],
+                              values['size'], values['block'], unit=unit)
+
+        def reading(values):
+            try:
+                part = block(values)
+            except ValueError as refusal:
+                self._draw_plane_preview(None)
+                text = str(refusal)
+                return f'{text[:1].upper()}{text[1:]}.', False
+            self._draw_plane_preview(part)
+            on, _rows = mesh.landing(obj, part)
+            first = part.node_xyz[part.node_index(part.elem_conn[0])]
+            if defined:
+                first = self.unit_system.from_si(first, 'length')
+            across = [float(np.linalg.norm(first[1] - first[0])),
+                      float(np.linalg.norm(first[3] - first[0])),
+                      float(np.linalg.norm(first[4] - first[0]))]
+            block_name = values['block']
+            where = (f'block {block_name!r}' if block_name in obj.block_name
+                     else f'a new block {block_name!r}' if block_name
+                     else 'an unnamed block of its own')
+            shared = int(on.sum())
+            text = (f'{len(part.elem_conn)} bricks of {across[0]:.4g} by '
+                    f'{across[1]:.4g} by {across[2]:.4g} {label}, into '
+                    f'{where}: {part.num_nodes - shared} nodes to add, '
+                    f'{shared} on nodes already there.')
+            return text, True
+
+        def add(values):
+            found = self.project.add_block(
+                name, values['corner'], values['edge_a'], values['edge_b'],
+                values['edge_c'], values['size'], values['block'],
+                unit=unit or 'm')
+            self._refresh_item(self._item_for_object(name), obj)
+            self.render_current()
+            self._show_status(
+                f'{name}: added {found["elements"]} bricks — '
+                f'{found["added"]} nodes, {found["shared"]} shared with '
+                f'the geometry; {obj.num_nodes} nodes in all')
+
+        if self.block_dialog is not None:
+            self.block_dialog.close()
+        self.block_dialog = AddBlockDialog(
+            self, name, label, list(obj.block_name), reading, add)
+        self.block_dialog.finished.connect(
+            lambda _result: self._draw_plane_preview(None))
+        self.block_dialog.show()
+
     def _draw_plane_preview(self, part) -> None:
-        """The plane Add Plane would add, drawn over the scene in the
-        highlight color — or taken away. Drawn from `display_points`, the
-        one rule for where a node sits in the view."""
+        """The plane Add Plane, or the block Add Block, would add, drawn
+        over the scene in the highlight color — or taken away. Drawn
+        from `display_points`, the one rule for where a node sits in the
+        view; a block by its skin, as the scene draws solids."""
         import pyvista as pv
 
-        from ..viz.geometry import display_points
+        from ..viz.geometry import display_points, solid_faces
 
         plotter = self.scene.plotter
         plotter.remove_actor('plane-preview', render=False)
         if part is not None:
             points, _ = display_points(part, self.unit_system)
-            faces = np.concatenate([[len(element), *part.node_index(element)]
-                                    for element in part.elem_conn])
+            polygons: dict[tuple[int, ...], list[int]] = {}
+            for element in part.elem_conn:
+                rows = list(part.node_index(element))
+                if len(rows) in (3, 4):
+                    polygons[tuple(rows)] = rows
+                    continue
+                for face in solid_faces(len(rows)):
+                    corners = [rows[i] for i in face]
+                    key = tuple(sorted(corners))
+                    if key in polygons:
+                        del polygons[key]
+                    else:
+                        polygons[key] = corners
+            faces = np.concatenate([[len(poly), *poly]
+                                    for poly in polygons.values()])
             plotter.add_mesh(
                 pv.PolyData(np.asarray(points, dtype=float), faces),
                 name='plane-preview', style='wireframe', line_width=2.0,

@@ -146,8 +146,10 @@ def test_the_wrong_kind_of_properties_is_refused_by_name():
         ALUMINUM, thickness=0.01, section=Section.rod('rod', 0.01))}
     with pytest.raises(ValueError, match='both a thickness and a section'):
         Model.from_geometry(geometry)
+    # a material alone is a block of solids (2026-09-30), which these
+    # quads are not
     geometry.block_properties = {block: BlockProperties(ALUMINUM)}
-    with pytest.raises(ValueError, match='neither a thickness nor a section'):
+    with pytest.raises(ValueError, match='quad4 elements, which take a thickness'):
         Model.from_geometry(geometry)
 
 

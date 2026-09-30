@@ -65,7 +65,9 @@ and coherence maps, animate shapes and time data on geometry, mark
 measurement DOFs with labeled axis-colored arrows, **fit modal models to
 FRFs interactively** (residual CMIF, one mode at a time, MAC beside the
 table), compare shape sets by cross-MAC with phase-aligned overlay
-animation, compute averaged spectra and PSDs from multi-average time
+animation, **build and solve finite element models** from planes of
+plates or blocks of solid bricks (or from an imported mesh), compute
+averaged spectra and PSDs from multi-average time
 data, keep test photos in the project, and **generate complete modal test
 reports** — a bar of acts and a settings pane beside the exported page
 itself as the live preview, markdown text with live `{{Object.field}}`

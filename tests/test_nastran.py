@@ -123,3 +123,39 @@ def test_the_written_deck_says_who_wrote_it_and_is_not_runnable(tmp_path):
     assert text.startswith('$ written by visualdynamics')
     assert 'PSHELL' not in text and 'MAT1' not in text, \
         'properties are the analyst\'s, not invented here'
+
+
+def test_property_cards_become_block_properties(tmp_path):
+    """A deck's PSOLID and PSHELL cards, with their MAT1, say what each
+    block is made of, and each property id is a block (2026-09-30, so
+    a shared solid model opens ready for Solve Modes). A property whose
+    material is not in the deck carries nothing, and the Blocks table
+    asks."""
+    from visualdynamics.io import nastran
+
+    deck = tmp_path / 'props.bdf'
+    deck.write_text(
+        'GRID,1,,0.,0.,0.\nGRID,2,,1.,0.,0.\nGRID,3,,1.,1.,0.\nGRID,4,,0.,1.,0.\n'
+        'GRID,5,,0.,0.,1.\nGRID,6,,1.,0.,1.\nGRID,7,,1.,1.,1.\nGRID,8,,0.,1.,1.\n'
+        'CHEXA,1,11,1,2,3,4,5,6,\n,7,8\n'
+        'CQUAD4,2,21,5,6,7,8\n'
+        'CQUAD4,3,31,1,2,3,4\n'
+        'MAT1,1,6.9E10,,0.33,2700.\n'
+        'MAT1,2,2.1E11,8.0E10,,7800.\n'
+        'PSOLID,11,1\nPSHELL,21,2,0.002\nPSHELL,31,9,0.001\n')
+    geometry = nastran.load(deck)
+    assert list(geometry.block_id) == [11, 21, 31]
+    assert list(geometry.block_name) == ['property 11', 'property 21',
+                                         'property 31']
+    assert list(geometry.elem_block) == [11, 21, 31]
+    solid = geometry.block_properties[11]
+    assert solid.kind == 'solid'
+    assert solid.material.youngs_modulus == 6.9e10
+    assert solid.material.density == 2700.0
+    assert solid.material.poissons_ratio == 0.33
+    shell = geometry.block_properties[21]
+    assert shell.kind == 'plate' and shell.thickness == 0.002
+    # E and G given, nu left blank: nu follows from them
+    assert shell.material.poissons_ratio == pytest.approx(2.1e11 / 1.6e11 - 1)
+    assert shell.material.shear_modulus == 8.0e10
+    assert 31 not in geometry.block_properties, 'MAT1 9 is not in the deck'

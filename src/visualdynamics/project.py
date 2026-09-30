@@ -2298,6 +2298,69 @@ class Project(dict):
             raise TypeError(f'{name!r} is not a geometry')
         return geometry.merge_blocks([int(b) for b in blocks])
 
+    def add_block(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
+                  edge_c: Any, size: float, block: str = '', *,
+                  unit: str = 'm', holes: Any = (),
+                  hole_block: str | None = None,
+                  tolerance: float | None = None) -> dict:
+        """Add a meshed box of solid bricks to a geometry (Add Block):
+        a corner, three perpendicular edges and an element size, each
+        edge divided evenly into the whole number of elements nearest
+        that size (`mesh.block`), with cylindrical holes cut the way a
+        structured mesh cuts them. Its nodes that fall on nodes already
+        there become them, so blocks meeting over a face are tied there
+        (`mesh.join`).
+
+        Blocks given the same block name are one block — the rails and
+        uprights of a frame, each named 'frame', are the frame, given
+        its material once in the Blocks table.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        corner : array_like
+            One corner, (x, y, z).
+        edge_a, edge_b, edge_c : array_like
+            The three edges from that corner, as vectors; perpendicular.
+        size : float
+            The element size aimed at.
+        block : str, optional
+            The block the bricks go in, by name: an existing block of
+            that name, or a new one.
+        unit : str, default 'm'
+            The unit the lengths above are in. A geometry whose units
+            are not defined takes them as given.
+        holes : sequence of tuple, optional
+            Holes as `mesh.block` takes them: (center, radius, axis) or
+            (center, radius, axis, depth).
+        hole_block : str, optional
+            The block the holes' bricks go to — an insert's — or None
+            to leave them out.
+        tolerance : float, optional
+            How close a node must be to one already there to be it, in
+            meters. Defaults to a millionth of the size of the two
+            together.
+
+        Returns
+        -------
+        dict
+            'added', the nodes added; 'shared', the block's nodes that
+            fell on nodes already there; 'elements', the bricks added;
+            'blocks', the blocks they went into.
+        """
+        from .core import mesh
+
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        defined = geometry.units_defined or not geometry.num_nodes
+        part = mesh.block(corner, edge_a, edge_b, edge_c, size, block,
+                          unit=unit if defined else None, holes=holes,
+                          hole_name=hole_block)
+        return mesh.join(geometry, part, tolerance)
+
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
@@ -3452,8 +3515,9 @@ _VERB_APPLIES: tuple = (
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
                                              and len(o.elem_conn) > 0)),
-    # a plane goes into any geometry, an empty one above all
+    # a plane or a block goes into any geometry, an empty one above all
     ('add_plane', lambda p, o: isinstance(o, Geometry)),
+    ('add_block', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
@@ -3540,7 +3604,8 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
-    'merge_coincident_nodes', 'new_geometry', 'add_plane', 'tie_elements',
+    'merge_coincident_nodes', 'new_geometry', 'add_plane', 'add_block',
+    'tie_elements',
     'merge_blocks', 'set_view',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',

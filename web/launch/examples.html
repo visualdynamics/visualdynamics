@@ -105,6 +105,38 @@
     <a href="downloads.html#examples">the project itself</a>, solved, to
     open in the app.
   </p>
+  <h2>A model from blocks: the four-unit frame</h2>
+  <p>
+    The four-unit frame is a small aluminum ladder the structural
+    dynamics community shares as a test article for substructuring, with
+    two rectangular wings that screw across it; its solid models, finite
+    element models and test data are shared on the
+    <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">SEM
+    Dynamic Substructuring Focus Group wiki</a>. A half-inch bar spanning
+    a hundred-millimeter window is not a beam and not a plate, so this
+    one is built from solids: each part as the blocks it is made of,
+    meshed into bricks, the insert holes cut from them, the fillets kept,
+    each screw a rigid tie from the bricks its washer covers to the frame
+    under it, and Solve Modes.
+  </p>
+  <div class="figure">
+    <iframe src="examples/frame.html" loading="lazy" scrolling="no"
+            title="Animated finite element mode shapes of the four-unit frame with its thick wing"></iframe>
+  </div>
+  <p class="caption">
+    The first eight elastic modes of the frame with its thick wing, drawn
+    as the skin of a mesh of bricks. Choose one from the list and it
+    animates; drag to turn it. The frame alone lands within a few percent
+    of the frames that were measured, and the brick element was checked
+    against the finite element model shared on the
+    <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">wiki</a>:
+    solved here, mesh for mesh, its modes agree with MSC Nastran's to a
+    tenth of a percent.
+    <a href="documentation/guide/workflows/fem-solids/">The whole
+    workflow</a>, from the blocks to these modes, and
+    <a href="downloads.html#examples">the projects themselves</a>, solved,
+    to open in the app.
+  </p>
   <h2>About these figures</h2>
   <p>
     They are drawn by the report renderer rather than by anything

@@ -434,13 +434,18 @@ def test_a_beam_to_itself_is_refused():
         model.add_beam(1, 1, STEEL, fem.Section.rod('r', 0.01))
 
 
-def test_a_free_node_with_no_stiffness_is_named_rather_than_crashing():
-    """A node nothing connects to has no mass either, so the Cholesky
-    factorization fails — and the useful thing to say is which node."""
+def test_a_free_node_with_no_stiffness_is_grounded_and_named():
+    """A node nothing connects to has no mass either, and used to fail
+    the Cholesky factorization, named. It is grounded at solve time now
+    (2026-09-30: a deck's reference points are such nodes) and named by
+    `loose_nodes`; the modes are the structure's."""
     model = straight_beam(1.0, fem.Section.rod('rod', 0.01), 3)
+    reference = model.eigensolution().frequency
     model.add_node(500, 5.0, 0.0, 0.0)
-    with pytest.raises(ValueError, match='500X\\+'):
-        model.eigensolution()
+    assert model.loose_nodes() == [500]
+    shapes = model.eigensolution()
+    assert shapes.frequency == pytest.approx(reference)
+    assert int(np.sum(shapes.frequency == 0.0)) == 6
 
 
 # ---- helpers -------------------------------------------------------------

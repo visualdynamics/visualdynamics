@@ -230,7 +230,7 @@ def test_the_example_tiles_wear_pictures_of_what_is_inside():
     examples = page.split('class="downloads examples"')[1].split('</div>')[0]
     assert 'mark.png' not in examples
     seen = []
-    for name in ('plate.png', 'drone.png', 'barc.png'):
+    for name in ('plate.png', 'drone.png', 'barc.png', 'frame.png'):
         assert f'src="{name}"' in examples, f'the tile shows {name}'
         image = QImage(str(ROOT_DIR / 'web' / 'launch' / name))
         assert not image.isNull(), name

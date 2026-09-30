@@ -117,6 +117,10 @@ ZERO_ENERGY = 1e-12
 #: two matrices (2026-09-26)
 SPARSE_ABOVE = 3000
 
+#: the element type a solid is written back as, by its node count
+#: (`Model.geometry`): hex8, wedge6, tet4 in `ELEMENT_TYPES`
+SOLID_CODES = {8: 115, 6: 112, 4: 111}
+
 #: the sparse solver polishes what Lanczos hands it until every mode
 #: asked for has a relative residual below this (`polish_modes`), or a
 #: step stops helping, or `POLISH_STEPS` have been spent. The residual
@@ -546,8 +550,9 @@ class BlockProperties:
     finite element format states a structure: a material for any
     block, plus a thickness for a block of plates (triangles or
     quads) or a section — and an orientation vector for the roll, as
-    `Model.add_beam` takes it — for a block of beams. A block given
-    both, or neither, is refused when the model is built, by name.
+    `Model.add_beam` takes it — for a block of beams; a block of
+    solids takes the material alone. A block given both, or plates or
+    beams given neither, is refused when the model is built, by name.
     """
 
     material: Material
@@ -557,17 +562,21 @@ class BlockProperties:
 
     @property
     def kind(self) -> str:
-        """'plate', 'beam', 'rigid', or what is wrong with it. A rigid
-        block takes no thickness and no section, and any left from before
-        the material was picked are ignored."""
+        """'plate', 'beam', 'solid', 'rigid', or what is wrong with it.
+        A rigid block takes no thickness and no section, and any left
+        from before the material was picked are ignored; a material
+        alone is a block of solids (2026-09-30), which take nothing
+        else — a block of plates or beams given only a material is
+        refused where the elements are built, by what they are."""
         if self.material.is_rigid:
             return 'rigid'
         if self.thickness is not None and self.section is None:
             return 'plate'
         if self.section is not None and self.thickness is None:
             return 'beam'
-        return ('both a thickness and a section' if self.section is not None
-                else 'neither a thickness nor a section')
+        if self.section is None and self.thickness is None:
+            return 'solid'
+        return 'both a thickness and a section'
 
 
 @dataclass
@@ -635,6 +644,38 @@ class Triangle:
     nodes: tuple[int, int, int]
     material: Material
     thickness: float               #: m
+    color: int = 1
+    group: str = ''
+
+
+@dataclass
+class Solid:
+    """One solid element: a hexahedron, a wedge or a tetrahedron, told
+    apart by how many nodes it names (8, 6 or 4).
+
+    Three translations per node and no rotations — a solid has no
+    rotational stiffness, and the rotations of a node only solids touch
+    are grounded by the eigensolution rather than left as degrees of
+    freedom with nothing on them (`Model.dangling_rotations`).
+
+    The hexahedron is trilinear with Wilson's incompatible bending
+    modes, Taylor's form (the extra modes' strains taken from the
+    centroid's Jacobian, so a distorted brick still passes the patch
+    test): a plain trilinear brick is far too stiff in bending, and a
+    part meshed a few elements through its thickness would come out a
+    third high. With the modes, one layer of bricks bends like a beam.
+    The wedge is the linear six-node element and the tetrahedron the
+    constant-strain one — transition and imported shapes, not what a
+    part is meshed with here (`mesh.block` makes bricks); a linear
+    tetrahedron locks in bending and a mesh of them is trusted only
+    where it is fine.
+
+    Nodes run around the bottom face and then the top, the same way
+    round (UFF 2412 and Nastran's CHEXA/CPENTA/CTETRA order).
+    """
+
+    nodes: tuple[int, ...]
+    material: Material
     color: int = 1
     group: str = ''
 
@@ -788,6 +829,7 @@ class Model:
         self.beams: list[Beam] = []
         self.plates: list[Plate] = []
         self.triangles: list[Triangle] = []
+        self.solids: list[Solid] = []
         self.rigid_links: list[RigidLink] = []
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
@@ -864,6 +906,45 @@ class Model:
         triangle = Triangle(nodes, material, float(thickness), color, group)
         self.triangles.append(triangle)
         return triangle
+
+    def add_solid(self, nodes: Sequence[int], material: Material,
+                  color: int = 1, group: str = '') -> Solid:
+        """One solid element over eight, six or four existing nodes: a
+        hexahedron, a wedge or a tetrahedron.
+
+        Parameters
+        ----------
+        nodes : sequence of int
+            The corners, bottom face then top, the same way round.
+        material : Material
+            What it is made of.
+        color, group : optional
+            As for a plate.
+
+        Returns
+        -------
+        Solid
+        """
+        nodes = tuple(int(n) for n in nodes)
+        if len(nodes) not in (8, 6, 4) or len(set(nodes)) != len(nodes):
+            raise ValueError('a solid spans eight, six or four distinct nodes')
+        for node in nodes:
+            if node not in self._nodes:
+                raise ValueError(
+                    f'solid names node {node}, which is not in the model')
+        if material.is_rigid:
+            raise ValueError('a solid is made of a material, not rigid')
+        # a flat element is caught here, by the person holding the bad
+        # coordinate, not by the eigensolver. One numbered the other way
+        # round (its volume negative) is the same element and is taken:
+        # meshers disagree on the handedness, and Linderholt's frame
+        # mesh arrived inside out to this convention (2026-09-30)
+        xyz = np.array([self._nodes[n] for n in nodes])
+        if abs(_solid_volume(xyz)) <= 1e-12 * float(np.ptp(xyz)) ** 3:
+            raise ValueError(f'solid {nodes} has no volume')
+        solid = Solid(nodes, material, color, group)
+        self.solids.append(solid)
+        return solid
 
     def add_rigid_link(self, node_a: int, node_b: int,
                        group: str = '') -> RigidLink:
@@ -1091,6 +1172,11 @@ class Model:
                 other = triangle.nodes[(k + 1) % 3]
                 neighbors[node].add(other)
                 neighbors[other].add(node)
+        for solid in self.solids:
+            first = solid.nodes[0]
+            for node in solid.nodes[1:]:
+                neighbors[first].add(node)
+                neighbors[node].add(first)
         for link in self.rigid_links:
             neighbors[link.node_a].add(link.node_b)
             neighbors[link.node_b].add(link.node_a)
@@ -1229,7 +1315,11 @@ class Model:
             _, xy = _triangle_frame(*[self._nodes[n] for n in triangle.nodes])
             plates += (triangle.material.density * triangle.thickness
                        * _triangle_area(xy))
-        return beams + plates
+        solids = float(sum(
+            solid.material.density
+            * abs(_solid_volume(np.array([self._nodes[n] for n in solid.nodes])))
+            for solid in self.solids))
+        return beams + plates + solids
 
     @property
     def total_mass(self) -> float:
@@ -1284,6 +1374,15 @@ class Model:
                                    for n in triangle.nodes])
             yield (rows, transform.T @ k_local @ transform,
                    transform.T @ m_local @ transform)
+
+        for solid in self.solids:
+            xyz = np.array([self._nodes[n] for n in solid.nodes])
+            k, m = _solid_matrices(solid.material, xyz)
+            # three translations per node: the rows of each node's
+            # first three degrees of freedom, and nothing on its rotations
+            rows = np.concatenate([np.arange(index[n], index[n] + 3)
+                                   for n in solid.nodes])
+            yield rows, k, m
 
         for item in self.masses:
             start = index[item.node]
@@ -1648,10 +1747,76 @@ class Model:
             transform[i, j] = v
         return transform
 
+    def dangling_rotations(self) -> list[int]:
+        """The nodes whose rotations nothing acts on: touched by solids
+        and by nothing that carries a rotation — no beam, plate or
+        triangle, and no rigid link, whose lead's rotation moves its
+        followers. A solid has no rotational stiffness, so these
+        rotations are grounded by the eigensolution; left free they
+        would be degrees of freedom with neither mass nor stiffness,
+        which no factorization survives.
+
+        Returns
+        -------
+        list of int
+            The nodes, in the model's order; empty for a model with no
+            solids.
+        """
+        if not self.solids:
+            return []
+        rotating = self._rotating_nodes()
+        touched = {n for solid in self.solids for n in solid.nodes}
+        return [n for n in self.node_ids if n in touched and n not in rotating]
+
+    def loose_nodes(self) -> list[int]:
+        """The nodes nothing touches: no element, no rigid link, no
+        lumped mass. A finite element deck carries them routinely — a
+        reference point, a constraint's own grid — and a model built
+        from its blocks grounds them whole rather than refusing the
+        deck (2026-09-30); the grillage path still refuses, since there
+        a loose node is a drawing that was never wired.
+
+        Returns
+        -------
+        list of int
+            The nodes, in the model's order.
+        """
+        touched = self._rotating_nodes()
+        touched |= {n for solid in self.solids for n in solid.nodes}
+        touched |= {m.node for m in self.masses}
+        return [n for n in self.node_ids if n not in touched]
+
+    def _rotating_nodes(self) -> set[int]:
+        """Every node something with a rotation acts on."""
+        rotating = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
+        rotating |= {n for plate in self.plates for n in plate.nodes}
+        rotating |= {n for triangle in self.triangles for n in triangle.nodes}
+        # a rigid body's lead rotates its followers, so its rotation has
+        # something to act on; the followers' rotations are written
+        # through the lead's and are not free to ground
+        rotating |= {n for body in self.rigid_bodies() for n in body}
+        return rotating
+
     def _free_dofs(self, fixed) -> np.ndarray:
-        """Which rows survive after grounding what `fixed` names."""
+        """Which rows survive after grounding what `fixed` names, the
+        rotations of the nodes only solids touch, and every degree of
+        freedom of a node nothing touches."""
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
         held = set()
+        for node in self.loose_nodes():
+            held.update(range(index[node], index[node] + 6))
+        dangling = self.dangling_rotations()
+        if dangling:
+            inert = sorted({m.node for m in self.masses
+                            if any(m.inertia) and m.node in set(dangling)})
+            if inert:
+                raise ValueError(
+                    f'the mass at node {inert[0]} has rotary inertia, but '
+                    'only solids touch the node and a solid gives a '
+                    'rotation nothing to act on; put it on a node a beam, '
+                    'a plate or a rigid link holds')
+            for node in dangling:
+                held.update(range(index[node] + 3, index[node] + 6))
         for item in fixed:
             text = str(item).strip()
             digits = 0
@@ -1707,6 +1872,10 @@ class Model:
             connectivity.append(list(triangle.nodes))
             types.append(41)
             colors.append(triangle.color)
+        for solid in self.solids:
+            connectivity.append(list(solid.nodes))
+            types.append(SOLID_CODES[len(solid.nodes)])
+            colors.append(solid.color)
         for face in self.faces:
             connectivity.append(list(face.nodes))
             types.append(44 if len(face.nodes) == 4 else 41)
@@ -1725,6 +1894,7 @@ class Model:
                         for link in self.rigid_links]
                      + [p.group for p in self.plates]
                      + [t.group for t in self.triangles]
+                     + [s.group for s in self.solids]
                      + [f.group for f in self.faces]):
             blocks.append(parts.setdefault(part or 'body', len(parts) + 1))
         return Geometry(
@@ -1753,13 +1923,11 @@ def _from_blocks(model: Model, geometry: Geometry,
     joined = {n for beam in model.beams for n in (beam.node_a, beam.node_b)}
     joined |= {n for plate in model.plates for n in plate.nodes}
     joined |= {n for triangle in model.triangles for n in triangle.nodes}
-    loose = sorted(set(model.node_ids) - joined)
-    if loose:
-        raise ValueError(
-            f'{len(loose)} nodes are connected to nothing, so they would '
-            'carry mass with no stiffness and the solution would not '
-            'factorize: ' + ', '.join(str(n) for n in loose[:8]))
-    pieces = model.pieces()
+    joined |= {n for solid in model.solids for n in solid.nodes}
+    # nodes no element touches are grounded at solve time
+    # (`Model.loose_nodes`), not refused: a deck's reference points
+    pieces = [piece for piece in model.pieces()
+              if len(piece) > 1 or piece[0] in joined]
     if len(pieces) > 1:
         sizes = ', '.join(str(len(p)) for p in pieces[:6])
         raise ValueError(
@@ -1793,7 +1961,7 @@ def _element_by_block(model: Model, geometry: Geometry,
             raise ValueError(
                 f'{named(block)} has no properties: give every block a '
                 'material and a thickness or a section (fem.BlockProperties)')
-        if props.kind not in ('plate', 'beam', 'rigid'):
+        if props.kind not in ('plate', 'beam', 'solid', 'rigid'):
             raise ValueError(f'{named(block)} has {props.kind}: a block of '
                              'plates takes a thickness, a block of beams a '
                              'section, never both')
@@ -1823,20 +1991,26 @@ def _element_by_block(model: Model, geometry: Geometry,
                            props.orientation, group=label)
         elif shape == 'line' and len(nodes) == 2 and props.kind == 'rigid':
             model.add_rigid_link(nodes[0], nodes[1], group=label)
+        elif (shape == 'volume' and len(nodes) in SOLID_CODES
+                and props.kind == 'solid'):
+            model.add_solid(nodes, props.material, group=label)
         elif props.kind == 'rigid':
             raise ValueError(f'{named(block)} holds {shape_name} elements; a '
                              'rigid (massless) block holds two-node lines, '
                              'one link each')
         else:
             wanted = ('a thickness' if shape == 'face' else 'a section'
-                      if shape == 'line' else 'an element this solver has')
+                      if shape == 'line' else 'a material alone')
+            solvable = ((shape in ('face', 'line') and len(nodes) in (2, 3, 4))
+                        or (shape == 'volume' and len(nodes) in SOLID_CODES))
             raise ValueError(
                 f'{named(block)} holds {shape_name} elements, which take '
                 f'{wanted}; it was given {props.kind} properties'
-                if shape in ('face', 'line') and len(nodes) in (2, 3, 4)
+                if solvable
                 else f'{named(block)} holds {shape_name} elements, and the '
                      'solver has no element for them: two-node beams, '
-                     'three-node triangles and four-node quads only')
+                     'three-node triangles, four-node quads, and eight-node '
+                     'hexahedra, six-node wedges and four-node tetrahedra only')
         built += 1
     return built
 
@@ -2334,3 +2508,194 @@ def _beam_mass(material: Material, section: Section, length: float) -> np.ndarra
     m[4, 10] = -3.0 * length ** 2 * unit
 
     return m + np.triu(m, 1).T
+
+
+# ---- solids ------------------------------------------------------------
+
+#: natural coordinates of the trilinear hexahedron's corners, bottom face
+#: then top, the same way round
+_HEX_CORNERS = np.array([[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+                         [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]],
+                        dtype=np.float64)
+_GAUSS_2 = (-1.0 / math.sqrt(3.0), 1.0 / math.sqrt(3.0))
+#: the three-point rule on the triangle, in area coordinates (L2, L3)
+#: with weights summing to the unit triangle's half
+_TRIANGLE_3 = (((1 / 6, 1 / 6), 1 / 6), ((2 / 3, 1 / 6), 1 / 6),
+               ((1 / 6, 2 / 3), 1 / 6))
+
+
+def _isotropic(material: Material) -> np.ndarray:
+    """The 6x6 elasticity matrix, strains ordered xx yy zz xy yz xz with
+    engineering shears."""
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    lame = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    mu = material.shear_modulus
+    d = np.zeros((6, 6))
+    d[:3, :3] = lame
+    d[np.arange(3), np.arange(3)] += 2.0 * mu
+    d[3:, 3:] = np.eye(3) * mu
+    return d
+
+
+def _strain_rows(derivatives: np.ndarray) -> np.ndarray:
+    """B (6 x 3n) from each node's (dN/dx, dN/dy, dN/dz)."""
+    n = len(derivatives)
+    b = np.zeros((6, 3 * n))
+    dx, dy, dz = derivatives.T
+    cols = 3 * np.arange(n)
+    b[0, cols], b[1, cols + 1], b[2, cols + 2] = dx, dy, dz
+    b[3, cols], b[3, cols + 1] = dy, dx
+    b[4, cols + 1], b[4, cols + 2] = dz, dy
+    b[5, cols], b[5, cols + 2] = dz, dx
+    return b
+
+
+def _hex_basis(xi: float, eta: float, zeta: float
+               ) -> tuple[np.ndarray, np.ndarray]:
+    """The eight trilinear functions and their natural derivatives (8, 3)."""
+    c = _HEX_CORNERS
+    n = (1 + xi * c[:, 0]) * (1 + eta * c[:, 1]) * (1 + zeta * c[:, 2]) / 8.0
+    d = np.column_stack([
+        c[:, 0] * (1 + eta * c[:, 1]) * (1 + zeta * c[:, 2]),
+        (1 + xi * c[:, 0]) * c[:, 1] * (1 + zeta * c[:, 2]),
+        (1 + xi * c[:, 0]) * (1 + eta * c[:, 1]) * c[:, 2]]) / 8.0
+    return n, d
+
+
+def _hex_matrices(material: Material, xyz: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the eight-node hexahedron with
+    incompatible modes, 24x24, three translations per node.
+
+    Wilson's three bubble modes (1 - xi^2, 1 - eta^2, 1 - zeta^2), each
+    in three directions, ride along as nine internal degrees of freedom
+    and are condensed out. Their strains are taken from the centroid's
+    Jacobian and scaled by its determinant over the local one (Taylor,
+    Beresford and Wilson, 1976), which is what lets a brick that is not
+    a parallelepiped still represent a constant strain exactly. Without
+    the modes a trilinear brick in bending carries parasitic shear and
+    comes out much too stiff; with them one layer through a plate's
+    thickness bends like the plate. Integrated 2x2x2, exact for the
+    mass of a parallelepiped and standard for the stiffness. The
+    Jacobian's sign is taken as read: an element numbered the other way
+    round is the same element.
+    """
+    d = _isotropic(material)
+    rho = material.density
+    _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
+    jacobian_0 = d0.T @ xyz
+    det_0 = abs(np.linalg.det(jacobian_0))
+    inverse_0_t = np.linalg.inv(jacobian_0).T
+    k_uu = np.zeros((24, 24))
+    k_ua = np.zeros((24, 9))
+    k_aa = np.zeros((9, 9))
+    mass = np.zeros((24, 24))
+    for xi in _GAUSS_2:
+        for eta in _GAUSS_2:
+            for zeta in _GAUSS_2:
+                n, dn = _hex_basis(xi, eta, zeta)
+                jacobian = dn.T @ xyz
+                det = abs(np.linalg.det(jacobian))
+                b_u = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+                # the bubble modes' natural derivatives, through the
+                # centroid's Jacobian
+                bubble = np.diag([-2.0 * xi, -2.0 * eta, -2.0 * zeta])
+                b_a = _strain_rows(bubble @ inverse_0_t) * (det_0 / det)
+                k_uu += det * (b_u.T @ d @ b_u)
+                k_ua += det * (b_u.T @ d @ b_a)
+                k_aa += det * (b_a.T @ d @ b_a)
+                fields = np.zeros((3, 24))
+                for i in range(8):
+                    fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+                mass += det * rho * (fields.T @ fields)
+    stiffness = k_uu - k_ua @ np.linalg.solve(k_aa, k_ua.T)
+    return (stiffness + stiffness.T) / 2.0, (mass + mass.T) / 2.0
+
+
+def _wedge_basis(l2: float, l3: float, zeta: float
+                 ) -> tuple[np.ndarray, np.ndarray]:
+    """The six linear wedge functions — a linear triangle swept
+    between zeta = -1 and 1 — and their natural derivatives (6, 3) with
+    respect to (L2, L3, zeta)."""
+    l1 = 1.0 - l2 - l3
+    lower, upper = (1.0 - zeta) / 2.0, (1.0 + zeta) / 2.0
+    n = np.array([l1 * lower, l2 * lower, l3 * lower,
+                  l1 * upper, l2 * upper, l3 * upper])
+    d = np.array([[-lower, -lower, -l1 / 2.0],
+                  [lower, 0.0, -l2 / 2.0],
+                  [0.0, lower, -l3 / 2.0],
+                  [-upper, -upper, l1 / 2.0],
+                  [upper, 0.0, l2 / 2.0],
+                  [0.0, upper, l3 / 2.0]])
+    return n, d
+
+
+def _wedge_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the six-node wedge, 18x18: the
+    three-point triangle rule by two Gauss points along its length."""
+    d = _isotropic(material)
+    rho = material.density
+    stiffness = np.zeros((18, 18))
+    mass = np.zeros((18, 18))
+    for (l2, l3), weight in _TRIANGLE_3:
+        for zeta in _GAUSS_2:
+            n, dn = _wedge_basis(l2, l3, zeta)
+            jacobian = dn.T @ xyz
+            det = abs(np.linalg.det(jacobian)) * weight
+            b = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+            stiffness += det * (b.T @ d @ b)
+            fields = np.zeros((3, 18))
+            for i in range(6):
+                fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+            mass += det * rho * (fields.T @ fields)
+    return (stiffness + stiffness.T) / 2.0, (mass + mass.T) / 2.0
+
+
+def _tet_matrices(material: Material, xyz: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the constant-strain tetrahedron,
+    12x12, in closed form."""
+    d = _isotropic(material)
+    edges = xyz[1:] - xyz[0]
+    volume = abs(np.linalg.det(edges)) / 6.0
+    # dL_i/dx from the inverse of the edge matrix: the natural
+    # coordinates L2, L3, L4 are affine in x, and L1 = 1 - the rest
+    inverse = np.linalg.inv(edges)               # d(L2, L3, L4)/dx, by columns
+    derivatives = np.vstack([-inverse.sum(axis=1), inverse.T])
+    b = _strain_rows(derivatives)
+    stiffness = volume * (b.T @ d @ b)
+    mass = np.zeros((12, 12))
+    for i in range(4):
+        for j in range(4):
+            mass[3 * i:3 * i + 3, 3 * j:3 * j + 3] = (
+                np.eye(3) * (2.0 if i == j else 1.0))
+    mass *= material.density * volume / 20.0
+    return stiffness, mass
+
+
+def _solid_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """(stiffness, mass) of a solid by its node count."""
+    if len(xyz) == 8:
+        return _hex_matrices(material, xyz)
+    if len(xyz) == 6:
+        return _wedge_matrices(material, xyz)
+    return _tet_matrices(material, xyz)
+
+
+def _solid_volume(xyz: np.ndarray) -> float:
+    """The volume of a hexahedron, wedge or tetrahedron by its nodes,
+    integrated the way its matrices are, so the two agree; negative for
+    an element numbered inside out, zero for a flat one."""
+    if len(xyz) == 4:
+        return float(np.linalg.det(xyz[1:] - xyz[0]) / 6.0)
+    if len(xyz) == 6:
+        return float(sum(np.linalg.det((_wedge_basis(l2, l3, zeta)[1]).T @ xyz)
+                         * weight
+                         for (l2, l3), weight in _TRIANGLE_3
+                         for zeta in _GAUSS_2))
+    return float(sum(np.linalg.det((_hex_basis(xi, eta, zeta)[1]).T @ xyz)
+                     for xi in _GAUSS_2 for eta in _GAUSS_2
+                     for zeta in _GAUSS_2))
+

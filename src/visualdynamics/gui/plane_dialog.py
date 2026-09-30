@@ -1,4 +1,5 @@
-"""Add Plane: a meshed rectangle of plates typed into a geometry.
+"""Add Plane and Add Block: a meshed rectangle of plates, or a meshed
+box of bricks, typed into a geometry.
 
 The app's side of `Project.add_plane` (Brandon, 2026-09-26: the BARC's
 planes could only be built from a script, twelve lines the app had no
@@ -35,9 +36,11 @@ from PySide6.QtWidgets import (
 )
 
 #: what the fields hold, in the display unit: a plane one unit on a side,
-#: a tenth of that per element — a default that is visible in any unit
+#: a tenth of that per element — a default that is visible in any unit;
+#: a block's third edge a tenth deep, one element through it
 DEFAULTS = {'corner': (0.0, 0.0, 0.0), 'edge_a': (1.0, 0.0, 0.0),
-            'edge_b': (0.0, 1.0, 0.0), 'size': 0.1}
+            'edge_b': (0.0, 1.0, 0.0), 'edge_c': (0.0, 0.0, 0.1),
+            'size': 0.1}
 
 
 def _spin(value: float) -> QDoubleSpinBox:
@@ -51,6 +54,7 @@ def _spin(value: float) -> QDoubleSpinBox:
 
 class AddPlaneDialog(QDialog):
     """The fields, the reading and the buttons; the window does the rest.
+    `AddBlockDialog` is the same dialog with a third edge.
 
     Parameters
     ----------
@@ -70,23 +74,29 @@ class AddPlaneDialog(QDialog):
         ``add(values)``: add the plane (and say so on the status bar).
     """
 
+    #: the act's name, the edges typed and the sentence above the fields
+    ACT = 'Add Plane'
+    EDGES = (('edge_a', 'Edge A'), ('edge_b', 'Edge B'))
+    NOTE = ('Edges run from the corner and must be perpendicular. Each is '
+            'divided evenly into the number of elements nearest the size.')
+    DEFAULT_BLOCK = 'plane'
+
     def __init__(self, parent: QWidget, geometry_name: str, unit: str,
                  blocks: Sequence[str],
                  reading: Callable[[dict], tuple[str, bool]],
                  add: Callable[[dict], None]) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f'Add Plane to {geometry_name}')
+        self.setWindowTitle(f'{self.ACT} to {geometry_name}')
         self._reading, self._add = reading, add
         self.block: QComboBox = QComboBox()
         self.block.setEditable(True)
         self.block.addItems([name for name in blocks if name])
         self.block.setCurrentText(next((name for name in blocks if name),
-                                       'plane'))
+                                       self.DEFAULT_BLOCK))
         self.fields: dict[str, list[QDoubleSpinBox]] = {}
         form = QFormLayout()
         form.addRow('Block', self.block)
-        for key, label in (('corner', 'Corner'), ('edge_a', 'Edge A'),
-                           ('edge_b', 'Edge B')):
+        for key, label in (('corner', 'Corner'), *self.EDGES):
             row = QHBoxLayout()
             boxes = []
             for axis, value in zip('xyz', DEFAULTS[key]):
@@ -110,9 +120,7 @@ class AddPlaneDialog(QDialog):
         buttons.addButton(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel('Edges run from the corner and must be '
-                                'perpendicular. Each is divided evenly into '
-                                'the number of elements nearest the size.'))
+        layout.addWidget(QLabel(self.NOTE))
         layout.addLayout(form)
         layout.addWidget(self.reading_label)
         layout.addWidget(buttons)
@@ -157,3 +165,17 @@ class AddPlaneDialog(QDialog):
         how a second Add of the same numbers shows itself."""
         self._add(self.values())
         self.refresh()
+
+
+class AddBlockDialog(AddPlaneDialog):
+    """Add Block: a corner and three edges, meshed into bricks
+    (`Project.add_block`, 2026-09-30). Holes are the script's business;
+    the dialog types the box."""
+
+    ACT = 'Add Block'
+    EDGES = (('edge_a', 'Edge A'), ('edge_b', 'Edge B'), ('edge_c', 'Edge C'))
+    NOTE = ('Edges run from the corner and must be perpendicular. Each is '
+            'divided evenly into the number of bricks nearest the size; '
+            'blocks meeting over a face are tied there.')
+    DEFAULT_BLOCK = 'block'
+

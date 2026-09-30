@@ -6,3 +6,4 @@
 - [The random and sine workflow](mixed-workflow.md)
 - [The system identification workflow](sysid-workflow.md)
 - [The finite element workflow: the BARC](fem-workflow.md)
+- [The solid workflow: the four-unit frame](fem-solids.md)

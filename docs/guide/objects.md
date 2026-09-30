@@ -114,7 +114,10 @@ and an element size, in the display unit, drawn in the 3-D view as it is
 typed — into the block named, its nodes that fall on nodes already there
 becoming them (`project.new_geometry`, `project.add_plane`; in
 [`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
-and `mesh.assemble`). *Merge Coincident Nodes* on a geometry's bar ties
+and `mesh.assemble`). *Add Block* is the same with a third edge: a box
+meshed into eight-node solid bricks, for a part that is neither a beam
+nor a plate (`project.add_block`, `mesh.block`, which also cuts
+cylindrical holes). *Merge Coincident Nodes* on a geometry's bar ties
 any geometry the same way after the fact, the tolerance asked in the
 display unit; `project.merge_coincident_nodes` from a script. All of it is
 shown and typed in the
@@ -367,7 +370,7 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_blocks`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `add_block`, a meshed box of solid bricks, likewise; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_blocks`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block, a material alone for a block of solids), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |

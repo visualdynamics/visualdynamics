@@ -88,6 +88,43 @@ def _display_length(values: ArrayLike, geometry: Geometry,
     return unit_system.from_si(np.asarray(values), 'length')
 
 
+#: the faces of a solid cell by its node count, as corner positions in
+#: the cell's own node order: the hexahedron's six, the wedge's two
+#: triangles and three quads, the tetrahedron's four. Bottom face then
+#: top, the same way round, as UFF 2412 and Nastran number them.
+_SOLID_FACES = {
+    8: ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5),
+        (2, 3, 7, 6), (3, 0, 4, 7)),
+    6: ((0, 2, 1), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5)),
+    4: ((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+}
+
+
+def solid_faces(node_count: int) -> tuple[tuple[int, ...], ...]:
+    """The faces of a solid cell of this many corners, each as
+    positions into the cell's node list; a higher-order cell draws by
+    its corners, which come first.
+
+    Parameters
+    ----------
+    node_count : int
+        How many nodes the cell names.
+
+    Returns
+    -------
+    tuple of tuple of int
+    """
+    if node_count in (8, 20, 27):
+        return _SOLID_FACES[8]
+    if node_count in (6, 15, 24):
+        return _SOLID_FACES[6]
+    if node_count in (4, 10):
+        return _SOLID_FACES[4]
+    if node_count in (5, 13):                 # a pyramid: a quad and four
+        return ((0, 3, 2, 1), (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4))
+    return ()
+
+
 def _cells(index_lists: Sequence[Sequence[int]]) -> np.ndarray:
     """Flat VTK cell array: [n, i0..in-1, n, i0..in-1, ...]"""
     return np.concatenate([[len(ix), *ix] for ix in index_lists])
@@ -749,18 +786,30 @@ def add_geometry(plotter: Any, geometry: Geometry,
     elements = ([(geometry.elem_type[i], geometry.elem_color[i],
                   geometry.elem_conn[i]) for i in element_indices]
                 if 'elements' in draw else [])
+    skins: dict[int, dict[tuple[int, ...], list[int]]] = {}
     for code, color, conn in elements:
         _name, _nnodes, render = ELEMENT_TYPES[int(code)]
         if render == 'face':
             faces.setdefault(int(color), []).append(
                 rows(conn[:face_corners(int(code))]))
         elif render == 'volume':
-            # render outer faces later; M0 draws the wireframe of the cell
-            lines.setdefault(int(color), []).append(rows(conn))
+            # a solid draws as its skin: the faces of its cells that no
+            # other cell of the color shares (2026-09-30; a polyline
+            # through every corner drew the mesh's insides as a tangle)
+            skin = skins.setdefault(int(color), {})
+            for face in solid_faces(len(conn)):
+                corners = rows([conn[i] for i in face])
+                key = tuple(sorted(corners))
+                if key in skin:
+                    del skin[key]
+                else:
+                    skin[key] = corners
         elif render == 'line':
             lines.setdefault(int(color), []).append(rows(conn[:2]))
         elif render == 'point':
             cell_points.setdefault(int(color), []).extend(rows(conn))
+    for color, skin in skins.items():
+        faces.setdefault(color, []).extend(skin.values())
     for color, polys in faces.items():
         mesh = new_mesh()
         mesh.faces = _cells(polys)

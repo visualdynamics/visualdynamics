@@ -76,6 +76,12 @@ datas = [
     # are files, read back through importlib.resources
     (str(ROOT / 'src' / 'visualdynamics' / 'gui' / 'icons'),
      'visualdynamics/gui/icons'),
+    # the ESCDF specification files the reader knows the format's
+    # types from, with their license — package data in the wheel, and
+    # left out of the bundles once: the packaged 0.1.0a17 died on an
+    # .escdf drop with a FileNotFoundError (Brandon, 2026-09-30)
+    (str(ROOT / 'src' / 'visualdynamics' / 'io' / 'escdf_specifications'),
+     'visualdynamics/io/escdf_specifications'),
     # The LGPL paper trail, in every package: the third-party notices,
     # the license texts, and the how-to-replace-Qt page. Shipping Qt
     # as replaceable libraries (--onedir) is only half the obligation;

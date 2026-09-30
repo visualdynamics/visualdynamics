@@ -26,6 +26,7 @@ The map first, then each path in full.
 | Correlate | select both shape sets — the MAC appears | `project.comparison_mac('A', 'B')`; `project.plot_mac('A', 'B')` draws it |
 | Commit matches | pick squares, press **+** | `project.match_modes('A', 'B', threshold=0.7)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('modal')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Export | Export HTML… | `project.export_report(name, path)` |
 | Save | Save Project As… | `project.save('modal.vdyn')` |
 

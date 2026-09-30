@@ -14,6 +14,21 @@ Each project type has its template — *Generate Report* on the bar,
 with the project row selected, builds the one that matches — and
 `'empty'` starts a blank outline.
 
+A typed project also has **Automatic** on the tree bar, beside Link
+and Unlink: one press computes every gray slot the type still expects
+that the loaded data can fill, in the workflow's order, and generates
+the report last. A random run's time data and specification become the
+PSDs, the octave-band PSDs and specification and the multiple
+coherence; a modal run's time data becomes its PSDs, FRFs, coherence
+and a fitted shape set; a shock record is filtered and read for its
+SRS, velocity and displacement; a sine sweep has its levels extracted;
+a system identification averages both streams on shared frames. What
+the data cannot supply — a geometry, photographs, a specification —
+stays gray, and a computation the data refuses (a coherence with no
+drive channel) is skipped while the rest are made. Pressed again with
+nothing left to make, it makes nothing. In a script the same press is
+`project.work_up()`, and it journals as that one line.
+
 The export is one self-contained HTML file: plots, animated 3D
 scenes, tables, photos, all with their own interactive viewers and
 nothing third-party inside. It opens on a locked-down machine with no

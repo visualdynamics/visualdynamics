@@ -483,6 +483,69 @@ def test_detect_keeps_the_recipe_a_record_carries():
         'an explicit choice still wins'
 
 
+def test_the_default_is_the_detectors_until_a_start_is_chosen():
+    """`default_averaging` is where a view opens (Brandon, 2026-09-30:
+    when the record has no assigned start, open on the detected one).
+    A chosen start stands, even at zero; an unchosen one is worked out,
+    keeping the recipe; and a record whose stretch holds fewer frames
+    than it asks for keeps its own — the modal survey's case."""
+    from dataclasses import replace
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rate = 1024.0
+    t = np.arange(int(rate * 30)) / rate
+    rng = np.random.default_rng(4)
+    level = np.where((t > 5.0) & (t < 25.0), 1.0, 0.05)
+    history = TimeHistory(
+        t, rng.standard_normal((2, len(t))) * level, response_dof=['1Z+', '2Z+'],
+        ordinate_dim='acceleration')
+    assert history.default_averaging() == history.suggest_averaging()
+    unchosen = Averaging(frame_length=2048, overlap=0.0, window='boxcar',
+                         frames=3)
+    assert not unchosen.start_set
+    history.averaging = unchosen
+    found = history.default_averaging()
+    assert found.start_set and found.frames > 3 and 5.0 <= found.start <= 10.0
+    assert (found.frame_length, found.window) == (2048, 'boxcar')
+    history.averaging = replace(unchosen, start_set=True)
+    assert history.default_averaging() is history.averaging
+    history.averaging = replace(unchosen, frames=1000)
+    assert history.default_averaging() is history.averaging, \
+        'the detector found fewer than the record asks for'
+
+
+def test_a_chosen_start_survives_the_project_file(tmp_path):
+    """Whether the start was chosen is saved with the rest, so a project
+    reopened does not detect over a start the user dragged to zero.
+    Files from before the flag carry a chosen start only where the
+    start is past zero — the one thing an old file can say about it."""
+    import h5py
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.project import Project
+
+    t = np.arange(4096) / 1024.0
+    history = TimeHistory(t, np.sin(2 * np.pi * 30 * t)[None],
+                          response_dof=['1Z+'], ordinate_dim='acceleration')
+    history.averaging = Averaging(frame_length=1024, overlap=0.0,
+                                  window='boxcar', frames=4, start_set=True)
+    project = Project()
+    project.add('Bare', history)
+    path = tmp_path / 'chosen.vdyn'
+    project.save(path)
+    assert Project.open(path)['Bare'].averaging.start_set
+    for start, expected in ((0.0, False), (0.5, True)):
+        with h5py.File(path, 'a') as f:
+            group = next(g for _n, g in f['objects'].items()
+                         if 'averaging_start' in g.attrs)
+            group.attrs.pop('averaging_start_set', None)
+            group.attrs['averaging_start'] = start
+        assert Project.open(path)['Bare'].averaging.start_set is expected
+
+
 def test_the_moved_analysis_still_fits_the_record(tmp_path):
     path = rattlesnake_run(tmp_path / 'random.nc4',
                            [(0.05, 20), (1.0, 60), (0.05, 20)])

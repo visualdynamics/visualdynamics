@@ -398,4 +398,4 @@ def suggest(history: TimeHistory, want_frames: int = WANT_FRAMES,
                           window=window, frames=1, start=first / rate)
     room = averaging.most_frames(last, rate)
     return Averaging(frame_length=length, overlap=overlap, window=window,
-                     frames=max(room, 1), start=first / rate)
+                     frames=max(room, 1), start=first / rate, start_set=True)

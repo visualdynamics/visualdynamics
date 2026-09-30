@@ -1272,6 +1272,26 @@ def _draw_unlink(painter, color):
     painter.drawLine(QPointF(30, 24), QPointF(34, 42))
 
 
+def _draw_automatic(painter, color):
+    """A gear: the tree bar's Automatic, which turns the rest of the
+    workflow over from what is loaded."""
+    import math
+
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    teeth, outer, inner = 8, 28.0, 21.0
+    points = []
+    for k in range(teeth * 4):
+        angle = 2.0 * math.pi * k / (teeth * 4)
+        radius = outer if (k % 4) in (0, 1) else inner
+        points.append(QPointF(32 + radius * math.cos(angle),
+                              32 + radius * math.sin(angle)))
+    painter.drawPolygon(points)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 5))
+    painter.drawEllipse(QPointF(32, 32), 11, 11)
+
+
 def _draw_dofs(painter, color):
     """An arrow leaving a node: the DOF marker."""
     painter.setPen(Qt.PenStyle.NoPen)
@@ -1611,6 +1631,7 @@ def control_icon(name: str) -> QIcon:
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
+     'automatic': _draw_automatic,
      'table': _draw_channel_table, 'overlay': _draw_overlay,
      'ratio': _draw_ratio,
      'project': _draw_project,

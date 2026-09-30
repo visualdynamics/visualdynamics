@@ -270,6 +270,7 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
         group.attrs['averaging_frames'] = averaging.frames
         group.attrs['averaging_start'] = averaging.start
         group.attrs['averaging_detrend'] = averaging.detrend
+        group.attrs['averaging_start_set'] = bool(averaging.start_set)
         if averaging.window_parameter is not None:
             group.attrs['averaging_window_parameter'] = \
                 averaging.window_parameter
@@ -327,7 +328,11 @@ def _load_averaging(group):
         window_parameter=(
             float(group.attrs['averaging_window_parameter'])
             if 'averaging_window_parameter' in group.attrs
-            else None))
+            else None),
+        # absent before 2026-09-30: a start those files carried was
+        # chosen only if it is not the record's beginning
+        start_set=bool(group.attrs.get(
+            'averaging_start_set', float(group.attrs['averaging_start']) > 0.0)))
 
 
 def load_data(group: h5py.Group) -> DataArray:

@@ -24,6 +24,7 @@ down through it, a near-dwell, and a log sweep — 16.5 seconds at
 | Judge them | select levels and specification together | `plot_comparison(levels, spec)` from `visualdynamics.plot` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('sine')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Save | Save Project As… | `project.save('sine.vdyn')` |
 
 ## In the app, step by step

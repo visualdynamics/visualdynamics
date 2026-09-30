@@ -323,7 +323,8 @@ class AveragingPanel(QWidget):
                                            if offered else None),
                          detrend=self.detrend_box.currentData(),
                          frames=self.frames_box.value(),
-                         start=max(self.start_box.value() - self.origin, 0.0))
+                         start=max(self.start_box.value() - self.origin, 0.0),
+                         start_set=True)
 
     # ---- editing ----------------------------------------------------------
 

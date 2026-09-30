@@ -735,3 +735,72 @@ def test_exceeding_lines_wear_the_abort_colors_on_the_stage():
     assert list(quiet) == ['exceed_under'] and \
         quiet['exceed_under'] > 0.1, \
         'a third of the target: the blue stripe to the floor'
+
+
+# ---- the solve in chunks (2026-09-30) -------------------------------------
+
+
+def _tones_for(spec, signal):
+    """(arguments, frequencies, starts) clipped to the record, as
+    `extract_sine` hands them to the solver."""
+    dt = 1.0 / FS
+    args, freqs, starts = [], [], []
+    for tone in spec.tones:
+        start = round(tone.start_time / dt)
+        argument = tone.argument(dt)
+        _t, f = tone.trajectory(dt)
+        n = min(len(argument), len(signal) - start)
+        args.append(argument[:n]); freqs.append(f[:n]); starts.append(start)
+    return args, freqs, starts
+
+
+def test_the_chunked_solve_is_the_whole_solve():
+    """A 19-minute run solved whole wanted tens of gigabytes; solved in
+    chunks with a margin of smoothing windows on each side it is the
+    same envelope to a part in ten million, at the smallest chunk."""
+    from visualdynamics.core.sine import _vold_kalman_whole, vold_kalman
+
+    spec = _spec()
+    signal = np.asarray(_recording(spec, noise=0.5).ordinate)[0]
+    args, freqs, starts = _tones_for(spec, signal)
+    whole = _vold_kalman_whole(signal, args, freqs, starts, 1.0 / FS)
+    chunked = vold_kalman(signal, args, freqs, starts, 1.0 / FS, chunk=4096)
+    for ours, theirs in zip(chunked, whole):
+        assert len(ours) == len(theirs)
+        assert np.abs(ours - theirs).max() <= 1e-7 * np.abs(theirs).max()
+
+
+def test_the_chunked_solve_holds_a_chunks_worth_of_memory():
+    """Measured, since the point is the memory: the chunked solve peaks
+    well under the whole solve's on the same record."""
+    import tracemalloc
+
+    from visualdynamics.core.sine import _vold_kalman_whole, vold_kalman
+
+    spec = _spec()
+    signal = np.asarray(_recording(spec, noise=0.5).ordinate)[0]
+    args, freqs, starts = _tones_for(spec, signal)
+    tracemalloc.start()
+    _vold_kalman_whole(signal, args, freqs, starts, 1.0 / FS)
+    whole = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    tracemalloc.start()
+    vold_kalman(signal, args, freqs, starts, 1.0 / FS, chunk=4096)
+    chunked = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert chunked < 0.5 * whole, (chunked, whole)
+
+
+def test_extraction_reads_the_same_levels_through_chunks(monkeypatch):
+    """The extraction's own path, with the chunk forced small: every
+    tone's levels as the whole-record extraction gives them."""
+    from visualdynamics.core import sine
+
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    whole = extract_sine(history, spec)
+    monkeypatch.setattr(sine, 'CHUNK', 4096)
+    chunked = extract_sine(history, spec)
+    for ours, theirs in zip(chunked, whole):
+        assert np.allclose(ours.abscissa, theirs.abscissa)
+        assert np.allclose(ours.ordinate, theirs.ordinate, rtol=1e-6, atol=0)

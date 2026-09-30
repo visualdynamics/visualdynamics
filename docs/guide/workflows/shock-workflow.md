@@ -21,6 +21,7 @@ photographed at every step. The recording ships with the repository
 | Compare | select SRS and specification together | `plot_comparison(srs, spec)` from `visualdynamics.plot` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('shock')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Export | Export HTML… | `project.export_report(name, path)` |
 | Save | Save Project As… | `project.save('shock.vdyn')` |
 

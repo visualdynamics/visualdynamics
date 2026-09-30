@@ -120,14 +120,46 @@ def test_moving_to_another_object_takes_the_frames_off(window, pump):
 
 
 def test_the_table_opens_on_what_the_file_said(window, pump):
-    """The whole point of reading the parameters at import: they are
-    already right, and the table shows what will be used."""
+    """The whole point of reading the parameters at import: the recipe
+    is already right, and the table shows what will be used. What the
+    file never said is when, so the view opens where Detect would put
+    it — the record's own start and count once the start was chosen,
+    the detector's until then (Brandon, 2026-09-30). The modal fixture
+    holds sixty-three of its frames, not the twenty it was told."""
     history = looking_at(window, pump, MODAL)
+    assert not history.averaging.start_set
     show_averaging(window, pump)
     panel = window.data_pane.averaging_panel
     assert panel.averaging() == history.averaging
+    assert history.averaging.start_set
     assert panel.length_box.value() == 2048
+    assert panel.frames_box.value() == 63
+    assert history.averaging == history.suggest_averaging()
+
+
+def test_a_start_the_file_chose_is_where_the_table_opens(window, pump):
+    """A start that was chosen — by the import's detection, a drag, a
+    typed number — stands, even at zero: the view is not a second
+    opinion on it."""
+    from dataclasses import replace
+
+    history = looking_at(window, pump, MODAL)
+    history.averaging = replace(history.averaging, start_set=True)
+    show_averaging(window, pump)
+    panel = window.data_pane.averaging_panel
     assert panel.frames_box.value() == 20
+    assert panel.start_box.value() == 0.0
+
+
+def test_the_opening_default_is_written_the_way_an_edit_is(window, pump):
+    """What the table shows is what the next PSD uses, so the detected
+    default lands on the record and in the project's settings journal,
+    exactly as Detect's answer does."""
+    history = looking_at(window, pump, MODAL)
+    show_averaging(window, pump)
+    assert history.averaging.frames == 63
+    assert window.project.journal[-1] == \
+        f"project['Time History'].averaging = {history.averaging!r}"
 
 
 def test_an_edit_in_the_table_moves_the_shading(window, pump):
@@ -301,8 +333,9 @@ def test_a_start_past_the_end_is_pulled_back(window, pump):
 def test_the_averaging_is_offered_even_when_the_file_said_nothing(window,
                                                                   pump):
     """A history assembled in a script has no parameters on it; the view
-    still opens, on the whole record as one frame, which is what
-    computing a PSD without any averaging has always meant."""
+    still opens, on the detector's own recipe (until 2026-09-30, on the
+    whole record as one frame — which is what computing a PSD without
+    any averaging still means, but not where the view should start)."""
     import numpy as np
 
     from visualdynamics.core.data import TimeHistory
@@ -320,7 +353,9 @@ def test_the_averaging_is_offered_even_when_the_file_said_nothing(window,
     pump()
     show_averaging(window, pump)
     panel = window.data_pane.averaging_panel
-    assert panel.averaging() == Averaging.for_records(4096)
+    assert panel.averaging() == history.averaging == history.suggest_averaging()
+    assert panel.averaging() != Averaging.for_records(4096)
+    assert panel.frames_box.value() > 1
     assert window.averaging_overlays
 
 
@@ -330,10 +365,15 @@ def test_the_averaging_is_offered_even_when_the_file_said_nothing(window,
 def test_detect_fills_the_table_in_from_the_record(window, pump):
     """The button answers 'where should I average and over how many
     frames' from the record itself, rather than leaving it to be typed."""
+    from dataclasses import replace
+
     history = looking_at(window, pump, MODAL)
+    # a start the file chose, so the view opens on the file's twenty
+    history.averaging = replace(history.averaging, start_set=True)
     show_averaging(window, pump)
     panel = window.data_pane.averaging_panel
     before = panel.averaging()
+    assert before.frames == 20
     panel.detect_button.click()
     pump()
     found = panel.averaging()

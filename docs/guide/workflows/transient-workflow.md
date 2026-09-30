@@ -24,6 +24,7 @@ generators repository.
 | PSDs of both | Compute PSDs in each averaging view | `project.compute_psds(name)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('transient')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Export | Export HTML… | `project.export_report(name, path)` |
 | Save | Save Project As… | `project.save('transient.vdyn')` |
 

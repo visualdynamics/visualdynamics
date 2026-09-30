@@ -34,7 +34,7 @@ are Harris's.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -215,6 +215,13 @@ class Averaging:
     #: window given None adopts its documented default, so a stored
     #: Averaging always carries the number it was computed with.
     window_parameter: float | None = None
+    #: whether the start was chosen — by the detector, a drag, a typed
+    #: number — rather than left at the record's beginning. A file's
+    #: recipe says frame length, window and overlap and never when
+    #: (Brandon, 2026-09-30: the view should open on the detected
+    #: start when none was assigned). Not part of equality: two
+    #: averagings with the same numbers are the same averaging.
+    start_set: bool = field(default=False, compare=False)
 
     def __post_init__(self) -> None:
         if int(self.frame_length) < 2:

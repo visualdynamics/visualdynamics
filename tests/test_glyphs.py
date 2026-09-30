@@ -106,3 +106,10 @@ def test_the_glyph_files_ship_in_every_package():
                      pyproject)
     spec = (ROOT / 'packaging' / 'visualdynamics.spec').read_text()
     assert "'visualdynamics/gui/icons'" in spec
+    # and the ESCDF specification files the reader knows the format's
+    # types from: package data that was not in the bundles, and the
+    # packaged 0.1.0a17 died on an .escdf drop with a FileNotFoundError
+    # (Brandon, 2026-09-30)
+    assert re.search(r'visualdynamics = \[.*"io/escdf_specifications/\*\.txt".*\]',
+                     pyproject)
+    assert "'visualdynamics/io/escdf_specifications'" in spec

@@ -117,6 +117,31 @@ ZERO_ENERGY = 1e-12
 #: two matrices (2026-09-26)
 SPARSE_ABOVE = 3000
 
+#: the sparse solver polishes what Lanczos hands it until every mode
+#: asked for has a relative residual below this (`polish_modes`), or a
+#: step stops helping, or `POLISH_STEPS` have been spent. The residual
+#: floors where the conditioning says it must — the rigid-link test
+#: model, scaled to a condition number of 4e9, floors at 3e-7 on this
+#: machine's builds — so the polish stops at the floor rather than
+#: spending its steps there, and the threshold is what a clean start
+#: passes on the way down. A runner's build once handed it a start it
+#: did not clean in the three steps that used to be fixed (2026-09-30,
+#: Python 3.12 on GitHub: the twelfth mode of that model, 1.45 % from
+#: its neighbor, came back with a MAC of 1 - 2.6e-8 against the dense
+#: solver's, while every build here gave 1 - 1e-14; a start corrupted
+#: by a part in a thousand reproduces it, 3e-4 after three steps and the
+#: floor after eight). A residual is measured; a step count is hoped for.
+POLISH_RESIDUAL = 1e-8
+POLISH_STEPS = 12
+#: modes asked of Lanczos beyond the ones wanted. Block inverse
+#: iteration cleans a wanted mode of the modes *outside* its block at
+#: the rate (lambda_k - sigma) / (lambda_outside - sigma) per step, so
+#: the highest wanted mode, whose nearest outside neighbor may be a
+#: percent away, would barely move without a band of unwanted modes
+#: above it to widen that gap. Eight is cheap: Lanczos computes them
+#: nearly for free and the polish is a few extra solves.
+LANCZOS_GUARD = 8
+
 
 @dataclass(frozen=True)
 class Material:
@@ -683,6 +708,49 @@ def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
             stack.extend(neighbors[node] - seen)
         found.append(sorted(piece))
     return sorted(found, key=len, reverse=True)
+
+
+def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
+                 wanted: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Refine a block of approximate modes until they are converged.
+
+    Block inverse iteration with the shifted factor (K - sigma M), each
+    step followed by Rayleigh-Ritz on the block — the small projected
+    generalized problem solved densely — repeated until every one of the
+    first `wanted` modes has a relative residual below `POLISH_RESIDUAL`,
+    or a step no longer halves the worst of them (the floor the
+    conditioning sets), or `POLISH_STEPS` are spent. The residual of a mode is
+    |K v - lambda M v| over |(K - sigma M) v|, which is defined for a
+    rigid-body mode too (its numerator and |K v| are both zero). The
+    block is polished whole: the Ritz step resolves the modes *inside*
+    it exactly, and iteration removes what leaks in from *outside*, at
+    a rate set by the gap between the last wanted mode and the first
+    beyond the block, which is why the caller hands over a guard band.
+
+    Returns the eigenvalues, the mass-normal vectors, both for the whole
+    block in ascending order, and the residual of each after the last
+    step. Sparse `stiffness` and `mass` in CSC form.
+    """
+    from scipy.linalg import eigh as scipy_eigh
+    from scipy.sparse.linalg import splu
+
+    factor = splu((stiffness - sigma * mass).tocsc())
+    wanted = min(int(wanted), vectors.shape[1])
+    worst = math.inf
+    for step in range(POLISH_STEPS):
+        if step:
+            vectors = factor.solve(mass @ vectors)
+        eigenvalues, ritz = scipy_eigh(vectors.T @ (stiffness @ vectors),
+                                       vectors.T @ (mass @ vectors))
+        vectors = vectors @ ritz
+        k_v = stiffness @ vectors
+        m_v = mass @ vectors
+        residuals = (np.linalg.norm(k_v - m_v * eigenvalues, axis=0)
+                     / np.linalg.norm(k_v - sigma * m_v, axis=0))
+        before, worst = worst, float(residuals[:wanted].max())
+        if worst < POLISH_RESIDUAL or worst > 0.5 * before:
+            break
+    return eigenvalues, vectors, residuals
 
 
 class Model:
@@ -1423,45 +1491,61 @@ class Model:
         full = transform @ shapes
         return eigenvalues, full, stiffness
 
+    def scaled_system(self, fixed: Sequence[str] = ()) -> tuple[Any, ...]:
+        """The sparse eigenproblem as the sparse solver poses it.
+
+        Returns (K, M, T, S, sigma, stiffness): the constrained,
+        symmetrically scaled stiffness and mass in CSC form, the
+        constraint transform T and the scaling S that carry a solution
+        back to every degree of freedom as T (S phi), the shift sigma, and
+        the unconstrained sparse stiffness. Public so a test can hand the
+        polish a start of its own choosing.
+
+        The shift is just below zero: the rigid-body modes (eigenvalue 0)
+        are nearest it, so they come first, and K - sigma M = K + |sigma| M
+        is positive definite even when K alone is singular (free-free).
+        The scaling is symmetric and diagonal, S K S and S M S with S =
+        1/sqrt of the shifted diagonal: the same eigenvalues, the modes
+        S phi'. A model of plates mixes meters with radians, and rigid
+        links fold lever arms into the rotations — the rigid-link test
+        model's shifted matrix had a condition number of 4e12, and
+        Lanczos, which converges no better than its linear solves, left
+        residuals of 1e-2. Scaled it is 4e9 (2026-09-26).
+        """
+        from scipy import sparse
+
+        mass, stiffness = self.sparse_matrices()
+        transform = self.constraint_transform(fixed, sparse=True)
+        reduced_m = (transform.T @ mass @ transform).tocsc()
+        reduced_k = (transform.T @ stiffness @ transform).tocsc()
+        if not reduced_m.shape[0]:
+            raise ValueError('every degree of freedom is fixed')
+        sigma = -(2.0 * np.pi) ** 2
+        scale = sparse.diags(1.0 / np.sqrt(
+            (reduced_k - sigma * reduced_m).diagonal()))
+        reduced_k = (scale @ reduced_k @ scale).tocsc()
+        reduced_m = (scale @ reduced_m @ scale).tocsc()
+        return reduced_k, reduced_m, transform, scale, sigma, stiffness
+
     def _sparse_modes(self, fixed, maximum_frequency, num_modes):
         """(eigenvalues, shapes at every DOF, stiffness) for the lowest
         modes, by shift-invert Lanczos on the sparse matrices."""
-        from scipy import sparse
-        from scipy.linalg import eigh as scipy_eigh
-        from scipy.sparse.linalg import eigsh, splu
+        from scipy.sparse.linalg import eigsh
 
         if num_modes is None and maximum_frequency is None:
             raise ValueError(
                 f'a model of {self.num_dof} degrees of freedom is solved '
                 'for its lowest modes: say how many (num_modes) or up to '
                 'what frequency (maximum_frequency)')
-        mass, stiffness = self.sparse_matrices()
-        transform = self.constraint_transform(fixed, sparse=True)
-        reduced_m = (transform.T @ mass @ transform).tocsc()
-        reduced_k = (transform.T @ stiffness @ transform).tocsc()
+        reduced_k, reduced_m, transform, scale, sigma, stiffness = \
+            self.scaled_system(fixed)
         size = reduced_m.shape[0]
-        if not size:
-            raise ValueError('every degree of freedom is fixed')
-        # a shift just below zero: the rigid-body modes (eigenvalue 0) are
-        # nearest it, so they come first, and K - sigma M = K + |sigma| M
-        # is positive definite even when K alone is singular (free-free)
-        sigma = -(2.0 * np.pi) ** 2
-        # Symmetric diagonal scaling, S K S and S M S with S = 1/sqrt of
-        # the shifted diagonal: the same eigenvalues, the modes S phi'. A
-        # model of plates mixes meters with radians, and rigid links fold
-        # lever arms into the rotations — the rigid-link test model's
-        # shifted matrix had a condition number of 4e12, and Lanczos,
-        # which converges no better than its linear solves, left residuals
-        # of 1e-2. Scaled it is 4e9 (2026-09-26).
-        scale = sparse.diags(1.0 / np.sqrt(
-            (reduced_k - sigma * reduced_m).diagonal()))
-        reduced_k = (scale @ reduced_k @ scale).tocsc()
-        reduced_m = (scale @ reduced_m @ scale).tocsc()
         limit = (None if maximum_frequency is None
                  else (2.0 * np.pi * float(maximum_frequency)) ** 2)
-        count = int(num_modes) if num_modes is not None else 24
+        wanted = int(num_modes) if num_modes is not None else 24
         while True:
-            count = max(1, min(count, size - 1))
+            wanted = max(1, min(wanted, size - 1))
+            count = min(wanted + LANCZOS_GUARD, size - 1)
             try:
                 eigenvalues, vectors = eigsh(reduced_k, k=count, M=reduced_m,
                                              sigma=sigma, which='LM')
@@ -1473,24 +1557,25 @@ class Model:
                     'with neither mass nor stiffness'
                     + (f' ({len(empty)} of them)' if len(empty) else '')
                     + f' — {failure}') from None
-            if (limit is None or eigenvalues.max() > limit
-                    or count >= size - 1):
+            # the wanted modes, not the guard, have to reach the limit:
+            # the guard is what keeps the last of them clean, and a
+            # guard mode is never the answer to "every mode up to"
+            if (limit is None or np.sort(eigenvalues)[wanted - 1] > limit
+                    or wanted >= size - 1):
                 break
-            count *= 2
-        # Polish: two steps of inverse iteration with the shifted factor,
-        # each followed by Rayleigh-Ritz — the small projected problem
-        # solved densely. What is left of the conditioning after scaling
-        # still bounds Lanczos' own accuracy; this brings the residuals to
-        # ~1e-6 and the frequencies onto the dense solver's (measured on
-        # the rigid-link model: 1e-4 residual before, 1.5e-6 after). The
-        # Ritz step also makes the modes mass-normal exactly.
-        factor = splu((reduced_k - sigma * reduced_m).tocsc())
-        for step in range(3):
-            if step:
-                vectors = factor.solve(reduced_m @ vectors)
-            eigenvalues, ritz = scipy_eigh(vectors.T @ (reduced_k @ vectors),
-                                           vectors.T @ (reduced_m @ vectors))
-            vectors = vectors @ ritz
+            wanted *= 2
+        # Polish: block inverse iteration with the shifted factor, each
+        # step followed by Rayleigh-Ritz, until the residuals say the
+        # modes are converged (`polish_modes`). What is left of the
+        # conditioning after scaling still bounds Lanczos' own accuracy
+        # (measured on the rigid-link model: 1e-4 residual before, 1.5e-6
+        # after two fixed steps, 2026-09-26), and a fixed count of steps
+        # was the flaw: a start the polish did not clean in three steps
+        # slipped through on one runner's build. The guard band above
+        # the wanted modes is trimmed by the caller's `keep`. The Ritz
+        # step also makes the modes mass-normal exactly.
+        eigenvalues, vectors, _residuals = polish_modes(
+            reduced_k, reduced_m, sigma, vectors, wanted)
         return eigenvalues, transform @ (scale @ vectors), stiffness
 
     def constraint_transform(self, fixed: Sequence[str] = (),

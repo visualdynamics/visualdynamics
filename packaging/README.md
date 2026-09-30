@@ -249,9 +249,13 @@ that means for whoever you hand a build to:
   `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarization takes a few
   minutes per submission, twice per image.
 - **Windows** — SmartScreen warns until the signature earns
-  reputation. **SignPath Foundation**, applied for 2026-09-28, the
-  day the project went MIT with no commercial terms (Brandon, first
-  planned 2026-08-28). Their conditions, read that day:
+  reputation. **SignPath Foundation** was applied for on 2026-09-28,
+  the day the project went MIT with no commercial terms (Brandon,
+  first planned 2026-08-28), and **declined on 2026-09-29**: not on
+  the terms, but on public-trust signals (stars, forks, contributors,
+  outside references, sustained activity) a project two weeks public
+  does not yet show; they invite a reapplication once it does. The
+  conditions stay recorded for that day. Read 2026-09-28:
   - The certificate is the Foundation's, so the publisher line in
     SmartScreen and the installer reads **"SignPath Foundation"** —
     not the author's name. Accepted as the price of free; the macOS
@@ -283,8 +287,10 @@ that means for whoever you hand a build to:
   an unsigned installer around a signed app still trips SmartScreen —
   and always timestamp, so signatures outlive the certificate.
 
-The macOS side is paid for and wired; the Windows side is SignPath
-after the first release, with the paid signer as the fallback.
+The macOS side is paid for and wired; the Windows side stays unsigned
+by Brandon's choice (2026-09-29) after the Foundation declined, with a
+reapplication once the project has the visibility they asked for and
+the paid signer as the alternative if waiting stops being acceptable.
 
 ## PyPI
 

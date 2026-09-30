@@ -199,18 +199,24 @@ happens on its own once 6 is done.
    publishing (packaging/README.md, "PyPI" — the pending publisher
    and the `pypi` environment have to exist, and the name is held by
    the placeholder from the `reserve` run).
-8. Afterwards: apply to SignPath Foundation for Windows signing.
-   **In progress 2026-09-28**, the day the tree went MIT with no
-   commercial terms, which is the Foundation's condition met plainly
+8. Afterwards: Windows signing. SignPath Foundation was applied to
+   on 2026-09-28, the day the tree went MIT with no commercial terms
    (their terms, read that day: an OSI license, no commercial
    dual-licensing, no proprietary components, already released, the
    download page naming the Foundation as signer, a code signing
-   policy page, MFA for everyone on the project). Brandon applies
-   through signpath.org/apply, which creates the SignPath account for
-   him; on acceptance, wire their GitHub Action into the release
-   workflow's Windows job. If they decline, Azure Artifact Signing
-   (about $10 a month, packaging/README.md). (The Apple side is done: Brandon
-   joined the Developer Program on 2026-09-02.)
+   policy page, MFA for everyone on the project), and **declined on
+   2026-09-29** — not on the terms but on public-trust signals (stars,
+   forks, contributors, outside references, sustained activity) the
+   project does not yet show at two weeks public; they invite a
+   reapplication once it does. **Decided (Brandon, 2026-09-29):
+   unsigned for now, reapply later**; the downloads page and
+   `code-signing.html` say so and point at each release's
+   `SHA256SUMS`. When the project has the visibility they named,
+   apply again at signpath.org/apply and, on acceptance, wire their
+   GitHub Action into the release workflow's Windows job. Azure
+   Artifact Signing (about $10 a month, packaging/README.md) remains
+   the paid alternative if waiting stops being acceptable. (The Apple
+   side is done: Brandon joined the Developer Program on 2026-09-02.)
 
 - **A verifying updater, after signing.** *File → Check for Updates…*
   exists (2026-09-01) and stops at telling: it reads

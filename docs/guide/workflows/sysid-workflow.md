@@ -24,6 +24,7 @@ after — streamed by the controller
 | Trust, part two | PSDs of both phases; select the pair; **Ratio (dB)** | `project.compute_psds(...)` twice |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('sysid')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Save | Save Project As… | `project.save('sysid.vdyn')` |
 
 ## In the app, step by step

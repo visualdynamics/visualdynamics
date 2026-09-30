@@ -1208,6 +1208,18 @@ class MainWindow(QMainWindow):
         self.unlink_action.triggered.connect(self.unlink_selected)
         tree_bar.addAction(self.unlink_action)
         self.unlink_action.setVisible(False)
+        # the rest of the workflow, from what is loaded: every gray
+        # slot the type expects that the data can fill, and the report
+        # (Brandon, 2026-09-30). Shown only on a typed project — an
+        # untyped one has no skeleton to fill.
+        self.automatic_action: QAction = QAction(
+            control_icon('automatic'), '&Automatic', self)
+        self.automatic_action.setToolTip(
+            'Compute everything the project type still expects from '
+            'what is loaded, and generate the report')
+        self.automatic_action.triggered.connect(self.work_up)
+        tree_bar.addAction(self.automatic_action)
+        self.automatic_action.setVisible(False)
         # Everything in the dock takes a file drag the way the tree
         # does. The dock's chrome — the title bar, the toolbar, the
         # holder around the tree — accepted nothing, and a drag refused
@@ -3725,16 +3737,37 @@ class MainWindow(QMainWindow):
             self._show_status('Project type cleared')
 
     def _sides(self):
-        """{side: [object names]} for the skeleton: the Basis by its
-        role, and under OTHER_SIDE every member of every group that is
-        not the Basis — the side has no name, so it is read off the
-        groups rather than declared."""
-        sides = dict(self.project.placed())
-        others = [name for g in self.links if g['role'] != 'Basis'
-                  for name in g['members']]
-        if others:
-            sides[OTHER_SIDE] = others
-        return sides
+        """{side: [object names]} for the skeleton — the project's
+        own rule (`Project.sides`), read here for the tree."""
+        return self.project.sides()
+
+    def work_up(self) -> None:
+        """The tree bar's Automatic: the project verb, with every
+        object it made given its row and the report — the last thing
+        made — opened."""
+        if not self.project_type:
+            self._show_status('Set a project type first — Automatic fills '
+                              'the slots the type expects')
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            added = self.project.work_up()
+        finally:
+            QApplication.restoreOverrideCursor()
+        for k, name in enumerate(added):
+            self.show_object(name, select=k == len(added) - 1)
+        still = [label for label, _cls, _icon, _n, optional, _side
+                 in self.project.missing() if not optional]
+        if added:
+            self._show_status(
+                f'Automatic: added {", ".join(added)}'
+                + (f' — still missing {", ".join(still)}' if still else
+                   ' — everything a report needs is here'))
+        else:
+            self._show_status(
+                'Automatic: nothing to compute'
+                + (f' — {", ".join(still)} must be imported' if still
+                   else ' — everything a report needs is here'))
 
     def _refresh_placeholders(self):
         """Gray slots under the project for whatever its type still
@@ -3745,6 +3778,7 @@ class MainWindow(QMainWindow):
             if reference is not None and reference[0] == 'placeholder':
                 self.test_item.removeChild(child)
         self._placeholder_items = {}
+        self.automatic_action.setVisible(bool(self.project_type))
         if not self.project_type:
             self._paint_links()
             return
@@ -8937,7 +8971,13 @@ class MainWindow(QMainWindow):
             self.data_pane.averaging_panel.hide()
             return
         samples = len(history.abscissa)
-        averaging = history.averaging or Averaging.for_records(samples)
+        # where Detect would put it when nothing chose a start yet
+        # (`TimeHistory.default_averaging`), landing on the record the
+        # way an edit does, so the PSD computed next uses what is shown
+        averaging = history.default_averaging()
+        if averaging is not history.averaging:
+            history.averaging = averaging
+            self.project.record_setting(history, 'averaging', averaging)
         colors = resolve_theme(self.theme_name)
         for item in self.data_pane.graphics.ci.items:
             if not isinstance(item, pg.PlotItem):

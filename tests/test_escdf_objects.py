@@ -51,8 +51,9 @@ def _project():
     project.add('FRF', Frf(f, np.ones((2, 51)) * (1 + 1j), ['1X+', '2X+'],
                            reference_dof=['3Z+', '3Z+'], ordinate_unit='m/s**2',
                            reference_unit='N'))
-    project.add('PSD', Psd(f, np.ones((2, 51)), ['1X+', '2X+'], reference_dof=['1X+', '2X+'],
-                           ordinate_unit='(m/s**2)**2/Hz'))
+    psd = Psd(f, np.ones((2, 51)), ['1X+', '2X+'], reference_dof=['1X+', '2X+'])
+    psd.define_units('m/s**2')               # a density declares its base quantity
+    project.add('PSD', psd)
     project.add('SRS', Srs(np.geomspace(10, 1000, 25), np.ones((1, 25)), ['1X+'],
                            ordinate_unit='m/s**2', q=10.0))
     project.link('Plate FEM', 'FEM Modes', 'FRF', 'PSD', 'SRS', name='Analysis')
@@ -100,7 +101,8 @@ def test_the_reference_loads_and_validates_every_dataset(tmp_path):
     names = {d.name: d for d in theirs.get_activity_data('Analysis')}
     assert {'FEM_Modes', 'FRF', 'PSD', 'SRS'} <= set(names)
     assert names['SRS'].dataset_type == 'response_spectrum'
-    assert names['FRF'].ordinate_unit[...] == '(m/s**2)/(N)'
+    assert names['FRF'].ordinate_unit[...] == '(m/s^2)/N'
+    assert str(names['PSD'].ordinate_unit[...]) == '(m/s^2)^2/Hz'
     for dataset in list(theirs.metadata) + [
             d for activity in theirs.activities for d in activity.data]:
         assert dataset.validate(), dataset.name
@@ -142,6 +144,7 @@ def test_the_standard_fields_alone_rebuild_the_objects(tmp_path):
     assert len(geometry.elem_conn) == len(original.elem_conn)
     assert geometry.length_unit == 'm'
     frf = back['FRF']
+    assert frf.units_defined
     assert frf.ordinate_unit == ['m/s**2', 'm/s**2'] and frf.reference_unit == ['N', 'N']
     assert frf.reference_dof == ['3Z+', '3Z+']
     assert back['SRS'].q == pytest.approx(10.0)
@@ -153,6 +156,64 @@ def test_the_standard_fields_alone_rebuild_the_objects(tmp_path):
     # the activity is the link group, named for it
     group = next(g for g in back.links if g.get('name') == 'Analysis')
     assert set(group['members']) == {'Plate FEM', 'FEM Modes', 'FRF', 'PSD', 'SRS'}
+
+
+def test_units_are_declared_and_converted_on_import(tmp_path):
+    """A foreign file's units are declared, not merely named: values in
+    g arrive in m/s**2 and show as g, a PSD in g^2/Hz likewise, and a
+    time base in milliseconds becomes seconds (the first cut named the
+    units and the app showed them undefined — Brandon, 2026-09-30)."""
+    file = escdf.File(created_by='x')
+    time = escdf.Dataset('t', 'data', 'Time in g')
+    time.values = {'data_type': 'time response', 'channel': np.array([['1X+']]),
+                   'ordinate_unit': 'g', 'abscissa_unit': 'ms',
+                   'ordinate': np.ones((1, 4)), 'abscissa_start': 0.0,
+                   'abscissa_step': 10.0}
+    psd = escdf.Dataset('p', 'data', 'Spec CPSD')
+    psd.values = {'data_type': 'power spectral density',
+                  'channel': np.array([['1X+', '1X+']]),
+                  'ordinate_unit': np.array(['g^2/Hz'], dtype=object),
+                  'abscissa_unit': 'Hz', 'ordinate': np.ones((1, 3)),
+                  'abscissa': np.array([10., 20., 40.])}
+    file.activities['a'] = escdf.Activity('a', 'A', data={'t': time, 'p': psd})
+    path = tmp_path / 'units.escdf'
+    escdf.write(file, path)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        project = escdf_objects.load(path)
+    history = project['Time in g']
+    assert history.units_defined and history.ordinate_unit == ['g']
+    assert history.ordinate[0, 0] == pytest.approx(9.80665)
+    np.testing.assert_allclose(history.abscissa, [0.0, 0.01, 0.02, 0.03])
+    spec = project['Spec CPSD']
+    assert spec.units_defined and spec.ordinate_unit == ['g'], 'the base quantity'
+    assert spec.ordinate[0, 0] == pytest.approx(9.80665 ** 2)
+    assert spec.ordinate_dim[0] == 'acceleration**2/frequency'
+
+
+def test_a_cross_density_declares_both_quantities(tmp_path):
+    file = escdf.File(created_by='x')
+    cross = escdf.Dataset('c', 'data', 'Cross')
+    cross.values = {'data_type': 'power spectral density',
+                    'channel': np.array([['1X+', '2Z+']]),
+                    'ordinate_unit': 'g*N/Hz', 'abscissa_unit': 'Hz',
+                    'ordinate': np.ones((1, 3)) + 0j,
+                    'abscissa': np.array([10., 20., 40.])}
+    file.activities['a'] = escdf.Activity('a', 'A', data={'c': cross})
+    path = tmp_path / 'cross.escdf'
+    escdf.write(file, path)
+    project = escdf_objects.load(path)
+    density = project['Cross']
+    assert density.ordinate_unit == ['g'] and density.reference_unit == ['N']
+    assert density.ordinate_dim[0] == 'acceleration*force/frequency'
+    assert density.ordinate[0, 0] == pytest.approx(9.80665)
+    # and back out in the file's spelling
+    again = tmp_path / 'again.escdf'
+    project.save(again)
+    written = escdf.read(again)
+    dataset = next(d for a in written.activities.values() for d in a.data.values()
+                   if d.descriptive_name == 'Cross')
+    assert dataset.values['ordinate_unit'] == 'g*N/Hz'
 
 
 def test_per_node_axes_become_coordinate_systems(tmp_path):
@@ -180,6 +241,26 @@ def test_per_node_axes_become_coordinate_systems(tmp_path):
     np.testing.assert_allclose(g.dof_direction('1X+'), [1, 0, 0])
     np.testing.assert_allclose(g.dof_direction('2X+'), [0, 1, 0])
     np.testing.assert_allclose(g.dof_direction('2Y+'), [-1, 0, 0])
+
+
+def test_a_geometry_of_bare_nodes_says_so(tmp_path):
+    file = escdf.File(created_by='x')
+    geometry = escdf.Dataset('g', 'geometry', 'points')
+    geometry.values = {
+        'node_id': np.array([1, 2], dtype=np.uint64),
+        'node_position': np.array([[0, 0, 0], [1, 0, 0.]]),
+        'node_x_direction': np.tile([1., 0, 0], (2, 1)),
+        'node_y_direction': np.tile([0., 1, 0], (2, 1)),
+        'node_z_direction': np.tile([0., 0, 1], (2, 1)),
+        'position_units': 'm',
+    }
+    file.metadata['g'] = geometry
+    file.activities['a'] = escdf.Activity('a', 'A', links=['g'])
+    path = tmp_path / 'points.escdf'
+    escdf.write(file, path)
+    with pytest.warns(ImportNote, match='2 nodes and no line_connection'):
+        project = escdf_objects.load(path)
+    assert project['points'].num_nodes == 2
 
 
 def test_what_the_specifications_do_not_define_is_left_out_with_a_note(tmp_path):

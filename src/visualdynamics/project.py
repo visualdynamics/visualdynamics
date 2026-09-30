@@ -1030,6 +1030,48 @@ class Project(dict):
                                []).extend(group['members'])
         return out
 
+    def sides(self) -> dict[str, list[str]]:
+        """{side: [object names]} for the typed skeleton: the Basis by
+        its role, and under `OTHER_SIDE` every member of every group
+        that is not the Basis — the other side has no name, so it is
+        read off the groups rather than declared. What the tree's gray
+        slots and `missing` are computed from.
+
+        Returns
+        -------
+        dict of str to list of str
+        """
+        from .core.report import OTHER_SIDE
+
+        sides = dict(self.placed())
+        others = [name for group in self.links if group['role'] != 'Basis'
+                  for name in group['members']]
+        if others:
+            sides[OTHER_SIDE] = others
+        return sides
+
+    def missing(self) -> list[tuple[str, type, str, int, bool, str | None]]:
+        """The typed skeleton's empty slots — what the tree shows gray.
+
+        Each is `project_expectations`' (label, class, icon key,
+        ordinal, optional, side). An untyped project expects nothing.
+        Until a Basis is declared every object counts for every slot:
+        the window places what arrives, a script may never, and a
+        script's project with everything in it and no groups is not
+        one with nothing in it.
+
+        Returns
+        -------
+        list of tuple
+        """
+        from .core.report import missing_expectations
+
+        if not self.project_type:
+            return []
+        sides = self.sides()
+        return missing_expectations(self.project_type, dict(self.items()),
+                                    sides if 'Basis' in sides else None)
+
     def role_group(self, role: str) -> LinkGroup | None:
         """The link group carrying a role, or None.
 
@@ -2825,6 +2867,193 @@ class Project(dict):
             report = report_template.load(path)
         return self.add(name, report)
 
+    def work_up(self) -> list[str]:
+        """Every missing object the project's type expects, computed
+        from what is loaded, and the report last (the tree bar's
+        **Automatic**; Brandon, 2026-09-30).
+
+        The skeleton's empty slots in their own order, each made from
+        the objects already there the way the workflow guide makes it
+        — PSDs from the time data, the octave bands from the PSDs and
+        the specification, the coherence from the time data; the FRFs
+        and a fitted shape set for a modal test; the levels for a sine
+        sweep; the filtered record, its SRS and the motion chain for a
+        shock; the two streams' PSDs on shared frames and the H1 plant
+        for a system identification — and the typed report once they
+        are in. A slot the loaded data cannot fill (a geometry, the
+        photographs, a specification) is left gray; a computation the
+        data refuses (no drive channel for a coherence) is skipped, and
+        the rest still happen. Nothing already present is remade:
+        pressed twice, the second press adds nothing.
+
+        One journal line, `project.work_up()`, the way `merge` is one
+        line: the verbs it calls are the ones the guide teaches, and a
+        script wanting them one at a time calls them.
+
+        Returns
+        -------
+        list of str
+            The names added, in the order made; empty when the
+            skeleton was already full.
+
+        Raises
+        ------
+        ValueError
+            When the project has no type — there is no skeleton to
+            fill.
+        """
+        from .core.data import Psd, Specification, TransientSpecification
+        from .core.report import (
+            PROJECT_TEMPLATES,
+            is_banded,
+            project_expectations,
+        )
+        from .core.shapes import ShapeSet
+
+        project_type = self.project_type
+        if not project_type:
+            raise ValueError('the project has no type, so there is nothing '
+                             'to work up — Set Project Type says what a '
+                             'finished project holds')
+        added: list[str] = []
+
+        def make(verb, *args, **kwargs):
+            names = verb(*args, **kwargs)
+            names = names if isinstance(names, list) else [names]
+            added.extend(names)
+            return names
+
+        def on(side, cls):
+            sides = self.sides()
+            pool = sides.get(side, []) if 'Basis' in sides else self.names
+            return [name for name in pool if isinstance(self[name], cls)]
+
+        def source_of(name):
+            return self.provenance.get(name, {}).get('source')
+
+        def verb_of(name):
+            return self.provenance.get(name, {}).get('verb')
+
+        def derived(name, verb):
+            return next((other for other in self.names
+                         if verb_of(other) == verb
+                         and source_of(other) == name), None)
+
+        def recorded(side):
+            # the imported record, ahead of anything derived from one
+            histories = on(side, TimeHistory)
+            histories = [name for name in histories
+                         if not isinstance(self[name], TransientSpecification)]
+            return next((name for name in histories
+                         if verb_of(name) is None), None) or (
+                histories[0] if histories else None)
+
+        def filtered(side):
+            record = recorded(side)
+            if record is None:
+                return None
+            done = derived(record, 'filter_data')
+            return done or make(self.filter_data, record)[0]
+
+        for slot in project_expectations(project_type):
+            if slot not in self.missing():
+                continue
+            _label, _cls, icon, ordinal, _optional, side = slot
+            side = side or 'Basis'
+            try:
+                if icon == 'Psd':
+                    if project_type == 'System ID':
+                        noise, driven = _quiet_and_driven(self)
+                        # the excitation's frames are the detected ones,
+                        # as `compute_frfs` adopts them, and the ambient
+                        # borrows them on purpose: the ratio the report
+                        # reads is only defined on lines both hold
+                        if self[driven].averaging is None:
+                            self[driven].averaging = \
+                                self[driven].suggest_averaging()
+                        if derived(driven, 'compute_psds') is None:
+                            make(self.compute_psds, driven)
+                        if noise and derived(noise, 'compute_psds') is None:
+                            self[noise].averaging = self[driven].averaging
+                            make(self.compute_psds, noise)
+                        continue
+                    record = recorded(side)
+                    if record is not None:
+                        make(self.compute_psds, record)
+                elif icon == 'Specification':
+                    # a transient's target is a recording too, and its
+                    # spectrum is the requirement the run is read against
+                    target = next((name for name in on(side, TransientSpecification)
+                                   if derived(name, 'compute_psds') is None),
+                                  None)
+                    if target is not None:
+                        make(self.compute_psds, target)
+                elif icon == 'OctavePsd':
+                    plain = [name for name in on(side, Psd)
+                             if not isinstance(self[name], Specification)
+                             and not is_banded(self[name])]
+                    if plain:
+                        make(self.compute_octave, plain[0])
+                elif icon == 'OctaveSpecification':
+                    plain = [name for name in on(side, Specification)
+                             if not is_banded(self[name])]
+                    if plain:
+                        make(self.compute_octave, plain[0])
+                elif icon == 'MultipleCoherence':
+                    record = (_quiet_and_driven(self)[1]
+                              if project_type == 'System ID'
+                              else recorded(side))
+                    if record is not None:
+                        make(self.compute_multiple_coherence, record)
+                elif icon == 'Frf':
+                    record = (_quiet_and_driven(self)[1]
+                              if project_type == 'System ID'
+                              else recorded(side))
+                    if record is not None:
+                        # H1 for a system identification: the excitation
+                        # is known and what noise there is sits on the
+                        # response
+                        make(self.compute_frfs, record,
+                             *(['H1'] if project_type == 'System ID' else []))
+                elif icon == 'ShapeSet' and side == 'Basis':
+                    frfs = on(side, Frf)
+                    if frfs:
+                        make(self.fit_modes, frfs[0])
+                elif icon == 'MatchedModes':
+                    from .core.report import OTHER_SIDE
+                    ours, theirs = on('Basis', ShapeSet), on(OTHER_SIDE, ShapeSet)
+                    if ours and theirs and ours[0] != theirs[0]:
+                        make(self.match_modes, ours[0], theirs[0])
+                elif icon == 'SineLevelSet':
+                    record = recorded(side)
+                    if record is not None:
+                        make(self.extract_sine, record)
+                elif icon == 'Srs':
+                    # the recommended order: the SRS is read from the
+                    # filtered record, so the filtering comes first even
+                    # though its slot is listed after
+                    record = filtered(side) if project_type == 'Shock' \
+                        else recorded(side)
+                    if record is not None:
+                        make(self.compute_srs, record)
+                elif icon == 'TimeHistory' and ordinal > 1:
+                    # the shock's motion chain: filtered, then velocity,
+                    # then displacement, each from the one before
+                    chain = filtered(side)
+                    for _step in range(ordinal - 2):
+                        if chain is None:
+                            break
+                        chain = derived(chain, 'integrate') or \
+                            make(self.integrate, chain)[0]
+                elif icon == 'Report':
+                    make(self.generate_report,
+                         PROJECT_TEMPLATES[project_type])
+            except ValueError:
+                # what the data refuses (a coherence with no drive
+                # channel) stays gray; the slots after it still fill
+                continue
+        return added
+
     def export_report(self, name: str, path: str | os.PathLike,
                       unit_system: Any = None) -> str:
         """Write a report as one self-contained HTML file (Export).
@@ -3653,7 +3882,7 @@ _JOURNALED_VERBS = (
     'merge_blocks', 'set_view',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
-    'extract_sine', 'refresh', 'refresh_stale',
+    'extract_sine', 'refresh', 'refresh_stale', 'work_up',
     'generate_report', 'export_report', 'export', 'save', 'duplicate',
 )
 for _verb in _JOURNALED_VERBS:

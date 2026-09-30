@@ -21,6 +21,12 @@ in its color; it is what the group is called when the
 project is written as an Engineering Sciences Common Data Format file,
 where a group is an activity.
 
+A project with a type shows a gray row for every object its report
+still expects. Right-click one for what can fill it, or press
+**Automatic** on the bar above the tree to have every slot the loaded
+data can fill computed at once and the report generated
+([Reports](reports.md)).
+
 Every object that holds more than one thing expands into a **grid**:
 rows are coordinates (or modes, or photographs), columns are whatever
 tells one record from another — the reference of a matrix of

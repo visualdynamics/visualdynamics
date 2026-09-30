@@ -25,6 +25,7 @@ repository) and lands at `stressdata/plate/mixed.nc4`.
 | The sine half | Extract Sine Levels on the time history's bar | `project.extract_sine(project.time_history)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('mixed')` |
+| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
 | Save | Save Project As… | `project.save('mixed.vdyn')` |
 
 ## What the file says, and what the project becomes

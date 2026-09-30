@@ -1188,6 +1188,39 @@ class TimeHistory(DataArray):
                             window_parameter=own.window_parameter)
         return found
 
+    def default_averaging(self) -> Averaging:
+        """The averaging a view of this record opens on.
+
+        The record's own when its start was chosen — by a file's import
+        that detected it, a drag, a typed number. Otherwise the
+        detector's answer, keeping whatever recipe the record carries
+        (frame length, window, overlap), as `suggest_averaging` does —
+        unless that answer holds fewer frames than the record's own
+        asks, when the record's own stands: a burst record has no
+        settled stretch to find, and the detector once returned four of
+        the twenty averages a modal survey asked for (2026-09-19). A
+        bare record gets the detector's recipe; one that cannot be
+        framed at all, each record as one frame (Brandon, 2026-09-30:
+        the view should open where Detect would put it, not at t = 0).
+
+        Returns
+        -------
+        Averaging
+        """
+        from .averaging import Averaging
+
+        own = self.averaging
+        if own is not None and own.start_set:
+            return own
+        try:
+            found = self.suggest_averaging()
+        except ValueError:
+            return (own if own is not None
+                    else Averaging.for_records(len(self.abscissa)))
+        if own is not None and found.frames < own.frames:
+            return own
+        return found
+
     def _spectral_frame(self, averaging=None):
         """(frequencies, one-sided scale, channel -> windowed frames).
 

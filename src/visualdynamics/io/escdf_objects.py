@@ -157,6 +157,68 @@ def _unit(text: str | None) -> str:
     return '' if text is None else str(text)
 
 
+def _spelled(unit: str) -> str:
+    """A unit as the format's examples spell it: '^' for a power."""
+    return unit.replace('**', '^')
+
+
+def _wrapped(unit: str) -> str:
+    """A unit safe to raise or multiply: compound ones in parentheses."""
+    return f'({unit})' if any(c in unit for c in '/*^') else unit
+
+
+def _psd_text(base: str, cross: str | None) -> str:
+    """The file's unit of a spectral density from this program's: the
+    base quantity squared per hertz, or two quantities' product per
+    hertz for a cross term ('g^2/Hz', '(m/s^2)*(N)/Hz')."""
+    base = _spelled(base)
+    if cross and cross != base:
+        return f'{_wrapped(base)}*{_wrapped(_spelled(cross))}/Hz'
+    return f'{_wrapped(base)}^2/Hz'
+
+
+def _psd_units(text: str) -> tuple[str, str | None]:
+    """This program's (base, cross) units from a file's spectral density
+    unit: 'g^2/Hz' or '(m/s**2)**2/Hz' give ('g', None) and
+    ('m/s**2', None); 'g*N/Hz' or '(g)*(N)/Hz' give ('g', 'N'); a
+    string in neither form is taken as the base itself, the way a file
+    that stored 'g' for a PSD in g^2/Hz would mean it."""
+    body = text.strip().replace('^', '**')
+    for suffix in ('/Hz', '/hertz', '/ Hz'):
+        if body.endswith(suffix):
+            body = body[:-len(suffix)].strip()
+            break
+    else:
+        return body, None
+
+    def unwrap(part: str) -> str:
+        part = part.strip()
+        while part.startswith('(') and part.endswith(')') and _balanced(part[1:-1]):
+            part = part[1:-1].strip()
+        return part
+
+    if body.endswith('**2'):
+        return unwrap(body[:-3]), None
+    depth, cut = 0, -1
+    for i, ch in enumerate(body):
+        depth += (ch == '(') - (ch == ')')
+        if ch == '*' and depth == 0 and body[i:i + 2] != '**' and body[i - 1:i] != '*':
+            cut = i
+            break
+    if cut > 0:
+        return unwrap(body[:cut]), unwrap(body[cut + 1:])
+    return unwrap(body), None
+
+
+def _balanced(text: str) -> bool:
+    depth = 0
+    for ch in text:
+        depth += (ch == '(') - (ch == ')')
+        if depth < 0:
+            return False
+    return depth == 0
+
+
 def _colors(indices: Any) -> np.ndarray:
     from ..viz.geometry import color_rgb
 
@@ -230,9 +292,16 @@ def _data_dataset(name: str, data: DataArray) -> escdf.Dataset:
     reference_units = [_unit(u) for u in (data.reference_unit or [None] * data.num_records)]
     if isinstance(data, Frf):
         # the standard's unit of a ratio is the ratio, spelled whole
-        combined = [f'({o})/({r})' if r else o
-                    for o, r in zip(ordinate_units, reference_units)]
-        ordinate_units = combined
+        ordinate_units = [f'{_wrapped(_spelled(o))}/{_wrapped(_spelled(r))}' if r
+                          else _spelled(o)
+                          for o, r in zip(ordinate_units, reference_units)]
+    elif isinstance(data, Psd):
+        # a density's unit here is the base quantity's; the file's is
+        # the square (or the cross product) per hertz
+        ordinate_units = [_psd_text(o, r or None) if o else ''
+                          for o, r in zip(ordinate_units, reference_units)]
+    else:
+        ordinate_units = [_spelled(o) for o in ordinate_units]
     values: dict[str, Any] = {
         'data_type': 'response spectrum' if isinstance(data, Srs)
         else _DATA_TYPES.get(type(data), 'spectrum'),
@@ -525,6 +594,13 @@ def _geometry_from(dataset: escdf.Dataset) -> Geometry:
                       elem_color=_indices(v.get('element_color'), len(conn)),
                       elem_block=[1] * len(conn), block_id=[1],
                       block_name=[dataset.descriptive_name or dataset.name])
+    if v.get('line_connection') is None and v.get('element_connection') is None:
+        # said, because a geometry that arrives as bare nodes looks like
+        # a reader that dropped its elements (Brandon, 2026-09-30)
+        warnings.warn(ImportNote(f'{dataset.name}: the file\'s geometry carries '
+                                 f'{len(node_id)} nodes and no line_connection or '
+                                 'element_connection, so nothing joins them'),
+                      stacklevel=2)
     geometry = Geometry(node_id, xyz, **kwargs)
     unit = str(v.get('position_units') or '').strip()
     if unit and unit.lower() not in ('unknown', 'none'):
@@ -556,23 +632,27 @@ def _split_ratio(unit: str) -> tuple[str, str | None]:
     registry knows; otherwise the whole string and None."""
     from ..units import normalize_unit
 
-    text = unit.strip()
-    if text.startswith('(') and ')/(' in text and text.endswith(')'):
-        left, right = text[1:-1].split(')/(', 1)
-    else:
-        depth, cut = 0, -1
-        for i, ch in enumerate(text):
-            depth += (ch == '(') - (ch == ')')
-            if ch == '/' and depth == 0:
-                cut = i
-        if cut < 0:
-            return text, None
-        left, right = text[:cut], text[cut + 1:]
+    text = unit.strip().replace('^', '**')
+
+    def unwrap(part: str) -> str:
+        part = part.strip()
+        while part.startswith('(') and part.endswith(')') and _balanced(part[1:-1]):
+            part = part[1:-1].strip()
+        return part
+
+    depth, cut = 0, -1
+    for i, ch in enumerate(text):
+        depth += (ch == '(') - (ch == ')')
+        if ch == '/' and depth == 0:
+            cut = i
+    if cut < 0:
+        return unwrap(text), None
+    left, right = unwrap(text[:cut]), unwrap(text[cut + 1:])
     try:
         normalize_unit(left)
         normalize_unit(right)
     except Exception:  # noqa: BLE001 — not two units, then
-        return text, None
+        return unwrap(text), None
     return left, right
 
 
@@ -595,16 +675,36 @@ def _data_from(dataset: escdf.Dataset) -> DataArray:
     else:
         start, step = float(v['abscissa_start']), float(v['abscissa_step'])
         abscissa = start + step * np.arange(ordinate.shape[1])
-    units = _strings(v.get('ordinate_unit'))
+    units = [u.replace('^', '**') for u in _strings(v.get('ordinate_unit'))]
     units = units * ordinate.shape[0] if len(units) == 1 else units
     reference_units: list[str | None] | None = None
     if cls is Frf:
         pairs = [_split_ratio(u) for u in units]
         units = [p[0] for p in pairs]
         reference_units = [p[1] for p in pairs]
-    kwargs: dict[str, Any] = {'ordinate_unit': [u or None for u in units] or None}
-    if reference_units is not None and any(reference_units):
-        kwargs['reference_unit'] = reference_units
+    elif cls is Psd:
+        pairs = [_psd_units(u) if u else ('', None) for u in units]
+        units = [p[0] for p in pairs]
+        reference_units = [p[1] for p in pairs]
+    elif cls in (Coherence, MultipleCoherence):
+        units = ['' for _ in units]              # dimensionless
+    # the file's abscissa is in whatever it says; here time is seconds
+    # and frequency hertz
+    abscissa_unit = str(v.get('abscissa_unit') or '').strip()
+    if abscissa_unit:
+        from ..units import UnitError, si_transform
+
+        dimension = 'time' if cls in (TimeHistory,) else 'frequency'
+        try:
+            scale, offset = si_transform(abscissa_unit, dimension)
+            abscissa = abscissa * scale + offset
+        except UnitError as failure:
+            warnings.warn(ImportNote(f'{dataset.name}: abscissa_unit '
+                                     f'{abscissa_unit!r} was not understood '
+                                     f'({failure}); the abscissa is taken as '
+                                     f'{"seconds" if dimension == "time" else "hertz"}'),
+                          stacklevel=2)
+    kwargs: dict[str, Any] = {}
     if cls is Srs:
         damping = float(v.get('percent_damping', 5.0))
         kwargs['q'] = 100.0 / (2.0 * damping) if damping else None
@@ -618,14 +718,27 @@ def _data_from(dataset: escdf.Dataset) -> DataArray:
     if cls is MultipleCoherence:
         kwargs.pop('reference_dof', None)
     try:
-        return cls(abscissa, ordinate, response, **kwargs)
+        data = cls(abscissa, ordinate, response, **kwargs)
     except (TypeError, ValueError) as failure:
         warnings.warn(ImportNote(f'{dataset.name}: read as a spectrum, not '
                                  f'{data_type!r} ({failure})'), stacklevel=2)
-        kwargs.pop('reference_dof', None)
-        kwargs.pop('q', None)
-        return Spectrum(abscissa, ordinate, response,
-                        ordinate_unit=kwargs.get('ordinate_unit'))
+        data = Spectrum(abscissa, ordinate, response)
+    # declared, not merely named: the values are in the file's units,
+    # and declaring them is what converts them to SI and shows them
+    # (a first cut named them and the app showed them undefined —
+    # Brandon, 2026-09-30). A unit the registry does not know leaves
+    # that record undefined, with a note.
+    declared = [u or None for u in units]
+    if any(declared):
+        try:
+            data.define_units(declared, reference_units if reference_units
+                              and any(reference_units) else None)
+        except Exception as failure:  # noqa: BLE001 — a unit nobody spells
+            spelled = sorted({u for u in declared if u})
+            warnings.warn(ImportNote(f'{dataset.name}: units {spelled} '
+                                     f'were not understood ({failure}); left '
+                                     'undefined'), stacklevel=2)
+    return data
 
 
 def _shapes_from(dataset: escdf.Dataset) -> ShapeSet:

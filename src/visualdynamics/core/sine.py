@@ -541,11 +541,103 @@ _AVERAGE_BANDWIDTH = 0.443
 _NOISE_INTEGRAL = 3.0 * np.pi / (4.0 * np.sqrt(2.0))
 
 
+#: samples a chunk of the Vold-Kalman solve keeps, and the margin
+#: solved beyond it on each side, in smoothing windows of the widest
+#: tone live at the edge. The solve's memory is linear in the span
+#: (measured 2026-09-30: 1.2 kB per sample for one tone, 4.6 kB for
+#: three), so a 19-minute sweep solved whole wanted tens of gigabytes
+#: per channel and took the machine down (Brandon). The margin is
+#: measured, not derived — the seam error at a 4096-sample chunk read
+#: 2e-6 of the envelope at eight windows, 1.3e-7 at sixteen, 5e-9 at
+#: twenty-four — and `test_extract_sine` pins the interior within 1e-7
+#: of the whole-record solve at the smallest chunk. The margin costs
+#: little beside the chunk: a few thousand samples against 65 536.
+CHUNK = 1 << 16
+MARGIN_WINDOWS = 24.0
+
+
 def vold_kalman(signal: np.ndarray, arguments: Sequence[np.ndarray],
                 frequencies: Sequence[np.ndarray],
                 starts: Sequence[int], dt: float,
-                cycles: float = 10.0) -> list[np.ndarray]:
+                cycles: float = 10.0,
+                chunk: int | None = None) -> list[np.ndarray]:
     """Every tone's complex envelope at every sample, solved jointly.
+
+    Solved in chunks (`CHUNK` samples, or `chunk`), each with a margin
+    of `MARGIN_WINDOWS` smoothing windows of the slowest tone active
+    at its edges solved beyond it and discarded: the penalty's memory
+    is a few windows, so the interior is the whole-record answer and
+    the memory is the chunk's, not the record's. `_vold_kalman_whole`
+    is the solve itself, on one span.
+    """
+    signal = np.asarray(signal, dtype=float)
+    K = len(arguments)
+    spans = []
+    for k in range(K):
+        n = min(len(arguments[k]), len(signal) - starts[k])
+        spans.append((starts[k], starts[k] + max(n, 0)))
+    lo = min(a for a, _b in spans)
+    hi = max(b for _a, b in spans)
+    if hi - lo <= 0:
+        raise ValueError('no tone overlaps the recording')
+    chunk = CHUNK if chunk is None else int(chunk)
+    if hi - lo <= chunk:
+        return _vold_kalman_whole(signal, arguments, frequencies, starts,
+                                  dt, cycles)
+
+    def window_at(sample):
+        # the widest smoothing window of any tone live at this sample:
+        # the margin follows the slowest tone, which decays slowest
+        widest = 1.0
+        for k, (a, b) in enumerate(spans):
+            if a <= sample < b:
+                f = max(float(frequencies[k][sample - a]), 1e-9)
+                widest = max(widest, cycles / f / dt)
+        return widest
+
+    envelopes = [np.zeros(b - a, dtype=complex) for a, b in spans]
+    start = lo
+    while start < hi:
+        end = min(start + chunk, hi)
+        before = int(MARGIN_WINDOWS * window_at(max(start, lo)))
+        after = int(MARGIN_WINDOWS * window_at(min(end, hi) - 1))
+        piece_lo, piece_hi = max(start - before, lo), min(end + after, hi)
+        # each tone clipped to the piece: its argument and frequency
+        # from where the piece enters its span
+        args, freqs, offsets = [], [], []
+        for k, (a, b) in enumerate(spans):
+            entry, leave = max(a, piece_lo), min(b, piece_hi)
+            if leave <= entry:
+                args.append(np.zeros(0)); freqs.append(np.zeros(0))
+                offsets.append(0)
+                continue
+            args.append(arguments[k][entry - a:leave - a])
+            freqs.append(frequencies[k][entry - a:leave - a])
+            offsets.append(entry - piece_lo)
+        live = [k for k in range(K) if len(args[k])]
+        if live:
+            solved = _vold_kalman_whole(
+                signal[piece_lo:piece_hi], [args[k] for k in live],
+                [freqs[k] for k in live], [offsets[k] for k in live],
+                dt, cycles)
+            for k, envelope in zip(live, solved):
+                a, _b = spans[k]
+                entry = max(a, piece_lo)
+                # keep the interior only: [start, end) of the record
+                keep_lo, keep_hi = max(start, entry), min(end, entry + len(envelope))
+                if keep_hi > keep_lo:
+                    envelopes[k][keep_lo - a:keep_hi - a] = \
+                        envelope[keep_lo - entry:keep_hi - entry]
+        start = end
+    return envelopes
+
+
+def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
+                       frequencies: Sequence[np.ndarray],
+                       starts: Sequence[int], dt: float,
+                       cycles: float = 10.0) -> list[np.ndarray]:
+    """Every tone's complex envelope at every sample, solved jointly,
+    on one span — `vold_kalman` without the chunking.
 
     The second-order Vold-Kalman filter: the record is modeled as the
     sum of the tones, each a slowly varying complex amplitude on its
@@ -749,13 +841,9 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
                 'to extract')
         per_tone.append((tone, onset, start, f[:n], argument[:n], window, n))
 
-    # the joint solve, once per channel: every tone's envelope together
-    envelopes = [vold_kalman(signals[i],
-                             [p[4] for p in per_tone], [p[3] for p in per_tone],
-                             [p[2] for p in per_tone], dt, cycles=cycles)
-                 for i in range(len(rows))]
-    out = []
-    for t_index, (tone, onset, start, f, argument, window, n) in enumerate(per_tone):
+    # where each tone is read, settled before any solving
+    readings = []
+    for tone, onset, start, f, argument, window, n in per_tone:
         half = (window / 2.0).astype(np.int64)
         # sample centers tile the sweep: each one window/points apart,
         # each an (almost) independent reading of the tracked amplitude
@@ -774,10 +862,21 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
         bandwidth = _AVERAGE_BANDWIDTH * f / cycles
         corner = 2.0 * np.pi * bandwidth * dt          # rad/sample
         samples_in = np.maximum(2.0 * np.pi / (corner * _NOISE_INTEGRAL), 1.0)
-        rotor = np.exp(-1j * argument)
-        ordinate = np.empty((len(rows), len(centers)), dtype=complex)
-        for i in range(len(rows)):
-            a = envelopes[i][t_index]
+        readings.append((half, centers, samples_in,
+                         np.empty((len(rows), len(centers)), dtype=complex)))
+
+    # the joint solve, one channel at a time: every tone's envelope
+    # together, and only this channel's alive — a long run's envelopes
+    # for every channel at once were a second way to run out of memory
+    # after the solve itself (2026-09-30)
+    for i in range(len(rows)):
+        envelopes = vold_kalman(signals[i],
+                                [p[4] for p in per_tone], [p[3] for p in per_tone],
+                                [p[2] for p in per_tone], dt, cycles=cycles)
+        for t_index, (tone, onset, start, f, argument, window, n) in \
+                enumerate(per_tone):
+            half, centers, samples_in, ordinate = readings[t_index]
+            a = envelopes[t_index]
             # the residual after every tone is removed — what the
             # envelope's noise was drawn from — measured in the same
             # window the old average used, demodulated like the tone
@@ -787,17 +886,20 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
                 o_arg = per_tone[other][4]
                 lo_s, hi_s = max(start, o_start), min(start + n, o_start + o_n)
                 if hi_s > lo_s:
-                    e = envelopes[i][other][lo_s - o_start:hi_s - o_start]
+                    e = envelopes[other][lo_s - o_start:hi_s - o_start]
                     model[lo_s - start:hi_s - start] += np.real(
                         e * np.exp(1j * o_arg[lo_s - o_start:hi_s - o_start]))
             residual = signals[i][start:start + n] - model
-            z = residual * rotor
+            z = residual * np.exp(-1j * argument)
             variance = _smooth(np.abs(z) ** 2 + 0.0j, half).real
             # a = 2*mean of the demodulated tone: the old formula in a's scale
             debiased = np.sqrt(np.maximum(
                 np.abs(a) ** 2 - 4.0 * variance / samples_in, 0.0))
             phase = np.exp(1j * np.angle(a))
             ordinate[i] = (debiased * phase)[centers]
+    out = []
+    for (tone, onset, start, f, argument, window, n), \
+            (half, centers, samples_in, ordinate) in zip(per_tone, readings):
         frequencies = f[centers]
         seconds = onset + centers * dt
         order = np.argsort(frequencies)

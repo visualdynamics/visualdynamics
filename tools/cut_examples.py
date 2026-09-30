@@ -19,10 +19,10 @@ provisional, and the next alpha's `.escdf` re-cuts them without
 touching an application tag. `modal_hard` stays out: 5 GB exists to
 stress the fitter, not to be downloaded.
 
-The BARC (2026-09-26) is the exception to all of that: no runs, just a
-model, so its one project is
-built and solved from `visualdynamics.demo.barc` as the zip is
-cut, needs nothing from `stressdata/`, and is under 10 MB. Name one
+The BARC (2026-09-26) and the four-unit frame (2026-09-30) are the
+exception to all of that: no runs, just models, so their projects are
+built and solved from `visualdynamics.demo.barc` and `.frame` as the
+zip is cut, need nothing from `stressdata/`, and are small. Name one
 zip to cut (and upload) only that one, leaving the others on the
 release as they are.
 """
@@ -56,6 +56,16 @@ def _barc(out_dir: str) -> None:
     barc.project(solved=True).save(os.path.join(out_dir, 'barc.vdyn'))
 
 
+def _frame(out_dir: str) -> None:
+    """The four-unit frame likewise: five models — the frame, each
+    wing alone, the frame with each wing — built from blocks and solved,
+    a few minutes on any machine."""
+    sys.path.insert(0, os.path.join(ROOT, 'src'))
+    from visualdynamics.demo import frame
+
+    frame.project(solved=True).save(os.path.join(out_dir, 'frame.vdyn'))
+
+
 #: asset name -> (where the projects come from: a folder under
 #: stressdata/, or a function writing them into a folder; the projects
 #: it takes; one sentence for the zip's own README; where the data came
@@ -74,6 +84,21 @@ SETS = {
         ('The quadcopter: the same workflows on a model with the node '
          'count of a real test article.'),
         SYNTHETIC),
+    'VisualDynamics-examples-frame.zip': (
+        _frame,
+        ('frame',),
+        ('The four-unit frame: the frame, its two wings and the two '
+         'assemblies as solid finite element models built from blocks of '
+         'bricks and solved — a substructuring test article, checked '
+         'against its measured frequencies.'),
+        ('The models are visualdynamics.demo.frame, rebuilt with\n'
+         'frame.project(solved=True). The frame\'s dimensions and hole\n'
+         'pattern were read off the finite element models shared on the\n'
+         'SEM Dynamic Substructuring Focus Group wiki,\n'
+         'https://wiki.sem.org/wiki/Round_Robin_Frame_Structure, and the\n'
+         'models checked against the measured frequencies there and\n'
+         'against those shared models. None of the wiki\'s files are\n'
+         'in this bundle.')),
     'VisualDynamics-examples-barc.zip': (
         _barc,
         ('barc',),

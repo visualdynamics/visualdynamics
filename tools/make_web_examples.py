@@ -248,6 +248,51 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
     return size_kb
 
 
+#: the four-unit frame figure's element size, inches: the website draws
+#: the frame with its thick wing a third of an inch coarse — 3,400 nodes
+#: and a two-megabyte page — where the example solves at a twelfth
+#: (the demonstration's own mesh made a 28 MB page, 2026-09-30)
+FRAME_WEB_SIZE = 1.0 / 3.0
+FRAME_MODES = 8
+
+
+def build_frame(size: float = FRAME_WEB_SIZE, write: bool = True) -> int:
+    """The four-unit frame's finite element modes, animated: the frame
+    with the thick wing screwed across it, built from blocks of bricks
+    (`visualdynamics.demo.frame`), its first elastic modes."""
+    import visualdynamics
+    import visualdynamics.report as report_module
+    from visualdynamics.core.report import Report
+    from visualdynamics.demo import frame
+
+    model = frame.build('thick wing', size, size)
+    shapes = model.eigensolution(maximum_frequency=1000.0)
+    elastic = [i for i, f in enumerate(shapes.frequency) if f > 1.0][:FRAME_MODES]
+    shapes.delete_modes([i for i in range(shapes.num_shapes)
+                         if i not in elastic])
+    geometry = frame.geometry('thick wing', size, size)
+    demo = visualdynamics.Project('Examples')
+    demo.add('Frame', geometry)
+    demo.add('Modes', shapes)
+    demo.link('Frame', 'Modes')
+    report = Report('', [{
+        'kind': 'scene', 'geometry': 'Frame', 'shapes': 'Modes',
+        'caption': 'Finite element modes of the four-unit frame with its '
+                   'thick wing, built from blocks of bricks — pick one '
+                   'from the list, and drag to turn it'}])
+    report.marking = ''
+    html = report_module.render_html(report, dict(demo.items()),
+                                     visualdynamics.SI, links=demo.links)
+    html = html.replace('</body>', EMBED.strip() + '\n')
+    size_kb = len(html.encode('utf-8')) // 1024
+    if write:
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / 'frame.html').write_text(html, encoding='utf-8')
+    print(f'  frame.html     {size_kb:5d} KB  ({model.num_nodes} nodes)')
+    return size_kb
+
+
 if __name__ == '__main__':
     build_barc()
+    build_frame()
     sys.exit(build())

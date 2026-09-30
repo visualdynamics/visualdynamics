@@ -21,6 +21,13 @@ repo_name: visualdynamics/visualdynamics
 edit_uri: edit/main/docs/
 
 docs_dir: docs
+# The API generator and its layout live beside the pages so the docs
+# folder is one thing to move; they are scripts, not pages, and the
+# built site used to carry them and their bytecode (2026-09-30).
+exclude_docs: |
+  gen_api.py
+  api_layout.py
+  __pycache__/
 # Nothing under docs/ is held back from the published tree: the one
 # private record that lived here moved out to the repository root
 # with the other working records, because a page mkdocs merely

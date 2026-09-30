@@ -16,9 +16,9 @@ here changes those terms.
 | **libquadmath**, inside the numpy and scipy wheels | **LGPL-2.1-or-later** | see below |
 | libgfortran / libgcc, inside those same wheels | GPL-3.0 **with the GCC Runtime Library Exception** | none — the exception exists to permit this |
 
-Seven Qt modules ship: `QtCore`, `QtGui`, `QtWidgets`, `QtOpenGL` and
-`QtSvg` from Qt Essentials, plus `QtWebEngineWidgets` and
-`QtWebChannel` — add-ons, and deliberate; `QtTest` is used by the test
+Eight Qt modules ship: `QtCore`, `QtGui`, `QtWidgets`, `QtOpenGL` and
+`QtSvg` from Qt Essentials, plus `QtWebEngineWidgets`,
+`QtWebEngineCore` and `QtWebChannel` — add-ons, and deliberate; `QtTest` is used by the test
 suite only. **All of them are offered under LGPLv3**, checked against
 Qt's own module licensing pages, so the obligations below cover the
 whole of what is used. Essentials-vs-add-ons is not the boundary that

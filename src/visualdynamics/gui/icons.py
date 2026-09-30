@@ -1104,6 +1104,27 @@ def _draw_plane(painter, color):
                          along(corners[1], corners[2], t))
 
 
+def _draw_block(painter, color):
+    """A box seen at an angle, its visible faces divided into a grid: a
+    block meshed into bricks (Add Block) — the plane's icon given a
+    depth."""
+    front = [QPointF(8, 24), QPointF(40, 24), QPointF(40, 56), QPointF(8, 56)]
+    top = [QPointF(8, 24), QPointF(24, 10), QPointF(56, 10), QPointF(40, 24)]
+    side = [QPointF(40, 24), QPointF(56, 10), QPointF(56, 42), QPointF(40, 56)]
+
+    def along(a, b, t):
+        return QPointF(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()))
+
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for face in (front, top, side):
+        painter.drawPolygon(face)
+    painter.setPen(_pen(color, 3))
+    for face in (front, top, side):
+        painter.drawLine(along(face[0], face[1], 0.5), along(face[3], face[2], 0.5))
+        painter.drawLine(along(face[0], face[3], 0.5), along(face[1], face[2], 0.5))
+
+
 def _draw_tie(painter, color):
     """Two plates, one above the other, joined by short links with a node
     at each end: a patch tied rigidly to the part under it (Tie)."""
@@ -1599,7 +1620,7 @@ def control_icon(name: str) -> QIcon:
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
-     'plane': _draw_plane, 'tie': _draw_tie,
+     'plane': _draw_plane, 'block': _draw_block, 'tie': _draw_tie,
      'merge_blocks': _draw_merge_blocks, 'solve_modes': _draw_solve_modes,
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
      'sine': _draw_sine,

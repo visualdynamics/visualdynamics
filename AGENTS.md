@@ -59,7 +59,8 @@ something that cannot be bought back.
    disqualifying; permissive (BSD/MIT/ISC) or LGPL with dynamic
    linking only. For Qt the line is **LGPL-available, not
    Essentials-only**: the sanctioned set is `QtCore`, `QtGui`,
-   `QtWidgets`, `QtTest`, `QtWebEngineWidgets`, `QtWebChannel`. Before
+   `QtWidgets`, `QtTest`, `QtWebEngineWidgets`, `QtWebEngineCore`,
+   `QtWebChannel`. Before
    importing a Qt module that is not already used, read that module's
    own licensing page — some are GPL-or-commercial. Dependencies are
    declared by name with no pin and no upper bound (principle 12);

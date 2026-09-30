@@ -1,7 +1,9 @@
 # The finite element workflow: the BARC
 
 A finite element model built from the planes a structure is made of,
-tied where it is bolted, and solved — all of it in the app.
+tied where it is bolted, and solved — all of it in the app. (A part too
+thick for plates is built from blocks of solid bricks instead: [the
+solid workflow](fem-solids.md), on the four-unit frame.)
 
 The structure is the **BARC** (Box Assembly with Removable Component),
 a small bolted aluminum article the structural dynamics community

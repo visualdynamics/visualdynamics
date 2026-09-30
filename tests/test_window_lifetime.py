@@ -67,15 +67,25 @@ def test_a_window_closed_mid_load_leaves_no_timer_behind(qt_app,
 
 
 def test_a_window_closed_mid_navigation_stops_the_page(qt_app,
-                                                       no_swallowed_errors):
+                                                       no_swallowed_errors,
+                                                       caplog):
     """A window closed with a live report page destroyed the view while
     Chromium's teardown waited on its render process for good — the
     gate's stall at 98 %, sampled on 2026-09-18 with the worker parked
     inside QtWebEngineCore, then named by a faulthandler dump in the
     fixture's deferred delete after the page had loaded. Closing stops
     any navigation, drops the slot waiting on it, hides the view and
-    discards the page, so the destructor finds nothing to wait for."""
+    discards the page, so the destructor finds nothing to wait for.
+
+    Then the discard itself hung (2026-09-28): Qt destroys the live
+    web contents inside it, synchronously, with the page still bound
+    to its widget. So the page is detached from the view before it is
+    discarded, and the order is pinned here by the witness log."""
+    import logging
+
     from visualdynamics.gui.main_window import MainWindow
+
+    caplog.set_level(logging.DEBUG, logger='visualdynamics.gui.report_editor')
 
     window = MainWindow(offscreen_3d=True)
     window.show()
@@ -90,11 +100,18 @@ def test_a_window_closed_mid_navigation_stops_the_page(qt_app,
     assert editor._restore is None, 'closing dropped the waiting slot'
     for _ in range(20):
         qt_app.processEvents()
-    assert not editor.view.page().isLoading(), 'closing stopped the load'
+    assert not editor.page.isLoading(), 'closing stopped the load'
     # the page's render process is gone before the destructor runs —
     # the faulthandler dump of 2026-09-18 put the hang there
-    assert editor.view.page().lifecycleState().name == 'Discarded'
+    assert editor.page.lifecycleState().name == 'Discarded'
     assert not editor.view.isVisible()
+    steps = [record.message.split(':')[1].split(',')[0].strip()
+             for record in caplog.records
+             if record.message.startswith('stand_down:')]
+    assert steps[-2:] == ['detached', 'discarded'], steps
+    # the view holds a page of its own no longer: asking makes a fresh,
+    # empty one, which is not the page that was discarded
+    assert editor.view.page() is not editor.page
     destroy_window(window, qt_app)
 
 

@@ -187,8 +187,13 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
 
     nodes: list[tuple[int, int, np.ndarray, int]] = []
     systems: dict[int, dict[str, Any]] = {}
-    elements: list[tuple[int, int, list[int]]] = []
+    elements: list[tuple[int, int, list[int], int]] = []
     tracelines: list[list[int]] = []
+    # the property cards, for the blocks: a block per property id, and
+    # what a solid or shell property says its block is made of
+    materials: dict[int, dict[str, float | None]] = {}
+    solids: dict[int, int] = {}
+    shells: dict[int, tuple[int, float | None]] = {}
 
     for card in cards:
         name = str(card[0]).upper()
@@ -217,13 +222,13 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
             # Nastran's own display-only line: exactly a traceline
             tracelines.append([int(card[2]), int(card[3])])
         elif name == 'CONM2':
-            elements.append((int(card[1]), 161, [int(card[2])]))
+            elements.append((int(card[1]), 161, [int(card[2])], 0))
         elif name in ('CELAS1', 'CELAS2'):
             # the grounded spring keeps its one live grid; a
             # two-grid spring keeps the first, the way the
             # vocabulary's point element does
             grid = card[4] if name == 'CELAS1' else card[3]
-            elements.append((int(card[1]), 136, [int(grid)]))
+            elements.append((int(card[1]), 136, [int(grid)], 0))
         elif name in _ELEMENT_CARDS:
             grids = [int(g) for g in card[_GRIDS_START + 1:]
                      if isinstance(g, (int, float)) and g]
@@ -233,7 +238,23 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                     f'{path}: {name} {card[1]} carries {len(grids)} '
                     f'grids; this card means {sorted(by_count)} '
                     'of them')
-            elements.append((int(card[1]), by_count[len(grids)], grids))
+            pid = card[_GRIDS_START] if len(card) > _GRIDS_START else 0
+            elements.append((int(card[1]), by_count[len(grids)], grids,
+                             int(pid) if isinstance(pid, (int, float)) else 0))
+        elif name == 'MAT1':
+            card = _pad(card, 6)
+            materials[int(card[1])] = {
+                key: (float(value) if isinstance(value, (int, float))
+                      else None)
+                for key, value in zip(('E', 'G', 'nu', 'rho'), card[2:6])}
+        elif name == 'PSOLID':
+            solids[int(card[1])] = int(card[2])
+        elif name == 'PSHELL':
+            card = _pad(card, 4)
+            thickness = card[3]
+            shells[int(card[1])] = (int(card[2]), float(thickness)
+                                    if isinstance(thickness, (int, float))
+                                    else None)
         elif name.startswith('C') and name not in _CONSTRAINT_CARDS \
                 and _looks_like_connection(card):
             raise ValueError(
@@ -260,10 +281,49 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
         elem_type=[e[1] for e in elements],
         elem_color=[1] * len(elements),
         elem_conn=[np.array(e[2]) for e in elements],
+        elem_block=[e[3] for e in elements],
+        block_id=sorted({e[3] for e in elements}),
+        block_name=[f'property {pid}' if pid else ''
+                    for pid in sorted({e[3] for e in elements})],
+        block_properties=_block_properties(materials, solids, shells),
     )
     if length_unit:
         geometry.define_units(length_unit)
     return geometry
+
+
+def _block_properties(materials: dict, solids: dict, shells: dict) -> dict:
+    """What the deck's own property cards say each block is made of:
+    a PSOLID names a material, a PSHELL a material and a thickness, a
+    MAT1 the numbers. A block whose cards are not all there carries
+    nothing, and the Blocks table asks (2026-09-30). The deck is taken
+    to be in SI: Nastran has no units, and a deck in inches and pounds
+    reads the same as one in meters and kilograms."""
+    from ..core.fem import BlockProperties, Material
+
+    def material(mid: int) -> Material | None:
+        found = materials.get(mid)
+        if not found or found['E'] is None or found['rho'] is None:
+            return None
+        nu = found['nu']
+        if nu is None:
+            # E and G given: nu follows from them, the way Nastran fills it
+            if found['G'] is None:
+                return None
+            nu = found['E'] / (2.0 * found['G']) - 1.0
+        return Material(f'MAT1 {mid}', found['E'], found['rho'], nu,
+                        found['G'])
+
+    out = {}
+    for pid, mid in solids.items():
+        made = material(mid)
+        if made is not None:
+            out[pid] = BlockProperties(made)
+    for pid, (mid, thickness) in shells.items():
+        made = material(mid)
+        if made is not None and thickness is not None:
+            out[pid] = BlockProperties(made, thickness=thickness)
+    return out
 
 
 def _looks_like_connection(card) -> bool:

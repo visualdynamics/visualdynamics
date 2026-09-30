@@ -104,11 +104,19 @@ once built (http://127.0.0.1:8710/documentation/). Order on the day:
 ```bash
 ./.venv/bin/python packaging/stage_downloads.py clear
 ./.venv/bin/properdocs build --strict
+gh release view --repo visualdynamics/visualdynamics --json tagName,url,name \
+  | ./.venv/bin/python -c "import json,sys; r=json.load(sys.stdin); json.dump({'version': r['tagName'][1:], 'url': r['url'], 'notes': r['name'] or 'Visual Dynamics ' + r['tagName'][1:]}, open('web/launch/latest.json','w'), indent=2)"
 cd web/launch && npx wrangler pages deploy . --project-name=visualdynamics --branch=main
 ```
 
 Skip the middle line and the deployed site's Documentation link is a
-404; CI's docs job keeps building into `site/` for its artifact.
+404; CI's docs job keeps building into `site/` for its artifact. Skip
+the third and the deploy carries whatever `latest.json` was on disk —
+it is gitignored and written by the release workflow's `site` job, so
+the local copy is as old as the last hand deploy; one such deploy told
+every *Check for Updates* that 0.1.0a15 was the latest for a minute
+after 0.1.0a16 was out (2026-09-30). Write it from the live release
+first, every time.
 
 **Direct upload** through the dashboard does the same thing by hand:
 

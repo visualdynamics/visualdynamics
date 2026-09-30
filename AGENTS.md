@@ -81,8 +81,8 @@ something that cannot be bought back.
 
 ## Branches
 
-The repository holds no working branches: `main`, the CLA bot's
-`cla-signatures`, the maintainer's publishing branches and, should a
+The repository holds no working branches: `main`, `cla-signatures`
+(the record of a retired contributor agreement), the maintainer's publishing branches and, should a
 backport ever be needed, `maintenance/X.Y.x`. A ruleset refuses the
 creation of anything else, the maintainer included, and no
 contributor has write access — so every working branch, yours and

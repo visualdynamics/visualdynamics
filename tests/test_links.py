@@ -176,7 +176,7 @@ def test_the_basis_is_unique_and_paints_its_bracket(window, pump,
     window.link_selected()
     window.set_link_role('Shapes', 'Basis')
     assert window.link_role('Geometry') == 'Basis'
-    color, _items, bold = window.tree.link_spans[0]
+    color, _items, bold, _name = window.tree.link_spans[0]
     assert bold is True
     assert color == window.LINK_ROLE_COLORS['Basis']
     # the Basis is unique: taking it takes it from the other group
@@ -186,7 +186,7 @@ def test_the_basis_is_unique_and_paints_its_bracket(window, pump,
     window.add_object('Other Shapes', stranger)
     _select(window, 'Other Geometry', 'Other Shapes')
     window.link_selected()
-    color, _items, bold = window.tree.link_spans[1]
+    color, _items, bold, _name = window.tree.link_spans[1]
     assert bold is False
     assert color != window.LINK_ROLE_COLORS['Basis'], (
         'an unroled bracket never wears the Basis blue')
@@ -208,7 +208,7 @@ def test_the_bracket_right_click_offers_the_basis(window, pump,
     _select(window, 'Geometry', 'Shapes')
     window.link_selected()
     pump()
-    _color, items, _bold = window.tree.link_spans[0]
+    _color, items, _bold, _name = window.tree.link_spans[0]
     middle = window.tree.visualItemRect(items[0]).center().y()
     span = window.tree.span_at(QPoint(5, middle))
     assert span == 0, 'the gutter click lands on the bracket'
@@ -306,3 +306,34 @@ def test_computing_from_a_member_leaves_it_in_place(window, pump,
     assert 'Pass 2 Hv FRFs' in names
     assert window.link_role('Pass 2 Hv FRFs') == 'Basis', \
         'the derived object joined its source\'s group'
+
+
+def test_a_named_group_paints_its_name_and_the_bracket_menu_names_it(
+        window, pump, monkeypatch):
+    """A link group's name (Brandon, 2026-09-30: an activity has a
+    name) rides on its bracket span, is painted up the bracket in its
+    color, and is set from the bracket's menu through the project's own
+    journaled verb."""
+    from PySide6.QtWidgets import QInputDialog
+
+    window.import_paths([fixture_path('plate', 'modal.nc4')])
+    pump()
+    names = list(window.objects)              # the import linked them all
+    window.project.name_group(names[0], 'Plate run')
+    window._paint_links()
+    pump()
+    span = next(s for s in window.tree.link_spans if s[3] == 'Plate run')
+    assert [item.text(0) for item in span[1]
+            if item is not None and item.text(0) in names] == names
+    window.tree.viewport().update()
+    pump()                                     # paints, offscreen
+    monkeypatch.setattr(QInputDialog, 'getText',
+                        staticmethod(lambda *a, **k: ('Renamed run', True)))
+    window.name_group(names[0])
+    pump()
+    assert window.project.group_of(names[0]) == names
+    assert next(g for g in window.links if names[0] in g['members'])['name'] == 'Renamed run'
+    assert window.project.journal[-1] == (
+        f"project.name_group({names[0]!r}, 'Renamed run')")
+    assert window.tree.link_spans[0][3] == 'Renamed run' or any(
+        s[3] == 'Renamed run' for s in window.tree.link_spans)

@@ -1,0 +1,38 @@
+modal_test_parameters - v0.1.0
+------------------------------
+extends: parameter_set
+
+Parameters to define a general modal test.
+
+properties
+----------
+sample_rate - f8
+samples_per_frame - u8
+averaging_type - str - scalar - optional, enum:averaging_types
+averages - u8
+averaging_coefficient - f8 - scalar - optional
+overlap - f8 - scalar - optional
+reference_channel - str - num_references
+excitation_channel - str - num_excitations - optional
+window - str - scalar - optional
+window_parameter_names - str - num_window_parameters - optional
+window_parameters - f8 - num_window_parameters - optional
+frf_technique - str - scalar - enum:frf_techniques
+trigger_type - str - scalar - optional, enum:trigger_types
+trigger_slope - str - scalar - optional, enum:trigger_slopes
+trigger_channel - str - scalar - optional
+trigger_level - f8 - scalar - optional
+pretrigger - f8 - scalar - optional
+signal_generator_type - str - scalar - optional
+signal_generator_level - f8 - scalar - optional
+signal_generator_min_freq - f8 - scalar - optional
+signal_generator_max_freq - f8 - scalar - optional
+signal_generator_on_fraction - f8 - scalar - optional
+
+
+enumerations
+------------
+frf_techniques - h1,h2,h3,hv
+averaging_types - linear, exponential
+trigger_types - free run, first frame, every frame
+trigger_slopes - positive, negative

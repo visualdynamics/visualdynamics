@@ -1,0 +1,13 @@
+matrix - v0.1.0
+---------------
+extends: activity_result
+
+This dataset defines a 2D array
+
+properties
+----------
+value - f4 - num_rows,num_cols - or:value:real_single_precision
+value - c8 - num_rows,num_cols - or:value:complex_single_precision
+value - f8 - num_rows,num_cols - or:value:real_double_precision
+value - c16 - num_rows,num_cols - or:value:complex_double_precision
+unit - str - scalar - optional

@@ -572,7 +572,7 @@ def _rows_of_spans(window):
              for i in range(window.test_item.childCount())}
     return [(sorted(index[id(item)] for item in items
                     if item is not None and id(item) in index), bold)
-            for _color, items, bold in window.tree.link_spans]
+            for _color, items, bold, _name in window.tree.link_spans]
 
 
 def _kinds(window):

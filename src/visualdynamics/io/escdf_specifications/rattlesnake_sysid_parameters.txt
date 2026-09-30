@@ -1,0 +1,30 @@
+rattlesnake_sysid_parameters - v0.1.0
+-------------------------------------
+extends: parameter_set
+
+Parameters to define a Rattlesnake system identification test.
+
+properties
+----------
+sample_rate - f8
+frame_size - u8
+averaging_type - str
+noise_averages - u8
+averages - u8
+exponential_averaging_coefficient - f8 - scalar - optional
+estimator - str
+level - f8
+level_ramp_time - f8
+signal_type - str
+window - str
+overlap - f8
+burst_on - f8 - scalar - optional
+pretrigger - f8 - scalar - optional
+burst_ramp_fraction - f8 - scalar - optional
+control_channel - str - num_control_channels
+excitation_channel - str - num_excitation_channels
+control_transformation_matrix - f8 - num_control_transformation_rows,num_control_channels - optional
+excitation_transformation_matrix - f8 - num_excitation_transformation_rows,num_excitation_channels - optional
+
+notes
+-----

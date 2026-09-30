@@ -51,5 +51,5 @@ def test_excel_is_offered_for_channel_tables_alone():
     geometry = visualdynamics.import_file(fixture_path('plate', 'geometry.unv'))
     # matlab takes every object the project file holds; excel is
     # the one *spreadsheet* form, and a table's alone
-    assert [e.name for e in io.exporters(table)] == ['excel', 'matlab']
+    assert [e.name for e in io.exporters(table)] == ['excel', 'matlab', 'escdf']
     assert 'excel' not in [e.name for e in io.exporters(geometry)]

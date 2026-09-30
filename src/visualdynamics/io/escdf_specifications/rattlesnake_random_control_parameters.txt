@@ -1,0 +1,30 @@
+rattlesnake_random_control_parameters - v0.1.0
+----------------------------------------------
+extends: mechanical_control_parameters
+
+Parameters to define a Rattlesnake random vibration test.
+
+properties
+----------
+samples_per_frame - u8
+control_frequency_lines - f8 - num_frequency_lines
+test_level_ramp_time - f8
+cpsd_overlap - f8
+update_tf_during_control - u1
+cola_window - str
+cola_overlap - f8
+cola_window_exponent - f8
+frames_in_cpsd - u8
+cpsd_window - str
+control_python_script - str
+control_python_function - str
+control_python_function_type - u1
+control_python_function_parameters - str
+allow_automatic_aborts - u1
+specification_warning_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_abort_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_unit - str - num_specification_channels - or:unit:varying_units
+specification_unit - str - scalar - or:unit:identical_units
+
+notes
+-----

@@ -51,7 +51,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from PySide6.QtCore import QEvent, QMimeData, QPoint, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QRect, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QColor,
     QDrag,
@@ -59,6 +59,7 @@ from PySide6.QtGui import (
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFont,
     QPainter,
     QPaintEvent,
     QPen,
@@ -284,11 +285,16 @@ def _drag_folder() -> str:
     return _DRAG_FOLDER
 
 
+#: where a group's name runs up the gutter: past both bracket columns
+#: and their ticks, before the rows' arrows
+GUTTER_TEXT_X = 22
+
+
 class ProjectTree(QTreeWidget):
     """Tree of imported objects.
 
     Linked objects are joined by a bracket painted down the left edge —
-    `link_spans` is [(color, [items], bold)], maintained by the
+    `link_spans` is [(color, [items], bold, name)], maintained by the
     window; the bold flag marks the Basis group's bracket."""
 
     #: files were dropped on the tree; the window imports them
@@ -555,7 +561,7 @@ class ProjectTree(QTreeWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._paint_active(painter)
         self._paint_drop_target(painter)
-        for offset, (color, items, bold) in enumerate(self.link_spans):
+        for offset, (color, items, bold, name) in enumerate(self.link_spans):
             rects = [self.visualItemRect(item) for item in items
                      if item is not None]
             rects = [rect for rect in rects if rect.height() > 0]
@@ -571,7 +577,42 @@ class ProjectTree(QTreeWidget):
             for rect in rects:
                 painter.drawLine(x, rect.center().y(),
                                  x + 5, rect.center().y())
+            if name:
+                self._paint_group_name(painter, name, color, items, rects)
         painter.end()
+
+    def _paint_group_name(self, painter, name, color, items, rects):
+        """A group's name along its bracket, turned to run up the line,
+        in the bracket's color — painted, not put in a row, so no rename
+        carries it and the rows stay the objects' own (Brandon,
+        2026-09-30: an activity has a name; the tree says the group's).
+        Along the bracket because that is the one place the tree has
+        room: a label at the right end of the first row had none at the
+        tree's real width and was elided to nothing (measured). Elided
+        to the bracket's length, and left out when that is too short.
+        """
+        del items
+        top = min(rect.center().y() for rect in rects)
+        bottom = max(rect.center().y() for rect in rects)
+        length = bottom - top - 8
+        font = QFont(painter.font())
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 2.0))
+        painter.save()
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        if length < 3 * metrics.averageCharWidth():
+            painter.restore()
+            return
+        label = metrics.elidedText(name, Qt.TextElideMode.ElideRight, length)
+        painter.setPen(QPen(QColor(color), 1))
+        # the text's baseline runs up the bracket's inner side, in the
+        # gutter between the line and the rows' icons
+        painter.translate(GUTTER_TEXT_X, bottom - 4)
+        painter.rotate(-90)
+        painter.drawText(QRect(0, -metrics.height(), length, metrics.height()),
+                         int(Qt.AlignmentFlag.AlignLeft
+                             | Qt.AlignmentFlag.AlignVCenter), label)
+        painter.restore()
 
     def _paint_active(self, painter):
         """A bullet marking the active geometry, in a column of its own.
@@ -659,7 +700,7 @@ class ProjectTree(QTreeWidget):
         object beside it."""
         if position.x() > 14:
             return None
-        for index, (_color, items, _bold) in enumerate(self.link_spans):
+        for index, (_color, items, _bold, _name) in enumerate(self.link_spans):
             rects = [self.visualItemRect(item) for item in items
                      if item is not None]
             rects = [rect for rect in rects if rect.height() > 0]

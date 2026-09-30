@@ -1,0 +1,44 @@
+data_physics_sine_control_parameters - v0.1.0
+---------------------------------------------
+extends: mechanical_control_parameters
+
+Parameters to define a data physics sine vibration test.
+
+properties
+----------
+samples_per_frame - u8
+control_frequency_lines - f8 - num_frequency_lines
+multi_channel_mode - str
+sweep_mode - str
+points_per_sweep - u8
+oversample - u8
+filter_type - str
+startup_time - f8
+shutdown_time - f8
+startup_level_db - f8
+frequency_bands - f8 - 2,num_bands - or:sweep_type:multiple_sweep_segments
+sweep_rate - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+sweep_rate - f8 - scalar - or:sweep_type:single_sweep_segment
+sweep_rate_unit - str
+sweep_duration - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+sweep_duration - f8 - scalar - or:sweep_type:single_sweep_segment
+phase - f8 - scalar - optional
+phase_unit - str - scalar - optional
+sweep_direction - str - optional
+correction_sensitivity - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+correction_sensitivity - f8 - scalar - or:sweep_type:single_sweep_segment
+h_participation - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+h_participation - f8 - scalar - or:sweep_type:single_sweep_segment
+signal_loss_threshold - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+signal_loss_threshold - f8 - scalar - or:sweep_type:single_sweep_segment
+abort_sensitivity - f8 - num_bands - or:sweep_type:multiple_sweep_segments
+abort_sensitivity - f8 - scalar - or:sweep_type:single_sweep_segment
+specification_warning_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_warning_unit - str - num_specification_channels - or:warning_unit:varying_warning_units - optional
+specification_warning_unit - str - scalar - or:warning_unit:identical_warning_units - optional
+specification_abort_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_abort_unit - str - num_specification_channels - or:abort_unit:varying_abort_units - optional
+specification_abort_unit - str - scalar - or:abort_unit:identical_abort_units - optional
+
+notes
+-----

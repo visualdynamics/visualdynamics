@@ -1,0 +1,16 @@
+rattlesnake_transient_control_parameters - v0.1.0
+-------------------------------------------------
+extends: mechanical_control_parameters
+
+Parameters to define a Rattlesnake transient test.
+
+properties
+----------
+test_level_ramp_time - u8
+control_python_script - str
+control_python_function - str
+control_python_function_type - u1
+control_python_function_parameters - str
+
+notes
+-----

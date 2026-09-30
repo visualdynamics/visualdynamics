@@ -1,0 +1,88 @@
+geometry - v0.1.0
+-----------------
+extends: parameter_set
+
+This specification defines a general test or analysis geometry, including
+node identifiers, node positions, and optional topological connectivity
+used to visualize or describe the spatial layout of a model or test article.
+
+The geometry specification is intended to support common engineering-sciences
+use cases such as test sensor layouts, finite element visualization geometry,
+or other point-based spatial descriptions.
+
+properties
+----------
+node_id - u8 - num_nodes
+node_position - f8 - num_nodes,3
+node_x_direction - f8 - num_nodes,3
+node_y_direction - f8 - num_nodes,3
+node_z_direction - f8 - num_nodes,3
+line_connection - u8 - num_lines - variable_length,optional
+line_color - u8 - num_lines,3 - optional
+element_connection - u8 - num_elements - variable_length,optional
+element_color - u8 - num_elements,3 - optional
+element_type - str - num_elements - optional, enum:element_types
+position_units - str - scalar
+
+enumerations
+------------
+element_types - sphere1, bar2, bar3, tri3, tri6, quad4, quad8, tet4, tet10, hex8, hex20, wedge6, wedge15
+
+notes
+-----
+The `node_id` field stores the identifiers associated with each node.
+Connectivity arrays such as `line_connection` and `element_connection`
+reference these `node_id` values directly, not the row indices of the arrays.
+
+The `node_position` field stores node coordinates with shape `num_nodes,3`.
+The three columns correspond to the three spatial coordinate components.
+These positions should be defined with respect to the global Cartesian
+coordinate system.
+
+The `node_x_direction`, `node_y_direction`, and `node_z_direction` fields
+store the local coordinate directions associated with each node. These fields
+are typically used to define the local orientation of measurements, response
+directions, or geometry-attached coordinate systems. When used as a full local
+basis, the three directions should be interpreted as the local x, y, and z
+axes for the node.  These should generally be unit vectors (with components
+defined in the global coordinate system) forming a right-handed coordinate
+system.
+
+The `line_connection` field is optional and stores variable-length node
+connectivity for line objects. Each entry identifies the ordered sequence of
+node IDs belonging to one line.
+
+The `element_connection` field is optional and stores variable-length node
+connectivity for element-like topology objects. Each entry identifies the
+ordered sequence of node IDs belonging to one element.
+
+The `line_color` and `element_color` fields are optional per-object RGB color
+definitions with shape `num_lines,3` and `num_elements,3`, respectively.
+These are intended for visualization and are typically interpreted as
+three-component integer color values.  These should be defined with integer
+values between 0 and 255, not floating point numbers between 0.0 and 1.0.
+
+The `element_type` field identifies the visualization topology associated with
+each entry in `element_connection`.
+
+Elements and lines in the geometry are intended only for topology and visualization and
+do not imply any physical formulation. For example, there is no distinction
+between plane strain and plane stress `quad4`; both are represented simply
+as `quad4`.
+
+Examples
+--------
+Example 1: simple sensor geometry
+- `node_id` = [101, 102, 103]
+- `node_position` stores three 3D node locations
+- `node_x_direction`, `node_y_direction`, and `node_z_direction` define local sensor directions
+- `position_units` = `'m'`
+
+Example 2: line-based visualization
+- `line_connection` may contain entries such as [101, 102] and [102, 103, 104]
+- each entry references the node IDs that define one line object
+
+Example 3: element-based visualization
+- `element_connection` may contain entries such as [1, 2, 3] for `tri3`
+  or [10, 11, 12, 13] for `quad4`
+- `element_type` identifies the topology associated with each connectivity entry

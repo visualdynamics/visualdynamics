@@ -143,7 +143,8 @@ def remap_links(links: Iterable[LinkGroup],
         role = None if role in taken else role
         if role is not None:
             taken.add(role)
-        out.append({'members': members, 'role': role})
+        out.append({'members': members, 'role': role,
+                    **({'name': group['name']} if group.get('name') else {})})
     return out
 
 
@@ -446,11 +447,14 @@ class Project(dict):
         # merged, or a 'FEM' role from before that role was retired;
         # both read as the Basis where they meant it and as nothing
         # otherwise, and are never stored again
+        # ... and, since 2026-09-30, an optional 'name': what the group
+        # is called, which an ESCDF activity needs and a tree can show
         self.links: list[dict[str, Any]] = [
             {'members': list(group['members']),
              'role': 'Basis' if (group.get('role') == 'Basis'
                                  or group.get('side') == 'experimental'
-                                 and not group.get('role')) else None}
+                                 and not group.get('role')) else None,
+             **({'name': str(group['name'])} if group.get('name') else {})}
             for group in (links or [])]
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
@@ -791,7 +795,8 @@ class Project(dict):
 
     # ---- links -------------------------------------------------------------
 
-    def link(self, *names: str, role: str | None = None) -> list[str]:
+    def link(self, *names: str, role: str | None = None,
+             name: str | None = None) -> list[str]:
         """Declare objects part of one group, merging any they are in.
 
         A group holds at most one geometry — its members are read
@@ -805,6 +810,11 @@ class Project(dict):
             The objects to act on, by name.
         role : str, optional
             The role to give the group — 'Basis', or None.
+        name : str, optional
+            What to call the group (Brandon, 2026-09-30: an activity in
+            the Engineering Sciences Common Data Format has a name, and
+            a named group exports as one that keeps its identity). Left
+            out, a group being merged into keeps the name it had.
 
         Returns
         -------
@@ -858,7 +868,12 @@ class Project(dict):
             # indicator names them and the link stands
             if blocks_a_link(issue):
                 raise ValueError(f'cannot link: {issue.message}')
-        self.links = kept + [{'members': merged, 'role': role}]
+        kept_name = name or next(
+            (group.get('name') for group in self.links
+             if any(n in group['members'] for n in names) and group.get('name')),
+            None)
+        self.links = kept + [{'members': merged, 'role': role,
+                              **({'name': kept_name} if kept_name else {})}]
         if role is not None:
             self.set_role(merged[0], role)
         # a channel table joining time data it describes brings its
@@ -941,6 +956,30 @@ class Project(dict):
         except (ValueError, KeyError):
             self.links = before
             raise
+
+    def name_group(self, member: str, name: str | None) -> list[str]:
+        """Name the link group an object belongs to, or unname it.
+
+        Parameters
+        ----------
+        member : str
+            Any member of the group, by name.
+        name : str or None
+            The group's new name; None removes it.
+
+        Returns
+        -------
+        list of str
+            The group's members.
+        """
+        for group in self.links:
+            if member in group['members']:
+                if name:
+                    group['name'] = str(name)
+                else:
+                    group.pop('name', None)
+                return list(group['members'])
+        raise KeyError(f'{member!r} is in no link group')
 
     def group_of(self, name: Any) -> list[str] | None:
         """The members linked with `name`, or None.
@@ -3159,15 +3198,20 @@ class Project(dict):
 
     # ---- the file ----------------------------------------------------------
 
-    def save(self, path: str | os.PathLike) -> str:
-        """Write the whole project to one file: `.vdyn`, or `.mat` for
-        the same layout in MATLAB's container.
+    def save(self, path: str | os.PathLike, **options: Any) -> str:
+        """Write the whole project to one file: `.vdyn`, `.mat` for
+        the same layout in MATLAB's container, or `.escdf` for the
+        Engineering Sciences Common Data Format.
 
         Parameters
         ----------
         path : str or os.PathLike
             Where to write the file. A `.mat` suffix writes the project
-            as MATLAB structs (`io.matlab`); anything else is `.vdyn`.
+            as MATLAB structs (`io.matlab`), `.escdf` as the standard's
+            types with each object whole in an attachment
+            (`io.escdf_objects`); anything else is `.vdyn`.
+        **options
+            Passed to a foreign writer: an ESCDF file's `created_by`.
 
         Returns
         -------
@@ -3176,8 +3220,8 @@ class Project(dict):
         """
         from .io import export_file, save_test
 
-        if str(path).endswith('.mat'):
-            export_file(self, str(path))
+        if str(path).endswith(('.mat', '.escdf')):
+            export_file(self, str(path), **options)
             return str(path)
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
@@ -3187,10 +3231,10 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project back, from `.vdyn` or from `.mat`."""
+        """Read a project back, from `.vdyn`, `.mat` or `.escdf`."""
         from .io import import_file, load
 
-        loaded = (import_file(str(path)) if str(path).endswith('.mat')
+        loaded = (import_file(str(path)) if str(path).endswith(('.mat', '.escdf'))
                   else load(str(path)))
         if isinstance(loaded, Project):
             # whatever the loader did on the way — construct, add,
@@ -3598,7 +3642,7 @@ PARTNER_VERBS = frozenset(verb for verb, _applies in _SELECTION_APPLIES)
 
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
-    'relink',
+    'relink', 'name_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',

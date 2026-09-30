@@ -1,0 +1,11 @@
+activity_result - v0.1.0
+------------------------
+extends: parameter_set
+
+This is a wrapper that basically flags a dataset as a
+result instead of metadata.  Anything that can be stored
+in an activity should inherit from this.
+
+properties
+----------
+

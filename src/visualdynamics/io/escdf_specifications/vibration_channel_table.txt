@@ -1,0 +1,27 @@
+vibration_channel_table - v0.1.0
+--------------------------------
+extends: channel_table
+
+This group defines a vibration channel table for a test.
+
+properties
+----------
+coupling - str - num_channels - enum:couplings
+signal_conditioner - str - scalar - optional
+signal_conditioner_input_sensitivity - f8 - num_channels - optional
+signal_conditioner_output_sensitivity - f8 - num_channels - optional
+signal_conditioner_daq - str - num_channels - optional
+
+enumerations
+------------
+couplings - ac, dc, iepe, icp, none
+
+notes
+-----
+coupling: should be something like "dc", "ac", "iepe", "icp", etc.
+signal_conditioner: global identifier for signal conditioning hardware (SN, Name, Model, etc.)
+signal_conditioner_input_sensitivity: input sensitivity for the signal conditioner
+signal_conditioner_output_sensitivity: output sensitivity for the signal conditioner
+    Note: Input & output sensitivities are specified without units, it is recommended they match the units used for `sensitivity_unit`. 
+          Gain (dimensionless) can be calculated using [signal_conditioner_output_sensitivity / signal_conditioner_input_sensitivity]
+signal_conditioner_daq: per-channel hardware identifier (card SN, channel number, etc.)

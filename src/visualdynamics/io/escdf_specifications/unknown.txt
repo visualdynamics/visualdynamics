@@ -1,0 +1,10 @@
+unknown - v0.1.0
+----------------
+extends: none
+
+This specification is only used for datasets that are
+read in with an unknown type associated with them.
+
+properties
+----------
+original_type_name - str - scalar

@@ -15,6 +15,11 @@ table, time data, spectra, requirements, shape sets, matched modes and
 the report — so the same project always reads the same way. A blue
 bracket down the left joins the objects of one link group, with the
 Basis group's bracket first ([Projects, links, and the Basis](projects.md)).
+A group can be named — right-click its bracket, *Name Group…*, or
+`project.link(..., name=...)` — and the name runs up the bracket
+in its color; it is what the group is called when the
+project is written as an Engineering Sciences Common Data Format file,
+where a group is an activity.
 
 Every object that holds more than one thing expands into a **grid**:
 rows are coordinates (or modes, or photographs), columns are whatever

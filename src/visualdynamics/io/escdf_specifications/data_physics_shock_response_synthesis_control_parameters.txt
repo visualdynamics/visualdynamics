@@ -1,0 +1,31 @@
+data_physics_shock_response_synthesis_control_parameters - v0.1.0
+-----------------------------------------------------------------
+extends: mechanical_control_parameters
+
+Parameters to define a data physics shock response synthesis test.
+
+properties
+----------
+samples_per_frame - u8
+control_frequency_lines - f8 - num_frequency_lines
+type - str
+octave_order - u8
+damping - f8
+reference_frequency - f8
+control_bandwidth - f8
+analysis_bandwidth - f8 - scalar - optional
+high_pass_filter_frequency - f8 - scalar - optional
+control_strategy - str
+control_sensitivity - f8
+minimum_frequency - f8
+linearity - f8
+specification_warning_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_warning_unit - str - num_specification_channels - or:warning_unit:varying_warning_units - optional
+specification_warning_unit - str - scalar - or:warning_unit:identical_warning_units - optional
+specification_abort_matrix - f8 - 2,num_frequency_lines,num_specification_channels - optional
+specification_abort_unit - str - num_specification_channels - or:abort_unit:varying_abort_units - optional
+specification_abort_unit - str - scalar - or:abort_unit:identical_abort_units - optional
+
+notes
+-----
+Configured for single-axis data physics shaker shock

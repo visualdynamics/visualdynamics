@@ -66,8 +66,14 @@ out under; there is no separate agreement to sign.
 git clone https://github.com/visualdynamics/visualdynamics
 cd visualdynamics
 pip install -e '.[dev,step]'
+pip install 'escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git'
 python -m pytest tests -q
 ```
+
+The second line is the reference implementation of the Engineering
+Sciences Common Data Format, which the tests of the `.escdf` reader and
+writer hold them to; it is not on PyPI, so it cannot be an extra, and
+without it those tests skip.
 
 Python 3.12 or newer. The desktop app is PySide6; the tests run headless
 (`QT_QPA_PLATFORM=offscreen`), and on Linux under `xvfb-run`, because

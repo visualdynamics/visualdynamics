@@ -39,13 +39,19 @@
 
   <h2>Windows</h2>
   <p>
-    Free code signing provided by
-    <a href="https://signpath.io">SignPath.io</a>, certificate by
-    <a href="https://signpath.org">SignPath Foundation</a>. The
-    application to the SignPath Foundation's program for open source
-    projects was made in September 2026; until it is accepted, the
-    Windows installer is unsigned and Windows SmartScreen warns before
-    running it.
+    The Windows installer is unsigned for now, and Windows SmartScreen
+    warns before running it. Check the file against the
+    <code>SHA256SUMS</code> attached to its release before you run it.
+  </p>
+  <p>
+    The <a href="https://signpath.org">SignPath Foundation</a> signs
+    open source projects at no cost, and Visual Dynamics applied in
+    September 2026. The Foundation asks for public visibility first
+    (users, contributors, references elsewhere), and a project a few
+    weeks old did not have it yet; the license and the code were not
+    the question. The project will apply again once it does. Until a
+    certificate exists, the installer stays unsigned rather than
+    signed under a name that is not the author's.
   </p>
   <p>
     Only release builds are signed: the installer the release workflow
@@ -72,7 +78,7 @@
   </ul>
   <p>
     Everyone with these roles uses multi-factor authentication on
-    GitHub and on SignPath.
+    GitHub and on any signing service the project uses.
   </p>
 
   <h2>Privacy policy</h2>

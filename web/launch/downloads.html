@@ -184,14 +184,12 @@ pip install -e .</pre>
   <h2 id="signing">Code signing</h2>
   <p>
     The macOS images are signed with the author's Apple Developer ID
-    and notarized by Apple. The Windows installer is to be signed
-    through the SignPath Foundation, which provides free code signing
-    for open source projects: free code signing provided by SignPath.io,
-    certificate by SignPath Foundation. Until that is in place the
-    installer is unsigned, and Windows SmartScreen asks before running
-    it. The <a href="code-signing.html">code signing policy</a> says
-    what is signed, who approves it, and what the program sends over
-    the network.
+    and notarized by Apple. The Windows installer is not signed yet,
+    so Windows SmartScreen asks before running it; every release
+    attaches a <code>SHA256SUMS</code> file you can check it against.
+    The <a href="code-signing.html">code signing policy</a> says what
+    is signed, who approves it, where Windows signing stands, and
+    what the program sends over the network.
   </p>
 </main>
 <script>

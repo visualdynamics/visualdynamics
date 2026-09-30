@@ -109,13 +109,15 @@ visualdynamics-gui = "visualdynamics.gui:main"
 # sdypy-sep005 is the sdypy project's own SEP 005 validator (MIT),
 # used only to prove our exported dicts pass *their* compliance
 # check — the package itself never imports it
-# escdf is the reference implementation of the Engineering Sciences
-# Common Data Format (BSD-3-Clause, not on PyPI): the agreement oracle
-# for io/escdf.py both ways — what it writes must load here, what is
-# written here must load and validate there. Never imported by the
-# package (2026-09-30).
-dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005",
-       "escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git"]
+# One more dev dependency is not declared here: escdf, the reference
+# implementation of the Engineering Sciences Common Data Format
+# (BSD-3-Clause), the agreement oracle for io/escdf.py both ways. It
+# is not on PyPI, and PyPI refuses to host a package whose metadata
+# names a dependency by URL even in an extra (the 0.1.0a17 upload was
+# refused for exactly that, 2026-09-30), so CI installs it from its
+# repository in a step of its own and CONTRIBUTING.md says how; the
+# tests that need it skip without it.
+dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005"]
 # The STEP/IGES importer's geometry kernel: OCP bindings (Apache-2.0)
 # over OpenCASCADE (LGPL-2.1 with exception — the same dynamic-linking
 # posture as Qt; see NOTICE.md). Optional so `pip install

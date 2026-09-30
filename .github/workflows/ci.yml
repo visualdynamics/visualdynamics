@@ -67,6 +67,14 @@ jobs:
       - name: Install visualdynamics and its test tools
         run: pip install -e '.[dev,step]'
 
+      # The ESCDF reference implementation is the agreement oracle for
+      # io/escdf.py both ways; it is not on PyPI, and PyPI refuses a
+      # package whose metadata names a dependency by URL, so it is
+      # installed here and not declared in pyproject (2026-09-30). The
+      # tests that need it skip without it.
+      - name: Install the ESCDF reference implementation
+        run: pip install 'escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git'
+
       - name: Lint
         run: ruff check .
 

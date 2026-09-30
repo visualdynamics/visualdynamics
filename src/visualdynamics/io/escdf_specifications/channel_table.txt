@@ -1,0 +1,108 @@
+channel_table - v0.1.0
+----------------------
+extends: parameter_set
+
+This specification defines a general channel table describing the channels
+used in a test or analysis workflow.
+
+A channel table associates each channel with a node identifier, a directional
+or component label, a physical quantity type, calibration/sensitivity
+information, and hardware-identification information. More specialized
+channel-table specifications may inherit from this specification and add
+test-specific fields.
+
+properties
+----------
+description - str - num_channels - optional
+node_id - u8 - num_channels
+node_direction - str - num_channels
+data_type - str - num_channels - enum:data_types
+make - str - num_channels
+model - str - num_channels
+serial_number - str - num_channels
+expiration - str - num_channels - optional, regex:^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?$
+sensitivity - f8 - num_channels
+sensitivity_unit - str - num_channels
+daq - str - num_channels
+
+enumerations
+------------
+data_types - displacement, velocity, acceleration, force, stress, strain, temperature, heat flux, pressure, mass, voltage, current, inductance, capacitance, time, frequency, angular displacement, angular velocity, angular acceleration
+
+notes
+-----
+The `node_id` field identifies the node associated with each channel.
+This should generally correspond to a node defined in the associated
+geometry specification.
+
+The `node_direction` field identifies the direction or component associated
+with each channel. This field is intended to align with the directional
+interpretation of the associated geometry. For example, values such as
+`X+`, `Y+`, `Z+`, `RX+`, `RY-`, or `RZ+` may be used for translational or
+rotational quantities. Blank values may be used for scalar quantities such
+as temperature.  Note that this node direction generally will correspond
+to the `node_*_position` values in the associated geometry specification.
+For example, a direction of `'X+'` will correspond to the direction of
+the `node_x_direction` field in the row corresponding to the `node_id`
+of this channel and the geometry.  Similarly, a direction of `'Y-'` will
+correspond to the opposite of the direction specified by the
+`node_y_direction` field of the geometry.
+
+More complex `node_direction` values may also be used when the measured
+quantity is associated with multiple components, such as strain-like or
+tensor-like quantities (e.g. `'XX+'`,`'XY+'`). In such cases, the producer
+should document the convention being used.
+
+The `data_type` field identifies the physical quantity represented by the
+channel, such as `acceleration`, `force`, or `temperature`. This is a
+semantic channel classification and is distinct from the numerical storage
+datatype used in ESCDF properties.
+
+The `description` field can be used to store a human-readable channel label
+or description.
+
+The `make`, `model`, and `serial_number` fields identify the hardware or
+sensor associated with the channel.
+
+The `expiration` field is optional and may be used to store a timestamp
+associated with channel expiration, such as calibration expiration or other
+validity limits. If used, it should be formatted as an ISO-style timestamp.
+
+The `sensitivity` field stores the calibration sensitivity associated with
+the channel.
+
+The `sensitivity_unit` field stores the units associated with the channel
+sensitivity. Because different workflows may express sensitivity in
+different conventions, producers should document the convention being used
+when ambiguity is possible.  Sensitivity units should generally be something
+like `'mV/g'` or `'V/N'`, containing the conversion from electrical units
+measured by the data acquisition system to the relevant engineering units.
+
+The `daq` field identifies the acquisition hardware path associated with
+the channel, such as a front-end identifier, card/channel identifier, or
+other data-acquisition mapping.
+
+Data products that reference this channel table should use the associated
+`node_id`, `node_direction`, and `data_type` values consistently.  
+For example, `data` objects `node_id` and `node_direction` information
+concatenated in the `channel` field as `<node_id><node_direction>`.
+
+Examples
+--------
+Example 1: accelerometer channel
+- `node_id` = 101
+- `node_direction` = `X+`
+- `data_type` = `acceleration`
+- `sensitivity_unit` = `mV/g`
+- `description` = `Left wing tip accelerometer`
+
+Example 2: force transducer channel
+- `node_id` = 205
+- `node_direction` = `Z-`
+- `data_type` = `force`
+- `sensitivity_unit` = `mV/lbf`
+
+Example 3: scalar quantity channel
+- `node_id` may still identify a physical location
+- `node_direction` may be blank
+- `data_type` = `temperature`

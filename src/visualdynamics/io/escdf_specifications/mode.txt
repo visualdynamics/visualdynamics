@@ -1,0 +1,97 @@
+mode - v0.1.0
+-------------
+extends: activity_result
+
+This specification defines a general format for storing modal data,
+including modal frequencies, optional damping and modal mass values,
+and real or complex mode shapes.
+
+Each mode shape is stored as a column in the `shape` field, while each
+row of `shape` corresponds to one degree of freedom identified by the
+`dof_name` field.
+
+properties
+----------
+frequency - f8 - num_modes
+damping_ratio - f8 - num_modes - optional
+modal_mass - f8 - num_modes - optional
+modal_mass_unit - str - scalar - optional
+shape - f8 - num_dofs,num_modes - or:mode_type:real_modes
+shape - c16 - num_dofs,num_modes - or:mode_type:complex_modes
+dof_name - str - num_dofs - regex:^\d+(R?[XYZ]{1,2}[+-])?$
+description - str - num_lines - optional
+
+notes
+-----
+The `frequency` field stores the modal frequencies associated with each
+mode. Its length is `num_modes`.  This value is assumed to be in Hz.
+
+The `damping_ratio` field is optional and stores the damping ratio
+associated with each mode. Its length is `num_modes`.  If no damping
+is assigned, it is implied that there is no damping in the system.
+This value is assumed to be a fraction of critical damping, entered as
+a fraction or ratio (e.g. 0.01) rather than a percentage (e.g. 1.0 %).
+
+The `modal_mass` field is optional and stores the modal mass associated
+with each mode. Its length is `num_modes`.  If not modal mass is
+assigned, it is implied that the mode shapes are normalized to unity
+modal mass.
+
+The `modal_mass_unit` field is optional and stores the units associated
+with the mode shape values.  For unity modal mass, this value will generally
+be the reciprocal of the square root of the mass unit.  For example, if the
+mass matrix is defined in kilograms, then the unit of a mass-normalized mode
+shape will generally be `1/sqrt(kg)`.
+
+If the mode shape matrix consists of multiple different data types (displacement,
+stress/strain, rotation, etc.), then the units on the mode shape matrix become
+somewhat unclear, and the user should describe the situation in the `notes`
+field.
+
+The `shape` field stores the mode shapes with shape `num_dofs,num_modes`.
+Each column corresponds to one mode, and each row corresponds to one
+degree of freedom identified by the `dof_name` field.
+
+The `mode_type` choice group allows either:
+- `real_modes`, where `shape` is stored as real-valued `f8`
+- `complex_modes`, where `shape` is stored as complex-valued `c16`
+
+Real or complex modes can therefore be stored using the same overall
+structure, differing only in the datatype of `shape`.  When using
+complex shapes, the modal mass is assumed to be the "Modal A" quantities.
+
+The `dof_name` field identifies the degree of freedom associated with each
+row of `shape`. It must be of the form `<node_number><direction><polarity>`.
+
+`node_number` is any non-negative integer.
+`direction` is an optional `R` (to signify rotation) followed by one or
+two of `X`, `Y`, or `Z`.
+`polarity` is one of `+` or `-`.
+
+If the degree of freedom does not have a direction or polarity, these may
+be left blank.
+
+Examples of valid `dof_name` values include:
+- `'6'`
+- `'101X+'`
+- `'204Z-'`
+- `'412RY-'`
+- `'100XX+'`
+- `'32ZX-'`
+
+The `description` field is optional and may be used to store freeform
+text describing the modal dataset, extraction method, interpretation, or
+other mode-set-level notes.  Most often this is used to provide human-readable
+
+Examples
+--------
+Example 1: real normal modes
+- `num_modes` = number of extracted modes
+- `num_dofs` = number of measured or modeled degrees of freedom
+- `shape` is stored as `f8`
+- each column of `shape` is one mode vector
+
+Example 2: complex modes
+- `shape` is stored as `c16`
+- each column of `shape` is one complex mode vector
+- `frequency`, `damping_ratio`, and `modal_mass` still align with mode index

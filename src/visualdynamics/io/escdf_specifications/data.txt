@@ -1,0 +1,131 @@
+data - v0.1.0
+-------------
+extends: activity_result
+
+This specification defines a general format for storing one or more
+data arrays associated with a test or analysis activity.
+
+The data specification is intentionally flexible so that it can represent
+many common engineering-sciences data products, including time histories,
+spectra, transfer functions, transmissibilities, coherence functions,
+correlation functions, and other sampled curve-like quantities.
+
+Specific data types should inherit from this specification.
+
+properties
+----------
+data_type - str - scalar - enum:data_types
+channel - str - num_data,num_channels - regex:^\d+(R?[XYZ]{1,2}[+-])?$
+channel_name - str - num_data,num_channels - optional
+ordinate_unit - str - num_data - or:ordinate_unit:varying_ordinate_units
+ordinate_unit - str - scalar - or:ordinate_unit:identical_ordinate_units
+abscissa_unit - str - num_data - or:abscissa_unit:varying_abscissa_units
+abscissa_unit - str - scalar - or:abscissa_unit:identical_abscissa_units
+ordinate - f4 - num_data,num_samples - or:ordinate:real_single_precision
+ordinate - c8 - num_data,num_samples - or:ordinate:complex_single_precision
+ordinate - f8 - num_data,num_samples - or:ordinate:real_double_precision
+ordinate - c16 - num_data,num_samples - or:ordinate:complex_double_precision
+abscissa - f4 - num_data,num_samples - or:abscissa:different_spacing_per_channel_single_precision
+abscissa - f4 - num_samples - or:abscissa:uneven_spacing_single_precision
+abscissa - f8 - num_data,num_samples - or:abscissa:different_spacing_per_channel_double_precision
+abscissa - f8 - num_samples - or:abscissa:uneven_spacing_double_precision
+abscissa_start - f8 - scalar - or:abscissa:even_spacing
+abscissa_step - f8 - scalar - or:abscissa:even_spacing
+timestamp - str - scalar - optional, regex:^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})?$
+
+enumerations
+------------
+data_types - time response, power spectrum, frequency response function, transmissibility, coherence, correlation, power spectral density, spectrum, mode indicator function, partial coherence, shock response spectrum, impulse response function, multiple coherence
+
+notes
+-----
+The `channel` field is always stored as a 2D array with shape `num_data,num_channels`.
+
+For data products associated with a single channel per data row (for example,
+many time history or single-sensor spectral datasets), `num_channels` should be 1,
+or an array with shape `num_data,1`.
+
+For data products representing relationships between multiple channels
+(for example, transfer functions, transmissibilities, coherence functions,
+or similar quantities), `num_channels` may be greater than 1. In this case,
+each row of the channel field identifies the participating channels associated
+with the corresponding row of ordinate data.
+
+The semantic meaning of each channel column depends on the `data_type` and the
+workflow that produced the data. If the ordering of channels is not obvious,
+the producer should document the convention being used.  The typical convention
+is "response" or "output" as the first column and "reference" or "input" as the
+second column for input/output relationships such as transmissibility or
+frequency response functions.  For matrix-like data like a cross-power spectral
+density matrix, the "row" should be the first column and the "column" should be
+the second column.
+
+The `channel` field must be of the form `<node_number><direction><polarity>`.
+`node_number` is any non-negative integer.
+`direction` is an optional `R` (to signify rotation) followed by one or two of `X`, `Y`, or `Z`.
+`polarity` is one of `+` or `-`.
+If the channel does not have a direction or a polarity (for example, a thermocouple),
+these can be left blank.
+
+Examples of valid channel names include:
+- `'6'`
+- `'101X+'`
+- `'204Z-'`
+- `'412RY-'`
+- `'100XX+'`
+- `'32ZX-'`
+
+If users have a different human-readable channel name that should be associated
+with the data, they can store it in the `channel_name` field.
+
+The `ordinate` array is always stored with shape `num_data,num_samples`.
+Each row corresponds to one data item, and each column corresponds to one sample
+along the `abscissa`.
+
+The `ordinate_unit` choice group allows either:
+- one unit per data row, using `ordinate_unit` with shape `num_data`, or
+- one shared unit for all rows, using `ordinate_unit` with scalar shape.
+
+The `abscissa_unit` choice group follows the same pattern:
+- one unit per data row, using `abscissa_unit` with shape `num_data`, or
+- one shared unit for all rows, using `abscissa_unit` with scalar shape.
+
+The `abscissa` choice group allows three representations:
+
+1. `even_spacing`
+   Use `abscissa_start` and `abscissa_step` when all samples are evenly spaced.
+
+2. `uneven_spacing_single_precision` / `uneven_spacing_double_precision`
+   Use `abscissa` with shape `num_samples` when all data rows share the same
+   uneven abscissa vector.
+
+3. `different_spacing_per_channel_single_precision` / `different_spacing_per_channel_double_precision`
+   Use `abscissa` with shape `num_data,num_samples` when each data row has its own
+   abscissa vector.
+
+Examples
+--------
+Example 1: time histories from three accelerometers
+- `data_type` = `'time response'`
+- `num_data` = 3
+- `num_channels` = 1
+- `channel` is a 3x1 array, for example [['101X+'], ['102X+'], ['103X+']]
+- `ordinate` has shape `3,num_samples`
+- `abscissa` is represented by `abscissa_start` and `abscissa_step` if evenly spaced
+
+Example 2: frequency response functions between response and reference channels
+- `data_type` = `'frequency response function'`
+- `num_data` = number of FRFs
+- `num_channels` = 2
+- each row of `channel` identifies the participating channel pair of response, reference channels
+- `ordinate` may be complex
+- `abscissa` is often evenly spaced represented by `abscissa_start` and `abscissa_step`
+
+Example 3: auto-power spectral density with octave spacing
+- `data_type` = `'power spectral density'`
+- `num_data` = number of APSDs
+- `num_channels` = 2
+- each row of `channel` indicates the row, column pairs from the full cross-power spectral density matrix.
+  - even though for an autopower-spectral density, the row and column are equivalent degrees of freedom, it is better to explicitly call this out by specifying both, as power spectral densities can generally involve relationships between two signals
+- `ordinate` is real, but could also be complex if a cross-power spectral density is specified, in which case the auto-power portion would simply have an imaginary part of zero
+- `abscissa` must be specified as an array because the octave spaced values do not have a constant `abscissa_step`.

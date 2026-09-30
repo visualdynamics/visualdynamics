@@ -183,7 +183,9 @@ from .preferences import (
     chosen_scheme,
     refresh_palettes,
     remember_appearance,
+    remember_creator,
     remembered_appearance,
+    remembered_creator,
     wear_appearance,
 )
 from .project_tree import (
@@ -1370,6 +1372,10 @@ class MainWindow(QMainWindow):
         # launches: a Linux desktop Qt could not read left a friend of
         # Brandon's with a light window and no way to change it
         # (2026-09-14). One menu, still — File stays the only one.
+        # the name an exported ESCDF file records as its creator
+        # (Brandon, 2026-09-30: a user setting, since the format asks
+        # for one and a library must never prompt for it)
+        file_menu.addAction('Creator &Name…', self.set_creator_name)
         appearance = file_menu.addMenu('&Appearance')
         group = QActionGroup(self)
         group.setExclusive(True)
@@ -3601,7 +3607,7 @@ class MainWindow(QMainWindow):
                 if owner is group:
                     items += placeholders[tag]
             spans.append((colors[id(group)], items,
-                          group['role'] == 'Basis'))
+                          group['role'] == 'Basis', group.get('name')))
         for tag, items in placeholders.items():
             # a side with no group yet is still a side: the Basis, or
             # the other one, which has no name — both bracketed, so a
@@ -3610,7 +3616,7 @@ class MainWindow(QMainWindow):
             if tag is not None and tag_groups.get(tag) is None:
                 basis = tag == 'Basis'
                 spans.append((self.LINK_ROLE_COLORS['Basis'] if basis
-                              else '#6a6a72', items, basis))
+                              else '#6a6a72', items, basis, None))
         # top-down, because the painter offsets neighboring brackets by
         # their position in this list: out of order, two brackets that
         # meet on screen are drawn in the same column and read as one
@@ -6349,20 +6355,26 @@ class MainWindow(QMainWindow):
         name = self.test_item.text(0)
         path, chosen = QFileDialog.getSaveFileName(
             self, 'Save Project', f'{name}.vdyn',
-            'Visual Dynamics files (*.vdyn);;MATLAB file (*.mat)')
+            'Visual Dynamics files (*.vdyn);;MATLAB file (*.mat);;'
+            'Engineering Sciences Common Data Format (*.escdf)')
         if not path:
             return
-        # the same project in MATLAB's container — the verb picks the
-        # writer by the suffix, so only the suffix has to be right
+        # the same project in MATLAB's container, or as the standard's
+        # types — the verb picks the writer by the suffix, so only the
+        # suffix has to be right
         if chosen.startswith('MATLAB') and not path.endswith('.mat'):
             path += '.mat'
+        if chosen.startswith('Engineering') and not path.endswith('.escdf'):
+            path += '.escdf'
         # through the verb, not io directly: the verb carries the
         # provenance records (the direct call dropped them, and a
         # GUI-saved project reopened with no staleness bookkeeping)
         # and journals the save like any other act (Brandon,
         # 2026-08-30)
         self.project.name = name
-        self.project.save(path)
+        # an ESCDF file records who made it: the preference, or the
+        # login name when none is set (the verb's own default)
+        self.project.save(path, created_by=remembered_creator() or None)
         count = len(self.objects)
         self._show_status(
             f'Saved {name} ({count} object{"s" * (count != 1)}) to '
@@ -7187,7 +7199,34 @@ class MainWindow(QMainWindow):
             self.set_link_role(
                 name, None if self.link_role(name) == 'Basis'
                 else 'Basis'))
+        named = menu.addAction('&Name Group…' if not group.get('name')
+                               else '&Rename Group…')
+        named.triggered.connect(
+            lambda _checked=False, name=group['members'][0]:
+            self.name_group(name))
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def name_group(self, member: str, name: str | None = None) -> None:
+        """Name the link group `member` is in — asked in a dialog when
+        `name` is not given — and paint it on the bracket. The name is
+        what an ESCDF activity is called on export."""
+        from PySide6.QtWidgets import QInputDialog
+
+        current = self.project.group_of(member)
+        if current is None:
+            return
+        if name is None:
+            held = next((g.get('name', '') for g in self.links
+                         if member in g['members']), '')
+            name, ok = QInputDialog.getText(
+                self, 'Name Group', 'The group\'s name:', text=held)
+            if not ok:
+                return
+        self.project.name_group(member, name.strip() or None)
+        self._paint_links()
+        self.tree.viewport().update()
+        self._show_status(f'Group named {name.strip()!r}' if name.strip()
+                          else 'Group name removed')
 
     def _render_matches(self, name, matched):
         """The matched-modes object on its own: the table, rows
@@ -10804,6 +10843,19 @@ class MainWindow(QMainWindow):
             if isinstance(current, Geometry) and not current.num_nodes:
                 plotter.reset_camera(render=False)   # nothing else to frame
         plotter.render()
+
+    def set_creator_name(self) -> None:
+        """File → Creator Name…: the name an exported ESCDF file records
+        as its creator, remembered between launches."""
+        from PySide6.QtWidgets import QInputDialog
+
+        name, ok = QInputDialog.getText(
+            self, 'Creator Name', 'The name an ESCDF file records as its '
+            'creator (blank: the login name):', text=remembered_creator())
+        if ok:
+            remember_creator(name)
+            self._show_status(f'ESCDF files will name {name.strip() or "the login name"} '
+                              'as their creator')
 
     def set_view_act(self) -> None:
         """Keep the view on screen as the selected geometry's default:

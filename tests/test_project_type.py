@@ -206,7 +206,7 @@ def test_a_fresh_modal_project_shows_both_group_brackets(window, pump,
 
     window.set_project_type('Modal Test')
     pump()
-    spans = {bold: items for _color, items, bold
+    spans = {bold: items for _color, items, bold, _name
              in window.tree.link_spans}
     assert set(spans) == {True, False}, 'the Basis bracket is the bold one'
     assert texts(spans[True]) == [
@@ -220,7 +220,7 @@ def test_a_fresh_modal_project_shows_both_group_brackets(window, pump,
     window.add_object('Geometry', geometry)
     window.add_object('FRF', frfs)
     pump()
-    spans = {bold: items for _color, items, bold
+    spans = {bold: items for _color, items, bold, _name
              in window.tree.link_spans}
     names = texts(spans[True])
     assert names[:2] == ['Geometry', 'FRF']

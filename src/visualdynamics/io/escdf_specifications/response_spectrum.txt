@@ -1,0 +1,31 @@
+response_spectrum - v0.1.0
+--------------------------
+extends: data
+
+This defines a general format for storing response spectrum data.
+
+properties
+----------
+data_type - str - scalar - enum:data_types
+model - str - scalar - enum:models
+percent_damping - f4 - scalar - or:damping:single_precision
+percent_damping - f8 - scalar - or:damping:double_precision
+response_type - str - scalar - enum:response_types
+response_variable - str - scalar - enum:response_variables
+
+
+enumerations
+------------
+data_types - response spectrum
+models - absolute acceleration, relative displacement
+response_types - primary positive, primary negative, primary maximum, residual positive, residual negative, residual maximum, maximum positive, maximum negative, maximax
+response_variables - acceleration, velocity, displacement, relative acceleration, relative velocity, relative displacement, pseudo-acceleration, pseudo-velocity, energy
+
+
+notes
+-----
+This specification is extended from the data.txt specification.
+All notes from the data.txt specification apply.
+The model property indicates if the absolute acceleration or relative displacement model was used when computing the single degree of freedom (SDOF) oscillator response.
+The response_type property indicates when the SDOF peak response was extracted; positive, negative, or absolute and during (primary), after (residual), or regardless of when excitation occurred (maximum).
+The response_variable property indicates the SDOF response quantity calculated and represented in the response spectrum. The option space of response variables that can be used to represent a response spectrum is vast. The options provided represent the more common variables used, but is not exhaustive and can be updated upon user request by working with the developers.

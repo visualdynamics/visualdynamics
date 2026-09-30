@@ -1,0 +1,16 @@
+mechanical_control_parameters - v0.1.0
+--------------------------------------
+extends: parameter_set
+
+Parameters to define a general shock/vibration test. Specific types of shock/vibration tests will inherit from this specification.
+
+properties
+----------
+sample_rate - f8
+control_channel - str - num_control_channels
+excitation_channel - str - num_excitation_channels
+control_transformation_matrix - f8 - num_control_transformation_rows,num_control_channels - optional
+excitation_transformation_matrix - f8 - num_excitation_transformation_rows,num_excitation_channels - optional
+
+notes
+-----

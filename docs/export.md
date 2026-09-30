@@ -33,10 +33,12 @@ One row per format, R/W meaning both directions:
 | STL mesh ⁵ | `.stl` | R/W | — | — | — |
 | STEP / IGES ⁶ | `.step`/`.stp`/`.iges`/`.igs` | R | — | — | — |
 | MATLAB ⁷ | `.mat` | R/W | R/W | R/W | R/W |
+| Engineering Sciences Common Data Format ⁸ | `.escdf` | R/W | R/W | R/W | R/W |
 
 Three more go in and out whole rather than by object: the project file
 itself (`.vdyn`, everything a project holds — or `.mat`, the same
-layout as MATLAB structs, see ⁷), a report template
+layout as MATLAB structs, see ⁷, or `.escdf`, the standard's types with
+each object whole beside them, see ⁸), a report template
 (`.vdreport`, a report on its own, to load into another project — see
 [reports](guide/reports.md)), and photographs (a folder of images,
 `.png`/`.jpg`/`.heic`, through the project's Photos).
@@ -206,6 +208,26 @@ rather than guessed at. Version 5 files only (MATLAB's `-v7`), which
 hold at most 4 GB per variable; a larger record is refused before
 anything is written, and the `.vdyn` — which MATLAB's `h5read` opens
 directly — is the file to hand over instead.
+
+⁸ **ESCDF**, the Engineering Sciences Common Data Format, is a public
+standard (HDF5; a geometry, a channel table, curves and modes each a
+type defined by a plain-text specification file, activities holding
+results and linking the metadata that defines them). A project written
+here is one file: every geometry and channel table a metadata group,
+every curve set and shape set a result in the activity of its link
+group — a named group is an activity of that name — and each object
+also whole, in its own `.vdyn` layout, as an attachment of its group,
+so the file reads back here exactly and any other reader of the format
+gets the standard fields with nothing of ours in the way. A report is
+attached rendered, a complete HTML page, and photographs as the images
+they are. A file another program wrote reads by its standard fields:
+nodes, lines, elements and per-node axes (a node with its own frame
+gets a coordinate system), records with their units, frequencies and
+shapes, activities as named link groups; a type the specifications do
+not define is left out with a note. The reader and writer were held to
+the format's reference implementation both ways as they were written,
+and the specification files it defines the types with ship inside the
+package.
 
 Writing takes the text form by default, because it is the one every
 reader takes. The binary form is `save(obj, path, binary=True)`, or

@@ -1,0 +1,11 @@
+point_cloud - v0.1.0
+--------------------
+extends: parameter_set
+
+This group defines a cloud of points in space
+
+properties
+----------
+node_id - u8 - num_nodes - optional
+node_position - f8 - num_nodes,3
+position_units - str

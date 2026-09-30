@@ -1,0 +1,12 @@
+global_test_attributes - v0.1.0
+-------------------------------
+extends: parameter_set
+
+This is a data set that describes the test program that a given test is part of.
+
+properties
+----------
+test_name - str
+program - str
+hardware_list - str - num_hardware
+point_of_contact - str - num_pocs

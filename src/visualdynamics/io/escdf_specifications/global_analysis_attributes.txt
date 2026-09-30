@@ -1,0 +1,13 @@
+global_analysis_attributes - v0.1.0
+-----------------------------------
+extends: parameter_set
+
+This is a data set that describes high-level information about a given analysis.
+
+properties
+----------
+analysis_name - str
+program - str
+software - str - scalar - optional
+analysis_contents - str - num_contents
+point_of_contact - str - num_pocs

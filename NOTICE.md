@@ -11,6 +11,7 @@ here changes those terms.
 | certifi (Mozilla's CA bundle, as netCDF4's dependency and the update check's trust store) | MPL-2.0 | keep the notice; its files ship unmodified, and its source is at github.com/certifi/python-certifi |
 | properdocs, mkdocs-materialx, mkdocstrings and friends (docs only) | BSD-2 / MIT / ISC | docs build only; nothing ships |
 | pytest, pytest-cov, pytest-xdist, ruff, sdypy-sep005 (dev only) | MIT | test suite only; nothing ships |
+| escdf, the Engineering Sciences Common Data Format's reference implementation (dev only) | BSD-3-Clause | test suite only, as the format's agreement oracle; nothing of it ships. Its **specification files** do ship, vendored as `io/escdf_specifications/*.txt` with their `LICENSE` beside them, so the reader here knows the standard's types |
 | **PySide6 (Qt for Python)** | **LGPL-3.0** | see below |
 | **OpenCASCADE** (via cadquery-ocp/OCP, Apache-2.0 bindings) | **LGPL-2.1 with exception** | see below |
 | **libquadmath**, inside the numpy and scipy wheels | **LGPL-2.1-or-later** | see below |

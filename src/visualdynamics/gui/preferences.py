@@ -82,6 +82,24 @@ def remember_3d(on: bool) -> None:
     store.sync()
 
 
+CREATOR_KEY = 'creator'
+
+
+def remembered_creator() -> str:
+    """The name an exported ESCDF file records as its creator
+    (File → Creator Name…), '' when none was set: the writer then
+    records the login name rather than asking, since a file format
+    library must never prompt (2026-09-30)."""
+    return str(settings().value(CREATOR_KEY, '') or '').strip()
+
+
+def remember_creator(name: str) -> None:
+    """Store the creator name."""
+    store = settings()
+    store.setValue(CREATOR_KEY, str(name).strip())
+    store.sync()
+
+
 def chosen_scheme() -> str:
     """The theme to wear now: this launch's statement, else the
     remembered choice, else the platform's."""

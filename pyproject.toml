@@ -109,7 +109,13 @@ visualdynamics-gui = "visualdynamics.gui:main"
 # sdypy-sep005 is the sdypy project's own SEP 005 validator (MIT),
 # used only to prove our exported dicts pass *their* compliance
 # check — the package itself never imports it
-dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005"]
+# escdf is the reference implementation of the Engineering Sciences
+# Common Data Format (BSD-3-Clause, not on PyPI): the agreement oracle
+# for io/escdf.py both ways — what it writes must load here, what is
+# written here must load and validate there. Never imported by the
+# package (2026-09-30).
+dev = ["pytest", "pytest-cov", "pytest-xdist", "pyyaml", "ruff", "sdypy-sep005",
+       "escdf @ git+https://github.com/sandialabs/Engineering-Sciences-Common-Data-Format.git"]
 # The STEP/IGES importer's geometry kernel: OCP bindings (Apache-2.0)
 # over OpenCASCADE (LGPL-2.1 with exception — the same dynamic-linking
 # posture as Qt; see NOTICE.md). Optional so `pip install
@@ -155,7 +161,7 @@ include = ["visualdynamics*"]
 # PEP 561: the inline annotations are the published types, so an
 # editor driving the scripting API gets real signatures
 [tool.setuptools.package-data]
-visualdynamics = ["py.typed", "gui/icons/*.svg"]
+visualdynamics = ["py.typed", "gui/icons/*.svg", "io/escdf_specifications/*.txt", "io/escdf_specifications/LICENSE"]
 
 [tool.ruff]
 line-length = 100

@@ -86,7 +86,8 @@ def test_only_the_formats_this_object_has(window, pump, monkeypatch):
     seen = offered(window, monkeypatch)
     assert seen['filters'] == ['Visual Dynamics object (*.vdyn)',
                                'Report template (.vdreport) (*.vdreport)',
-                               'MATLAB file (.mat) (*.mat)']
+                               'MATLAB file (.mat) (*.mat)',
+                               'Engineering Sciences Common Data Format (.escdf) (*.escdf)']
 
 
 def test_choosing_a_foreign_type_writes_that_format(window, geometry,

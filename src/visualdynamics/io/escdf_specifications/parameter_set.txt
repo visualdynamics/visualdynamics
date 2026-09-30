@@ -1,0 +1,17 @@
+parameter_set - v0.1.0
+----------------------
+extends: none
+
+This is a generic parameter set which includes space for notes
+as well as file attachments to be encoded into the group.  Almost every
+group should inherit from this.
+
+properties
+----------
+notes - str - num_notes - optional
+attachments - bytes - num_attachments - optional
+attachment_names - str - num_attachments - optional
+
+notes
+-----
+The bytes of an attachment are stored as opaque, and must be decoded by readers of this file type.

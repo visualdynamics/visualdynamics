@@ -30,20 +30,20 @@ yet. When one is written, the exception comes out of principle 5.
 ## The project file: `.escdf` in the next alpha
 
 Decided 2026-09-13, releasing with `.vdyn` explicitly alpha-only and a
-dated end (PLAN.md, "The project file is provisional"). A coworker of
-Brandon's publishes the Engineering Sciences Common Data Format this
-week — HDF5, a standard structure for the data types this project
-holds, generic enough to take the project's extras (links, provenance,
-marks, bands, report definitions, photos) in a group of its own.
+dated end (PLAN.md, "The project file is provisional"). The Engineering
+Sciences Common Data Format is public since 2026-09-30 (BSD-3-Clause;
+HDF5, a standard structure for the data types this project holds).
+**Import and export come first** (PLAN.md "ESCDF: import and export
+first", with the decisions), and whether `.escdf` replaces `.vdyn` is
+decided after they are solid.
 
-1. When the format's repository is public, read the specification.
-   Write the reader and the writer here from it, on h5py, the way every
-   other format in the matrix is done; the reference library is a
-   dependency only if its license allows (rule 3), and never a source.
-2. Decide from the spec where the extras live — a vendor group inside
-   the file, ideally — and whether every object kind maps. What does
-   not map stays in the vendor group.
-3. The next alpha saves projects as `.escdf` and still opens `.vdyn`.
+1. **Done 2026-09-30**: read with and write from the specification,
+   on h5py (`io/escdf.py`, `io/escdf_objects.py`); the reference
+   package a test-only dependency, the agreement oracle both ways.
+2. **Done**: the extras — what the standard has no field for — live in
+   the `attachments` every group carries, each object whole in its own
+   layout; a report is attached rendered as well.
+3. Then, if decided: the next alpha saves projects as `.escdf` and still opens `.vdyn`.
    The rename is broad and mechanical: `io/native.py`, the file
    dialogs, the app's document type in the macOS and Windows packaging,
    the website's format table and its test, the guide, the disclaimer

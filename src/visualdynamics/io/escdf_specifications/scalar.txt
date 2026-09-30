@@ -1,0 +1,13 @@
+scalar - v0.1.0
+---------------
+extends: activity_result
+
+This dataset defines a scalar value
+
+properties
+----------
+value - f4 - scalar - or:value:real_single_precision
+value - c8 - scalar - or:value:complex_single_precision
+value - f8 - scalar - or:value:real_double_precision
+value - c16 - scalar - or:value:complex_double_precision
+unit - str - scalar - optional

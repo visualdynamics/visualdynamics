@@ -41,13 +41,14 @@ Everything is SI at rest, like every other object in core.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
 from .data import NAMED_CLASSES, Bounded, Spectrum
+from .progress import Ticker
 
 LINEAR = 0
 LOG = 1
@@ -689,7 +690,7 @@ def find_tone(records: np.ndarray, dt: float, tone: SineTone,
 
 
 def find_environment(records: np.ndarray, dt: float,
-                     tones: Sequence[SineTone]) -> float:
+                     tones: Sequence[SineTone], ticker=None) -> float:
     """Where the tones' shared clock starts, by joint matched filter.
 
     Every tone in one environment begins at its own `start_time` on
@@ -703,9 +704,13 @@ def find_environment(records: np.ndarray, dt: float,
     """
     records = _records(records)
     joint = None
+    if ticker is not None:
+        ticker.add(len(tones))
     for tone in tones:
         lag = round(tone.start_time / dt)
         score = _tone_score(records, dt, tone)
+        if ticker is not None:
+            ticker.tick()
         if len(score) <= lag:
             continue
         vote = score[lag:]
@@ -1262,13 +1267,14 @@ class _Laid:
         return self.tone.grid_at(self.dt, samples)
 
 
-def _lay_tones(signals, specification, wanted, onsets, dt, cycles):
+def _lay_tones(signals, specification, wanted, onsets, dt, cycles,
+               ticker=None):
     """Where every wanted tone sits in the recording, found jointly
     unless given, and each tone laid onto the samples."""
     length = len(signals[0])
     searching = [tone for tone in wanted
                  if (onsets or {}).get(tone.name) is None]
-    origin = (find_environment(signals, dt, searching)
+    origin = (find_environment(signals, dt, searching, ticker)
               if searching else 0.0)
     laid = []
     for tone in wanted:
@@ -1402,7 +1408,7 @@ def _run_piece(*args):
 
 
 def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
-                 pool=None):
+                 pool=None, ticker=None):
     """The readings at each tone's centers, one chunk of the record at
     a time, every channel through each chunk before the next — in
     worker processes when a `pool` is given, each channel of each
@@ -1544,10 +1550,18 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
     else:
         bounds = [(max(int(a), lo), min(int(b), hi)) for a, b in pieces]
         bounds = [(a, b) for a, b in bounds if b > a]
+    if ticker is not None:
+        ticker.add(len(bounds) * C)
+
+    def tick():
+        if ticker is not None:
+            ticker.tick()
+
     if pool is None:
         for start, end in bounds:
             made = prepare(start, end)
             if made is None:
+                tick()
                 continue
             (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
              reads, blocks) = made
@@ -1555,6 +1569,7 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
                 keep(i, live, _piece_task(
                     channel_piece(i, piece_lo, piece_hi, step), args, freqs,
                     offsets, dt_piece, cycles, reads, blocks))
+                tick()
         return amplitude, floor, below, slopes
     # a few pieces in flight at once, so every worker stays busy when
     # the channels alone are fewer than the workers — fewer when the
@@ -1575,6 +1590,7 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
                 break
             made = prepare(start, end)
             if made is None:
+                tick(C)
                 continue
             (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
              reads, blocks) = made
@@ -1587,6 +1603,7 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
                     for future in done:
                         ii, ll = in_flight.pop(future)
                         keep(ii, ll, future.result())
+                        tick()
                 future = pool.submit(
                     _run_piece, channel_piece(i, piece_lo, piece_hi, step),
                     args, freqs, offsets, dt_piece, cycles, reads, blocks)
@@ -1597,6 +1614,7 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
         for future in done:
             i, live = in_flight.pop(future)
             keep(i, live, future.result())
+            tick()
     return amplitude, floor, below, slopes
 
 
@@ -1636,7 +1654,7 @@ def _tone_groups(laid, cycles):
 
 
 def _read_grouped(signals, laid, dt, cycles, centers, pieces_by_tone=None,
-                  pool=None):
+                  pool=None, ticker=None):
     """`_read_levels` a group of tones at a time (`_tone_groups`), the
     results put back in the placements' order. `pieces_by_tone`, when
     given, is a list per placement of the spans to solve for it."""
@@ -1647,7 +1665,8 @@ def _read_grouped(signals, laid, dt, cycles, centers, pieces_by_tone=None,
                   else [span for k in group for span in pieces_by_tone[k]])
         a, f, b, s = _read_levels(
             signals, [laid[k] for k in group], dt, cycles,
-            [centers[k] for k in group], pieces=pieces, pool=pool)
+            [centers[k] for k in group], pieces=pieces, pool=pool,
+            ticker=ticker)
         for j, k in enumerate(group):
             amplitude[k], floor[k], below[k], slopes[k] = a[j], f[j], b[j], s[j]
     return amplitude, floor, below, slopes
@@ -1687,8 +1706,8 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
                   cycles: float = BASE_CYCLES,
                   windows: int = SAMPLE_WINDOWS,
                   tones: Sequence[str] | None = None,
-                  onsets: dict[str, float] | None = None
-                  ) -> list[dict[str, Any]]:
+                  onsets: dict[str, float] | None = None,
+                  ticker: Any = None) -> list[dict[str, Any]]:
     """The levels read at `windows` stretches of each tone, cheaply.
 
     The sine view's preview and the automatic smoothing's measurement:
@@ -1711,7 +1730,8 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
     signals = [history.ordinate[row] for row in rows]
     wanted = (specification.tones if tones is None
               else [specification.tone(name) for name in tones])
-    laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles)
+    laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles,
+                      ticker)
     centers, pieces = [], []
     for placed in laid:
         first = int(placed.window_at(0) / 2.0)
@@ -1726,7 +1746,8 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
             own.append((placed.start + c - half, placed.start + c + half + 1))
         pieces.append(own)
     amplitude, floor, below, _slopes = _read_grouped(
-        signals, laid, dt, cycles, centers, pieces_by_tone=pieces)
+        signals, laid, dt, cycles, centers, pieces_by_tone=pieces,
+        ticker=ticker)
     out = []
     for k, placed in enumerate(laid):
         seconds = placed.seconds_at(centers[k])
@@ -1764,7 +1785,8 @@ def scatter_db(amplitude: np.ndarray, floor: np.ndarray) -> np.ndarray:
 def suggest_cycles(history: Any, specification: SineSweepSpecification,
                    target_db: float = TARGET_SCATTER_DB,
                    tones: Sequence[str] | None = None,
-                   onsets: dict[str, float] | None = None) -> float:
+                   onsets: dict[str, float] | None = None,
+                   ticker: Any = None) -> float:
     """The smoothing the data asks for: the first rung of
     `CYCLES_LADDER` at which the predicted scatter of the readings is
     under `target_db` (one standard deviation).
@@ -1782,7 +1804,7 @@ def suggest_cycles(history: Any, specification: SineSweepSpecification,
     the floor at the base smoothing asks for the top of the ladder.
     """
     sampled = sample_levels(history, specification, BASE_CYCLES,
-                            tones=tones, onsets=onsets)
+                            tones=tones, onsets=onsets, ticker=ticker)
     wanted = (specification.tones if tones is None
               else [specification.tone(name) for name in tones])
     asked = BASE_CYCLES
@@ -1809,12 +1831,12 @@ def suggest_cycles(history: Any, specification: SineSweepSpecification,
     return float(max(BASE_CYCLES, min(rung, cap)))
 
 
-def _passes(signals, laid, dt, cycles, centers, refine, pool):
+def _passes(signals, laid, dt, cycles, centers, refine, pool, ticker=None):
     """The solve, and with `refine` the clock checked and the solve
     repeated while it moves, up to three times."""
     for _pass in range(3 if refine else 1):
         amplitude, floor, below, slopes = _read_grouped(
-            signals, laid, dt, cycles, centers, pool=pool)
+            signals, laid, dt, cycles, centers, pool=pool, ticker=ticker)
         if not refine:
             break
         moved = False
@@ -1842,7 +1864,9 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
                  points_per_window: float = 2.0,
                  refine: bool = True,
                  target_db: float = TARGET_SCATTER_DB,
-                 workers: int | None = None) -> SineLevelSet:
+                 workers: int | None = None,
+                 progress: Callable[[int, int], None] | None = None
+                 ) -> SineLevelSet:
     """Read each tone's level out of a recording, against its own sweep.
 
     Reconstruct every wanted tone's sweep from the specification's
@@ -1903,13 +1927,15 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
     rows = _control_rows(history, specification)
     signals = [history.ordinate[row] for row in rows]
+    ticker = Ticker(progress)
     if cycles is None:
         cycles = suggest_cycles(history, specification, target_db,
-                                tones=tones, onsets=onsets)
+                                tones=tones, onsets=onsets, ticker=ticker)
     cycles = float(cycles)
     wanted = (specification.tones if tones is None
               else [specification.tone(name) for name in tones])
-    laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles)
+    laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles,
+                      ticker)
     centers = [_centers(placed, points_per_window) for placed in laid]
 
     span = max(p.end for p in laid) - min(p.start for p in laid)
@@ -1927,7 +1953,7 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
             max_workers=count, mp_context=multiprocessing.get_context('spawn'))
     try:
         amplitude, floor, below, _slopes = _passes(
-            signals, laid, dt, cycles, centers, refine, pool)
+            signals, laid, dt, cycles, centers, refine, pool, ticker)
     finally:
         if pool is not None:
             pool.shutdown(wait=True)

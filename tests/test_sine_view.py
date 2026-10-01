@@ -207,3 +207,23 @@ def test_a_clean_record_opens_on_the_base_smoothing(window, pump, noise):
     _flat(window, pump)
     assert pane.sine_panel.setting().chosen == 10.0
     assert np.isfinite(float(pane.sine_panel.derived['scatter'].text().split()[0]))
+
+
+def test_extracting_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch):
+    """The window's extraction ticks the strip's bar — the import's
+    bar, shared (2026-10-01) — to full, then hides it."""
+    _sweep(window, pump)
+    seen = []
+    real = window._strip_tick
+
+    def spy(done, total):
+        seen.append((done, total, not window._import_progress.isHidden()))
+        real(done, total)
+
+    monkeypatch.setattr(window, '_strip_tick', spy)
+    window.extract_sine_levels('Record')
+    pump()
+    assert seen and seen[-1][0] == seen[-1][1] > 0
+    assert all(shown for _d, _t, shown in seen[1:]), 'the bar was shown while it moved'
+    assert window._import_progress.isHidden()
+    assert 'extracted from Record' in window.statusBar().currentMessage()

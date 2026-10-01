@@ -2444,7 +2444,7 @@ class Project(dict):
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
-                    name: str | None = None) -> str:
+                    name: str | None = None, progress: Any = None) -> str:
         """The normal modes of a geometry whose blocks carry their
         properties (Solve Modes): the finite element model built from
         the blocks, solved, and the shapes added in the geometry's
@@ -2472,6 +2472,9 @@ class Project(dict):
         name : str, optional
             What to call the result. Defaults to the geometry's name
             with ' Modes' after it.
+        progress : callable, optional
+            Told ``(done, total)`` as the solve advances; the window's
+            strip bar reads it, a script can print it.
 
         Returns
         -------
@@ -2491,7 +2494,8 @@ class Project(dict):
                 'table or on geometry.block_properties')
         model = Model.from_geometry(geometry, name=source)
         shapes = model.eigensolution(maximum_frequency=maximum_frequency,
-                                     num_modes=num_modes, damping=damping)
+                                     num_modes=num_modes, damping=damping,
+                                     progress=progress)
         params = {'maximum_frequency': maximum_frequency,
                   'num_modes': num_modes, 'damping': damping}
         return self._derive(source, shapes, name or f'{source} Modes',
@@ -3195,7 +3199,8 @@ class Project(dict):
         return None
 
     def extract_sine(self, source: Any,
-                     specification: Any = None) -> list[str]:
+                     specification: Any = None,
+                     progress: Any = None) -> list[str]:
         """Each specification tone's level, read out of a recording
         (Extract Sine Levels) — one object per tone, because each tone
         sweeps its own frequencies on its own clock.
@@ -3211,6 +3216,12 @@ class Project(dict):
         specification : str or object, optional
             The sweep specification to extract against. Defaults to
             the project's own, when it holds exactly one.
+        progress : callable, optional
+            Told ``(done, total)`` as the extraction advances — the
+            matched filter per tone, the smoothing ladder, then the
+            solve's pieces per channel. The window's strip bar reads
+            it; a script can print it. Anything it raises stops the
+            extraction.
 
         Returns
         -------
@@ -3237,7 +3248,8 @@ class Project(dict):
             setting = history.suggest_sine_extraction()
         levels = extract_sine(history, spec, cycles=setting.cycles,
                               refine=setting.refine,
-                              target_db=setting.target_db)
+                              target_db=setting.target_db,
+                              progress=progress)
         # what the automatic chose rides the setting, so the view and
         # the journal say what was used
         history.sine_extraction = replace(setting, chosen=levels.cycles)
@@ -3694,8 +3706,12 @@ def _journaled(verb):
                 shown = [self._journal_arg(args[0]), built]
             else:
                 shown = [self._journal_arg(a) for a in args]
+            # a callback — the window's progress bar — is this session's,
+            # not the script's: a replay has no bar to feed, and the
+            # line reads as the user could have typed it (2026-10-01)
             shown += [f'{key}={self._journal_arg(value)}'
-                      for key, value in kwargs.items()]
+                      for key, value in kwargs.items()
+                      if not callable(value)]
             line = f'project.{verb.__name__}({", ".join(shown)})'
             if unsayable:
                 line = f'# {line} — not replayable'

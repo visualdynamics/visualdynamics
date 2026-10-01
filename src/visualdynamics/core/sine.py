@@ -186,9 +186,148 @@ class SineTone:
         return np.concatenate(pieces_t), np.concatenate(pieces_f)
 
     def argument(self, dt: float) -> np.ndarray:
-        """The cosine argument over the tone's span: 2*pi*integral(f)."""
-        _t, f = self.trajectory(dt)
-        return 2.0 * np.pi * np.cumsum(f) * dt
+        """The cosine argument over the tone's span: 2*pi*integral(f),
+        at the sample times `trajectory` returns — `phase_at` on them,
+        so a slice of the sweep (`argument_slice`) is the same numbers
+        as the whole (2026-10-01)."""
+        t, _f = self.trajectory(dt)
+        return self.phase_at(t)
+
+    def _segments(self):
+        """(start second, length, f0, f1, log?) per segment."""
+        out, start = [], 0.0
+        for i, length in enumerate(self.segment_seconds()):
+            out.append((start, float(length), float(self.frequency[i]),
+                        float(self.frequency[i + 1]),
+                        int(self.segment_type[i]) != LINEAR))
+            start += float(length)
+        return out
+
+    def frequency_at(self, t: Any) -> np.ndarray:
+        """The instantaneous frequency, Hz, at seconds `t` from the
+        tone's start — the same law `trajectory` lays on its grid,
+        evaluated anywhere, so a slice of a long sweep costs the slice.
+
+        Parameters
+        ----------
+        t : array-like
+            Seconds from the tone's start.
+
+        Returns
+        -------
+        ndarray
+        """
+        t = np.asarray(t, dtype=np.float64)
+        f = np.full(t.shape, float(self.frequency[-1]))
+        f[t <= 0.0] = float(self.frequency[0])
+        for start, length, f0, f1, log in self._segments():
+            inside = (t > start) & (t <= start + length)
+            fraction = (t[inside] - start) / length
+            f[inside] = (f0 * (f1 / f0) ** fraction if log
+                         else f0 + (f1 - f0) * fraction)
+        return f
+
+    def phase_at(self, t: Any) -> np.ndarray:
+        """The cosine argument, radians, at seconds `t` from the
+        tone's start: 2*pi times the integral of the frequency law,
+        segment by segment in closed form — a linear sweep's chirp, a
+        log sweep's exponential.
+
+        Parameters
+        ----------
+        t : array-like
+            Seconds from the tone's start.
+
+        Returns
+        -------
+        ndarray
+        """
+        t = np.asarray(t, dtype=np.float64)
+        phase = np.zeros(t.shape)
+        carried = 0.0            # cycles at the start of each segment
+        for start, length, f0, f1, log in self._segments():
+            local = np.clip(t - start, 0.0, length)
+            if log:
+                ratio = f1 / f0
+                cycles = f0 * length / np.log(ratio) * (ratio ** (local / length) - 1.0)
+                whole = f0 * length / np.log(ratio) * (ratio - 1.0)
+            else:
+                cycles = f0 * local + (f1 - f0) * local ** 2 / (2.0 * length)
+                whole = (f0 + f1) * length / 2.0
+            phase += cycles
+            carried += whole
+        # past the last segment the phase holds, as the frequency does
+        over = t > sum(length for _s, length, *_r in self._segments())
+        phase[over] = carried
+        return 2.0 * np.pi * phase
+
+    def grid(self, dt: float, first: int, last: int) -> np.ndarray:
+        """The sample times `trajectory(dt)` lays down, from sample
+        `first` to `last` (exclusive): the whole grid's own numbers,
+        for a slice of it.
+
+        Parameters
+        ----------
+        dt : float
+            The sample interval.
+        first, last : int
+            The slice of the sweep's samples.
+
+        Returns
+        -------
+        ndarray
+        """
+        # the grid is one sample at t=0, then each segment's samples
+        # evenly over its own length — rebuilt per segment so a slice
+        # never allocates the whole
+        edges = []
+        for start, length, *_rest in self._segments():
+            n = max(round(length / dt), 1)
+            edges.append((start, length, n))
+        total = 1 + sum(n for _s, _l, n in edges)
+        first, last = max(int(first), 0), min(int(last), total)
+        out = np.empty(max(last - first, 0))
+        if last <= first:
+            return out
+        index = 0
+        if first == 0:
+            out[0] = 0.0
+            index = 1
+        offset = 1
+        for start, length, n in edges:
+            lo, hi = max(first, offset), min(last, offset + n)
+            if hi > lo:
+                k = np.arange(lo - offset + 1, hi - offset + 1)
+                out[index:index + hi - lo] = start + length * k / n
+                index += hi - lo
+            offset += n
+        return out
+
+    def grid_at(self, dt: float, samples: Any) -> np.ndarray:
+        """The sample times `trajectory(dt)` lays down, at the given
+        sample indices — `grid` for a handful of samples picked out of
+        a long sweep, without laying the whole sweep down.
+
+        Parameters
+        ----------
+        dt : float
+            The sample interval.
+        samples : array-like of int
+            Sample indices into the sweep's grid.
+
+        Returns
+        -------
+        ndarray
+        """
+        samples = np.asarray(samples, dtype=np.int64)
+        out = np.zeros(samples.shape)
+        offset = 1
+        for start, length, *_rest in self._segments():
+            n = max(round(length / dt), 1)
+            inside = (samples >= offset) & (samples < offset + n)
+            out[inside] = start + length * (samples[inside] - offset + 1) / n
+            offset += n
+        return out
 
     def target(self, frequencies: Any,
                curve: str = 'amplitude') -> np.ndarray:
@@ -418,26 +557,34 @@ class SineLevel(Spectrum):
         return ~self.below_floor
 
 
-def _tone_score(records: np.ndarray, dt: float,
-                tone: SineTone) -> np.ndarray:
-    """Matched-filter correlation power for one tone at every lag."""
-    from scipy.signal import fftconvolve
+def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
+    """Matched-filter correlation power for one tone at every lag.
 
+    `records` is a sequence of one-dimensional records (views onto the
+    history, never copies). Overlap-add convolution rather than one
+    FFT of the whole record, so the memory is a block's, not the
+    record's (2026-10-01: a 23 GB run)."""
+    from scipy.signal import oaconvolve
+
+    records = [np.asarray(record) for record in records]
+    length = len(records[0])
     template = np.cos(tone.argument(dt))
-    if records.shape[1] <= len(template):
+    if length <= len(template):
         # a recording that stopped mid-sweep still holds the sweep's
         # opening, and the opening aligns it: correlate on the half
         # that fits, leaving the other half as search room. Anything
         # shorter than one second of tone has nothing to lock onto.
-        template = template[:records.shape[1] // 2]
+        template = template[:length // 2]
         if len(template) < 1.0 / dt:
             raise ValueError(
                 f'{tone.name}: the recording '
-                f'({records.shape[1] * dt:.2f} s) holds less than a '
+                f'({length * dt:.2f} s) holds less than a '
                 'second of the tone; nothing to align')
-    score = np.zeros(records.shape[1] - len(template) + 1)
+    score = np.zeros(length - len(template) + 1)
+    flipped = template[::-1]
     for record in records:
-        score += fftconvolve(record, template[::-1], mode='valid') ** 2
+        score += oaconvolve(np.asarray(record, dtype=float), flipped,
+                            mode='valid') ** 2
     return score
 
 
@@ -497,6 +644,14 @@ class SineLevelSet:
                 f'{len(self.response_dof)} channels>')
 
 
+def _records(records: Any) -> list[np.ndarray]:
+    """One-dimensional records, whatever was handed in: a 2-D array's
+    rows, or a sequence of records — views, never copies."""
+    if isinstance(records, np.ndarray):
+        return list(np.atleast_2d(records))
+    return [np.asarray(record) for record in records]
+
+
 def find_tone(records: np.ndarray, dt: float, tone: SineTone,
               search: tuple[float, float] | None = None) -> float:
     """Where a tone's sweep begins in a recording, by matched filter.
@@ -508,7 +663,7 @@ def find_tone(records: np.ndarray, dt: float, tone: SineTone,
     random). `search` bounds the onset in seconds when the caller
     knows roughly where to look. Returns the onset in seconds.
     """
-    records = np.atleast_2d(records)
+    records = _records(records)
     score = _tone_score(records, dt, tone)
     if search is not None:
         lo = max(round(search[0] / dt), 0)
@@ -533,20 +688,23 @@ def find_environment(records: np.ndarray, dt: float,
     the clock origin in seconds; tone i's sweep begins at
     `origin + start_time_i`.
     """
-    records = np.atleast_2d(records)
-    votes = []
+    records = _records(records)
+    joint = None
     for tone in tones:
         lag = round(tone.start_time / dt)
         score = _tone_score(records, dt, tone)
-        if len(score) > lag:
-            votes.append(score[lag:])
-    if not votes:
+        if len(score) <= lag:
+            continue
+        vote = score[lag:]
+        # summed as it comes, one vote alive at a time (2026-10-01)
+        if joint is None:
+            joint = vote.copy()
+        else:
+            length = min(len(joint), len(vote))
+            joint = joint[:length] + vote[:length]
+    if joint is None:
         raise ValueError('no tone fits the recording at its own start '
                          'time; nothing to align')
-    length = min(len(vote) for vote in votes)
-    joint = np.zeros(length)
-    for vote in votes:
-        joint += vote[:length]
     return float(int(np.argmax(joint)) * dt)
 
 
@@ -816,8 +974,7 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
         record): magnitude is the peak amplitude, angle the phase
         against the reconstructed sweep.
     """
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.linalg import splu
+    from scipy.linalg import solve_banded
 
     signal = np.asarray(signal, dtype=float)
     fs = 1.0 / dt
@@ -844,20 +1001,29 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
         bandwidth = _AVERAGE_BANDWIDTH * f / cycles       # Hz
         weight[k, a - lo:b - lo] = (fs / (2.0 * np.pi * bandwidth)) ** 2
 
-    rows, cols, vals = [], [], []
-    rhs = np.zeros(N * W)
+    # The system is banded — the data term couples the unknowns of one
+    # sample, the penalty a sample with its neighbors — so it is built
+    # in LAPACK's banded layout and solved by its banded LU
+    # (2026-10-01): ab[u + i - j, j] = A[i, j], u = 2W the bandwidth.
+    # It was a COO list of triplets factored by SuperLU, 4.6 kB per
+    # sample for three tones and the slowest thing in the extraction;
+    # this is (4W + 1) * W doubles per sample and a fraction of the time.
+    u = 2 * W
+    size = N * W
+    ab = np.zeros((2 * u + 1, size))
+    rhs = np.zeros(size)
     sample = np.arange(N)
-    # A^T A: one WxW block per sample, c c^T with c = [cos1, -sin1, ...]
     coeff = np.empty((N, W))
     coeff[:, 0::2] = cos.T
     coeff[:, 1::2] = sin.T
+    # A^T A: one WxW block per sample, c c^T with c = [cos1, -sin1, ...]
     for i in range(W):
         rhs[sample * W + i] = coeff[:, i] * y
         for j in range(W):
-            rows.append(sample * W + i); cols.append(sample * W + j)
-            vals.append(coeff[:, i] * coeff[:, j])
+            ab[u + i - j, sample * W + j] += coeff[:, i] * coeff[:, j]
     # the smoothness penalty D^T R^2 D per tone and component, R the
     # per-sample weight; and a unit pull to zero where a tone is absent
+    m = np.arange(1, N - 1)
     for k in range(K):
         # the data term's diagonal averages 1/2 per component (cos^2,
         # sin^2 over a cycle), so the penalty is halved to put the
@@ -867,22 +1033,25 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
         absent = (weight[k] == 0.0).astype(float)
         for comp in (0, 1):
             idx = sample * W + 2 * k + comp
-            rows.append(idx); cols.append(idx); vals.append(absent)
-            # (x[n-1] - 2x[n] + x[n+1]) for n = 1..N-2, weighted by w[n]
-            m = np.arange(1, N - 1)
+            ab[u, idx] += absent
+            if N < 3:
+                continue
             wm = w2[m]
-            center = m * W + 2 * k + comp
-            left, right = center - W, center + W
-            for (r, c, v) in ((left, left, wm), (center, center, 4 * wm),
-                              (right, right, wm), (left, center, -2 * wm),
-                              (center, left, -2 * wm), (center, right, -2 * wm),
-                              (right, center, -2 * wm), (left, right, wm),
-                              (right, left, wm)):
-                rows.append(r); cols.append(c); vals.append(v)
-    matrix = coo_matrix((np.concatenate(vals),
-                         (np.concatenate(rows), np.concatenate(cols))),
-                        shape=(N * W, N * W)).tocsc()
-    x = splu(matrix).solve(rhs)
+            left, center, right = idx[m - 1], idx[m], idx[m + 1]
+            # (x[n-1] - 2x[n] + x[n+1]) for n = 1..N-2, weighted by w[n]
+            ab[u, left] += wm
+            ab[u, center] += 4.0 * wm
+            ab[u, right] += wm
+            # left-center and center-right: offsets -W (above) and +W
+            ab[u - W, center] -= 2.0 * wm
+            ab[u + W, left] -= 2.0 * wm
+            ab[u - W, right] -= 2.0 * wm
+            ab[u + W, center] -= 2.0 * wm
+            # left-right: offsets -2W and +2W
+            ab[u - 2 * W, right] += wm
+            ab[u + 2 * W, left] += wm
+    x = solve_banded((u, u), ab, rhs, overwrite_ab=True, overwrite_b=True,
+                     check_finite=False)
     envelopes = []
     for k, (a, b) in enumerate(spans):
         u = x[(sample * W + 2 * k)][a - lo:b - lo]
@@ -892,6 +1061,18 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
 
 
 # ---- reading the levels ---------------------------------------------------
+#
+# Nothing here holds a sweep-length array (2026-10-01): a 23 GB run on
+# a 64 GB machine crashed at the extraction, which had carried the
+# sweep's argument and frequency per tone, every tone's envelope per
+# channel and the debiasing's residual at every sample — some 400
+# bytes a sample on top of the record. The tone's law is closed-form
+# (`SineTone.phase_at`, `frequency_at`, `grid`), so a chunk of the
+# sweep is made when the chunk is solved and dropped after; the
+# readings are taken at their centers inside the chunk and the clock
+# drift is accumulated as per-chunk phase slopes. What stays is the
+# record itself (read as views, cast one chunk at a time) and the
+# readings.
 
 
 def _even_steps(abscissa, dt):
@@ -918,37 +1099,65 @@ def _control_rows(history, specification):
     return rows
 
 
-class _Tone:
-    """One tone laid onto the recording: where it starts, its sweep
-    argument and frequency sample by sample, its smoothing window and
-    the debiasing length that follow from `cycles`."""
+class _Laid:
+    """One tone laid onto the recording: where its sweep starts, how
+    many samples it spans, the smoothing, and the clock correction
+    found so far — no per-sample arrays. `argument` and `f` give any
+    slice of the sweep on demand from the tone's closed-form law."""
 
-    def __init__(self, tone, onset, start, f, argument, n, dt, cycles):
-        self.tone, self.onset, self.start, self.n = tone, onset, start, n
-        self.f, self.argument = f[:n], argument[:n]
-        self.dt, self.cycles = dt, cycles
-        self.window: np.ndarray = np.maximum(cycles / self.f / dt, 1.0)
-        # the filter's equivalent averaging length in samples, from its
-        # noise bandwidth: what a moving average of that length would
-        # do to white noise, the debiasing formula's N
-        bandwidth = _AVERAGE_BANDWIDTH * self.f / cycles
-        corner = 2.0 * np.pi * bandwidth * dt          # rad/sample
-        self.samples_in: np.ndarray = np.maximum(
-            2.0 * np.pi / (corner * _NOISE_INTEGRAL), 1.0)
-        self.half: np.ndarray = (self.window / 2.0).astype(np.int64)
+    def __init__(self, tone, onset, start, n, dt, cycles):
+        self.tone, self.onset, self.start, self.n = tone, float(onset), int(start), int(n)
+        self.dt, self.cycles = float(dt), float(cycles)
+        #: the clock correction, radians per second and per second
+        #: squared about the span's middle, and the offset it applies
+        #: at the sweep's end in Hz — zero until the refinement moves it
+        self.c1, self.c2, self.drift_hz = 0.0, 0.0, 0.0
 
-    def shifted(self, phase):
-        """The same tone with `phase` (radians, per sample) added to
-        its argument — the clock refinement."""
-        out = _Tone.__new__(_Tone)
-        out.__dict__.update(self.__dict__)
-        out.argument = self.argument + phase
-        return out
+    @property
+    def end(self) -> int:
+        return self.start + self.n
+
+    def seconds(self, lo, hi) -> np.ndarray:
+        """Seconds from the tone's start at its samples lo..hi."""
+        return self.tone.grid(self.dt, lo, hi)
+
+    def f(self, lo, hi) -> np.ndarray:
+        return self.tone.frequency_at(self.seconds(lo, hi))
+
+    def argument(self, lo, hi) -> np.ndarray:
+        t = self.seconds(lo, hi)
+        phase = self.tone.phase_at(t)
+        if self.c1 or self.c2:
+            u = t - self.n * self.dt / 2.0
+            phase = phase + self.c1 * u + self.c2 * u * u
+        return phase
+
+    def window(self, f) -> np.ndarray:
+        """The smoothing window in samples at frequency `f`."""
+        return np.maximum(self.cycles / np.maximum(np.asarray(f, dtype=float),
+                                                   1e-9) / self.dt, 1.0)
+
+    def samples_in(self, f) -> np.ndarray:
+        """The filter's equivalent averaging length in samples, from
+        its noise bandwidth: what a moving average of that length would
+        do to white noise, the debiasing formula's N."""
+        bandwidth = _AVERAGE_BANDWIDTH * np.asarray(f, dtype=float) / self.cycles
+        corner = 2.0 * np.pi * bandwidth * self.dt          # rad/sample
+        return np.maximum(2.0 * np.pi / (corner * _NOISE_INTEGRAL), 1.0)
+
+    def window_at(self, k) -> float:
+        k = min(max(int(k), 0), self.n - 1)
+        return float(self.window(self.f(k, k + 1))[0])
+
+    def seconds_at(self, samples) -> np.ndarray:
+        """Seconds from the tone's start at the given sweep samples."""
+        return self.tone.grid_at(self.dt, samples)
 
 
 def _lay_tones(signals, specification, wanted, onsets, dt, cycles):
     """Where every wanted tone sits in the recording, found jointly
     unless given, and each tone laid onto the samples."""
+    length = len(signals[0])
     searching = [tone for tone in wanted
                  if (onsets or {}).get(tone.name) is None]
     origin = (find_environment(signals, dt, searching)
@@ -959,61 +1168,186 @@ def _lay_tones(signals, specification, wanted, onsets, dt, cycles):
         if onset is None:
             onset = origin + tone.start_time
         start = round(onset / dt)
-        _t, f = tone.trajectory(dt)
-        argument = tone.argument(dt)
-        n = min(len(argument), signals.shape[1] - start)
-        window = np.maximum(cycles / f[:n] / dt, 1.0) if n else np.zeros(0)
-        if n < 1 or n < int(window[0]):
+        total = 1 + sum(max(round(length_s / dt), 1)
+                        for length_s in tone.segment_seconds())
+        n = min(total, length - start)
+        placed = _Laid(tone, onset, start, max(n, 0), dt, cycles)
+        if n < 1 or n < int(placed.window_at(0)):
             raise ValueError(
                 f'{tone.name}: the recording holds {max(n, 0) * dt:.2f} s '
                 'of the tone, less than one smoothing window — nothing '
                 'to extract')
-        laid.append(_Tone(tone, onset, start, f, argument, n, dt, cycles))
+        laid.append(placed)
     return laid
 
 
-def _debias(signal, envelopes, laid, t_index, lo=0, hi=None):
-    """(amplitude, floor) at every sample of tone `t_index` on one
-    channel, between `lo` and `hi` of its span.
+def _centers(laid: _Laid, points_per_window: float) -> np.ndarray:
+    """Where a tone is read: sample centers tiling the sweep, each one
+    window/points apart, each an (almost) independent reading."""
+    centers = []
+    k = int(laid.window_at(0) / 2.0)
+    while k < laid.n - int(laid.window_at(min(k, laid.n - 1)) / 2.0):
+        centers.append(k)
+        k += max(int(laid.window_at(k) / points_per_window), 1)
+    if not centers:
+        raise ValueError(f'{laid.tone.name}: no whole smoothing window '
+                         'fits the recorded span')
+    return np.asarray(centers, dtype=np.int64)
 
-    The magnitude is *debiased*: a noisy envelope's magnitude reads
-    high, so the noise power left in the residual around each sample
-    — after every tone is removed, demodulated like the tone,
-    measured in the same window the old average used — scaled by the
-    filter's equivalent averaging length, is subtracted from the
-    squared magnitude before the square root. The floor is that noise
-    power's square root in the tone's own units: the amplitude a tone
-    would need to stand clear of the noise at that reading. Where the
-    squared magnitude is under it the tone was not resolved, and the
-    amplitude is reported *at* the floor rather than at zero, flagged
-    (Brandon, 2026-09-30: a reading of zero is a hole in the curve; a
-    reading at the floor says how much was not seen).
+
+def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None):
+    """The readings at each tone's centers, one chunk of the record at
+    a time, every channel through each chunk before the next.
+
+    Per chunk `[start, end)` — the chunks tile the tones' joint span,
+    or are the `pieces` given — the margin the chunked solve needs is
+    added each side, every tone live in the piece gives its slice of
+    argument and frequency, and per channel the piece is solved
+    (`_vold_kalman_whole`), the model of every tone subtracted for the
+    residual, and each center inside the chunk read: the envelope's
+    power less the noise power the smoothing let through, measured in
+    the residual demodulated like the tone over the center's own
+    window (`_debias` before this), the floor beside it, and whether
+    the tone stood above it. Along the way the envelope's phase slope
+    over the chunk's interior is fitted per tone and channel, which is
+    what the clock refinement reads.
+
+    Returns (amplitude, floor, below, slopes): the first three per tone
+    `(channels, centers)` arrays (amplitude complex, at the floor and
+    flagged where the tone was under it), `slopes` per tone a list per
+    channel of `(seconds from the tone's start, phase slope, weight)`.
     """
-    this = laid[t_index]
-    hi = this.n if hi is None else hi
-    a = envelopes[t_index][lo:hi]
-    model = np.zeros(hi - lo)
-    for other, that in enumerate(laid):
-        lo_s = max(this.start + lo, that.start)
-        hi_s = min(this.start + hi, that.start + that.n)
-        if hi_s > lo_s:
-            e = envelopes[other][lo_s - that.start:hi_s - that.start]
-            model[lo_s - this.start - lo:hi_s - this.start - lo] += np.real(
-                e * np.exp(1j * that.argument[lo_s - that.start:
-                                              hi_s - that.start]))
-    residual = signal[this.start + lo:this.start + hi] - model
-    z = residual * np.exp(-1j * this.argument[lo:hi])
-    variance = _smooth(np.abs(z) ** 2 + 0.0j, this.half[lo:hi]).real
-    noise_power = 4.0 * variance / this.samples_in[lo:hi]
-    floor = np.sqrt(noise_power)
-    power = np.abs(a) ** 2 - noise_power
-    return np.sqrt(np.maximum(power, 0.0)), floor
+    K, C = len(laid), len(signals)
+    lo = min(placed.start for placed in laid)
+    hi = max(placed.end for placed in laid)
+    chunk = CHUNK if chunk is None else int(chunk)
+    amplitude = [np.zeros((C, len(c)), dtype=complex) for c in centers]
+    floor = [np.zeros((C, len(c))) for c in centers]
+    below = [np.zeros((C, len(c)), dtype=bool) for c in centers]
+    slopes = [[[] for _i in range(C)] for _k in range(K)]
+    if pieces is None:
+        pieces = [(a, min(a + chunk, hi)) for a in range(lo, hi, chunk)]
+
+    def widest(sample):
+        # the widest smoothing window of any tone live at this sample
+        return max([placed.window_at(sample - placed.start)
+                    for placed in laid if placed.start <= sample < placed.end]
+                   or [1.0])
+
+    for start, end in pieces:
+        start, end = max(int(start), lo), min(int(end), hi)
+        if end <= start:
+            continue
+        before = int(MARGIN_WINDOWS * widest(start))
+        after = int(MARGIN_WINDOWS * widest(end - 1))
+        piece_lo, piece_hi = max(start - before, lo), min(end + after, hi)
+        live, args, freqs, offsets, entries = [], [], [], [], []
+        for k, placed in enumerate(laid):
+            entry, leave = max(placed.start, piece_lo), min(placed.end, piece_hi)
+            if leave <= entry:
+                continue
+            args.append(placed.argument(entry - placed.start, leave - placed.start))
+            freqs.append(placed.f(entry - placed.start, leave - placed.start))
+            offsets.append(entry - piece_lo)
+            entries.append(entry)
+            live.append(k)
+        if not live:
+            continue
+        # which of each live tone's centers this chunk reads
+        wanted = {}
+        for e, k in enumerate(live):
+            absolute = centers[k] + laid[k].start
+            wanted[k] = np.flatnonzero((absolute >= start) & (absolute < end))
+        rotors = [np.exp(1j * a) for a in args]
+        for i in range(C):
+            y = np.asarray(signals[i][piece_lo:piece_hi], dtype=float)
+            envelopes = _vold_kalman_whole(y, args, freqs, offsets, dt, cycles)
+            model = np.zeros(piece_hi - piece_lo)
+            for e in range(len(live)):
+                span = slice(offsets[e], offsets[e] + len(args[e]))
+                model[span] += np.real(envelopes[e] * rotors[e])
+            residual = y - model
+            for e, k in enumerate(live):
+                placed, a, f = laid[k], args[e], freqs[e]
+                span = slice(offsets[e], offsets[e] + len(a))
+                envelope = envelopes[e]
+                j = wanted[k]
+                if len(j):
+                    # the residual demodulated like the tone, its power
+                    # summed over each center's own window
+                    z = residual[span] * np.conj(rotors[e])
+                    sums = np.concatenate(([0.0], np.cumsum(np.abs(z) ** 2)))
+                    local = centers[k][j] - (entries[e] - placed.start)
+                    fc = f[local]
+                    half = (placed.window(fc) / 2.0).astype(np.int64)
+                    lo_i = np.clip(local - half, 0, len(a))
+                    hi_i = np.clip(local + half + 1, 0, len(a))
+                    variance = (sums[hi_i] - sums[lo_i]) / np.maximum(hi_i - lo_i, 1)
+                    noise_power = 4.0 * variance / placed.samples_in(fc)
+                    power = np.abs(envelope[local]) ** 2 - noise_power
+                    under = power <= 0.0
+                    shown = np.where(under, np.sqrt(noise_power),
+                                     np.sqrt(np.maximum(power, 0.0)))
+                    amplitude[k][i, j] = shown * np.exp(1j * np.angle(envelope[local]))
+                    floor[k][i, j] = np.sqrt(noise_power)
+                    below[k][i, j] = under
+                # the clock: the envelope's phase slope over the chunk's
+                # interior, in sub-blocks so a sweep shorter than one
+                # chunk still gives the curve its slopes are fitted
+                # with, each weighted by its power so a stretch under
+                # the noise says nothing
+                int_lo = max(start, entries[e]) - entries[e]
+                int_hi = min(end, entries[e] + len(a)) - entries[e]
+                block = max((int_hi - int_lo) // 8, 256)
+                for b_lo in range(int_lo, int_hi, block):
+                    b_hi = min(b_lo + block, int_hi)
+                    if b_hi - b_lo < 4:
+                        continue
+                    weight = np.abs(envelope[b_lo:b_hi]) ** 2
+                    if weight.sum() <= 0.0:
+                        continue
+                    phase = np.unwrap(np.angle(envelope[b_lo:b_hi]))
+                    t = placed.seconds(entries[e] - placed.start + b_lo,
+                                       entries[e] - placed.start + b_hi)
+                    t_mean = np.average(t, weights=weight)
+                    p_mean = np.average(phase, weights=weight)
+                    spread = np.sum(weight * (t - t_mean) ** 2)
+                    if spread > 0.0:
+                        slope = np.sum(weight * (t - t_mean)
+                                       * (phase - p_mean)) / spread
+                        slopes[k][i].append((float(t_mean), float(slope),
+                                             float(weight.sum())))
+    return amplitude, floor, below, slopes
 
 
-def _solve_channel(signal, laid, dt, cycles):
-    return vold_kalman(signal, [t.argument for t in laid],
-                       [t.f for t in laid], [t.start for t in laid],
-                       dt, cycles=cycles)
+def _clock_correction(placed: _Laid, slopes_by_channel):
+    """(c1, c2) for one tone from its channels' chunk slopes: per
+    channel a weighted line through slope against time about the
+    span's middle, then the median across channels — the structure's
+    own phase differs channel to channel, the clock's does not. The
+    correction phase is c1·u + c2·u², u seconds from the middle, so
+    the slope it adds is c1 + 2·c2·u."""
+    middle = placed.n * placed.dt / 2.0
+    fits = []
+    for points in slopes_by_channel:
+        if not points:
+            continue
+        u = np.array([t for t, _s, _w in points]) - middle
+        slope = np.array([s for _t, s, _w in points])
+        weight = np.array([w for _t, _s, w in points])
+        if len(points) < 2 or np.ptp(u) == 0.0:
+            fits.append((float(np.average(slope, weights=weight)), 0.0))
+            continue
+        u_mean = np.average(u, weights=weight)
+        s_mean = np.average(slope, weights=weight)
+        p1 = (np.sum(weight * (u - u_mean) * (slope - s_mean))
+              / np.sum(weight * (u - u_mean) ** 2))
+        p0 = s_mean - p1 * u_mean
+        fits.append((float(p0), float(p1) / 2.0))
+    if not fits:
+        return 0.0, 0.0
+    c1, c2 = np.median(np.asarray(fits), axis=0)
+    return float(c1), float(c2)
 
 
 def sample_levels(history: Any, specification: SineSweepSpecification,
@@ -1033,60 +1367,43 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
     every edit of the setting.
 
     Returns, per wanted tone, a dict: 'tone', 'frequency' (the sampled
-    points), 'amplitude' and 'floor' (channels × points, debiased the
-    way the full extraction is), 'scatter_db' (channels × points, the
-    predicted standard deviation of a reading at this smoothing, from
-    the floor against the amplitude; infinite where the tone is under
-    the floor), and 'cycles'.
+    points), 'seconds', 'amplitude' and 'floor' (channels × points,
+    debiased the way the full extraction is), 'scatter_db' (channels ×
+    points, the predicted standard deviation of a reading at this
+    smoothing, from the floor against the amplitude; infinite where
+    the tone is under the floor), and 'cycles'.
     """
-    abscissa = np.asarray(history.abscissa, dtype=float)
-    dt = _even_steps(abscissa, None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
     rows = _control_rows(history, specification)
-    signals = np.asarray(history.ordinate, dtype=float)[rows]
+    signals = [history.ordinate[row] for row in rows]
     wanted = (specification.tones if tones is None
               else [specification.tone(name) for name in tones])
     laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles)
-    spans = [(t.start, t.start + t.n) for t in laid]
+    centers, pieces = [], []
+    for placed in laid:
+        first = int(placed.window_at(0) / 2.0)
+        last = placed.n - 1 - int(placed.window_at(placed.n - 1) / 2.0)
+        count = max(1, min(windows, placed.n))
+        chosen = (np.linspace(first, last, count).astype(np.int64)
+                  if last > first else np.array([placed.n // 2]))
+        centers.append(chosen)
+        for c in chosen:
+            half = int(placed.window_at(c) / 2.0) + 1
+            pieces.append((placed.start + c - half, placed.start + c + half + 1))
+    amplitude, floor, below, _slopes = _read_levels(
+        signals, laid, dt, cycles, centers, pieces=pieces)
     out = []
-    for k, this in enumerate(laid):
-        # the sampled centers, each a window clear of the span's ends
-        half_first = int(this.window[0] / 2.0)
-        half_last = int(this.window[-1] / 2.0)
-        first, last = half_first, this.n - 1 - half_last
-        count = max(1, min(windows, this.n))
-        centers = (np.linspace(first, last, count).astype(np.int64)
-                   if last > first else np.array([this.n // 2]))
-        amplitude = np.zeros((len(rows), len(centers)))
-        floor = np.zeros((len(rows), len(centers)))
-        for j, center in enumerate(centers):
-            half = int(this.window[center] / 2.0) + 1
-            piece_lo = this.start + max(center - half, 0)
-            piece_hi = this.start + min(center + half + 1, this.n)
-            for i in range(len(rows)):
-                solved = _solve_piece(
-                    signals[i], [t.argument for t in laid],
-                    [t.f for t in laid], spans, dt, cycles,
-                    piece_lo, piece_hi)
-                # every tone's envelope over the piece, as the full
-                # solve would hold it, so the residual is the same
-                envelopes = []
-                for t_index, that in enumerate(laid):
-                    envelope = np.zeros(that.n, dtype=complex)
-                    if solved[t_index] is not None:
-                        entry, piece = solved[t_index]
-                        envelope[entry - that.start:
-                                 entry - that.start + len(piece)] = piece
-                    envelopes.append(envelope)
-                lo_s = max(center - this.half[center], 0)
-                hi_s = min(center + this.half[center] + 1, this.n)
-                debiased, noise = _debias(signals[i], envelopes, laid, k,
-                                          lo_s, hi_s)
-                at = center - lo_s
-                amplitude[i, j], floor[i, j] = debiased[at], noise[at]
-        out.append({'tone': this.tone.name, 'frequency': this.f[centers],
-                    'seconds': this.onset + centers * dt,
-                    'amplitude': amplitude, 'floor': floor,
-                    'scatter_db': scatter_db(amplitude, floor),
+    for k, placed in enumerate(laid):
+        seconds = placed.seconds_at(centers[k])
+        # a reading under its floor is nothing seen; a weak reading that
+        # stood above it is still a reading, and says its own scatter
+        magnitude = np.where(below[k], 0.0, np.abs(amplitude[k]))
+        out.append({'tone': placed.tone.name,
+                    'frequency': placed.tone.frequency_at(seconds),
+                    'seconds': placed.onset + centers[k] * dt,
+                    'amplitude': magnitude,
+                    'floor': floor[k],
+                    'scatter_db': scatter_db(magnitude, floor[k]),
                     'cycles': float(cycles)})
     return out
 
@@ -1151,46 +1468,10 @@ def suggest_cycles(history: Any, specification: SineSweepSpecification,
             need = (1.5 * BASE_CYCLES
                     * (float(np.median(finite)) / target_db) ** 2)
         asked = max(asked, need)
-        _t, f = tone.trajectory(1.0 / float(history.sample_rate))
-        lowest = max(float(np.min(f)), 1e-9)
+        lowest = max(float(np.min(tone.frequency)), 1e-9)
         cap = min(cap, lowest * tone.duration() / 4.0)
     rung = next((c for c in CYCLES_LADDER if c >= asked), CYCLES_LADDER[-1])
     return float(max(BASE_CYCLES, min(rung, cap)))
-
-
-def _fit_drift(envelopes_by_channel, laid, t_index, dt):
-    """The sweep clock's drift against the specification, for one
-    tone: a quadratic phase (radians against seconds) common to the
-    channels, as (c1, c2) — the linear and quadratic coefficients.
-
-    Each channel's envelope phase is unwrapped and fitted by weighted
-    least squares, the weight the envelope's power so a stretch where
-    the tone is under the noise says nothing; the median across
-    channels is the drift, since the structure's own phase differs
-    channel to channel and the clock's does not. A smooth structural
-    phase trend that survives the median is harmless: moving the
-    argument by it rotates the envelope and leaves the magnitude.
-    """
-    this = laid[t_index]
-    t = np.arange(this.n) * dt
-    t = t - t.mean()
-    fits = []
-    for envelopes in envelopes_by_channel:
-        a = envelopes[t_index]
-        weight = np.abs(a) ** 2
-        if not np.any(weight > 0.0):
-            continue
-        phase = np.unwrap(np.angle(a))
-        basis = np.stack([np.ones_like(t), t, t ** 2], axis=1)
-        sqrt_w = np.sqrt(weight)[:, None]
-        coefficients, *_rest = np.linalg.lstsq(basis * sqrt_w,
-                                               phase * sqrt_w[:, 0],
-                                               rcond=None)
-        fits.append(coefficients[1:])
-    if not fits:
-        return 0.0, 0.0, t
-    c1, c2 = np.median(np.asarray(fits), axis=0)
-    return float(c1), float(c2), t
 
 
 def extract_sine(history: Any, specification: SineSweepSpecification,
@@ -1202,44 +1483,46 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
                  target_db: float = TARGET_SCATTER_DB) -> SineLevelSet:
     """Read each tone's level out of a recording, against its own sweep.
 
-    Reconstruct every wanted tone's sweep argument from the
-    specification's breakpoints, find where the environment's clock
-    begins in the recording (joint matched filter; `onsets` overrides
-    per tone name, and the found value rides the result as `.onset`),
-    then solve for every tone's complex envelope on every control
-    channel at once with the second-order **Vold-Kalman filter**
-    (`vold_kalman`): the record modeled as the sum of the tones on
-    their known sweeps, each envelope held to a slow curve over
-    `cycles` cycles of its own instantaneous frequency. Joint, so
-    crossing sweeps are separated by their frequency histories rather
-    than each reading the other as noise — the documented limit of the
-    tracking demodulation this replaced (2026-09-03).
+    Reconstruct every wanted tone's sweep from the specification's
+    breakpoints, find where the environment's clock begins in the
+    recording (joint matched filter; `onsets` overrides per tone name,
+    and the found value rides the result as `.onset`), then solve for
+    every tone's complex envelope on every control channel at once
+    with the second-order **Vold-Kalman filter** (`vold_kalman`): the
+    record modeled as the sum of the tones on their known sweeps, each
+    envelope held to a slow curve over `cycles` cycles of its own
+    instantaneous frequency. Joint, so crossing sweeps are separated
+    by their frequency histories rather than each reading the other
+    as noise — the documented limit of the tracking demodulation this
+    replaced (2026-09-03). Solved one chunk of the record at a time
+    (`_read_levels`), so the memory is a chunk's whatever the record's
+    length (2026-10-01).
 
     `cycles` None is **automatic** (`suggest_cycles`): the smoothing
     is climbed until the predicted scatter of the readings is under
     `target_db`, measured from the recording itself. The smoothing
     used rides the result as `SineLevelSet.cycles`.
 
-    The magnitude is *debiased* (`_debias`): a noisy envelope's
-    magnitude reads high, so the noise power left in the residual
-    around each sample, scaled by the filter's equivalent averaging
-    length, is subtracted from the squared magnitude before the square
-    root — a planted amplitude under 4x its own RMS of noise reads
-    back within a fraction of a dB. Where the tone is under that noise
-    the reading is reported at the floor and flagged
-    (`SineLevel.below_floor`) rather than at zero. The controller's
-    own live tracker carries the raw bias, which is worth remembering
-    when the two are compared.
+    The magnitude is *debiased*: a noisy envelope's magnitude reads
+    high, so the noise power left in the residual around each
+    reading, scaled by the filter's equivalent averaging length, is
+    subtracted from the squared magnitude before the square root — a
+    planted amplitude under 4x its own RMS of noise reads back within
+    a fraction of a dB. Where the tone is under that noise the reading
+    is reported at the floor and flagged (`SineLevel.below_floor`)
+    rather than at zero. The controller's own live tracker carries the
+    raw bias, which is worth remembering when the two are compared.
 
     With `refine`, the sweep clock is checked against the recording:
-    each tone's residual envelope phase is fitted (`_fit_drift`) and,
-    where the implied frequency offset reaches `REFINE_FRACTION` of
-    the filter's bandwidth anywhere along the sweep, the argument is
-    moved by it and the solve repeated, up to three times. The offset
-    applied at the end of each tone's sweep rides the result as
-    `SineLevel.drift_hz`, zero when none was needed.
+    each tone's envelope phase slope is fitted chunk by chunk
+    (`_clock_correction`) and, where the implied frequency offset
+    reaches `REFINE_FRACTION` of the filter's bandwidth at either end
+    of the sweep, the argument is moved by it and the solve repeated,
+    up to three times. The offset applied at the end of each tone's
+    sweep rides the result as `SineLevel.drift_hz`, zero when none was
+    needed.
 
-    The envelope is sampled every window/`points_per_window` along the
+    The envelope is read every window/`points_per_window` along the
     sweep, one (almost) independent reading each. Returns a
     `SineLevelSet` — one object, one `SineLevel` per tone inside,
     frequencies ascending whichever way the tone swept, each line
@@ -1247,10 +1530,9 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     before a tone does yields the lines it reached — the coverage the
     comparison reports.
     """
-    abscissa = np.asarray(history.abscissa, dtype=float)
-    dt = _even_steps(abscissa, None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
     rows = _control_rows(history, specification)
-    signals = np.asarray(history.ordinate, dtype=float)[rows]
+    signals = [history.ordinate[row] for row in rows]
     if cycles is None:
         cycles = suggest_cycles(history, specification, target_db,
                                 tones=tones, onsets=onsets)
@@ -1258,82 +1540,47 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     wanted = (specification.tones if tones is None
               else [specification.tone(name) for name in tones])
     laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles)
+    centers = [_centers(placed, points_per_window) for placed in laid]
 
-    # where each tone is read, settled before any solving
-    readings = []
-    for this in laid:
-        # sample centers tile the sweep: each one window/points apart,
-        # each an (almost) independent reading of the tracked amplitude
-        centers = []
-        k = int(this.window[0] / 2.0)
-        while k < this.n - int(this.window[min(k, this.n - 1)] / 2.0):
-            centers.append(k)
-            k += max(int(this.window[k] / points_per_window), 1)
-        centers = np.asarray(centers, dtype=np.int64)
-        if not len(centers):
-            raise ValueError(f'{this.tone.name}: no whole smoothing '
-                             'window fits the recorded span')
-        readings.append(centers)
-
-    drift = [0.0] * len(laid)
     for _pass in range(3 if refine else 1):
-        # the joint solve, one channel at a time: every tone's envelope
-        # together, and only this channel's alive — a long run's
-        # envelopes for every channel at once were a second way to run
-        # out of memory after the solve itself (2026-09-30)
-        amplitudes = [np.empty((len(rows), len(c)), dtype=complex)
-                      for c in readings]
-        floors = [np.empty((len(rows), len(c))) for c in readings]
-        flagged = [np.zeros((len(rows), len(c)), dtype=bool) for c in readings]
-        fits: list[list[Any]] = []
-        for i in range(len(rows)):
-            envelopes = _solve_channel(signals[i], laid, dt, cycles)
-            if refine:
-                fits.append(envelopes)
-            for t_index, (this, centers) in enumerate(zip(laid, readings)):
-                debiased, floor = _debias(signals[i], envelopes, laid, t_index)
-                a = envelopes[t_index]
-                below = debiased <= 0.0
-                shown = np.where(below, floor, debiased)
-                phase = np.exp(1j * np.angle(a))
-                amplitudes[t_index][i] = (shown * phase)[centers]
-                floors[t_index][i] = floor[centers]
-                flagged[t_index][i] = below[centers]
+        amplitude, floor, below, slopes = _read_levels(
+            signals, laid, dt, cycles, centers)
         if not refine:
             break
-        # the clock against the specification: move the argument where
-        # the drift would pull the reading down, and solve again
         moved = False
-        for t_index, this in enumerate(laid):
-            c1, c2, t = _fit_drift(fits, laid, t_index, dt)
-            offset_hz = (c1 + 2.0 * c2 * t) / (2.0 * np.pi)
-            bandwidth = _AVERAGE_BANDWIDTH * this.f / cycles
+        for k, placed in enumerate(laid):
+            c1, c2 = _clock_correction(placed, slopes[k])
+            half_span = placed.n * placed.dt / 2.0
+            ends = np.array([-half_span, half_span])
+            offset_hz = (c1 + 2.0 * c2 * ends) / (2.0 * np.pi)
+            f_ends = placed.f(0, 1)[0], placed.f(placed.n - 1, placed.n)[0]
+            bandwidth = _AVERAGE_BANDWIDTH * np.array(f_ends) / cycles
             if np.max(np.abs(offset_hz) / bandwidth) > REFINE_FRACTION:
-                laid[t_index] = this.shifted(c1 * t + c2 * t ** 2)
-                drift[t_index] += float(offset_hz[-1])
+                placed.c1 += c1
+                placed.c2 += c2
+                placed.drift_hz += float(offset_hz[-1])
                 moved = True
-        del fits
         if not moved:
             break
 
     out = []
-    for t_index, (this, centers) in enumerate(zip(laid, readings)):
-        frequencies = this.f[centers]
-        seconds = this.onset + centers * dt
+    for k, placed in enumerate(laid):
+        frequencies = placed.tone.frequency_at(placed.seconds_at(centers[k]))
+        seconds = placed.onset + centers[k] * dt
         order = np.argsort(frequencies)
         dims = [history.ordinate_dim[row] for row in rows]
         units = [history.ordinate_unit[row] for row in rows]
         out.append(SineLevel(
-            abscissa=frequencies[order], ordinate=amplitudes[t_index][:, order],
+            abscissa=frequencies[order], ordinate=amplitude[k][:, order],
             response_dof=list(specification.response_dof),
             ordinate_dim=dims, ordinate_unit=units,
-            comment=[f'{this.tone.name} at {dof}'
+            comment=[f'{placed.tone.name} at {dof}'
                      for dof in specification.response_dof],
-            tone=this.tone.name, onset=float(this.onset),
+            tone=placed.tone.name, onset=float(placed.onset),
             seconds=seconds[order],
-            floor=floors[t_index][:, order],
-            below_floor=flagged[t_index][:, order],
-            drift_hz=drift[t_index]))
+            floor=floor[k][:, order],
+            below_floor=below[k][:, order],
+            drift_hz=placed.drift_hz))
     return SineLevelSet(out, cycles=cycles)
 
 

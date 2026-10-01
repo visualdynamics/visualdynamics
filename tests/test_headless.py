@@ -359,3 +359,20 @@ def test_the_two_front_ends_reach_the_same_numbers(random_run):
                   and obj.bandwidth is None)
     assert np.isfinite(narrow.ordinate).all()
     assert narrow.abscissa[0] == 0.0
+
+
+def test_the_entry_module_launches_only_as_main(monkeypatch):
+    """A spawned worker process re-imports the parent's main module as
+    `__mp_main__`; `python -m visualdynamics` must not launch the app
+    again there (2026-10-01: eight workers each loaded a 23 GB file)."""
+    import runpy
+
+    from visualdynamics import gui
+
+    launches = []
+    monkeypatch.setattr(gui, 'main', lambda *a: launches.append(a) or 0)
+    runpy.run_module('visualdynamics.__main__', run_name='__mp_main__')
+    assert launches == []
+    with pytest.raises(SystemExit):
+        runpy.run_module('visualdynamics.__main__', run_name='__main__')
+    assert len(launches) == 1

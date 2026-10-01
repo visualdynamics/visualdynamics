@@ -1378,6 +1378,40 @@ class TimeHistory(DataArray):
     #: here at the time, the way the Compute buttons read `averaging`.
     filtering = None
 
+    #: how a sweep's levels are read out of this record (a
+    #: `core.sine.SineExtraction`), when something knows. Set in the
+    #: sine view; Extract Sine Levels reads whatever is here, and with
+    #: nothing here adopts the automatic setting (2026-09-30).
+    sine_extraction = None
+
+    def suggest_sine_extraction(self, specification: Any = None) -> Any:
+        """The extraction setting a record starts from: automatic
+        smoothing — chosen from the recording against the
+        specification when the levels are read — with the clock
+        refinement on.
+
+        Parameters
+        ----------
+        specification : SineSweepSpecification, optional
+            The sweep the levels would be read against. When given,
+            the smoothing the automatic would choose is worked out now
+            and rides the setting as `chosen`, so the sine view can
+            show it before anything is extracted.
+
+        Returns
+        -------
+        SineExtraction
+        """
+        from .sine import SineExtraction, suggest_cycles
+
+        setting = SineExtraction()
+        if specification is not None:
+            from dataclasses import replace
+
+            setting = replace(setting, chosen=suggest_cycles(
+                self, specification, setting.target_db))
+        return setting
+
     def suggest_filtering(self) -> Any:
         """A starting low-pass: a tenth of the sample rate, order 4.
 

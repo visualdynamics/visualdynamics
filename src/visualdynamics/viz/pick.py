@@ -173,7 +173,7 @@ def _segment_distances(point, starts, ends):
 
 
 class EntityPicker:
-    """Which node, coordinate system, traceline or element is under a pixel.
+    """Which node, coordinate system or element is under a pixel.
 
     Candidate geometry is reduced once to points or segments over node rows;
     a pick then projects, measures in pixels, and takes the nearest within
@@ -205,8 +205,7 @@ class EntityPicker:
             self.rows = None
             return
 
-        connectivity = (geometry.traceline_conn if self.kind == 'tracelines'
-                        else geometry.elem_conn)
+        connectivity = geometry.elem_conn
         starts, ends, owners = [], [], []
         for index, nodes in enumerate(connectivity):
             rows = [row_of[int(node)] for node in nodes if int(node) in row_of]
@@ -249,7 +248,7 @@ class EntityPicker:
              tolerance: float = 12.0) -> int | None:
         """The entity under (x, y) in pixels, or None.
 
-        Returns a node id, a coordinate system id, or a traceline/element
+        Returns a node id, a coordinate system id, or an element
         index, matching what the rest of the code uses to identify each kind.
         """
         screen, depth = self.projector.screen()

@@ -14,7 +14,7 @@ this package's own.
 Products (testdata/plate/, SI; only the UNV declares units):
 
 - geometry.npz / .unv / .exo   the full 169-node meshed plate
-- test_geometry.npz            the modal run's nodes, with tracelines
+- test_geometry.npz            the modal run's nodes, with drawn lines
 - shapes.npy                   mass-normalized modes to 5 kHz
 - frfs.npz / frfs.unv          25 Z responses x 4 references, accelerance
 - time.npz                     the impulse response from the corner drive
@@ -158,15 +158,16 @@ def make_test_geometry(model):
                 [707, 1310, 1307]]
     assert {n for conn in elements for n in conn} == set(nodes), (
         'every measured node carries a panel corner, and only those')
-    return visualdynamics.Geometry(
+    geometry = visualdynamics.Geometry(
         node_id=nodes,
         node_xyz=np.array([model.position(n) for n in nodes]),
-        traceline_id=list(range(1, len(lines) + 1)),
-        traceline_desc=[name for name, _line in lines],
-        traceline_conn=[np.asarray(line) for _name, line in lines],
         elem_conn=[np.asarray(conn) for conn in elements],
         elem_type=[44, 44, 44, 44, 41],
         length_unit='m')
+    # each drawn line a block of beams with no properties, named for
+    # the row or column it threads (2026-09-30)
+    geometry.attach_drawn_lines([(name, 1, [line]) for name, line in lines])
+    return geometry
 
 
 # ---- the shock recording ---------------------------------------------------

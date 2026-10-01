@@ -238,12 +238,19 @@ def _geometry_dataset(name: str, geometry: Geometry) -> escdf.Dataset:
         values[f'node_{axis}_direction'] = np.array(
             [geometry.dof_direction(f'{n}{axis.upper()}+') for n in nodes],
             dtype=np.float64).reshape(-1, 3)
-    if len(geometry.traceline_conn):
-        values['line_connection'] = [np.asarray(c, dtype=np.uint64)
-                                     for c in geometry.traceline_conn]
-        values['line_color'] = _colors(geometry.traceline_color)
+    # a drawn line — a block of two-node line elements with no
+    # properties — is the format's line, one entry per run, and not an
+    # element as well
+    drawn = geometry.drawn_lines()
+    runs = [(line, chain) for line in drawn for chain in line['chains']]
+    if runs:
+        values['line_connection'] = [np.asarray(chain, dtype=np.uint64)
+                                     for _l, chain in runs]
+        values['line_color'] = _colors([line['color'] for line, _c in runs])
+    drawn_blocks = {line['block'] for line in drawn}
     rows = [i for i, code in enumerate(geometry.elem_type)
-            if int(code) in _ELEMENT_NAMES]
+            if int(code) in _ELEMENT_NAMES
+            and int(geometry.elem_block[i]) not in drawn_blocks]
     if rows:
         values['element_connection'] = [np.asarray(geometry.elem_conn[i], dtype=np.uint64)
                                         for i in rows]
@@ -581,11 +588,6 @@ def _geometry_from(dataset: escdf.Dataset) -> Geometry:
         kwargs.update(cs_id=cs_id, cs_type=cs_type, cs_matrix=np.array(cs_matrix),
                       cs_name=[''] * len(cs_id), node_disp_cs=disp,
                       node_def_cs=[0] * len(node_id))
-    if v.get('line_connection') is not None:
-        lines = [np.asarray(c, dtype=np.int64) for c in v['line_connection']]
-        kwargs.update(traceline_id=list(range(1, len(lines) + 1)),
-                      traceline_conn=lines,
-                      traceline_color=_indices(v.get('line_color'), len(lines)))
     if v.get('element_connection') is not None:
         conn = [np.asarray(c, dtype=np.int64) for c in v['element_connection']]
         names = _strings(v.get('element_type')) or ['bar2'] * len(conn)
@@ -602,6 +604,15 @@ def _geometry_from(dataset: escdf.Dataset) -> Geometry:
                                  'element_connection, so nothing joins them'),
                       stacklevel=2)
     geometry = Geometry(node_id, xyz, **kwargs)
+    # the file's elements arrive in one block; a block holds one
+    # family (2026-09-30). Each line is a block of two-node line
+    # elements with no properties, one block per line
+    geometry.split_blocks_by_family()
+    if v.get('line_connection') is not None:
+        lines = [[int(n) for n in c] for c in v['line_connection']]
+        colors = _indices(v.get('line_color'), len(lines))
+        geometry.attach_drawn_lines([('', color, [line])
+                                     for line, color in zip(lines, colors)])
     unit = str(v.get('position_units') or '').strip()
     if unit and unit.lower() not in ('unknown', 'none'):
         try:

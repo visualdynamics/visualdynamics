@@ -15,7 +15,7 @@ The ground rules, per Brandon:
   The same point with the same role described two different ways is a
   disagreement, and refuses by naming the point.
 - A geometry merge must have disjoint node and coordinate-system ids —
-  colliding numbers are a decision, not a default. Traceline and element
+  colliding numbers are a decision, not a default. Element
   ids only name themselves, so those renumber quietly.
 - FRFs (and every other frequency-domain array) refuse when two records
   share a (response, reference) pair: the same measurement twice is not
@@ -165,10 +165,7 @@ def _merge_geometry(objects):
         cs_name=[names[cs] for cs in unique_cs],
         cs_type=[types[cs] for cs in unique_cs],
         cs_matrix=[matrices[cs] for cs in unique_cs],
-        # traceline and element ids only name themselves: renumber
-        traceline_color=concat('traceline_color'),
-        traceline_desc=listed('traceline_desc'),
-        traceline_conn=listed('traceline_conn'),
+        # element ids only name themselves: renumber
         elem_type=concat('elem_type'), elem_color=concat('elem_color'),
         elem_conn=listed('elem_conn'),
         length_unit=objects[0].length_unit)

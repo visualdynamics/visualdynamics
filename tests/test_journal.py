@@ -304,7 +304,7 @@ def test_deleting_sub_items_journals_the_call(window, pump, tmp_path):
 
 
 def test_geometry_edits_journal_and_replay(window, pump):
-    """Adding a traceline said nothing (Brandon, 2026-08-30) — the
+    """Adding a line said nothing (Brandon, 2026-08-30) — the
     audit that followed put the whole edit surface on the record:
     structural adds as their core verbs, cell edits as post-state
     echoes, all replayable."""
@@ -317,12 +317,12 @@ def test_geometry_edits_journal_and_replay(window, pump):
     nodes = [int(geometry.node_id[0]), int(geometry.node_id[1])]
 
     # the picking gesture's commit, exactly as the scene calls it
-    window.editing = ('Geometry', 'tracelines')
+    window.editing = ('Geometry', 'elements')
     window._picked_nodes = list(nodes)
     window._commit_picked_nodes()
     pump()
-    assert f"project['Geometry'].add_traceline({nodes!r})" in \
-        window.project.journal
+    assert any(line.startswith(f"project['Geometry'].add_element({nodes!r}")
+               for line in window.project.journal)
 
     # a cell edit in the node table: post-state echo, in SI
     from PySide6.QtCore import Qt
@@ -337,7 +337,7 @@ def test_geometry_edits_journal_and_replay(window, pump):
     room: dict = {}
     exec(window.project.session_script(), room)         # noqa: S102
     replayed = room['project']['Geometry']
-    assert len(replayed.traceline_conn) == len(geometry.traceline_conn)
+    assert len(replayed.elem_conn) == len(geometry.elem_conn)
     assert np.allclose(replayed.node_xyz, geometry.node_xyz), \
         'the echoed cell edit landed the same coordinates'
 

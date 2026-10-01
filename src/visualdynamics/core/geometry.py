@@ -1,4 +1,4 @@
-"""Test/model geometry: nodes, coordinate systems, tracelines, elements.
+"""Test/model geometry: nodes, coordinate systems, elements and blocks.
 
 Node coordinates are stored in SI meters once their units are known, resolved
 into the global cartesian frame. A geometry imported from a source that does
@@ -128,6 +128,49 @@ ELEMENT_TYPES = {
     201: ('pyramid5', 5, 'volume'),
     202: ('pyramid13', 13, 'volume'),
 }
+
+#: the element families the tree lists under a geometry (Brandon,
+#: 2026-09-30: one sub-item per element type, blocks under each), in
+#: listing order, with how each is told apart: drawn shape, then the
+#: corner count of the first-order element and its higher-order
+#: siblings. Every 2412 code lands in one of them.
+FAMILIES = ('beams', 'triangles', 'quads', 'tetras', 'wedges', 'hexes')
+#: the two the vocabulary also holds and the tree lists only when
+#: present: point elements (masses, grounded springs and dampers) and
+#: pyramids, which no file here has carried yet
+RARE_FAMILIES = ('points', 'pyramids')
+FAMILY_LABELS = {'beams': 'Beams', 'triangles': 'Triangles',
+                 'quads': 'Quads', 'tetras': 'Tetras', 'wedges': 'Wedges',
+                 'hexes': 'Hexes', 'points': 'Points', 'pyramids': 'Pyramids'}
+_FACE_FAMILIES = {3: 'triangles', 6: 'triangles', 9: 'triangles',
+                  4: 'quads', 8: 'quads', 12: 'quads'}
+_VOLUME_FAMILIES = {4: 'tetras', 10: 'tetras', 6: 'wedges', 15: 'wedges',
+                    24: 'wedges', 8: 'hexes', 20: 'hexes', 27: 'hexes',
+                    32: 'hexes', 5: 'pyramids', 13: 'pyramids'}
+
+
+def element_family(code: int) -> str:
+    """Which family a 2412 element code belongs to.
+
+    Parameters
+    ----------
+    code : int
+        The element type code.
+
+    Returns
+    -------
+    str
+        One of `FAMILIES`.
+    """
+    _name, count, shape = ELEMENT_TYPES[int(code)]
+    if shape == 'line':
+        return 'beams'
+    if shape == 'point':
+        return 'points'
+    if shape == 'face':
+        return _FACE_FAMILIES[count]
+    return _VOLUME_FAMILIES[count]
+
 
 
 def placed(local: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
@@ -379,13 +422,13 @@ DEFAULT_VIEW = View()
 
 
 class Geometry:
-    """Nodes, coordinate systems, tracelines, elements and blocks.
+    """Nodes, coordinate systems, elements and blocks.
 
     Parameters are array-likes; connectivity lists contain one integer array
-    of node ids per traceline/element. All coordinates in SI meters.
+    of node ids per element. All coordinates in SI meters.
 
     The arrays below are the storage; `nodes`, `coordinate_systems`,
-    `tracelines`, `elements` and `blocks` are **views** onto them, which
+    `elements` and `blocks` are **views** onto them, which
     is how the tree lists a geometry and how a script should usually
     reach one. A view is not a copy — writing through a row writes here.
 
@@ -405,12 +448,12 @@ class Geometry:
         cs_type: 0 cartesian, 1 cylindrical, 2 spherical (`CS_TYPES`).
         cs_matrix: `(systems, 4, 3)` — three direction rows then the
             origin, so `cs_matrix[i, 3]` is where system *i* sits.
-        traceline_id: Ids of the display polylines. Not unique: a UNV
-            trace line that lifts the pen arrives as several runs under
-            one id, and deleting that id removes all of them.
-        traceline_color: Palette index per line.
-        traceline_desc: Free text per line.
-        traceline_conn: One array of node ids per line, in drawing order.
+        (There are no tracelines (2026-09-30). A line drawn through
+        nodes is a block of two-node line elements with no properties —
+        `add_beams` makes one, `drawn_lines` reads them back for the
+        formats that keep tracelines apart — and the same block becomes
+        structure the moment its block carries a section. One storage
+        for one drawn idea; PLAN.md "Geometry by element family".)
         elem_id: Element ids. Labels — nothing refers to them.
         elem_type: UFF dataset 2412 descriptor code per element
             (`ELEMENT_TYPES` names them and says how each is drawn).
@@ -437,10 +480,6 @@ class Geometry:
                  cs_name: Sequence[str] | None = None,
                  cs_type: ArrayLike | None = None,
                  cs_matrix: ArrayLike | None = None,
-                 traceline_id: Ids | None = None,
-                 traceline_color: ArrayLike | None = None,
-                 traceline_desc: Sequence[str] | None = None,
-                 traceline_conn: Sequence[ArrayLike] | None = None,
                  elem_id: Ids | None = None,
                  elem_type: ArrayLike | None = None,
                  elem_color: ArrayLike | None = None,
@@ -474,16 +513,6 @@ class Geometry:
             if cs_matrix is not None
             else np.tile(np.vstack([np.eye(3), np.zeros(3)]), (c, 1, 1)))
 
-        t = len(traceline_conn) if traceline_conn is not None else 0
-        self.traceline_id: IdArray = (
-            _ids(traceline_id, 'traceline ids') if traceline_id is not None
-            else self._default(None, t, None, arange=True))
-        self.traceline_color: NDArray[np.int64] = self._default(
-            traceline_color, t, 1)
-        self.traceline_desc: list[str] = (
-            list(traceline_desc) if traceline_desc is not None else [''] * t)
-        self.traceline_conn: list[IdArray] = [
-            np.asarray(c, dtype=np.int64) for c in (traceline_conn or [])]
 
         e = len(elem_conn) if elem_conn is not None else 0
         self.elem_id: IdArray = (
@@ -539,7 +568,12 @@ class Geometry:
         self.mass_properties: MassProperties | None = None
         #: how it opens in 3-D (`View`); None opens on `DEFAULT_VIEW`
         self.view: View | None = None
-
+        # one block, one family (2026-09-30): a source that mixes them —
+        # UNV 2412 and the sdynpy layout carry no blocks at all, so every
+        # element arrives in one — is split on arrival rather than
+        # refused, the same way a mislabeled type is mended above. Here
+        # rather than in each reader, so every source is read the same way.
+        self.split_blocks_by_family()
         self.validate()
 
     @property
@@ -559,23 +593,19 @@ class Geometry:
         present, every identifier unique — and report what does not."""
         # An id that other data points at has to mean one thing:
         # connectivity names nodes by id, and a node names the systems it
-        # is placed and measured in. Traceline and element ids are
-        # labels — nothing refers to them — and a UNV trace line that
-        # lifts the pen legitimately arrives as several polylines under
-        # one id, so they are not held to this.
+        # is placed and measured in. Element ids are labels — nothing
+        # refers to them — so they are not held to this.
         # the same helper the constructor uses, so a duplicate introduced
         # by an edit is refused in the same words as one handed in
         for label, values in (('node ids', self.node_id),
                               ('coordinate system ids', self.cs_id)):
             _ids(values, label, unique=True)
         known = set(self.node_id.tolist())
-        for kind, conns in (('traceline', self.traceline_conn),
-                            ('element', self.elem_conn)):
-            for i, conn in enumerate(conns):
-                missing = set(conn.tolist()) - known
-                if missing:
-                    raise ValueError(
-                        f"{kind} {i} references unknown node ids {sorted(missing)}")
+        for i, conn in enumerate(self.elem_conn):
+            missing = set(conn.tolist()) - known
+            if missing:
+                raise ValueError(
+                    f"element {i} references unknown node ids {sorted(missing)}")
         if len(self.block_name) != len(self.block_id):
             raise ValueError(
                 f'{len(self.block_name)} block names for '
@@ -590,6 +620,15 @@ class Geometry:
         for code in np.unique(self.elem_type) if len(self.elem_type) else []:
             if int(code) not in ELEMENT_TYPES:
                 raise ValueError(f"Unknown element type code {int(code)}")
+        # one block, one family (2026-09-30): a block's properties are
+        # one kind, and the tree lists a block under its family
+        mixed = self.mixed_blocks()
+        if mixed:
+            raise ValueError(
+                'a block holds one element family; '
+                + ', '.join(f'block {b} holds {" and ".join(fams)}'
+                            for b, fams in mixed.items())
+                + ' — split_blocks_by_family() sorts them out')
 
     @property
     def num_nodes(self) -> int:
@@ -610,11 +649,6 @@ class Geometry:
     def coordinate_systems(self) -> EntityView:
         """Every coordinate system: `ids`, `names`, `types`, `matrices`."""
         return EntityView(self, 'coordinate_systems')
-
-    @property
-    def tracelines(self) -> EntityView:
-        """Every traceline: `ids`, `descriptions`, `colors`, `nodes`."""
-        return EntityView(self, 'tracelines')
 
     @property
     def elements(self) -> EntityView:
@@ -910,36 +944,175 @@ class Geometry:
         self.cs_matrix = np.concatenate([self.cs_matrix, matrix[np.newaxis]])
         return cs_id
 
-    def add_traceline(self, node_ids: Ids, color: int = 1,
-                      description: str = '') -> int:
-        """Append a traceline through the given nodes. Returns its index.
+    def add_beams(self, node_ids: Ids, block: int | None = None,
+                  color: int = 1, elem_type: int = 21) -> int:
+        """A chain of two-node line elements through the given nodes, in
+        order — what a traceline was (2026-09-30), and a run of beams
+        once the block carries a section. Returns the block's id.
 
         Parameters
         ----------
-        node_ids : int or sequence of int
-            The nodes the line passes through, in order.
+        node_ids : sequence of int
+            The nodes the line runs through, in order; two at least.
+        block : int, optional
+            The block the segments join. A new, unnamed block when
+            omitted — a drawn line is its own block, named by what
+            the line was called.
         color : int, default 1
-            Its display color index.
-        description : str, optional
-            A label for it.
+            The display color index, on every segment.
+        elem_type : int, default 21
+            The two-node line code (`ELEMENT_TYPES`): a beam unless
+            the source says rod, pipe or rigid bar.
 
         Returns
         -------
         int
-            The traceline's identifier.
+            The block the segments are in.
         """
-        nodes = np.asarray([int(n) for n in node_ids], dtype=np.int64)
-        unknown = set(nodes.tolist()) - set(self.node_id.tolist())
+        nodes = [int(n) for n in node_ids]
+        if len(nodes) < 2:
+            raise ValueError('a line needs at least two nodes')
+        unknown = set(nodes) - set(self.node_id.tolist())
         if unknown:
             raise ValueError(f'unknown nodes {sorted(unknown)}')
-        if len(nodes) < 2:
-            raise ValueError('a traceline needs at least two nodes')
-        self.traceline_id = np.append(self.traceline_id,
-                                      self._next_id(self.traceline_id))
-        self.traceline_color = np.append(self.traceline_color, int(color))
-        self.traceline_desc.append(str(description))
-        self.traceline_conn.append(nodes)
-        return len(self.traceline_conn) - 1
+        if ELEMENT_TYPES.get(int(elem_type), (None, 0, None))[1:] != (2, 'line'):
+            raise ValueError(f'{elem_type} is not a two-node line element type')
+        from itertools import pairwise
+
+        block = self.add_block() if block is None else int(block)
+        for a, b in pairwise(nodes):
+            self.add_element([a, b], elem_type=int(elem_type), color=color,
+                             block=block)
+        return block
+
+    def mixed_blocks(self) -> dict[int, list[str]]:
+        """{block id: families} for every block holding more than one
+        element family — none, in a geometry that keeps the rule.
+
+        Returns
+        -------
+        dict of int to list of str
+        """
+        found: dict[int, list[str]] = {}
+        for code, block in zip(self.elem_type, self.elem_block):
+            if int(code) not in ELEMENT_TYPES:
+                continue                 # validate names the stray code
+            family = element_family(int(code))
+            families = found.setdefault(int(block), [])
+            if family not in families:
+                families.append(family)
+        return {b: f for b, f in found.items() if len(f) > 1}
+
+    def split_blocks_by_family(self) -> dict[int, list[int]]:
+        """One block, one family: a block holding elements of more than
+        one family keeps its first family and each other family moves
+        into a new block named for it beside the old name. What a
+        source without blocks — UNV 2412, the sdynpy layout — needs on
+        the way in (Brandon, 2026-09-30: split on import rather than
+        show one block under two families and edit it twice).
+
+        Returns
+        -------
+        dict of int to list of int
+            {old block: [the new blocks made from it]}, empty when
+            nothing was mixed.
+        """
+        made: dict[int, list[int]] = {}
+        for block, families in self.mixed_blocks().items():
+            row = int(np.flatnonzero(self.block_id == block)[0])
+            base = self.block_name[row]
+            for family in families[1:]:
+                label = FAMILY_LABELS[family].lower()
+                new = self.add_block(f'{base} {label}'.strip())
+                rows = [i for i, (code, b) in enumerate(
+                    zip(self.elem_type, self.elem_block))
+                    if int(b) == block and element_family(int(code)) == family]
+                self.elem_block[rows] = new
+                made.setdefault(block, []).append(new)
+        return made
+
+    def attach_drawn_lines(self, lines: Sequence[tuple[str, int, Sequence[Ids]]]
+                           ) -> list[int]:
+        """Drawn lines from a format that keeps them apart from
+        elements, each as its own block of two-node line elements with
+        no properties — the reader's half of `drawn_lines`.
+
+        Parameters
+        ----------
+        lines : sequence of (name, color, chains)
+            One entry per line: what it was called, its color index,
+            and its runs, each a sequence of node ids in drawing order
+            (a UNV line that lifted the pen has several).
+
+        Returns
+        -------
+        list of int
+            The blocks made, one per line.
+        """
+        blocks = []
+        for name, color, chains in lines:
+            block = self.add_block(str(name))
+            for chain in chains:
+                self.add_beams(chain, block=block, color=int(color))
+            blocks.append(block)
+        return blocks
+
+    def is_drawn_line(self, block: int) -> bool:
+        """Whether a block is a drawn line: every element in it a
+        two-node line element, and no properties on the block — the
+        one discriminator, on screen and in every file (PLAN.md
+        "Geometry by element family"). An empty block is not one.
+
+        Parameters
+        ----------
+        block : int
+            The block's identifier.
+
+        Returns
+        -------
+        bool
+        """
+        block = int(block)
+        if block in self.block_properties:
+            return False
+        rows = np.flatnonzero(self.elem_block == block)
+        if not len(rows):
+            return False
+        return all(ELEMENT_TYPES.get(int(self.elem_type[r]),
+                                     (None, 0, None))[1:] == (2, 'line')
+                   for r in rows)
+
+    def drawn_lines(self) -> list[dict[str, Any]]:
+        """The drawn lines, as the formats that keep tracelines apart
+        from elements write them: per drawn-line block, in block order,
+        `{'block', 'name', 'color', 'chains'}` — the chains the block's
+        segments make when walked in element order, each a list of
+        node ids, a new chain wherever a segment does not start where
+        the last one ended. A block read from one polyline gives that
+        polyline back; one from a UNV line that lifted the pen gives
+        its runs back under the one block.
+
+        Returns
+        -------
+        list of dict
+        """
+        out = []
+        for row, block in enumerate(self.block_id):
+            block = int(block)
+            if not self.is_drawn_line(block):
+                continue
+            rows = np.flatnonzero(self.elem_block == block)
+            chains: list[list[int]] = []
+            for r in rows:
+                a, b = (int(n) for n in self.elem_conn[r][:2])
+                if chains and chains[-1][-1] == a:
+                    chains[-1].append(b)
+                else:
+                    chains.append([a, b])
+            out.append({'block': block, 'name': self.block_name[row],
+                        'color': int(self.elem_color[rows[0]]),
+                        'chains': chains})
+        return out
 
     def block_of(self, elem_id: int) -> str:
         """The name of the block an element belongs to, or ''.
@@ -1023,7 +1196,10 @@ class Geometry:
         color : int, default 1
             Its display color index.
         block : int, optional
-            Which block it belongs to.
+            Which block it belongs to. Left out, the first block that
+            holds this element's family, else a new one: a block holds
+            one family (2026-09-30), so a beam added to a mesh of
+            plates goes in a block of its own rather than theirs.
 
         Returns
         -------
@@ -1042,12 +1218,26 @@ class Geometry:
                     'give elem_type')
         if int(elem_type) not in ELEMENT_TYPES:
             raise ValueError(f'unknown element type {elem_type}')
+        family = element_family(int(elem_type))
+        if block is None:
+            held_by = {int(b): element_family(int(code))
+                       for code, b in zip(self.elem_type, self.elem_block)}
+            block = next((b for b in self.block_id.tolist()
+                          if held_by.get(int(b), family) == family), None)
+            if block is None:
+                block = self.add_block()
+        block = int(block)
+        # one block, one family: the block's properties are one kind
+        rows = np.flatnonzero(self.elem_block == block)
+        if len(rows):
+            held = element_family(int(self.elem_type[rows[0]]))
+            if held != family:
+                raise ValueError(
+                    f'block {block} holds {held}; a {family[:-1]} goes in '
+                    'a block of its own')
         self.elem_id = np.append(self.elem_id, self._next_id(self.elem_id))
         self.elem_type = np.append(self.elem_type, int(elem_type))
         self.elem_color = np.append(self.elem_color, int(color))
-        if block is None:
-            block = int(self.block_id[0]) if len(self.block_id) else 1
-        block = int(block)
         if block not in self.block_id.tolist():
             self.block_id = np.append(self.block_id, block)
             self.block_name.append('')
@@ -1102,7 +1292,7 @@ class Geometry:
     # ---- deletion -----------------------------------------------------------
 
     def renumber_node(self, row: int, node_id: int) -> None:
-        """Give a node a new id, carrying its tracelines and elements over.
+        """Give a node a new id, carrying its elements over.
 
         Connectivity names nodes by id, so a rename that left it alone
         would orphan every line and face touching the node.
@@ -1124,7 +1314,7 @@ class Geometry:
             raise ValueError(f'node {node_id} already exists')
         old = int(self.node_id[row])
         self.node_id[row] = node_id
-        for conn in (*self.traceline_conn, *self.elem_conn):
+        for conn in self.elem_conn:
             conn[conn == old] = node_id
 
     def renumber_block(self, row: int, block_id: int) -> None:
@@ -1180,8 +1370,8 @@ class Geometry:
     def delete_nodes(self, node_ids: Ids) -> dict[str, int]:
         """Remove nodes, and anything that referenced them.
 
-        A traceline or element naming a deleted node cannot survive, so it
-        goes too. Returns what was removed, for reporting.
+        An element naming a deleted node cannot survive, so it goes
+        too. Returns what was removed, for reporting.
 
         Parameters
         ----------
@@ -1198,23 +1388,18 @@ class Geometry:
         keep = ~np.isin(self.node_id, list(wanted))
         removed_nodes = int((~keep).sum())
         if not removed_nodes:
-            return {'nodes': 0, 'tracelines': 0, 'elements': 0}
+            return {'nodes': 0, 'elements': 0}
 
-        orphan_lines = [int(self.traceline_id[i])
-                        for i, conn in enumerate(self.traceline_conn)
-                        if wanted & {int(n) for n in conn}]
         orphan_elements = [int(self.elem_id[i])
                            for i, conn in enumerate(self.elem_conn)
                            if wanted & {int(n) for n in conn}]
-        self.delete_tracelines(orphan_lines)
         self.delete_elements(orphan_elements)
 
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
         self.node_xyz = self.node_xyz[keep]
         self.validate()
-        return {'nodes': removed_nodes, 'tracelines': len(orphan_lines),
-                'elements': len(orphan_elements)}
+        return {'nodes': removed_nodes, 'elements': len(orphan_elements)}
 
     def coincident_nodes(self, tolerance: float) -> dict[int, int]:
         """{node: the node it coincides with}: every node within
@@ -1264,7 +1449,7 @@ class Geometry:
 
     def merge_coincident_nodes(self, tolerance: float) -> dict[str, int]:
         """Make nodes that are one point one node: every element and
-        traceline naming a node within `tolerance` of another is renamed
+        element naming a node within `tolerance` of another is renamed
         to the lowest id among them, and the rest are removed. Plates
         connect only where they share nodes, so this is what ties a model
         built from planes together at its corners.
@@ -1298,9 +1483,6 @@ class Geometry:
         self.elem_conn = [np.asarray([mapping.get(int(n), int(n))
                                       for n in conn], dtype=np.int64)
                           for conn in self.elem_conn]
-        self.traceline_conn = [np.asarray([mapping.get(int(n), int(n))
-                                           for n in conn], dtype=np.int64)
-                               for conn in self.traceline_conn]
         keep = ~np.isin(self.node_id, list(mapping))
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
@@ -1354,35 +1536,6 @@ class Geometry:
         return sorted((row for row, value in enumerate(id_array)
                        if int(value) in wanted), reverse=True)
 
-    def delete_tracelines(self, traceline_ids: Ids) -> dict[str, int]:
-        """Remove tracelines by id. Ids that are not there are ignored.
-
-        One id can name several polylines — a UNV trace line that lifts
-        the pen arrives split into its drawn runs, all still that one
-        trace line — and deleting it removes all of them, which is what
-        deleting that trace line means.
-
-        Parameters
-        ----------
-        traceline_ids : int or sequence of int
-            The identifiers, one or many.
-
-        Returns
-        -------
-        dict of str to int
-            How many of each kind were removed, including the
-            dependents that went with them.
-        """
-        rows = self._rows_for(traceline_ids, self.traceline_id)
-        for row in rows:
-            del self.traceline_conn[row]
-            del self.traceline_desc[row]
-        keep = np.ones(len(self.traceline_id), dtype=bool)
-        keep[rows] = False
-        self.traceline_id = self.traceline_id[keep]
-        self.traceline_color = self.traceline_color[keep]
-        return {'tracelines': len(rows)}
-
     def delete_blocks(self, block_ids: Ids) -> dict[str, int]:
         """Remove blocks with what they hold: their elements, and the
         nodes no element outside them uses.
@@ -1392,8 +1545,7 @@ class Geometry:
         made a delete a merge; merging is its own act now
         (`merge_blocks`). A node an element of another block also uses
         stays, so a neighboring part is not cut into along the line the
-        two share — and a traceline through a removed node goes with it,
-        as `delete_nodes` has it.
+        two share.
 
         Parameters
         ----------
@@ -1403,13 +1555,13 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many blocks, elements, nodes and tracelines went.
+            How many blocks, elements and nodes went.
         """
         wanted = {int(block) for block in block_ids}
         keep = ~np.isin(self.block_id, list(wanted))
         removed = int((~keep).sum())
         if not removed:
-            return {'blocks': 0, 'elements': 0, 'nodes': 0, 'tracelines': 0}
+            return {'blocks': 0, 'elements': 0, 'nodes': 0}
         inside, outside = set(), set()
         doomed = []
         for row, conn in enumerate(self.elem_conn):
@@ -1426,7 +1578,7 @@ class Geometry:
             self.block_properties.pop(block, None)
         self.block_id = self.block_id[keep]
         return {'blocks': removed, 'elements': len(doomed),
-                'nodes': gone['nodes'], 'tracelines': gone['tracelines']}
+                'nodes': gone['nodes']}
 
     def merge_refusal(self, block_ids: Ids) -> str | None:
         """Why these blocks cannot be one, or None when they can: they
@@ -1524,25 +1676,21 @@ class Geometry:
             return NotImplemented
         scalar = all(np.array_equal(getattr(self, f), getattr(other, f)) for f in (
             'node_id', 'node_def_cs', 'node_disp_cs', 'node_color',
-            'cs_id', 'cs_type', 'traceline_id', 'traceline_color',
+            'cs_id', 'cs_type',
             'elem_id', 'elem_type', 'elem_color', 'elem_block'))
         arrays = (np.allclose(self.node_xyz, other.node_xyz)
                   and np.allclose(self.cs_matrix, other.cs_matrix))
-        ragged = (len(self.traceline_conn) == len(other.traceline_conn)
-                  and all(np.array_equal(a, b) for a, b in
-                          zip(self.traceline_conn, other.traceline_conn))
-                  and len(self.elem_conn) == len(other.elem_conn)
+        ragged = (len(self.elem_conn) == len(other.elem_conn)
                   and all(np.array_equal(a, b) for a, b in
                           zip(self.elem_conn, other.elem_conn)))
-        names = (self.cs_name == other.cs_name
-                 and self.traceline_desc == other.traceline_desc)
+        names = self.cs_name == other.cs_name
         return (scalar and arrays and ragged and names
                 and self.length_unit == other.length_unit)
 
     def __repr__(self) -> str:
         units = self.length_unit if self.units_defined else 'units undefined'
         return (f"Geometry({self.num_nodes} nodes, {len(self.cs_id)} coordinate systems, "
-                f"{len(self.traceline_conn)} tracelines, {len(self.elem_conn)} elements, "
+                f"{len(self.elem_conn)} elements, {len(self.block_id)} blocks, "
                 f"{units})")
 
     def save(self, path: str | os.PathLike) -> None:
@@ -1570,7 +1718,7 @@ class Geometry:
 
     def plot(self, unit_system: UnitSystem | None = None,
              **kwargs: Any) -> Any:
-        """Draw the geometry: nodes, elements and tracelines.
+        """Draw the geometry: nodes and elements.
 
         Parameters
         ----------

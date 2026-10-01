@@ -20,18 +20,17 @@ def geometry():
         node_id=[1, 2, 3, 4],
         node_xyz=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0],
                   [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
-        traceline_conn=[[1, 2, 3]],
-        traceline_desc=['edge'],
         elem_conn=[[1, 2, 3]],
         elem_type=[41],
+        block_name=['edge'],
         length_unit='m')
 
 
 def test_the_groups_are_named_as_the_tree_names_them(geometry):
     assert len(geometry.nodes) == 4
     assert len(geometry.coordinate_systems) == 1
-    assert len(geometry.tracelines) == 1
     assert len(geometry.elements) == 1
+    assert len(geometry.blocks) == 1
 
 
 def test_a_column_is_the_geometrys_own_array(geometry):
@@ -44,8 +43,8 @@ def test_a_column_is_the_geometrys_own_array(geometry):
 def test_a_row_writes_through_to_the_geometry(geometry):
     geometry.nodes[0].xyz = [9.0, 9.0, 9.0]
     assert list(geometry.node_xyz[0]) == [9.0, 9.0, 9.0]
-    geometry.tracelines[0].description = 'renamed'
-    assert geometry.traceline_desc[0] == 'renamed'
+    geometry.blocks[0].name = 'renamed'
+    assert geometry.block_name[0] == 'renamed'
 
 
 def test_a_row_reads_the_geometry_as_it_stands_now(geometry):
@@ -78,7 +77,7 @@ def test_adding_goes_through_the_geometrys_own_rules(geometry):
     with pytest.raises(ValueError, match='already exists'):
         geometry.nodes.add([0.0, 0.0, 0.0], node_id=1)
     with pytest.raises(ValueError, match='unknown nodes'):
-        geometry.tracelines.add([1, 999])
+        geometry.elements.add([1, 999])
 
 
 def test_everything_is_deleted_by_id(geometry):
@@ -87,9 +86,9 @@ def test_everything_is_deleted_by_id(geometry):
     geometry.nodes.delete([5])
     assert [int(i) for i in geometry.nodes.ids] == [1, 2, 3, 4]
 
-    line = int(geometry.tracelines[0].id)
-    geometry.tracelines.delete([line])
-    assert len(geometry.tracelines) == 0
+    element = int(geometry.elements[0].id)
+    geometry.elements.delete([element])
+    assert len(geometry.elements) == 0
 
 
 def test_deleting_an_id_that_is_not_there_is_harmless(geometry):
@@ -106,7 +105,7 @@ def test_the_columns_are_the_table_columns(geometry):
 
 def test_a_view_says_what_it_holds(geometry):
     assert repr(geometry.nodes) == '<4 nodes>'
-    assert repr(geometry.tracelines) == '<1 traceline>'
+    assert repr(geometry.blocks) == '<1 block>'
     assert repr(geometry.elements) == '<1 element>'
     assert 'id=1' in repr(geometry.nodes[0])
     assert 'matrix' not in repr(geometry.coordinate_systems[0])
@@ -121,5 +120,5 @@ def test_the_view_follows_the_geometry_as_it_changes(geometry):
 
 
 def test_connectivity_comes_back_as_the_node_ids(geometry):
-    assert [int(n) for n in geometry.tracelines[0].nodes] == [1, 2, 3]
+    assert [int(n) for n in geometry.elements[0].nodes] == [1, 2, 3]
     assert isinstance(geometry.elements[0].nodes, np.ndarray)

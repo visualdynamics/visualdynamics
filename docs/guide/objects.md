@@ -23,19 +23,27 @@ Two rules hold across all of them:
 
 ## Geometry — [`core.geometry`](../api/visualdynamics.core.geometry.md)
 
-Kind `geometry`. Nodes, coordinate systems, tracelines, elements and
-blocks, held as flat arrays: `node_id`, `node_xyz` (meters), the
-placement and measurement system of each node, `cs_matrix` (three
-direction rows and an origin per system), one connectivity array per
-traceline and per element, and the block each element belongs to with
-its name. `nodes`, `coordinate_systems`, `tracelines`, `elements` and
-`blocks` are row **views** onto those arrays — what the tree lists and
-what a script usually reaches; writing through a row writes the
-array.
+Kind `geometry`. Nodes, coordinate systems, elements and blocks, held
+as flat arrays: `node_id`, `node_xyz` (meters), the placement and
+measurement system of each node, `cs_matrix` (three direction rows
+and an origin per system), one connectivity array per element, and
+the block each element belongs to with its name. `nodes`,
+`coordinate_systems`, `elements` and `blocks` are row **views** onto
+those arrays — what a script usually reaches; writing through a row
+writes the array.
+
+There are no tracelines. A line drawn through nodes is a **block of
+two-node beam elements with no properties** — `add_beams` chains one
+through the nodes, `drawn_lines` reads them back as the runs they
+were — and the same block becomes structure the moment its block is
+given a section. A block holds one **element family** (beams,
+triangles, quads, tetras, wedges, hexes; `element_family` names a
+type code's), which is how exodus has always meant a block; a source
+that mixes families is split on arrival.
 
 Comes from universal files, Exodus, Nastran and Femap decks, STEP and
 IGES, 3MF and STL meshes, sdynpy arrays and `.vdyn` files. Does:
-`plot` and `plot_dofs`; `add_node`, `add_traceline`, `add_element`,
+`plot` and `plot_dofs`; `add_node`, `add_element`, `add_beams`,
 `add_block` and their `delete_*` and `renumber_*` counterparts;
 `missing_dofs` against a data object; `extent`; `validate`; `save`.
 
@@ -71,7 +79,8 @@ model is looked at changes; its nodes are not turned. The view is
 saved with the geometry.
 
 A geometry is also a finite element model once its blocks say what
-they are made of. The Blocks table's property columns take, per
+they are made of. The pencil on a block's row in the tree opens the
+blocks table on it, and its property columns take, per
 block, a material (name, E, ν, ρ) and either a thickness — for a block
 of quads or triangles — or a section and an orientation vector for a
 block of beams. A section is built from its **shape**: round tube, rod,
@@ -97,9 +106,9 @@ modulus, density and ratio read blank. In the app a link is a beam
 element: edit the geometry's Elements, switch on add mode (**+**), choose
 the beam and, in the **Block** drop-down beside it, *New block*; click
 the two nodes of each link — every link picked joins that new block —
-and give the block *rigid (massless)* in the Blocks table. The drop-down
-defaults to the first block while it holds the kind of element being
-added, and to a new block otherwise, so a beam never lands among
+and give the block *rigid (massless)* in the blocks table. The drop-down
+lists the blocks of the family being added to and a new one, and opens
+on the block the editing began from, so a beam never lands among
 plates. A bolted joint is quicker as a patch: select the elements under
 the washer (click one, Shift-click the rest) and press **Tie** on the
 bar — every node of the patch is linked to the nearest node of the block
@@ -217,7 +226,7 @@ sine test was controlled to: the `tones`, each with its breakpoints,
 sweep law, bands and start time, over the control DOFs. `sine_levels`
 (`SineLevelSet`) is one extraction — the per-tone `levels` a joint
 Vold-Kalman solve read out of a recording, grouped the way the
-specification groups its tones.
+specification groups its tones. Each level carries the noise floor beside every reading (`floor`) and where the tone sat under it (`below_floor`, the reading then reported at the floor); the set carries the smoothing it was read with (`cycles`), and a level the sweep clock was corrected on says by how much (`drift_hz`).
 
 ## Shapes — [`core.shapes`](../api/visualdynamics.core.shapes.md)
 

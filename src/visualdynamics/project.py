@@ -85,7 +85,6 @@ def describe(obj: Any) -> str:
     zero."""
     if isinstance(obj, Geometry):
         counts = [(obj.num_nodes, 'node'),
-                  (len(obj.traceline_conn), 'traceline'),
                   (len(obj.elem_conn), 'element')]
         if len(obj.cs_id) > 1:
             counts.insert(1, (len(obj.cs_id), 'coordinate system'))
@@ -2158,7 +2157,7 @@ class Project(dict):
     def merge_coincident_nodes(self, source: Any,
                                tolerance: float | None = None) -> dict:
         """Make a geometry's coincident nodes one node (Merge Coincident
-        Nodes): elements and tracelines renamed to the lowest id at each
+        Nodes): elements renamed to the lowest id at each
         point, the rest removed. Plates connect only where they share
         nodes, so this is what ties planes meshed apart at the lines where
         they meet.
@@ -3218,15 +3217,33 @@ class Project(dict):
         list of str
             The names of the levels added, one per tone.
         """
+        from dataclasses import replace
+
         from .core.sine import extract_sine
 
         source = self.name_of(source)
         if specification is None:
             spec = self.sine_sweep_specification
+            spec_name = self.name_of(spec)
         else:
-            spec = self[self.name_of(specification)]
-        levels = extract_sine(self[source], spec)
-        return [self._derive(source, levels, 'Sine Levels')]
+            spec_name = self.name_of(specification)
+            spec = self[spec_name]
+        history = self[source]
+        # the settings are the history's own; with none set, the
+        # suggestion is adopted the way `filter_data` adopts its filter,
+        # so the button works before the sine view has been visited
+        setting = history.sine_extraction
+        if setting is None:
+            setting = history.suggest_sine_extraction()
+        levels = extract_sine(history, spec, cycles=setting.cycles,
+                              refine=setting.refine,
+                              target_db=setting.target_db)
+        # what the automatic chose rides the setting, so the view and
+        # the journal say what was used
+        history.sine_extraction = replace(setting, chosen=levels.cycles)
+        return [self._derive(source, levels, 'Sine Levels',
+                             recipe=('extract_sine',
+                                     {'specification': spec_name}))]
 
     def _derive(self, source: str, obj: Any, name: str,
                 recipe: tuple[str, dict[str, Any]] | None = None,
@@ -3265,6 +3282,8 @@ class Project(dict):
         # and differentiation read the record's bytes, so refreshing a
         # re-filtered source cascades down the whole motion chain
         'filter_data': 'filtering', 'truncate_data': 'truncation',
+        # the smoothing and the refinement the levels were read with
+        'extract_sine': 'sine_extraction',
         'integrate': 'content', 'differentiate': 'content',
         # the settings and the nodes both: a moved node, or a turned
         # displacement system, changes the shapes as surely as a moved
@@ -3325,6 +3344,13 @@ class Project(dict):
             filtering = getattr(obj, 'filtering', None)
             return ('filtering', None if filtering is None
                     else asdict(filtering))
+        if reads == 'sine_extraction':
+            setting = getattr(obj, 'sine_extraction', None)
+            # `chosen` is what the automatic found, not a choice: a
+            # fingerprint that moved when the data answered would
+            # badge a result for having been computed
+            return ('sine_extraction', None if setting is None else
+                    (setting.cycles, setting.target_db, setting.refine))
         if reads == 'truncation':
             truncation = getattr(obj, 'truncation', None)
             return ('truncation', None if truncation is None
@@ -3562,9 +3588,9 @@ class Project(dict):
         """A method call on an object, journaled as a script makes it.
 
         The front ends' funnel for object verbs that are not Project
-        verbs — a traceline added to a geometry, a photo renamed —
+        verbs — a line added to a geometry, a photo renamed —
         each an act of the session the console must speak (Brandon,
-        2026-08-30: adding a traceline said nothing).
+        2026-08-30: adding a line said nothing).
 
         Parameters
         ----------
@@ -3596,6 +3622,8 @@ class Project(dict):
     _SCRIPT_IMPORTS: ClassVar[tuple[tuple[str, str], ...]] = (
         ('Averaging(', 'from visualdynamics.core.averaging import Averaging'),
         ('Filtering(', 'from visualdynamics.core.filters import Filtering'),
+        ('SineExtraction(',
+         'from visualdynamics.core.sine import SineExtraction'),
         ('Truncation(', 'from visualdynamics.core.truncate import Truncation'),
         ('Shock(', 'from visualdynamics.core.shocks import Shock'),
         ('Photos(', 'from visualdynamics.core.photos import Photos'),
@@ -3889,6 +3917,18 @@ for _verb in _JOURNALED_VERBS:
     setattr(Project, _verb, _journaled(getattr(Project, _verb)))
 
 
+def _extract_again(project, source, params):
+    """The sine levels read again with the history's current setting
+    — what `refresh` does for a level set whose smoothing moved."""
+    from .core.sine import extract_sine
+
+    history = project[source]
+    setting = history.sine_extraction or history.suggest_sine_extraction()
+    return extract_sine(history, project[params['specification']],
+                        cycles=setting.cycles, refine=setting.refine,
+                        target_db=setting.target_db)
+
+
 #: how each verb rebuilds its object from the source, for `refresh` —
 #: the same core calls the verbs make, minus the add
 _RECOMPUTE = {
@@ -3905,6 +3945,7 @@ _RECOMPUTE = {
     'compute_octave': lambda p, s, k: p[s].to_octave(
         k.get('per_octave', 6)),
     'filter_data': lambda p, s, k: p[s].filter(),
+    'extract_sine': lambda p, s, k: _extract_again(p, s, k),
     'truncate_data': lambda p, s, k: p[s].truncate(),
     # `get` with the module default, so a recipe that recorded None
     # stays raw — None is a choice here, not an absence

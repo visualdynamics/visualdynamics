@@ -672,8 +672,8 @@ def _origin_scale(scale):
     return factors
 
 
-def _build_geometry(nodes, tracelines, elements, scale, length_unit,
-                    systems=()):
+def _geometry_without_lines(nodes, elements, scale, length_unit,
+                            systems=()):
     from ..core.geometry import Geometry
 
     node_ids = [n[0] for n in nodes]
@@ -699,15 +699,29 @@ def _build_geometry(nodes, tracelines, elements, scale, length_unit,
         cs_name=[s[3] for s in systems] or None,
         cs_matrix=(np.array([s[4] for s in systems]) * _origin_scale(scale)
                    if systems else None),
-        traceline_id=[t[0] for t in tracelines],
-        traceline_color=[t[1] for t in tracelines],
-        traceline_desc=[t[2] for t in tracelines],
-        traceline_conn=[np.array(t[3]) for t in tracelines],
         elem_id=[e[0] for e in elements],
         elem_type=[e[1] for e in elements],
         elem_color=[e[2] for e in elements],
         elem_conn=[np.array(e[3]) for e in elements],
     )
+
+
+def _build_geometry(nodes, tracelines, elements, scale, length_unit,
+                    systems=()):
+    geometry = _geometry_without_lines(nodes, elements, scale, length_unit,
+                                       systems)
+    # 2412 carries no blocks, so every element arrived in one; a block
+    # holds one family (2026-09-30)
+    geometry.split_blocks_by_family()
+    # an 82 line is a block of two-node line elements with no
+    # properties; a line that lifted the pen is one block of several
+    # runs, so it goes back out under its one id
+    by_id: dict[int, tuple[str, int, list]] = {}
+    for tl_id, color, desc, run in tracelines:
+        _name, _color, runs = by_id.setdefault(tl_id, (desc, color, []))
+        runs.append(run)
+    geometry.attach_drawn_lines(list(by_id.values()))
+    return geometry
 
 
 # ---- writing --------------------------------------------------------------
@@ -789,19 +803,28 @@ def _geometry_datasets(geometry, unit_system=None):
         nodes.append(''.join(f'{v:25.16E}' for v in written[i]) + '\n')
     out.append(_block(2411, ''.join(nodes)))
 
-    for i, conn in enumerate(geometry.traceline_conn):
-        ids = [int(n) for n in conn]
-        body = (f'{int(geometry.traceline_id[i]):10d}{len(ids):10d}'
-                f'{int(geometry.traceline_color[i]):10d}\n'
-                f'{str(geometry.traceline_desc[i])[:80]}\n')
+    # a drawn line — a block of two-node line elements with no
+    # properties — is an 82 line, its runs joined by pen-ups (0), and
+    # not a 2412 element as well
+    drawn = geometry.drawn_lines()
+    for line in drawn:
+        ids: list[int] = []
+        for chain in line['chains']:
+            ids += ([0] if ids else []) + [int(n) for n in chain]
+        body = (f'{int(line["block"]):10d}{len(ids):10d}'
+                f'{int(line["color"]):10d}\n'
+                f'{str(line["name"])[:80]}\n')
         body += ''.join(
             ''.join(f'{n:10d}' for n in ids[start:start + 8]) + '\n'
             for start in range(0, len(ids), 8))
         out.append(_block(82, body))
+    drawn_blocks = {line['block'] for line in drawn}
 
     if len(geometry.elem_conn):
         elements = []
         for i, conn in enumerate(geometry.elem_conn):
+            if int(geometry.elem_block[i]) in drawn_blocks:
+                continue
             ids = [int(n) for n in conn]
             descriptor = int(geometry.elem_type[i])
             if descriptor >= 200:

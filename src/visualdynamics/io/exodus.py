@@ -8,7 +8,7 @@ named blocks with its systems as frames and its assignments as node
 sets, and shapes or records riding that geometry as nodal and global
 variables — damping and modal mass as `Damping`/`ModalMass`, a complex
 part as `<name>_IM` beside the real one — so a modal model round-trips
-lossless (2026-09-12). Tracelines have no exodus form and go out as
+lossless (2026-09-12). Drawn lines are beam blocks and go out as
 beam elements. The format carries no units; `length_unit` may be
 given to declare them at import, otherwise the geometry arrives
 unit-less.
@@ -708,7 +708,7 @@ _EXODUS_TYPES = {
 
 
 def save(obj: Any, path: str | os.PathLike, title: str = 'visualdynamics geometry',
-         tracelines_as_beams: bool = True, geometry: Geometry | None = None,
+         geometry: Geometry | None = None,
          unit_system: UnitSystem | None = None) -> None:
     """Write a geometry, or mode shapes, as exodus."""
     from ..core.data import Spectrum, TimeHistory
@@ -721,7 +721,6 @@ def save(obj: Any, path: str | os.PathLike, title: str = 'visualdynamics geometr
                 'file is a mesh with results, and shapes alone give '
                 'ParaView no mesh to draw or animate')
         return _save_geometry(geometry, path, title=title,
-                              tracelines_as_beams=tracelines_as_beams,
                               unit_system=unit_system, shapes=obj)
     if isinstance(obj, (TimeHistory, Spectrum)):
         if geometry is None:
@@ -730,10 +729,8 @@ def save(obj: Any, path: str | os.PathLike, title: str = 'visualdynamics geometr
                 'a mesh with results, and records alone give it no mesh '
                 'to sit on')
         return _save_geometry(geometry, path, title=title,
-                              tracelines_as_beams=tracelines_as_beams,
                               unit_system=unit_system, data=obj)
     return _save_geometry(obj, path, title=title,
-                          tracelines_as_beams=tracelines_as_beams,
                           unit_system=unit_system)
 
 
@@ -797,7 +794,7 @@ def _to_global(shapes, geometry, order, components, present, values=None):
 
 
 def _save_geometry(geometry, path, title='visualdynamics geometry',
-                   tracelines_as_beams=True, unit_system=None, shapes=None,
+                   unit_system=None, shapes=None,
                    data=None):
     """Write a geometry as exodus — with mode shapes riding along.
 
@@ -813,11 +810,9 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
     Elements are grouped into one block per type, which is how exodus wants
     them — a block holds elements of a single shape.
 
-    Exodus has no traceline, so by default each one is written as a run of
-    two-node beam elements rather than dropped. That is not reversible:
-    they read back as elements, because on the way in there is nothing to
-    say a beam was ever a traceline. Pass `tracelines_as_beams=False` to
-    leave them out instead.
+    Exodus has no traceline; a drawn line is a block of two-node line
+    elements here and goes out as that block (2026-09-30), which is
+    what it read back as before.
 
     Coordinate systems go out as the file's coordinate frames, and which
     node is placed or measured in which as named node sets — the format
@@ -843,15 +838,6 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
     types = list(geometry.elem_type)
     connectivity = [list(conn) for conn in geometry.elem_conn]
     ids = [int(i) for i in geometry.elem_id]
-    if tracelines_as_beams:
-        next_id = (max(ids) if ids else 0) + 1
-        for line in geometry.traceline_conn:
-            nodes = [int(n) for n in line]
-            for start, end in itertools.pairwise(nodes):
-                types.append(21)               # beam2
-                connectivity.append([start, end])
-                ids.append(next_id)
-                next_id += 1
 
     # Grouped by the geometry's own block first and by element type within
     # it, because exodus needs one type per block but the *block* is what

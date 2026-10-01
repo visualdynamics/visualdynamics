@@ -57,7 +57,7 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     # numbers as global puts it somewhere else entirely (Brandon,
     # 2026-09-20). Resolved in the file's own units, because an angle
     # is not a length and the scale must not touch it.
-    return Geometry(
+    geometry = Geometry(
         node_id=node['id'],
         node_xyz=to_global(node['coordinate'].astype(np.float64),
                            node['def_cs'], cs['id'], cs['cs_type'],
@@ -69,16 +69,23 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
         cs_name=[str(n) for n in cs['name']],
         cs_type=cs['cs_type'],
         cs_matrix=matrix,
-        traceline_id=tl['id'],
-        traceline_color=tl['color'],
-        traceline_desc=[str(s) for s in tl['description']],
-        traceline_conn=[np.asarray(c) for c in tl['connectivity']],
         elem_id=el['id'],
         elem_type=el['type'],
         elem_color=el['color'],
         elem_conn=[np.asarray(c) for c in el['connectivity']],
         length_unit=length_unit,
     )
+    # the layout carries no blocks, so every element arrived in one; a
+    # block holds one family (2026-09-30). A traceline is a block of
+    # two-node line elements with no properties, one block per id.
+    geometry.split_blocks_by_family()
+    by_id: dict[int, tuple[str, int, list]] = {}
+    for tl_id, color, desc, conn in zip(tl['id'], tl['color'],
+                                        tl['description'], tl['connectivity']):
+        _n, _c, runs = by_id.setdefault(int(tl_id), (str(desc), int(color), []))
+        runs.append([int(n) for n in conn])
+    geometry.attach_drawn_lines(list(by_id.values()))
+    return geometry
 
 
 def handles(obj: Any) -> bool:
@@ -127,17 +134,26 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     cs['cs_type'] = geometry.cs_type
     cs['matrix'] = matrices
 
-    traceline = np.zeros(len(geometry.traceline_conn), dtype=TRACELINE_DTYPE)
-    traceline['id'] = geometry.traceline_id
-    traceline['color'] = geometry.traceline_color
-    traceline['description'] = [str(s)[:40] for s in geometry.traceline_desc]
-    traceline['connectivity'] = _connectivity(geometry.traceline_conn)
+    # a drawn line goes out as the layout's traceline, one row per run
+    # under its block's id, and not as elements as well
+    drawn = geometry.drawn_lines()
+    runs = [(line, chain) for line in drawn for chain in line['chains']]
+    traceline = np.zeros(len(runs), dtype=TRACELINE_DTYPE)
+    traceline['id'] = [line['block'] for line, _c in runs]
+    traceline['color'] = [line['color'] for line, _c in runs]
+    traceline['description'] = [str(line['name'])[:40] for line, _c in runs]
+    traceline['connectivity'] = _connectivity(
+        [np.asarray(chain, dtype=np.int64) for _l, chain in runs])
+    drawn_blocks = {line['block'] for line in drawn}
+    kept = [i for i, b in enumerate(geometry.elem_block)
+            if int(b) not in drawn_blocks]
 
-    element = np.zeros(len(geometry.elem_conn), dtype=ELEMENT_DTYPE)
-    element['id'] = geometry.elem_id
-    element['type'] = geometry.elem_type
-    element['color'] = geometry.elem_color
-    element['connectivity'] = _connectivity(geometry.elem_conn)
+    element = np.zeros(len(kept), dtype=ELEMENT_DTYPE)
+    element['id'] = geometry.elem_id[kept]
+    element['type'] = geometry.elem_type[kept]
+    element['color'] = geometry.elem_color[kept]
+    element['connectivity'] = _connectivity(
+        [geometry.elem_conn[i] for i in kept])
 
     np.savez(path, node=node, coordinate_system=cs, traceline=traceline,
              element=element)

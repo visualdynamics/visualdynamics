@@ -13,7 +13,6 @@ shows exactly what the screen showed.
 from __future__ import annotations
 
 import html as html_escape
-import itertools
 import json
 import os
 import re
@@ -363,7 +362,7 @@ def _field_value(obj, field, us):
         return {
             'num_nodes': lambda: f'{len(obj.node_id)}',
             'num_elements': lambda: f'{len(obj.elem_id)}',
-            'num_tracelines': lambda: f'{len(obj.traceline_id)}',
+            'num_blocks': lambda: f'{len(obj.block_id)}',
         }.get(field, lambda: None)()
     if isinstance(obj, ChannelTable):
         return f'{obj.num_channels}' if field == 'num_channels' else None
@@ -1757,10 +1756,6 @@ def _scene_geometry(geometry, us):
     points = np.asarray(points, dtype=float)
     node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
     lines, faces = [], []
-    for index, conn in enumerate(geometry.traceline_conn):
-        chain = [node_row[int(n)] for n in conn if int(n) in node_row]
-        color = _hex(color_rgb(geometry.traceline_color[index]))
-        lines.extend([[a, b, color] for a, b in itertools.pairwise(chain)])
     for index, conn in enumerate(geometry.elem_conn):
         chain = [node_row[int(n)] for n in conn if int(n) in node_row]
         color = _hex(color_rgb(geometry.elem_color[index]))

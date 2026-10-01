@@ -78,7 +78,6 @@ the same five names:
 geometry = project.basis.geometry
 geometry.nodes                # <202 nodes>
 geometry.coordinate_systems
-geometry.tracelines
 geometry.elements
 geometry.blocks               # <3 blocks>: the parts the mesh is divided into
 ```
@@ -98,12 +97,13 @@ unique and connectivity honest:
 
 ```python
 node = geometry.nodes.add([1.0, 0.0, 0.0])   # returns the new id
-geometry.tracelines.add([101, 106, 111])
+geometry.elements.add([101, 106, 111])       # a triangle, in a block of triangles
+geometry.add_beams([101, 106, 111, 116])     # a drawn line: a block of beams
 geometry.nodes.delete([305])
-geometry.tracelines.delete([12])
+geometry.elements.delete([12])
 ```
 
-Everything is deleted by **id**, in all five groups. Deleting an id
+Everything is deleted by **id**, in all four groups. Deleting an id
 that is not there is not an error.
 
 A block is a part: it has an id and a name, and what it holds is read
@@ -113,15 +113,17 @@ element uses; nodes it shares with another block stay, so the neighbor
 is not cut into. Blocks that hold the same element types and carry the
 same material and thickness or section can be made one
 (`merge_blocks([7, 9])`, the first keeping its id and name; in the app,
-select them in the tree or the Blocks table and press **Merge Blocks**).
+select them in the tree or the blocks table and press **Merge Blocks**).
 Moving an element between blocks is an edit to the *element* — in the
-app, the Block column of the element table.
+app, the Block column of the element table — and a block holds one
+element family, so a quad is refused a block of beams by name. A block
+of two-node beams with no properties is a **drawn line**: what a
+traceline was, read and written as one by the formats that keep lines
+apart from elements, and structure the moment the block is given a
+section.
 
 Node and coordinate-system ids are unique, because connectivity and
-node placement refer to them. A traceline or element id is a label, and
-one traceline id can name several polylines — a UNV trace line that
-lifts the pen arrives split into its drawn runs, still one trace line.
-Deleting that id removes the whole thing, gaps and all.
+node placement refer to them. An element id is a label.
 
 CAD geometry arrives the same way. STEP and IGES (tessellated on
 import by a geometry kernel the packaged builds include and a pip

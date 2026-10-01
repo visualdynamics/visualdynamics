@@ -1016,7 +1016,7 @@ class Model:
     def from_geometry(cls, geometry: Geometry, material: Material | None = None,
                       section: Section | None = None,
                       total_mass: float | None = None,
-                      tracelines: bool = False, name: str = '',
+                      name: str = '',
                       groups: dict[int, str] | None = None,
                       sections: dict[str, Section] | None = None) -> Model:
         """A structure from a drawn shape: members on its edges, mass at its
@@ -1051,8 +1051,10 @@ class Model:
         Without block properties the grillage below is built, and
         `material` and `section` are required for it.
 
-        `tracelines` wires the display polylines too, which is what a
-        wireframe geometry with no elements needs to hold together at all.
+        A drawn line — a block of two-node line elements with no
+        properties, what a traceline was — is an element like any other
+        here and gives its run, which is what a wireframe geometry
+        needs to hold together at all.
         `groups` labels the nodes by the part they belong to; a Geometry
         does not carry that, and the first question asked of any result is
         which part of the structure a mode lives in. `sections` then gives
@@ -1104,10 +1106,6 @@ class Model:
                 runs.append((nodes + nodes[:1], label))
                 if len(nodes) in (3, 4):
                     model.add_face(nodes, group=label)
-        if tracelines:
-            runs.extend(([int(n) for n in conn], '')
-                        for conn in geometry.traceline_conn)
-
         seen: set[frozenset[int]] = set()
         for run, label in runs:
             chosen = section
@@ -1123,7 +1121,7 @@ class Model:
                 model.add_beam(a, b, material, chosen, group=label)
         if not seen:
             raise ValueError(
-                'the geometry has no elements or tracelines to make members '
+                'the geometry has no elements to make members '
                 'from, so there is nothing to connect its nodes')
 
         loose = sorted(set(model.node_ids)
@@ -1140,7 +1138,7 @@ class Model:
                 f'the geometry is {len(pieces)} disconnected pieces ({sizes} '
                 'nodes), which would solve as that many free bodies and give '
                 f'{6 * len(pieces)} zero-frequency modes rather than 6. Its '
-                'elements and tracelines do not join them: either they are '
+                'elements do not join them: either they are '
                 'meant to be separate structures, or the connectivity is '
                 'incomplete')
         if total_mass is not None:
@@ -1154,7 +1152,7 @@ class Model:
         each bringing its own six zero-frequency modes. It is the first
         thing to ask of any model that comes back too floppy, and the
         answer is almost never what was intended — the old airplane
-        fixture, meshed and wired through its own tracelines, turned out
+        fixture, meshed and wired through its own drawn lines, turned out
         to be three: the fuselage, a wing and the tail, none joined.
         """
         neighbors: dict[int, set[int]] = {n: set() for n in self.node_ids}

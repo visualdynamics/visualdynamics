@@ -91,8 +91,9 @@ def select_objects(window, pump, *names):
 
 
 def edit_category(window, pump, label):
-    """Open a geometry category's edit table, the way the pencil does,
-    and return its row."""
+    """Open a geometry category's or family's edit table, the way the
+    pencil does, and return its row ('Nodes', 'Coordinate systems',
+    'Beams', 'Quads', ...)."""
     item = window._item_for_object('Geometry')
     item.setExpanded(True)
     child = next(item.child(i) for i in range(item.childCount())
@@ -103,6 +104,34 @@ def edit_category(window, pump, label):
     window.edit_entities()
     pump()
     return child
+
+
+def block_row(window, block_id):
+    """A block's row in the tree, under its family (2026-09-30)."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    item = window._item_for_object('Geometry')
+    item.setExpanded(True)
+    for i in range(item.childCount()):
+        family = item.child(i)
+        for j in range(family.childCount()):
+            row = family.child(j)
+            if row.data(0, ROLE_REFERENCE) == ('block', item.text(0), block_id):
+                family.setExpanded(True)
+                return row
+    raise LookupError(f'no row for block {block_id}')
+
+
+def edit_block(window, pump, block_id):
+    """Open a block's edit table — the blocks table on its row — the way
+    the pencil on the block's row does, and return the row."""
+    row = block_row(window, block_id)
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(row)
+    row.setSelected(True)
+    window.edit_entities()
+    pump()
+    return row
 
 
 def overlay_selection(window, pump, modes=None):

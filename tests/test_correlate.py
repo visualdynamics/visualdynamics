@@ -112,8 +112,8 @@ def test_the_reduced_test_geometry_matches_the_modal_run():
     reduced_nodes = {int(node) for node in reduced.node_id}
     assert reduced_nodes == measured
     assert reduced_nodes < {int(node) for node in full.node_id}
-    assert len(reduced.traceline_conn) >= 2, (
-        'the sensors thread into tracelines, not a dot cloud')
+    assert len(reduced.drawn_lines()) >= 2, (
+        'the sensors thread into drawn lines, not a dot cloud')
 
 
 def _select(window, *names):

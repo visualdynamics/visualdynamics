@@ -62,14 +62,11 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     group.attrs['length_unit'] = geom.length_unit or ''
     for name in ('node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
                  'cs_id', 'cs_type', 'cs_matrix',
-                 'traceline_id', 'traceline_color',
                  'elem_id', 'elem_type', 'elem_color', 'elem_block',
                  'block_id'):
         group.create_dataset(name, data=getattr(geom, name))
     _write_strings(group, 'cs_name', geom.cs_name)
     _write_strings(group, 'block_name', geom.block_name)
-    _write_strings(group, 'traceline_desc', geom.traceline_desc)
-    _write_ragged(group, 'traceline_conn', geom.traceline_conn)
     _write_ragged(group, 'elem_conn', geom.elem_conn)
     # the rigid-body settings, when set — the point always, the mass
     # and inertia only when the set is to be mass-normalized, so an
@@ -171,16 +168,28 @@ def load_geometry(group: h5py.Group) -> Geometry:
     data = {name: group[name][()] for name in (
         'node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
         'cs_id', 'cs_type', 'cs_matrix',
-        'traceline_id', 'traceline_color',
         'elem_id', 'elem_type', 'elem_color', 'elem_block', 'block_id')}
     data['block_name'] = _read_strings(group, 'block_name')
     data['cs_name'] = _read_strings(group, 'cs_name')
-    data['traceline_desc'] = _read_strings(group, 'traceline_desc')
-    data['traceline_conn'] = _read_ragged(group, 'traceline_conn')
     data['elem_conn'] = _read_ragged(group, 'elem_conn')
     data['length_unit'] = group.attrs.get('length_unit', '') or None
     data['block_properties'] = _load_block_properties(group)
     geometry = Geometry(**data)
+    if 'traceline_conn' in group:
+        # a file from before 2026-09-30 carried tracelines apart from
+        # elements, and could hold a block of more than one family: a
+        # traceline becomes a block of two-node line elements with no
+        # properties, one block per id, and the blocks are split by
+        # family — the geometry it reads as now, saved back that way
+        geometry.split_blocks_by_family()
+        by_id: dict[int, tuple[str, int, list]] = {}
+        for tl_id, color, desc, conn in zip(
+                group['traceline_id'][()], group['traceline_color'][()],
+                _read_strings(group, 'traceline_desc'),
+                _read_ragged(group, 'traceline_conn')):
+            _n, _c, runs = by_id.setdefault(int(tl_id), (desc, int(color), []))
+            runs.append([int(n) for n in conn])
+        geometry.attach_drawn_lines(list(by_id.values()))
     geometry.mass_properties = _load_mass_properties(group)
     if 'view_eye' in group.attrs:
         from ..core.geometry import View
@@ -227,8 +236,16 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     if getattr(data, 'tone', ''):
         group.attrs['sine_tone'] = str(data.tone)
         group.attrs['sine_onset'] = float(data.onset)
+        group.attrs['sine_drift_hz'] = float(getattr(data, 'drift_hz', 0.0))
         if getattr(data, 'seconds', None) is not None:
             group.create_dataset('sine_seconds', data=data.seconds)
+        # the noise floor beside each reading and where the tone was
+        # under it (2026-09-30): what the plot marks and the judge skips
+        if getattr(data, 'floor', None) is not None:
+            group.create_dataset('sine_floor', data=data.floor)
+        if getattr(data, 'below_floor', None) is not None:
+            group.create_dataset('sine_below_floor',
+                                 data=data.below_floor.astype(np.uint8))
     # how a spectrum's values are read between the points. It travels
     # because it cannot be worked out again from the numbers: a
     # specification computed from a record and one written by hand can
@@ -285,6 +302,16 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
         if filtering.high is not None:
             group.attrs['filtering_high'] = filtering.high
         group.attrs['filtering_order'] = filtering.order
+    setting = getattr(data, 'sine_extraction', None)
+    if setting is not None:
+        # the automatic leaves `sine_cycles` out, which is how it reads
+        # back as automatic; what it chose travels beside it
+        if setting.cycles is not None:
+            group.attrs['sine_cycles'] = float(setting.cycles)
+        group.attrs['sine_target_db'] = float(setting.target_db)
+        group.attrs['sine_refine'] = bool(setting.refine)
+        if setting.chosen is not None:
+            group.attrs['sine_chosen'] = float(setting.chosen)
     truncation = getattr(data, 'truncation', None)
     if truncation is not None:
         group.attrs['truncation_start'] = truncation.start
@@ -351,8 +378,13 @@ def load_data(group: h5py.Group) -> DataArray:
     if 'sine_tone' in group.attrs:
         limits['tone'] = str(group.attrs['sine_tone'])
         limits['onset'] = float(group.attrs['sine_onset'])
+        limits['drift_hz'] = float(group.attrs.get('sine_drift_hz', 0.0))
         if 'sine_seconds' in group:
             limits['seconds'] = group['sine_seconds'][()]
+        if 'sine_floor' in group:
+            limits['floor'] = group['sine_floor'][()]
+        if 'sine_below_floor' in group:
+            limits['below_floor'] = group['sine_below_floor'][()].astype(bool)
     data = cls(
         **limits,
         abscissa=group['abscissa'][()],
@@ -382,6 +414,16 @@ def load_data(group: h5py.Group) -> DataArray:
         flat = _read_strings(group, 'roles')
         data.roles = {(dof, quantity): role for dof, quantity, role
                       in zip(flat[::3], flat[1::3], flat[2::3])}
+    if 'sine_target_db' in group.attrs:
+        from ..core.sine import SineExtraction
+
+        data.sine_extraction = SineExtraction(
+            cycles=(float(group.attrs['sine_cycles'])
+                    if 'sine_cycles' in group.attrs else None),
+            target_db=float(group.attrs['sine_target_db']),
+            refine=bool(group.attrs['sine_refine']),
+            chosen=(float(group.attrs['sine_chosen'])
+                    if 'sine_chosen' in group.attrs else None))
     if 'filtering_low' in group.attrs or 'filtering_high' in group.attrs:
         from ..core.filters import Filtering
 
@@ -582,6 +624,8 @@ def save_sine_levels(levels, group) -> None:
     is grouping, not a new format."""
     _write_strings(group, 'tone_order',
                    [level.tone for level in levels.levels])
+    if levels.cycles is not None:
+        group.attrs['sine_cycles'] = float(levels.cycles)
     tones = group.create_group('tones')
     for k, level in enumerate(levels.levels):
         save_data(level, tones.create_group(str(k)))
@@ -592,7 +636,9 @@ def load_sine_levels(group):
 
     return SineLevelSet([load_data(group['tones'][str(k)])
                          for k in range(len(
-                             _read_strings(group, 'tone_order')))])
+                             _read_strings(group, 'tone_order')))],
+                        cycles=(float(group.attrs['sine_cycles'])
+                                if 'sine_cycles' in group.attrs else None))
 
 
 def _savers():

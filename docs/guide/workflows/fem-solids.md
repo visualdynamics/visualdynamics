@@ -38,8 +38,8 @@ frame.project().save('frame.vdyn')    # the five models this page builds
 | Start a geometry | the project row's bar | **+** *New Geometry* |
 | Build it from blocks | the geometry's bar | *Add Block*, once per block |
 | Cut the holes | a script | `mesh.block(..., holes=...)`, which the dialog does not type |
-| Tie the screwed parts | the geometry's Elements | pick the wing's bricks under each washer, *Tie* to the frame |
-| Give each block its material | the Blocks table | a material; nothing else for a block of solids |
+| Tie the screwed parts | the geometry's Hexes | pick the wing's bricks under each washer, *Tie* to the frame |
+| Give each block its material | the pencil on the block's row | a material; nothing else for a block of solids |
 | Solve | the geometry's bar | *Solve Modes*, to 1500 Hz |
 
 ## 1. Blocks
@@ -108,8 +108,9 @@ under it.
 
 ## 3. Materials and solve
 
-Expand the geometry in the tree and click the pencil on **Blocks**: one
-row per part. A block of solids takes a material and nothing else.
+Expand the geometry in the tree, then **Hexes**, and click the pencil
+on a block's row: the blocks table opens on it, one row per part. A
+block of solids takes a material and nothing else.
 
 | Block | Material |
 |---|---|

@@ -22,11 +22,12 @@ def foreign_geometry():
     never uses, so everything measured on the plate is missing here.
     Synthesized rather than shipped — the fixtures all describe one
     article now, and incompatibility needs a second one."""
-    return visualdynamics.Geometry(
+    geometry = visualdynamics.Geometry(
         node_id=[9001, 9002, 9003, 9004],
         node_xyz=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
-        traceline_id=[1], traceline_conn=[[9001, 9002, 9003, 9004]],
         length_unit='m')
+    geometry.add_beams([9001, 9002, 9003, 9004])
+    return geometry
 
 
 def foreign_frfs():

@@ -20,7 +20,8 @@ down through it, a near-dwell, and a log sweep — 16.5 seconds at
 | Import the run | drag the `.nc4` onto the window | `project.import_file(path)` |
 | The specification | arrives with the run — nothing to declare | (read from the file's environment) |
 | See the sweep itself | the time history's **wavelet** reading | `plot_scalogram(...)` from `visualdynamics.plot` |
-| Extract the levels | Extract Sine Levels on the bar | `project.extract_sine(project.time_history)` |
+| Set the smoothing | the **Sine Levels** view: automatic, or a number of cycles | `history.sine_extraction = SineExtraction(cycles=40)` |
+| Extract the levels | Extract Sine Levels on the bar, or on the view | `project.extract_sine(project.time_history)` |
 | Judge them | select levels and specification together | `plot_comparison(levels, spec)` from `visualdynamics.plot` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
 | Report | *Generate Report* on the bar, the project row selected | `project.generate_report('sine')` |
@@ -82,6 +83,25 @@ jointly, two tones that run close together for a stretch are
 separated by their different frequency histories rather than each
 reading the other as its own level, which is what a tracking filter
 (the controller's own included) does.
+
+How much each reading averages over is the one setting, and it rides
+the time history: the **Sine Levels** view on the plot bar, offered
+for a record beside a sweep specification, shows it with what follows
+from it — the smoothing window in seconds at the sweep's ends, the
+scatter a reading is predicted to carry, how much of the sweep sits
+under the noise floor — and the readings themselves sampled along
+each tone at that setting, so the trade is seen before anything is
+made. **Automatic** climbs the smoothing until a reading is predicted
+to scatter less than the target (1 dB) and says what it chose; a
+clean sine test stays at ten cycles, a sweep under a random
+environment goes to forty or more. **Set** takes the number typed.
+*Follow the clock* fits the sweep's clock to the recording and solves
+again when the recorded sweep drifted from the one commanded, so a
+long run does not read low toward its end. The button on the panel
+is the same Extract Sine Levels. A reading where the tone sat under
+the noise is reported *at* the floor and drawn as a hollow ring —
+how much was not seen, rather than a hole — and the deviation score
+leaves it out.
 
 One object comes out, grouped the way the specification groups its
 tones, with a per-tone clock. Selecting the levels beside the

@@ -67,7 +67,7 @@ def test_deleting_a_category_empties_it_and_leaves_it_there(geometry_item,
     window.tree.clearSelection()
     elements = next(geometry_item.child(i)
                     for i in range(geometry_item.childCount())
-                    if geometry_item.child(i).text(0).startswith('Elements'))
+                    if geometry_item.child(i).text(0).startswith('Quads'))
     window.tree.setCurrentItem(elements)
     elements.setSelected(True)
     pump()
@@ -77,8 +77,8 @@ def test_deleting_a_category_empties_it_and_leaves_it_there(geometry_item,
     assert len(geometry.elem_conn) == 0, 'every element gone'
     assert geometry.num_nodes > 0, 'the nodes are not the elements'
     assert window.objects.get('Geometry') is geometry, 'the geometry stays'
-    assert geometry_item.childCount() == 5, 'and so do all its categories'
-    assert any(geometry_item.child(i).text(0).startswith('Elements (0)')
+    assert geometry_item.childCount() == 8, 'and so do all its categories'
+    assert any(geometry_item.child(i).text(0).startswith('Quads (0)')
                for i in range(geometry_item.childCount()))
     assert 'Removed' in window.statusBar().currentMessage()
     geometry.validate()

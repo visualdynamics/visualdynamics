@@ -219,7 +219,7 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                 'points, which this reader does not resolve — redefine '
                 'it as the equivalent CORD2 card')
         elif name == 'PLOTEL':
-            # Nastran's own display-only line: exactly a traceline
+            # Nastran's own display-only line: exactly a drawn line
             tracelines.append([int(card[2]), int(card[3])])
         elif name == 'CONM2':
             elements.append((int(card[1]), 161, [int(card[2])], 0))
@@ -274,9 +274,6 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
             [np.vstack([np.eye(3), np.zeros(3)])[None]]
             + [_resolved_matrix(systems, k, path)[None]
                for k in sorted(systems)]),
-        traceline_id=list(range(1, len(tracelines) + 1)),
-        traceline_color=[1] * len(tracelines),
-        traceline_conn=[np.array(t) for t in tracelines],
         elem_id=[e[0] for e in elements],
         elem_type=[e[1] for e in elements],
         elem_color=[1] * len(elements),
@@ -287,6 +284,10 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                     for pid in sorted({e[3] for e in elements})],
         block_properties=_block_properties(materials, solids, shells),
     )
+    # the PLOTELs are one drawn line — a block of two-node line
+    # elements with no properties — chained where they join
+    if tracelines:
+        geometry.attach_drawn_lines([('PLOTEL', 1, tracelines)])
     if length_unit:
         geometry.define_units(length_unit)
     return geometry
@@ -456,7 +457,7 @@ def save(geometry: Geometry, path: str | os.PathLike,
     PID 1 and no PSHELL/PSOLID/MAT cards are written, because
     properties are the analyst's statement about the structure and
     inventing them here would put made-up stiffness in a real deck.
-    Grids go out large-field for full precision. Tracelines become
+    Grids go out large-field for full precision. Drawn lines become
     PLOTEL chains — Nastran's own display-only line. Values are
     written in SI, the geometry's storage.
     """
@@ -488,7 +489,13 @@ def save(geometry: Geometry, path: str | os.PathLike,
             f'{x:16.9E}{y:16.9E}*\n'
             f'*       {z:16.9E}'
             f'{int(geometry.node_disp_cs[i]):>16d}\n')
+    # a drawn line — a block of two-node line elements with no
+    # properties — goes out as PLOTEL chains and not as elements too
+    drawn = geometry.drawn_lines()
+    drawn_blocks = {line['block'] for line in drawn}
     for i, code in enumerate(geometry.elem_type):
+        if int(geometry.elem_block[i]) in drawn_blocks:
+            continue
         code = int(code)
         name = _CARD_NAMES.get(code)
         if name is None:
@@ -505,11 +512,11 @@ def save(geometry: Geometry, path: str | os.PathLike,
         else:
             lines.append(_card(name, int(geometry.elem_id[i]), 1, *conn))
     plotel = 1 + (max((int(e) for e in geometry.elem_id), default=0))
-    for i, conn in enumerate(geometry.traceline_conn):
-        chain = [int(n) for n in conn]
-        for a, b in pairwise(chain):
-            lines.append(_card('PLOTEL', plotel, a, b))
-            plotel += 1
+    for line in drawn:
+        for chain in line['chains']:
+            for a, b in pairwise(chain):
+                lines.append(_card('PLOTEL', plotel, a, b))
+                plotel += 1
     lines.append('ENDDATA\n')
     with open(str(path), 'w') as f:
         f.writelines(lines)

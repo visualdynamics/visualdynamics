@@ -33,9 +33,21 @@ def same_geometry(a, b, elements=True, tracelines=True):
     assert np.array_equal(a.node_id, b.node_id)
     assert np.allclose(a.node_xyz, b.node_xyz)
     if tracelines:
-        assert len(a.traceline_conn) == len(b.traceline_conn)
-        assert all(np.array_equal(x, y)
-                   for x, y in zip(a.traceline_conn, b.traceline_conn))
+        # the drawn lines, as their runs: a format that keeps lines
+        # apart from elements writes them after the elements, so the
+        # element order may differ while the lines are the same
+        ours = sorted(tuple(map(tuple, line['chains']))
+                      for line in a.drawn_lines())
+        theirs = sorted(tuple(map(tuple, line['chains']))
+                        for line in b.drawn_lines())
+        assert ours == theirs
+    if elements and a.drawn_lines():
+        ours = sorted((int(t), tuple(int(n) for n in c))
+                      for t, c in zip(a.elem_type, a.elem_conn))
+        theirs = sorted((int(t), tuple(int(n) for n in c))
+                        for t, c in zip(b.elem_type, b.elem_conn))
+        assert ours == theirs
+        return
     if elements:
         assert np.array_equal(np.asarray(a.elem_type, dtype=int),
                               np.asarray(b.elem_type, dtype=int))
@@ -240,23 +252,19 @@ def test_an_exodus_whose_frames_are_all_local_still_gets_a_global_system(
     assert set(back.node_def_cs) == {1} and set(back.node_disp_cs) == {1}
 
 
-def test_exodus_writes_tracelines_as_beams(tmp_path):
-    """Exodus has no traceline, so they go as runs of two-node beams."""
-    source = visualdynamics.import_file(survey('geometry.npz'))
+def test_exodus_writes_drawn_lines_as_beam_blocks(tmp_path):
+    """Exodus has no traceline; a drawn line is a block of two-node
+    beams here and goes out as that block, and comes back as it."""
+    source = visualdynamics.import_file(plate('test_geometry.npz'))
+    assert source.drawn_lines()
     path = str(tmp_path / 'beams.exo')
     visualdynamics.export_file(source, path, format='exodus')
     back = visualdynamics.import_file(path)
-    segments = sum(len(line) - 1 for line in source.traceline_conn)
-    assert len(back.elem_conn) == len(source.elem_conn) + segments
-    assert sum(1 for code in back.elem_type if int(code) == 21) == segments
+    assert len(back.elem_conn) == len(source.elem_conn)
+    beams = sum(1 for code in source.elem_type if int(code) == 21)
+    assert sum(1 for code in back.elem_type if int(code) == 21) == beams
+    assert len(back.drawn_lines()) == len(source.drawn_lines())
     back.validate()
-
-
-def test_exodus_can_leave_tracelines_out(tmp_path):
-    source = visualdynamics.import_file(survey('geometry.npz'))
-    path = str(tmp_path / 'plain.exo')
-    visualdynamics.io.exodus.save(source, path, tracelines_as_beams=False)
-    assert len(visualdynamics.import_file(path).elem_conn) == len(source.elem_conn)
 
 
 # ---- unv -------------------------------------------------------------------
@@ -737,9 +745,8 @@ def test_paraviews_own_reader_accepts_the_modal_exodus(tmp_path):
     element_blocks = reader.GetOutput().GetBlock(0)
     meshes = [element_blocks.GetBlock(i)
               for i in range(element_blocks.GetNumberOfBlocks())]
-    beams = sum(len(line) - 1 for line in geometry.traceline_conn)
     assert sum(m.GetNumberOfCells() for m in meshes) == \
-        len(geometry.elem_conn) + beams, 'a mesh, not a point cloud'
+        len(geometry.elem_conn), 'a mesh, not a point cloud'
     arrays = [meshes[0].GetPointData().GetArrayName(i)
               for i in range(meshes[0].GetPointData().GetNumberOfArrays())]
     assert 'Disp' in arrays, 'the vector ParaView warps by'

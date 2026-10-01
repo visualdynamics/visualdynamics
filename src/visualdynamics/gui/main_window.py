@@ -5985,12 +5985,14 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, run)
 
     def _strip_tick(self, done: int, total: int) -> None:
-        """The strip's progress bar at `done` of `total`, painted now:
-        the one way a long operation on the event loop's own thread
-        shows its progress — the import's bar since 2026-09, the sine
-        extraction's and the modal solve's since 2026-10-01
-        (`Project.extract_sine(progress=)`, `Project.solve_modes(progress=)`).
-        The caller hides the bar when it is done."""
+        """The strip's progress bar at `done` of `total`, painted now.
+
+        Two callers. The import ticks it from the event loop's own
+        thread, blocked for the duration, so the repaint and the pump
+        below are its only way onto the screen. `_run_long` ticks it
+        through a queued signal while the loop is running, where the
+        pump is a harmless extra turn. The caller hides the bar when
+        it is done."""
         bar = self._import_progress
         bar.setRange(0, max(int(total), 1))
         bar.setValue(int(done))
@@ -6016,6 +6018,61 @@ class MainWindow(QMainWindow):
         # which are the re-entrancies the blocking exists for.
         QApplication.processEvents(
             QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
+    def _run_long(self, status: str, verb, /, *args, **kwargs):
+        """Run a project verb that takes a while, with the window alive.
+
+        The verb runs on a worker thread with `progress=` wired to the
+        strip's bar; this thread runs the event loop meanwhile, with
+        user input excluded, so the status line and the bar are
+        painted the way anything is — by the loop turning — rather
+        than pumped from inside a blocked one. The pumped version
+        (`_strip_tick`'s repaint and processEvents, the import's way)
+        never painted the extraction's status line or its bar on
+        Brandon's Mac (2026-10-01): a message set in the same turn the
+        work starts cannot paint, and on macOS a layer-backed view is
+        flushed by the run loop, not by a repaint. What the verb
+        raises is raised here, on this thread, so a handler's
+        `except ValueError` still reads it. The wait cursor is up for
+        the duration and the bar is put away after, success or not.
+        """
+        import threading
+
+        from PySide6.QtCore import QObject, Signal
+
+        class Relay(QObject):
+            told = Signal(int, int)
+            finished = Signal()
+
+        relay = Relay()
+        loop = QEventLoop()
+        relay.told.connect(self._strip_tick)
+        relay.finished.connect(loop.quit)
+        outcome: list = []
+
+        def work():
+            try:
+                outcome.append((True, verb(*args, progress=relay.told.emit,
+                                           **kwargs)))
+            except BaseException as failure:  # noqa: BLE001 — re-raised below
+                outcome.append((False, failure))
+            finally:
+                relay.finished.emit()
+
+        self._show_status(status)
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        thread = threading.Thread(target=work, name=status, daemon=True)
+        try:
+            thread.start()
+            loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+            thread.join()
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._import_progress.hide()
+        ok, value = outcome[0]
+        if not ok:
+            raise value
+        return value
 
     @contextlib.contextmanager
     def _asking(self):
@@ -10621,17 +10678,13 @@ class MainWindow(QMainWindow):
                     'Select a time history to extract sine levels')
                 return
             time_name = self.object_item().text(0)
-        self._show_status(f'Extracting sine levels from {time_name}…')
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            added = self.project.extract_sine(time_name,
-                                              progress=self._strip_tick)
+            added = self._run_long(
+                f'Extracting sine levels from {time_name}…',
+                self.project.extract_sine, time_name)
         except (ValueError, AttributeError) as refusal:
             self._show_status(f'{time_name}: {refusal}')
             return
-        finally:
-            QApplication.restoreOverrideCursor()
-            self._import_progress.hide()
         for k, name in enumerate(added):
             self.show_object(name, source=time_name, select=k == 0)
         levels = self.objects[added[0]]
@@ -11155,16 +11208,12 @@ class MainWindow(QMainWindow):
             100.0, 2)
         if not ok:
             return
-        self._show_status(f'Solving modes to {top:g} Hz…')
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            acted = self._act_on(
-                Geometry, 'Select a geometry to solve', self.project.solve_modes,
-                maximum_frequency=top, damping=percent / 100.0,
-                progress=self._strip_tick)
-        finally:
-            QApplication.restoreOverrideCursor()
-            self._import_progress.hide()
+        acted = self._act_on(
+            Geometry, 'Select a geometry to solve',
+            lambda name, **options: self._run_long(
+                f'Solving modes to {top:g} Hz…', self.project.solve_modes,
+                name, **options),
+            maximum_frequency=top, damping=percent / 100.0)
         if acted is None:
             return
         name, _geometry, added = acted

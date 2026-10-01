@@ -227,3 +227,40 @@ def test_extracting_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypat
     assert all(shown for _d, _t, shown in seen[1:]), 'the bar was shown while it moved'
     assert window._import_progress.isHidden()
     assert 'extracted from Record' in window.statusBar().currentMessage()
+
+
+def test_a_long_verb_runs_off_the_loop_and_the_loop_turns(window, pump):
+    """`_run_long`: the verb runs on a worker thread while this thread's
+    event loop keeps turning — the only way a status line set as the
+    work starts, or a bar, reaches a macOS screen (Brandon, 2026-10-01:
+    neither did when they were pumped from inside the blocked loop)."""
+    import threading
+    import time
+
+    from PySide6.QtCore import QTimer
+
+    turned = []
+    seen = {}
+
+    def verb(name, progress=None):
+        seen['thread'] = threading.current_thread() is threading.main_thread()
+        progress(1, 2)
+        time.sleep(0.2)
+        progress(2, 2)
+        return name
+
+    QTimer.singleShot(50, lambda: turned.append(True))
+    assert window._run_long('Working…', verb, 'x') == 'x'
+    assert seen['thread'] is False, 'the verb ran on the loop thread'
+    assert turned, 'the loop did not turn while the verb ran'
+    assert window._import_progress.isHidden()
+    assert window.statusBar().currentMessage() == 'Working…'
+
+
+def test_what_a_long_verb_raises_is_raised_on_the_loop_thread(window):
+    def verb(name, progress=None):
+        raise ValueError('no')
+
+    with pytest.raises(ValueError, match='no'):
+        window._run_long('Working…', verb, 'x')
+    assert window._import_progress.isHidden()

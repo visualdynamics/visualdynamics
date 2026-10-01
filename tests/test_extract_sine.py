@@ -1061,3 +1061,109 @@ def test_the_pieces_really_run_in_the_workers(monkeypatch):
         extract_sine(history, spec, cycles=20.0, workers=1)
     levels = extract_sine(history, spec, cycles=20.0, workers=2)
     assert len(levels) == 2
+
+
+# ---- the pieces decimated, the margin in cycles (2026-10-01) -------------
+
+
+def _slow_sweep(amplitude=1.0, noise=2.0, seed=2, rate_hz=8192.0, seconds=60.0):
+    """A log sweep from 5 Hz at a controller's rate: the case where a
+    piece solved at the record's rate ran to tens of millions of
+    samples — the margin at the low end reached across the sweep and
+    the banded solve wanted a hundred gigabytes."""
+    octaves_per_minute = np.log2(100.0) / ((seconds - 5.0) / 60.0)
+    tone = SineTone('Up', 1.0, [5.0, 500.0], [[amplitude] * 2] * 2, [1],
+                    [octaves_per_minute])
+    spec = SineSweepSpecification([tone], ['101Z+', '104Z+'],
+                                  ordinate_unit='m/s**2')
+    n = int(seconds * rate_hz)
+    rng = np.random.default_rng(seed)
+    signal = rng.standard_normal((2, n)) * noise
+    argument = tone.argument(1.0 / rate_hz)
+    start = int(rate_hz)
+    m = min(len(argument), n - start)
+    signal[:, start:start + m] += amplitude * np.cos(argument[:m])
+    history = TimeHistory(np.arange(n) / rate_hz, signal,
+                          response_dof=['101Z+', '104Z+'],
+                          ordinate_dim=['acceleration'] * 2,
+                          ordinate_unit=['m/s**2'] * 2)
+    return history, spec
+
+
+def test_the_margin_is_cycles_of_the_tone():
+    """`reach` walks the sweep by phase: so many cycles before or after
+    a sample, from the closed-form phase, and never past the span."""
+    from visualdynamics.core.sine import _Laid
+
+    history, spec = _slow_sweep()
+    tone = spec.tones[0]
+    dt = 1.0 / history.sample_rate
+    placed = _Laid(tone, 1.0, int(history.sample_rate), 1 + sum(
+        max(round(s / dt), 1) for s in tone.segment_seconds()), dt, 40.0)
+    k = placed.n // 2
+    ahead = placed.reach(k, 100.0, +1)
+    behind = placed.reach(k, 100.0, -1)
+    t = tone.grid_at(dt, [behind, k, ahead])
+    phase = tone.phase_at(t) / (2.0 * np.pi)
+    assert phase[2] - phase[1] == pytest.approx(100.0, abs=0.01)
+    assert phase[1] - phase[0] == pytest.approx(100.0, abs=0.01)
+    assert placed.reach(0, 1e9, -1) == 0 and placed.reach(0, 1e9, +1) == placed.n
+    # at the low end a hundred cycles are many samples, at the high end few
+    assert placed.reach(0, 100.0, +1) > 10 * (placed.n - placed.reach(placed.n - 1, 100.0, -1))
+
+
+def test_a_slow_sweep_at_a_high_rate_is_solved_small_and_reads_true(monkeypatch):
+    """The 23 GB case in miniature: a log sweep from 5 Hz at 8 kHz,
+    chunked finely enough that the sweep is many pieces. Each piece is
+    decimated to the rate its highest tone needs and its margin is
+    cycles of the tone, so the largest piece the solver sees is a few
+    thousand cycles at a few samples each — where at the record's rate
+    the margin at the low end reached most of the sweep (the first
+    piece alone was gigabytes on the real file) — and the planted level
+    still reads back.
+    """
+    import tracemalloc
+
+    from visualdynamics.core import sine
+
+    history, spec = _slow_sweep(seconds=240.0)
+    sizes = []
+    real = sine._piece_task
+    monkeypatch.setattr(sine, 'CHUNK', 4096)
+    monkeypatch.setattr(sine, '_piece_task',
+                        lambda y, *rest: sizes.append(len(y)) or real(y, *rest))
+    tracemalloc.start()
+    level = next(iter(extract_sine(history, spec, cycles=40.0, workers=1)))
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    # measured 2026-10-01: decimated, 122 pieces of at most 46k samples
+    # and a 168 MB peak; at the record's rate 942 pieces of up to 897k
+    # samples, a 625 MB peak, and twenty-five times the run time
+    assert len(sizes) > 50 and max(sizes) < 60_000, (len(sizes), max(sizes))
+    assert peak < 300e6, peak
+    inside = (level.abscissa > 8.0) & (level.abscissa < 400.0)
+    magnitude = np.abs(level.ordinate[0, inside])
+    assert level.resolved[0, inside].all()
+    assert abs(20 * np.log10(np.median(magnitude))) < 0.3
+
+
+def test_decimation_reads_what_the_full_rate_reads():
+    """A piece solved at a decimated rate gives the reading the
+    full-rate solve gives, to a tenth of a dB: the tone is still the
+    tone below the decimated Nyquist, and the floor is the noise the
+    smoothing lets through at either rate."""
+    from visualdynamics.core import sine
+
+    history, spec = _slow_sweep(seconds=30.0)
+    decimated = next(iter(extract_sine(history, spec, cycles=40.0, workers=1)))
+    monkeypatch_value = sine.SAMPLES_PER_CYCLE
+    try:
+        sine.SAMPLES_PER_CYCLE = 10 ** 9           # never decimate
+        full = next(iter(extract_sine(history, spec, cycles=40.0, workers=1)))
+    finally:
+        sine.SAMPLES_PER_CYCLE = monkeypatch_value
+    inside = (decimated.abscissa > 10.0) & (decimated.abscissa < 400.0)
+    assert np.allclose(decimated.abscissa, full.abscissa)
+    ratio = np.abs(decimated.ordinate[0, inside]) / np.abs(full.ordinate[0, inside])
+    assert np.abs(20 * np.log10(np.median(ratio))) < 0.1
+    assert np.percentile(np.abs(20 * np.log10(ratio)), 95) < 0.5

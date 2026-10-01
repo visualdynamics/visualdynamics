@@ -756,8 +756,26 @@ _NOISE_INTEGRAL = 3.0 * np.pi / (4.0 * np.sqrt(2.0))
 #: twenty-four — and `test_extract_sine` pins the interior within 1e-7
 #: of the whole-record solve at the smallest chunk. The margin costs
 #: little beside the chunk: a few thousand samples against 65 536.
+#: The streaming reader (`_read_levels`) takes the same count as
+#: cycles of the tone (`MARGIN_WINDOWS * cycles`) rather than samples
+#: of a window at the edge, since at the low end of a log sweep the
+#: window is millions of samples and the chunk no longer bounded
+#: anything (2026-10-01).
 CHUNK = 1 << 16
 MARGIN_WINDOWS = 24.0
+#: the fewest samples per cycle of the highest tone a piece is solved
+#: at: each piece is decimated to a rate that gives the highest tone
+#: live in it at least this many, since a 5 Hz tone sampled at
+#: 20 kHz carries four thousand samples a cycle its envelope never
+#: needs (2026-10-01: a 23 GB run's first piece was 63 million samples
+#: at full rate and the banded solve 189 GB — the chunk was bounded,
+#: the margin at the low end of a log sweep under heavy smoothing was
+#: not; in cycles it is, and decimated it is small)
+SAMPLES_PER_CYCLE = 8
+#: the most memory the pool's in-flight pieces may take together, in
+#: bytes — the banded solve costs ~3 kB per decimated sample, so a
+#: wide piece is sent to fewer workers at once rather than all eight
+POOL_BUDGET = 8 * 2 ** 30
 
 #: the smoothing the extraction starts from — ten cycles of the
 #: instantaneous frequency, the tracking-filter convention that
@@ -1160,18 +1178,63 @@ class _Laid:
             phase = phase + self.c1 * u + self.c2 * u * u
         return phase
 
-    def window(self, f) -> np.ndarray:
-        """The smoothing window in samples at frequency `f`."""
+    def window(self, f, dt=None) -> np.ndarray:
+        """The smoothing window in samples at frequency `f`, at the
+        record's rate or at a decimated one."""
+        dt = self.dt if dt is None else dt
         return np.maximum(self.cycles / np.maximum(np.asarray(f, dtype=float),
-                                                   1e-9) / self.dt, 1.0)
+                                                   1e-9) / dt, 1.0)
 
-    def samples_in(self, f) -> np.ndarray:
+    def samples_in(self, f, dt=None) -> np.ndarray:
         """The filter's equivalent averaging length in samples, from
         its noise bandwidth: what a moving average of that length would
         do to white noise, the debiasing formula's N."""
+        dt = self.dt if dt is None else dt
         bandwidth = _AVERAGE_BANDWIDTH * np.asarray(f, dtype=float) / self.cycles
-        corner = 2.0 * np.pi * bandwidth * self.dt          # rad/sample
+        corner = 2.0 * np.pi * bandwidth * dt               # rad/sample
         return np.maximum(2.0 * np.pi / (corner * _NOISE_INTEGRAL), 1.0)
+
+    def max_f(self, lo, hi) -> float:
+        """The highest frequency the tone reaches over its samples
+        lo..hi: at the ends, and at any breakpoint inside."""
+        lo, hi = max(int(lo), 0), min(int(hi), self.n)
+        if hi <= lo:
+            return float(self.tone.frequency.max())
+        t_lo, t_hi = (float(t) for t in self.tone.grid_at(self.dt, [lo, hi - 1]))
+        highest = max(float(self.tone.frequency_at([t_lo])[0]),
+                      float(self.tone.frequency_at([t_hi])[0]))
+        at = 0.0
+        for start_s, length, f0, f1, _log in self.tone._segments():
+            if t_lo < start_s < t_hi:
+                highest = max(highest, f0)
+            at = start_s + length
+            if t_lo < at < t_hi:
+                highest = max(highest, f1)
+        return highest
+
+    def reach(self, k, cycles_count, direction) -> int:
+        """The tone's sample `cycles_count` cycles before (`direction`
+        -1) or after (+1) sample `k`, from the closed-form phase, clipped
+        to the span: the margin a chunk is solved with, in cycles of the
+        tone rather than samples, so the low end of a sweep does not
+        reach across the whole of it."""
+        k = min(max(int(k), 0), self.n - 1)
+        here = float(self.tone.phase_at([self.tone.grid_at(self.dt, [k])[0]])[0])
+        target = here + direction * 2.0 * np.pi * float(cycles_count)
+        lo_t, hi_t = 0.0, max(self.n - 1, 1) * self.dt
+        phase_lo = float(self.tone.phase_at([lo_t])[0])
+        phase_hi = float(self.tone.phase_at([hi_t])[0])
+        if target <= phase_lo:
+            return 0
+        if target >= phase_hi:
+            return self.n
+        for _ in range(60):
+            mid = 0.5 * (lo_t + hi_t)
+            if float(self.tone.phase_at([mid])[0]) < target:
+                lo_t = mid
+            else:
+                hi_t = mid
+        return min(max(round(hi_t / self.dt), 0), self.n)
 
     def window_at(self, k) -> float:
         k = min(max(int(k), 0), self.n - 1)
@@ -1225,13 +1288,14 @@ def _centers(laid: _Laid, points_per_window: float) -> np.ndarray:
 
 def _piece_task(y, args, freqs, offsets, dt, cycles, reads, blocks):
     """One channel through one piece — the work a worker process does
-    (2026-10-01). `reads` per live tone: (local centers, half-windows,
+    (2026-10-01). `y` is the piece at its own rate, `dt` that rate's
+    interval. `reads` per live tone: (local centers, half-windows,
     debiasing lengths) or None when the chunk reads none of that
-    tone's centers; `blocks` per live tone: (tone, sweep offset of the
-    piece's entry, interior lo, interior hi) for the clock slopes.
-    Returns per live tone `(amplitude, floor, below, slopes)` — the
-    first three at the read centers, the slopes a list of (seconds,
-    slope, weight)."""
+    tone's centers; `blocks` per live tone: (seconds from the tone's
+    start at each sample of the slice, interior lo, interior hi) for
+    the clock slopes. Returns per live tone `(amplitude, floor, below,
+    slopes)` — the first three at the read centers, the slopes a list
+    of (seconds, slope, weight)."""
     y = np.asarray(y, dtype=float)
     rotors = [np.exp(1j * a) for a in args]
     envelopes = _vold_kalman_whole(y, args, freqs, offsets, dt, cycles)
@@ -1267,7 +1331,7 @@ def _piece_task(y, args, freqs, offsets, dt, cycles, reads, blocks):
         # still gives the curve its slopes are fitted with, each
         # weighted by its power so a stretch under the noise says
         # nothing
-        tone, sweep_offset, int_lo, int_hi = blocks[e]
+        seconds, int_lo, int_hi = blocks[e]
         slopes = []
         block = max((int_hi - int_lo) // 8, 256)
         for b_lo in range(int_lo, int_hi, block):
@@ -1278,7 +1342,7 @@ def _piece_task(y, args, freqs, offsets, dt, cycles, reads, blocks):
             if weight.sum() <= 0.0:
                 continue
             phase = np.unwrap(np.angle(envelope[b_lo:b_hi]))
-            t = tone.grid(dt, sweep_offset + b_lo, sweep_offset + b_hi)
+            t = seconds[b_lo:b_hi]
             t_mean = np.average(t, weights=weight)
             p_mean = np.average(phase, weights=weight)
             spread = np.sum(weight * (t - t_mean) ** 2)
@@ -1324,53 +1388,102 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
     K, C = len(laid), len(signals)
     lo = min(placed.start for placed in laid)
     hi = max(placed.end for placed in laid)
-    chunk = CHUNK if chunk is None else int(chunk)
     amplitude = [np.zeros((C, len(c)), dtype=complex) for c in centers]
     floor = [np.zeros((C, len(c))) for c in centers]
     below = [np.zeros((C, len(c)), dtype=bool) for c in centers]
     slopes = [[[] for _i in range(C)] for _k in range(K)]
-    if pieces is None:
-        pieces = [(a, min(a + chunk, hi)) for a in range(lo, hi, chunk)]
 
-    def widest(sample):
-        # the widest smoothing window of any tone live at this sample
-        return max([placed.window_at(sample - placed.start)
-                    for placed in laid if placed.start <= sample < placed.end]
-                   or [1.0])
+    fs = 1.0 / dt
+    margin_cycles = MARGIN_WINDOWS * cycles
+
+    def live_at(sample):
+        return [placed for placed in laid if placed.start <= sample < placed.end]
+
+    def factor(a, b):
+        """The decimation a stretch of the record takes: enough samples
+        per cycle of the highest tone live in it."""
+        highest = max([placed.max_f(a - placed.start, b - placed.start)
+                       for placed in laid
+                       if placed.start < b and placed.end > a] or [fs])
+        return max(1, int(fs / (SAMPLES_PER_CYCLE * highest)))
+
+    def chunk_end(start):
+        """Where the chunk from `start` ends: CHUNK samples at the rate
+        the chunk is solved at, settled against the highest frequency
+        it reaches."""
+        rate = factor(start, start + 1)
+        end = min(start + CHUNK * rate, hi)
+        for _ in range(3):
+            lower = factor(start, end)
+            if lower >= rate:
+                break
+            rate = lower
+            end = min(start + CHUNK * rate, hi)
+        return end
 
     def prepare(start, end):
-        """The piece around a chunk: its slices per live tone and what
-        each channel's task needs — None when no tone is live."""
-        before = int(MARGIN_WINDOWS * widest(start))
-        after = int(MARGIN_WINDOWS * widest(end - 1))
-        piece_lo, piece_hi = max(start - before, lo), min(end + after, hi)
+        """The piece around a chunk — the margin in cycles of each live
+        tone on either side, the whole decimated to the rate its highest
+        tone needs — and what each channel's task needs: slices of
+        argument and frequency per live tone on the decimated grid, the
+        centers read, the seconds for the clock. None when no tone is
+        live. Returns also the decimation and the piece's bounds."""
+        piece_lo, piece_hi = start, end
+        for placed in live_at(start) + live_at(end - 1):
+            piece_lo = min(piece_lo, placed.start + placed.reach(
+                start - placed.start, margin_cycles, -1))
+            piece_hi = max(piece_hi, placed.start + placed.reach(
+                end - 1 - placed.start, margin_cycles, +1))
+        piece_lo, piece_hi = max(piece_lo, lo), min(piece_hi, hi)
+        step = factor(piece_lo, piece_hi)
+        dt_piece = dt * step
+        count = -(-(piece_hi - piece_lo) // step)      # ceil: resample_poly's length
         live, args, freqs, offsets, reads, blocks = [], [], [], [], [], []
         for k, placed in enumerate(laid):
-            entry, leave = max(placed.start, piece_lo), min(placed.end, piece_hi)
-            if leave <= entry:
+            # the decimated samples m whose record sample lies in the span
+            m_lo = max(-(-(placed.start - piece_lo) // step), 0)
+            m_hi = min(-(-(placed.end - piece_lo) // step), count)
+            if m_hi <= m_lo:
                 continue
-            a = placed.argument(entry - placed.start, leave - placed.start)
-            f = placed.f(entry - placed.start, leave - placed.start)
-            # which of this tone's centers the chunk reads
+            sweep = piece_lo + np.arange(m_lo, m_hi) * step - placed.start
+            seconds = placed.tone.grid_at(dt, sweep)
+            a = placed.tone.phase_at(seconds)
+            if placed.c1 or placed.c2:
+                u = seconds - placed.n * placed.dt / 2.0
+                a = a + placed.c1 * u + placed.c2 * u * u
+            f = placed.tone.frequency_at(seconds)
             absolute = centers[k] + placed.start
             j = np.flatnonzero((absolute >= start) & (absolute < end))
             if len(j):
-                local = centers[k][j] - (entry - placed.start)
+                local = np.clip(np.rint((absolute[j] - piece_lo) / step).astype(np.int64)
+                                - m_lo, 0, len(a) - 1)
                 fc = f[local]
-                reads.append((local, (placed.window(fc) / 2.0).astype(np.int64),
-                              placed.samples_in(fc)))
+                reads.append((local,
+                              (placed.window(fc, dt_piece) / 2.0).astype(np.int64),
+                              placed.samples_in(fc, dt_piece)))
             else:
                 reads.append(None)
-            blocks.append((placed.tone, entry - placed.start,
-                           max(start, entry) - entry,
-                           min(end, entry + len(a)) - entry))
+            int_lo = max(-(-(start - piece_lo) // step), m_lo) - m_lo
+            int_hi = min(-(-(end - piece_lo) // step), m_hi) - m_lo
+            blocks.append((seconds, int_lo, int_hi))
             args.append(a)
             freqs.append(f)
-            offsets.append(entry - piece_lo)
+            offsets.append(m_lo)
             live.append((k, j))
         if not live:
             return None
-        return piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks
+        return (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
+                reads, blocks)
+
+    def channel_piece(i, piece_lo, piece_hi, step):
+        """One channel's piece at the piece's rate: the record's samples,
+        low-passed and decimated when the piece asks for it."""
+        y = np.asarray(signals[i][piece_lo:piece_hi], dtype=float)
+        if step == 1:
+            return y
+        from scipy.signal import resample_poly
+
+        return resample_poly(y, 1, step)
 
     def keep(i, live, result):
         for (k, j), (amp, flo, bel, found) in zip(live, result):
@@ -1380,30 +1493,40 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
                 below[k][i, j] = bel
             slopes[k][i].extend(found)
 
-    bounds = [(max(int(a), lo), min(int(b), hi)) for a, b in pieces]
-    bounds = [(a, b) for a, b in bounds if b > a]
+    if pieces is None:
+        bounds = []
+        start = lo
+        while start < hi:
+            end = chunk_end(start)
+            bounds.append((start, end))
+            start = end
+    else:
+        bounds = [(max(int(a), lo), min(int(b), hi)) for a, b in pieces]
+        bounds = [(a, b) for a, b in bounds if b > a]
     if pool is None:
         for start, end in bounds:
             made = prepare(start, end)
             if made is None:
                 continue
-            piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks = made
+            (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
+             reads, blocks) = made
             for i in range(C):
                 keep(i, live, _piece_task(
-                    signals[i][piece_lo:piece_hi], args, freqs, offsets, dt,
-                    cycles, reads, blocks))
+                    channel_piece(i, piece_lo, piece_hi, step), args, freqs,
+                    offsets, dt_piece, cycles, reads, blocks))
         return amplitude, floor, below, slopes
     # a few pieces in flight at once, so every worker stays busy when
-    # the channels alone are fewer than the workers; results are kept
-    # as they land, in any order
+    # the channels alone are fewer than the workers — fewer when the
+    # pieces are wide, within POOL_BUDGET; results are kept as they
+    # land, in any order
     from concurrent.futures import FIRST_COMPLETED, wait
 
     in_flight = {}
-    ahead = max(2, -(-pool._max_workers // max(C, 1)) + 1)
     queue = iter(bounds)
     pending = True
+    limit = max(2, -(-pool._max_workers // max(C, 1)) + 1) * C
     while pending or in_flight:
-        while pending and len(in_flight) < ahead * C:
+        while pending and len(in_flight) < limit:
             try:
                 start, end = next(queue)
             except StopIteration:
@@ -1412,12 +1535,20 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
             made = prepare(start, end)
             if made is None:
                 continue
-            piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks = made
+            (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
+             reads, blocks) = made
+            # the banded solve's ~3 kB per decimated sample, per task
+            cost = 3000 * (-(-(piece_hi - piece_lo) // step)) * (2 * len(live)) ** 2 / 16
+            limit = max(1, min(limit, int(POOL_BUDGET // max(cost, 1))))
             for i in range(C):
+                while len(in_flight) >= limit:
+                    done, _rest = wait(list(in_flight), return_when=FIRST_COMPLETED)
+                    for future in done:
+                        ii, ll = in_flight.pop(future)
+                        keep(ii, ll, future.result())
                 future = pool.submit(
-                    _run_piece, np.asarray(signals[i][piece_lo:piece_hi],
-                                           dtype=float),
-                    args, freqs, offsets, dt, cycles, reads, blocks)
+                    _run_piece, channel_piece(i, piece_lo, piece_hi, step),
+                    args, freqs, offsets, dt_piece, cycles, reads, blocks)
                 in_flight[future] = (i, live)
         if not in_flight:
             break

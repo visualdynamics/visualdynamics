@@ -753,16 +753,33 @@ _NOISE_INTEGRAL = 3.0 * np.pi / (4.0 * np.sqrt(2.0))
 #: per channel and took the machine down (Brandon). The margin is
 #: measured, not derived — the seam error at a 4096-sample chunk read
 #: 2e-6 of the envelope at eight windows, 1.3e-7 at sixteen, 5e-9 at
-#: twenty-four — and `test_extract_sine` pins the interior within 1e-7
-#: of the whole-record solve at the smallest chunk. The margin costs
-#: little beside the chunk: a few thousand samples against 65 536.
+#: twenty-four — and `test_extract_sine` pins the interior within 1e-5
+#: of the whole-record solve at the smallest chunk. Twenty-four was
+#: the first choice; eight is a third of the piece for a seam error
+#: of 2e-5 dB, nothing against a reading (2026-10-01).
 #: The streaming reader (`_read_levels`) takes the same count as
 #: cycles of the tone (`MARGIN_WINDOWS * cycles`) rather than samples
 #: of a window at the edge, since at the low end of a log sweep the
 #: window is millions of samples and the chunk no longer bounded
 #: anything (2026-10-01).
 CHUNK = 1 << 16
-MARGIN_WINDOWS = 24.0
+MARGIN_WINDOWS = 8.0
+#: tones are solved together only where they are close in frequency:
+#: within this many smoothing bandwidths of each other (the window's
+#: bandwidth is about f/cycles) at some sample both are live, or
+#: crossing. Farther apart the filter separates them by frequency
+#: alone, and a joint solve costs the square of the tones it holds —
+#: nine tones in nine bands as one system, at the rate the highest
+#: needed, was 11 kB a sample before the solver's workspace and a
+#: 90 GB worker on a 23 GB run (Brandon, 2026-10-01); apart, each is
+#: one tone, decimated to its own rate
+SEPARATION_BANDWIDTHS = 4.0
+#: where the floor is measured: this many filter corners to either
+#: side of the tone along its sweep — outside the notch the fit cuts
+#: in the residual at the tone (2.5 % of the noise taken at 2.5
+#: corners, 1.2 % at 3), inside the separation that keeps another
+#: group's tone away (4 bandwidths is 9 corners)
+SIDE_CORNERS = 3.0
 #: the fewest samples per cycle of the highest tone a piece is solved
 #: at: each piece is decimated to a rate that gives the highest tone
 #: live in it at least this many, since a 5 Hz tone sampled at
@@ -1312,14 +1329,38 @@ def _piece_task(y, args, freqs, offsets, dt, cycles, reads, blocks):
         amplitude = floor = below = None
         if reads[e] is not None:
             local, half, samples_in = reads[e]
-            # the residual demodulated like the tone, its power summed
-            # over each center's own window
+            # the noise the smoothing lets through, measured beside the
+            # tone rather than assumed from the residual's whole power:
+            # the residual demodulated along the sweep `SIDE_CORNERS`
+            # filter corners above and below the tone and averaged over
+            # the debiasing length. White noise gives variance/N as the
+            # whole-power formula did, but a tone of another group left
+            # in the residual (solved apart, 2026-10-01) is attenuated
+            # by the average the way the filter attenuates it, where
+            # the whole-power formula counted it as noise and read the
+            # tone half a decibel low (nine bands: -0.50 dB). Beside the
+            # tone, not at it: at the tone the fit has taken the
+            # in-band noise into the envelope and the residual is
+            # notched, which read a loud floor at half its size.
             z = residual[span] * np.conj(rotors[e])
-            sums = np.concatenate(([0.0], np.cumsum(np.abs(z) ** 2)))
-            lo_i = np.clip(local - half, 0, len(a))
-            hi_i = np.clip(local + half + 1, 0, len(a))
-            variance = (sums[hi_i] - sums[lo_i]) / np.maximum(hi_i - lo_i, 1)
-            noise_power = 4.0 * variance / samples_in
+            f_e = freqs[e]
+            noise_power = np.empty(len(local))
+            for c, (center, h, n_avg) in enumerate(zip(local, half, samples_in)):
+                center, h, n_avg = int(center), int(h), int(n_avg)
+                lo_w, hi_w = max(center - h, 0), min(center + h + 1, len(a))
+                lo_z, hi_z = max(lo_w - n_avg, 0), min(hi_w + n_avg, len(a))
+                i = np.arange(lo_z, hi_z)
+                omega = (2.0 * np.pi * SIDE_CORNERS * _AVERAGE_BANDWIDTH
+                         * float(f_e[center]) / cycles * dt)
+                lo_i = np.clip(np.arange(lo_w, hi_w) - n_avg // 2, lo_z, hi_z) - lo_z
+                hi_i = np.clip(np.arange(lo_w, hi_w) + n_avg - n_avg // 2, lo_z, hi_z) - lo_z
+                through = 0.0
+                for side in (-1.0, 1.0):
+                    shifted = z[lo_z:hi_z] * np.exp(-1j * side * omega * (i - center))
+                    running = np.concatenate(([0.0], np.cumsum(shifted)))
+                    averaged = (running[hi_i] - running[lo_i]) / np.maximum(hi_i - lo_i, 1)
+                    through += np.mean(np.abs(averaged) ** 2)
+                noise_power[c] = 4.0 * through / 2.0
             power = np.abs(envelope[local]) ** 2 - noise_power
             below = power <= 0.0
             shown = np.where(below, np.sqrt(noise_power),
@@ -1559,6 +1600,59 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
     return amplitude, floor, below, slopes
 
 
+def _tone_groups(laid, cycles):
+    """Which placements share a solve: tones joined through pairs that
+    come within `SEPARATION_BANDWIDTHS` smoothing bandwidths of each
+    other, or cross, at some sample both are live. Returns index lists
+    in first-appearance order; a tone far from every other is a group
+    of one, solved at its own rate."""
+    K = len(laid)
+    parent = list(range(K))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for a in range(K):
+        for b in range(a + 1, K):
+            pa, pb = laid[a], laid[b]
+            lo, hi = max(pa.start, pb.start), min(pa.end, pb.end)
+            if hi <= lo:
+                continue
+            samples = np.linspace(lo, hi - 1, min(hi - lo, 4096)).astype(np.int64)
+            fa = pa.tone.frequency_at(pa.tone.grid_at(pa.dt, samples - pa.start))
+            fb = pb.tone.frequency_at(pb.tone.grid_at(pb.dt, samples - pb.start))
+            gap = fa - fb
+            bandwidth = (fa + fb) / (2.0 * cycles)
+            if (np.any(np.abs(gap) < SEPARATION_BANDWIDTHS * bandwidth)
+                    or np.any(np.sign(gap[1:]) != np.sign(gap[:-1]))):
+                parent[find(a)] = find(b)
+    groups: dict[int, list[int]] = {}
+    for k in range(K):
+        groups.setdefault(find(k), []).append(k)
+    return list(groups.values())
+
+
+def _read_grouped(signals, laid, dt, cycles, centers, pieces_by_tone=None,
+                  pool=None):
+    """`_read_levels` a group of tones at a time (`_tone_groups`), the
+    results put back in the placements' order. `pieces_by_tone`, when
+    given, is a list per placement of the spans to solve for it."""
+    K = len(laid)
+    amplitude, floor, below, slopes = [None] * K, [None] * K, [None] * K, [None] * K
+    for group in _tone_groups(laid, cycles):
+        pieces = (None if pieces_by_tone is None
+                  else [span for k in group for span in pieces_by_tone[k]])
+        a, f, b, s = _read_levels(
+            signals, [laid[k] for k in group], dt, cycles,
+            [centers[k] for k in group], pieces=pieces, pool=pool)
+        for j, k in enumerate(group):
+            amplitude[k], floor[k], below[k], slopes[k] = a[j], f[j], b[j], s[j]
+    return amplitude, floor, below, slopes
+
+
 def _clock_correction(placed: _Laid, slopes_by_channel):
     """(c1, c2) for one tone from its channels' chunk slopes: per
     channel a weighted line through slope against time about the
@@ -1626,11 +1720,13 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
         chosen = (np.linspace(first, last, count).astype(np.int64)
                   if last > first else np.array([placed.n // 2]))
         centers.append(chosen)
+        own = []
         for c in chosen:
             half = int(placed.window_at(c) / 2.0) + 1
-            pieces.append((placed.start + c - half, placed.start + c + half + 1))
-    amplitude, floor, below, _slopes = _read_levels(
-        signals, laid, dt, cycles, centers, pieces=pieces)
+            own.append((placed.start + c - half, placed.start + c + half + 1))
+        pieces.append(own)
+    amplitude, floor, below, _slopes = _read_grouped(
+        signals, laid, dt, cycles, centers, pieces_by_tone=pieces)
     out = []
     for k, placed in enumerate(laid):
         seconds = placed.seconds_at(centers[k])
@@ -1717,7 +1813,7 @@ def _passes(signals, laid, dt, cycles, centers, refine, pool):
     """The solve, and with `refine` the clock checked and the solve
     repeated while it moves, up to three times."""
     for _pass in range(3 if refine else 1):
-        amplitude, floor, below, slopes = _read_levels(
+        amplitude, floor, below, slopes = _read_grouped(
             signals, laid, dt, cycles, centers, pool=pool)
         if not refine:
             break

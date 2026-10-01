@@ -1248,3 +1248,34 @@ def test_tones_that_meet_share_a_solve_and_tones_apart_do_not():
     # close, not crossing: a tone a bandwidth above another all the way
     near = placed('Near', 5.0 * 1.02, 500.0 * 1.02)
     assert _tone_groups([up, near, high], 40.0) == [[0, 1], [2]]
+
+
+def test_the_extraction_tells_its_progress():
+    """`progress` hears (done, total): the total grows as each stage is
+    sized, done never falls, and the last word is done == total."""
+    history, spec = _flat_sweep(noise=1.0)
+    heard = []
+    extract_sine(history, spec, workers=1, progress=lambda d, t: heard.append((d, t)))
+    assert heard, 'nothing heard'
+    done = [d for d, _t in heard]
+    assert done == sorted(done)
+    assert all(d <= t for d, t in heard)
+    assert heard[-1][0] == heard[-1][1] > 0
+    # the matched filter per tone, the ladder's samples, then the solve:
+    # the first word is well short of the last total
+    assert heard[0][1] < heard[-1][1]
+
+
+def test_what_the_progress_raises_stops_the_extraction():
+    """A cancel is the callback raising; nothing swallows it."""
+    history, spec = _flat_sweep(noise=1.0)
+
+    class Stop(Exception):
+        pass
+
+    def cancel(done, total):
+        if done > 0:
+            raise Stop
+
+    with pytest.raises(Stop):
+        extract_sine(history, spec, workers=1, progress=cancel)

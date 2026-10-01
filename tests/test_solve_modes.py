@@ -528,3 +528,105 @@ def test_a_rigid_link_is_picked_like_a_material_and_journals_by_name(qt_app):
               'props = ' + lines[-1].split(' = ', 1)[1])
     exec(replay, namespace)  # noqa: S102 — the table's own journal line
     assert namespace['props'].material is RIGID
+
+
+# ---- progress ------------------------------------------------------------
+
+
+def _hears(solver):
+    """(done, total) as the solve told it, and the shapes."""
+    heard = []
+    shapes = _plate_geometry(mesh=6)
+    model = Model.from_geometry(shapes)
+    found = model.eigensolution(num_modes=12, solver=solver,
+                                progress=lambda d, t: heard.append((d, t)))
+    return heard, found
+
+
+@pytest.mark.parametrize('solver', ['sparse', 'dense'])
+def test_the_solve_tells_its_progress(solver):
+    """`progress` hears (done, total) on either path: done never falls,
+    never passes the total, and the last word is done == total."""
+    heard, found = _hears(solver)
+    assert heard and found.num_shapes == 12
+    done = [d for d, _t in heard]
+    assert done == sorted(done)
+    assert all(d <= t for d, t in heard)
+    assert heard[-1][0] == heard[-1][1] > 0
+
+
+def test_the_sparse_solve_counts_the_elements_and_the_iterations():
+    """The sparse path's total holds the assembly per element, the
+    factorization, the eigen iterations and the polish — many more
+    words than the dense path's two steps."""
+    sparse, _ = _hears('sparse')
+    dense, _ = _hears('dense')
+    assert sparse[-1][1] > 36 + 1 + 12, sparse[-1]
+    assert dense[-1][1] == 2
+
+
+def test_the_eigen_stage_grows_the_total_while_it_runs():
+    """The iterations' length is an estimate, extended while they run
+    (`Ticker.extend_to`): the total is raised past what is done
+    whenever it would be reached, so the bar sits short of full until
+    the stage ends."""
+    from visualdynamics.core.progress import Ticker
+
+    words = []
+    ticker = Ticker(lambda d, t: words.append((d, t)), interval=0.0)
+    ticker.add(2)
+    ticker.tick(2)
+    ticker.extend_to(1)
+    assert (ticker.done, ticker.total) == (2, 3)
+    ticker.tick()
+    ticker.extend_to(1)
+    assert (ticker.done, ticker.total) == (3, 4)
+    ticker.extend_to(5)
+    assert ticker.total == 8, 'raised to the estimate past what is done'
+    assert words[-1] == (3, 8)
+
+
+def test_what_the_progress_raises_stops_the_solve():
+    class Stop(Exception):
+        pass
+
+    def cancel(done, total):
+        if done > 0:
+            raise Stop
+
+    model = Model.from_geometry(_plate_geometry(mesh=6))
+    with pytest.raises(Stop):
+        model.eigensolution(num_modes=12, solver='sparse', progress=cancel)
+
+
+def test_sparse_frequencies_are_unchanged_by_the_shared_factor():
+    """eigsh solves with the model's own factor now (`OPinv`), the one
+    the polish uses: the answer is the dense answer still."""
+    model = Model.from_geometry(_plate_geometry(mesh=6))
+    dense = model.eigensolution(num_modes=12, solver='dense').frequency
+    sparse = model.eigensolution(num_modes=12, solver='sparse').frequency
+    assert sparse == pytest.approx(dense, rel=1e-7, abs=1e-6)
+
+
+def test_the_act_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch):
+    from visualdynamics.gui import main_window as window_module
+
+    window.add_object('Skin', _plate_geometry())
+    select_objects(window, pump, 'Skin')
+    answers = iter([(800.0, True), (1.5, True)])
+    monkeypatch.setattr(window_module.QInputDialog, 'getDouble',
+                        lambda *a: next(answers))
+    seen = []
+    real = window._strip_tick
+
+    def spy(done, total):
+        seen.append((done, total, not window._import_progress.isHidden()))
+        real(done, total)
+
+    monkeypatch.setattr(window, '_strip_tick', spy)
+    window.solve_modes_act()
+    pump()
+    assert seen and seen[-1][0] == seen[-1][1] > 0
+    assert all(shown for _d, _t, shown in seen[1:])
+    assert window._import_progress.isHidden()
+    assert window.project['Skin Modes'].num_shapes > 0

@@ -5984,6 +5984,39 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, run)
 
+    def _strip_tick(self, done: int, total: int) -> None:
+        """The strip's progress bar at `done` of `total`, painted now:
+        the one way a long operation on the event loop's own thread
+        shows its progress — the import's bar since 2026-09, the sine
+        extraction's and the modal solve's since 2026-10-01
+        (`Project.extract_sine(progress=)`, `Project.solve_modes(progress=)`).
+        The caller hides the bar when it is done."""
+        bar = self._import_progress
+        bar.setRange(0, max(int(total), 1))
+        bar.setValue(int(done))
+        if bar.isHidden():
+            bar.show()
+            # show() only *posts* the layout request, and the loop
+            # that would deliver it is blocked — the bar stayed
+            # zero-sized, and every synchronous repaint painted
+            # nothing. Activating the status bar's layout here gives
+            # it geometry to paint, which is the difference between
+            # a progress bar and a progress variable.
+            layout = self.statusBar().layout()
+            if layout is not None:
+                layout.activate()
+        bar.repaint()
+        # repaint() alone was the first version, on the rule that
+        # the import loop stays blocked. On macOS it painted into
+        # the backing store and no further: the views are
+        # layer-backed and only the event loop flushes them to the
+        # screen, so the bar moved and nobody could ever have seen
+        # it — reported twice as "no loading bar". Excluding user
+        # input keeps out the second drop and the mid-import click,
+        # which are the re-entrancies the blocking exists for.
+        QApplication.processEvents(
+            QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
     @contextlib.contextmanager
     def _asking(self):
         """The arrow back while a dialog asks something mid-import.
@@ -6128,32 +6161,7 @@ class MainWindow(QMainWindow):
             imported.append(self._add_photos(pictures, failures))
         remaining = [path for path in paths if path not in pictures]
         bar = self._import_progress
-
-        def tick(done: int, total: int) -> None:
-            bar.setRange(0, total)
-            bar.setValue(done)
-            if bar.isHidden():
-                bar.show()
-                # show() only *posts* the layout request, and the loop
-                # that would deliver it is blocked — the bar stayed
-                # zero-sized, and every synchronous repaint painted
-                # nothing. Activating the status bar's layout here gives
-                # it geometry to paint, which is the difference between
-                # a progress bar and a progress variable.
-                layout = self.statusBar().layout()
-                if layout is not None:
-                    layout.activate()
-            bar.repaint()
-            # repaint() alone was the first version, on the rule that
-            # the import loop stays blocked. On macOS it painted into
-            # the backing store and no further: the views are
-            # layer-backed and only the event loop flushes them to the
-            # screen, so the bar moved and nobody could ever have seen
-            # it — reported twice as "no loading bar". Excluding user
-            # input keeps out the second drop and the mid-import click,
-            # which are the re-entrancies the blocking exists for.
-            QApplication.processEvents(
-                QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+        tick = self._strip_tick
 
         many = len(remaining) > 1
         if many:
@@ -10613,11 +10621,17 @@ class MainWindow(QMainWindow):
                     'Select a time history to extract sine levels')
                 return
             time_name = self.object_item().text(0)
+        self._show_status(f'Extracting sine levels from {time_name}…')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            added = self.project.extract_sine(time_name)
+            added = self.project.extract_sine(time_name,
+                                              progress=self._strip_tick)
         except (ValueError, AttributeError) as refusal:
             self._show_status(f'{time_name}: {refusal}')
             return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._import_progress.hide()
         for k, name in enumerate(added):
             self.show_object(name, source=time_name, select=k == 0)
         levels = self.objects[added[0]]
@@ -11141,9 +11155,16 @@ class MainWindow(QMainWindow):
             100.0, 2)
         if not ok:
             return
-        acted = self._act_on(
-            Geometry, 'Select a geometry to solve', self.project.solve_modes,
-            maximum_frequency=top, damping=percent / 100.0)
+        self._show_status(f'Solving modes to {top:g} Hz…')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            acted = self._act_on(
+                Geometry, 'Select a geometry to solve', self.project.solve_modes,
+                maximum_frequency=top, damping=percent / 100.0,
+                progress=self._strip_tick)
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._import_progress.hide()
         if acted is None:
             return
         name, _geometry, added = acted

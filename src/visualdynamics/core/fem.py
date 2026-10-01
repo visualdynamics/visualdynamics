@@ -75,7 +75,7 @@ textbook; these are where they are set out.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from typing import Any
@@ -84,6 +84,7 @@ import numpy as np
 
 from .data import direction_code
 from .geometry import ELEMENT_TYPES, Geometry
+from .progress import Ticker
 from .shapes import ShapeSet
 
 #: The six degrees of freedom every node carries, in order. A beam
@@ -144,6 +145,11 @@ POLISH_STEPS = 12
 #: percent away, would barely move without a band of unwanted modes
 #: above it to widen that gap. Eight is cheap: Lanczos computes them
 #: nearly for free and the polish is a few extra solves.
+#: the eigen stage's length on the bar is an estimate — shift-invert
+#: Lanczos solves with the factor a few times per mode it is asked
+#: for — and the bar is kept short of full until the stage ends
+#: (`Ticker.extend_to`)
+EIGEN_SOLVES_PER_MODE = 6
 LANCZOS_GUARD = 8
 
 
@@ -752,7 +758,8 @@ def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
 
 
 def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
-                 wanted: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                 wanted: int, factor: Any = None, ticker: Any = None
+                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Refine a block of approximate modes until they are converged.
 
     Block inverse iteration with the shifted factor (K - sigma M), each
@@ -775,10 +782,15 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
     from scipy.linalg import eigh as scipy_eigh
     from scipy.sparse.linalg import splu
 
-    factor = splu((stiffness - sigma * mass).tocsc())
+    if factor is None:
+        factor = splu((stiffness - sigma * mass).tocsc())
     wanted = min(int(wanted), vectors.shape[1])
     worst = math.inf
+    if ticker is not None:
+        ticker.add(POLISH_STEPS)
     for step in range(POLISH_STEPS):
+        if ticker is not None:
+            ticker.tick()
         if step:
             vectors = factor.solve(mass @ vectors)
         eigenvalues, ritz = scipy_eigh(vectors.T @ (stiffness @ vectors),
@@ -1408,7 +1420,7 @@ class Model:
         # eigh reads only one triangle, so an asymmetry here is silent
         return (mass + mass.T) / 2.0, (stiffness + stiffness.T) / 2.0
 
-    def sparse_matrices(self) -> tuple[Any, Any]:
+    def sparse_matrices(self, ticker: Any = None) -> tuple[Any, Any]:
         """The same mass and stiffness matrices as `matrices`, stored
         sparse (scipy CSR): each node couples only to the nodes of the
         elements it touches, so a row holds a few dozen entries of
@@ -1424,7 +1436,12 @@ class Model:
 
         n = self.num_dof
         rows_k, cols_k, vals_k, rows_m, cols_m, vals_m = [], [], [], [], [], []
+        if ticker is not None:
+            ticker.add(len(self.beams) + len(self.plates)
+                       + len(self.triangles) + len(self.solids))
         for rows, k, m in self._contributions():
+            if ticker is not None:
+                ticker.tick()
             r = len(rows)
             i, j = np.repeat(rows, r), np.tile(rows, r)
             if k is not None:
@@ -1476,7 +1493,9 @@ class Model:
     def eigensolution(self, maximum_frequency: float | None = None,
                       num_modes: int | None = None, damping: float = 0.0,
                       fixed: Sequence[str] = (),
-                      solver: str = 'auto') -> ShapeSet:
+                      solver: str = 'auto',
+                      progress: Callable[[int, int], None] | None = None
+                      ) -> ShapeSet:
         """Real normal modes, mass-normalized, as a ShapeSet.
 
         `fixed` names degrees of freedom to ground: '101X+' fixes one,
@@ -1515,6 +1534,12 @@ class Model:
         solver : {'auto', 'dense', 'sparse'}, default 'auto'
             Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees
             of freedom and sparse beyond.
+        progress : callable, optional
+            Told ``(done, total)`` as the solve advances: the assembly
+            per element, the factorization, the eigen iterations (an
+            estimated length, extended while they run), the polish.
+            The window's strip bar reads it; anything it raises stops
+            the solve.
 
         Returns
         -------
@@ -1522,12 +1547,15 @@ class Model:
         """
         if solver not in ('auto', 'dense', 'sparse'):
             raise ValueError(f'{solver!r} is not a solver: auto, dense, sparse')
+        ticker = Ticker(progress)
         if solver == 'sparse' or (solver == 'auto'
                                   and self.num_dof > SPARSE_ABOVE):
             eigenvalues, full, stiffness = self._sparse_modes(
-                fixed, maximum_frequency, num_modes)
+                fixed, maximum_frequency, num_modes, ticker)
         else:
-            eigenvalues, full, stiffness = self._dense_modes(fixed)
+            eigenvalues, full, stiffness = self._dense_modes(fixed, ticker)
+        if ticker.total:
+            ticker.tick(ticker.total - ticker.done)
         # a rigid-body eigenvalue is zero plus round-off, and comes out
         # either side of it; the negative ones are not oscillations
         frequency = np.sqrt(np.clip(eigenvalues, 0.0, None)) / (2.0 * np.pi)
@@ -1549,8 +1577,12 @@ class Model:
                         mass_unit='kg',
                         comment=self.name or '')
 
-    def _dense_modes(self, fixed):
+    def _dense_modes(self, fixed, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) solved whole."""
+        if ticker is not None:
+            # the dense path is one factorization and one eigh: two
+            # steps, the second the long one
+            ticker.add(2)
         mass, stiffness = self.matrices()
         # u = T q: q the degrees of freedom that remain — every node's,
         # less those grounded and those following a rigid link's first
@@ -1582,13 +1614,18 @@ class Model:
         # want and not something applied afterwards.
         temporary = np.linalg.solve(factor, reduced_k)
         standard = np.linalg.solve(factor, temporary.T).T
+        if ticker is not None:
+            ticker.tick()
         eigenvalues, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
+        if ticker is not None:
+            ticker.tick()
         shapes = np.linalg.solve(factor.T, vectors)
 
         full = transform @ shapes
         return eigenvalues, full, stiffness
 
-    def scaled_system(self, fixed: Sequence[str] = ()) -> tuple[Any, ...]:
+    def scaled_system(self, fixed: Sequence[str] = (),
+                      ticker: Any = None) -> tuple[Any, ...]:
         """The sparse eigenproblem as the sparse solver poses it.
 
         Returns (K, M, T, S, sigma, stiffness): the constrained,
@@ -1611,7 +1648,7 @@ class Model:
         """
         from scipy import sparse
 
-        mass, stiffness = self.sparse_matrices()
+        mass, stiffness = self.sparse_matrices(ticker)
         transform = self.constraint_transform(fixed, sparse=True)
         reduced_m = (transform.T @ mass @ transform).tocsc()
         reduced_k = (transform.T @ stiffness @ transform).tocsc()
@@ -1624,10 +1661,10 @@ class Model:
         reduced_m = (scale @ reduced_m @ scale).tocsc()
         return reduced_k, reduced_m, transform, scale, sigma, stiffness
 
-    def _sparse_modes(self, fixed, maximum_frequency, num_modes):
+    def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) for the lowest
         modes, by shift-invert Lanczos on the sparse matrices."""
-        from scipy.sparse.linalg import eigsh
+        from scipy.sparse.linalg import LinearOperator, eigsh, splu
 
         if num_modes is None and maximum_frequency is None:
             raise ValueError(
@@ -1635,8 +1672,35 @@ class Model:
                 'for its lowest modes: say how many (num_modes) or up to '
                 'what frequency (maximum_frequency)')
         reduced_k, reduced_m, transform, scale, sigma, stiffness = \
-            self.scaled_system(fixed)
+            self.scaled_system(fixed, ticker)
         size = reduced_m.shape[0]
+        # the shifted factor, once: eigsh's shift-invert and the polish
+        # both solve with it, and eigsh built its own until the bar
+        # needed to count the solves (2026-10-01) — the operator ticks
+        # per application against an estimate the bar is kept short of
+        if ticker is not None:
+            ticker.add(1)
+        try:
+            factor = splu((reduced_k - sigma * reduced_m).tocsc())
+        except RuntimeError as failure:
+            empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
+                                   & (reduced_k.diagonal() <= 0.0))
+            raise ValueError(
+                'the model could not be factored: degrees of freedom '
+                'with neither mass nor stiffness'
+                + (f' ({len(empty)} of them)' if len(empty) else '')
+                + f' — {failure}') from None
+        if ticker is not None:
+            ticker.tick()
+
+        def solve(vector):
+            if ticker is not None:
+                ticker.extend_to(1)
+                ticker.tick()
+            return factor.solve(np.asarray(vector, dtype=float))
+
+        shifted_inverse = LinearOperator(factor.shape, matvec=solve,
+                                         dtype=float)
         limit = (None if maximum_frequency is None
                  else (2.0 * np.pi * float(maximum_frequency)) ** 2)
         wanted = int(num_modes) if num_modes is not None else 24
@@ -1644,8 +1708,11 @@ class Model:
             wanted = max(1, min(wanted, size - 1))
             count = min(wanted + LANCZOS_GUARD, size - 1)
             try:
+                if ticker is not None:
+                    ticker.extend_to(EIGEN_SOLVES_PER_MODE * count)
                 eigenvalues, vectors = eigsh(reduced_k, k=count, M=reduced_m,
-                                             sigma=sigma, which='LM')
+                                             sigma=sigma, which='LM',
+                                             OPinv=shifted_inverse)
             except RuntimeError as failure:
                 empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
                                        & (reduced_k.diagonal() <= 0.0))
@@ -1672,7 +1739,8 @@ class Model:
         # the wanted modes is trimmed by the caller's `keep`. The Ritz
         # step also makes the modes mass-normal exactly.
         eigenvalues, vectors, _residuals = polish_modes(
-            reduced_k, reduced_m, sigma, vectors, wanted)
+            reduced_k, reduced_m, sigma, vectors, wanted, factor=factor,
+            ticker=ticker)
         return eigenvalues, transform @ (scale @ vectors), stiffness
 
     def constraint_transform(self, fixed: Sequence[str] = (),

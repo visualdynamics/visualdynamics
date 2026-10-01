@@ -43,6 +43,7 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import scipy.fft as scipy_fft
 from numpy.typing import ArrayLike
 
 if TYPE_CHECKING:
@@ -1061,7 +1062,7 @@ class TimeHistory(DataArray):
         frequencies = np.fft.rfftfreq(len(self.abscissa), step)
         rows, dofs, dims, units, hints = [], [], [], [], []
         for (dof, dim, unit, hint), indices in groups.items():
-            frames = np.fft.rfft(self.ordinate[indices], axis=1)
+            frames = scipy_fft.rfft(workers=-1, x=self.ordinate[indices], axis=1)
             rows.append(np.mean(frames, axis=0))
             dofs.append(dof)
             dims.append(dim)
@@ -1665,7 +1666,7 @@ class TimeHistory(DataArray):
         frequencies, scale, groups = self._spectral_frame(averaging)
         rows, dofs, dims, hints = [], [], [], []
         for (dof, dim, hint), windowed in groups.items():
-            frames = np.fft.rfft(windowed, axis=1)
+            frames = scipy_fft.rfft(workers=-1, x=windowed, axis=1)
             rows.append(np.mean(np.abs(frames) ** 2, axis=0) * scale)
             dofs.append(dof)
             dims.append(f'{dim}**2/frequency' if dim != UNKNOWN
@@ -1728,7 +1729,7 @@ class TimeHistory(DataArray):
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
         keys = list(groups)
-        frames = {key: np.fft.rfft(windowed, axis=1)
+        frames = {key: scipy_fft.rfft(workers=-1, x=windowed, axis=1)
                   for key, windowed in groups.items()}
         records, responses, references = [], [], []
         dims, hints = [], []
@@ -1951,7 +1952,7 @@ class TimeHistory(DataArray):
                 f'{what} needs response channels; every channel is a '
                 'reference or a monitor')
 
-        spectra = np.asarray([np.fft.rfft(groups[key], axis=1)
+        spectra = np.asarray([scipy_fft.rfft(workers=-1, x=groups[key], axis=1)
                               for key in keys])
         averages = spectra.shape[1]
         if averages <= len(drives):

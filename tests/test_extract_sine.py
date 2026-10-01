@@ -1011,3 +1011,53 @@ def test_the_setting_rides_the_history_through_the_project(tmp_path):
     exec('from visualdynamics.core.sine import SineExtraction\n'  # noqa: S102
          f'setting = {line}', room)
     assert room['setting'] == SineExtraction(cycles=20.0)
+
+
+# ---- the pieces across worker processes (2026-10-01) ---------------------
+
+
+def test_the_pooled_extraction_is_the_serial_one():
+    """Each piece and channel is one task and a task is the serial
+    code, so the worker processes give the same numbers to the byte —
+    forced onto two workers for a recording the automatic choice
+    would keep in one process."""
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    serial = extract_sine(history, spec, cycles=20.0, workers=1)
+    pooled = extract_sine(history, spec, cycles=20.0, workers=2)
+    assert serial.cycles == pooled.cycles
+    for ours, theirs in zip(serial, pooled):
+        assert np.array_equal(ours.ordinate, theirs.ordinate)
+        assert np.array_equal(ours.floor, theirs.floor)
+        assert np.array_equal(ours.below_floor, theirs.below_floor)
+        assert ours.drift_hz == theirs.drift_hz
+
+
+def test_small_work_stays_in_one_process():
+    """The workers take a second each to start; a recording under the
+    floor is not worth them, and the automatic choice says so."""
+    from visualdynamics.core import sine
+
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    assert len(history.abscissa) * 2 < sine.PARALLEL_FLOOR
+    assert sine._workers(None) >= 1
+    assert sine._workers(3) == 3
+
+
+def test_the_pieces_really_run_in_the_workers(monkeypatch):
+    """A worker imports the real module, so breaking the task in this
+    process breaks the serial path and not the pooled one — which is
+    how the test knows the work left the process."""
+    from visualdynamics.core import sine
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError('ran in the parent')
+
+    monkeypatch.setattr(sine, '_piece_task', boom)
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    with pytest.raises(RuntimeError, match='ran in the parent'):
+        extract_sine(history, spec, cycles=20.0, workers=1)
+    levels = extract_sine(history, spec, cycles=20.0, workers=2)
+    assert len(levels) == 2

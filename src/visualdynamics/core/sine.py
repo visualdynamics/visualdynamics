@@ -564,6 +564,7 @@ def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
     history, never copies). Overlap-add convolution rather than one
     FFT of the whole record, so the memory is a block's, not the
     record's (2026-10-01: a 23 GB run)."""
+    from scipy.fft import set_workers
     from scipy.signal import oaconvolve
 
     records = [np.asarray(record) for record in records]
@@ -582,10 +583,22 @@ def _tone_score(records: Any, dt: float, tone: SineTone) -> np.ndarray:
                 'second of the tone; nothing to align')
     score = np.zeros(length - len(template) + 1)
     flipped = template[::-1]
-    for record in records:
-        score += oaconvolve(np.asarray(record, dtype=float), flipped,
-                            mode='valid') ** 2
+    # the FFTs inside run on every core; nothing is copied for it
+    with set_workers(_workers()):
+        for record in records:
+            score += oaconvolve(np.asarray(record, dtype=float), flipped,
+                                mode='valid') ** 2
     return score
+
+
+def _workers(wanted: int | None = None) -> int:
+    """How many workers to use: `wanted`, else the cores up to
+    `MAX_WORKERS`."""
+    import os
+
+    if wanted is not None:
+        return max(int(wanted), 1)
+    return max(1, min(MAX_WORKERS, os.cpu_count() or 1))
 
 
 class SineLevelSet:
@@ -768,6 +781,15 @@ SAMPLE_WINDOWS = 8
 #: within 0.2 % of flat there, and a sweep that drifted further would
 #: begin to read low
 REFINE_FRACTION = 0.2
+#: the most worker processes an extraction spreads its pieces over
+#: (Brandon, 2026-10-01: use the cores). Eight: the solve scaled to
+#: 3.5x on eight workers of a twelve-core Mac and fell back at twelve,
+#: when the efficiency cores joined; and the work it pays for — a
+#: piece's worth of samples times channels under which the workers'
+#: start-up (a second each, importing this package) costs more than
+#: it saves, measured on the test recordings
+MAX_WORKERS = 8
+PARALLEL_FLOOR = 4_000_000
 
 
 @dataclass(frozen=True)
@@ -1012,18 +1034,22 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
     size = N * W
     ab = np.zeros((2 * u + 1, size))
     rhs = np.zeros(size)
-    sample = np.arange(N)
     coeff = np.empty((N, W))
     coeff[:, 0::2] = cos.T
     coeff[:, 1::2] = sin.T
+    # Every unknown's column is sample * W + slot, so the unknowns of
+    # one slot are a strided view `slot::W` of a row of ab — filled as
+    # slices rather than through index arrays (2026-10-01: the index
+    # arrays were half of each solve's time, and a scatter through
+    # them holds the interpreter lock, which is why threads gained
+    # nothing).
     # A^T A: one WxW block per sample, c c^T with c = [cos1, -sin1, ...]
     for i in range(W):
-        rhs[sample * W + i] = coeff[:, i] * y
+        rhs[i::W] = coeff[:, i] * y
         for j in range(W):
-            ab[u + i - j, sample * W + j] += coeff[:, i] * coeff[:, j]
+            ab[u + i - j, j::W] += coeff[:, i] * coeff[:, j]
     # the smoothness penalty D^T R^2 D per tone and component, R the
     # per-sample weight; and a unit pull to zero where a tone is absent
-    m = np.arange(1, N - 1)
     for k in range(K):
         # the data term's diagonal averages 1/2 per component (cos^2,
         # sin^2 over a cycle), so the penalty is halved to put the
@@ -1032,31 +1058,33 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
         w2 = 0.5 * weight[k] ** 2
         absent = (weight[k] == 0.0).astype(float)
         for comp in (0, 1):
-            idx = sample * W + 2 * k + comp
-            ab[u, idx] += absent
+            slot = 2 * k + comp
+            diagonal = ab[u, slot::W]                 # one entry per sample
+            diagonal += absent
             if N < 3:
                 continue
-            wm = w2[m]
-            left, center, right = idx[m - 1], idx[m], idx[m + 1]
-            # (x[n-1] - 2x[n] + x[n+1]) for n = 1..N-2, weighted by w[n]
-            ab[u, left] += wm
-            ab[u, center] += 4.0 * wm
-            ab[u, right] += wm
+            wm = w2[1:N - 1]
+            # (x[n-1] - 2x[n] + x[n+1]) for n = 1..N-2, weighted by w[n]:
+            # left is sample n-1, center n, right n+1
+            diagonal[0:N - 2] += wm
+            diagonal[1:N - 1] += 4.0 * wm
+            diagonal[2:N] += wm
             # left-center and center-right: offsets -W (above) and +W
-            ab[u - W, center] -= 2.0 * wm
-            ab[u + W, left] -= 2.0 * wm
-            ab[u - W, right] -= 2.0 * wm
-            ab[u + W, center] -= 2.0 * wm
+            above, below_ = ab[u - W, slot::W], ab[u + W, slot::W]
+            above[1:N - 1] -= 2.0 * wm            # column = center
+            below_[0:N - 2] -= 2.0 * wm           # column = left
+            above[2:N] -= 2.0 * wm                # column = right
+            below_[1:N - 1] -= 2.0 * wm           # column = center
             # left-right: offsets -2W and +2W
-            ab[u - 2 * W, right] += wm
-            ab[u + 2 * W, left] += wm
+            ab[u - 2 * W, slot::W][2:N] += wm     # column = right
+            ab[u + 2 * W, slot::W][0:N - 2] += wm  # column = left
     x = solve_banded((u, u), ab, rhs, overwrite_ab=True, overwrite_b=True,
                      check_finite=False)
     envelopes = []
     for k, (a, b) in enumerate(spans):
-        u = x[(sample * W + 2 * k)][a - lo:b - lo]
-        v = x[(sample * W + 2 * k + 1)][a - lo:b - lo]
-        envelopes.append(u + 1j * v)
+        real = x[2 * k::W][a - lo:b - lo]
+        imag = x[2 * k + 1::W][a - lo:b - lo]
+        envelopes.append(real + 1j * imag)
     return envelopes
 
 
@@ -1195,9 +1223,85 @@ def _centers(laid: _Laid, points_per_window: float) -> np.ndarray:
     return np.asarray(centers, dtype=np.int64)
 
 
-def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None):
+def _piece_task(y, args, freqs, offsets, dt, cycles, reads, blocks):
+    """One channel through one piece — the work a worker process does
+    (2026-10-01). `reads` per live tone: (local centers, half-windows,
+    debiasing lengths) or None when the chunk reads none of that
+    tone's centers; `blocks` per live tone: (tone, sweep offset of the
+    piece's entry, interior lo, interior hi) for the clock slopes.
+    Returns per live tone `(amplitude, floor, below, slopes)` — the
+    first three at the read centers, the slopes a list of (seconds,
+    slope, weight)."""
+    y = np.asarray(y, dtype=float)
+    rotors = [np.exp(1j * a) for a in args]
+    envelopes = _vold_kalman_whole(y, args, freqs, offsets, dt, cycles)
+    model = np.zeros(len(y))
+    for e in range(len(args)):
+        span = slice(offsets[e], offsets[e] + len(args[e]))
+        model[span] += np.real(envelopes[e] * rotors[e])
+    residual = y - model
+    out = []
+    for e in range(len(args)):
+        a = args[e]
+        span = slice(offsets[e], offsets[e] + len(a))
+        envelope = envelopes[e]
+        amplitude = floor = below = None
+        if reads[e] is not None:
+            local, half, samples_in = reads[e]
+            # the residual demodulated like the tone, its power summed
+            # over each center's own window
+            z = residual[span] * np.conj(rotors[e])
+            sums = np.concatenate(([0.0], np.cumsum(np.abs(z) ** 2)))
+            lo_i = np.clip(local - half, 0, len(a))
+            hi_i = np.clip(local + half + 1, 0, len(a))
+            variance = (sums[hi_i] - sums[lo_i]) / np.maximum(hi_i - lo_i, 1)
+            noise_power = 4.0 * variance / samples_in
+            power = np.abs(envelope[local]) ** 2 - noise_power
+            below = power <= 0.0
+            shown = np.where(below, np.sqrt(noise_power),
+                             np.sqrt(np.maximum(power, 0.0)))
+            amplitude = shown * np.exp(1j * np.angle(envelope[local]))
+            floor = np.sqrt(noise_power)
+        # the clock: the envelope's phase slope over the chunk's
+        # interior, in sub-blocks so a sweep shorter than one chunk
+        # still gives the curve its slopes are fitted with, each
+        # weighted by its power so a stretch under the noise says
+        # nothing
+        tone, sweep_offset, int_lo, int_hi = blocks[e]
+        slopes = []
+        block = max((int_hi - int_lo) // 8, 256)
+        for b_lo in range(int_lo, int_hi, block):
+            b_hi = min(b_lo + block, int_hi)
+            if b_hi - b_lo < 4:
+                continue
+            weight = np.abs(envelope[b_lo:b_hi]) ** 2
+            if weight.sum() <= 0.0:
+                continue
+            phase = np.unwrap(np.angle(envelope[b_lo:b_hi]))
+            t = tone.grid(dt, sweep_offset + b_lo, sweep_offset + b_hi)
+            t_mean = np.average(t, weights=weight)
+            p_mean = np.average(phase, weights=weight)
+            spread = np.sum(weight * (t - t_mean) ** 2)
+            if spread > 0.0:
+                slope = np.sum(weight * (t - t_mean) * (phase - p_mean)) / spread
+                slopes.append((float(t_mean), float(slope), float(weight.sum())))
+        out.append((amplitude, floor, below, slopes))
+    return out
+
+
+def _run_piece(*args):
+    """What the pool is handed: looks the task up in the worker's own
+    module, so a task replaced in the parent (a test proving the work
+    left the process) is not what the worker runs."""
+    return _piece_task(*args)
+
+
+def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
+                 pool=None):
     """The readings at each tone's centers, one chunk of the record at
-    a time, every channel through each chunk before the next.
+    a time, every channel through each chunk before the next — in
+    worker processes when a `pool` is given, each channel of each
+    piece one task, the pool kept fed with a few pieces at once.
 
     Per chunk `[start, end)` — the chunks tile the tones' joint span,
     or are the `pieces` given — the margin the chunked solve needs is
@@ -1234,89 +1338,93 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None):
                     for placed in laid if placed.start <= sample < placed.end]
                    or [1.0])
 
-    for start, end in pieces:
-        start, end = max(int(start), lo), min(int(end), hi)
-        if end <= start:
-            continue
+    def prepare(start, end):
+        """The piece around a chunk: its slices per live tone and what
+        each channel's task needs — None when no tone is live."""
         before = int(MARGIN_WINDOWS * widest(start))
         after = int(MARGIN_WINDOWS * widest(end - 1))
         piece_lo, piece_hi = max(start - before, lo), min(end + after, hi)
-        live, args, freqs, offsets, entries = [], [], [], [], []
+        live, args, freqs, offsets, reads, blocks = [], [], [], [], [], []
         for k, placed in enumerate(laid):
             entry, leave = max(placed.start, piece_lo), min(placed.end, piece_hi)
             if leave <= entry:
                 continue
-            args.append(placed.argument(entry - placed.start, leave - placed.start))
-            freqs.append(placed.f(entry - placed.start, leave - placed.start))
+            a = placed.argument(entry - placed.start, leave - placed.start)
+            f = placed.f(entry - placed.start, leave - placed.start)
+            # which of this tone's centers the chunk reads
+            absolute = centers[k] + placed.start
+            j = np.flatnonzero((absolute >= start) & (absolute < end))
+            if len(j):
+                local = centers[k][j] - (entry - placed.start)
+                fc = f[local]
+                reads.append((local, (placed.window(fc) / 2.0).astype(np.int64),
+                              placed.samples_in(fc)))
+            else:
+                reads.append(None)
+            blocks.append((placed.tone, entry - placed.start,
+                           max(start, entry) - entry,
+                           min(end, entry + len(a)) - entry))
+            args.append(a)
+            freqs.append(f)
             offsets.append(entry - piece_lo)
-            entries.append(entry)
-            live.append(k)
+            live.append((k, j))
         if not live:
-            continue
-        # which of each live tone's centers this chunk reads
-        wanted = {}
-        for e, k in enumerate(live):
-            absolute = centers[k] + laid[k].start
-            wanted[k] = np.flatnonzero((absolute >= start) & (absolute < end))
-        rotors = [np.exp(1j * a) for a in args]
-        for i in range(C):
-            y = np.asarray(signals[i][piece_lo:piece_hi], dtype=float)
-            envelopes = _vold_kalman_whole(y, args, freqs, offsets, dt, cycles)
-            model = np.zeros(piece_hi - piece_lo)
-            for e in range(len(live)):
-                span = slice(offsets[e], offsets[e] + len(args[e]))
-                model[span] += np.real(envelopes[e] * rotors[e])
-            residual = y - model
-            for e, k in enumerate(live):
-                placed, a, f = laid[k], args[e], freqs[e]
-                span = slice(offsets[e], offsets[e] + len(a))
-                envelope = envelopes[e]
-                j = wanted[k]
-                if len(j):
-                    # the residual demodulated like the tone, its power
-                    # summed over each center's own window
-                    z = residual[span] * np.conj(rotors[e])
-                    sums = np.concatenate(([0.0], np.cumsum(np.abs(z) ** 2)))
-                    local = centers[k][j] - (entries[e] - placed.start)
-                    fc = f[local]
-                    half = (placed.window(fc) / 2.0).astype(np.int64)
-                    lo_i = np.clip(local - half, 0, len(a))
-                    hi_i = np.clip(local + half + 1, 0, len(a))
-                    variance = (sums[hi_i] - sums[lo_i]) / np.maximum(hi_i - lo_i, 1)
-                    noise_power = 4.0 * variance / placed.samples_in(fc)
-                    power = np.abs(envelope[local]) ** 2 - noise_power
-                    under = power <= 0.0
-                    shown = np.where(under, np.sqrt(noise_power),
-                                     np.sqrt(np.maximum(power, 0.0)))
-                    amplitude[k][i, j] = shown * np.exp(1j * np.angle(envelope[local]))
-                    floor[k][i, j] = np.sqrt(noise_power)
-                    below[k][i, j] = under
-                # the clock: the envelope's phase slope over the chunk's
-                # interior, in sub-blocks so a sweep shorter than one
-                # chunk still gives the curve its slopes are fitted
-                # with, each weighted by its power so a stretch under
-                # the noise says nothing
-                int_lo = max(start, entries[e]) - entries[e]
-                int_hi = min(end, entries[e] + len(a)) - entries[e]
-                block = max((int_hi - int_lo) // 8, 256)
-                for b_lo in range(int_lo, int_hi, block):
-                    b_hi = min(b_lo + block, int_hi)
-                    if b_hi - b_lo < 4:
-                        continue
-                    weight = np.abs(envelope[b_lo:b_hi]) ** 2
-                    if weight.sum() <= 0.0:
-                        continue
-                    phase = np.unwrap(np.angle(envelope[b_lo:b_hi]))
-                    t = placed.seconds(entries[e] - placed.start + b_lo,
-                                       entries[e] - placed.start + b_hi)
-                    t_mean = np.average(t, weights=weight)
-                    p_mean = np.average(phase, weights=weight)
-                    spread = np.sum(weight * (t - t_mean) ** 2)
-                    if spread > 0.0:
-                        slope = np.sum(weight * (t - t_mean)
-                                       * (phase - p_mean)) / spread
-                        slopes[k][i].append((float(t_mean), float(slope),
-                                             float(weight.sum())))
+            return None
+        return piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks
+
+    def keep(i, live, result):
+        for (k, j), (amp, flo, bel, found) in zip(live, result):
+            if amp is not None:
+                amplitude[k][i, j] = amp
+                floor[k][i, j] = flo
+                below[k][i, j] = bel
+            slopes[k][i].extend(found)
+
+    bounds = [(max(int(a), lo), min(int(b), hi)) for a, b in pieces]
+    bounds = [(a, b) for a, b in bounds if b > a]
+    if pool is None:
+        for start, end in bounds:
+            made = prepare(start, end)
+            if made is None:
+                continue
+            piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks = made
+            for i in range(C):
+                keep(i, live, _piece_task(
+                    signals[i][piece_lo:piece_hi], args, freqs, offsets, dt,
+                    cycles, reads, blocks))
+        return amplitude, floor, below, slopes
+    # a few pieces in flight at once, so every worker stays busy when
+    # the channels alone are fewer than the workers; results are kept
+    # as they land, in any order
+    from concurrent.futures import FIRST_COMPLETED, wait
+
+    in_flight = {}
+    ahead = max(2, -(-pool._max_workers // max(C, 1)) + 1)
+    queue = iter(bounds)
+    pending = True
+    while pending or in_flight:
+        while pending and len(in_flight) < ahead * C:
+            try:
+                start, end = next(queue)
+            except StopIteration:
+                pending = False
+                break
+            made = prepare(start, end)
+            if made is None:
+                continue
+            piece_lo, piece_hi, live, args, freqs, offsets, reads, blocks = made
+            for i in range(C):
+                future = pool.submit(
+                    _run_piece, np.asarray(signals[i][piece_lo:piece_hi],
+                                           dtype=float),
+                    args, freqs, offsets, dt, cycles, reads, blocks)
+                in_flight[future] = (i, live)
+        if not in_flight:
+            break
+        done, _rest = wait(list(in_flight), return_when=FIRST_COMPLETED)
+        for future in done:
+            i, live = in_flight.pop(future)
+            keep(i, live, future.result())
     return amplitude, floor, below, slopes
 
 
@@ -1474,13 +1582,40 @@ def suggest_cycles(history: Any, specification: SineSweepSpecification,
     return float(max(BASE_CYCLES, min(rung, cap)))
 
 
+def _passes(signals, laid, dt, cycles, centers, refine, pool):
+    """The solve, and with `refine` the clock checked and the solve
+    repeated while it moves, up to three times."""
+    for _pass in range(3 if refine else 1):
+        amplitude, floor, below, slopes = _read_levels(
+            signals, laid, dt, cycles, centers, pool=pool)
+        if not refine:
+            break
+        moved = False
+        for k, placed in enumerate(laid):
+            c1, c2 = _clock_correction(placed, slopes[k])
+            half_span = placed.n * placed.dt / 2.0
+            ends = np.array([-half_span, half_span])
+            offset_hz = (c1 + 2.0 * c2 * ends) / (2.0 * np.pi)
+            f_ends = placed.f(0, 1)[0], placed.f(placed.n - 1, placed.n)[0]
+            bandwidth = _AVERAGE_BANDWIDTH * np.array(f_ends) / cycles
+            if np.max(np.abs(offset_hz) / bandwidth) > REFINE_FRACTION:
+                placed.c1 += c1
+                placed.c2 += c2
+                placed.drift_hz += float(offset_hz[-1])
+                moved = True
+        if not moved:
+            break
+    return amplitude, floor, below, slopes
+
+
 def extract_sine(history: Any, specification: SineSweepSpecification,
                  tones: Sequence[str] | None = None,
                  onsets: dict[str, float] | None = None,
                  cycles: float | None = None,
                  points_per_window: float = 2.0,
                  refine: bool = True,
-                 target_db: float = TARGET_SCATTER_DB) -> SineLevelSet:
+                 target_db: float = TARGET_SCATTER_DB,
+                 workers: int | None = None) -> SineLevelSet:
     """Read each tone's level out of a recording, against its own sweep.
 
     Reconstruct every wanted tone's sweep from the specification's
@@ -1522,6 +1657,14 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     sweep rides the result as `SineLevel.drift_hz`, zero when none was
     needed.
 
+    `workers` is how many processes the pieces are spread over
+    (Brandon, 2026-10-01: use the cores): None picks the cores up to
+    `MAX_WORKERS`, and spreads only when the work is more than
+    `PARALLEL_FLOOR` samples times channels, since the workers take a
+    second each to start; 1 does everything here. The numbers are the
+    same either way — each piece and channel is one task, and a task
+    is the serial code.
+
     The envelope is read every window/`points_per_window` along the
     sweep, one (almost) independent reading each. Returns a
     `SineLevelSet` — one object, one `SineLevel` per tone inside,
@@ -1542,27 +1685,25 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     laid = _lay_tones(signals, specification, wanted, onsets, dt, cycles)
     centers = [_centers(placed, points_per_window) for placed in laid]
 
-    for _pass in range(3 if refine else 1):
-        amplitude, floor, below, slopes = _read_levels(
-            signals, laid, dt, cycles, centers)
-        if not refine:
-            break
-        moved = False
-        for k, placed in enumerate(laid):
-            c1, c2 = _clock_correction(placed, slopes[k])
-            half_span = placed.n * placed.dt / 2.0
-            ends = np.array([-half_span, half_span])
-            offset_hz = (c1 + 2.0 * c2 * ends) / (2.0 * np.pi)
-            f_ends = placed.f(0, 1)[0], placed.f(placed.n - 1, placed.n)[0]
-            bandwidth = _AVERAGE_BANDWIDTH * np.array(f_ends) / cycles
-            if np.max(np.abs(offset_hz) / bandwidth) > REFINE_FRACTION:
-                placed.c1 += c1
-                placed.c2 += c2
-                placed.drift_hz += float(offset_hz[-1])
-                moved = True
-        if not moved:
-            break
+    span = max(p.end for p in laid) - min(p.start for p in laid)
+    count = _workers(workers)
+    if workers is None and span * len(rows) < PARALLEL_FLOOR:
+        count = 1
+    pool = None
+    if count > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
 
+        # spawned, on every platform: a forked worker inherits the
+        # parent's BLAS threads and locks and can hang in them
+        pool = ProcessPoolExecutor(
+            max_workers=count, mp_context=multiprocessing.get_context('spawn'))
+    try:
+        amplitude, floor, below, _slopes = _passes(
+            signals, laid, dt, cycles, centers, refine, pool)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
     out = []
     for k, placed in enumerate(laid):
         frequencies = placed.tone.frequency_at(placed.seconds_at(centers[k]))

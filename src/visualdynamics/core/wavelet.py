@@ -369,7 +369,14 @@ def _bands(record, sample_rate, wanted, omega0):
     Each band's coefficients are already cut back to the record's
     length; the caller stacks them or reduces them as it likes.
     """
-    from scipy.fft import fft, ifft, next_fast_len
+    from functools import partial
+
+    from scipy.fft import fft as _fft
+    from scipy.fft import ifft as _ifft
+    from scipy.fft import next_fast_len
+
+    # every core on the transforms (2026-10-01); the same numbers
+    fft, ifft = partial(_fft, workers=-1), partial(_ifft, workers=-1)
 
     samples = record.size
     step = 1.0 / float(sample_rate)

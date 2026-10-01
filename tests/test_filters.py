@@ -381,3 +381,31 @@ def test_every_kind_survives_a_save_and_a_load(tmp_path):
         path = project.save(tmp_path / f'{filtering.kind}.vdyn')
         back = visualdynamics.Project.open(path)
         assert back['Run'].filtering == filtering
+
+
+def test_a_long_record_is_filtered_a_channel_per_core(monkeypatch):
+    """`threaded_sosfiltfilt` sends each channel of a long record to its
+    own thread — the same scipy call per row, so the same numbers to
+    the bit — and leaves a short record to one call (2026-10-01)."""
+    import scipy.signal
+
+    from visualdynamics.core.filters import threaded_sosfiltfilt
+
+    sos = scipy.signal.butter(4, 0.1, output='sos')
+    rng = np.random.default_rng(3)
+    long = rng.standard_normal((4, 300_000))
+    calls = []
+    real = scipy.signal.sosfiltfilt
+
+    def counted(sos, rows, axis=-1):
+        calls.append(np.ndim(rows))
+        return real(sos, rows, axis=axis)
+
+    monkeypatch.setattr(scipy.signal, 'sosfiltfilt', counted)
+    ours = threaded_sosfiltfilt(sos, long)
+    assert calls == [1, 1, 1, 1], 'one call per channel, each a row'
+    assert np.array_equal(ours, real(sos, long, axis=-1))
+    calls.clear()
+    short = rng.standard_normal((4, 1000))
+    threaded_sosfiltfilt(sos, short)
+    assert calls == [2], 'a short record in one call'

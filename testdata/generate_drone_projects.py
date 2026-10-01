@@ -105,7 +105,7 @@ def _defined(geometry):
 
 def survey_geometry():
     """The display model: the nodes the test instruments, threaded with
-    tracelines so an animation reads as an airframe."""
+    drawn lines so an animation reads as an airframe."""
     return _defined(visualdynamics.load(str(DRONE / 'test_geometry.vdyn')))
 
 

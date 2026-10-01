@@ -21,7 +21,7 @@ Three things MATLAB spells differently from HDF5, and the rules for
 them, applied mechanically both ways:
 
 - **Ragged arrays** — the `<name>_flat` / `<name>_offsets` pairs
-  (traceline and element connectivity) — are one cell array `<name>`,
+  (element connectivity) — are one cell array `<name>`,
   one row vector per entry, which is how MATLAB holds a ragged list.
 - **Numbered groups** — the project's `objects/0000, 0001, …` and a
   sine specification's `tones/0, 1, …` — are a cell array of structs
@@ -133,7 +133,7 @@ def _cell(items: list) -> np.ndarray:
     """A one-dimensional object array holding exactly these items —
     built by hand, because `np.array` given a list of equal-length
     arrays makes a matrix of their elements instead of a cell of
-    arrays (one traceline of four nodes came back as four of one)."""
+    arrays (one line of four nodes came back as four of one)."""
     cell = np.empty(len(items), dtype=object)
     for k, item in enumerate(items):
         cell[k] = item

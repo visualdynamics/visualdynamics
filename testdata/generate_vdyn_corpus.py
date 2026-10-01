@@ -46,8 +46,8 @@ def build_project() -> visualdynamics.Project:
     geometry = Geometry(
         node_id=[1, 2, 3, 4],
         node_xyz=[[0.0, 0.0, 0.0], [0.5, 0.0, 0.0],
-                  [1.0, 0.0, 0.0], [1.0, 0.5, 0.0]],
-        traceline_id=[1], traceline_conn=[[1, 2, 3, 4]])
+                  [1.0, 0.0, 0.0], [1.0, 0.5, 0.0]])
+    geometry.add_beams([1, 2, 3, 4])
     geometry.length_unit = 'm'
 
     t = np.arange(256) / 256.0

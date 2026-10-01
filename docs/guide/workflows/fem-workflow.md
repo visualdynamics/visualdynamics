@@ -29,8 +29,8 @@ barc.project().save('barc.vdyn')    # the model this page builds, already built
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
 | Build it from planes | the geometry's bar | *Add Plane*, once per plane |
-| Tie the bolted parts | the geometry's Elements | pick the elements under each washer, *Tie* to the part below |
-| Give each part its material and thickness | the Blocks table | pick a material, type a thickness |
+| Tie the bolted parts | the geometry's Quads | pick the elements under each washer, *Tie* to the part below |
+| Give each part its material and thickness | the pencil on each block's row | pick a material, type a thickness |
 | Solve | the bar | *Solve Modes* |
 
 ## 1. The geometry, from planes
@@ -137,7 +137,7 @@ its outer ring of elements, split into four 3 × 3 squares. On the beam,
 8 elements wide, each patch is the middle four across its width, the
 third to sixth elements from its end.
 
-In the app: click the pencil on the geometry's **Elements**. For each
+In the app: expand the geometry and click the pencil on **Quads**. For each
 bolt, click one element of its patch in the 3-D view and Shift-click
 (Cmd-click on a Mac) the rest; then press **Tie** on the bar and pick
 the part below from its menu — *box* for a foot, *left channel* or
@@ -155,9 +155,10 @@ solved — is on the website's
 
 ## 3. Materials, thicknesses, solve
 
-Expand the geometry in the tree — yours, or **BARC** — and click the pencil on
-**Blocks**: one row per part, and to the right of Name and Elements the
-property columns, in the display units.
+Expand the geometry in the tree — yours, or **BARC** — then **Quads**,
+and click the pencil on a block's row: the blocks table opens on it,
+one row per part, and to the right of Name and Elements the property
+columns, in the display units.
 
 | Block | Material | Thickness |
 |---|---|---|

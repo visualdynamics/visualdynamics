@@ -70,7 +70,7 @@ root attributes:
   per field, one element per record. `''` marks *undefined* — an
   ordinate unit of `''` is a channel whose units were never declared,
   and it reloads as undefined, not as dimensionless.
-- **Ragged arrays** (traceline and element connectivity) are two
+- **Ragged arrays** (element connectivity) are two
   datasets: `<name>_flat`, the values run together, and
   `<name>_offsets`, one longer than the count, so entry *i* is
   `flat[offsets[i]:offsets[i+1]]`.
@@ -86,10 +86,15 @@ root attributes:
     attrs   dimension, length_unit ('' = undeclared)
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
-            traceline_id, traceline_color, traceline_desc,
-            traceline_conn_flat / _offsets,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,
             elem_block, block_id, block_name
+
+    A file from before 2026-09-30 also holds `traceline_id`,
+    `traceline_color`, `traceline_desc` and `traceline_conn_flat /
+    _offsets`: a loader turns each traceline id into a block of two-node
+    beam elements with no properties, named by its description, and
+    splits any block holding more than one element family. The file is
+    written back without them.
     block_properties/<block id>/   (only blocks given properties)
             attrs   material_name, youngs_modulus, density, poissons_ratio,
                     modulus_of_rigidity (when set), thickness (plates) or

@@ -81,64 +81,79 @@ def test_a_coordinate_system_lands_where_the_click_did_too(plate, window,
     assert 'Added coordinate system' in window.statusBar().currentMessage()
 
 
-def test_the_element_types_are_offered_only_while_adding_one(plate, window,
-                                                             pump):
-    """Nothing else is built from a node count, so the tri/quad/beam
-    buttons belong to elements in add mode and nowhere else."""
-    edit(window, pump, 'Nodes')
+def test_the_family_being_edited_says_what_a_click_builds(plate, window,
+                                                          pump):
+    """The beam / triangle / quad chooser is gone (2026-09-30): the
+    family row the editing began from says what is added, so there is
+    nothing to choose and nothing to get wrong."""
+    assert not hasattr(window, 'element_type_actions')
+    edit(window, pump, 'Quads')
+    assert window.editing == ('Geometry', 'elements')
+    assert window.editing_scope == ('family', 'quads')
     window.set_add_mode(True)
-    assert not any(a.isVisible() for a in window.element_type_actions.values())
-    edit(window, pump, 'Elements')
-    assert not any(a.isVisible() for a in window.element_type_actions.values()), (
-        'editing elements is not yet adding one'
-    )
-    window.set_add_mode(True)
-    assert all(a.isVisible() for a in window.element_type_actions.values())
-    assert window.element_type_actions['tri'].isChecked(), 'the default'
-    assert window.element_type == (41, 3)
+    assert window.element_type == (44, 4)
     assert window._picking_component() == 'nodes', (
         'an element is built out of nodes, so that is what the cursor picks')
+    edit(window, pump, 'Beams')
+    window.set_add_mode(True)
+    assert window.element_type == (21, 2)
+    edit(window, pump, 'Hexes')
+    window.set_add_mode(True)
+    assert window.element_type == (115, 8)
 
 
 def test_each_element_type_commits_on_its_own_node_count(plate, window, pump):
-    edit(window, pump, 'Elements')
-    window.set_add_mode(True)
-    screen = screen_of(window)
-
     def pick(rows):
+        screen = screen_of(window)
         for n, row in enumerate(rows):
             window.hover_at(*screen[row])
             window._add_at(*screen[row], extend=n > 0)
 
-    for kind, rows, code in (('tri', (0, 1, 6), 41),
-                             ('quad', (0, 1, 6, 5), 44),
-                             ('beam', (2, 3), 21)):
-        window.element_type_actions[kind].trigger()
-        assert not window._picked_nodes, (
-            'switching type drops a part-built element')
+    for family, rows, code in (('Triangles', (0, 1, 6), 41),
+                               ('Quads', (0, 1, 6, 5), 44)):
+        edit(window, pump, family)
+        window.set_add_mode(True)
+        assert not window._picked_nodes
         before = len(plate.elem_conn)
         pick(rows)
-        assert len(plate.elem_conn) == before + 1, f'{kind} did not commit'
+        assert len(plate.elem_conn) == before + 1, f'{family} did not commit'
         assert int(plate.elem_type[-1]) == code
         assert not window._picked_nodes, 'the pick list resets after committing'
+    # a beam has no count to commit on: it is a line, said done with Enter
+    edit(window, pump, 'Beams')
+    window.set_add_mode(True)
+    before = len(plate.elem_conn)
+    pick((2, 3))
+    assert len(plate.elem_conn) == before, 'a line waits for Enter'
+    window.commit_action.trigger()
+    pump()
+    assert len(plate.elem_conn) == before + 1
+    assert int(plate.elem_type[-1]) == 21
 
 
-def test_a_traceline_is_as_long_as_you_say_and_commits_on_enter(plate, window,
-                                                                pump):
-    """A traceline has no node count to commit on — it is however many
-    were picked — so it is the one that needs saying when it is done."""
-    edit(window, pump, 'Tracelines')
+def test_a_line_of_beams_is_as_long_as_you_say_and_commits_on_enter(
+        plate, window, pump):
+    """A beam takes the line's grammar (2026-09-30): it is however many
+    nodes were picked, chained, so it is the one that needs saying when
+    it is done — and the chain lands in one block."""
+    edit(window, pump, 'Beams')
     window.set_add_mode(True)
     screen = screen_of(window)
-    before = len(plate.traceline_conn)
+    before = len(plate.elem_conn)
     for n, row in enumerate((2, 3, 4)):
         window.hover_at(*screen[row])
         window._add_at(*screen[row], extend=n > 0)
-    assert len(plate.traceline_conn) == before, 'still being drawn'
+    assert len(plate.elem_conn) == before, 'still being drawn'
     window.commit_action.trigger()
     pump()
-    assert len(plate.traceline_conn) == before + 1
-    assert len(plate.traceline_conn[-1]) == 3
+    assert len(plate.elem_conn) == before + 2
+    assert [int(t) for t in plate.elem_type[-2:]] == [21, 21]
+    assert len({int(b) for b in plate.elem_block[-2:]}) == 1, 'one block'
+    assert [list(map(int, c)) for c in plate.elem_conn[-2:]] == \
+        [[int(plate.node_id[2]), int(plate.node_id[3])],
+         [int(plate.node_id[3]), int(plate.node_id[4])]]
+    assert any(line.startswith("project['Geometry'].add_beams(")
+               for line in window.project.journal)
 
 
 def test_the_cursor_lights_the_node_it_is_over_not_an_element_of_that_id(
@@ -146,7 +161,7 @@ def test_the_cursor_lights_the_node_it_is_over_not_an_element_of_that_id(
     """While building an element the picker returns nodes, and the hover
     mesh has to light one — ids are shared between the groups, so drawing
     'entity 6' without asking which group would light a face."""
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Quads')
     window.set_add_mode(True)
     screen = screen_of(window)
     window.hover_at(*screen[6])
@@ -188,7 +203,7 @@ def test_the_pencil_on_the_tree_opens_the_table_and_closes_it(plate, window,
 def test_an_edit_that_would_break_the_model_is_refused_at_entry(plate, window,
                                                                pump):
     """Never written and complained about afterwards."""
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Quads')
     model = window.table.model()
     column = [c.title for c in model.columns].index('Nodes')
     kept = list(plate.elem_conn[0])
@@ -206,7 +221,7 @@ def test_the_geometry_is_still_valid_after_all_of_that(plate, window, pump):
     window.set_add_mode(True)
     screen = screen_of(window)
     window._add_at(*(screen[0] + screen[8]) / 2)
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Triangles')
     window.set_add_mode(True)
     for n, row in enumerate((0, 1, 6)):
         window.hover_at(*screen[row])
@@ -226,7 +241,7 @@ def _block_box(window):
 
 def test_the_block_drop_down_is_offered_only_while_adding_elements(plate, window,
                                                                   pump):
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Quads')
     assert not window._element_block_handle.isVisible()
     window.set_add_mode(True)
     assert window._element_block_handle.isVisible()
@@ -237,27 +252,34 @@ def test_the_block_drop_down_is_offered_only_while_adding_elements(plate, window
     assert not window._element_block_handle.isVisible()
 
 
-def test_the_default_block_is_the_first_while_it_holds_the_same_kind(plate,
-                                                                     window,
-                                                                     pump):
+def test_the_drop_down_offers_the_familys_blocks_and_a_new_one(plate,
+                                                                window,
+                                                                pump):
     """A quad added to a model of quads joins them — a file's four-node
     shells are the same kind as the quad add mode makes; a beam added to
-    it starts a block of its own, where a plate block would refuse it."""
-    edit(window, pump, 'Elements')
+    it has no block of beams to join, so only a new block is offered —
+    a block holds one family (2026-09-30), where a plate block would
+    refuse it. Editing from a block row starts on that block."""
+    edit(window, pump, 'Quads')
     window.set_add_mode(True)
-    window.element_type_actions['quad'].trigger()
-    assert _block_box(window)[1] == 'Block 1 — body'
-    window.element_type_actions['beam'].trigger()
-    assert _block_box(window)[1] == 'New block'
+    assert _block_box(window) == (['Block 1 — body', 'New block'],
+                                  'Block 1 — body')
+    edit(window, pump, 'Beams')
+    window.set_add_mode(True)
+    assert _block_box(window) == (['New block'], 'New block')
+    from conftest import edit_block
+
+    edit_block(window, pump, 1)
+    assert window.editing == ('Geometry', 'blocks')
+    assert window.editing_scope == ('block', 1)
 
 
 def test_links_picked_one_after_another_share_the_new_block(plate, window,
                                                             pump):
     """The first beam makes the block and the drop-down then shows it, so
     every link picked after joins it — one block to make rigid."""
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Beams')
     window.set_add_mode(True)
-    window.element_type_actions['beam'].trigger()
     screen = screen_of(window)
     blocks_before = list(plate.block_id)
     for a, b in ((0, 8), (2, 10)):
@@ -265,6 +287,7 @@ def test_links_picked_one_after_another_share_the_new_block(plate, window,
         window._add_at(*screen[a])
         window.hover_at(*screen[b])
         window._add_at(*screen[b], extend=True)
+        window.commit_action.trigger()      # a line is said done with Enter
     pump()
     new = [int(b) for b in plate.block_id if int(b) not in blocks_before]
     assert len(new) == 1, 'one new block for both links'
@@ -272,18 +295,25 @@ def test_links_picked_one_after_another_share_the_new_block(plate, window,
     assert _block_box(window)[1] == f'Block {new[0]}'
     journal = window.project.journal
     assert any(line.endswith(".add_block()") for line in journal)
-    assert journal[-1].endswith(f'elem_type=21, block={new[0]})'), journal[-1]
+    assert journal[-1].endswith(f'block={new[0]}, elem_type=21)'), journal[-1]
 
 
 def test_a_block_picked_in_the_drop_down_is_honored(plate, window, pump):
-    edit(window, pump, 'Elements')
+    """Two blocks of beams: the one picked in the drop-down is where
+    the next line lands."""
+    first = plate.add_beams([int(plate.node_id[0]), int(plate.node_id[1])])
+    second = plate.add_beams([int(plate.node_id[2]), int(plate.node_id[3])])
+    window._refresh_item(window._item_for_object('Geometry'), plate)
+    edit(window, pump, 'Beams')
     window.set_add_mode(True)
-    window.element_type_actions['beam'].trigger()
     box = window.element_block_box
-    box.setCurrentIndex(box.findData(1))
+    assert {box.itemData(i) for i in range(box.count())} == {first, second, None}
+    box.setCurrentIndex(box.findData(second))
     screen = screen_of(window)
-    window.hover_at(*screen[0])
-    window._add_at(*screen[0])
-    window.hover_at(*screen[1])
-    window._add_at(*screen[1], extend=True)
-    assert int(plate.elem_block[-1]) == 1, 'where it was told, if not wisely'
+    window.hover_at(*screen[4])
+    window._add_at(*screen[4])
+    window.hover_at(*screen[5])
+    window._add_at(*screen[5], extend=True)
+    window.commit_action.trigger()
+    pump()
+    assert int(plate.elem_block[-1]) == second, 'where it was told'

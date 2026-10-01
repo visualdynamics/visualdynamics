@@ -95,20 +95,21 @@ def test_a_single_object_goes_out_and_comes_back(tmp_path):
     assert back.reference_unit == frf.reference_unit
 
 
-def test_a_one_traceline_geometry_keeps_its_one_traceline(tmp_path):
+def test_a_one_line_geometry_keeps_its_one_line(tmp_path):
     """A cell holding one entry of four nodes came back as four entries
     of one node, because numpy makes a matrix of a list of equal-length
-    arrays; the cell is built by hand now."""
+    arrays; the cell is built by hand now. The line is a block of
+    three beams since 2026-09-30, and comes back as that chain."""
     from visualdynamics.core.geometry import Geometry
 
     geometry = Geometry(node_id=[1, 2, 3, 4],
-                        node_xyz=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
-                        traceline_conn=[np.array([1, 2, 3, 4])])
+                        node_xyz=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]])
+    geometry.add_beams([1, 2, 3, 4])
     path = str(tmp_path / 'g.mat')
     export_file(geometry, path)
     back = import_file(path)
-    assert len(back.traceline_conn) == 1
-    assert np.array_equal(back.traceline_conn[0], [1, 2, 3, 4])
+    assert back == geometry
+    assert [line['chains'] for line in back.drawn_lines()] == [[[1, 2, 3, 4]]]
 
 
 def test_a_one_channel_sine_tone_keeps_its_matrix(tmp_path):
@@ -141,8 +142,8 @@ def test_matlab_sees_structs_cells_and_columns(tmp_path):
     assert [o.name for o in objects] == list(project)
     geometry = next(o for o in objects if o.kind == 'geometry')
     # ragged connectivity is a cell, not a flat-plus-offsets pair
-    assert not hasattr(geometry, 'traceline_conn_flat')
-    assert hasattr(geometry, 'traceline_conn')
+    assert not hasattr(geometry, 'elem_conn_flat')
+    assert hasattr(geometry, 'elem_conn')
     data = next(o for o in objects if o.kind == 'data')
     raw = loadmat(path, squeeze_me=False, struct_as_record=False)
     raw_data = next(o for o in raw['objects'].ravel()

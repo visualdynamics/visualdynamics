@@ -43,6 +43,7 @@ from .icons import child_icon, control_icon
 from .octave_panel import OctavePanel
 from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
+from .sine_panel import SinePanel
 from .toolbars import fence, shows_anything, tidy
 from .truncate_panel import TruncatePanel
 from .wavelet_panel import WaveletPanel
@@ -153,6 +154,8 @@ class DataPane(QWidget):
 
     #: the filter view was asked for (True) or put away (False)
     filter_toggled = Signal(bool)
+    #: the sine view was asked for (True) or put away (False)
+    sine_toggled = Signal(bool)
     #: the truncate view was asked for (True) or put away (False)
     truncate_toggled = Signal(bool)
     #: the octave-band view was asked for (True) or put away (False)
@@ -205,6 +208,7 @@ class DataPane(QWidget):
         self.averaging_wanted: bool = False
         self.shocks_wanted: bool = False
         self.filter_wanted: bool = False
+        self.sine_wanted: bool = False
         self.truncate_wanted: bool = False
         self.octave_wanted: bool = False
         #: the kurtosis reading, sticky like every other view choice
@@ -268,6 +272,8 @@ class DataPane(QWidget):
         self.shock_panel.hide()
         self.filter_panel: FilterPanel = FilterPanel()
         self.filter_panel.hide()
+        self.sine_panel: SinePanel = SinePanel()
+        self.sine_panel.hide()
         self.truncate_panel: TruncatePanel = TruncatePanel()
         self.truncate_panel.hide()
         self.octave_panel: OctavePanel = OctavePanel()
@@ -300,6 +306,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.averaging_panel)
         plot_row.addWidget(self.shock_panel)
         plot_row.addWidget(self.filter_panel)
+        plot_row.addWidget(self.sine_panel)
         plot_row.addWidget(self.truncate_panel)
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.wavelet_panel)
@@ -638,6 +645,18 @@ class DataPane(QWidget):
             'high- or band-pass — previewed over the raw trace')
         self.filter_action.triggered.connect(self._choose_filter)
         toolbar.addAction(self.filter_action)
+        # how a sweep's levels are read out of the record: the
+        # smoothing, automatic or set, with the readings it gives
+        # sampled beside the plot (Brandon, 2026-09-30)
+        self.sine_action: QAction = QAction(control_icon('sine_levels'),
+                                            'Sine Levels', self)
+        self.sine_action.setCheckable(True)
+        self.sine_action.setToolTip(
+            'Show how the sweep’s levels are read out of this record — '
+            'the smoothing and the clock refinement — with the readings '
+            'sampled at that setting')
+        self.sine_action.triggered.connect(self._choose_sine)
+        toolbar.addAction(self.sine_action)
         # the stretch a record would be cut to: start and stop beside
         # the plot, the discarded ends grayed over on it — the
         # averaging span's editing grammar with nothing computed
@@ -685,6 +704,7 @@ class DataPane(QWidget):
         self.wavelet_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.wavelet_action)
         for action in (self.averaging_action, self.filter_action,
+                       self.sine_action,
                        self.truncate_action, self.kurtosis_action,
                        self.shocks_action, self.wavelet_action):
             self.reading_group.addAction(action)
@@ -791,6 +811,7 @@ class DataPane(QWidget):
     #: an edit to every other reading's handler.
     _READINGS = (('averaging_action', 'averaging_wanted', 'averaging_panel'),
                  ('filter_action', 'filter_wanted', 'filter_panel'),
+                 ('sine_action', 'sine_wanted', 'sine_panel'),
                  ('truncate_action', 'truncate_wanted', 'truncate_panel'),
                  ('kurtosis_action', 'kurtosis_wanted', None),
                  ('shocks_action', 'shocks_wanted', 'shock_panel'),
@@ -835,6 +856,11 @@ class DataPane(QWidget):
         """The filter button: remember it, then say so."""
         self._readings_settled()
         self.filter_toggled.emit(checked)
+
+    def _choose_sine(self, checked: bool) -> None:
+        """The sine button: remember it, then say so."""
+        self._readings_settled()
+        self.sine_toggled.emit(checked)
 
     def _choose_truncate(self, checked: bool) -> None:
         """The truncate button: remember it, then say so."""
@@ -1067,6 +1093,13 @@ class DataPane(QWidget):
         """Is the filter view asked for? Only meaningful for a time
         history, which is why the caller checks that first."""
         return self.filter_action.isChecked()
+
+    @property
+    def showing_sine(self) -> bool:
+        """Is the sine view asked for? Only meaningful for a time
+        history beside a sweep specification, which is why the caller
+        checks that first."""
+        return self.sine_action.isChecked()
 
     @property
     def showing_octave(self) -> bool:
@@ -1369,7 +1402,7 @@ class DataPane(QWidget):
                       complex_data: bool, pair: bool,
                       averaging: bool = False, shocks: bool = False,
                       residual: bool = False,
-                      octave: bool = False) -> None:
+                      octave: bool = False, sine: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
         when that is none of them.
 
@@ -1407,6 +1440,14 @@ class DataPane(QWidget):
             self.filter_panel.hide()
         # the cut is offered wherever the averaging is: both are
         # readings of a record's stretch of time
+        # the sine reading is offered for a record that has a sweep
+        # specification to be read against, and nowhere else
+        # (principle 3)
+        self.sine_action.setVisible(averaging and sine)
+        self.sine_action.setChecked(averaging and sine and not instead
+                                    and self.sine_wanted)
+        if not (averaging and sine) or instead:
+            self.sine_panel.hide()
         self.truncate_action.setVisible(averaging)
         self.truncate_action.setChecked(averaging and self.truncate_wanted)
         if not averaging or instead:
@@ -1546,6 +1587,7 @@ class DataPane(QWidget):
         # rather than going through `build_plots` and so would have
         # kept the old theme's ink
         self.filter_panel.response.apply_theme(colors)
+        self.sine_panel.apply_theme(colors)
 
 
 class ScenePane(QWidget):

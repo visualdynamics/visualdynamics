@@ -20,7 +20,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-#: The ids of nodes, coordinate systems, elements, tracelines and
+#: The ids of nodes, coordinate systems, elements and
 #: blocks: whole numbers, stored as int64. Ids are *labels* — they are
 #: what connectivity, placement and element blocks refer to by — so
 #: nothing is inferred from their value and nothing is computed with
@@ -57,8 +57,7 @@ def ids(values: ArrayLike, label: str, unique: bool = False) -> IdArray:
     from zero and refusing them would be refusing real data.
 
     `unique` where something refers to these by id — nodes, coordinate
-    systems and blocks. Element and traceline ids are labels nothing
-    refers to, and one traceline id legitimately names several polylines
+    systems and blocks. Element ids are labels nothing refers to
     (a UNV trace line that lifts the pen), so they are not held to it.
     """
     array = np.asarray(values)

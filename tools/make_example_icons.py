@@ -70,7 +70,7 @@ def render(geometry, path: pathlib.Path, *, azimuth: float, elevation: float,
     plotter = pv.Plotter(off_screen=True, window_size=(SIZE, SIZE))
     add_geometry(plotter, geometry, node_size=0.0, line_width=1.0,
                  show_edges=True, text_color=colors['scene_text'],
-                 components=['elements', 'tracelines'])
+                 components=['elements'])
     # the geometry's own view, then the tile's turn from it
     place_view(plotter, geometry.opening_view, render=False)
     plotter.camera.azimuth = azimuth

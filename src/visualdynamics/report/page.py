@@ -1452,7 +1452,7 @@ function sceneBlock(block) {
       } else {
         const [a, b, color] = item.line;
         if (t) {
-          // the traceline reads the same way: endpoint to endpoint
+          // a line reads the same way: endpoint to endpoint
           const grad = g.createLinearGradient(
             deformed[a][0], deformed[a][1],
             deformed[b][0], deformed[b][1]);

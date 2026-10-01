@@ -24,9 +24,11 @@ from visualdynamics.theme import OVERLAY_ALPHA
 
 
 def _geometry():
-    return visualdynamics.Geometry(
+    geometry = visualdynamics.Geometry(
         node_id=[1, 2, 3], node_xyz=[[0, 0, 0], [1, 0, 0], [2, 0, 0]],
-        length_unit='m', traceline_id=[1], traceline_conn=[[1, 2, 3]])
+        length_unit='m')
+    geometry.add_beams([1, 2, 3])
+    return geometry
 
 
 def _shapes(scale=1.0):

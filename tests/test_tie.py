@@ -110,7 +110,7 @@ def test_the_project_records_a_tie():
 def _edit_elements(window, pump):
     window.add_object('Geometry', _floor_and_foot())
     select_objects(window, pump, 'Geometry')
-    edit_category(window, pump, 'Elements')
+    edit_category(window, pump, 'Quads')
     return window.objects['Geometry']
 
 

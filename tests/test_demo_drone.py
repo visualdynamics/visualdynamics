@@ -90,7 +90,7 @@ def test_it_is_drawn_in_surfaces_only(model):
     so drawing them would lay a wireframe over the thing they are in."""
     drawn = model.geometry(beams=False)
     assert {int(t) for t in drawn.elem_type} <= {41, 44}
-    assert len(drawn.traceline_id) == 0
+    assert not drawn.drawn_lines()
     assert len(drawn.elem_id) > 100
 
 

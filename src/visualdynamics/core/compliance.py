@@ -1197,10 +1197,14 @@ def sine_errors(specification, levels):
                 continue
             wanted = target[:, column]
             got = np.abs(level.ordinate[row])
-            # the debiased magnitude clamps at zero where the noise
-            # accounted for everything measured; a zero is 'nothing
-            # detected there', not minus infinity decibels
+            # a reading the tone was under the noise at is reported at
+            # the floor and flagged (2026-09-30): it says how much was
+            # not seen, not how much was there, so it is not scored;
+            # a zero from an older level is the same 'nothing detected'
             good = np.isfinite(wanted) & (wanted > 0) & (got > 0)
+            resolved = getattr(level, 'resolved', None)
+            if resolved is not None:
+                good &= np.asarray(resolved)[row]
             if not good.any():
                 continue
             out.append((str(dof), level.tone,

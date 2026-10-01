@@ -261,6 +261,8 @@ MEASURED_ALPHA = 0.75
 #: a dense measurement it vanished (Brandon, 2026-09-25), and a
 #: half-pixel edge was lost in print where the two coincided
 STOOD_BACK_WIDTH = 4.5
+#: the ring drawn at a sine reading that sat under its noise floor
+FLOOR_MARK_SIZE = 6
 
 #: categorical curve colors on a dark background
 CURVE_COLORS = [
@@ -1320,6 +1322,17 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                 # covered it and a compliant run showed no color at all
                 # (the band-average paper, 2026-09-27)
                 curve.setZValue(-1)
+            # a sine level's readings where the tone was under the noise
+            # sit at the floor and are marked: hollow rings, so the
+            # curve says "not seen above this" rather than drawing a
+            # hole or a level that was not there (2026-09-30)
+            flagged = getattr(owner[0], 'below_floor', None)
+            if flagged is not None and np.asarray(flagged)[owner[1]].any():
+                mask = np.asarray(flagged)[owner[1]]
+                plot.plot(np.asarray(x)[mask], np.asarray(magnitude)[mask],
+                          pen=None, symbol='o', symbolSize=FLOOR_MARK_SIZE,
+                          symbolPen=pg.mkPen(color, width=1),
+                          symbolBrush=None)
             extents.add(drawn_x, drawn_y, log_ordinate, log_abscissa)
             if shape == 'steps' and not follower:
                 measured_by_pair.setdefault(pair, (x, magnitude, owner))

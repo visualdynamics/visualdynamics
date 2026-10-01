@@ -20,7 +20,6 @@ from visualdynamics.gui.object_tables import (
     element_table_model,
     node_table_model,
     shape_table_model,
-    traceline_table_model,
     units_table_model,
 )
 from visualdynamics.gui.tables import ChoiceDelegate, CopyPasteTableView
@@ -34,8 +33,7 @@ def geometry():
 
 
 def meshed_geometry():
-    """One with elements in it — the plate is tracelines only, so its
-    element and block tables have no rows to check anything against."""
+    """One with elements in it."""
     return visualdynamics.import_file(fixture_path('plate',
                                                    'geometry.npz'))
 
@@ -51,7 +49,6 @@ def every_model():
         ('nodes', node_table_model(geo, DEFAULT_SYSTEM)),
         ('coordinate systems', coordinate_system_table_model(geo,
                                                              DEFAULT_SYSTEM)),
-        ('tracelines', traceline_table_model(geo, DEFAULT_SYSTEM)),
         ('elements', element_table_model(meshed, DEFAULT_SYSTEM)),
         ('blocks', block_table_model(meshed, DEFAULT_SYSTEM)),
         ('shapes', shape_table_model(shapes)),

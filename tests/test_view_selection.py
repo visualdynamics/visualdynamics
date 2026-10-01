@@ -2,7 +2,7 @@
 
 A plain click selects only what was clicked, the modifier extends, and
 the modifier on something already picked takes it back out — for nodes,
-coordinate systems, tracelines and elements alike, and for the
+coordinate systems and elements alike, and for the
 half-picked nodes of an element being built. One rule, four groups, and
 `test_pick.py` covers only the geometry underneath it (which entity is
 under a pixel), not the window's use of it.
@@ -27,8 +27,8 @@ def plate(window, pump):
     pump()
     geometry = window.objects['Geometry']
     # the exodus plate is nodes and quads; give it lines to pick as well
-    geometry.add_traceline([int(n) for n in geometry.node_id[:2]])
-    geometry.add_traceline([int(n) for n in geometry.node_id[2:4]])
+    geometry.add_beams([int(n) for n in geometry.node_id[:2]])
+    geometry.add_beams([int(n) for n in geometry.node_id[2:4]])
     return geometry
 
 
@@ -41,8 +41,7 @@ def test_every_entity_kind_picks_by_the_same_three_rules(plate, window, pump):
     for label, picks in (
             ('Nodes', [int(n) for n in plate.node_id[:3]]),
             ('Coordinate systems', [int(c) for c in plate.cs_id[:1]]),
-            ('Tracelines', [0, 1]),
-            ('Elements', [0, 1])):
+            ('Quads', [0, 1])):
         edit(window, pump, label)
         window.select_entity(picks[0])
         assert rows(window) == [0], (label, rows(window))
@@ -60,9 +59,8 @@ def test_the_nodes_of_a_half_built_element_pick_the_same_way(plate, window,
                                                              pump):
     """The rule holds for a selection that is not a table selection at
     all — the nodes gathered so far for an element that has not committed."""
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Quads')
     window.set_add_mode(True)
-    window.element_type_actions['quad'].trigger()
     screen = window._projector.screen()[0]
 
     def click(row, extend=False):
@@ -89,7 +87,7 @@ def test_the_modifier_is_read_from_the_click_s_own_layer_too(plate, window,
     """A click arrives through VTK, which carries Shift and Ctrl but knows
     nothing of Command; Qt knows Command but only as of the last event it
     handled. Both layers get a say."""
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Quads')
     window.set_add_mode(True)
     assert not window._extend_pressed()
     interactor = getattr(window.scene.plotter, 'iren', None)

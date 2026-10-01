@@ -77,7 +77,7 @@ to build a model in with *Add Plane*
 
 | selected | what the right side shows |
 | --- | --- |
-| Geometry | The 3-D scene: nodes, elements, tracelines and coordinate systems. Picking a component or an entity in its list shows that part. The *Rigid Body* reading previews the six rigid-body shapes about a reference point. |
+| Geometry | The 3-D scene: nodes, coordinate systems and elements, listed by family — Beams, Triangles, Quads, Tetras, Wedges, Hexes — with the blocks of each family under it and a block's elements under the block. Picking a family, a block or an element shows that part; the pencil on a family opens its elements' table, on a block the blocks table on its row, where its material and section are set. The *Rigid Body* reading previews the six rigid-body shapes about a reference point. |
 | Photos | The photographs, one at a time; a name is edited in the grid. |
 | Channel table | The spreadsheet: every column typed, the drop-downs and check boxes live ([The channel table](channel-table.md)). |
 | Time history | The record against time, with the averaging frames or the shock windows shaded when they are set, and the readings a record offers on its bar: averaging, filter, truncate, kurtosis, shocks, wavelet. |

@@ -103,30 +103,38 @@ def test_tolerance_is_respected():
                               tolerance=12.0) is None
 
 
-def test_traceline_picking_is_accurate_where_unambiguous():
-    """Every traceline whose midpoint is not shared with another."""
+def test_beam_picking_is_accurate_where_unambiguous():
+    """Every drawn-line segment whose midpoint is not shared with
+    another (the survey's lines are blocks of beams, 2026-09-30)."""
     from visualdynamics.viz.pick import EntityPicker, _segment_distances
 
-    geometry, plotter, projector = scene('plate/test_geometry.npz')
+    # the survey's drawn lines on their own: its faces' edges lie on
+    # the same pixels and would make every segment ambiguous
+    survey = visualdynamics.import_file(fixture_path('plate/test_geometry.npz'),
+                                        length_unit='m')
+    drawn = {line['block'] for line in survey.drawn_lines()}
+    survey.delete_blocks([int(b) for b in survey.block_id
+                          if int(b) not in drawn])
+    geometry, plotter, projector = scene(survey)
     screen, _ = projector.screen()
-    picker = EntityPicker(geometry, 'tracelines', projector)
+    picker = EntityPicker(geometry, 'elements', projector)
     starts, ends = picker.segments
     lookup = {int(n): i for i, n in enumerate(geometry.node_id)}
 
     checked = 0
-    for index in range(len(geometry.traceline_conn)):
-        rows = [lookup[int(n)] for n in geometry.traceline_conn[index]]
+    for index in range(len(geometry.elem_conn)):
+        rows = [lookup[int(n)] for n in geometry.elem_conn[index]]
         midpoint = screen[rows].mean(axis=0)
         distances = _segment_distances(midpoint, screen[starts], screen[ends])
         others = distances[picker.owner != index]
         if others.size and others.min() <= 2.0:
-            continue          # another traceline lies on the same pixels
+            continue          # another segment lies on the same pixels
         checked += 1
         assert picker.pick(*midpoint) == index
     # the survey display threads six lines through the grid; the ones
     # whose midpoints land on a crossing line are skipped as ambiguous,
     # and at least a couple always stand clear
-    assert checked >= 2, 'some tracelines should be unambiguous'
+    assert checked >= 2, 'some segments should be unambiguous'
     plotter.close()
 
 
@@ -200,7 +208,7 @@ def test_picking_is_fast_enough_to_hover():
 
 @pytest.mark.parametrize('component,model', [
     ('nodes', 'plate/geometry.exo'),
-    ('tracelines', 'plate/test_geometry.npz'),  # the mesh has no tracelines
+    ('elements', 'plate/test_geometry.npz'),  # the survey's drawn lines
     ('elements', 'plate/geometry.exo'),
 ])
 def test_hover_cells_reference_scene_points(component, model):
@@ -261,10 +269,11 @@ def solid_box():
                for y in (0.0, 0.3) for x in (0.0, 0.5)]
     lines = [[1, 2, 4, 3, 1], [5, 6, 8, 7, 5],
              [1, 5], [2, 6], [3, 7], [4, 8]]
-    return visualdynamics.Geometry(
-        node_id=list(range(1, 9)), node_xyz=corners,
-        traceline_id=list(range(1, len(lines) + 1)),
-        traceline_conn=lines, length_unit='m')
+    geometry = visualdynamics.Geometry(
+        node_id=list(range(1, 9)), node_xyz=corners, length_unit='m')
+    for line in lines:
+        geometry.add_beams(line)
+    return geometry
 
 
 def test_a_three_dimensional_model_has_no_plane():

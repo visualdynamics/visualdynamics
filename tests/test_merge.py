@@ -184,13 +184,13 @@ def test_geometries_with_colliding_nodes_refuse(survey):
 def test_disjoint_geometries_merge_whole():
     from visualdynamics.core.geometry import Geometry
 
-    left = Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]],
-                    traceline_conn=[[1, 2]])
-    right = Geometry(node_id=[11, 12], node_xyz=[[0, 1, 0], [1, 1, 0]],
-                     traceline_conn=[[11, 12]])
+    left = Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]])
+    left.add_beams([1, 2])
+    right = Geometry(node_id=[11, 12], node_xyz=[[0, 1, 0], [1, 1, 0]])
+    right.add_beams([11, 12])
     both = merge([left, right])
     assert sorted(both.node_id.tolist()) == [1, 2, 11, 12]
-    assert len(both.traceline_conn) == 2
+    assert len(both.elem_conn) == 2
     both.validate()
 
 

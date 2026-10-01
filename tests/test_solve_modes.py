@@ -16,7 +16,7 @@ import math
 
 import numpy as np
 import pytest
-from conftest import edit_category, select_objects
+from conftest import edit_block, edit_category, select_objects
 from PySide6.QtCore import Qt
 from test_acts import _bar
 from test_fem import ALUMINUM, square_plate
@@ -158,7 +158,7 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     # it from the unit menu
     window.unit_combo.setCurrentText('m-kg-N-s')
     pump()
-    edit_category(window, pump, 'Blocks')
+    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
     model = window.table.model()
     _set(model, 'Material', 'Al')
     _set(model, 'E [Pa]', '70e9')
@@ -352,14 +352,12 @@ def test_the_blocks_table_journals_in_si_whatever_it_shows(qt_app):
 def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
     """The table follows the unit menu: the same thickness reads in
     inches, then in millimeters."""
-    from conftest import edit_category
-
     geometry = _plate_geometry()           # 0.01 m thick, SI inside
     path_name = 'Geometry'
     window.add_object(path_name, geometry)
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     pump()
-    edit_category(window, pump, 'Blocks')
+    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
     model = window.table.model()
     assert float(model.data(model.index(0, _column(model, 'Thickness [in]')))) \
         == pytest.approx(0.01 / 0.0254)
@@ -373,7 +371,6 @@ def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
 def test_switching_the_unit_system_restates_the_node_table(window, pump):
     """The same gap, found through the Blocks table: an open node table
     kept the coordinates' unit of the moment it was opened."""
-    from conftest import edit_category
 
     window.add_object('Geometry', _plate_geometry())
     window.unit_combo.setCurrentText('in-slinch-lbf-s')

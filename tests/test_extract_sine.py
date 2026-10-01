@@ -127,15 +127,24 @@ def test_two_tones_that_stay_close_are_separated():
 
 def test_extraction_holds_under_loud_noise():
     """Noise 4x the quieter tone's amplitude: the tracking filter's
-    whole job. Medians hold to a fraction of a dB."""
+    whole job. With the automatic smoothing the readings that stood
+    above the floor hold to a fraction of a dB — each realization
+    within 1.5 dB, and the mean over three within half of one, since
+    a single realization's median scatters ±0.5 dB at this noise
+    (measured over twelve, 2026-09-30: unbiased to +0.01 dB)."""
     spec = _spec()
-    levels = extract_sine(_recording(spec, noise=4.0), spec)
-    down = levels.tone('Down')
-    mid = slice(len(down.abscissa) // 4, -len(down.abscissa) // 4)
-    measured = np.median(np.abs(down.ordinate[0, mid]))
-    error_db = 20 * np.log10(measured / 1.0)
-    assert abs(error_db) < 1.0, \
-        f'planted 1.0 under 4.0-RMS noise read back {error_db:+.2f} dB off'
+    errors = []
+    for seed in (7, 8, 9):
+        levels = extract_sine(_recording(spec, noise=4.0, seed=seed), spec)
+        down = levels.tone('Down')
+        mid = slice(len(down.abscissa) // 4, -len(down.abscissa) // 4)
+        resolved = down.resolved[0, mid]
+        measured = np.median(np.abs(down.ordinate[0, mid][resolved]))
+        errors.append(20 * np.log10(measured / 1.0))
+        assert abs(errors[-1]) < 1.5, \
+            f'planted 1.0 under 4.0-RMS noise read back {errors[-1]:+.2f} dB off'
+        assert levels.cycles > 10.0, 'the automatic climbed the ladder'
+    assert abs(np.mean(errors)) < 0.5, errors
 
 
 def test_a_short_recording_reports_its_coverage():
@@ -804,3 +813,193 @@ def test_extraction_reads_the_same_levels_through_chunks(monkeypatch):
     for ours, theirs in zip(chunked, whole):
         assert np.allclose(ours.abscissa, theirs.abscissa)
         assert np.allclose(ours.ordinate, theirs.ordinate, rtol=1e-6, atol=0)
+
+
+# ---- the smoothing chosen from the data (2026-09-30) ---------------------
+
+
+def _flat_sweep(amplitude=2.0, noise=1.0, seed=3, rate_error=0.0,
+                seconds=9.0):
+    """One planted sweep of constant amplitude under white noise; the
+    recording's sweep may run `rate_error` faster than the
+    specification says."""
+    spec_tone = SineTone('Up', 0.5, [100.0, 800.0],
+                         [[amplitude] * 2] * 2, [0], [100.0])
+    spec = SineSweepSpecification([spec_tone], ['101Z+', '104Z+'],
+                                  ordinate_unit='m/s**2')
+    actual = SineTone('Up', 0.5, [100.0, 800.0], [[amplitude] * 2] * 2,
+                      [0], [100.0 * (1.0 + rate_error)])
+    n = int(seconds * FS)
+    rng = np.random.default_rng(seed)
+    signal = rng.standard_normal((2, n)) * noise
+    argument = actual.argument(1.0 / FS)
+    start = int(0.5 * FS)
+    m = min(len(argument), n - start)
+    signal[:, start:start + m] += amplitude * np.cos(argument[:m])
+    history = TimeHistory(np.arange(n) / FS, signal,
+                          response_dof=['101Z+', '104Z+'],
+                          ordinate_dim=['acceleration'] * 2,
+                          ordinate_unit=['m/s**2'] * 2)
+    return history, spec
+
+
+def _inside(level, low=150.0, high=750.0):
+    return (level.abscissa > low) & (level.abscissa < high)
+
+
+def test_the_automatic_smoothing_climbs_with_the_noise():
+    """Clean, the base ten cycles; under loud noise, enough smoothing
+    to hold the readings' scatter near the target — and the readings
+    then do: a 2.0 sweep under 6.0-RMS noise read with 10 cycles had
+    a tenth of its points at zero and a 190 dB spread (2026-09-30)."""
+    from visualdynamics.core.sine import BASE_CYCLES, suggest_cycles
+
+    quiet, spec = _flat_sweep(noise=0.0)
+    assert suggest_cycles(quiet, spec) == BASE_CYCLES
+    loud, spec = _flat_sweep(noise=6.0)
+    chosen = suggest_cycles(loud, spec)
+    assert chosen >= 60.0
+    levels = extract_sine(loud, spec)
+    assert levels.cycles == chosen
+    level = next(iter(levels))
+    inside = _inside(level)
+    assert level.resolved[0, inside].all(), 'nothing left under the floor'
+    readings = 20 * np.log10(np.abs(level.ordinate[0, inside]) / 2.0)
+    assert np.std(readings) < 1.5
+    assert abs(np.median(readings)) < 0.5
+
+
+def test_a_fixed_smoothing_is_used_as_given():
+    loud, spec = _flat_sweep(noise=6.0)
+    levels = extract_sine(loud, spec, cycles=20.0)
+    assert levels.cycles == 20.0
+
+
+def test_the_sampled_levels_read_the_scatter_quickly():
+    """The sine view's preview and the automatic's measurement: a
+    handful of short solves, the noise floor and the predicted scatter
+    beside each reading."""
+    import time
+
+    from visualdynamics.core.sine import sample_levels
+
+    loud, spec = _flat_sweep(noise=6.0)
+    started = time.perf_counter()
+    sampled = sample_levels(loud, spec, cycles=10.0)
+    assert time.perf_counter() - started < 2.0
+    (reading,) = sampled
+    assert reading['tone'] == 'Up' and reading['cycles'] == 10.0
+    assert reading['amplitude'].shape == reading['floor'].shape == (2, 8)
+    assert np.all(np.diff(reading['frequency']) > 0)
+    assert np.median(reading['scatter_db']) > 2.0, 'loud noise reads loud'
+    quiet, spec = _flat_sweep(noise=0.5)
+    (reading,) = sample_levels(quiet, spec, cycles=10.0)
+    assert np.median(reading['scatter_db']) < 0.5
+
+
+def test_a_tone_under_the_floor_is_reported_at_the_floor_and_flagged():
+    """A reading of zero was a hole in the curve; a reading at the
+    floor says how much was not seen, and is marked so the comparison
+    does not judge it (Brandon, 2026-09-30)."""
+    loud, spec = _flat_sweep(noise=12.0)
+    level = next(iter(extract_sine(loud, spec, cycles=10.0)))
+    flagged = level.below_floor[0]
+    assert flagged.any() and not flagged.all()
+    magnitude = np.abs(level.ordinate[0])
+    assert np.allclose(magnitude[flagged], level.floor[0][flagged])
+    assert np.all(magnitude[~flagged] > 0.0)
+    assert (level.resolved == ~level.below_floor).all()
+    assert level.floor.shape == level.ordinate.shape
+
+
+def test_a_flagged_line_is_not_scored():
+    """The sine score (`sine_errors`) leaves a reading under its floor
+    out: it says how much was not seen, not how much was there."""
+    from visualdynamics.core.compliance import sine_errors
+
+    loud, spec = _flat_sweep(noise=12.0)
+    levels = extract_sine(loud, spec, cycles=10.0)
+    level = next(iter(levels))
+    flagged = level.below_floor[0]
+    assert flagged.any()
+    scored = sine_errors(spec, levels)
+    assert len(scored) == 2
+    # the same score from the resolved readings alone
+    got = np.abs(level.ordinate[0])[~flagged]
+    wanted = spec.tone('Up').target(level.abscissa)[:, 0][~flagged]
+    from visualdynamics.core.compliance import signed_rms_db
+
+    assert scored[0][2] == pytest.approx(signed_rms_db(got, wanted))
+    # and a flagged reading moved to the floor leaves the score alone
+    level.ordinate[0, flagged] *= 10.0
+    assert sine_errors(spec, levels)[0][2] == pytest.approx(scored[0][2])
+
+
+def test_the_clock_is_refined_against_the_specification():
+    """A recording whose sweep ran 1 % faster than commanded: at forty
+    cycles the filter's bandwidth is narrower than the drift by the
+    end of the sweep and the unrefined reading falls; refined, the
+    sweep argument follows the recording and the level holds, and the
+    offset applied is reported."""
+    fast, spec = _flat_sweep(noise=1.0, rate_error=0.01, seed=5)
+    unrefined = next(iter(extract_sine(fast, spec, cycles=40.0,
+                                       refine=False)))
+    refined = next(iter(extract_sine(fast, spec, cycles=40.0)))
+    late = refined.abscissa > 600.0
+    assert np.median(np.abs(unrefined.ordinate[0, late])) < 1.7
+    assert abs(np.median(np.abs(refined.ordinate[0, late])) - 2.0) < 0.1
+    assert 5.0 < refined.drift_hz < 9.0
+    assert unrefined.drift_hz == 0.0
+    # a sweep on its clock is left alone
+    true, spec = _flat_sweep(noise=1.0, seed=5)
+    assert next(iter(extract_sine(true, spec, cycles=40.0))).drift_hz == 0.0
+
+
+def test_the_floor_and_the_smoothing_travel_through_native(tmp_path):
+    from visualdynamics.core.sine import SineLevelSet
+
+    loud, spec = _flat_sweep(noise=12.0)
+    levels = extract_sine(loud, spec, cycles=10.0)
+    path = str(tmp_path / 'levels.vdyn')
+    visualdynamics.io.save(levels, path)
+    back = visualdynamics.io.load(path)
+    assert isinstance(back, SineLevelSet) and back == levels
+    assert back.cycles == 10.0
+    ours, theirs = next(iter(levels)), next(iter(back))
+    assert np.allclose(theirs.floor, ours.floor)
+    assert (theirs.below_floor == ours.below_floor).all()
+    assert theirs.drift_hz == ours.drift_hz
+
+
+def test_the_setting_rides_the_history_through_the_project(tmp_path):
+    """The verb adopts the automatic setting, records what it chose,
+    journals as one line that replays, and a changed smoothing badges
+    the levels stale — the filter view's contract, for the sine view."""
+    from visualdynamics.core.sine import SineExtraction
+
+    loud, spec = _flat_sweep(noise=6.0)
+    project = visualdynamics.Project('sweep')
+    project.add('Time History', loud)
+    project.add('Sine Specification', spec)
+    assert project['Time History'].sine_extraction is None
+    (name,) = project.extract_sine('Time History')
+    setting = project['Time History'].sine_extraction
+    assert setting.automatic and setting.chosen == project[name].cycles
+    assert setting.chosen >= 60.0
+    assert project.journal[-1] == "project.extract_sine('Time History')"
+    assert not project.stale(), 'fresh'
+    project['Time History'].sine_extraction = SineExtraction(cycles=20.0)
+    assert name in project.stale(), 'a moved smoothing badges the levels'
+    project.refresh(name)
+    assert project[name].cycles == 20.0 and not project.stale()
+    path = str(tmp_path / 'sweep.vdyn')
+    project.save(path)
+    back = visualdynamics.Project.open(path)
+    assert back['Time History'].sine_extraction == SineExtraction(cycles=20.0)
+    assert back[name].cycles == 20.0
+    # the journal line a drag or an edit writes rebuilds the setting
+    line = repr(SineExtraction(cycles=20.0))
+    room: dict = {}
+    exec('from visualdynamics.core.sine import SineExtraction\n'  # noqa: S102
+         f'setting = {line}', room)
+    assert room['setting'] == SineExtraction(cycles=20.0)

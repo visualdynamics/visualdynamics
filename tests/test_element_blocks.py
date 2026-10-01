@@ -20,6 +20,11 @@ import pytest
 from visualdynamics.core.geometry import Geometry
 from visualdynamics.io import export_file, import_file, load, save
 
+try:
+    from conftest import block_row
+except ImportError:  # pragma: no cover - collected outside tests/
+    block_row = None
+
 
 @pytest.fixture
 def two_blocks():
@@ -67,11 +72,21 @@ def test_a_block_no_element_belongs_to_is_refused(two_blocks):
 
 
 def test_a_new_element_joins_a_block(two_blocks):
-    two_blocks.add_element([1, 2, 4], block=9)
+    two_blocks.add_element([1, 2, 5, 4], block=9)
     assert two_blocks.block_of(two_blocks.elem_id[-1]) == 'tail'
     two_blocks.add_element([2, 3, 5], block=12)
     assert 12 in two_blocks.block_id.tolist(), 'a new block is declared'
     assert two_blocks.block_of(two_blocks.elem_id[-1]) == ''
+    # one block, one family (2026-09-30): a triangle is refused a block
+    # of quads by name, and with no block named finds its own family
+    import pytest
+
+    with pytest.raises(ValueError, match='block 9 holds quads'):
+        two_blocks.add_element([1, 2, 4], block=9)
+    two_blocks.add_element([1, 2, 4])
+    assert int(two_blocks.elem_block[-1]) == 12, 'the triangles already there'
+    two_blocks.add_element([1, 2])
+    assert int(two_blocks.elem_block[-1]) not in (7, 9, 12), 'a beam block of its own'
 
 
 def test_deleting_an_element_takes_its_block_entry_with_it(two_blocks):
@@ -140,7 +155,7 @@ def test_deleting_a_block_deletes_its_elements_and_its_own_nodes(two_blocks):
     elements, and the nodes no other block's element uses. The nodes it
     shares with the tail stay, so the tail is not cut into."""
     report = two_blocks.delete_blocks([7])
-    assert report == {'blocks': 1, 'elements': 1, 'nodes': 2, 'tracelines': 0}
+    assert report == {'blocks': 1, 'elements': 1, 'nodes': 2}
     assert list(two_blocks.block_id) == [9]
     assert two_blocks.elements_in(9) == [11], 'the tail, whole'
     assert list(two_blocks.node_id) == [2, 3, 5, 6], 'the shared edge kept'
@@ -218,7 +233,7 @@ def test_a_block_of_two_element_types_splits_into_distinct_blocks(
     assert 7 in ids, 'the declared id is kept where it can be'
 
     back = import_file(path)
-    assert back.block_name == ['canopy', 'canopy TRI3'], (
+    assert back.block_name == ['canopy', 'canopy triangles'], (
         'the second piece says which type it is, since names must differ')
     assert len(back.elem_id) == 2
     assert back.block_of(back.elem_id[0]) == 'canopy'
@@ -263,26 +278,36 @@ def _category(item, label):
                 if item.child(i).text(0).startswith(label))
 
 
-def test_the_tree_lists_blocks_as_a_geometry_category(two_blocks, window, pump):
-    """A geometry says what is in it, and since the mesh is divided into
-    parts, that is one of the things in it."""
+def test_the_tree_lists_blocks_under_their_family(two_blocks, window, pump):
+    """A geometry lists its nodes, its coordinate systems and then one
+    row per element family, the six always; under a family, one row
+    per block holding elements of it, and under a block its elements
+    (Brandon, 2026-09-30). The pencil sits on a family and on a block."""
+    from conftest import block_row
+
     item = _show_geometry(window, pump, two_blocks)
     labels = [item.child(i).text(0) for i in range(item.childCount())]
-    assert labels[-1] == 'Blocks (2)', 'after the elements it groups'
-    blocks = _category(item, 'Blocks')
-    assert not blocks.icon(1).isNull(), 'the edit pencil, like every category'
-    blocks.setExpanded(True)
-    window._populate_entities(blocks)
+    assert labels == ['Nodes (6)', 'Coordinate systems (1)', 'Beams (0)',
+                      'Triangles (0)', 'Quads (2)', 'Tetras (0)',
+                      'Wedges (0)', 'Hexes (0)']
+    quads = _category(item, 'Quads')
+    assert not quads.icon(1).isNull(), 'the edit pencil, like every category'
+    assert [quads.child(i).text(0) for i in range(quads.childCount())] == [
+        'wing (1)', 'tail (1)']
+    wing = block_row(window, 7)
+    assert not wing.icon(1).isNull(), 'the pencil on a block: its properties'
+    window._populate_entities(wing)
     pump()
-    assert [blocks.child(i).text(0) for i in range(blocks.childCount())] == [
-        'Block 7 — wing (1 elements)', 'Block 9 — tail (1 elements)']
+    assert [wing.child(i).text(0) for i in range(wing.childCount())] == [
+        'Element 10 (quad4, 4 nodes)']
+    assert _category(item, 'Beams').childCount() == 0, 'no block of beams'
 
 
 def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
     from PySide6.QtCore import Qt
 
-    item = _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(_category(item, 'Blocks'))
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(block_row(window, 7))
     window.edit_entities()
     pump()
     assert window.editing == ('Geometry', 'blocks')
@@ -308,8 +333,8 @@ def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
 def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
     """There is nothing to click in the view for a block, so the button
     cannot arm a mode — it adds one and comes straight back up."""
-    item = _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(_category(item, 'Blocks'))
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(block_row(window, 7))
     window.edit_entities()
     pump()
     assert window.add_action.isVisible()
@@ -325,8 +350,8 @@ def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
 def test_deleting_a_block_row_deletes_the_part(two_blocks, window, pump):
     """From the Blocks table as from a script: the block, its elements
     and its own nodes go (Brandon, 2026-09-27)."""
-    item = _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(_category(item, 'Blocks'))
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(block_row(window, 7))
     window.edit_entities()
     pump()
     window.table.selectRow(0)
@@ -362,7 +387,7 @@ def test_an_element_moves_between_blocks_from_its_own_table(two_blocks, window,
     from PySide6.QtCore import Qt
 
     item = _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(_category(item, 'Elements'))
+    window.tree.setCurrentItem(_category(item, 'Quads'))
     window.edit_entities()
     pump()
     model = window.table.model()
@@ -472,8 +497,8 @@ def test_an_unknown_element_is_refused(qt_app, two_blocks):
 
 
 def _pick_blocks(window, pump, item, rows):
-    """Select these block rows under the geometry's Blocks category."""
-    blocks = _category(item, 'Blocks')
+    """Select these block rows under the geometry's Quads family."""
+    blocks = _category(item, 'Quads')
     blocks.setExpanded(True)
     pump()
     window.tree.clearSelection()
@@ -517,8 +542,8 @@ def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
 def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
     from PySide6.QtCore import QItemSelectionModel
 
-    item = _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(_category(item, 'Blocks'))
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(block_row(window, 7))
     window.edit_entities()
     pump()
     window.table.selectRow(0)

@@ -28,9 +28,9 @@ def test_unv_matches_npz():
     assert np.array_equal(np.sort(a.node_id), np.sort(b.node_id))
     order_a, order_b = np.argsort(a.node_id), np.argsort(b.node_id)
     assert np.allclose(a.node_xyz[order_a], b.node_xyz[order_b])
-    assert len(a.traceline_conn) == len(b.traceline_conn)
-    assert all(np.array_equal(x, y) for x, y in
-               zip(a.traceline_conn, b.traceline_conn))
+    ours = [line['chains'] for line in a.drawn_lines()]
+    theirs = [line['chains'] for line in b.drawn_lines()]
+    assert ours == theirs
 
 
 def test_unv_units_from_dataset_164():
@@ -42,19 +42,26 @@ def test_unv_units_from_dataset_164():
 
 def test_unv_beam_element_orientation_record_skipped():
     geo = visualdynamics.import_file(FIXTURE)
-    assert len(geo.elem_conn) == 2
-    quad, beam = geo.elem_conn
+    # the 2412 quad and beam, then the 82 line's two segments
+    assert len(geo.elem_conn) == 4
+    quad, beam = geo.elem_conn[:2]
     assert np.array_equal(quad, [1, 2, 3, 4])
     assert np.array_equal(beam, [5, 6])
-    assert geo.elem_type.tolist() == [94, 21]
+    assert geo.elem_type.tolist() == [94, 21, 21, 21]
+    # and the 2412 elements landed in blocks of their own families
+    assert int(geo.elem_block[0]) != int(geo.elem_block[1])
 
 
-def test_unv_traceline_pen_up_splits():
+def test_unv_traceline_pen_up_is_one_block_of_two_runs():
+    """An 82 line that lifts the pen is one block of two-node line
+    elements holding both runs (2026-09-30), read back as the runs."""
     geo = visualdynamics.import_file(FIXTURE)
-    assert len(geo.traceline_conn) == 2
-    assert np.array_equal(geo.traceline_conn[0], [1, 2])
-    assert np.array_equal(geo.traceline_conn[1], [3, 4])
-    assert geo.traceline_id.tolist() == [1, 1]  # both from the same dataset
+    lines = geo.drawn_lines()
+    # the 2412 beam carries no properties either, so it is a drawn
+    # line too; the 82 line is the block holding two runs
+    runs = [line for line in lines if len(line['chains']) == 2]
+    assert len(runs) == 1
+    assert runs[0]['chains'] == [[1, 2], [3, 4]]
 
 
 def test_unv_explicit_unit_overridden_by_164():

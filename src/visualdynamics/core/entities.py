@@ -1,6 +1,6 @@
 """A geometry's entities, grouped the way the project tree lists them.
 
-`geometry.nodes`, `.coordinate_systems`, `.tracelines`, `.elements` and
+`geometry.nodes`, `.coordinate_systems`, `.elements` and
 `.blocks` each hand back a view: the same rows you can expand in the
 tree, reachable from a script under the same names. A view is a window onto
 the geometry's own arrays and never a copy of them, so writing through a
@@ -42,12 +42,6 @@ COLUMNS: dict[str, tuple[Column, ...]] = {
         ('types', 'type', 'cs_type'),
         ('matrices', 'matrix', 'cs_matrix'),
     ),
-    'tracelines': (
-        ('ids', 'id', 'traceline_id'),
-        ('descriptions', 'description', 'traceline_desc'),
-        ('colors', 'color', 'traceline_color'),
-        ('nodes', 'nodes', 'traceline_conn'),
-    ),
     'elements': (
         ('ids', 'id', 'elem_id'),
         ('types', 'type', 'elem_type'),
@@ -58,8 +52,8 @@ COLUMNS: dict[str, tuple[Column, ...]] = {
     # A block is a *grouping* of elements rather than a thing in space: it
     # has an id and a name and nothing else, and what it holds is read off
     # the elements that name it (`elements_in`). Listing it beside the
-    # other four is what the file says — exodus writes a mesh as blocks —
-    # and it is the only one of the five nothing is drawn for.
+    # other three is what the file says — exodus writes a mesh as blocks —
+    # and it is the only one of the four nothing is drawn for.
     'blocks': (
         ('ids', 'id', 'block_id'),
         ('names', 'name', 'block_name'),
@@ -71,7 +65,6 @@ VERBS: dict[str, tuple[str, str]] = {
     'nodes': ('add_node', 'delete_nodes'),
     'coordinate_systems': ('add_coordinate_system',
                            'delete_coordinate_systems'),
-    'tracelines': ('add_traceline', 'delete_tracelines'),
     'elements': ('add_element', 'delete_elements'),
     'blocks': ('add_block', 'delete_blocks'),
 }
@@ -79,14 +72,13 @@ VERBS: dict[str, tuple[str, str]] = {
 LABELS: dict[str, str] = {
     'nodes': 'node',
     'coordinate_systems': 'coordinate system',
-    'tracelines': 'traceline',
     'elements': 'element',
     'blocks': 'block',
 }
 
 
 class EntityRow:
-    """One node, coordinate system, traceline or element, in place.
+    """One node, coordinate system, element or block, in place.
 
     Holds a row number rather than the values, so it reads and writes the
     geometry as it stands. Delete rows out from under one and it will be

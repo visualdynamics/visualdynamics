@@ -17,16 +17,16 @@ from visualdynamics.io import nastran
 
 def _mesh():
     rng = np.random.default_rng(11)
-    return visualdynamics.Geometry(
+    geometry = visualdynamics.Geometry(
         node_id=list(range(1, 16)),
         node_xyz=rng.normal(size=(15, 3)) * 0.5,
         elem_id=[1, 2, 3, 4, 5],
         elem_type=[94, 118, 115, 201, 161],
         elem_color=[1] * 5,
         elem_conn=[np.array([1, 2, 3, 4]), np.arange(1, 11),
-                   np.arange(1, 9), np.arange(1, 6), np.array([15])],
-        traceline_id=[1], traceline_color=[1],
-        traceline_conn=[np.array([1, 5, 9])])
+                   np.arange(1, 9), np.arange(1, 6), np.array([15])])
+    geometry.add_beams([1, 5, 9])          # a drawn line, PLOTELs in the deck
+    return geometry
 
 
 def test_a_geometry_round_trips_the_bulk_deck(tmp_path):
@@ -36,10 +36,11 @@ def test_a_geometry_round_trips_the_bulk_deck(tmp_path):
     back = visualdynamics.import_file(str(tmp_path / 'mesh.bdf'),
                                       length_unit='m')
     assert np.allclose(back.node_xyz, geometry.node_xyz)
-    assert list(back.elem_type) == [94, 118, 115, 201, 161]
+    assert list(back.elem_type) == [94, 118, 115, 201, 161, 21, 21]
     assert np.array_equal(back.elem_conn[1], np.arange(1, 11)), 'the tet10'
-    # the traceline came back as PLOTELs, re-joined pair by pair
-    assert [list(t) for t in back.traceline_conn] == [[1, 5], [5, 9]]
+    # the drawn line went out as PLOTELs and came back as one block of
+    # beams, chained where they join
+    assert [line['chains'] for line in back.drawn_lines()] == [[[1, 5, 9]]]
 
 
 def test_the_three_field_formats_read_the_same_grid(tmp_path):

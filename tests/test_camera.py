@@ -51,7 +51,7 @@ def test_an_edit_redraws_the_scene_without_reframing_it(zoomed, window, pump):
 
 
 def test_creating_an_element_does_not_zoom_back_out(zoomed, window, pump):
-    edit(window, pump, 'Elements')
+    edit(window, pump, 'Triangles')
     window.set_add_mode(True)
     screen = window._projector.screen()[0]
     for n, row in enumerate((0, 1, 6)):

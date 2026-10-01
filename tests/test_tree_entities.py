@@ -22,7 +22,7 @@ def geometry_item(window, pump):
     window.import_paths([fixture_path('plate', 'geometry.exo')])
     pump()
     geometry = window.objects['Geometry']
-    geometry.add_traceline([int(n) for n in geometry.node_id[:3]])
+    geometry.add_beams([int(n) for n in geometry.node_id[:3]])
     item = window._item_for_object('Geometry')
     window._refresh_item(item, geometry)
     item.setExpanded(True)
@@ -51,11 +51,14 @@ def test_each_kind_of_entity_says_which_one_it_is(geometry_item, window,
     assert systems[0].startswith(f'CS {int(geometry.cs_id[0])}')
     assert '(cartesian)' in systems[0], 'the kind of frame it is'
 
-    lines = labels(window, geometry_item, 'Tracelines')
-    assert lines[0].startswith('Traceline ')
-    assert '(3 nodes)' in lines[0], 'how long the line is'
+    # elements are listed under their block, which sits under its family
+    from conftest import block_row
 
-    elements = labels(window, geometry_item, 'Elements')
+    quads = category(geometry_item, 'Quads')
+    assert quads.childCount() == 1, 'one block of quads'
+    block = block_row(window, int(geometry.block_id[0]))
+    window._populate_entities(block)
+    elements = [block.child(i).text(0) for i in range(block.childCount())]
     assert elements[0].startswith(f'Element {int(geometry.elem_id[0])} ')
     assert '(quadshell4, 4 nodes)' in elements[0], (
         'the type it is, and its node count')

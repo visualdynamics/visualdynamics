@@ -134,7 +134,7 @@ def _curve(points):
 
 
 def _draw_geometry(painter, color):
-    """Nodes joined by tracelines."""
+    """Nodes joined by lines."""
     points = [(12, 50), (52, 48), (32, 14)]
     painter.setPen(_pen(color, 5))
     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -509,6 +509,25 @@ def _draw_kurtosis(painter, color):
     path.cubicTo(40, 14, 44, 48, 58, 50)
     painter.setPen(QPen(QColor(color), 4))
     painter.drawPath(path)
+
+
+def _draw_sine_levels(painter, color):
+    """A sweep with its level read along it: the chirp, and dots on
+    its crests — the sine view's button."""
+    import math
+
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 4))
+    points = []
+    for i in range(33):
+        x = 6 + 52 * i / 32
+        phase = 2.6 * math.pi * (i / 32) ** 2 * 3
+        points.append((x, 36 - 14 * math.sin(phase)))
+    painter.drawPath(_curve(points))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for x in (12, 26, 40, 54):
+        painter.drawEllipse(QPointF(x, 16), 4, 4)
 
 
 def _draw_wavelet(painter, color):
@@ -1273,23 +1292,34 @@ def _draw_unlink(painter, color):
 
 
 def _draw_automatic(painter, color):
-    """A gear: the tree bar's Automatic, which turns the rest of the
-    workflow over from what is loaded."""
-    import math
+    """Two circular arrows chasing each other: the tree bar's
+    Automatic, which turns the rest of the workflow over from what is
+    loaded. Drawn in the refresh glyph's own hand (Brandon,
+    2026-09-30: it should look like the tree's refresh icon) — the
+    same arc and arrowhead, twice round, since one arrow says
+    *recompute this* and the pair says *run it all*. A gear sat here
+    for a day.
+    """
+    from PySide6.QtCore import QRectF
 
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(QColor(color)))
-    teeth, outer, inner = 8, 28.0, 21.0
-    points = []
-    for k in range(teeth * 4):
-        angle = 2.0 * math.pi * k / (teeth * 4)
-        radius = outer if (k % 4) in (0, 1) else inner
-        points.append(QPointF(32 + radius * math.cos(angle),
-                              32 + radius * math.sin(angle)))
-    painter.drawPolygon(points)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.setPen(_pen(color, 5))
-    painter.drawEllipse(QPointF(32, 32), 11, 11)
+    rect = QRectF(14, 14, 36, 36)
+    # each arc runs counterclockwise through 120 degrees and its head
+    # sits at the end, pointing on round: the first ends at the left
+    # (heading down), the second at the right (heading up)
+    for start_angle, head in ((60, ((14, 41), (6, 29), (22, 29))),
+                              (240, ((50, 23), (42, 35), (58, 35)))):
+        painter.setPen(_pen(color, 6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(rect, start_angle * 16, 120 * 16)
+        painter.setBrush(QColor(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        path = QPainterPath()
+        path.moveTo(*head[0])
+        path.lineTo(*head[1])
+        path.lineTo(*head[2])
+        path.closeSubpath()
+        painter.drawPath(path)
 
 
 def _draw_dofs(painter, color):
@@ -1367,9 +1397,40 @@ def _draw_coordinate_systems(painter, color):
     painter.drawEllipse(origin, 5, 5)
 
 
-def _draw_tracelines(painter, color):
-    painter.setPen(_pen(color, 6))
-    painter.drawPath(_curve([(11, 44), (24, 20), (38, 44), (53, 20)]))
+def _draw_tet(painter, color):
+    """A tetrahedron: a triangle with its apex drawn to the far corner."""
+    _element_shape(painter, color, [(32, 10), (54, 50), (10, 50)])
+    painter.drawLine(QPointF(32, 10), QPointF(34, 36))
+    painter.drawLine(QPointF(54, 50), QPointF(34, 36))
+    painter.drawLine(QPointF(10, 50), QPointF(34, 36))
+
+
+def _draw_wedge(painter, color):
+    """A wedge: a triangle extruded sideways."""
+    _element_shape(painter, color, [(12, 20), (28, 48), (12, 48)])
+    painter.drawLine(QPointF(12, 20), QPointF(40, 14))
+    painter.drawLine(QPointF(28, 48), QPointF(54, 42))
+    painter.drawLine(QPointF(12, 48), QPointF(40, 42))
+    painter.drawLine(QPointF(40, 14), QPointF(54, 42))
+    painter.drawLine(QPointF(40, 14), QPointF(40, 42))
+    painter.drawLine(QPointF(40, 42), QPointF(54, 42))
+
+
+def _draw_hex(painter, color):
+    """A brick: a square with its back face offset."""
+    _element_shape(painter, color, [(10, 22), (42, 22), (42, 54), (10, 54)])
+    painter.drawLine(QPointF(10, 22), QPointF(22, 10))
+    painter.drawLine(QPointF(42, 22), QPointF(54, 10))
+    painter.drawLine(QPointF(42, 54), QPointF(54, 42))
+    painter.drawLine(QPointF(22, 10), QPointF(54, 10))
+    painter.drawLine(QPointF(54, 10), QPointF(54, 42))
+
+
+def _draw_pyramid(painter, color):
+    """A pyramid: a quad base with an apex."""
+    _element_shape(painter, color, [(10, 50), (42, 50), (54, 40), (22, 40)])
+    for corner in ((10, 50), (42, 50), (54, 40), (22, 40)):
+        painter.drawLine(QPointF(*corner), QPointF(32, 10))
 
 
 def _draw_elements(painter, color):
@@ -1629,7 +1690,7 @@ def control_icon(name: str) -> QIcon:
      'kurtosis': _draw_kurtosis, 'filter': _draw_filter,
      'truncate': _draw_truncate, 'octave': _draw_octave,
      'log_axis': _draw_log_axis,
-     'wavelet': _draw_wavelet,
+     'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'dofs': _draw_dofs, 'link': _draw_link, 'unlink': _draw_unlink,
      'automatic': _draw_automatic,
      'table': _draw_channel_table, 'overlay': _draw_overlay,
@@ -1654,9 +1715,17 @@ def control_icon(name: str) -> QIcon:
 _CHILD_DRAW = {
     'nodes': _draw_nodes,
     'coordinate_systems': _draw_coordinate_systems,
-    'tracelines': _draw_tracelines,
     'elements': _draw_elements,
     'blocks': _draw_blocks,
+    # the element families a geometry lists (2026-09-30)
+    'beams': _draw_beam,
+    'triangles': _draw_tri,
+    'quads': _draw_quad,
+    'tetras': _draw_tet,
+    'wedges': _draw_wedge,
+    'hexes': _draw_hex,
+    'points': _draw_nodes,
+    'pyramids': _draw_pyramid,
     'bounds': _draw_bounds,
     'mode': _draw_mode,
     'record': _draw_record,

@@ -83,7 +83,15 @@ from ..core.data import (
     has_phase,
 )
 from ..core.entities import LABELS as ENTITY_LABELS
-from ..core.geometry import CS_TYPES, ELEMENT_TYPES, Geometry
+from ..core.geometry import (
+    CS_TYPES,
+    ELEMENT_TYPES,
+    FAMILIES,
+    FAMILY_LABELS,
+    RARE_FAMILIES,
+    Geometry,
+    element_family,
+)
 from ..core.matches import MatchedModes
 from ..core.modal_fit import ModalFitSession
 from ..core.photos import FORMATS as PHOTO_FORMATS
@@ -162,8 +170,6 @@ from .icons import (
 #: measurement rather than the residue of computing one
 
 # what the toolbar's element-type buttons build: type code and node count
-ELEMENT_ADD_TYPES = {'beam': (21, 2), 'tri': (41, 3), 'quad': (44, 4)}
-
 # how the user adds to a selection, in the words of their platform
 EXTEND_KEYS = 'Shift or Cmd' if sys.platform == 'darwin' else 'Shift or Ctrl'
 from ..core.report import OTHER_SIDE
@@ -225,7 +231,6 @@ MAX_LISTED_ENTITIES = 2000  # a big FE model must not build 100k tree items
 ENTITY_COMPONENT = {
     'node': 'nodes',
     'coordinate_system': 'coordinate_systems',
-    'traceline': 'tracelines',
     'element': 'elements',
     'block': 'blocks',
 }
@@ -233,13 +238,18 @@ ENTITY_COMPONENT = {
 # geometry categories: (label, attribute holding the collection, component)
 # Blocks come after the elements they group, and are the one category with
 # nothing of their own in the view: picking one shows its elements.
+#: the two categories a geometry lists before its element families
+#: (Brandon, 2026-09-30: nodes, coordinate systems, then one sub-item
+#: per element family with the blocks of that family under it)
 GEOMETRY_PARTS = [
     ('Nodes', 'node_id', 'nodes'),
     ('Coordinate systems', 'cs_id', 'coordinate_systems'),
-    ('Tracelines', 'traceline_conn', 'tracelines'),
-    ('Elements', 'elem_conn', 'elements'),
-    ('Blocks', 'block_id', 'blocks'),
 ]
+
+#: what a click builds while adding to a family: (type code, node count)
+FAMILY_ADD_TYPES = {'beams': (21, 2), 'triangles': (41, 3), 'quads': (44, 4),
+                    'tetras': (111, 4), 'wedges': (112, 6), 'hexes': (115, 8),
+                    'pyramids': (201, 5), 'points': (161, 1)}
 
 # what is drawn for a category, where that is not the category itself
 DRAWN_AS = {'blocks': 'elements'}
@@ -247,7 +257,7 @@ DRAWN_AS = {'blocks': 'elements'}
 
 def _row_for_entity(geometry, component, entity):
     """Table row for a picked entity — id for nodes and coordinate systems,
-    index for tracelines and elements."""
+    index for elements."""
     if geometry is None or entity is None:
         return None
     if component == 'nodes':
@@ -259,17 +269,15 @@ def _row_for_entity(geometry, component, entity):
     if component == 'blocks':
         rows = np.flatnonzero(geometry.block_id == entity)
         return int(rows[0]) if len(rows) else None
-    total = len(geometry.traceline_conn if component == 'tracelines'
-                else geometry.elem_conn)
+    total = len(geometry.elem_conn)
     return int(entity) if 0 <= int(entity) < total else None
 
 
 def _entity_key(geometry, component, row):
     """What identifies the entity in a given table row: its id, for all
-    five groups — every one of them is named the same way."""
+    four groups — every one of them is named the same way."""
     return int({'nodes': geometry.node_id,
                 'coordinate_systems': geometry.cs_id,
-                'tracelines': geometry.traceline_id,
                 'elements': geometry.elem_id,
                 'blocks': geometry.block_id}[component][row])
 
@@ -278,7 +286,6 @@ def _delete_from_geometry(geometry, component, keys):
     return {
         'nodes': geometry.delete_nodes,
         'coordinate_systems': geometry.delete_coordinate_systems,
-        'tracelines': geometry.delete_tracelines,
         'elements': geometry.delete_elements,
         'blocks': geometry.delete_blocks,
     }[component](keys)
@@ -388,8 +395,7 @@ def _hover_cells(geometry, component, entity):
         return {**empty, 'verts': np.array([1, row], dtype=np.int64)}
     if component == 'coordinate_systems':
         return empty          # triads are drawn separately
-    nodes = (geometry.traceline_conn[row] if component == 'tracelines'
-             else geometry.elem_conn[row])
+    nodes = geometry.elem_conn[row]
     lookup = {int(node): index for index, node in enumerate(geometry.node_id)}
     indices = [lookup[int(node)] for node in nodes if int(node) in lookup]
     if len(indices) < 2:
@@ -684,7 +690,10 @@ class MainWindow(QMainWindow):
         self.editing: tuple[str, str] | None = None
         #: clicking in the view creates things
         self.add_mode: bool = False
-        self._picked_nodes = []       # nodes gathered for a traceline/element
+        #: what narrows the table being edited: ('family', name) or
+        #: ('block', id), None for a category (2026-09-30)
+        self.editing_scope: tuple | None = None
+        self._picked_nodes = []       # nodes gathered for an element
         self._shape_source = None     # (geometry, shape set) while a mode plays
         #: (geometry name, the proposed set) while the rigid-body
         #: reading previews on the scene
@@ -766,6 +775,11 @@ class MainWindow(QMainWindow):
         self.data_pane.filter_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.filter_panel.changed.connect(self._filtering_edited)
+        self.data_pane.sine_toggled.connect(
+            lambda _wanted: self.render_current())
+        self.data_pane.sine_panel.changed.connect(self._sine_edited)
+        self.data_pane.sine_panel.apply_asked.connect(
+            lambda: self.extract_sine_levels())
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(
@@ -1299,7 +1313,7 @@ class MainWindow(QMainWindow):
         # editing geometry, where the rows *are* the entities and removing
         # them is what Delete has always meant. See _set_table_model.
         # Escape and Return belong to a geometry editing session: one
-        # abandons it, the other makes a traceline or an element from
+        # abandons it, the other makes an element from
         # the nodes picked so far. They were **window** shortcuts, and a
         # window shortcut is answered before the focused widget sees the
         # key — so Return typed into any editor anywhere in the window
@@ -1706,25 +1720,10 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.merge_blocks_action)
         self.merge_blocks_action.setVisible(False)
 
-        # what a click builds while adding elements; only on screen when
-        # adding elements, since nothing else is built from a node count
-        self.element_type_group: QActionGroup = QActionGroup(self)
-        self.element_type_group.setExclusive(True)
-        self.element_type_actions: dict[str, QAction] = {}
-        for kind, label in (('beam', 'Beam (2 nodes)'),
-                            ('tri', 'Triangle (3 nodes)'),
-                            ('quad', 'Quadrilateral (4 nodes)')):
-            action = QAction(control_icon(kind), '', self)
-            action.setCheckable(True)
-            action.setToolTip(f'Add elements as: {label}')
-            action.setChecked(kind == 'tri')
-            self.element_type_group.addAction(action)
-            toolbar.addAction(action)
-            action.setVisible(False)
-            action.triggered.connect(
-                lambda _checked, k=kind: self._element_type_chosen(k))
-            self.element_type_actions[kind] = action
-
+        # what a click builds while adding elements is the family of the
+        # row the editing began from (Brandon, 2026-09-30): the beam /
+        # triangle / quad chooser that sat here went with the Elements
+        # category it belonged to
         # which block new elements go into (Brandon, 2026-09-26): the
         # geometry's blocks and a new one. Before this every element went
         # into the first block, and a beam added to a model of plates —
@@ -2377,6 +2376,7 @@ class MainWindow(QMainWindow):
                     child.setChildIndicatorPolicy(
                         QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                 item.addChild(child)
+            self._build_families(item, obj, name)
         elif isinstance(obj, (DataArray, ShapeSet, ChannelTable, Photos,
                               MatchedModes, SineSweepSpecification,
                               SineLevelSet)):
@@ -2386,19 +2386,72 @@ class MainWindow(QMainWindow):
             # list of 6859 rows to freeze the tree.
             self._build_record_grid(item, obj, name)
 
+    def _build_families(self, item, geometry, name):
+        """One row per element family under a geometry — the six always,
+        the rare two (points, pyramids) when present — and under each
+        family one row per block holding elements of it, the block's
+        elements listed when the block is opened (Brandon, 2026-09-30:
+        each element type a sub-item, blocks under it, the pencil on a
+        block for its properties). An empty block has no family and no
+        row until an element lands in it."""
+        families = {}
+        for row, (code, block) in enumerate(zip(geometry.elem_type,
+                                                geometry.elem_block)):
+            families.setdefault(element_family(int(code)), {}).setdefault(
+                int(block), []).append(row)
+        listed = list(FAMILIES) + [f for f in RARE_FAMILIES if f in families]
+        for family in listed:
+            blocks = families.get(family, {})
+            count = sum(len(rows) for rows in blocks.values())
+            child = QTreeWidgetItem([f'{FAMILY_LABELS[family]} ({count})'])
+            child.setIcon(0, child_icon(family, 'Geometry',
+                                        geometry.units_defined, not count))
+            child.setData(0, ROLE_REFERENCE, ('family', name, family))
+            child.setData(0, ROLE_POPULATED, True)
+            child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            child.setIcon(1, control_icon('edit'))
+            child.setToolTip(
+                1, f'Edit the {FAMILY_LABELS[family].lower()} in a table')
+            for block in geometry.block_id:
+                if int(block) not in blocks:
+                    continue
+                block = int(block)
+                row = int(np.flatnonzero(geometry.block_id == block)[0])
+                label = geometry.block_name[row].strip() or f'Block {block}'
+                held = len(blocks[block])
+                grand = QTreeWidgetItem([f'{label} ({held})'])
+                grand.setIcon(0, child_icon('blocks', 'Geometry',
+                                            geometry.units_defined))
+                grand.setData(0, ROLE_REFERENCE, ('block', name, block))
+                grand.setData(0, ROLE_POPULATED, False)
+                grand.setFlags(grand.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                grand.setIcon(1, control_icon('edit'))
+                grand.setToolTip(1, 'Edit this block — its name and what '
+                                    'it is made of — in a table')
+                grand.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+                child.addChild(grand)
+            item.addChild(child)
+
     def _populate_entities(self, item):
-        """List a category's individual entities the first time it opens."""
+        """List a category's individual entities — or a block's elements
+        — the first time it opens."""
         reference = item.data(0, ROLE_REFERENCE)
         if reference is None or item.data(0, ROLE_POPULATED):
             return
         kind, name, component = reference
-        if kind != 'component':
+        if kind not in ('component', 'block'):
             return
         geometry = self.objects.get(name)
         if geometry is None:
             return
         item.setData(0, ROLE_POPULATED, True)
-        labels = list(self._entity_labels(geometry, component))
+        if kind == 'block':
+            labels = [entry for entry in self._entity_labels(geometry, 'elements')
+                      if int(geometry.elem_block[entry[1]]) == int(component)]
+            component = 'elements'
+        else:
+            labels = list(self._entity_labels(geometry, component))
         self.tree.blockSignals(True)
         for entity_kind, detail, label in labels[:MAX_LISTED_ENTITIES]:
             child = QTreeWidgetItem([label])
@@ -2431,13 +2484,6 @@ class MainWindow(QMainWindow):
                 yield 'coordinate_system', int(cs_id), (
                     f'CS {int(cs_id)}' + (f' — {cs_name}' if cs_name else '')
                     + f' ({kind})')
-        elif component == 'tracelines':
-            for index, conn in enumerate(geometry.traceline_conn):
-                label = f'Traceline {int(geometry.traceline_id[index])}'
-                description = geometry.traceline_desc[index].strip()
-                yield 'traceline', index, (
-                    f'{label} ({len(conn)} nodes)'
-                    + (f' — {description}' if description else ''))
         elif component == 'elements':
             for index, conn in enumerate(geometry.elem_conn):
                 type_name = ELEMENT_TYPES[int(geometry.elem_type[index])][0]
@@ -2727,7 +2773,6 @@ class MainWindow(QMainWindow):
         stable across a replay where row numbers are not."""
         method = {'nodes': 'delete_nodes',
                   'coordinate_systems': 'delete_coordinate_systems',
-                  'tracelines': 'delete_tracelines',
                   'elements': 'delete_elements',
                   'blocks': 'delete_blocks'}[component]
         self.project.record_call(geometry, method,
@@ -3162,10 +3207,12 @@ class MainWindow(QMainWindow):
         if column != 1:
             return
         reference = item.data(0, ROLE_REFERENCE)
-        if reference is not None and reference[0] == 'component':
+        if reference is not None and reference[0] in ('component', 'family',
+                                                      'block'):
             # the pencil is a toggle: editing this category closes it,
             # anything else opens (or switches to) its table
-            if self.editing == (reference[1], reference[2]):
+            if (self.editing == (reference[1], self._component_of(reference))
+                    and self.editing_scope == self._scope_of(reference)):
                 self.stop_editing()
                 return
             self.tree.setCurrentItem(item)
@@ -3864,12 +3911,14 @@ class MainWindow(QMainWindow):
         return None if last < 0 else last + 1
 
     def _selected_components(self):
-        """(geometry name, components) when whole categories are selected."""
+        """(geometry name, components) when whole categories — or whole
+        families, as ('family', name) — are selected."""
         picks = {}
         for kind, name, obj, detail in self.selected_references():
-            if kind != 'component' or not isinstance(obj, Geometry):
+            if kind not in ('component', 'family') or not isinstance(obj, Geometry):
                 return None
-            picks.setdefault(name, []).append(detail)
+            picks.setdefault(name, []).append(
+                ('family', detail) if kind == 'family' else detail)
         if len(picks) != 1:
             return None
         return next(iter(picks.items()))
@@ -3879,17 +3928,23 @@ class MainWindow(QMainWindow):
         geometry = self.objects.get(name)
         if geometry is None:
             return
-        # ids, for all five — the same thing a row's delete names
+        # ids, for all four — the same thing a row's delete names
         counts = {
             'nodes': lambda g: g.node_id.tolist(),
             'coordinate_systems': lambda g: g.cs_id.tolist(),
-            'tracelines': lambda g: g.traceline_id.tolist(),
             'elements': lambda g: g.elem_id.tolist(),
             'blocks': lambda g: g.block_id.tolist(),
         }
         removed, refused = {}, []
         for component in components:
-            keys = counts[component](geometry)
+            if isinstance(component, tuple):
+                # a family: its elements, by id
+                family = component[1]
+                component = 'elements'
+                keys = [int(e) for e, code in zip(geometry.elem_id, geometry.elem_type)
+                        if element_family(int(code)) == family]
+            else:
+                keys = counts[component](geometry)
             if not keys:
                 continue
             try:
@@ -4312,11 +4367,22 @@ class MainWindow(QMainWindow):
             grid.refresh_icons()
             return
         if isinstance(obj, Geometry):
-            for i, (_label, attribute, component) in enumerate(GEOMETRY_PARTS):
-                if i < item.childCount():
-                    item.child(i).setIcon(0, child_icon(
-                        component, 'Geometry', obj.units_defined,
-                        not len(getattr(obj, attribute))))
+            for i in range(item.childCount()):
+                child = item.child(i)
+                reference = child.data(0, ROLE_REFERENCE)
+                if reference is None:
+                    continue
+                kind, _name, detail = reference
+                if kind == 'component':
+                    attribute = {c: a for _l, a, c in GEOMETRY_PARTS}[detail]
+                    empty = not len(getattr(obj, attribute))
+                elif kind == 'family':
+                    empty = not any(element_family(int(code)) == detail
+                                    for code in obj.elem_type)
+                else:
+                    continue
+                child.setIcon(0, child_icon(detail, 'Geometry',
+                                            obj.units_defined, empty))
 
     def _report_edits(self, applied, rejected, reason=''):
         """Say how a multi-cell edit landed, including what it could not do."""
@@ -4487,18 +4553,64 @@ class MainWindow(QMainWindow):
         else:
             self.tree.setCurrentItem(item)
 
+    @staticmethod
+    def _component_of(reference):
+        """Which table a tree row edits: a category its own, a family
+        the elements, a block the blocks, an entity its category."""
+        kind, _name, detail = reference
+        if kind == 'component':
+            return detail
+        if kind == 'family':
+            return 'elements'
+        return ENTITY_COMPONENT.get(kind)
+
+    @staticmethod
+    def _scope_of(reference):
+        """What narrows the editing: ('family', name) from a family row,
+        ('block', id) from a block row, None from a category."""
+        kind, _name, detail = reference
+        if kind == 'family':
+            return ('family', detail)
+        if kind == 'block':
+            return ('block', int(detail))
+        return None
+
+    @property
+    def editing_family(self) -> str | None:
+        """The element family being added to, read off the editing
+        scope: the family row's own, a block row's from what the block
+        holds, an element row's from the element. None outside the
+        elements table."""
+        if self.editing is None or self.editing[1] not in ('elements', 'blocks'):
+            return None
+        geometry = self.objects.get(self.editing[0])
+        scope = self.editing_scope
+        if scope is None or geometry is None:
+            return None
+        if scope[0] == 'family':
+            return scope[1]
+        rows = np.flatnonzero(geometry.elem_block == scope[1])
+        if len(rows):
+            return element_family(int(geometry.elem_type[rows[0]]))
+        return None
+
     def edit_entities(self) -> None:
-        """Edit a geometry's nodes, coordinate systems, tracelines,
-        elements or blocks in a table beside the model."""
+        """Edit a geometry's nodes, coordinate systems, a family of its
+        elements or one of its blocks in a table beside the model."""
         kind, obj, detail = self.current_reference()
-        component = detail if kind == 'component' else ENTITY_COMPONENT.get(kind)
+        reference = (kind, None, detail)
+        component = self._component_of(reference) if kind else None
         if not isinstance(obj, Geometry) or component not in ENTITY_TABLES:
             self._show_status(
-                'Select nodes, coordinate systems, tracelines, elements or '
-                'blocks to edit them')
+                'Select nodes, coordinate systems, an element family or a '
+                'block to edit them')
             return
         item = self.object_item()
         self.editing = (item.text(0), component)
+        self.editing_scope = self._scope_of(reference)
+        if kind == 'element':
+            self.editing_scope = ('family', element_family(
+                int(obj.elem_type[int(detail)])))
         self.views.setOrientation(Qt.Orientation.Horizontal)
         model = self._set_table_model(
             ENTITY_TABLES[component](obj, self.unit_system, self))
@@ -4506,6 +4618,7 @@ class MainWindow(QMainWindow):
         self.table.selectionModel().selectionChanged.connect(
             self._edit_selection_changed)
         self._show_views(three_d=True, table=True)
+        self._select_scope_rows(obj)
         self._draw_edit_selection()
         self.add_action.setVisible(True)
         # a block is not placed in space, so its + adds a row outright
@@ -4515,9 +4628,49 @@ class MainWindow(QMainWindow):
         self._begin_picking(obj, self._picking_component())
         self._update_toolbar_actions()
         self._show_status(
-            f'Editing {component.replace("_", " ")} of {self.editing[0]} — '
+            f'Editing {self._editing_words()} of {self.editing[0]} — '
             'select rows to highlight them; Escape or reselecting the tree '
             'leaves editing')
+
+    def _editing_words(self) -> str:
+        """'the quads', 'block 7', 'nodes': what the table is of."""
+        component = self.editing[1]
+        scope = self.editing_scope
+        if scope is not None and scope[0] == 'family':
+            return 'the ' + FAMILY_LABELS[scope[1]].lower()
+        if scope is not None and scope[0] == 'block':
+            return f'block {scope[1]}'
+        return component.replace('_', ' ')
+
+    def _select_scope_rows(self, geometry):
+        """Open the table on what was clicked: a family's rows of the
+        elements table, a block's row of the blocks table. The table
+        holds every row — one row per element, one per block — and the
+        scope says which are being looked at."""
+        scope = self.editing_scope
+        model = self.table.model()
+        if scope is None or model is None:
+            return
+        component = self.editing[1]
+        # a family's rows are most of the table, and a selection is a
+        # statement (Tie reads it): the family row opens the table on
+        # nothing selected, a block row on its block
+        if component == 'elements' and scope[0] == 'block':
+            rows = [int(r) for r in np.flatnonzero(geometry.elem_block == scope[1])]
+        elif component == 'blocks' and scope[0] == 'block':
+            rows = [int(r) for r in np.flatnonzero(geometry.block_id == scope[1])]
+        else:
+            return
+        selection = self.table.selectionModel()
+        blocked = selection.blockSignals(True)
+        selection.clearSelection()
+        for row in rows:
+            selection.select(model.index(row, 0),
+                             QItemSelectionModel.SelectionFlag.Select
+                             | QItemSelectionModel.SelectionFlag.Rows)
+        selection.blockSignals(blocked)
+        if rows:
+            self.table.scrollTo(model.index(rows[0], 0))
 
     # ---- add mode -----------------------------------------------------------
 
@@ -4544,20 +4697,20 @@ class MainWindow(QMainWindow):
         self._update_element_type_actions()
         if self.editing is None:
             return
-        geometry_name, component = self.editing
+        geometry_name, _component = self.editing
         geometry = self.objects.get(geometry_name)
         if geometry is not None:
-            # tracelines and elements are built from nodes, so pick nodes
+            # elements are built from nodes, so pick nodes
             self._begin_picking(geometry, self._picking_component())
         self._show_status(self._add_mode_hint() if enabled
-                          else f'Editing {component.replace("_", " ")}')
+                          else f'Editing {self._editing_words()}')
 
     def _picking_component(self):
         """What the cursor selects: nodes while building a line or element,
         and nothing at all while editing blocks, which are not in the view
         to be clicked on."""
         _name, component = self.editing
-        if self.add_mode and component in ('tracelines', 'elements'):
+        if self.add_mode and component == 'elements':
             return 'nodes'
         if component == 'blocks':
             return None
@@ -4975,12 +5128,10 @@ class MainWindow(QMainWindow):
             action.setVisible(turning)
 
     def _update_element_type_actions(self):
-        """Show the element-type buttons, and the block new elements go
-        into, only while adding elements."""
+        """Show the block new elements go into only while adding
+        elements."""
         adding = (self.add_mode and self.editing is not None
                   and self.editing[1] == 'elements')
-        for action in self.element_type_actions.values():
-            action.setVisible(adding)
         self._element_block_handle.setVisible(adding)
         self._update_tie_action()
         if adding:
@@ -4990,52 +5141,35 @@ class MainWindow(QMainWindow):
     NEW_BLOCK = 'New block'
 
     def _fill_element_blocks(self, keep: int | None = None):
-        """The geometry's blocks and a new one, choosing `keep` when
-        given, else the default: the first block while it holds the kind
-        of element being added (or nothing), a new block otherwise — so a
-        beam never lands among plates."""
+        """The blocks of the family being added to — a block holds one
+        family (2026-09-30) — the empty ones, and a new one; choosing
+        `keep` when given, else the block the editing began from, else
+        the family's first block, else a new one — so a beam never
+        lands among plates."""
         geometry = self.objects.get(self.editing[0]) if self.editing else None
         box = self.element_block_box
         blocked = box.blockSignals(True)
         box.clear()
+        family = self.editing_family
         if geometry is not None:
+            held = {}
+            for code, block in zip(geometry.elem_type, geometry.elem_block):
+                held.setdefault(int(block), element_family(int(code)))
             for k, block in enumerate(geometry.block_id):
+                if held.get(int(block), family) != family:
+                    continue
                 name = geometry.block_name[k]
                 box.addItem(f'Block {int(block)}' + (f' — {name}' if name
                                                      else ''), int(block))
         box.addItem(self.NEW_BLOCK, None)
+        scope = self.editing_scope
+        if keep is None and scope is not None and scope[0] == 'block':
+            keep = scope[1]
         if keep is not None and box.findData(keep) >= 0:
             box.setCurrentIndex(box.findData(keep))
         else:
-            box.setCurrentIndex(self._default_block_index(geometry))
+            box.setCurrentIndex(0)
         box.blockSignals(blocked)
-
-    def _default_block_index(self, geometry) -> int:
-        box = self.element_block_box
-        if geometry is None or not len(geometry.block_id):
-            return box.count() - 1
-        first = int(geometry.block_id[0])
-
-        def kind(code):
-            # the element's shape and node count: a file's four-node shell
-            # (94) and the quad add mode makes (44) are one kind of element
-            _name, count, shape = ELEMENT_TYPES.get(int(code), ('', 0, ''))
-            return count, shape
-
-        adding = kind(self.element_type[0])
-        held = {kind(t) for t, b in zip(geometry.elem_type, geometry.elem_block)
-                if int(b) == first}
-        return 0 if held <= {adding} else box.count() - 1
-
-    def _element_type_chosen(self, kind):
-        """A different element type: drop a part-built element and say so,
-        and default the block for it again."""
-        self._picked_nodes = []
-        self._draw_picked()
-        if self.add_mode and self.editing is not None:
-            if self.editing[1] == 'elements':
-                self._fill_element_blocks()
-            self._show_status(self._add_mode_hint())
 
     def _element_block(self, geometry) -> int:
         """The block the next element goes into — made now when the
@@ -5051,24 +5185,24 @@ class MainWindow(QMainWindow):
 
     @property
     def element_type(self) -> tuple[int, int]:
-        """(type code, node count) for the element type now selected."""
-        checked = self.element_type_group.checkedAction()
-        for kind, action in self.element_type_actions.items():
-            if action is checked:
-                return ELEMENT_ADD_TYPES[kind]
-        return ELEMENT_ADD_TYPES['tri']
+        """(type code, node count) a click builds: the family being
+        edited says what, and a block that holds nothing yet takes a
+        triangle, the smallest face."""
+        return FAMILY_ADD_TYPES.get(self.editing_family or 'triangles')
 
     def _add_mode_hint(self):
         _name, component = self.editing
         if component == 'elements':
             code, count = self.element_type
+            if ELEMENT_TYPES[code][2] == 'line':
+                return (f'Add mode: {EXTEND_KEYS}-click nodes in order, then '
+                        f'press Enter (or switch off +) for the line of '
+                        f'{ELEMENT_TYPES[code][0]} elements')
             return (f'Add mode: {EXTEND_KEYS}-click {count} nodes to make a '
                     f'{ELEMENT_TYPES[code][0]}')
         return {
             'nodes': 'Add mode: click in the view to place a node',
             'coordinate_systems': 'Add mode: click to place a coordinate system',
-            'tracelines': f'Add mode: {EXTEND_KEYS}-click nodes in order, then '
-                          'press Enter (or switch off +) for the traceline',
         }[component]
 
     def _add_at(self, x, y, extend=False):
@@ -5111,7 +5245,12 @@ class MainWindow(QMainWindow):
         else:
             self._picked_nodes.append(node)
         self._draw_picked()
-        limit = self.element_type[1] if component == 'elements' else None
+        # a beam takes the line's grammar (2026-09-30): pick as many
+        # nodes as the line runs through, and Enter makes the chain; a
+        # face commits itself on its own node count
+        code, count = self.element_type
+        chained = ELEMENT_TYPES[code][2] == 'line'
+        limit = count if component == 'elements' and not chained else None
         picked = ', '.join(str(n) for n in self._picked_nodes)
         self._show_status(f'{self._add_mode_hint()} — picked {picked}'
                           if picked else self._add_mode_hint())
@@ -5119,26 +5258,30 @@ class MainWindow(QMainWindow):
             self._commit_picked_nodes()
 
     def _commit_picked_nodes(self):
-        """Create the traceline or element from the nodes picked so far."""
+        """Create the element from the nodes picked so far."""
         nodes, self._picked_nodes = self._picked_nodes, []
         self._draw_picked()
         if self.editing is None or len(nodes) < 2:
             return
-        name, component = self.editing
+        name, _component = self.editing
         geometry = self.objects.get(name)
         if geometry is None:
             return
         try:
-            if component == 'tracelines':
-                geometry.add_traceline(nodes)
+            code, count = self.element_type
+            block = self._element_block(geometry)
+            if ELEMENT_TYPES[code][2] == 'line':
+                # the chain through every node picked, in one block
+                geometry.add_beams(nodes, block=block, elem_type=code)
                 self.project.record_call(
-                    geometry, 'add_traceline', [int(n) for n in nodes])
-                message = f'Added traceline through {len(nodes)} nodes'
+                    geometry, 'add_beams', [int(n) for n in nodes],
+                    block=block, elem_type=code)
+                message = (f'Added {len(nodes) - 1} '
+                           f'{ELEMENT_TYPES[code][0]} element'
+                           f'{"s" * (len(nodes) != 2)} through {len(nodes)} nodes')
             else:
-                code, count = self.element_type
                 if len(nodes) != count:
                     code = None      # Enter with fewer picks: fit the count
-                block = self._element_block(geometry)
                 geometry.add_element(nodes, elem_type=code, block=block)
                 self.project.record_call(
                     geometry, 'add_element', [int(n) for n in nodes],
@@ -5265,7 +5408,7 @@ class MainWindow(QMainWindow):
         name, _component = self.editing
         geometry = self.objects.get(name)
         # what the cursor is over, not what is being edited: building a
-        # traceline or element lights up the nodes the picker is returning
+        # element lights up the nodes the picker is returning
         component = self._picking_component()
         if component is None:
             return                       # blocks: nothing in the view to hover
@@ -5348,6 +5491,7 @@ class MainWindow(QMainWindow):
         self._update_element_type_actions()
         self._end_picking()
         self.editing = None
+        self.editing_scope = None
         self.views.setOrientation(Qt.Orientation.Vertical)
         self.render_current()
         self._update_toolbar_actions()
@@ -5533,7 +5677,7 @@ class MainWindow(QMainWindow):
         if kind == 'placeholder':
             self._show_placeholder_menu(item, position)
             return
-        sub_item = kind == 'component' or kind in ENTITY_COMPONENT
+        sub_item = kind in ('component', 'family') or kind in ENTITY_COMPONENT
         # a geometry is in one length unit throughout — units are declared
         # for the whole thing, never part of it. Data records are different:
         # channels genuinely differ, and keep their own entry.
@@ -6700,6 +6844,8 @@ class MainWindow(QMainWindow):
                 return False
             if kind == 'component' and detail == component:
                 continue
+            if kind == 'family' and component == 'elements':
+                continue
             if ENTITY_COMPONENT.get(kind) == component:
                 continue
             return False
@@ -6887,6 +7033,11 @@ class MainWindow(QMainWindow):
                     name, {'object': obj, 'components': set(), 'entities': {}})
                 if kind == 'component' and detail:
                     entry['components'].add(detail)
+                elif kind == 'family':
+                    # a family is its elements, as a block is its own
+                    rows = [i for i, code in enumerate(obj.elem_type)
+                            if element_family(int(code)) == detail]
+                    entry['entities'].setdefault('elements', []).extend(rows)
                 elif kind in ENTITY_COMPONENT:
                     entry['entities'].setdefault(
                         ENTITY_COMPONENT[kind], []).append(detail)
@@ -7083,7 +7234,6 @@ class MainWindow(QMainWindow):
         component = next(iter(components))
         counts = {'nodes': entry['object'].num_nodes,
                   'coordinate_systems': len(entry['object'].cs_id),
-                  'tracelines': len(entry['object'].traceline_conn),
                   'elements': len(entry['object'].elem_conn),
                   'blocks': len(entry['object'].block_id)}
         return component if not counts.get(component, 1) else None
@@ -9031,6 +9181,32 @@ class MainWindow(QMainWindow):
         frames and the windows."""
         self._clear_overlays('filter_overlays')
 
+    def _draw_sine(self, history):
+        """The sine view: the extraction setting beside the record,
+        with the readings sampled at it.
+
+        The same shape as the filter view, and for the same reason:
+        the setting lives on the history, the view shows and edits it,
+        and Extract Sine Levels uses whatever is there when it runs.
+        Nothing is drawn over the trace — the preview is the panel's
+        own, since the levels live over frequency, not time.
+        """
+        panel = self.data_pane.sine_panel
+        specs = self.project.sine_sweep_specifications
+        if not specs:
+            panel.hide()
+            return
+        try:
+            _rate = history.sample_rate
+        except ValueError as refusal:
+            # unevenly sampled, so there is no sweep to read
+            self._show_status(f'No sine levels: {refusal}')
+            panel.hide()
+            return
+        setting = history.sine_extraction or history.suggest_sine_extraction()
+        panel.show_history(history, specs[0], setting)
+        panel.show()
+
     def _octave_source(self, series):
         """The one density the octave reading would band — a PSD, a
         CPSD or a specification, limits and all — or None, which is
@@ -9182,6 +9358,19 @@ class MainWindow(QMainWindow):
         if redraw is not None and self.data_pane.showing_waterfall \
                 and self.data_pane.showing_filter:
             redraw(filtering)
+        self._refresh_stale_badges()
+        self._report_content_changed(settling=True)
+
+    def _sine_edited(self, setting):
+        """The panel moved: store it. Storing is what makes the badge
+        work — a level set's provenance fingerprints the source's
+        `sine_extraction`, so the edit is the moment its refresh badge
+        appears."""
+        history = self._averaging_history()
+        if history is None:
+            return
+        history.sine_extraction = setting
+        self.project.record_setting(history, 'sine_extraction', setting)
         self._refresh_stale_badges()
         self._report_content_changed(settling=True)
 
@@ -9466,6 +9655,8 @@ class MainWindow(QMainWindow):
                                      complex_data=complex_series,
                                      pair=offered,
                                      averaging=history is not None,
+                                     sine=history is not None
+                                     and bool(self.project.sine_sweep_specifications),
                                      shocks=history is not None,
                                      octave=self._octave_source(series)
                                      is not None)
@@ -9755,6 +9946,8 @@ class MainWindow(QMainWindow):
             self._draw_shocks(history)
         if history is not None and self.data_pane.showing_filter:
             self._draw_filtering(history)
+        if history is not None and self.data_pane.showing_sine:
+            self._draw_sine(history)
         if history is not None and self.data_pane.showing_truncate:
             self._draw_truncation(history)
         banded_source = self._octave_source(series)
@@ -10078,6 +10271,9 @@ class MainWindow(QMainWindow):
             self._stage_dragger.disarm()
         if not isinstance(data, TimeHistory):
             return
+        if pane.showing_sine:
+            self._draw_sine(data)
+            return
         if not (pane.showing_averaging or pane.showing_shocks
                 or pane.showing_filter or pane.showing_truncate):
             return
@@ -10090,6 +10286,7 @@ class MainWindow(QMainWindow):
             pane.averaging_panel.hide()
             pane.shock_panel.hide()
             pane.filter_panel.hide()
+            pane.sine_panel.hide()
             return
         if pane.showing_filter:
             self._stage_filter_preview(plotter, data, info)
@@ -10423,9 +10620,13 @@ class MainWindow(QMainWindow):
             return
         for k, name in enumerate(added):
             self.show_object(name, source=time_name, select=k == 0)
+        levels = self.objects[added[0]]
+        setting = self.objects[time_name].sine_extraction
         self._show_status(
-            f'{len(added)} tone level{"s" * (len(added) != 1)} '
-            f'extracted from {time_name}')
+            f'{len(levels)} tone level{"s" * (len(levels) != 1)} '
+            f'extracted from {time_name} — '
+            + (setting.describe() if setting is not None
+               else f'{levels.cycles:g} cycles of smoothing'))
 
     def compute_psds(self) -> None:
         """Averaged auto-power spectral densities from the selected
@@ -13730,7 +13931,7 @@ class MainWindow(QMainWindow):
     def _set_table_model(self, model):
         # every table edit that changes an object reaches the journal
         # through the model's own suffix (Brandon, 2026-08-30: adding a
-        # traceline said nothing, and the sweep found the whole edit
+        # line said nothing, and the sweep found the whole edit
         # surface silent)
         model.edit_journaled.connect(
             lambda suffix, m=model: self._journal_table_edit(m, suffix))

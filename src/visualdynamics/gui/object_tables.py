@@ -991,30 +991,6 @@ def _set_block_elements(geometry: Any, row: int, text: str) -> None:
                                     list(wanted))] = block
 
 
-def traceline_table_model(geometry: Geometry,
-                          unit_system: UnitSystem | None = None,
-                          parent: QObject | None = None) -> TableModel:
-    def set_description(geometry: Any, row: int, text: str) -> None:
-        geometry.traceline_desc[row] = text
-
-    columns = [
-        Column('Traceline', lambda g, r: int(g.traceline_id[r]),
-               set=_set_int_field('traceline_id', minimum=1),
-               journal=_int_field_journal('traceline_id')),
-        Column('Description', lambda g, r: g.traceline_desc[r],
-               set=set_description,
-               journal=lambda g, r, t: f'.traceline_desc[{r}] = {t!r}',
-               alignment=LEFT),
-        _color_column('Color', 'traceline_color'),
-        Column('Nodes', lambda g, r: _connectivity_text(g.traceline_conn[r]),
-               set=_set_connectivity('traceline_conn'),
-               journal=_connectivity_journal('traceline_conn'),
-               alignment=LEFT),
-    ]
-    return TableModel(geometry, columns,
-                          lambda g: len(g.traceline_conn), parent)
-
-
 #: the Blocks table's property columns: (title, field of the property
 #: set or of its material/section, kind)
 _PROPERTY_FIELDS = (
@@ -1366,8 +1342,8 @@ def block_table_model(geometry: Geometry,
 
     Three columns, all editable. The elements are listed as runs
     (`1-36 156-245`) and naming one here claims it for this block —
-    the same gesture as typing a node into a traceline, with one
-    difference the model forces: a node can be in no traceline at all,
+    the same gesture as typing a node into an element, with one
+    difference the model forces: a node can be in no element at all,
     while an element is always in exactly one block. So the list adds
     and moves, and a removal that would orphan an element is refused
     with the reason (see `_set_block_elements`). The Elements column
@@ -1410,7 +1386,6 @@ def block_table_model(geometry: Geometry,
 ENTITY_TABLES = {
     'nodes': node_table_model,
     'coordinate_systems': coordinate_system_table_model,
-    'tracelines': traceline_table_model,
     'elements': element_table_model,
     'blocks': block_table_model,
 }

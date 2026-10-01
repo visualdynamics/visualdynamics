@@ -133,7 +133,7 @@ and its modes, so a test column can stand beside a model column:
 
 - **Nastran bulk data** reads and writes the mesh — grids (all three
   field formats, bare-exponent floats included), CORD2 chains,
-  elements, concentrated masses, PLOTELs as tracelines. Constraints
+  elements, concentrated masses, PLOTELs as drawn lines. Constraints
   and analysis cards are skipped knowingly on the way in; the written
   deck is interchange, not a runnable model — no properties or
   materials are invented, and the header says who wrote it.
@@ -275,7 +275,8 @@ values, which are SI once units are declared.
 ## What each format drops
 
 **sdynpy** keeps everything else: geometry including coordinate systems,
-tracelines and elements; data including reference DOFs; shapes including
+drawn lines (its tracelines) and elements; data including reference
+DOFs; shapes including
 frequency, damping, modal mass and the DOF set. Where visualdynamics has both a
 `comment` (from the file it came from) and a `description` (typed in
 visualdynamics), the format has one field — what the user typed wins.
@@ -364,13 +365,25 @@ without saying why, and Visual Dynamics refuses the duplicate ids
 outright. `vtkExodusIIReader` read it happily, so only the IOSS reader
 catches this.
 
-**exodus** has no traceline. Tracelines are written as runs of
-two-node beam elements rather than dropped, which is lossy in one
-direction: they read back as elements, because nothing in the file
-says a beam was ever a traceline. Pass `tracelines_as_beams=False` to
-leave them out. Coordinate systems survive — as frames, with their
-assignments riding as node sets (above) — but their *names* do not: a
-frame is an id, three points and a tag.
+**exodus** has no traceline, and needs none: a drawn line *is* a
+block of two-node beam elements with no properties here, and goes out
+as that block and comes back as it. Coordinate systems survive — as
+frames, with their assignments riding as node sets (above) — but their
+*names* do not: a frame is an id, three points and a tag.
+
+**A drawn line in every format.** Visual Dynamics keeps no separate
+tracelines: a line drawn through nodes is a block of two-node line
+elements with no properties, and that is the one discriminator on the
+way out. UNV, sdynpy, ESCDF and Nastran keep lines apart from
+elements, so such a block is written as the format's line (dataset 82,
+the traceline array, `line_connection`, PLOTEL chains) and not as
+elements as well; a block that carries a section is structure and is
+written as elements. On the way in a line arrives as its own block,
+named for the line and colored by it, a UNV line that lifted the pen
+as one block of several runs. A block holds one element family, so a
+source that mixes families in a block — UNV and sdynpy carry no blocks
+at all, a Nastran PSHELL covers quads and triangles alike — is split
+on arrival, the new blocks named for their family beside the old name.
 
 **UNV** writes geometry as datasets 2411, 82, 2412 and 2420, and data as
 one dataset 58 per record. Both coherence types keep their own function

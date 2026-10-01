@@ -750,19 +750,20 @@ def test_a_geometry_with_no_blocks_still_rebuilds_as_one_part():
     assert {model.group(n) for n in model.node_ids} == {''}
 
 
-def test_from_geometry_can_wire_tracelines_for_a_wireframe():
-    """A geometry with no elements at all has only its display lines, and
-    for a bare wireframe those are the connectivity."""
-    wire = fem.Model()
-    for i in range(6):
-        wire.add_node(i + 1, i * 0.1, 0.0, 0.0)
+def test_from_geometry_wires_a_wireframe_through_its_drawn_lines():
+    """A bare wireframe's drawn lines are blocks of beams (2026-09-30),
+    and for the grillage those are the connectivity; bare nodes with
+    nothing joining them are refused."""
+    bare = Geometry(node_id=list(range(1, 7)),
+                    node_xyz=[[i * 0.1, 0.0, 0.0] for i in range(6)],
+                    length_unit='m')
+    with pytest.raises(ValueError, match='nothing to connect'):
+        fem.Model.from_geometry(bare, MASSLESS, MEMBER)
     drawn = Geometry(node_id=list(range(1, 7)),
                      node_xyz=[[i * 0.1, 0.0, 0.0] for i in range(6)],
-                     traceline_conn=[list(range(1, 7))], length_unit='m')
-    with pytest.raises(ValueError, match='nothing to connect'):
-        fem.Model.from_geometry(drawn, MASSLESS, MEMBER)
-    model = fem.Model.from_geometry(drawn, MASSLESS, MEMBER, total_mass=1.0,
-                                    tracelines=True)
+                     length_unit='m')
+    drawn.add_beams(list(range(1, 7)))
+    model = fem.Model.from_geometry(drawn, MASSLESS, MEMBER, total_mass=1.0)
     assert len(model.beams) == 5
     assert len(model.pieces()) == 1
 

@@ -3,7 +3,7 @@
 Coordinates are converted from stored SI to the display unit system at scene
 build time — switching unit systems rebuilds the scene, never the data.
 
-Tracelines and line elements are drawn with direct colors, grouped by color
+Line elements are drawn with direct colors, grouped by color
 index, except when the scene is colored by value (see docs/colormap.md).
 An older note here warned that macOS VTK silently drops scalar-mapped line
 cells; that was measured against pyvista 0.48.4 / VTK 9.6.2 and does not
@@ -143,7 +143,7 @@ def geometry_scene(geometry: Geometry, unit_system: UnitSystem | None = None,
 
     `theme` is 'light', 'dark', or a colors dict; it sets the scene
     background and annotation color. `components` limits what is drawn to a
-    subset of {'nodes', 'tracelines', 'elements'} — selecting one in the
+    subset of {'nodes', 'elements'} — selecting one in the
     project tree shows just that part. `scale` multiplies every size
     given in pixels — nodes, lines, the bounds' labels — for a render at
     print resolution (`print_plotter`). `bounds` and `orientation` are
@@ -588,7 +588,6 @@ def labels_fit(geometry: Geometry, kind: str,
         return len(chosen) <= ENTITY_LABEL_LIMIT
     counts = {'nodes': geometry.num_nodes,
               'coordinate_systems': len(geometry.cs_id),
-              'tracelines': len(geometry.traceline_conn),
               'elements': len(geometry.elem_conn),
               'blocks': len(geometry.block_id)}
     return counts.get(kind, 0) <= ENTITY_LABEL_LIMIT
@@ -602,18 +601,13 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
     `points` is the geometry's nodes as drawn, so a caption lands in the
     same units and the same frame as the thing it names. Everything but
     a node is captioned at the **centroid of its own nodes**: the middle
-    of a traceline's run, of an element's corners, of a block's
+    of an element's corners, of a block's
     elements. That is where a reader looks for the name of a shape, and
     it keeps the number off the vertices, which are already carrying
     node ids whenever both are shown.
 
-    A traceline id can name several runs — a UNV dataset-82 line that
-    lifts the pen arrives as several polylines under one id — and each
-    run is captioned where it is. One centroid for the id would land
-    between them, in empty space, naming nothing.
-
     `chosen` is the ids (nodes, coordinate systems, blocks) or indices
-    (tracelines, elements) to caption; None captions every one of the
+    (elements) to caption; None captions every one of the
     kind. Returns nothing past `ENTITY_LABEL_LIMIT`; see `labels_fit`.
     """
     if not labels_fit(geometry, kind, chosen):
@@ -632,16 +626,7 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
                 else np.ones(geometry.num_nodes, bool))
         return points[mask], [str(int(i)) for i in geometry.node_id[mask]]
 
-    if kind == 'tracelines':
-        wanted = (list(chosen) if chosen is not None
-                  else range(len(geometry.traceline_conn)))
-        for i in wanted:
-            spot = center(geometry.traceline_conn[int(i)])
-            if spot is not None:
-                spots.append(spot)
-                texts.append(str(int(geometry.traceline_id[int(i)])))
-
-    elif kind == 'elements':
+    if kind == 'elements':
         wanted = (list(chosen) if chosen is not None
                   else range(len(geometry.elem_conn)))
         for i in wanted:
@@ -688,14 +673,14 @@ def add_geometry(plotter: Any, geometry: Geometry,
     `color_override` paints the whole geometry one color, which is how
     several geometries overlaid in one scene stay tellable apart.
     `entities` restricts drawing to specific items, as a dict with any of
-    'nodes' (node ids), 'coordinate_systems' (ids), 'tracelines' (indices)
-    and 'elements' (indices) — that is how a single node or traceline picked
+    'nodes' (node ids), 'coordinate_systems' (ids)
+    and 'elements' (indices) — that is how a single node or element picked
     in the tree gets highlighted.
 
     `labels` names the kinds to caption with their ids — any of 'nodes',
-    'coordinate_systems', 'tracelines', 'elements', 'blocks'. Captions
+    'coordinate_systems', 'elements', 'blocks'. Captions
     follow `entities` when it restricts the drawing, so labeling a
-    picked traceline names that one and not all of them, and a kind with
+    picked element names that one and not all of them, and a kind with
     more than `ENTITY_LABEL_LIMIT` of them is left uncaptioned (see
     `labels_fit`).
 
@@ -734,7 +719,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
     picked = entities or {}
     # a caption follows what is drawn: told nothing more specific, a
     # kind is captioned over exactly the entities the pick restricted
-    # it to, so labeling a picked traceline names that one alone
+    # it to, so labeling a picked element names that one alone
     wanted_labels = {kind: (picked.get(kind) if chosen is None else chosen)
                      for kind, chosen in label_choices(labels).items()}
     if components:
@@ -742,7 +727,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
     elif picked:
         draw = {kind for kind, values in picked.items() if values}
     else:
-        draw = {'nodes', 'tracelines', 'elements'}
+        draw = {'nodes', 'elements'}
     id_to_row = {int(i): r for r, i in enumerate(geometry.node_id)}
 
     def rows(node_ids: Sequence[int]) -> list[int]:
@@ -762,23 +747,9 @@ def add_geometry(plotter: Any, geometry: Geometry,
         plotter.add_mesh(mesh, **painted(color), point_size=node_size,
                          render_points_as_spheres=True, opacity=opacity)
 
-    # Tracelines: direct color per group (see VTK note above)
-    line_groups = {}
-    wanted_lines = picked.get('tracelines')
-    traceline_indices = (list(wanted_lines) if wanted_lines is not None
-                         else range(len(geometry.traceline_conn)))
-    tracelines = ([(geometry.traceline_color[i], geometry.traceline_conn[i])
-                   for i in traceline_indices] if 'tracelines' in draw else [])
-    for color, conn in tracelines:
-        if len(conn) >= 2:
-            line_groups.setdefault(int(color), []).append(rows(conn))
-    for color, polylines in line_groups.items():
-        mesh = new_mesh()
-        mesh.lines = _cells(polylines)
-        plotter.add_mesh(mesh, **painted(color), line_width=line_width,
-                         opacity=opacity)
-
-    # Elements, split by render class and grouped by color
+    # Elements, split by render class and grouped by color (a drawn
+    # line is a block of two-node line elements since 2026-09-30, and
+    # draws as its line elements do: direct color per group)
     faces, lines, cell_points = {}, {}, {}
     wanted_elements = picked.get('elements')
     element_indices = (list(wanted_elements) if wanted_elements is not None

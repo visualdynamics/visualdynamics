@@ -491,9 +491,9 @@ def test_edit_mode_keeps_unbound_blocks_as_cards(project):
 def test_scenes_carry_element_faces(project):
     """Elements draw as shaded faces in the report, not just edge lines —
     the plate's 144 quads all arrive with four corners. A perimeter
-    traceline goes on first, because the meshed plate ships without
+    line of beams goes on first, because the meshed plate ships without
     any and the scene must carry both kinds at once."""
-    project['Geometry'].add_traceline([101, 113, 1313, 1301, 101])
+    project['Geometry'].add_beams([101, 113, 1313, 1301, 101])
     report = Report('R', [{'kind': 'scene', 'geometry': 'Geometry',
                            'shapes': 'Shape Set', 'caption': ''}])
     html = render_html(report, project)
@@ -502,7 +502,7 @@ def test_scenes_carry_element_faces(project):
     scene = payload['blocks'][0]
     assert len(scene['faces']) == 144
     assert all(len(face['nodes']) == 4 for face in scene['faces'])
-    assert scene['lines'], 'tracelines still draw as lines'
+    assert scene['lines'], 'drawn lines still draw as lines'
 
 
 def test_figures_and_tables_number_sequentially(project):

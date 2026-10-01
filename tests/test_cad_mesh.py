@@ -166,9 +166,8 @@ endsolid right plate
 
 
 def test_a_faceless_geometry_is_refused_by_both(tmp_path):
-    lines_only = Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]],
-                          traceline_id=[1],
-                          traceline_conn=[np.array([1, 2])])
+    lines_only = Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]])
+    lines_only.add_beams([1, 2])
     for suffix in ('.stl', '.3mf'):
         with pytest.raises(ValueError, match='no face elements'):
             export_file(lines_only, tmp_path / f'bad{suffix}')

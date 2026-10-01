@@ -49,6 +49,7 @@ def pane(window, pump):
 
 def readings(pane):
     return {'averaging': pane.averaging_action, 'filter': pane.filter_action,
+            'sine': pane.sine_action,
             'truncate': pane.truncate_action,
             'kurtosis': pane.kurtosis_action, 'shocks': pane.shocks_action,
             'wavelet': pane.wavelet_action}

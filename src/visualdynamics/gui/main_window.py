@@ -1424,6 +1424,15 @@ class MainWindow(QMainWindow):
                               lambda: self.generate_report('transient'))
         report_menu.addAction('&Shock',
                               lambda: self.generate_report('shock'))
+        # every template the bar's menu offers (Brandon, 2026-10-02: the
+        # sine and the random-and-sine reports were on the bar and not
+        # here)
+        report_menu.addAction('S&ine Sweep',
+                              lambda: self.generate_report('sine'))
+        report_menu.addAction('Random &and Sine',
+                              lambda: self.generate_report('mixed'))
+        report_menu.addAction('S&ystem ID',
+                              lambda: self.generate_report('sysid'))
         report_menu.addAction('&Empty',
                               lambda: self.generate_report('empty'))
         file_menu.addSeparator()

@@ -265,3 +265,56 @@ def test_a_system_id_averages_both_streams_on_shared_frames(tmp_path):
     assert 'Report' in project.names
     assert [slot[0] for slot in project.missing() if not slot[4]] == \
         ['FRF', 'Multiple Coherence']
+
+
+def test_a_random_and_sine_run_works_up_both_halves():
+    """Automatic on a Random and Sine project fills the random half's
+    slots and the sine half's — the PSDs, the octave bands of both the
+    data and the requirement, the sine levels — and makes the mixed
+    report last (Brandon, 2026-10-02: "make sure Compute everything
+    works for Sine and Random and Sine")."""
+    import numpy as np
+    from test_extract_sine import _recording, _spec
+
+    from visualdynamics.core.data import Specification
+
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    frequencies = np.logspace(1, 3, 25)
+    level = np.full((2, len(frequencies)), 1e-3)
+    random = Specification(
+        abscissa=frequencies, ordinate=level,
+        response_dof=list(history.response_dof),
+        ordinate_dim=['acceleration**2/frequency'] * 2,
+        ordinate_unit=['(m/s**2)**2/Hz'] * 2,
+        abort_upper=level * 2.0, abort_lower=level * 0.5)
+    project = visualdynamics.Project()
+    project.add('Time History', history)
+    project.add('PSD Specification', random)
+    project.add('Sine Specification', spec)
+    project.project_type = 'Random and Sine'
+    added = project.work_up()
+    kinds = [type(project[name]).__name__ for name in added]
+    assert 'Psd' in kinds and 'SineLevelSet' in kinds
+    assert added[-1] == 'Report'
+    report = project['Report']
+    captions = ' '.join(block.get('caption', '') for block in report.blocks)
+    assert 'Control against specification' in captions, 'the random half'
+    assert 'extracted level against the requirement' in captions, 'the sine half'
+    assert not [slot[0] for slot in project.missing()
+                if not slot[4] and slot[0] not in
+                ('Geometry', 'Photos', 'Channel Table', 'Multiple Coherence')]
+
+
+def test_the_file_menu_offers_every_report(window):
+    """The File menu's Generate Report lists the same templates the
+    bar's menu does — the sine and the random-and-sine reports were
+    missing there (Brandon, 2026-10-02)."""
+    file_menu = next(a.menu() for a in window.menuBar().actions()
+                     if a.text().replace('&', '') == 'File')
+    report_menu = next(a.menu() for a in file_menu.actions()
+                       if a.menu() is not None
+                       and a.text().replace('&', '') == 'Generate Report')
+    labels = [a.text().replace('&', '') for a in report_menu.actions()]
+    assert labels == ['Modal Test', 'Random Vibration', 'Transient', 'Shock',
+                      'Sine Sweep', 'Random and Sine', 'System ID', 'Empty']

@@ -303,3 +303,26 @@ def test_the_one_call_writes_the_sine_report_into_a_folder(tmp_path):
     with open(written[0], encoding='utf-8') as f:
         html = f.read()
     assert 'extracted level against the requirement' in html
+
+
+def test_the_one_call_reports_take_a_marking(tmp_path):
+    """A batch stamps its own banner: 'UNCLASSIFIED' is only the
+    default (Brandon, 2026-10-02)."""
+    import inspect
+
+    for report in (visualdynamics.random_vibration_report,
+                   visualdynamics.mixed_report,
+                   visualdynamics.system_id_report,
+                   visualdynamics.sine_report):
+        assert 'marking' in inspect.signature(report).parameters, report.__name__
+    run = _write_run(tmp_path / 'sweep.nc4', seconds=18.0)
+    written = visualdynamics.sine_report(run, str(tmp_path / 'marked.html'),
+                                         marking='TEST SERIES 4')
+    with open(written, encoding='utf-8') as f:
+        html = f.read()
+    assert 'TEST SERIES 4' in html and 'UNCLASSIFIED' not in html
+    project = visualdynamics.sine_run(run)
+    name = project.generate_report('sine', marking='CUI', marking_color='red')
+    assert project[name].marking == 'CUI' and project[name].marking_color == 'red'
+    plain = project.generate_report('sine', name='Plain')
+    assert project[plain].marking == 'UNCLASSIFIED'

@@ -2822,7 +2822,8 @@ class Project(dict):
         return str(path)
 
     def generate_report(self, template: str = 'modal',
-                        name: str = 'Report') -> str:
+                        name: str = 'Report', marking: str | None = None,
+                        marking_color: str | None = None) -> str:
         """Build a report from a starter template, bound symbolically
         to this project's structure (Generate Report).
 
@@ -2836,6 +2837,12 @@ class Project(dict):
             exported on its own; `io.report_template`).
         name : str, default 'Report'
             What to call the report object.
+        marking : str, optional
+            The banner across the top and bottom of every page —
+            'UNCLASSIFIED' unless said. A batch stamps its own
+            (Brandon, 2026-10-02).
+        marking_color : str, optional
+            'ink' or 'red'.
 
         Returns
         -------
@@ -2868,6 +2875,10 @@ class Project(dict):
                     f'template ({", ".join(saved) or "none saved"}) or a '
                     f'{report_template.SUFFIX} file')
             report = report_template.load(path)
+        if marking is not None:
+            report.marking = str(marking)
+        if marking_color is not None:
+            report.marking_color = marking_color
         return self.add(name, report)
 
     def work_up(self) -> list[str]:
@@ -4451,7 +4462,7 @@ def _report_path(run: str | os.PathLike,
 
 def _one_call_reports(run: Any, path: Any, geometry: Any,
                       unit_system: Any, kind: str,
-                      work_up: Any) -> Any:
+                      work_up: Any, marking: str | None = None) -> Any:
     """What every one-call report function does around its workup.
 
     The asking, the batch and the destination, in one place because
@@ -4485,7 +4496,7 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
     written = []
     for one in runs:
         project = work_up(one, geometry)
-        report = project.generate_report(kind, name='Report')
+        report = project.generate_report(kind, name='Report', marking=marking)
         written.append(project.export_report(
             report, _report_path(one, path), unit_system))
     return written if len(written) > 1 else written[0]
@@ -4531,7 +4542,8 @@ def mixed_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
                  geometry: Any = None,
                  photos: Any = None,
                  per_octave: int | None = None,
-                 unit_system: Any = None) -> Any:
+                 unit_system: Any = None,
+                 marking: str | None = None) -> Any:
     """A Rattlesnake random-and-sine run in, an HTML report out.
 
         visualdynamics.mixed_report('run.nc4', 'report.html')
@@ -4548,7 +4560,8 @@ def mixed_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     return _one_call_reports(
         run, path, geometry, unit_system, 'mixed',
         lambda one, geo: mixed_run(one, per_octave, last=last, geometry=geo,
-                                   photos=photos))
+                                   photos=photos),
+        marking=marking)
 
 
 def sine_run(run: str | os.PathLike, *,
@@ -4600,7 +4613,8 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
                 last: float | None = None,
                 geometry: Any = None,
                 photos: Any = None,
-                unit_system: Any = None) -> Any:
+                unit_system: Any = None,
+                marking: str | None = None) -> Any:
     """A Rattlesnake sine sweep run in, an HTML report out.
 
         visualdynamics.sine_report('sweep.nc4', 'report.html')
@@ -4612,11 +4626,15 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     of `sine_run`, and the Sine Sweep report written as one
     self-contained HTML file. Returns the path written, or the list of
     them when several runs were chosen (Brandon, 2026-10-02: the batch
-    tool stopped at a run that was sine alone).
+    tool stopped at a run that was sine alone). `marking` is the banner
+    across every page of the report, 'UNCLASSIFIED' unless said — on
+    every one-call report since 2026-10-02, when a batch wanted its own
+    heading.
     """
     return _one_call_reports(
         run, path, geometry, unit_system, 'sine',
-        lambda one, geo: sine_run(one, last=last, geometry=geo, photos=photos))
+        lambda one, geo: sine_run(one, last=last, geometry=geo, photos=photos),
+        marking=marking)
 
 
 def system_id_report(run: Any = ASK,
@@ -4624,7 +4642,8 @@ def system_id_report(run: Any = ASK,
                      last: float | None = None,
                      geometry: Any = None,
                      photos: Any = None,
-                     unit_system: Any = None) -> Any:
+                     unit_system: Any = None,
+                     marking: str | None = None) -> Any:
     """A Rattlesnake system identification in, an HTML report out.
 
         visualdynamics.system_id_report('sysid.nc4', 'sysid.html')
@@ -4646,7 +4665,8 @@ def system_id_report(run: Any = ASK,
     return _one_call_reports(
         run, path, geometry, unit_system, 'sysid',
         lambda one, geo: system_id_run(one, last=last, geometry=geo,
-                                       photos=photos))
+                                       photos=photos),
+        marking=marking)
 
 
 def random_vibration_report(run: Any = ASK,
@@ -4655,7 +4675,8 @@ def random_vibration_report(run: Any = ASK,
                             geometry: Any = None,
                             photos: Any = None,
                             per_octave: int | None = None,
-                            unit_system: Any = None) -> Any:
+                            unit_system: Any = None,
+                            marking: str | None = None) -> Any:
     """A Rattlesnake random vibration run in, an HTML report out.
 
         visualdynamics.random_vibration_report('run.nc4', 'report.html')
@@ -4703,4 +4724,5 @@ def random_vibration_report(run: Any = ASK,
     return _one_call_reports(
         run, path, geometry, unit_system, 'random',
         lambda one, geo: random_vibration_run(one, per_octave, last=last,
-                                              geometry=geo, photos=photos))
+                                              geometry=geo, photos=photos),
+        marking=marking)

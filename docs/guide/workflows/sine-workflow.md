@@ -194,7 +194,7 @@ import visualdynamics
 
 visualdynamics.sine_report('sweep.nc4', 'report.html')
 visualdynamics.sine_report('sweep.nc4', 'reports/', geometry='article.stp',
-                           photos='setup_photos/')
+                           photos='setup_photos/', marking='TEST SERIES 4')
 visualdynamics.sine_report()                     # ask for the runs and the geometry
 project = visualdynamics.sine_run('sweep.nc4')   # the project, to go on with
 ```

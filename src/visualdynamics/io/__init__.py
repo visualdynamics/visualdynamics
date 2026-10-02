@@ -28,6 +28,7 @@ from . import (
     photo_files,
     punch,
     rattlesnake,
+    rattlesnake_sine,
     rattlesnake_specification,
     report_template,
     sdynpy_data,
@@ -176,6 +177,9 @@ register_importer('rattlesnake_specification',
                   'Rattlesnake random specification (.npz)',
                   rattlesnake_specification.sniff,
                   rattlesnake_specification.load)
+register_importer('rattlesnake_sine',
+                  'Rattlesnake sine specification (.npz)',
+                  rattlesnake_sine.sniff, rattlesnake_sine.load)
 register_importer('rattlesnake', 'Rattlesnake controller output (.nc4)',
                   rattlesnake.sniff, rattlesnake.load,
                   rattlesnake.project_type)

@@ -4551,6 +4551,74 @@ def mixed_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
                                    photos=photos))
 
 
+def sine_run(run: str | os.PathLike, *,
+             last: float | None = None,
+             geometry: str | os.PathLike | None = None,
+             length_unit: str | None = None,
+             photos: Any = None) -> Project:
+    """A Rattlesnake sine sweep run, worked up into a project.
+
+        project = visualdynamics.sine_run('sweep.nc4')
+
+    The run imported, each tone's level extracted from the control
+    channels against the sweep specification the file carried, and the
+    geometry and photographs brought in and linked, as
+    `random_vibration_run` brings them. The run says it is a sine
+    sweep, so the project comes back declared as one. A run with no
+    sine sweep specification is refused by name; `random_vibration_run`
+    or `mixed_run` is the call for it. The keywords are
+    `random_vibration_run`'s, less `per_octave`, which a sweep has no
+    use for.
+    """
+    project = Project()
+    project.import_file(run, **(_last_window(run, last) if last is not None
+                                else {}))
+    from .core.sine import SineSweepSpecification
+
+    if not any(isinstance(obj, SineSweepSpecification)
+               for _name, obj in project.items()):
+        raise ValueError(
+            f'{run} holds no sine sweep specification: it is not a sine '
+            'sweep run — random_vibration_run or mixed_run is the call for it')
+    history = next((name for name, obj in project.items()
+                    if isinstance(obj, TimeHistory)), None)
+    if history is None:
+        raise ValueError(f'{run} holds no time data to work up')
+    project.extract_sine(history)
+    extras: list[str] = []
+    if geometry is not None:
+        options = {} if length_unit is None else {'length_unit': length_unit}
+        extras += project.import_file(geometry, **options)
+    if photos is not None:
+        extras.append(project.add('Photos', _photos_from(photos)))
+    if extras:
+        project.link(history, *extras)
+    return project
+
+
+def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
+                last: float | None = None,
+                geometry: Any = None,
+                photos: Any = None,
+                unit_system: Any = None) -> Any:
+    """A Rattlesnake sine sweep run in, an HTML report out.
+
+        visualdynamics.sine_report('sweep.nc4', 'report.html')
+        visualdynamics.sine_report()                   # ask for both
+        visualdynamics.sine_report('sweep.nc4', 'reports/')
+
+    `random_vibration_report`'s twin for a sweep: the same asking when
+    the run is left out, the same batch and folder rules, the workup
+    of `sine_run`, and the Sine Sweep report written as one
+    self-contained HTML file. Returns the path written, or the list of
+    them when several runs were chosen (Brandon, 2026-10-02: the batch
+    tool stopped at a run that was sine alone).
+    """
+    return _one_call_reports(
+        run, path, geometry, unit_system, 'sine',
+        lambda one, geo: sine_run(one, last=last, geometry=geo, photos=photos))
+
+
 def system_id_report(run: Any = ASK,
                      path: str | os.PathLike | None = None, *,
                      last: float | None = None,

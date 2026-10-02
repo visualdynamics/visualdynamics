@@ -17,18 +17,31 @@ from visualdynamics.io import rattlesnake
 
 
 def _write_run(path, sine=True, random=False, band=True,
-               split_band=False, sine_transformation=None):
+               split_band=False, sine_transformation=None, seconds=1.0):
     import netCDF4 as nc
 
     ds = nc.Dataset(str(path), 'w')
     n_channels = 3
     ds.file_version = '3.0.0'
     ds.sample_rate = 4096.0
+    samples = int(seconds * 4096.0)
     ds.createDimension('response_channels', n_channels)
-    ds.createDimension('time_samples', 4096)
+    ds.createDimension('time_samples', samples)
     time_data = ds.createVariable('time_data', 'f8',
                                   ('response_channels', 'time_samples'))
-    time_data[...] = np.zeros((n_channels, 4096))
+    signal = np.zeros((n_channels, samples))
+    if seconds > 1.0:
+        # a record long enough to extract from carries the sweep the
+        # specification below describes — 100 to 800 Hz at 50 Hz/s from
+        # 2 s — at the amplitudes it asks for, over a little noise
+        t = np.arange(samples) / 4096.0 - 2.0
+        on = (t >= 0.0) & (t <= 14.0)
+        phase = 2.0 * np.pi * (100.0 * t + 25.0 * t * t)
+        rng = np.random.default_rng(5)
+        signal += rng.standard_normal(signal.shape) * 0.05
+        for row, amplitude in enumerate((2.0, 4.0)):
+            signal[row, on] += amplitude * np.cos(phase[on])
+    time_data[...] = signal
 
     ch = ds.createGroup('channels')
     ch.createDimension('n', n_channels)
@@ -257,3 +270,36 @@ def test_a_mixed_run_keeps_the_random_loops_own_frames(tmp_path):
     assert averaging.frame_length == 512, \
         "the random loop's frames, not the sysid phase's 1024"
     assert averaging.window == 'hann'
+
+
+# ---- the one-call sine run and report (2026-10-02) -------------------------
+
+
+def test_sine_run_works_the_sweep_up_and_types_the_project(tmp_path):
+    path = _write_run(tmp_path / 'sine.nc4', seconds=18.0)
+    project = visualdynamics.sine_run(path)
+    assert project.project_type == 'Sine Sweep'
+    from visualdynamics.core.sine import SineLevelSet
+
+    assert any(isinstance(obj, SineLevelSet) for obj in project.objects)
+
+
+def test_sine_run_refuses_a_run_with_no_sweep():
+    import pytest
+    from conftest import fixture_path
+
+    with pytest.raises(ValueError, match='no sine sweep specification'):
+        visualdynamics.sine_run(fixture_path('plate', 'random.nc4'))
+
+
+def test_the_one_call_writes_the_sine_report_into_a_folder(tmp_path):
+    import os
+
+    runs = [_write_run(tmp_path / f'sweep{k}.nc4', seconds=18.0) for k in range(2)]
+    out = tmp_path / 'reports'
+    out.mkdir()
+    written = [visualdynamics.sine_report(run, str(out) + '/') for run in runs]
+    assert sorted(os.path.basename(p) for p in written) == ['sweep0.html', 'sweep1.html']
+    with open(written[0], encoding='utf-8') as f:
+        html = f.read()
+    assert 'extracted level against the requirement' in html

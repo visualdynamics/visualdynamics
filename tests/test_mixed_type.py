@@ -283,3 +283,91 @@ def test_a_six_channel_sine_report_renders_the_grid():
     assert len(cells) == 6
     assert all(len(cell['channels']) == 1 for cell in cells)
     assert sorted(cell['channels'][0]['label'] for cell in cells) == dofs
+
+
+def test_the_sine_report_draws_no_averaging_frames_on_its_time_figures():
+    """The sine extraction demodulates the whole record and averages
+    nothing, so the frames an averaging setting would draw on the time
+    figures are not this reading's (Brandon, 2026-10-02); the random
+    report, which averages, keeps them."""
+    from test_extract_sine import _flat_sweep
+
+    from visualdynamics.core.report import random_template, sine_template
+    from visualdynamics.report import render_html
+
+    history, spec = _flat_sweep(noise=1.0)
+    history.averaging = history.suggest_averaging()
+    assert history.averaging is not None
+
+    def time_figures(template):
+        objects = {'Sweep': spec, 'Record': history}
+        html = render_html(template(objects, links=[]), objects)
+        data = json.loads(html.split('type="application/json">')[1]
+                          .split('</script>')[0])
+        return [b for b in data['blocks'] if b.get('kind') == 'plot'
+                and 'time histories' in b.get('caption', '')]
+
+    import json
+
+    sine = time_figures(sine_template)
+    assert sine and all('averaging' not in b for b in sine)
+    random = time_figures(random_template)
+    assert random and all('averaging' in b for b in random)
+
+
+def test_virtual_channels_lie_across_one_row_of_the_grid():
+    """Channels with no direction — a transformation's '1', '2', '3' —
+    have nothing to stack by, so they are one row, a column each."""
+    from visualdynamics.core.report import channel_grid
+
+    grid = channel_grid(['1', '2', '3'])
+    assert grid['columns'] == ['1', '2', '3']
+    assert len(grid['rows']) == 1
+    assert [[c['channel'] for c in col] for col in grid['rows'][0]['cells']] == [['1'], ['2'], ['3']]
+    # physical channels keep their node rows and direction columns
+    grid = channel_grid(['101X+', '101Z+', '102Z+'])
+    assert grid['columns'] == ['X', 'Z'] and len(grid['rows']) == 2
+
+
+def test_many_sweeps_on_few_channels_tile_into_a_grid_per_sweep():
+    """The count that decides tiling is the whole report's: nine tones
+    on three channels is twenty-seven figures, so each tone becomes a
+    grid of its three (Brandon, 2026-10-02); one tone on two channels
+    stays two figures."""
+    import json
+
+    import numpy as np
+    from test_extract_sine import _flat_sweep
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.report import sine_template
+    from visualdynamics.core.sine import SineSweepSpecification, SineTone, extract_sine
+    from visualdynamics.report import render_html
+
+    history, spec = _flat_sweep(noise=1.0)
+    base = spec.tones[0]
+    dofs = ['1', '2', '3']
+    tones = [SineTone(f'Tone {k + 1}', base.start_time, base.frequency,
+                      np.repeat(base.amplitude[:, :1], 3, axis=1),
+                      base.segment_type, base.segment_rate)
+             for k in range(9)]
+    nine = SineSweepSpecification(tones, dofs, ordinate_unit='m/s**2')
+    blocks = sine_template({'Sweep': nine}, links=[]).blocks
+    figures = [b for b in blocks if b.get('kind') == 'plot' and b.get('tone')]
+    assert not figures, 'nothing extracted yet: the one symbolic figure'
+    three = TimeHistory(history.abscissa, np.vstack([history.ordinate, history.ordinate[:1]]),
+                        response_dof=dofs, ordinate_dim=['acceleration'] * 3,
+                        ordinate_unit=['m/s**2'] * 3)
+    # one tone at a time keeps the extraction quick; the levels carry all nine names
+    levels = extract_sine(three, nine, tones=[t.name for t in tones], cycles=40.0,
+                          workers=1, refine=False)
+    objects = {'Sweep': nine, 'Record': three, 'Levels': levels}
+    blocks = sine_template(objects, links=[]).blocks
+    figures = [b for b in blocks if b.get('kind') == 'plot' and b.get('tone')]
+    assert len(figures) == 9 and all(b.get('grid') is True for b in figures)
+    html = render_html(sine_template(objects, links=[]), objects)
+    data = json.loads(html.split('type="application/json">')[1].split('</script>')[0])
+    grids = [b for b in data['blocks'] if b.get('kind') == 'grid']
+    assert len(grids) == 9
+    assert all(len(g['rows']) == 1 and len(g['rows'][0]['cells']) == 3 for g in grids)
+    assert grids[0]['columns'] == dofs

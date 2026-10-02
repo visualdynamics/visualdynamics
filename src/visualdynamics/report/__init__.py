@@ -1543,7 +1543,11 @@ def _plot_block(block, source, objects, us):
                              'y': _finite(envelope[k])}
                             for k, i in enumerate(wanted)],
                  'note': _thinned_note(int(envelope.shape[1]), int(x.size))}
-        frames = _averaging_marks(source)
+        # a template says when the frames are not the reading's — the
+        # sine report demodulates the whole record and averages nothing
+        # (Brandon, 2026-10-02)
+        frames = (_averaging_marks(source)
+                  if block.get('averaging', True) else None)
         if frames is not None:
             built['averaging'] = frames
         events = _shock_marks(source)
@@ -1649,7 +1653,8 @@ def _plot_block(block, source, objects, us):
     thinning = _thinned_note(thinned_to, thinned_from)
     if thinning:
         built['note'] = thinning
-    frames = _averaging_marks(source)
+    frames = (_averaging_marks(source)
+              if block.get('averaging', True) else None)
     if frames is not None:
         built['averaging'] = frames
     events = _shock_marks(source)

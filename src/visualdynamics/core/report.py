@@ -1015,7 +1015,8 @@ def quantity_order(dims: set[str]) -> list[str]:
 def time_data_blocks(source: str, objects: Mapping[str, Any],
                      links: Sequence[Mapping[str, Any]] | None,
                      caption: str, per_quantity: str,
-                     mode: str = 'curves') -> list[dict[str, Any]]:
+                     mode: str = 'curves',
+                     averaging: bool = True) -> list[dict[str, Any]]:
     """The time plots for one history: one figure per quantity it
     measures (Brandon, 2026-08-23 — an axis holds one quantity, so a
     stream carrying drive voltages beside response accelerations must
@@ -1043,12 +1044,17 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
     name = resolve_binding(source, objects, links)
     obj = objects.get(name)
     dims = record_dimensions(obj) if obj is not None else set()
+    # the averaging frames are drawn unless the template says they are
+    # not this reading's: the sine report demodulates the whole record
+    # and averages nothing (Brandon, 2026-10-02)
+    frames = {} if averaging else {'averaging': False}
     if len(dims) < 2:
         return [{'kind': 'plot', 'source': source, 'mode': mode,
-                 'caption': caption}]
+                 'caption': caption, **frames}]
     return [{'kind': 'plot', 'source': source, 'mode': mode,
              'select': f'dim:{quantity}',
-             'caption': per_quantity.replace('{quantity}', quantity)}
+             'caption': per_quantity.replace('{quantity}', quantity),
+             **frames}
             for quantity in quantity_order(dims)]
 
 
@@ -1667,19 +1673,24 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
     loose = [name for name, obj in objects.items()
              if isinstance(obj, SineLevel)]
     # every control channel drawn, none behind a drop-down (Brandon,
-    # 2026-10-01): one figure per channel, or a grid past GRID_ABOVE,
-    # exactly as the random report lays its comparisons out
+    # 2026-10-01): one figure per channel, or grids past GRID_ABOVE,
+    # as the random report lays its comparisons out — and the count
+    # that decides is the report's whole, tones times channels, with a
+    # grid per tone: nine sweeps on three channels are twenty-seven
+    # figures the page's width, or nine rows of three (Brandon,
+    # 2026-10-02)
     specs = [obj for obj in objects.values()
              if isinstance(obj, SineSweepSpecification)]
     labels = control_channels_of(specs[0]) if specs else []
     if grouped:
         name, level_set = grouped[0]
+        tiled = len(labels) * len(level_set.tone_names) > GRID_ABOVE
         for tone in level_set.tone_names:
             head = {'kind': 'plot', 'source': name, 'tone': tone,
                     'mode': 'curves',
                     'specification': '@basis:SineSweepSpecification'}
             caption = f'{tone}: extracted level against the requirement'
-            if len(labels) > GRID_ABOVE:
+            if tiled:
                 blocks.append({**head, 'grid': True, 'caption': caption})
             elif labels:
                 blocks.extend({**head, 'channel': label,
@@ -1790,7 +1801,7 @@ def sine_template(objects: Mapping[str, Any],
         *time_data_blocks(
             '@basis:TimeHistory', objects, links,
             'Measured time histories',
-            'Measured {quantity} time histories'),
+            'Measured {quantity} time histories', averaging=False),
     ]
     blocks += _sine_level_blocks(objects)
     blocks += [
@@ -2321,6 +2332,16 @@ def channel_grid(labels: Sequence[str],
             column = (2, 0)
         placed.append((row, column, str(label), note))
     columns = sorted({column for _row, column, _label, _note in placed})
+    if columns == [(2, 0)]:
+        # channels with no direction at all — the virtual responses of
+        # a transformation, recorded as '1', '2', '3' — have no node to
+        # stack by and no axis to sort into: they lie across one row, a
+        # column each, named by themselves (Brandon, 2026-10-02: nine
+        # sweeps on three such channels made twenty-seven figures the
+        # page's width, wanted as nine rows of three)
+        return {'columns': [label for _row, _col, label, _note in placed],
+                'rows': [{'label': '', 'cells': [[{'channel': label, 'note': note}]
+                                                 for _row, _col, label, note in placed]}]}
     names = {0: 'Global {}', 1: '{}', 2: 'Channel'}
     headings = [names[kind].format(GRID_AXES[axis] if kind < 2 else '')
                 for kind, axis in columns]

@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from typing import Any
 
@@ -173,7 +173,7 @@ def _channel_rows(channels, dofs: list[str]) -> list[int]:
 
 
 def _read_stream(variable, rows=None, first: int = 0,
-                 last: int | None = None) -> np.ndarray:
+                 last: int | None = None, ticker: Any = None) -> np.ndarray:
     """A (channels, samples) stream variable, read into one array.
 
     `rows` picks channels, in the order given; `first` and `last` a
@@ -204,6 +204,10 @@ def _read_stream(variable, rows=None, first: int = 0,
         stop = min(start + READ_SAMPLES, last)
         slab = variable[selector, start:stop]
         out[:, start - first:stop - first] = slab[put]
+        if ticker is not None:
+            # a slab is the unit of progress: a 23 GB run is tens of
+            # them, each a second or so (2026-10-02)
+            ticker.tick(stop - start)
     return out
 
 
@@ -1129,7 +1133,8 @@ def _load_sysid_package(ds, path):
 
 def load(path: str | os.PathLike, full_cpsd: bool = False,
          start: float | None = None, stop: float | None = None,
-         channels: Iterable[int | str] | None = None) -> dict[str, Any]:
+         channels: Iterable[int | str] | None = None,
+         progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
     """Everything a Rattlesnake `.nc4` holds, keyed the way the tree names it.
 
     The streamed time data, the channel table, and each environment's
@@ -1183,18 +1188,27 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
         drive_channels = [i for i, value in enumerate(feedback)
                           if str(value).strip()]
 
+        # the streams the window keeps, sized before any is read, so
+        # the progress is one count over all of them
+        from ..core.progress import Ticker
+
+        ticker = Ticker(progress)
+        kept = []
         for variable, _dimension, key in _streams(ds):
             sample_rate = float(ds.sample_rate)
             samples = int(ds.variables[variable].shape[1])
             span = _sample_window(start, stop, samples, sample_rate)
             if span is None:
                 continue
-            first, last = span
+            kept.append((variable, key, sample_rate, samples, span))
+        ticker.add(sum(last - first for _v, _k, _r, _s, (first, last) in kept))
+        for variable, key, sample_rate, samples, (first, last) in kept:
             rows = list(range(num_channels)) if chosen is None else chosen
             # a part of the run is a recording of that part: the window
             # is read as a slice of the file, never the whole and cut
             partial = (first, last) != (0, samples) or chosen is not None
-            time_data = _read_stream(ds.variables[variable], rows, first, last)
+            time_data = _read_stream(ds.variables[variable], rows, first, last,
+                                     ticker)
             scales = np.array([scales_dims[i][0] for i in rows])
             rows_dof = [dofs[i] for i in rows]
             rows_dim = [scales_dims[i][1] for i in rows]

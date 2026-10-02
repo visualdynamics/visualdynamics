@@ -254,7 +254,7 @@ def test_a_long_verb_runs_off_the_loop_and_the_loop_turns(window, pump):
     assert seen['thread'] is False, 'the verb ran on the loop thread'
     assert turned, 'the loop did not turn while the verb ran'
     assert window._import_progress.isHidden()
-    assert window.statusBar().currentMessage() == 'Working…'
+    assert window._status_text == 'Working…', 'said on the strip while it ran'
 
 
 def test_what_a_long_verb_raises_is_raised_on_the_loop_thread(window):
@@ -264,3 +264,102 @@ def test_what_a_long_verb_raises_is_raised_on_the_loop_thread(window):
     with pytest.raises(ValueError, match='no'):
         window._run_long('Working…', verb, 'x')
     assert window._import_progress.isHidden()
+
+
+def test_a_long_verb_shows_the_strip_and_its_bar_and_puts_them_away(window, pump):
+    """The strip that holds the bar is hidden except while something
+    runs — and the first runner never showed it, so a27's bar sat in
+    a hidden strip (2026-10-02). Visible-to-the-window while the verb
+    runs, both of them and the Cancel button; all gone after."""
+    import time
+
+    seen = []
+
+    def verb(name, progress=None):
+        progress(1, 2)
+        time.sleep(0.05)
+        progress(2, 2)
+        return name
+
+    real = window._strip_tick
+
+    def spy(done, total):
+        real(done, total)
+        seen.append((window._import_strip.isVisibleTo(window),
+                     window._import_progress.isVisibleTo(window),
+                     window._cancel_button.isVisibleTo(window),
+                     window._import_label.text()))
+
+    window._strip_tick = spy
+    try:
+        window._run_long('Working…', verb, 'x')
+    finally:
+        window._strip_tick = real
+    assert seen and all(strip and bar and cancel for strip, bar, cancel, _t in seen)
+    assert seen[-1][3] == 'Working…', 'the status rides the strip, not the message'
+    assert not window._import_strip.isVisibleTo(window)
+    assert not window._cancel_button.isVisibleTo(window)
+    assert not window._importing
+
+
+def _cancellable(stopped):
+    import time
+
+    def verb(name, progress=None):
+        for k in range(200):
+            progress(k, 200)
+            time.sleep(0.02)
+        stopped.append('ran to the end')
+        return name
+    return verb
+
+
+def test_the_cancel_button_stops_a_long_verb(window, pump):
+    from PySide6.QtCore import QTimer
+
+    from visualdynamics.core.progress import Cancelled
+
+    stopped = []
+    QTimer.singleShot(150, window._cancel_button.click)
+    with pytest.raises(Cancelled):
+        window._run_long('Working…', _cancellable(stopped), 'x')
+    assert stopped == [], 'the verb was stopped at a tick, not run out'
+    assert not window._cancel_button.isVisibleTo(window)
+    # and the next run's button is live again
+    assert window._run_long('Again…', lambda name, progress=None: name, 'y') == 'y'
+    assert window._cancel_button.isEnabled()
+
+
+def test_escape_cancels_a_long_verb_and_the_action_says_so(window, pump):
+    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtTest import QTest
+
+    from visualdynamics.core.data import TimeHistory
+
+    _sweep(window, pump)
+    stopped = []
+    QTimer.singleShot(150, lambda: QTest.keyClick(window, Qt.Key.Key_Escape))
+    acted = window._act_on(
+        TimeHistory, 'nothing selected',
+        lambda name, **kw: window._run_long('Working…', _cancellable(stopped),
+                                            name, **kw))
+    assert acted is None and stopped == []
+    assert 'cancelled' in window.statusBar().currentMessage()
+
+
+def test_long_verbs_share_one_worker_thread(window, pump):
+    """One thread for the window's life, not one per verb: on Linux
+    OpenBLAS keeps buffers per thread that has called it, and a thread
+    per verb ate the CI runner until the VM died (2026-10-02)."""
+    import threading
+
+    idents = []
+
+    def verb(name, progress=None):
+        idents.append(threading.get_ident())
+        return name
+
+    window._run_long('One…', verb, 'a')
+    window._run_long('Two…', verb, 'b')
+    assert len(idents) == 2 and idents[0] == idents[1]
+    assert idents[0] != threading.get_ident()

@@ -602,6 +602,39 @@ class _FileDropDock(_FileDropMixin, QDockWidget):
 REPORT_SETTLE_MS = 250
 
 
+class _InputGate(QObject):
+    """While a long verb runs, every mouse press, wheel and key goes
+    nowhere — except to the Cancel button, and Esc, which is the
+    same request. The loop runs with all its events so the window
+    paints and the button works; what the exclusion flag used to keep
+    out, this keeps out (2026-10-02)."""
+
+    _BLOCKED = (
+        QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+        QEvent.Type.MouseButtonDblClick, QEvent.Type.Wheel,
+        QEvent.Type.KeyPress, QEvent.Type.KeyRelease,
+        QEvent.Type.ShortcutOverride, QEvent.Type.Shortcut,
+    )
+
+    def __init__(self, allowed, cancel) -> None:
+        super().__init__()
+        self._allowed, self._cancel = allowed, cancel
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() not in self._BLOCKED:
+            return False
+        if (event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape):
+            self._cancel()
+            return True
+        here = watched
+        while here is not None:
+            if here is self._allowed:
+                return False
+            here = here.parent() if isinstance(here, QObject) else None
+        return True
+
+
 class MainWindow(QMainWindow):
     """The app: a project tree, and panes that read whatever is picked.
 
@@ -1453,6 +1486,16 @@ class MainWindow(QMainWindow):
         # the one moving, and the label reads as its caption
         strip_row.addWidget(self._import_progress)
         strip_row.addWidget(self._import_label)
+        # Cancel, beside the bar while a long verb runs (2026-10-02):
+        # the one control that takes input while the window is held
+        self._cancel_button: QPushButton = QPushButton('Cancel')
+        self._cancel_button.setFlat(True)
+        self._cancel_button.setToolTip('Stop the running computation (Esc)')
+        self._cancel_asked: bool = False
+        self._long_worker: Any = None
+        self._cancel_button.clicked.connect(self._ask_cancel)
+        strip_row.addWidget(self._cancel_button)
+        self._cancel_button.hide()
         self.statusBar().insertWidget(0, strip)
         self._import_strip: QWidget = strip
         strip.hide()
@@ -6036,9 +6079,9 @@ class MainWindow(QMainWindow):
         `except ValueError` still reads it. The wait cursor is up for
         the duration and the bar is put away after, success or not.
         """
-        import threading
-
         from PySide6.QtCore import QObject, Signal
+
+        from ..core.progress import Cancelled
 
         class Relay(QObject):
             told = Signal(int, int)
@@ -6050,29 +6093,74 @@ class MainWindow(QMainWindow):
         relay.finished.connect(loop.quit)
         outcome: list = []
 
+        def told(done, total):
+            # on the worker thread: the bar is fed through the queued
+            # signal, and a cancel asked since the last tick is raised
+            # here, inside the computation, where nothing catches it
+            relay.told.emit(done, total)
+            if self._cancel_asked:
+                raise Cancelled(status)
+
         def work():
             try:
-                outcome.append((True, verb(*args, progress=relay.told.emit,
-                                           **kwargs)))
+                outcome.append((True, verb(*args, progress=told, **kwargs)))
             except BaseException as failure:  # noqa: BLE001 — re-raised below
                 outcome.append((False, failure))
             finally:
                 relay.finished.emit()
 
+        # the strip is the status while the verb runs, as it is for an
+        # import: a temporary message would paint over it. The strip
+        # itself was hidden under the first runner, and the bar inside
+        # it with it — the thing a27 shipped (2026-10-02).
+        # inside an import the strip is already up and stays up after;
+        # on its own the runner raises it and puts it away
+        was_importing, strip_shown = self._importing, not self._import_strip.isHidden()
+        self._importing = True
+        self.statusBar().clearMessage()
         self._show_status(status)
+        self._import_strip.show()
+        self._cancel_asked = False
+        self._cancel_button.setEnabled(True)
+        self._cancel_button.show()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        thread = threading.Thread(target=work, name=status, daemon=True)
+        gate = _InputGate(self._cancel_button, self._ask_cancel)
+        app = QApplication.instance()
+        app.installEventFilter(gate)
+        # one worker thread for the window's life, not one per verb: on
+        # Linux numpy's OpenBLAS keeps buffers per OS thread that has
+        # called it, and a thread per verb — hundreds of them across a
+        # test run — ate the CI runner's memory until the VM died, which
+        # GitHub reports as a cancelled job (2026-10-02, twice at the
+        # same point in the suite; macOS, on Accelerate, never saw it)
+        if self._long_worker is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            self._long_worker = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix='long-verb')
         try:
-            thread.start()
-            loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
-            thread.join()
+            future = self._long_worker.submit(work)
+            loop.exec()
+            future.result()
         finally:
+            app.removeEventFilter(gate)
             QApplication.restoreOverrideCursor()
+            self._cancel_button.hide()
             self._import_progress.hide()
+            if not strip_shown:
+                self._import_strip.hide()
+            self._importing = was_importing
         ok, value = outcome[0]
         if not ok:
             raise value
         return value
+
+    def _ask_cancel(self) -> None:
+        """The Cancel button, or Esc, while a long verb runs: the next
+        tick raises `Cancelled` inside the computation."""
+        self._cancel_asked = True
+        self._cancel_button.setEnabled(False)
+        self._import_label.setText('Cancelling…')
 
     @contextlib.contextmanager
     def _asking(self):
@@ -6211,6 +6299,8 @@ class MainWindow(QMainWindow):
             self._show_status(told)
 
     def _import_paths(self, paths: Sequence[str]) -> list[str]:
+        from ..core.progress import Cancelled
+
         pictures = [path for path in paths
                     if os.path.splitext(path)[1].lower() in PHOTO_FORMATS]
         imported, failures, notes, announced = [], [], [], False
@@ -6250,10 +6340,25 @@ class MainWindow(QMainWindow):
                     # socket went into the dialog the first day
                     with warnings.catch_warnings(record=True) as caught:
                         warnings.simplefilter('always')
+                        # a lone file's reader feeds the bar from the
+                        # loop's own thread, pumped by `_strip_tick`:
+                        # the read ran through `_run_long` for one sync
+                        # (2026-10-02) and the CI runner died at the
+                        # same point three times — on Linux the import's
+                        # allocations on a second thread sit in their own
+                        # malloc arena and the memory never comes back —
+                        # where the a27 main on the same runners passed.
+                        # Off the loop thread is still where a 23 GB read
+                        # belongs; it waits for a reader that frees as
+                        # it goes.
                         result = io.import_file(
                             path, progress=None if many else tick, **options)
                     notes += [str(w.message) for w in caught
                               if issubclass(w.category, io.ImportNote)]
+                except Cancelled:
+                    self._show_status(
+                        f'{os.path.basename(path)}: import cancelled')
+                    break
                 except Exception as e:  # noqa: BLE001 — see below
                     # Any exception, not only ValueError and OSError. A
                     # file refused *by the objects* raises ValueError,
@@ -10446,9 +10551,14 @@ class MainWindow(QMainWindow):
         if not fits:
             self._show_status(refusal)
             return None
+        from ..core.progress import Cancelled
+
         name = self.object_item().text(0)
         try:
             added = verb(name, *args, **kwargs)
+        except Cancelled:
+            self._show_status(f'{name}: cancelled')
+            return None
         except ValueError as why:
             self._show_status(f'{name}: {why}')
             return None
@@ -10678,10 +10788,15 @@ class MainWindow(QMainWindow):
                     'Select a time history to extract sine levels')
                 return
             time_name = self.object_item().text(0)
+        from ..core.progress import Cancelled
+
         try:
             added = self._run_long(
                 f'Extracting sine levels from {time_name}…',
                 self.project.extract_sine, time_name)
+        except Cancelled:
+            self._show_status(f'{time_name}: extraction cancelled')
+            return
         except (ValueError, AttributeError) as refusal:
             self._show_status(f'{time_name}: {refusal}')
             return

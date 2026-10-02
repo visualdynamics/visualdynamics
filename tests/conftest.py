@@ -490,3 +490,19 @@ def web_close(view):
     view.deleteLater()
     for _ in range(10):
         app.processEvents()
+
+
+def pytest_runtest_logstart(nodeid, location):
+    """On CI only: the test about to run, on stderr, unbuffered.
+
+    The runner's log shows `-q`'s dots and nothing else, so when the
+    VM died at the same point three times (2026-10-02, a28's syncs)
+    there was no way to say which test was running. This is the
+    witness line the stall guidance asks for, kept to CI so the local
+    gate stays quiet."""
+    import os
+    import sys
+
+    if os.environ.get('CI'):
+        sys.stderr.write(f'>> {nodeid}\n')
+        sys.stderr.flush()

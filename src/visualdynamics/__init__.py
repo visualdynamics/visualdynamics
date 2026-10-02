@@ -67,6 +67,8 @@ from .project import (
     mixed_run,
     random_vibration_report,
     random_vibration_run,
+    sine_report,
+    sine_run,
     system_id_report,
     system_id_run,
 )
@@ -193,6 +195,8 @@ __all__ = [
     'register_importer',
     'save',
     'si_factor',
+    'sine_report',
+    'sine_run',
     'system_id_report',
     'system_id_run',
 ]

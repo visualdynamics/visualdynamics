@@ -181,3 +181,24 @@ project.save('sine.vdyn')
   frequency at `start_time + ramp_time`, and the extracted clock is
   aligned to the tone's onset — a lead-in before the sweep starts is
   not a level error, and the comparison does not read it as one.
+
+## One call
+
+The whole thing is one call when the defaults are right, and the same
+batch and folder rules as `random_vibration_report`: a run left out
+is asked for, several may be chosen, and a folder path lands each
+report under its run's own name.
+
+```python
+import visualdynamics
+
+visualdynamics.sine_report('sweep.nc4', 'report.html')
+visualdynamics.sine_report('sweep.nc4', 'reports/', geometry='article.stp',
+                           photos='setup_photos/')
+visualdynamics.sine_report()                     # ask for the runs and the geometry
+project = visualdynamics.sine_run('sweep.nc4')   # the project, to go on with
+```
+
+A run that is random and sine together is `mixed_report`; a run that
+is random alone is `random_vibration_report`. Each refuses the other's
+file by name rather than reporting on half of it.

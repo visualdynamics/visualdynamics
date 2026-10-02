@@ -198,3 +198,88 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     assert 'Random test level' in found['level'], (
         "the level beside the verdict is the random half's")
     assert found['canvases'] > 8
+
+
+def test_the_random_report_charts_the_margin_to_abort_not_the_share():
+    """The second compliance chart is the signed margin to the abort
+    limits (Brandon, 2026-10-01: a share of the band cannot go
+    negative, and the question behind the chart was how far)."""
+    from visualdynamics.core.report import random_template
+
+    blocks = random_template({}, links=[]).blocks
+    bars = [b for b in blocks if b.get('kind') == 'bars']
+    assert [b['mode'] for b in bars][:4] == ['error', 'margin', 'error', 'margin']
+    assert not any(b.get('mode') == 'lines' for b in blocks)
+    text = ' '.join(b.get('text', '') for b in blocks if b.get('kind') == 'text')
+    assert '{{figure:Margin to the abort limits, by control channel}}' in text
+
+
+def test_the_sine_comparison_draws_every_control_channel():
+    """One figure per control channel, or a grid past four — never a
+    drop-down (Brandon, 2026-10-01)."""
+    import numpy as np
+    from test_extract_sine import _flat_sweep
+
+    from visualdynamics.core.report import sine_template
+    from visualdynamics.core.sine import (
+        SineLevelSet,
+        SineSweepSpecification,
+        SineTone,
+        extract_sine,
+    )
+
+    history, spec = _flat_sweep(noise=1.0)
+    levels = extract_sine(history, spec, cycles=40.0, workers=1, refine=False)
+    assert isinstance(levels, SineLevelSet)
+    few = sine_template({'Sweep': spec, 'Levels': levels}, links=[]).blocks
+    figures = [b for b in few if b.get('kind') == 'plot' and b.get('tone')]
+    assert [b.get('channel') for b in figures] == list(spec.response_dof)
+    assert all(not b.get('grid') for b in figures)
+    tone = spec.tones[0]
+    wide = SineSweepSpecification(
+        [SineTone(tone.name, tone.start_time, tone.frequency,
+                  np.repeat(tone.amplitude[:, :1], 6, axis=1),
+                  tone.segment_type, tone.segment_rate)],
+        [f'{n}Z+' for n in range(101, 107)], ordinate_unit='m/s**2')
+    many = sine_template({'Sweep': wide, 'Levels': levels}, links=[]).blocks
+    figures = [b for b in many if b.get('kind') == 'plot' and b.get('tone')]
+    assert len(figures) == 1 and figures[0]['grid'] is True
+
+
+def test_a_six_channel_sine_report_renders_the_grid():
+    """Past four control channels the sine comparison is one grid
+    figure, each cell the channel's own figure: rendered, not merely
+    asked for."""
+    import json
+
+    import numpy as np
+    from test_extract_sine import _flat_sweep
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.report import sine_template
+    from visualdynamics.core.sine import SineSweepSpecification, SineTone, extract_sine
+    from visualdynamics.report import render_html
+
+    history, spec = _flat_sweep(noise=1.0)
+    dofs = [f'{n}Z+' for n in range(101, 107)]
+    tone = spec.tones[0]
+    wide = SineSweepSpecification(
+        [SineTone(tone.name, tone.start_time, tone.frequency,
+                  np.repeat(tone.amplitude[:, :1], 6, axis=1),
+                  tone.segment_type, tone.segment_rate)],
+        dofs, ordinate_unit='m/s**2')
+    signal = np.vstack([history.ordinate] * 3)
+    six = TimeHistory(history.abscissa, signal, response_dof=dofs,
+                      ordinate_dim=['acceleration'] * 6,
+                      ordinate_unit=['m/s**2'] * 6)
+    levels = extract_sine(six, wide, cycles=40.0, workers=1, refine=False)
+    objects = {'Sweep': wide, 'Record': six, 'Levels': levels}
+    html = render_html(sine_template(objects, links=[]), objects)
+    data = json.loads(html.split('type="application/json">')[1]
+                      .split('</script>')[0])
+    grids = [b for b in data['blocks'] if b.get('kind') == 'grid']
+    assert len(grids) == 1, [b.get('kind') for b in data['blocks']]
+    cells = [cell for row in grids[0]['rows'] for column in row['cells'] for cell in column]
+    assert len(cells) == 6
+    assert all(len(cell['channels']) == 1 for cell in cells)
+    assert sorted(cell['channels'][0]['label'] for cell in cells) == dofs

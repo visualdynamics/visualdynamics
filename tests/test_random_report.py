@@ -498,8 +498,8 @@ def test_the_report_carries_both_bar_charts():
 
     blocks = random_template({}).blocks
     charts = [b for b in blocks if b.get('kind') == 'bars']
-    assert [b['mode'] for b in charts] == ['error', 'lines',
-                                           'error', 'lines',
+    assert [b['mode'] for b in charts] == ['error', 'margin',
+                                           'error', 'margin',
                                            'kurtosis'], (
         'both readings, narrowband and then on octave bands')
     assert [b.get('octave') for b in charts] == [None] * 5, (
@@ -1323,3 +1323,49 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
     assert wide['figure'] > narrow['figure'], 'the figure took the room'
     assert wide['tall'] > narrow['tall'], 'and grew taller with it'
     assert wide['tall'] <= 560, 'but never runs away with the screen'
+
+
+def test_the_bar_chart_zooms_along_its_channels(run, tmp_path):
+    """A wheel over the chart narrows the rows on show about the row
+    under the pointer; a double-click opens it back out (Brandon,
+    2026-10-01: the report's bar charts read as static images)."""
+    import json
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWidgets import QApplication
+
+    path = tmp_path / 'zoom.html'
+    path.write_text(render_html(report_of(run), run.project,
+                                unit_system=visualdynamics.SI), encoding='utf-8')
+    QApplication.instance() or QApplication(['x'])
+    view = QWebEngineView()
+    view.resize(1000, 800)
+    state = ("(() => { const c = document.querySelector('canvas.bars');"
+             " if (!c || !c.dataset.bars) return null;"
+             " return JSON.stringify({bars: +c.dataset.bars, first: +c.dataset.first,"
+             "  shown: +c.dataset.shown}); })()")
+    wheel = ("(() => { const c = document.querySelector('canvas.bars');"
+             " for (let k = 0; k < 4; k++) c.dispatchEvent(new WheelEvent('wheel',"
+             "  {deltaY: -100, clientX: 400, clientY: 60, bubbles: true, cancelable: true}));"
+             " return 'ok'; })()")
+    home = ("(() => { document.querySelector('canvas.bars')"
+            ".dispatchEvent(new MouseEvent('dblclick', {bubbles: true})); return 'ok'; })()")
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    try:
+        opened = json.loads(web_read(view, state, ready=bool))
+        web_read(view, wheel, ready=lambda v: v == 'ok')
+        zoomed = json.loads(web_read(
+            view, state, ready=lambda v: bool(v) and json.loads(v)['shown'] < opened['shown']))
+        web_read(view, home, ready=lambda v: v == 'ok')
+        back = json.loads(web_read(
+            view, state, ready=lambda v: bool(v) and json.loads(v)['shown'] == opened['shown']))
+    finally:
+        web_close(view)
+    assert opened['shown'] == opened['bars'] > 1
+    assert 1 <= zoomed['shown'] < opened['shown']
+    assert back['shown'] == opened['bars']

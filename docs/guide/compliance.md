@@ -48,6 +48,14 @@ from one reading. A comparison is built on that:
    bands are equal in *log* frequency, so the highest band of a
    sixth-octave decade set is two hundred times the width of the
    lowest.
+5. **The margin.** The report's second compliance chart is the
+   *margin to abort*: the worst line's distance to the abort limits
+   in decibels, positive by how far a line went out, negative by how
+   much room the nearest line left — the same cell-by-cell judgment
+   as the share, read as a distance rather than a count
+   (`margin_db`, `channel_margins`). The share still decides the
+   verdict; the margin is what a reader scans seventy-five channels
+   by.
 
 One function holds it — `visualdynamics.core.compliance.judge` — and
 the compliance table, the application's comparison plot and the

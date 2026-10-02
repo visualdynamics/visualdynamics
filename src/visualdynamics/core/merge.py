@@ -42,6 +42,7 @@ from .channel_table import ChannelTable
 from .data import DataArray, Specification, TimeHistory
 from .geometry import Geometry
 from .shapes import ShapeSet
+from .sine import SineSweepSpecification
 
 
 def mergeable(objects: Sequence[Any]) -> str | None:
@@ -60,6 +61,8 @@ def mergeable(objects: Sequence[Any]) -> str | None:
         return _shapes_refusal(objects)
     if issubclass(first, DataArray):
         return _data_refusal(objects)
+    if issubclass(first, SineSweepSpecification):
+        return _sine_refusal(objects)
     return f'{first.__name__} does not merge'
 
 
@@ -75,6 +78,8 @@ def merge(objects: Sequence[Any]) -> Any:
         return _merge_geometry(objects)
     if isinstance(objects[0], ShapeSet):
         return _merge_shapes(objects)
+    if isinstance(objects[0], SineSweepSpecification):
+        return _merge_sine(objects)
     return _merge_data(objects)
 
 
@@ -354,3 +359,34 @@ def _merge_data(objects):
         dimension_hint=listed('dimension_hint'),
         **extras)
     return merged
+
+
+# ---- sine sweep specifications ---------------------------------------------
+
+
+def _sine_refusal(objects):
+    """Tones join when they are written for the same control channels
+    in the same unit, under names that do not repeat: nine files from
+    the controller, one tone each, become the one specification the
+    sine report reads (2026-10-02)."""
+    first = objects[0]
+    for other in objects[1:]:
+        if list(other.response_dof) != list(first.response_dof):
+            return ('the specifications name different control channels: '
+                    f'{first.response_dof} and {other.response_dof}')
+        if (other.ordinate_unit, other.ordinate_dim) != (first.ordinate_unit,
+                                                         first.ordinate_dim):
+            return 'the specifications are in different units'
+    names = [tone.name for obj in objects for tone in obj.tones]
+    if len(set(names)) != len(names):
+        repeated = sorted({n for n in names if names.count(n) > 1})
+        return f'tone names repeat across the specifications: {repeated}'
+    return None
+
+
+def _merge_sine(objects):
+    first = objects[0]
+    return SineSweepSpecification(
+        [tone for obj in objects for tone in obj.tones], list(first.response_dof),
+        ordinate_dim=first.ordinate_dim, ordinate_unit=first.ordinate_unit,
+        comment='; '.join(c for c in (obj.comment for obj in objects) if c))

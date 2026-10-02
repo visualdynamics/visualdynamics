@@ -28,6 +28,7 @@ One row per format, R/W meaning both directions:
 | Femap Neutral ³ | `.neu` | R | R | — | — |
 | sdynpy | `.npz`/`.npy` | R/W | R/W | R/W | — |
 | Rattlesnake | `.nc4` | — | — | R | R |
+| Rattlesnake specification, random or sine | `.npz` | — | — | R | — |
 | Excel | `.xlsx` | — | — | — | R/W |
 | 3MF CAD mesh ⁵ | `.3mf` | R/W | — | — | — |
 | STL mesh ⁵ | `.stl` | R/W | — | — | — |

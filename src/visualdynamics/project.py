@@ -4637,6 +4637,95 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
         marking=marking)
 
 
+#: the one-call report each kind of run gets, by the project type the
+#: run declares: (template, workup, report function)
+_REPORTS_BY_TYPE = {
+    'Random Vibration': 'random', 'Random and Sine': 'mixed',
+    'Sine Sweep': 'sine', 'System ID': 'sysid'}
+
+
+def report_kind(run: str | os.PathLike) -> str:
+    """Which one-call report a Rattlesnake run gets: 'random', 'mixed',
+    'sine' or 'sysid', from the project type the file declares — and
+    'sysid' for a streamed save with a system ID's shape, two streams,
+    a quiet one then a loud one, where the window asks and this
+    decides (Brandon, 2026-10-02: a batch defaults to the likeliest
+    reading). A run of a type with no one-call report, a modal or a
+    transient run, is refused by name.
+    """
+    from .io.rattlesnake import project_type, streamed_sysid_candidate
+
+    declared = project_type(run)
+    if declared == 'System ID' or streamed_sysid_candidate(run):
+        return 'sysid'
+    kind = _REPORTS_BY_TYPE.get(declared or '')
+    if kind is None:
+        raise ValueError(
+            f'{run} is {declared or "of no type visualdynamics reports on"}: '
+            'no one-call report exists for it — a project worked up in the '
+            'window can still generate its report')
+    return kind
+
+
+def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
+           last: float | None = None,
+           geometry: Any = None,
+           photos: Any = None,
+           per_octave: int | None = None,
+           unit_system: Any = None,
+           marking: str | None = None) -> Any:
+    """A Rattlesnake run in, the report its type calls for out.
+
+        visualdynamics.run_report('run.nc4', 'report.html')
+        visualdynamics.run_report()               # ask for the runs and the geometry
+        visualdynamics.run_report('run.nc4', 'reports/')
+
+    The one-call report that reads the run's own type (`report_kind`)
+    and writes that report: a random run gets `random_vibration_report`'s,
+    a random-and-sine run `mixed_report`'s, a sweep `sine_report`'s, a
+    system identification `system_id_report`'s — and a streamed save
+    that looks like a system ID, two streams quiet then loud, is taken
+    as one rather than asked about. Named for what it takes, since
+    `visualdynamics.report` is the rendering package. The asking, the batch and the
+    folder are the same rule the typed functions share, and a batch
+    may mix kinds. The keywords are the union of theirs; `per_octave`
+    reaches the random halves alone.
+    """
+    asked = run is ASK
+    if asked:
+        from .gui.ask import for_runs
+        runs = for_runs()
+        if not runs:
+            raise ValueError('no run chosen')
+    else:
+        runs = [run]
+    if geometry is ASK or (asked and geometry is None):
+        from .gui.ask import for_geometry
+        geometry = for_geometry()
+    if len(runs) > 1 and path is not None and not (
+            os.path.isdir(os.path.expanduser(str(path)))
+            or str(path).endswith((os.sep, '/'))):
+        raise ValueError(
+            f'{len(runs)} runs cannot be written to one file '
+            f'{str(path)!r} — give a folder, or no path at all')
+    workups = {
+        'random': lambda one, geo: random_vibration_run(
+            one, per_octave, last=last, geometry=geo, photos=photos),
+        'mixed': lambda one, geo: mixed_run(
+            one, per_octave, last=last, geometry=geo, photos=photos),
+        'sine': lambda one, geo: sine_run(one, last=last, geometry=geo,
+                                          photos=photos),
+        'sysid': lambda one, geo: system_id_run(one, last=last, geometry=geo,
+                                                photos=photos),
+    }
+    written = []
+    for one in runs:
+        kind = report_kind(one)
+        written.append(_one_call_reports(one, path, geometry, unit_system,
+                                         kind, workups[kind], marking=marking))
+    return written if len(written) > 1 else written[0]
+
+
 def system_id_report(run: Any = ASK,
                      path: str | os.PathLike | None = None, *,
                      last: float | None = None,

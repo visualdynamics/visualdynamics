@@ -202,3 +202,12 @@ project = visualdynamics.sine_run('sweep.nc4')   # the project, to go on with
 A run that is random and sine together is `mixed_report`; a run that
 is random alone is `random_vibration_report`. Each refuses the other's
 file by name rather than reporting on half of it.
+
+`visualdynamics.run_report` is the same call without the type: it reads
+the run's own type and writes that report, so a batch may mix sweeps,
+random runs and system identifications. A streamed save with a system
+ID's shape, two streams quiet then loud, is taken as one.
+
+```python
+visualdynamics.run_report('run.nc4', 'reports/', geometry='article.stp', marking='TEST SERIES 4')
+```

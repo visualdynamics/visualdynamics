@@ -326,3 +326,51 @@ def test_the_one_call_reports_take_a_marking(tmp_path):
     assert project[name].marking == 'CUI' and project[name].marking_color == 'red'
     plain = project.generate_report('sine', name='Plain')
     assert project[plain].marking == 'UNCLASSIFIED'
+
+
+# ---- the detecting one-call report (2026-10-02) ----------------------------
+
+
+def test_report_kind_reads_the_runs_type(tmp_path):
+    from conftest import fixture_path
+    from test_sysid_package import _write_streamed_sysid
+
+    assert visualdynamics.report_kind(_write_run(tmp_path / 'sweep.nc4', seconds=18.0)) == 'sine'
+    assert visualdynamics.report_kind(fixture_path('plate', 'random.nc4')) == 'random'
+    # a streamed save with a system ID's shape is taken as one, not asked about
+    assert visualdynamics.report_kind(_write_streamed_sysid(tmp_path / 'sysid.nc4')) == 'sysid'
+    import pytest
+
+    with pytest.raises(ValueError, match='no one-call report'):
+        visualdynamics.report_kind(fixture_path('plate', 'modal.nc4'))
+
+
+def test_run_report_writes_each_runs_own_kind_into_a_folder(tmp_path):
+    import os
+
+    import pytest
+    from conftest import fixture_path
+    from test_sysid_package import _write_streamed_sysid
+
+    out = tmp_path / 'reports'
+    out.mkdir()
+    runs = [_write_run(tmp_path / 'sweep.nc4', seconds=18.0),
+            fixture_path('plate', 'random.nc4')]
+    written = [visualdynamics.run_report(run, str(out) + '/', marking='BATCH') for run in runs]
+    assert sorted(os.path.basename(p) for p in written) == ['random.html', 'sweep.html']
+    pages = {}
+    for p in written:
+        with open(p, encoding='utf-8') as f:
+            pages[os.path.basename(p)] = f.read()
+    assert 'extracted level against the requirement' in pages['sweep.html']
+    assert 'Control against specification' in pages['random.html']
+    assert all('BATCH' in page and 'UNCLASSIFIED' not in page for page in pages.values())
+    # a streamed save with a system ID's shape goes the system-ID way —
+    # this synthetic one has no drive channel, so it is refused exactly
+    # as system_id_report refuses it, not reported on as something else
+    sysid = _write_streamed_sysid(tmp_path / 'sysid.nc4')
+    with pytest.raises(ValueError) as typed:
+        visualdynamics.system_id_report(sysid, str(out) + '/')
+    with pytest.raises(ValueError) as detected:
+        visualdynamics.run_report(sysid, str(out) + '/')
+    assert str(detected.value) == str(typed.value)

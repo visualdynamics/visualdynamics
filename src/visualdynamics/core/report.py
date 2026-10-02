@@ -1659,22 +1659,34 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
     the figures; a project not yet extracted gets one symbolic figure so
     the outline shows what is missing.
     """
-    from .sine import SineLevel, SineLevelSet
+    from .sine import SineLevel, SineLevelSet, SineSweepSpecification
 
     blocks: list[dict[str, Any]] = []
     grouped = [(name, obj) for name, obj in objects.items()
                if isinstance(obj, SineLevelSet)]
     loose = [name for name, obj in objects.items()
              if isinstance(obj, SineLevel)]
+    # every control channel drawn, none behind a drop-down (Brandon,
+    # 2026-10-01): one figure per channel, or a grid past GRID_ABOVE,
+    # exactly as the random report lays its comparisons out
+    specs = [obj for obj in objects.values()
+             if isinstance(obj, SineSweepSpecification)]
+    labels = control_channels_of(specs[0]) if specs else []
     if grouped:
         name, level_set = grouped[0]
         for tone in level_set.tone_names:
-            blocks.append(
-                {'kind': 'plot', 'source': name, 'tone': tone,
-                 'mode': 'curves',
-                 'specification': '@basis:SineSweepSpecification',
-                 'caption': f'{tone}: extracted level against the '
-                 'requirement'})
+            head = {'kind': 'plot', 'source': name, 'tone': tone,
+                    'mode': 'curves',
+                    'specification': '@basis:SineSweepSpecification'}
+            caption = f'{tone}: extracted level against the requirement'
+            if len(labels) > GRID_ABOVE:
+                blocks.append({**head, 'grid': True, 'caption': caption})
+            elif labels:
+                blocks.extend({**head, 'channel': label,
+                               'caption': f'{caption} — {label}'}
+                              for label in labels)
+            else:
+                blocks.append({**head, 'caption': caption})
     elif loose:
         for name in loose:
             blocks.append(
@@ -2219,6 +2231,11 @@ def control_channels_of(spec: Any) -> list[str]:
     figure labels them: its autospectra, in its own order. A cross
     term has no measured response to stand against it. Empty for
     anything that is not a specification."""
+    from .sine import SineSweepSpecification
+
+    if isinstance(spec, SineSweepSpecification):
+        # a sweep's control channels are named outright
+        return list(dict.fromkeys(str(dof) for dof in spec.response_dof))
     if spec is None or not hasattr(spec, 'record_pair'):
         return []
     labels: list[str] = []
@@ -2452,22 +2469,25 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'per control channel. **RMS error** '
             '({{figure:RMS error by control channel}}) is the level: '
             'how far each channel sits from what was asked for. '
-            '**Lines outside abort** '
-            '({{figure:Band outside the abort limits, by control '
-            'channel}}) is the shape: a channel can sit at exactly the '
-            'right level and still be out of tolerance across half its '
-            'band. The thresholds drawn on both are a tolerance '
-            'someone chose — plus or minus three decibels and a tenth '
-            'of the band are where most specifications land, not '
-            'where they all do — so each chart is read against the '
-            'line it carries rather than as a pass mark of its '
-            'own.'},
+            '**Margin to abort** '
+            '({{figure:Margin to the abort limits, by control '
+            'channel}}) is the shape: the worst line\'s distance to '
+            'the abort limits in decibels, positive by how far a line '
+            'went out, negative by how much room the nearest line '
+            'left. A channel can sit at exactly the right level and '
+            'still cross an abort limit across half its band. The '
+            'threshold on the first chart is a tolerance someone chose '
+            '— plus or minus three decibels is where most '
+            'specifications land, not where they all do — so it is '
+            'read against the line it carries rather than as a pass '
+            'mark of its own; on the second the line is the limit '
+            'itself.'},
         {'kind': 'bars', 'mode': 'error', 'source': '@basis:Specification',
          'measured': '@basis:Psd',
          'caption': 'RMS error by control channel'},
-        {'kind': 'bars', 'mode': 'lines', 'source': '@basis:Specification',
+        {'kind': 'bars', 'mode': 'margin', 'source': '@basis:Specification',
          'measured': '@basis:Psd',
-         'caption': 'Band outside the abort limits, by control channel'},
+         'caption': 'Margin to the abort limits, by control channel'},
         {'kind': 'text', 'text':
             '## Octave Band Comparison\n\nThe same comparison on '
             'octave bands: the control spectra integrated onto bands '
@@ -2482,9 +2502,9 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'how it is usually read.\n\n'
             'Banding conserves the area under each curve, so the RMS '
             'error below is the same number as above; what changes is '
-            'the share of the band outside abort, which is counted '
-            'over bands rather than over lines, against limits that '
-            'are themselves per band.'},
+            'the margin to abort, which is judged over bands rather '
+            'than over lines, against limits that are themselves per '
+            'band.'},
         # the banded objects themselves, not the report banding the
         # narrowband ones for itself (which `'octave': N` on a block
         # still does, for a template that asks): the comparison is
@@ -2498,10 +2518,10 @@ def _random_control_blocks(objects: Mapping[str, Any],
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',
          'caption': 'RMS error by control channel, octave bands'},
-        {'kind': 'bars', 'mode': 'lines',
+        {'kind': 'bars', 'mode': 'margin',
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',
-         'caption': 'Band outside the abort limits, by control channel, '
+         'caption': 'Margin to the abort limits, by control channel, '
                     'octave bands'},
     ]
 
@@ -2625,8 +2645,8 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'Whether the run met its specification is read off the '
             'control comparison and the two compliance charts under '
             'it: the RMS error says how far each channel sat from the '
-            'level it was asked for, and the band outside abort how '
-            'much of each channel\'s band fell outside tolerance. A '
+            'level it was asked for, and the margin to abort how far '
+            'each channel\'s worst line sat from the limits. A '
             'channel can pass one and fail the other — a channel 2 dB '
             'low everywhere may never cross an abort limit, and one at '
             'exactly the right level may be out across half its band — '
@@ -2772,8 +2792,8 @@ def mixed_template(objects: Mapping[str, Any],
             'Whether the random half met its specification is read off '
             'the control comparison and the two compliance charts under '
             'it: the RMS error says how far each channel sat from the '
-            'level it was asked for, and the band outside abort how '
-            'much of each channel\'s band fell outside tolerance. A '
+            'level it was asked for, and the margin to abort how far '
+            'each channel\'s worst line sat from the limits. A '
             'channel can pass one and fail the other, which is why both '
             'are there; the octave-band figures read the same run the '
             'way a requirement is usually written. Where a control '

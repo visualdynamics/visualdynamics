@@ -1016,6 +1016,58 @@ def channel_errors(rows: Sequence[tuple[str, dict[str, Any]]]
     return out
 
 
+def margin_db(specification: Specification, measured: DataArray,
+              spec_record: int = 0, measured_record: int = 0,
+              scale_db: float | None = None) -> float | None:
+    """The worst line's signed distance to the abort limits, in dB.
+
+    Positive where a line went outside — above the upper abort limit
+    or below the lower, by that many decibels at the worst line;
+    negative where every line stayed in, by how far the nearest came
+    to a limit. One number a reader can scan seventy-five channels
+    by (Brandon, 2026-10-01: the share of the band outside abort
+    "should go negative" — it cannot, a share has no sign, but the
+    question behind it has this answer). Judged cell by cell as the
+    share is (`judge`): the measurement's power in each cell against
+    the limit's. None without an abort limit, or with nothing judged.
+    """
+    if scale_db is None:
+        scale_db = comparison_scale_db(specification, measured)
+    worst = None
+    for edge, over in (('abort_upper', True), ('abort_lower', False)):
+        if specification.limits.get(edge) is None:
+            continue
+        cells = judge(specification, measured, spec_record, measured_record,
+                      edge, over, scale_db)
+        good = (cells['judged'] & np.isfinite(cells['asked'])
+                & np.isfinite(cells['held'])
+                & (cells['asked'] > 0.0) & (cells['held'] > 0.0))
+        if not good.any():
+            continue
+        ratio = cells['held'][good] / cells['asked'][good]
+        far = float(np.max(10.0 * np.log10(ratio if over else 1.0 / ratio)))
+        worst = far if worst is None else max(worst, far)
+    return worst
+
+
+def channel_margins(specification: Specification, measured: DataArray,
+                    scale_db: float | None = None
+                    ) -> list[tuple[str, float]]:
+    """[(label, margin to abort in dB)] for a bar chart, a row per
+    control channel in the specification's order (`margin_db`);
+    channels without an abort limit or nothing to judge are left out."""
+    if scale_db is None:
+        scale_db = comparison_scale_db(specification, measured)
+    out = []
+    for label, spec_index, measured_index in matched_records(
+            specification, measured, None, None):
+        margin = margin_db(specification, measured, spec_index,
+                           measured_index, scale_db=scale_db)
+        if margin is not None:
+            out.append((label, margin))
+    return out
+
+
 def outside_fraction(values: Sequence[float], low: float,
                      high: float | None = None) -> float:
     """What share of these fell outside the threshold, as a percentage.

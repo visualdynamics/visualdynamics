@@ -114,7 +114,7 @@ def test_one_call_writes_the_report(tmp_path):
     assert 'Random Vibration Test Report' in html
     for caption in ('Control against specification',
                     'RMS error by control channel',
-                    'Band outside the abort limits, by control channel',
+                    'Margin to the abort limits, by control channel',
                     'Control against specification, octave bands',
                     'Multiple coherence',
                     'Instrumentation'):

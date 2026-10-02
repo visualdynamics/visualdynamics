@@ -414,10 +414,21 @@ function barsBlock(block) {
     return null;
   };
 
+  /* the rows on show: all of them to open, fewer and taller once the
+     reader zooms — wheel over the chart narrows the window about the
+     row under the pointer, a drag slides it, a double-click opens it
+     back out. Seventy-five names at eighteen pixels are legible on a
+     page; a reader who wants one row bigger can have it (Brandon,
+     2026-10-01: the report's bar charts read as static images). */
+  let first = 0, shown = block.values.length;
+  const clampView = () => {
+    shown = Math.max(1, Math.min(shown, block.values.length));
+    first = Math.max(0, Math.min(first, block.values.length - shown));
+  };
   function draw() {
-    const values = block.values;
+    const values = block.values.slice(first, first + shown);
     const [g, width, height] = sized(
-      canvas, margin.top + margin.bottom + values.length * ROW_HEIGHT);
+      canvas, margin.top + margin.bottom + block.values.length * ROW_HEIGHT);
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
     const ink = getComputedStyle(document.body).color;
@@ -437,7 +448,6 @@ function barsBlock(block) {
     const px = v => margin.left + (v - lo) / (hi - lo) * plotW;
     g.clearRect(0, 0, width, height);
     {
-      const first = 0;
       const block_ = values;
       const top = margin.top;
       const step = plotH / Math.max(block_.length, 1);
@@ -507,15 +517,19 @@ function barsBlock(block) {
     }
 
 
-    const out = values.filter(v => beyond(v)).length;
-    const share = values.length ? 100 * out / values.length : 0;
+    const all = block.values;
+    const out = all.filter(v => beyond(v)).length;
+    const share = all.length ? 100 * out / all.length : 0;
     const where = block.high_at === null
       ? 'over ' + block.low_at.toFixed(1) + block.units
       : 'outside ' + block.low_at.toFixed(1) + ' to '
         + block.high_at.toFixed(1) + block.units;
     g.fillStyle = ink; g.font = '12px sans-serif'; g.textAlign = 'center';
-    g.fillText(out + ' of ' + values.length + ' channels ' + where
-               + ' — ' + share.toFixed(0) + '%',
+    g.fillText(out + ' of ' + all.length + ' channels ' + where
+               + ' — ' + share.toFixed(0) + '%'
+               + (shown < all.length
+                  ? ' (rows ' + (first + 1) + ' to ' + (first + shown) + ' shown)'
+                  : ''),
                margin.left + plotW / 2, 14);
     /* how many bars this canvas carries, stamped once the drawing has
        actually got to the end of them. A report that comes back blank
@@ -525,14 +539,44 @@ function barsBlock(block) {
        pixels back cannot answer that — a canvas on a machine with no
        working GPU path hands back a fully transparent buffer however
        well it drew. */
-    canvas.dataset.bars = values.length;
+    canvas.dataset.bars = all.length;
+    canvas.dataset.first = first;
+    canvas.dataset.shown = shown;
   }
 
-  /* No dragging here. A threshold is a judgment, and the place to
-     make it is the app, where the data is in front of you; a report is
-     what that judgment produced, and a reader who could quietly move
-     the line would be reading a different document from the one that
-     was written. */
+  /* No threshold dragging here. A threshold is a judgment, and the
+     place to make it is the app, where the data is in front of you; a
+     report is what that judgment produced, and a reader who could
+     quietly move the line would be reading a different document from
+     the one that was written. The gestures move the view, not the
+     judgment. */
+  const rowAt = y => first + (y - margin.top)
+    / Math.max(canvas.clientHeight - margin.top - margin.bottom, 1) * shown;
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const at = rowAt(e.offsetY);
+    const factor = e.deltaY > 0 ? 1.25 : 0.8;
+    const was = shown;
+    shown = Math.round(shown * factor);
+    if (shown === was) shown += e.deltaY > 0 ? 1 : -1;
+    first = Math.round(at - (at - first) * shown / was);
+    clampView(); draw();
+  }, { passive: false });
+  let dragging = null;
+  canvas.addEventListener('pointerdown', e => {
+    dragging = [e.offsetY, first]; canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const perRow = Math.max(canvas.clientHeight - margin.top - margin.bottom, 1)
+      / shown;
+    first = Math.round(dragging[1] - (e.offsetY - dragging[0]) / perRow);
+    clampView(); draw();
+  });
+  canvas.addEventListener('pointerup', () => dragging = null);
+  canvas.addEventListener('dblclick', () => {
+    first = 0; shown = block.values.length; draw();
+  });
   REDRAWS.push(draw);
   draw();
 }

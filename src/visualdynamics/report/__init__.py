@@ -2253,8 +2253,13 @@ def _srs_comparison_block(block, measured, specification, us, caption):
     events = {}
     for i in range(measured.num_records):
         events.setdefault(_pair_key(measured, i), []).append(i)
+    # a block that names its channel is one channel's figure — a grid
+    # cell, or one of a short run of figures (2026-10-01)
+    named = block.get('channel')
     shared = [j for j in range(specification.num_records)
-              if _pair_key(specification, j) in events]
+              if _pair_key(specification, j) in events
+              and (not named
+                   or _channel_label(specification, j) == str(named))]
     if not shared:
         return None
     x = np.asarray(measured.display_abscissa(us), dtype=float)
@@ -2709,6 +2714,24 @@ def _bars_block(block, specification, measured, us):
     measured, specification = _banded_pair(measured, specification, block)
     if measured is None:
         return None
+    if block.get('mode') == 'margin':
+        from ..core.compliance import channel_margins
+
+        margins = channel_margins(specification, measured, scale_db=scale_db)
+        if not margins:
+            return None
+        caption = block.get('caption', '')
+        if scale_db:
+            caption = (caption + f' — measured data scaled {scale_db:+d} dB '
+                       'to the specification').strip()
+        # zero is the limit itself: past it a line went out, red; a
+        # negative bar is the room that was left, and the axis runs
+        # both ways because the reading does
+        return {'kind': 'bars', 'caption': caption,
+                'labels': [label for label, _m in margins],
+                'values': [round(float(m), 4) for _label, m in margins],
+                'low': 0.0, 'high': None, 'floor': None, 'units': ' dB',
+                'ylabel': 'margin to abort [dB]'}
     rows = channel_errors(compare_all(specification, measured,
                                       scale_db=scale_db))
     if not rows:

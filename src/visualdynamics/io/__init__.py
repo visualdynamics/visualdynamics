@@ -109,10 +109,19 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     the file's raw values until `define_units()` is called.
     `format` forces a specific importer by name. `progress` is a
     (done, total) callable, honored where the reader can count — a
-    project file's objects — and quietly unused where it cannot: a
-    foreign file is one read, and nothing inside netCDF or UFF parsing
-    reports fractions worth relaying.
+    project file's objects, a Rattlesnake run's samples (2026-10-02) —
+    and quietly unused where it cannot: a UFF file is one parse, and
+    nothing inside it reports fractions worth relaying.
     """
+    import inspect
+
+    def load_with(imp):
+        kwargs_for = dict(kwargs)
+        if progress is not None and 'progress' in inspect.signature(
+                imp.load).parameters:
+            kwargs_for['progress'] = progress
+        return imp.load(path, **kwargs_for)
+
     # a person types a path where the window hands one over: `~` is
     # theirs to write and Python's to expand, and a path that is not
     # there has to say so. Both came back as "No importer recognizes",
@@ -128,12 +137,12 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     if format is not None:
         for imp in _IMPORTERS:
             if imp.name == format:
-                return imp.load(path, **kwargs)
+                return load_with(imp)
         raise ValueError(f"No importer named {format!r}; "
                          f"available: {[i.name for i in _IMPORTERS]}")
     for imp in _IMPORTERS:
         if imp.sniff(path):
-            return imp.load(path, **kwargs)
+            return load_with(imp)
     # a refusal that says what the file *is* saves a round trip: a
     # container whose contents decide the reader, and whose name does
     # not, is the case that brought this up (Brandon, 2026-09-20)

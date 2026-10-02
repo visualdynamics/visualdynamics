@@ -15,6 +15,12 @@ import time
 from collections.abc import Callable
 
 
+class Cancelled(Exception):
+    """Raised out of a computation by its progress callback when the
+    person asked for it to stop. The window's Cancel button sets a
+    flag the next tick reads; nothing in between catches this."""
+
+
 class Ticker:
     """`add` a stage's count, `tick` as it goes; the callback hears
     `(done, total)` at most every `interval` seconds and always on the

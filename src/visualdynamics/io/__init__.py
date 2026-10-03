@@ -196,7 +196,7 @@ register_importer('stl', 'CAD triangle mesh (.stl)',
                   stl.sniff, stl.load)
 register_importer('matlab', 'MATLAB file, the project layout (.mat)',
                   matlab.sniff, matlab.load)
-register_importer('escdf', 'Engineering Sciences Common Data Format (.escdf)',
+register_importer('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.sniff, escdf_objects.load)
 
 register_exporter('sdynpy_geometry', 'sdynpy native geometry (.npz)', '.npz',
@@ -259,7 +259,7 @@ register_exporter('report_template', 'Report template (.vdreport)',
 # project, SI with the units named, exactly as .vdyn holds them
 register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)
-register_exporter('escdf', 'Engineering Sciences Common Data Format (.escdf)',
+register_exporter('escdf', 'Engineering Sciences Common Data Format (.h5)',
                   escdf_objects.SUFFIX, escdf_objects.handles, escdf_objects.save)
 
 __all__ = ['ImportNote', 'TestContents', 'export_file', 'exporters', 'from_sep005',

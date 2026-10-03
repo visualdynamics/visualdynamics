@@ -71,9 +71,17 @@ from ..project import Project
 from . import escdf, native
 from .notes import ImportNote
 
-__all__ = ['SUFFIX', 'from_file', 'handles', 'load', 'save', 'sniff', 'to_file']
+__all__ = ['SUFFIX', 'SUFFIXES', 'from_file', 'handles', 'load', 'save', 'sniff', 'to_file']
 
-SUFFIX = '.escdf'
+#: what a file is given when it is named without one. `.h5`, not
+#: `.escdf`: the files written where the format is used every day carry
+#: the container's suffix, and one written here should sit beside them
+#: unremarked (Brandon, 2026-10-03). Reading never looked at the suffix
+#: — `sniff` reads the file — so the choice is the writer's alone.
+SUFFIX = '.h5'
+#: the suffixes a file may already carry and keep: the container's two
+#: spellings, and `.escdf`, which this writer gave until 0.1.0a33
+SUFFIXES = ('.h5', '.hdf5', '.escdf')
 #: the attachment that holds an object whole, in its own layout
 WHOLE = 'visualdynamics.vdyn'
 #: the root metadata group carrying what belongs to the project itself
@@ -510,14 +518,15 @@ def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
     obj : Project or object
         What to write.
     path : path-like
-        Where; `.escdf` is added when the suffix is not there.
+        Where; `.h5` is added unless it already ends in `.h5`,
+        `.hdf5` or `.escdf`.
     unit_system : UnitSystem, optional
         The system reports are rendered in.
     created_by : str, optional
         The creator recorded in the file.
     """
     path = str(path)
-    if not path.endswith(SUFFIX):
+    if not path.endswith(SUFFIXES):
         path += SUFFIX
     if not isinstance(obj, Project):
         project = Project(getattr(obj, 'name', '') or type(obj).__name__)

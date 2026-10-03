@@ -18,7 +18,7 @@ file.
 acknowledge: the software is offered as is, and its numbers are the
 user's to check against a tool they already trust. The project file,
 `.vdyn`, is provisional: the next alpha will save projects in the
-Engineering Sciences Common Data Format (`.escdf`), a public standard,
+Engineering Sciences Common Data Format (`.h5`), a public standard,
 and will still open `.vdyn` files; the first release that is not an
 alpha will not. Open each `.vdyn` once in that alpha and save it again.
 

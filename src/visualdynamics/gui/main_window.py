@@ -120,6 +120,8 @@ from ..deform import (
     TimeDeflection,
     animation_records,
 )
+from ..io.escdf_objects import SUFFIX as ESCDF_SUFFIX
+from ..io.escdf_objects import SUFFIXES as ESCDF_SUFFIXES
 from ..plot import (
     MAX_RECORDS,
     add_mode_markers,
@@ -6139,7 +6141,7 @@ class MainWindow(QMainWindow):
         filters = ('Importable files (*.vdyn *.vdreport *.npz *.exo *.e *.exo2 *.g *.gen '
                    '*.unv *.uff *.uf *.nc4 *.nc *.afu *.ati *.ash '
                    '*.bdf *.dat *.nas *.pch *.neu *.3mf *.stl '
-                   '*.step *.stp *.iges *.igs'
+                   '*.step *.stp *.iges *.igs *.h5 *.hdf5 *.escdf'
                    ');;All files (*)')
         paths, _ = QFileDialog.getOpenFileNames(self, 'Import', '', filters)
         self.import_paths(paths)
@@ -6961,7 +6963,7 @@ class MainWindow(QMainWindow):
         path, chosen = QFileDialog.getSaveFileName(
             self, 'Save Project', f'{name}.vdyn',
             'Visual Dynamics files (*.vdyn);;MATLAB file (*.mat);;'
-            'Engineering Sciences Common Data Format (*.escdf)')
+            'Engineering Sciences Common Data Format (*.h5)')
         if not path:
             return
         # the same project in MATLAB's container, or as the standard's
@@ -6969,8 +6971,8 @@ class MainWindow(QMainWindow):
         # suffix has to be right
         if chosen.startswith('MATLAB') and not path.endswith('.mat'):
             path += '.mat'
-        if chosen.startswith('Engineering') and not path.endswith('.escdf'):
-            path += '.escdf'
+        if chosen.startswith('Engineering') and not path.endswith(ESCDF_SUFFIXES):
+            path += ESCDF_SUFFIX
         # through the verb, not io directly: the verb carries the
         # provenance records (the direct call dropped them, and a
         # GUI-saved project reopened with no staleness bookkeeping)

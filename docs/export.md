@@ -9,7 +9,7 @@ the program that makes them.
 
 **`.vdyn` (HDF5) is the native format**, and the only one that keeps
 everything — units included. Save and Load use it. It is provisional
-for the alpha (the next alpha saves `.escdf`; [its own
+for the alpha (the next alpha saves ESCDF `.h5`; [its own
 page](vdyn-format.md) says what that means for a file you have). It
 is standard, documented HDF5 — the layout is that page, and
 any HDF5 tool reads one without this package. The foreign formats
@@ -34,11 +34,11 @@ One row per format, R/W meaning both directions:
 | STL mesh ⁵ | `.stl` | R/W | — | — | — |
 | STEP / IGES ⁶ | `.step`/`.stp`/`.iges`/`.igs` | R | — | — | — |
 | MATLAB ⁷ | `.mat` | R/W | R/W | R/W | R/W |
-| Engineering Sciences Common Data Format ⁸ | `.escdf` | R/W | R/W | R/W | R/W |
+| Engineering Sciences Common Data Format ⁸ | `.h5` | R/W | R/W | R/W | R/W |
 
 Three more go in and out whole rather than by object: the project file
 itself (`.vdyn`, everything a project holds — or `.mat`, the same
-layout as MATLAB structs, see ⁷, or `.escdf`, the standard's types with
+layout as MATLAB structs, see ⁷, or `.h5`, the standard's types with
 each object whole beside them, see ⁸), a report template
 (`.vdreport`, a report on its own, to load into another project — see
 [reports](guide/reports.md)), and photographs (a folder of images,
@@ -228,7 +228,10 @@ shapes, activities as named link groups; a type the specifications do
 not define is left out with a note. The reader and writer were held to
 the format's reference implementation both ways as they were written,
 and the specification files it defines the types with ship inside the
-package.
+package. A file is written as `.h5`, the container's suffix, which is
+how the format's files are named where it is used; one named `.hdf5`
+or `.escdf` keeps its name, and reading looks at the contents, never
+the suffix.
 
 Writing takes the text form by default, because it is the one every
 reader takes. The binary form is `save(obj, path, binary=True)`, or

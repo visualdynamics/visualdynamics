@@ -25,11 +25,11 @@ def test_the_version_says_alpha():
 
 def test_the_notice_says_the_project_file_is_provisional():
     """Brandon, 2026-09-13: release today, with `.vdyn` explicitly
-    alpha-only and a dated end — the next alpha writes `.escdf` and
+    alpha-only and a dated end — the next alpha writes ESCDF `.h5` and
     still reads `.vdyn`, the first non-alpha does not. Said where a
     user reads: here, the downloads page, the README, the guide."""
     assert '.vdyn' in TEXT and 'provisional' in TEXT
-    assert '.escdf' in TEXT and 'save it again' in TEXT
+    assert '.h5' in TEXT and 'save it again' in TEXT
 
 
 def test_continue_needs_the_acknowledgment(qt_app):

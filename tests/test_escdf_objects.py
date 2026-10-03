@@ -284,16 +284,17 @@ def test_the_window_saves_the_project_as_the_format_with_the_creator_name(
 
     window.import_paths([fixture_path('plate', 'modal.nc4')])
     pump()
-    path = tmp_path / 'saved.escdf'
+    # named without a suffix: the dialog adds `.h5`, the default
+    path = tmp_path / 'saved'
     monkeypatch.setattr(QFileDialog, 'getSaveFileName',
                         staticmethod(lambda *a, **k: (
-                            str(path), 'Engineering Sciences Common Data Format (*.escdf)')))
+                            str(path), 'Engineering Sciences Common Data Format (*.h5)')))
     preferences.remember_creator('Test Person')
     try:
         window.save_test()
     finally:
         preferences.remember_creator('')
-    file = escdf.read(path)
+    file = escdf.read(tmp_path / 'saved.h5')
     assert file.created_by == 'Test Person'
     assert file.problems() == []
     assert 'Saved' in window.statusBar().currentMessage()
@@ -304,10 +305,28 @@ def test_one_object_exports_as_a_project_of_one(tmp_path):
     history = TimeHistory(t, np.zeros((1, 11)), ['1X+'], ordinate_unit='g')
     path = tmp_path / 'one'
     visualdynamics.io.export_file(history, str(path), format='escdf')
-    file = escdf.read(tmp_path / 'one.escdf')
+    file = escdf.read(tmp_path / 'one.h5')
     assert file.problems() == []
     activity = next(iter(file.activities.values()))
     data = next(iter(activity.data.values()))
     assert data.values['data_type'] == 'time response'
     assert data.values['abscissa_step'] == pytest.approx(0.1)
     assert data.values['ordinate_unit'] == 'g'
+
+
+def test_a_file_is_written_as_h5_unless_it_names_another_suffix(tmp_path):
+    """`.h5` is the default (Brandon, 2026-10-03): the format's files
+    are named for their container where it is used, and one written
+    here should sit beside them. A name already ending in `.hdf5` or
+    the old `.escdf` keeps it, through the export and through
+    `Project.save`, and every one of them opens again."""
+    project = _project()
+    project.save(tmp_path / 'plain.h5')
+    visualdynamics.io.export_file(project, str(tmp_path / 'bare'), format='escdf')
+    project.save(tmp_path / 'long.hdf5')
+    project.save(tmp_path / 'old.escdf')
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        'bare.h5', 'long.hdf5', 'old.escdf', 'plain.h5']
+    for path in tmp_path.iterdir():
+        assert escdf.read(path).problems() == []
+        assert set(visualdynamics.Project.open(path)) == set(project)

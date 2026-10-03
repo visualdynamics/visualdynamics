@@ -3478,16 +3478,17 @@ class Project(dict):
 
     def save(self, path: str | os.PathLike, **options: Any) -> str:
         """Write the whole project to one file: `.vdyn`, `.mat` for
-        the same layout in MATLAB's container, or `.escdf` for the
+        the same layout in MATLAB's container, or `.h5` for the
         Engineering Sciences Common Data Format.
 
         Parameters
         ----------
         path : str or os.PathLike
             Where to write the file. A `.mat` suffix writes the project
-            as MATLAB structs (`io.matlab`), `.escdf` as the standard's
-            types with each object whole in an attachment
-            (`io.escdf_objects`); anything else is `.vdyn`.
+            as MATLAB structs (`io.matlab`), `.h5` (or `.hdf5`, or
+            `.escdf`) as the standard's types with each object whole in
+            an attachment (`io.escdf_objects`); anything else is
+            `.vdyn`.
         **options
             Passed to a foreign writer: an ESCDF file's `created_by`.
 
@@ -3497,9 +3498,15 @@ class Project(dict):
             The path written.
         """
         from .io import export_file, save_test
+        from .io.escdf_objects import SUFFIXES
 
-        if str(path).endswith(('.mat', '.escdf')):
+        if str(path).endswith('.mat'):
             export_file(self, str(path), **options)
+            return str(path)
+        if str(path).endswith(SUFFIXES):
+            # by name: the writer's own suffix is `.h5`, and picking by
+            # suffix would refuse the other two it keeps
+            export_file(self, str(path), format='escdf', **options)
             return str(path)
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
@@ -3509,10 +3516,13 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project back, from `.vdyn`, `.mat` or `.escdf`."""
+        """Read a project back, from `.vdyn`, `.mat` or an ESCDF `.h5`
+        (`.hdf5`, `.escdf`)."""
         from .io import import_file, load
+        from .io.escdf_objects import SUFFIXES
 
-        loaded = (import_file(str(path)) if str(path).endswith(('.mat', '.escdf'))
+        loaded = (import_file(str(path))
+                  if str(path).endswith(('.mat', *SUFFIXES))
                   else load(str(path)))
         if isinstance(loaded, Project):
             # whatever the loader did on the way — construct, add,

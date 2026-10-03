@@ -115,13 +115,13 @@ ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 def test_the_provisional_project_file_is_said_everywhere_a_user_reads():
     """`.vdyn` is alpha-only with a dated end (2026-09-13): the next
-    alpha writes `.escdf` and still reads `.vdyn`, the first non-alpha
+    alpha writes ESCDF (`.h5`, 2026-10-03) and still reads `.vdyn`, the first non-alpha
     does not. The disclaimer says so (test_disclaimer); so must the
     downloads page, the README and the guide, in the same terms."""
     for page in ('web/launch/downloads.html', 'README.md',
                  'docs/guide/README.md', 'docs/vdyn-format.md'):
         text = (ROOT_DIR / page).read_text(encoding='utf-8')
-        for phrase in ('.vdyn', 'provisional', '.escdf', 'save it again'):
+        for phrase in ('.vdyn', 'provisional', '.h5', 'save it again'):
             assert phrase in text, f'{page} does not say {phrase!r}'
 
 

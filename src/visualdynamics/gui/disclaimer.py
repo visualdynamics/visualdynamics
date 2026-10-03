@@ -37,7 +37,7 @@ TEXT = (
     'independent means before anything depends on them.</p>'
     '<p>The project file, <code>.vdyn</code>, is provisional. The next '
     'alpha will save projects in the Engineering Sciences Common Data '
-    'Format (<code>.escdf</code>), a public standard, and will still '
+    'Format (<code>.h5</code>), a public standard, and will still '
     'open <code>.vdyn</code> files; the first release that is not an '
     'alpha will not. Open each <code>.vdyn</code> once in that alpha and '
     'save it again.</p>'

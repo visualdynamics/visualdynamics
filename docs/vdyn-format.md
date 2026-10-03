@@ -34,7 +34,7 @@ for earlier spellings. Since the first release (0.1.0a1, 2026-09-14)
 the contract is hard *for as long as the format lives* — and that is
 the caveat this page has to state: **`.vdyn` is provisional, an
 alpha-only format**. The next alpha saves projects in the Engineering
-Sciences Common Data Format (`.escdf`), a public standard, and still
+Sciences Common Data Format (`.h5`), a public standard, and still
 opens `.vdyn`; the first release that is not an alpha will not. Open
 each `.vdyn` once in that alpha and save it again. Until then every
 `.vdyn` written by any alpha loads in every later alpha.

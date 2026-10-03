@@ -9,7 +9,7 @@ The application says so when it opens, and asks for that to be
 acknowledged every time. Anything that looks wrong is worth
 reporting to contact@visualdynamics.org. The project file, `.vdyn`,
 is provisional: the next alpha will save projects in the Engineering
-Sciences Common Data Format (`.escdf`), a public standard, and will
+Sciences Common Data Format (`.h5`), a public standard, and will
 still open `.vdyn` files; the first release that is not an alpha will
 not. Open each `.vdyn` once in that alpha and save it again.
 

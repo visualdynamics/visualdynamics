@@ -234,9 +234,11 @@ class DataPane(QWidget):
         self.replication_view: str = 'overlay'
         #: 'curves' or 'error' — the same for a pair of shock spectra
         self.srs_view: str = 'curves'
-        #: 'overlay' or 'ratio' — how two selected densities read
-        #: together; sticky like every view choice
+        #: 'overlay', 'ratio' or 'snr' — how two selected densities
+        #: read together; sticky like every view choice
         self.spectra_view: str = 'overlay'
+        #: where the RMS signal-to-noise bars' floor has been dragged
+        self.snr_bound: float | None = None
         self.srs_bounds: tuple[float, float] | None = None
         #: where the replication bars' thresholds have been dragged
         self.waveform_bound: float | None = None
@@ -459,16 +461,22 @@ class DataPane(QWidget):
         toolbar.addAction(self.rms_action)
         self.rms_action.setVisible(False)
         # two densities selected together: drawn over each other, or
-        # divided — the signal-to-noise reading, in dB (Brandon,
-        # 2026-08-25). One at a time, like the comparison's readings.
+        # read as signal over noise — line by line in dB (Brandon,
+        # 2026-08-25), or one RMS number per channel as bars
+        # (2026-10-03). One at a time, like the comparison's readings.
         self.spectra_group: QActionGroup = QActionGroup(self)
         self.spectra_actions: dict[str, QAction] = {}
         for key, icon, text, tip in (
                 ('overlay', 'overlay', 'Overlaid',
                  'The two spectra over each other'),
-                ('ratio', 'ratio', 'Ratio (dB)',
-                 ('The louder spectrum over the quieter, in decibels '
-                  '— the signal-to-noise reading'))):
+                ('ratio', 'ratio', 'Signal to noise (dB)',
+                 ('The signal-to-noise of the louder spectrum over the '
+                  'quieter, line by line, in decibels: the louder less '
+                  'the quieter, over the quieter')),
+                ('snr', 'bars', 'RMS signal to noise',
+                 ('The signal-to-noise of each channel over the whole '
+                  'band, a bar apiece, from the RMS of the two '
+                  'spectra'))):
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
             action.setToolTip(tip)
@@ -929,7 +937,7 @@ class DataPane(QWidget):
         self.spectra_view_chosen.emit(which)
 
     def show_spectra_views(self, offered: bool) -> None:
-        """Offer the overlay/ratio pair, or take it away."""
+        """Offer the two-density readings, or take them away."""
         for action in self.spectra_actions.values():
             action.setVisible(offered)
         if offered:

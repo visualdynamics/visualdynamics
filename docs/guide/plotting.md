@@ -67,7 +67,7 @@ The readings on a time history's bar have calls of their own, in
 drawn at a picture's width whatever the record's length — the
 [wavelet guide](wavelet.md) says how), `plot_kurtosis(history)`, and
 for a specification comparison `plot_bars(measured, specification)`,
-`plot_comparison(...)`, `plot_ratio(...)` and `plot_replication(...)`
+`plot_comparison(...)`, `plot_ratio(...)`, `plot_snr(...)` and `plot_replication(...)`
 — each the figure the app shows, each taking `path=`.
 
 ## Copying what is shown
@@ -176,17 +176,22 @@ psd.plot_waterfall(screenshot='stack.png')    # headless, to a file
 
 ## Two PSDs together: overlaid, or divided
 
-Selecting two PSD objects offers two more readings on the bar. The
+Selecting two PSD objects offers three more readings on the bar. The
 **overlay** stages both on the 3-D axes, station by station where
 their channels share a record, the louder set colored by level and
-the quieter drawn behind it in gray. The **ratio** divides them where
-they match — same DOF, same quantity — and draws the quotient in
-decibels; with the driven and ambient densities of a system ID that
-reading *is* the signal-to-noise, computed where it is looked at
-rather than stored as a third object. The louder set is the
-numerator, so the healthy reading is positive. Both honor the 2D/3D
-toggle, and a mixed pair offers a quantity box naming what to
-compare.
+the quieter drawn behind it in gray. **Signal to noise (dB)** pairs
+them where they match (same DOF, same quantity) and takes the louder
+as signal plus noise and the quieter as the noise: the louder less the
+quieter, over the quieter, in decibels, line by line. **RMS signal to
+noise** is the same ratio over the whole band, one bar per channel,
+judged against a threshold that can be dragged. With the driven and
+ambient densities of a system ID these readings *are* the
+signal-to-noise, computed where they are looked at rather than stored
+as a third object; the
+[system ID guide](workflows/sysid-workflow.md#how-the-signal-to-noise-is-computed)
+gives the definition and its sources. The overlay and the line-by-line
+reading honor the 2D/3D toggle, and a mixed pair offers a quantity box
+naming what to compare.
 
 ## A measurement and its resynthesis
 

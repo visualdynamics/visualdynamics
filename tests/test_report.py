@@ -1345,7 +1345,7 @@ def test_a_paired_stage_stands_the_quieter_object_back():
 def test_the_ratio_reads_in_decibels_on_the_stage():
     """The divided reading: one curve per channel, linear in dB — the
     number being read *is* the decibel — through the same
-    `density_ratio` the flat figure divides by."""
+    `snr.signal_to_noise` the flat figure divides by."""
     import numpy as np
 
     from visualdynamics.core.data import Psd
@@ -1364,7 +1364,7 @@ def test_the_ratio_reads_in_decibels_on_the_stage():
         {'kind': 'plot', 'mode': 'stage', 'source': 'Excitation',
          'floor': 'Noise', 'reading': 'ratio', 'caption': 'SNR'},
         objects, visualdynamics.SI, [])[0]
-    assert built['zlabel'] == 'ratio [dB]'
+    assert built['zlabel'] == 'signal to noise [dB]'
     assert built['log'] is False, 'a decibel is already the log reading'
     assert not any(r.get('quiet') for r in built['runs']), \
         'a ratio has one curve per station, not two'

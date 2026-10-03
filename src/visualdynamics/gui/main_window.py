@@ -9484,16 +9484,18 @@ class MainWindow(QMainWindow):
         return info
 
     def _render_ratio(self, series):
-        """Two densities divided, in decibels — the Ratio reading.
+        """The signal-to-noise of two densities, in decibels — the
+        Signal to noise reading.
 
-        The louder is the numerator, the same physical rule the sysid
-        naming and the import question use: for a noise floor the
-        ratio then reads *up* as signal-to-noise. Returns None when
-        the pair cannot divide (mismatched lines, no shared channel);
-        the caller falls back to the overlay with the reason on the
-        status line, because a blank pane explains nothing.
+        The louder is the signal, the same physical rule the sysid
+        naming and the import question use, and the quieter the noise
+        (`core.snr`: the louder less the quieter, over the quieter).
+        Returns None when the pair cannot divide (mismatched lines, no
+        shared channel); the caller falls back to the overlay with the
+        reason on the status line, because a blank pane explains
+        nothing.
         """
-        from ..core.data import density_ratio
+        from ..core.snr import signal_to_noise
         from ..plot import build_ratio
 
         (name_a, a, records_a), (name_b, b, records_b) = series
@@ -9504,9 +9506,9 @@ class MainWindow(QMainWindow):
             if louder_first else ((name_b, b, records_b),
                                   (name_a, a, records_a))
         try:
-            _x, rows, _dofs, _dims = density_ratio(loud[1], quiet[1])
+            _x, rows, _dofs, _dims = signal_to_noise(loud[1], quiet[1])
         except ValueError as refusal:
-            self._show_status(f'No ratio: {refusal}')
+            self._show_status(f'No signal to noise: {refusal}')
             return None
         pane = self.data_pane
         pane.show_waterfall(False)
@@ -9516,9 +9518,70 @@ class MainWindow(QMainWindow):
         finite = np.real(rows)[np.isfinite(np.real(rows))]
         reading = (f'median {10 * np.log10(np.median(finite)):+.1f} dB'
                    if finite.size and np.median(finite) > 0
-                   else 'no finite lines')
+                   else 'no line above the floor')
         return (f'{loud[0]} over {quiet[0]}: {drawn} '
-                f'channel{"s" * (drawn != 1)}, {reading} — equal at 0 dB')
+                f'channel{"s" * (drawn != 1)}, signal to noise {reading} '
+                '— signal and noise equal at 0 dB')
+
+    def _render_snr(self, series):
+        """How far each channel's signal stands above its noise, a bar
+        apiece — the RMS signal to noise reading of two densities.
+
+        The louder is the signal and the quieter the noise, as on the
+        line-by-line reading; each channel's power is the area under
+        its density over the band the two share (`core.snr`). Returns
+        None when the pair cannot pair, with the reason on the status
+        line, and the caller falls back to the overlay.
+        """
+        from ..core.snr import THRESHOLD_DB, rms_signal_to_noise
+        from ..plot.bars import snr_chart
+
+        (name_a, a, records_a), (name_b, b, records_b) = series
+        louder_first = float(np.nanmean(np.real(np.asarray(
+            a.ordinate)))) >= float(np.nanmean(np.real(np.asarray(
+                b.ordinate))))
+        loud, quiet = ((name_a, a, records_a), (name_b, b, records_b)) \
+            if louder_first else ((name_b, b, records_b),
+                                  (name_a, a, records_a))
+        try:
+            rows, silent = rms_signal_to_noise(loud[1], quiet[1],
+                                               loud[2] or None)
+        except ValueError as refusal:
+            self._show_status(f'No signal to noise: {refusal}')
+            return None
+        if not rows:
+            return None
+        pane = self.data_pane
+        pane.show_waterfall(False)
+        pane.graphics.clear()
+        plot = pane.graphics.addPlot(row=0, col=0)
+        low = pane.snr_bound if pane.snr_bound is not None else THRESHOLD_DB
+        try:
+            names = (self.project.name_of(loud[1]),
+                     self.project.name_of(quiet[1]))
+        except (KeyError, ValueError):
+            pass
+        else:
+            prefix = (f'visualdynamics.plot.plot_snr(project[{names[0]!r}], '
+                      f'project[{names[1]!r}]')
+            self._journal_view(
+                prefix, prefix
+                + (f', records={list(loud[2])!r}' if loud[2] else '')
+                + f", low={low!r}, path='snr.png', show=False)")
+        self.bar_chart = snr_chart(plot, rows, resolve_theme(self.theme_name),
+                                   low=low, changed=self._snr_bound_moved)
+        # a channel whose ambient recorded nothing has no noise to
+        # divide by; it is left off the chart and said here, so a chart
+        # of eight bars from twelve channels is not read as all of them
+        left = (f'; {len(silent)} channel{"s" * (len(silent) != 1)} '
+                'recorded no ambient noise and cannot be read'
+                if silent else '')
+        return (f'{loud[0]} over {quiet[0]}: '
+                f'{self.bar_chart.summary.toPlainText()}{left}')
+
+    def _snr_bound_moved(self, low, _high):
+        """Remember a dragged floor, so a redraw does not put it back."""
+        self.data_pane.snr_bound = low
 
     def _sole_history(self, series):
         """The one time history being looked at, if that is what this is.
@@ -10147,6 +10210,13 @@ class MainWindow(QMainWindow):
             isinstance(data, Psd) and not isinstance(data, Specification)
             for _name, data, _records in series))
         self.data_pane.show_spectra_views(densities)
+        if densities and self.data_pane.spectra_view == 'snr':
+            # one number per channel is a flat picture, like the
+            # kurtosis bars: no depth axis to offer
+            drawn = self._render_snr(series)
+            if drawn is not None:
+                self.data_pane.offer_waterfall(False)
+                return drawn
         if densities:
             # the pair's readings are three-dimensional by default —
             # shared channels receding, overlaid or divided — and the

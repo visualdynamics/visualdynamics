@@ -4,12 +4,12 @@ The 3-D reading of two selected PSDs (Brandon, 2026-08-25), in the
 banded stage's own idiom: each shared channel is a station along the
 depth axis, and at each station the two objects meet — the louder
 drawn level-colored, the quieter stood back in the muted gray a
-compared reference wears. The Ratio reading divides instead: one
-curve per station, in decibels, linear — the number being read *is*
-the decibel.
+compared reference wears. The Signal to noise reading divides
+instead: one curve per station, in decibels, linear — the number being
+read *is* the decibel.
 
 Rides `waterfall_arrays` for decimation, paging and labels, and
-`density_ratio` for the division, so the stage, the flat plots and
+`snr.signal_to_noise` for the division, so the stage, the flat plots and
 the report cannot disagree about a value.
 
 Kept free of Qt, like the rest of `viz`.
@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.data import density_ratio
+from ..core.snr import signal_to_noise
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM, UnitSystem
 from ._quiet import one_render
@@ -100,7 +100,7 @@ def paired_stage_curves(loud: Any, quiet: Any,
     ``extents`` (x0, x1, z0, z1) the stage stands in for, the station
     ``labels``, and the axis titles.
 
-    In 'ratio' the division is `density_ratio` at full resolution —
+    In 'ratio' the division is `snr.signal_to_noise` at full resolution —
     the same call the flat plot and the report's flat figure divide
     through — so no reading of a pair can disagree with another.
     """
@@ -111,7 +111,7 @@ def paired_stage_curves(loud: Any, quiet: Any,
     runs: list[dict[str, Any]] = []
 
     if mode == 'ratio':
-        abscissa, rows, dofs, dims = density_ratio(loud, quiet)
+        abscissa, rows, dofs, dims = signal_to_noise(loud, quiet)
         with np.errstate(divide='ignore', invalid='ignore'):
             decibels = 10.0 * np.log10(np.real(rows))
         drawn = [(dof, decibels[k]) for k, dof in enumerate(dofs)
@@ -138,7 +138,7 @@ def paired_stage_curves(loud: Any, quiet: Any,
         arrays['runs'] = runs
         arrays['extents'] = (x0, x1, z0, z1)
         arrays['drawn'] = len(drawn)
-        arrays['zlabel'] = 'ratio [dB]'
+        arrays['zlabel'] = 'signal to noise [dB]'
         return arrays
 
     stations = arrays['stations']

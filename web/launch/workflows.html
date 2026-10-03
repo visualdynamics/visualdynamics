@@ -93,6 +93,19 @@
     coherence map, the signal-to-noise against the ambient floor, and
     the complex mode indicator that reads the whole matrix at a glance.
   </p>
+  <p>
+    The signal-to-noise follows the standard definition, signal power
+    over noise power, as IEEE Std 1241 states it and as Bendat and
+    Piersol use it in <cite>Random Data</cite>. The driven recording
+    holds the signal and the same noise the ambient one recorded, so
+    the signal's power is the driven power less the ambient power, and
+    the ratio is that over the ambient. The report draws it line by
+    line for every channel and once per channel over the whole band, as
+    bars against a 10 dB threshold, the margin at which the coherence
+    the same noise allows reaches 0.91.
+    <a href="documentation/guide/workflows/sysid-workflow/#how-the-signal-to-noise-is-computed">How
+    it is computed</a>.
+  </p>
 
   <h2 id="formats">Supported data formats</h2>
   <p>

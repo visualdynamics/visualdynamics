@@ -3,7 +3,7 @@
 The 3-D reading of two selected PSDs (Brandon, 2026-08-25): matched
 stations recede along the depth axis, the louder wears the level
 coloring, the quieter the compared gray — and the Ratio reading
-divides through `density_ratio`, in decibels, so the stage and the
+divides through `snr.signal_to_noise`, in decibels, so the stage and the
 flat plot cannot disagree."""
 
 from __future__ import annotations
@@ -65,8 +65,11 @@ def test_the_ratio_stage_divides_in_decibels():
     info = add_paired_stage(plotter, loud, quiet, mode='ratio')
     assert info['drawn'] == 3
     mesh = plotter.actors['paired-ratio'].mapper.dataset
-    assert np.allclose(np.asarray(mesh.point_data['level']), 30.0), \
-        'a thousandfold power ratio reads 30 dB, per point'
+    # the driven holds the noise too: a thousandfold density is 999
+    # noise powers of signal (`core.snr`, 2026-10-03)
+    assert np.allclose(np.asarray(mesh.point_data['level']),
+                       10 * np.log10(999.0)), \
+        'a thousandfold density reads 999 powers of signal, per point'
     plotter.close()
 
 

@@ -420,8 +420,9 @@ recording, the spectral saves, and the saved **system-ID package**
 coherence, plus the driven and ambient autospectra as a pair of
 PSDs. The signal-to-noise is a *reading* of that pair, not a third
 object: select the two PSDs together and the bar offers them
-overlaid or divided, the ratio in decibels, with a zero ambient
-line answering a gap rather than infinity — on real hardware zero
+overlaid, as signal to noise line by line in decibels, or as RMS
+signal to noise per channel, with a zero ambient line answering a gap
+rather than infinity — on real hardware zero
 means below resolution, in a simulation it means the quiet was
 exactly silent. The package records hardware channel numbers but no
 node names or units, so its DOFs arrive as those numbers and its

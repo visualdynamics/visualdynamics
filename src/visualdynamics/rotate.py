@@ -6,6 +6,13 @@ tested without a window.
 
 A coordinate system is stored as four rows: three orthonormal basis vectors
 and an origin. Rotation only ever touches the basis; the origin stays put.
+
+Sliding is the other gesture (2026-10-02): an arrow along each axis of the
+frame, dragged, moves the origin along that axis and snaps it to a grid in
+the geometry's own axes — a tenth of an inch for the inch family of units,
+a centimetre for the metric one — so a frame or a block lands on round
+coordinates whichever way it is turned. The arrow arithmetic lives here
+beside the ring arithmetic, for the same reason.
 """
 
 from __future__ import annotations
@@ -125,3 +132,114 @@ def identity_frame(matrix: ArrayLike) -> np.ndarray:
     reset[:3] = np.eye(3)
     reset[3] = matrix[3]
     return reset
+
+
+# ---- sliding --------------------------------------------------------------
+
+#: the units a tenth of an inch is the grid for; everything else is metric
+INCH_FAMILY = frozenset({'in', 'inch', 'inches', 'ft', 'foot', 'feet',
+                         'mil', 'mils', 'thou'})
+
+ARROW_STEPS = 24         # points along an arrow's shaft, for picking
+
+
+def grid_step(unit: str) -> float:
+    """The grid a slide lands on, in the display `unit`: a tenth of an
+    inch for the inch family, a centimetre for the metric one."""
+    from .units import convert
+
+    if unit in INCH_FAMILY:
+        return float(convert(0.1, 'in', unit))
+    return float(convert(1.0, 'cm', unit))
+
+
+def arrow_points(matrix: ArrayLike, axis: int, length: float,
+                 steps: int = ARROW_STEPS) -> np.ndarray:
+    """Points along the arrow for one principal axis of a frame, from
+    the origin out to `length` along it — a polyline the way a ring is,
+    so `ring_under_cursor` picks an arrow the same way."""
+    matrix = np.asarray(matrix, dtype=np.float64)
+    along = np.linspace(0.0, length, steps)[:, None]
+    return matrix[3] + along * matrix[axis]
+
+
+def translate_frame(matrix: ArrayLike, axis: int, distance: float) -> np.ndarray:
+    """A copy of `matrix` with its origin slid `distance` along one of
+    its own axes; the basis stays put, the mirror of `rotate_frame`."""
+    moved = np.array(matrix, dtype=np.float64)
+    moved[3] = moved[3] + float(distance) * moved[axis]
+    return moved
+
+
+def axis_hit(origin: ArrayLike, direction: ArrayLike, eye: ArrayLike,
+             ray: ArrayLike) -> np.ndarray | None:
+    """The point on the axis line nearest the cursor's ray, or None when
+    the two are parallel.
+
+    Dragging an arrow means following the cursor along a line the cursor
+    can only ever be near, never on: the closest approach of the two
+    lines is where the drag is read, which is what this finds.
+    """
+    origin = np.asarray(origin, dtype=np.float64)
+    direction = np.asarray(direction, dtype=np.float64)
+    eye = np.asarray(eye, dtype=np.float64)
+    ray = np.asarray(ray, dtype=np.float64)
+    w0 = origin - eye
+    a, b, c = direction @ direction, direction @ ray, ray @ ray
+    d, e = direction @ w0, ray @ w0
+    denominator = a * c - b * b
+    if abs(denominator) < 1e-12 * max(a * c, 1e-300):
+        return None
+    along = (b * e - c * d) / denominator
+    return origin + along * direction
+
+
+def distance_along(matrix: ArrayLike, axis: int, world: ArrayLike) -> float:
+    """How far a world point sits from the frame's origin along one of
+    its axes: the drag's reading, before the snap."""
+    matrix = np.asarray(matrix, dtype=np.float64)
+    return float((np.asarray(world, dtype=np.float64) - matrix[3]) @ matrix[axis])
+
+
+def snapped(point: ArrayLike, step: float) -> np.ndarray:
+    """`point` moved to the nearest grid line in each coordinate — the
+    geometry's own axes, so a turned frame still lands on round
+    coordinates. A step of zero or less is no snap."""
+    point = np.asarray(point, dtype=np.float64)
+    if step <= 0.0:
+        return point.copy()
+    return np.round(point / step) * step
+
+
+# ---- angles -----------------------------------------------------------------
+
+
+def frame_from_angles(angles: ArrayLike, origin: ArrayLike = (0.0, 0.0, 0.0)
+                      ) -> np.ndarray:
+    """A frame turned by `angles`, in degrees about the geometry's fixed
+    X, then Y, then Z axes — the order a person types them in — at
+    `origin`. The rows are the frame's axes, as a coordinate system's
+    are."""
+    ax, ay, az = (np.radians(float(a)) for a in angles)
+    turn = (rotation_about((0.0, 0.0, 1.0), az) @ rotation_about((0.0, 1.0, 0.0), ay)
+            @ rotation_about((1.0, 0.0, 0.0), ax))
+    frame = np.zeros((4, 3))
+    frame[:3] = turn.T
+    frame[3] = np.asarray(origin, dtype=np.float64)
+    return frame
+
+
+def angles_of(matrix: ArrayLike) -> tuple[float, float, float]:
+    """The fixed-axis X, Y, Z angles in degrees that turn the geometry's
+    axes into the frame's (`frame_from_angles` undone), each in
+    (-180, 180]. At a quarter turn about Y the X and Z turns are one
+    turn, and it is said as Z with X at zero."""
+    turn = np.asarray(matrix, dtype=np.float64)[:3].T
+    ay = float(np.arcsin(np.clip(-turn[2, 0], -1.0, 1.0)))
+    if abs(np.cos(ay)) > 1e-9:
+        ax = float(np.arctan2(turn[2, 1], turn[2, 2]))
+        az = float(np.arctan2(turn[1, 0], turn[0, 0]))
+    else:
+        ax = 0.0
+        az = float(np.arctan2(-turn[0, 1], turn[1, 1]))
+    return tuple(float(np.round(np.degrees(a), 9)) + 0.0 for a in (ax, ay, az))

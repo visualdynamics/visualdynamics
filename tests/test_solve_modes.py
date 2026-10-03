@@ -630,3 +630,33 @@ def test_the_act_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch)
     assert all(shown for _d, _t, shown in seen[1:])
     assert window._import_progress.isHidden()
     assert window.project['Skin Modes'].num_shapes > 0
+
+
+def test_the_material_column_and_its_list_are_wide_enough_to_read(window, pump):
+    """The Blocks table's Material column starts empty, and sized to its
+    contents it was too narrow to read a material in, in the cell or in
+    the drop-down (Brandon, 2026-10-02). The column opens no narrower
+    than the widest choice, the list opens as wide as its longest
+    entry, and the header stays the person's to drag."""
+    from PySide6.QtWidgets import QHeaderView, QStyleOptionViewItem
+
+    from visualdynamics.core.fem import MATERIALS
+
+    window.add_object('Geometry', _plate_geometry(properties=False))
+    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
+    model = window.table.model()
+    column = _column(model, 'Material')
+    metrics = window.table.fontMetrics()
+    widest = max(metrics.horizontalAdvance(name) for name in MATERIALS)
+    assert window.table.columnWidth(column) >= widest, (
+        window.table.columnWidth(column), widest)
+    header = window.table.horizontalHeader()
+    assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+    index = model.index(0, column)
+    editor = window.table.itemDelegate().createEditor(
+        window.table, QStyleOptionViewItem(), index)
+    try:
+        assert editor.view().minimumWidth() >= widest
+    finally:
+        editor.deleteLater()
+        pump()

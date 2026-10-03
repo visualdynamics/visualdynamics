@@ -139,6 +139,10 @@ FAMILIES = ('beams', 'triangles', 'quads', 'tetras', 'wedges', 'hexes')
 #: present: point elements (masses, grounded springs and dampers) and
 #: pyramids, which no file here has carried yet
 RARE_FAMILIES = ('points', 'pyramids')
+#: the families whose elements fill a volume: two of them on one set of
+#: nodes are one cell counted twice (`duplicate_elements`)
+SOLID_FAMILIES = frozenset({'tetras', 'wedges', 'hexes', 'pyramids'})
+
 FAMILY_LABELS = {'beams': 'Beams', 'triangles': 'Triangles',
                  'quads': 'Quads', 'tetras': 'Tetras', 'wedges': 'Wedges',
                  'hexes': 'Hexes', 'points': 'Points', 'pyramids': 'Pyramids'}
@@ -1276,6 +1280,22 @@ class Geometry:
         if wrong:
             raise ValueError(f'unknown element type {wrong[0]}')
         blocks = [int(b) for b in blocks]
+        # one block, one family — the rule `add_element` keeps one element
+        # at a time, kept here for many at once. Its absence let a plate
+        # joined by name into a block of bricks make one block of both
+        # (Brandon, 2026-10-02); checked before anything is appended, so
+        # a refused call leaves the geometry as it was
+        coming: dict[int, set[str]] = {}
+        for block, code in zip(blocks, types):
+            coming.setdefault(block, set()).add(element_family(code))
+        for block, families in coming.items():
+            held = {element_family(int(code)) for code
+                    in self.elem_type[self.elem_block == block]}
+            if len(held | families) > 1:
+                raise ValueError(
+                    f'block {block} would hold '
+                    f'{" and ".join(sorted(held | families))}: a block holds '
+                    'one element family')
         for block in dict.fromkeys(blocks):
             if block not in self.block_id.tolist():
                 self.block_id = np.append(self.block_id, block)
@@ -1447,6 +1467,43 @@ class Geometry:
                 out[other] = ids[0]
         return out
 
+    def duplicate_elements(self) -> dict[int, int]:
+        """{element id: the element it is} for every solid element on
+        exactly the nodes of an earlier one, of the same type — two
+        bricks filling one cell. The lowest id is the one that stays.
+
+        Solids only: two beams on one line can be two members, and a
+        plate on a plate's nodes is how a doubler or a layer is modeled,
+        but no two solids fill one cell on purpose.
+
+        Two blocks that overlap and share their nodes there — the bars
+        of an X cross-section — put two elements in every cell of the
+        overlap: the region counted twice, its stiffness and mass
+        doubled, and every face of each pair drawn as interior, so the
+        middle of the X vanished from the view (Brandon, 2026-10-02).
+        """
+        first: dict[tuple, int] = {}
+        out: dict[int, int] = {}
+        for k, conn in enumerate(self.elem_conn):
+            if element_family(int(self.elem_type[k])) not in SOLID_FAMILIES:
+                continue
+            key = (int(self.elem_type[k]), tuple(sorted(int(n) for n in conn)))
+            eid = int(self.elem_id[k])
+            if key in first:
+                out[eid] = first[key]
+            else:
+                first[key] = eid
+        return out
+
+    def merge_duplicate_elements(self) -> int:
+        """Make elements that are one cell one element (`duplicate_elements`):
+        the later of each pair is removed, the earlier — and its block —
+        stays. Returns how many were removed."""
+        going = self.duplicate_elements()
+        if going:
+            self.delete_elements(list(going))
+        return len(going)
+
     def merge_coincident_nodes(self, tolerance: float) -> dict[str, int]:
         """Make nodes that are one point one node: every element and
         element naming a node within `tolerance` of another is renamed
@@ -1457,6 +1514,8 @@ class Geometry:
         Refused, with the element named, when the tolerance would fold an
         element onto itself — two of its own corners within it — since
         that is a tolerance larger than the mesh, not a coincidence.
+        Elements the merge leaves on exactly the same nodes are one cell
+        filled twice, and are made one (`merge_duplicate_elements`).
 
         Parameters
         ----------
@@ -1467,12 +1526,14 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            'merged', the nodes removed, and 'into', the nodes they
-            became.
+            'merged', the nodes removed, 'into', the nodes they became,
+            and 'duplicates', the elements removed for filling a cell
+            another already filled.
         """
         mapping = self.coincident_nodes(tolerance)
         if not mapping:
-            return {'merged': 0, 'into': 0}
+            duplicates = self.merge_duplicate_elements()
+            return {'merged': 0, 'into': 0, 'duplicates': duplicates}
         for i, conn in enumerate(self.elem_conn):
             renamed = [mapping.get(int(n), int(n)) for n in conn]
             if len(set(renamed)) < len(renamed):
@@ -1487,8 +1548,10 @@ class Geometry:
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
         self.node_xyz = self.node_xyz[keep]
+        duplicates = self.merge_duplicate_elements()
         self.validate()
-        return {'merged': len(mapping), 'into': len(set(mapping.values()))}
+        return {'merged': len(mapping), 'into': len(set(mapping.values())),
+                'duplicates': duplicates}
 
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
         """Remove coordinate systems, reassigning any node that used them.

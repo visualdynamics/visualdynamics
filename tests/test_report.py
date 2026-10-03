@@ -11,7 +11,7 @@ import json
 
 import numpy as np
 import pytest
-from conftest import fixture_path, web_close, web_read
+from conftest import fixture_path, web_close, web_read, web_view
 
 import visualdynamics
 from visualdynamics import io
@@ -61,7 +61,6 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     report = modal_template(project)
@@ -69,7 +68,7 @@ def test_the_report_runs_in_a_real_browser_engine(tmp_path, project):
     path.write_text(render_html(report, project), encoding='utf-8')
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     view.load(QUrl.fromLocalFile(str(path)))
     # Through the shared reader, never one reading after a fixed delay
@@ -1024,14 +1023,13 @@ def test_a_narrow_log_axis_labels_its_real_values(tmp_path, project):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     path = tmp_path / 'labels.html'
     path.write_text(render_html(modal_template(project), project),
                     encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     outcome = {}
 
     # Asked until the page's own functions exist rather than after a
@@ -1239,7 +1237,6 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.viz.waterfall import stage_basis
@@ -1252,7 +1249,7 @@ def test_the_stage_draws_and_turns_in_a_real_browser_engine(tmp_path,
     path.write_text(render_html(report, project), encoding='utf-8')
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 700)
     view.load(QUrl.fromLocalFile(str(path)))
     # Through the shared reader. This read the stage once, 1.5 s after
@@ -1504,7 +1501,6 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.core.data import TimeHistory
@@ -1523,7 +1519,7 @@ def test_a_stage_curve_shades_along_each_segment(tmp_path):
 
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(900, 600)
     view.load(QUrl.fromLocalFile(str(path)))
     # Polled until there is paint, through the shared reader. This read
@@ -1585,7 +1581,6 @@ def test_a_hidden_node_is_hidden(tmp_path):
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     import numpy as np
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.core.geometry import Geometry
@@ -1618,7 +1613,7 @@ def test_a_hidden_node_is_hidden(tmp_path):
     ink = tuple(int(flat[i:i + 2], 16) for i in (1, 3, 5))
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(900, 600)
 
     # null until there is a canvas with paint on it, and the reading
@@ -1896,7 +1891,6 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.core.data import TimeHistory
@@ -1923,7 +1917,7 @@ def test_the_selection_script_survives_a_scalogram_figure(tmp_path):
     path.write_text(html, encoding='utf-8')
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()

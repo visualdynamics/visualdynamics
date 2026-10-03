@@ -118,12 +118,15 @@ go into the geometry's rigid block, made the first time
 where they share nodes: a structure built from planes is tied along the
 lines where its planes meet. **+** *New Geometry* on the project row's
 bar starts an empty geometry, and *Add Plane* on a geometry's bar meshes
-one rectangle at its mid-thickness — a corner, two perpendicular edges
-and an element size, in the display unit, drawn in the 3-D view as it is
-typed — into the block named, its nodes that fall on nodes already there
-becoming them (`project.new_geometry`, `project.add_plane`; in
+one rectangle at its mid-thickness — a center, widths with one left at
+zero to name the plane it lies in, and an element size, in the display
+unit, typed in a pane beside the 3-D view and drawn there as it is
+typed, turned by angles about X, Y and Z or by the rings around the
+preview, a degree at a time, and slid onto the grid by its arrows —
+into the block named, its nodes that fall on nodes
+already there becoming them (`project.new_geometry`, `project.add_plane`; in
 [`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
-and `mesh.assemble`). *Add Block* is the same with a third edge: a box
+and `mesh.assemble`). *Add Block* is the same pane with all three widths: a box
 meshed into eight-node solid bricks, for a part that is neither a beam
 nor a plate (`project.add_block`, `mesh.block`, which also cuts
 cylindrical holes). *Merge Coincident Nodes* on a geometry's bar ties

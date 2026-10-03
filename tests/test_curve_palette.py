@@ -87,9 +87,8 @@ def test_the_report_page_wears_the_shade_of_its_theme(qt_app, tmp_path):
     import pytest
 
     pytest.importorskip('PySide6.QtWebEngineWidgets')
-    from conftest import web_close, web_read
+    from conftest import web_close, web_read, web_view
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from test_export_html import _pair
 
     import visualdynamics
@@ -103,7 +102,7 @@ def test_the_report_page_wears_the_shade_of_its_theme(qt_app, tmp_path):
         path = visualdynamics.export_html(tmp_path / f'{name}.html', measured,
                                           specification=spec,
                                           channel='101Z+', theme=name)
-        view = QWebEngineView()
+        view = web_view()
         view.resize(700, 400)
         view.load(QUrl.fromLocalFile(str(path)))
         view.show()

@@ -46,6 +46,11 @@ def rings(window):
             if 'rotate-ring' in name]
 
 
+def arrows(window):
+    return [name for name in window.scene.plotter.renderer.actors
+            if 'rotate-arrow' in name]
+
+
 def test_the_rings_are_offered_only_for_one_picked_system(systems, window,
                                                           pump):
     assert not window.rotate_action.isVisible(), 'nothing picked'
@@ -66,11 +71,12 @@ def test_turning_on_puts_three_rings_in_the_scene(systems, window, pump):
     window.rotate_action.setChecked(True)
     pump()
     assert len(rings(window)) == 3, 'one per axis'
+    assert len(arrows(window)) == 3, 'and an arrow along each, for sliding'
     assert window.reset_rotation_action.isVisible()
     assert window._angle_actions[0].isVisible(), 'the angle box comes with it'
     window.rotate_action.setChecked(False)
     pump()
-    assert not rings(window), 'and they go with it'
+    assert not rings(window) and not arrows(window), 'and they go with it'
     assert not window.reset_rotation_action.isVisible()
 
 
@@ -108,3 +114,58 @@ def test_reset_squares_it_up_where_it_sits(systems, window, pump):
     assert np.allclose(reset[:3], np.eye(3)), 'back to the global directions'
     assert np.allclose(reset[3], origin), 'without moving it'
     assert window.angle_box.value() == 0.0
+
+
+def test_a_slide_moves_the_origin_along_the_axis_onto_the_grid(systems, window,
+                                                                pump):
+    """Dragging an arrow slides the origin along that axis and lands it
+    on the grid in the geometry's own axes — a centimetre here, the
+    display unit being metres — leaving the basis alone (2026-10-02)."""
+    from visualdynamics.rotate import grid_step
+
+    # the fixture's exodus file says no unit; the grid needs one
+    systems.define_units('m')
+    window.table.selectRow(0)
+    pump()
+    window.rotate_action.setChecked(True)
+    pump()
+    before = np.array(systems.cs_matrix[0])
+    step = grid_step(window.unit_system.unit('length'))
+    assert systems.units_defined and step > 0.0
+    window._sliding = {'row': 0, 'axis': 0, 'start': before.copy(), 'from': 0.0}
+    window._apply_slide(12.3 * step)
+    moved = np.array(systems.cs_matrix[0])
+    assert np.allclose(moved[:3], before[:3]), 'the basis stayed put'
+    shown = window.unit_system.from_si(moved[3], 'length')
+    assert np.allclose(shown / step, np.round(shown / step)), 'on the grid'
+    assert np.allclose(moved[3] - before[3],
+                       window.unit_system.to_si(12.0 * step, 'length') * before[0],
+                       atol=1e-9), 'twelve steps along x, the third of a step dropped'
+    window._commit_slide()
+    pump()
+    assert window._sliding is None
+    assert 'Moved coordinate system' in window.statusBar().currentMessage()
+    assert sorted({i.row() for i
+                   in window.table.selectionModel().selectedIndexes()}) == [0]
+
+
+def test_a_dragged_turn_snaps_to_a_degree_and_a_typed_one_does_not(systems,
+                                                                    window, pump):
+    window.table.selectRow(0)
+    pump()
+    window.rotate_action.setChecked(True)
+    pump()
+    before = np.array(systems.cs_matrix[0])
+    window._rotating = {'row': 0, 'axis': 2, 'start': before.copy(), 'from': 0.0}
+    applied = window._apply_rotation(np.radians(37.4), snap=True)
+    assert np.degrees(applied) == pytest.approx(37.0)
+    assert window._gizmo_reading == 'Turn about Z: +37°'
+    window._commit_rotation()
+    pump()
+    assert window._gizmo_reading is None
+    systems.cs_matrix[0] = before
+    window._rotating = {'row': 0, 'axis': 2, 'start': before.copy(), 'from': 0.0}
+    applied = window._apply_rotation(np.radians(37.4))
+    assert np.degrees(applied) == pytest.approx(37.4), 'typed exactly'
+    window._commit_rotation()
+    pump()

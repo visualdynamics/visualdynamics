@@ -40,6 +40,7 @@ from .averaging_panel import AveragingPanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
+from .mesh_panel import MeshPanel
 from .octave_panel import OctavePanel
 from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
@@ -1648,11 +1649,16 @@ class ScenePane(QWidget):
         # read against the model it is moving, and both want the height
         self.rigid_panel: RigidBodyPanel = RigidBodyPanel()
         self.rigid_panel.hide()
+        #: Add Block's and Add Plane's fields, beside the view rather than in
+        #: a window of their own (2026-10-02)
+        self.mesh_panel: MeshPanel = MeshPanel()
+        self.mesh_panel.hide()
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(self._page, 1)
         row.addWidget(self.rigid_panel)
+        row.addWidget(self.mesh_panel)
         layout.addLayout(row)
         self._layout = layout
         self._view_row = row

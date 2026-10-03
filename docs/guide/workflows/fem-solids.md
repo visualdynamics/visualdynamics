@@ -45,9 +45,11 @@ frame.project().save('frame.vdyn')    # the five models this page builds
 ## 1. Blocks
 
 Set the display units to inches (the unit menu on the toolbar). Start a
-geometry and add blocks: each is a corner, three perpendicular edges and
-an element size, in the display unit, drawn in the 3-D view as it is
-typed. A block whose face falls on a face already there shares its
+geometry and press **Add Block**: a pane opens beside the 3-D view, and
+each block is a center, three widths and an element size, in the
+display unit, drawn in the 3-D view as it is typed; the rings around
+the preview turn it about its center and the arrows slide it onto a
+tenth of an inch. A block whose face falls on a face already there shares its
 nodes, so blocks that meet are tied where they meet. Give blocks
 that meet the same size, and make the face they share the same
 rectangle on both sides: a rail meshed whole puts its nodes between an
@@ -55,11 +57,11 @@ upright's, so the demonstration meshes each rail as the segments
 between the uprights. The frame's top face is at z = 0 with the plate
 below it, as the shared models have it.
 
-| Block | Corner | Edge A | Edge B | Edge C |
-|---|---|---|---|---|
-| frame, a rail | (−8, 2.5, −0.5) | (16, 0, 0) | (0, 0.5, 0) | (0, 0, 0.5) |
-| frame, the other rail | (−8, −3, −0.5) | (16, 0, 0) | (0, 0.5, 0) | (0, 0, 0.5) |
-| frame, an upright at x | (x − 0.25, −2.5, −0.5) | (0.5, 0, 0) | (0, 5, 0) | (0, 0, 0.5) |
+| Block | Center | Widths |
+|---|---|---|
+| frame, a rail | (0, 2.75, −0.25) | (16, 0.5, 0.5) |
+| frame, the other rail | (0, −2.75, −0.25) | (16, 0.5, 0.5) |
+| frame, an upright at x | (x, 0, −0.25) | (0.5, 5, 0.5) |
 
 The uprights stand at x = 0, ±3.875 and ±7.75. A twelfth of an inch
 puts six bricks across a member and three across an insert hole; a

@@ -47,26 +47,31 @@ box's five walls are the box.
 Choose the inch system in the unit menu, select the project's row and
 press **+** (*New Geometry*): an empty geometry, in inches, named
 *Geometry*. Select it and
-press **Add Plane**. Type each row below — block, corner, the two edges —
-with an element size of 0.125 in, and press **Add**; the dialog stays
-open for the next row, draws the plane in the 3-D view as it is typed,
+press **Add Plane**. A pane opens beside the 3-D view. Type each row
+below — block, center, widths — with an element size of 0.125 in, and
+press **Add**. A plate leaves one width at zero, the axis it faces: the
+bottom's zero width along Y puts it in the X-Z plane. The pane stays
+open for the next row, draws the plate in the 3-D view as it is typed,
 and says before each Add how many of its nodes land on nodes already
-there (the right wall's 25 on the bottom's edge, for one).
+there (the right wall's 25 on the bottom's edge, for one). The rings
+around the preview turn it about its center and the arrows slide the
+center along its axes, onto a tenth of an inch; the table's rows need
+neither.
 
-| Plane | Block | Corner | Edge A | Edge B |
-|---|---|---|---|---|
-| box, bottom | box | (−2.875, −2.875, 0) | (5.75, 0, 0) | (0, 0, 3) |
-| box, right side | box | (2.875, −2.875, 0) | (0, 5.75, 0) | (0, 0, 3) |
-| box, left side | box | (−2.875, −2.875, 0) | (0, 5.75, 0) | (0, 0, 3) |
-| box, top left of the slot | box | (−2.875, 2.875, 0) | (2.625, 0, 0) | (0, 0, 3) |
-| box, top right of it | box | (0.25, 2.875, 0) | (2.625, 0, 0) | (0, 0, 3) |
-| right channel, foot | right channel | (1.5, 3.0625, 1) | (0.9375, 0, 0) | (0, 0, 1) |
-| right channel, top | right channel | (1.5, 4.9375, 1) | (0.9375, 0, 0) | (0, 0, 1) |
-| right channel, web | right channel | (2.4375, 3.0625, 1) | (0, 1.875, 0) | (0, 0, 1) |
-| left channel, foot | left channel | (−2.5, 3.0625, 1.0625) | (1, 0, 0) | (0, 0, 0.9375) |
-| left channel, top | left channel | (−2.5, 4.9375, 1.0625) | (1, 0, 0) | (0, 0, 0.9375) |
-| left channel, web | left channel | (−2.5, 3.0625, 1.0625) | (1, 0, 0) | (0, 1.875, 0) |
-| beam | beam | (−2.5, 5.0625, 1) | (5, 0, 0) | (0, 0, 1) |
+| Plane | Block | Center | Widths |
+|---|---|---|---|
+| box, bottom | box | (0, −2.875, 1.5) | (5.75, 0, 3) |
+| box, right side | box | (2.875, 0, 1.5) | (0, 5.75, 3) |
+| box, left side | box | (−2.875, 0, 1.5) | (0, 5.75, 3) |
+| box, top left of the slot | box | (−1.5625, 2.875, 1.5) | (2.625, 0, 3) |
+| box, top right of it | box | (1.5625, 2.875, 1.5) | (2.625, 0, 3) |
+| right channel, foot | right channel | (1.96875, 3.0625, 1.5) | (0.9375, 0, 1) |
+| right channel, top | right channel | (1.96875, 4.9375, 1.5) | (0.9375, 0, 1) |
+| right channel, web | right channel | (2.4375, 4, 1.5) | (0, 1.875, 1) |
+| left channel, foot | left channel | (−2, 3.0625, 1.53125) | (1, 0, 0.9375) |
+| left channel, top | left channel | (−2, 4.9375, 1.53125) | (1, 0, 0.9375) |
+| left channel, web | left channel | (−2, 4, 1.0625) | (1, 1.875, 0) |
+| beam | beam | (0, 5.0625, 1.5) | (5, 0, 1) |
 
 The two channels are turned a quarter turn from each other, as the
 hardware is; the lengths are the solid model's, in inches (the geometry

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import fixture_path, web_view
 
 import visualdynamics
 from visualdynamics import View
@@ -249,13 +249,12 @@ def test_the_page_opens_a_scene_on_the_geometry_view(qt_app, tmp_path):
 
     from conftest import web_close, web_read
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
 
     geometry = _plate()
     geometry.view = View(eye=(1, 1, -1), up=(0, 1, 0))
     path = visualdynamics.export_html(tmp_path / 'g.html',
                                       geometry=geometry, theme='light')
-    view = QWebEngineView()
+    view = web_view()
     view.resize(600, 400)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()

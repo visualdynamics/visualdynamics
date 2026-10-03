@@ -1054,3 +1054,129 @@ def test_drilling_artifacts_live_far_above_the_physical_band():
                 f'drilling artifact at {frequency:.0f} Hz')
     assert found > 0, ('no pure-drilling modes at all: the classifier '
                        'is not seeing them, so it guards nothing')
+
+
+# ---- batched assembly (2026-10-03) ------------------------------------------
+
+
+def _element_by_element(model):
+    """The assembly as it was, one element at a time, from the same
+    element routines: what the batched one must equal."""
+    from scipy import sparse
+
+    from visualdynamics.core.fem import (
+        _beam_mass,
+        _beam_stiffness,
+        _block_diagonal,
+        _element_axes,
+        _plate_frame,
+        _plate_matrices,
+        _solid_matrices,
+        _triangle_frame,
+        _triangle_matrices,
+    )
+
+    index = {node: 6 * i for i, node in enumerate(model.node_ids)}
+    n = model.num_dof
+    rk, ck, vk, rm, cm, vm = [], [], [], [], [], []
+    def put(rows, k, m):
+        r = len(rows); i, j = np.repeat(rows, r), np.tile(rows, r)
+        if k is not None:
+            rk.append(i); ck.append(j); vk.append(k.ravel())
+        rm.append(i); cm.append(j); vm.append(m.ravel())
+    for beam in model.beams:
+        L = model._length(beam)
+        T = _block_diagonal(_element_axes(model._nodes[beam.node_a], model._nodes[beam.node_b], beam.orientation), 4)
+        rows = np.r_[index[beam.node_a]:index[beam.node_a] + 6, index[beam.node_b]:index[beam.node_b] + 6]
+        put(rows, T.T @ _beam_stiffness(beam.material, beam.section, L) @ T,
+            T.T @ _beam_mass(beam.material, beam.section, L) @ T)
+    for plate in model.plates:
+        R, a, b = _plate_frame(*[model._nodes[q] for q in plate.nodes])
+        T = _block_diagonal(R, 8); k, m = _plate_matrices(plate.material, plate.thickness, a, b)
+        put(np.concatenate([np.arange(index[q], index[q] + 6) for q in plate.nodes]), T.T @ k @ T, T.T @ m @ T)
+    for tri in model.triangles:
+        R, xy = _triangle_frame(*[model._nodes[q] for q in tri.nodes])
+        T = _block_diagonal(R, 6); k, m = _triangle_matrices(tri.material, tri.thickness, xy)
+        put(np.concatenate([np.arange(index[q], index[q] + 6) for q in tri.nodes]), T.T @ k @ T, T.T @ m @ T)
+    for solid in model.solids:
+        k, m = _solid_matrices(solid.material, np.array([model._nodes[q] for q in solid.nodes]))
+        put(np.concatenate([np.arange(index[q], index[q] + 3) for q in solid.nodes]), k, m)
+    for item in model.masses:
+        s = index[item.node]
+        put(np.arange(s, s + 6), None, np.diag([item.mass] * 3 + list(item.inertia)))
+    def gather(r, c, v):
+        mat = sparse.coo_matrix((np.concatenate(v), (np.concatenate(r), np.concatenate(c))), shape=(n, n)).tocsr()
+        return ((mat + mat.T) / 2.0).tocsr()
+    return gather(rm, cm, vm), gather(rk, ck, vk)
+
+
+
+def _every_family():
+    """A model holding beams, plates of two thicknesses, triangles, bricks,
+    a tet, a wedge and a lumped mass."""
+    from visualdynamics.core.fem import Model, Section, material
+
+    al = material('6061-T6')
+    model = Model()
+    nid = 1
+    grid = {}
+    for i in range(6):
+        for j in range(5):
+            grid[i, j] = model.add_node(nid, 0.1 * i, 0.07 * j, 0.0); nid += 1
+    for i in range(5):
+        for j in range(4):
+            if (i + j) % 3:
+                model.add_plate([grid[i, j], grid[i + 1, j], grid[i + 1, j + 1], grid[i, j + 1]], al, 0.003 + 0.001 * (i % 2))
+            else:
+                model.add_triangle([grid[i, j], grid[i + 1, j], grid[i + 1, j + 1]], al, 0.003)
+                model.add_triangle([grid[i, j], grid[i + 1, j + 1], grid[i, j + 1]], al, 0.003)
+    sec = Section.rectangle('bar', 0.01, 0.02)
+    for i in range(5):
+        model.add_beam(grid[i, 0], grid[i + 1, 0], al, sec, orientation=(0, 0, 1))
+    # a column of bricks, a wedge and a tet under the plate's corner
+    base = {}
+    for k in range(3):
+        for (x, y) in ((0, 0), (0.1, 0), (0.1, 0.07), (0, 0.07)):
+            base[x, y, k] = model.add_node(nid, x, y, -0.05 * (k + 1)); nid += 1
+    for k in range(2):
+        model.add_solid([base[0, 0, k], base[0.1, 0, k], base[0.1, 0.07, k], base[0, 0.07, k],
+                         base[0, 0, k + 1], base[0.1, 0, k + 1], base[0.1, 0.07, k + 1], base[0, 0.07, k + 1]], al)
+    apex = model.add_node(nid, 0.05, 0.035, -0.2); nid += 1
+    model.add_solid([base[0, 0, 2], base[0.1, 0, 2], base[0.1, 0.07, 2], apex], al)
+    w = [model.add_node(nid + q, *p) for q, p in enumerate([(0.3, 0, -0.1), (0.4, 0, -0.1), (0.3, 0.07, -0.1),
+                                                             (0.3, 0, -0.2), (0.4, 0, -0.2), (0.3, 0.07, -0.2)])]
+    model.add_solid(w, al)
+    model.add_mass(grid[5, 4], 0.25, (1e-4, 2e-4, 3e-4))
+    return model
+
+
+def test_the_batched_assembly_is_the_element_by_element_one():
+    """Every family — beams, plates, triangles, bricks, a wedge, a tet and
+    a lumped mass — rotated and scattered in batches, each distinct
+    element's matrices computed once, gives the matrices the one-at-a-
+    time assembly gave, to the last bit or two; the dense assembly
+    agrees with the sparse."""
+    model = _every_family()
+    mass, stiffness = model.sparse_matrices()
+    ref_mass, ref_stiffness = _element_by_element(model)
+    assert abs(mass - ref_mass).max() <= 1e-14 * abs(ref_mass).max()
+    assert abs(stiffness - ref_stiffness).max() <= 1e-14 * abs(ref_stiffness).max()
+    dense_mass, dense_stiffness = model.matrices()
+    assert np.allclose(dense_mass, mass.toarray(), rtol=0,
+                       atol=1e-14 * abs(dense_mass).max())
+    assert np.allclose(dense_stiffness, stiffness.toarray(), rtol=0,
+                       atol=1e-14 * abs(dense_stiffness).max())
+
+
+def test_a_meshed_plate_computes_its_element_matrices_once(monkeypatch):
+    """A plate of identical elements builds one 24x24 pair, not one per
+    element: half a fine model's solve was that repetition (2026-10-03)."""
+    from visualdynamics.core import fem
+
+    calls = []
+    real = fem._plate_matrices
+    monkeypatch.setattr(fem, '_plate_matrices',
+                        lambda *a: calls.append(a) or real(*a))
+    model = square_plate(8)
+    model.sparse_matrices()
+    assert len(model.plates) == 64 and len(calls) == 1

@@ -153,6 +153,12 @@ EIGEN_SOLVES_PER_MODE = 6
 LANCZOS_GUARD = 8
 
 
+#: how many elements of one family are rotated and scattered at once:
+#: enough that the per-chunk cost vanishes, few enough that a fine mesh's
+#: (E, 24, 24) arrays stay in the tens of megabytes
+ASSEMBLY_CHUNK = 4096
+
+
 @dataclass(frozen=True)
 class Material:
     """An isotropic elastic material.
@@ -1343,61 +1349,132 @@ class Model:
 
     def _contributions(self):
         """Every element's (rows, stiffness, mass) in global coordinates,
-        and every lumped mass's (rows, None, mass) — what both assemblies
+        and every lumped mass's (rows, None, mass) — `_batches` one
+        element at a time, for the dense assembly."""
+        for rows, k, m in self._batches():
+            for e in range(len(rows)):
+                yield rows[e], (None if k is None else k[e]), m[e]
+
+    def _batches(self, chunk: int = ASSEMBLY_CHUNK):
+        """The elements' (rows, stiffness, mass) in global coordinates,
+        as arrays of up to `chunk` elements of one family at a time —
+        rows (E, r), stiffness and mass (E, r, r) — what both assemblies
         scatter, so the dense and the sparse matrices cannot differ in
-        anything but storage."""
+        anything but storage.
+
+        Each distinct element's local matrices are computed once (2026-10-03):
+        a plate's depend only on its material, thickness and side lengths,
+        a beam's on its material, section and length, a triangle's on its
+        corners in its own plane, a solid's on its corners relative to its
+        first, so a meshed model of twenty thousand identical plates built
+        one 24x24 pair twenty thousand times in Python, half its solve
+        (Brandon: is the solve multi-threaded? It was not, and threads were
+        not the answer). The key is the exact inputs, so a cached matrix is
+        the matrix; the rotations into the global axes are one einsum per
+        chunk, and the chunk bounds the memory a fine mesh takes.
+        """
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
 
-        for beam in self.beams:
-            length = self._length(beam)
-            if length == 0.0:
-                raise ValueError(f'beam {beam.node_a}-{beam.node_b} has zero length')
-            rotation = _element_axes(self._nodes[beam.node_a],
-                                     self._nodes[beam.node_b], beam.orientation)
-            transform = _block_diagonal(rotation, 4)
-            # local -> global: k_g = T^T k_l T, with T mapping global
-            # displacements onto local ones
-            k = transform.T @ _beam_stiffness(beam.material, beam.section, length) @ transform
-            m = transform.T @ _beam_mass(beam.material, beam.section, length) @ transform
-            rows = np.r_[index[beam.node_a]:index[beam.node_a] + 6,
-                         index[beam.node_b]:index[beam.node_b] + 6]
-            yield rows, k, m
+        def dof_rows(nodes_per, per_node):
+            idx = np.array([[index[n] for n in nodes] for nodes in nodes_per],
+                           dtype=np.int64)
+            return (idx[:, :, None] + np.arange(per_node)).reshape(len(idx), -1)
 
-        for plate in self.plates:
-            corners = [self._nodes[n] for n in plate.nodes]
-            rotation, a, b = _plate_frame(*corners)
-            transform = _block_diagonal(rotation, 8)
-            k_local, m_local = _plate_matrices(plate.material,
-                                               plate.thickness, a, b)
-            rows = np.concatenate([np.arange(index[n], index[n] + 6)
-                                   for n in plate.nodes])
-            yield (rows, transform.T @ k_local @ transform,
-                   transform.T @ m_local @ transform)
+        def rotated(rotations, local):
+            # k_g = T^T k_l T with T the rotation repeated down the diagonal
+            count, size, _ = local.shape
+            blocks = size // 3
+            grid = local.reshape(count, blocks, 3, blocks, 3)
+            out = np.einsum('epi,eapbq,eqj->eaibj', rotations, grid, rotations,
+                            optimize=True)
+            return out.reshape(count, size, size)
 
-        for triangle in self.triangles:
-            corners = [self._nodes[n] for n in triangle.nodes]
-            rotation, xy = _triangle_frame(*corners)
-            transform = _block_diagonal(rotation, 6)
-            k_local, m_local = _triangle_matrices(triangle.material,
-                                                  triangle.thickness, xy)
-            rows = np.concatenate([np.arange(index[n], index[n] + 6)
-                                   for n in triangle.nodes])
-            yield (rows, transform.T @ k_local @ transform,
-                   transform.T @ m_local @ transform)
+        def cached(compute, keys):
+            store: dict = {}
+            first = []
+            for key in keys:
+                if key not in store:
+                    store[key] = len(first)
+                    first.append(key)
+            which = np.array([store[key] for key in keys], dtype=np.int64)
+            pairs = [compute(key) for key in first]
+            k = np.array([pair[0] for pair in pairs])
+            m = np.array([pair[1] for pair in pairs])
+            return which, k, m
 
-        for solid in self.solids:
-            xyz = np.array([self._nodes[n] for n in solid.nodes])
-            k, m = _solid_matrices(solid.material, xyz)
-            # three translations per node: the rows of each node's
-            # first three degrees of freedom, and nothing on its rotations
-            rows = np.concatenate([np.arange(index[n], index[n] + 3)
-                                   for n in solid.nodes])
-            yield rows, k, m
+        for lo in range(0, len(self.beams), chunk):
+            beams = self.beams[lo:lo + chunk]
+            lengths = []
+            rotations = []
+            for beam in beams:
+                length = self._length(beam)
+                if length == 0.0:
+                    raise ValueError(f'beam {beam.node_a}-{beam.node_b} has zero length')
+                lengths.append(length)
+                rotations.append(_element_axes(self._nodes[beam.node_a],
+                                               self._nodes[beam.node_b],
+                                               beam.orientation))
+            which, k, m = cached(
+                lambda key: (_beam_stiffness(*key), _beam_mass(*key)),
+                [(beam.material, beam.section, length)
+                 for beam, length in zip(beams, lengths)])
+            rotations = np.array(rotations)
+            rows = dof_rows([(beam.node_a, beam.node_b) for beam in beams], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
 
-        for item in self.masses:
-            start = index[item.node]
-            yield (np.arange(start, start + 6), None,
-                   np.diag([item.mass] * 3 + list(item.inertia)))
+        for lo in range(0, len(self.plates), chunk):
+            plates = self.plates[lo:lo + chunk]
+            corners = np.array([[self._nodes[n] for n in plate.nodes]
+                                for plate in plates], dtype=np.float64)
+            rotations, a, b = _plate_frames(corners)
+            which, k, m = cached(
+                lambda key: _plate_matrices(*key),
+                [(plate.material, plate.thickness, float(a[e]), float(b[e]))
+                 for e, plate in enumerate(plates)])
+            rows = dof_rows([plate.nodes for plate in plates], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
+
+        for lo in range(0, len(self.triangles), chunk):
+            triangles = self.triangles[lo:lo + chunk]
+            frames = [_triangle_frame(*[self._nodes[n] for n in triangle.nodes])
+                      for triangle in triangles]
+            which, k, m = cached(
+                lambda key: _triangle_matrices(key[0], key[1],
+                                               np.array(key[2]).reshape(3, 2)),
+                [(triangle.material, triangle.thickness,
+                  tuple(float(v) for v in xy.ravel()))
+                 for triangle, (_rotation, xy) in zip(triangles, frames)])
+            rotations = np.array([rotation for rotation, _xy in frames])
+            rows = dof_rows([triangle.nodes for triangle in triangles], 6)
+            yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
+
+        for lo in range(0, len(self.solids), chunk):
+            solids = self.solids[lo:lo + chunk]
+            # tets, wedges and bricks side by side differ in size, so each
+            # count is its own batch
+            by_count: dict[int, list] = {}
+            for solid in solids:
+                by_count.setdefault(len(solid.nodes), []).append(solid)
+            for members in by_count.values():
+                # a solid's matrices are those of its corners relative to
+                # its first: the same brick anywhere in the mesh is one brick
+                shapes = [np.array([self._nodes[n] for n in solid.nodes])
+                          for solid in members]
+                which, k, m = cached(
+                    lambda key: _solid_matrices(key[0],
+                                                np.array(key[1]).reshape(-1, 3)),
+                    [(solid.material, tuple(float(v) for v in (xyz - xyz[0]).ravel()))
+                     for solid, xyz in zip(members, shapes)])
+                # three translations per node: the rows of each node's
+                # first three degrees of freedom, and nothing on its rotations
+                rows = dof_rows([solid.nodes for solid in members], 3)
+                yield rows, k[which], m[which]
+
+        if self.masses:
+            rows = dof_rows([(item.node,) for item in self.masses], 6)
+            mass = np.array([np.diag([item.mass] * 3 + list(item.inertia))
+                             for item in self.masses])
+            yield rows, None, mass
 
     def matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Assemble the global mass and stiffness matrices, dense.
@@ -1439,15 +1516,16 @@ class Model:
         if ticker is not None:
             ticker.add(len(self.beams) + len(self.plates)
                        + len(self.triangles) + len(self.solids))
-        for rows, k, m in self._contributions():
-            if ticker is not None:
-                ticker.tick()
-            r = len(rows)
-            i, j = np.repeat(rows, r), np.tile(rows, r)
+        for rows, k, m in self._batches():
+            count, r = rows.shape
+            i = np.broadcast_to(rows[:, :, None], (count, r, r)).ravel()
+            j = np.broadcast_to(rows[:, None, :], (count, r, r)).ravel()
             if k is not None:
                 rows_k.append(i)
                 cols_k.append(j)
                 vals_k.append(k.ravel())
+                if ticker is not None:
+                    ticker.tick(count)
             rows_m.append(i)
             cols_m.append(j)
             vals_m.append(m.ravel())
@@ -2211,6 +2289,29 @@ def _plate_frame(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray,
             'where corners 1, 2 and 4 put it. Rectangular elements '
             'only — see Plate')
     return np.array([e1, e2, np.cross(e1, e2)]), a, b
+
+
+def _plate_frames(corners: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`_plate_frame` for many plates at once: corners (E, 4, 3) in,
+    rotations (E, 3, 3) and side lengths a and b (E,) out. A plate that
+    fails a check is handed to `_plate_frame`, so the refusal is the
+    one-plate refusal, word for word."""
+    edge_x = corners[:, 1] - corners[:, 0]
+    edge_y = corners[:, 3] - corners[:, 0]
+    a = np.linalg.norm(edge_x, axis=1)
+    b = np.linalg.norm(edge_y, axis=1)
+    tolerance = 1e-6 * np.maximum(a, b)
+    bad = ((a == 0.0) | (b == 0.0)
+           | (np.abs(np.einsum('ei,ei->e', edge_x, edge_y))
+              > tolerance * np.maximum(a, b))
+           | (np.linalg.norm(corners[:, 2] - (corners[:, 0] + edge_x + edge_y),
+                             axis=1) > tolerance))
+    if bad.any():
+        _plate_frame(*corners[int(np.flatnonzero(bad)[0])])
+    e1 = edge_x / a[:, None]
+    e2 = edge_y / b[:, None]
+    return np.stack([e1, e2, np.cross(e1, e2)], axis=1), a, b
 
 
 #: transverse shear correction for a homogeneous section: the parabolic

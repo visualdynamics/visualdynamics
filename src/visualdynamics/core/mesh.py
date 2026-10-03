@@ -312,6 +312,75 @@ def landing(geometry: Geometry, part: Geometry,
     return distance <= tolerance, nearest
 
 
+def block_families(geometry: Geometry, block_id: int) -> set[str]:
+    """The element families a block of `geometry` holds: empty for a
+    block with no elements yet."""
+    import numpy as np
+
+    from .geometry import element_family
+
+    mask = np.asarray(geometry.elem_block) == int(block_id)
+    return {element_family(int(code)) for code in np.asarray(geometry.elem_type)[mask]}
+
+
+def block_refusal(geometry: Geometry, part: Geometry) -> str | None:
+    """Why `part` cannot join `geometry` by block name, or None.
+
+    A block holds one element family (`Geometry.mixed_blocks`), and a
+    part whose block is named like one already holding another family
+    would make it two at once: a plate added under the name of a block
+    of bricks was one block, deleted whole from either family's row in
+    the tree (Brandon, 2026-10-02). The one rule `join` refuses by and
+    the Add pane reads before it offers Add.
+    """
+    from .geometry import FAMILY_LABELS
+
+    names = list(geometry.block_name)
+    for k, block in enumerate(part.block_id):
+        name = part.block_name[k]
+        if not name or name not in names:
+            continue
+        held = block_families(geometry, int(geometry.block_id[names.index(name)]))
+        coming = block_families(part, int(block))
+        if held and coming and held != coming:
+            have = ', '.join(FAMILY_LABELS[f].lower() for f in sorted(held))
+            want = ', '.join(FAMILY_LABELS[f].lower() for f in sorted(coming))
+            return (f'block {name!r} holds {have}, and {want} need a block of '
+                    'their own: give them another name')
+    return None
+
+
+def _solid_cells(geometry: Geometry) -> set[tuple]:
+    """(type, sorted nodes) of every solid element: the cells already
+    filled. Solids only, as `Geometry.duplicate_elements` has it."""
+    from .geometry import SOLID_FAMILIES, element_family
+
+    return {(int(t), tuple(sorted(int(n) for n in c)))
+            for t, c in zip(geometry.elem_type, geometry.elem_conn)
+            if element_family(int(t)) in SOLID_FAMILIES}
+
+
+def already_there(geometry: Geometry, part: Geometry,
+                  tolerance: float | None = None) -> int:
+    """How many of `part`'s elements `join` would leave out for being
+    elements already there — every corner on a node already there, the
+    cell already filled — so a reading can say it before the Add."""
+    import numpy as np
+
+    on, nearest = landing(geometry, part, tolerance)
+    if not on.any():
+        return 0
+    ids = {int(part.node_id[k]): int(geometry.node_id[nearest[k]])
+           for k in np.flatnonzero(on)}
+    there = _solid_cells(geometry)
+    count = 0
+    for element, code in zip(part.elem_conn, part.elem_type):
+        renamed = [ids.get(int(n)) for n in element]
+        if None not in renamed and (int(code), tuple(sorted(renamed))) in there:
+            count += 1
+    return count
+
+
 def join(geometry: Geometry, part: Geometry,
          tolerance: float | None = None) -> dict:
     """Put `part` into `geometry`, in place: each of the part's nodes that
@@ -323,7 +392,9 @@ def join(geometry: Geometry, part: Geometry,
 
     A block of the part named like one already in the geometry joins it:
     the five planes of a box, each named 'box', are one part, given its
-    material once. An unnamed block is always a block of its own.
+    material once. An unnamed block is always a block of its own. A
+    named block holding another element family is refused
+    (`block_refusal`): a block holds one family.
 
     Parameters
     ----------
@@ -341,7 +412,8 @@ def join(geometry: Geometry, part: Geometry,
     -------
     dict
         'added', the nodes added; 'shared', the part's nodes that fell on
-        nodes already there; 'elements', the elements added; 'blocks',
+        nodes already there; 'elements', the elements added; 'duplicates', the part's
+        elements left out for being elements already there; 'blocks',
         the ids of the blocks they went into.
     """
     if (geometry.num_nodes and part.num_nodes
@@ -349,6 +421,9 @@ def join(geometry: Geometry, part: Geometry,
         raise ValueError('one has its length unit defined and the other '
                          'does not, so their coordinates do not mean the '
                          'same thing')
+    refusal = block_refusal(geometry, part)
+    if refusal is not None:
+        raise ValueError(refusal)
     on, nearest = landing(geometry, part, tolerance)
     new_ids = geometry.add_nodes(part.node_xyz[~on])
     renumber = dict(zip(part.node_id[~on].tolist(), new_ids.tolist()))
@@ -366,13 +441,26 @@ def join(geometry: Geometry, part: Geometry,
         block_map[int(block)] = new
         if int(block) in part.block_properties:
             geometry.block_properties[new] = part.block_properties[int(block)]
-    geometry.add_elements(
-        [[renumber[int(n)] for n in element] for element in part.elem_conn],
-        part.elem_type, [block_map[int(b)] for b in part.elem_block])
+    # an element of the part that is an element already there — the
+    # overlap of two crossing bars — fills that cell once, as the one
+    # already there; adding it again counted the overlap twice
+    # (2026-10-02)
+    there = _solid_cells(geometry)
+    conn, types, blocks = [], [], []
+    for element, code, block in zip(part.elem_conn, part.elem_type,
+                                    part.elem_block):
+        renamed = [renumber[int(n)] for n in element]
+        if (int(code), tuple(sorted(renamed))) in there:
+            continue
+        conn.append(renamed)
+        types.append(int(code))
+        blocks.append(block_map[int(block)])
+    duplicates = len(part.elem_conn) - len(conn)
+    geometry.add_elements(conn, types, blocks)
     if geometry.length_unit is None:
         geometry.length_unit = part.length_unit
     return {'added': len(new_ids), 'shared': int(on.sum()),
-            'elements': len(part.elem_conn),
+            'elements': len(conn), 'duplicates': duplicates,
             'blocks': sorted(set(block_map.values()))}
 
 

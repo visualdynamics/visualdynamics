@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
-    QDialog,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -137,11 +136,18 @@ from ..plot import (
 )
 from ..rotate import (
     angle_in_plane,
+    angles_of,
+    arrow_points,
+    axis_hit,
+    distance_along,
+    frame_from_angles,
+    grid_step,
     identity_frame,
     plane_hit,
     ring_points,
     ring_under_cursor,
     rotate_frame,
+    snapped,
     wrapped,
 )
 from ..theme import OVERLAY_ALPHA
@@ -211,6 +217,9 @@ ROLE_POPULATED = Qt.ItemDataRole.UserRole + 2       # lazy children built yet?
 
 # room a unit cell needs beyond its text: the drop-down arrow and padding
 COMBO_CELL_PADDING = 44
+
+#: a dragged turn snaps to whole degrees of this; a typed angle does not
+ANGLE_STEP = 1.0
 
 FRAMES_PER_SECOND = 30
 PHASE_STEPS = 120            # frames in one mode-shape cycle
@@ -736,12 +745,17 @@ class MainWindow(QMainWindow):
         self._hovered = None
         self._hover_mesh = None
         self._picked_mesh = None
-        self.plane_dialog: QDialog | None = None   # Add Plane's, while open
-        self.block_dialog: QDialog | None = None   # Add Block's, while open
+        #: the box Add Block or Add Plane is placing, while its pane is
+        #: open: kind, geometry name, the display unit and whether the
+        #: geometry has one, and the frame (basis rows and the center)
+        #: the box is drawn in, in the display unit (2026-10-02)
+        self._mesh: dict | None = None
         # Tie's first patch, while the second is being picked
         self._tie_patch: list[int] | None = None
         self._framed = ()          # what the camera was last framed for
         self._rotating = None      # the ring gesture in progress
+        self._gizmo_reading = None  # the drag's number, while it lasts
+        self._sliding = None       # the arrow gesture in progress (2026-10-02)
         self._rotate_observers = []
         self._last_axis = 2        # the ring a typed angle turns about
         self._pick_observers = []
@@ -850,6 +864,10 @@ class MainWindow(QMainWindow):
         self.scene.rigid_toggled.connect(
             lambda _wanted: self.render_current())
         self.scene.rigid_panel.changed.connect(self._rigid_edited)
+        self.scene.mesh_panel.changed.connect(self._mesh_edited)
+        self.scene.mesh_panel.add_asked.connect(self._mesh_add)
+        self.scene.mesh_panel.close_asked.connect(self.close_mesh_pane)
+        self.scene.mesh_panel.square_asked.connect(self._mesh_square_up)
         self.scene.rigid_panel.apply_asked.connect(
             self.generate_rigid_body_modes)
         self.data_pane.shock_panel.srs_asked.connect(self.compute_srs)
@@ -1791,7 +1809,8 @@ class MainWindow(QMainWindow):
         self.rotate_action: QAction = QAction(control_icon('rotate'), '', self)
         self.rotate_action.setCheckable(True)
         self.rotate_action.setToolTip(
-            'Turn the selected coordinate system by dragging a ring')
+            'Turn the selected coordinate system by dragging a ring, or '
+            'slide it along an axis by dragging an arrow')
         self.rotate_action.toggled.connect(self.set_rotate_mode)
         toolbar.addAction(self.rotate_action)
         self.rotate_action.setVisible(False)
@@ -4308,18 +4327,29 @@ class MainWindow(QMainWindow):
         only columns worth clicking the narrowest on screen. Size them to
         the units they offer instead.
         """
-        table.resizeColumnsToContents()
-        metrics = table.fontMetrics()
-        for i, column in enumerate(model.columns):
-            if not column.editable:
-                continue
-            widest = max((metrics.horizontalAdvance(str(choice))
-                          for choice in column.choices or []), default=0)
-            table.setColumnWidth(
-                i, max(table.columnWidth(i), widest + COMBO_CELL_PADDING))
+        self._size_choice_columns(table, model)
         return (sum(table.columnWidth(i)
                     for i in range(model.columnCount()))
                 + table.verticalHeader().width())
+
+    @staticmethod
+    def _size_choice_columns(table, model) -> None:
+        """Columns sized to their contents, and a column offering choices
+        no narrower than the widest of them. The Blocks table's Material
+        column starts empty and sized to nothing, and a material name
+        could not be read in it (Brandon, 2026-10-02); the units columns
+        had the same rule since September. The header stays interactive,
+        so a column is still the person's to drag wider or narrower."""
+        table.resizeColumnsToContents()
+        metrics = table.fontMetrics()
+        for i, column in enumerate(getattr(model, 'columns', ())):
+            if not getattr(column, 'editable', False):
+                continue
+            widest = max((metrics.horizontalAdvance(str(choice))
+                          for choice in column.choices or []), default=0)
+            if widest:
+                table.setColumnWidth(
+                    i, max(table.columnWidth(i), widest + COMBO_CELL_PADDING))
 
     def close_units_panel(self) -> None:
         self.units_target = None
@@ -4939,6 +4969,7 @@ class MainWindow(QMainWindow):
         """Show the rings, and take over the mouse while one is dragged."""
         enabled = bool(enabled) and self._turnable_row() is not None
         self._rotating = None
+        self._sliding = None
         if enabled:
             self._begin_rotating()
         else:
@@ -4946,7 +4977,10 @@ class MainWindow(QMainWindow):
         self._update_rotate_actions()
 
     def _rotating_frame(self):
-        """(row, the coordinate system's 4x3 matrix) being turned."""
+        """(row, the coordinate system's 4x3 matrix) being turned — or,
+        while Add Block's pane is open, ('mesh', the box's frame)."""
+        if self._mesh is not None:
+            return 'mesh', self._mesh['frame']
         row = self._turnable_row()
         if row is None:
             return None, None
@@ -4978,12 +5012,18 @@ class MainWindow(QMainWindow):
                     interactor.interactor.RemoveObserver(observer)
         self._rotate_observers = []
         self._rotating = None
+        self._sliding = None
         if self.scene.plotter is not None:
             for axis in range(3):
-                self.scene.plotter.remove_actor(f'rotate-ring-{axis}', render=False)
+                for kind in ('ring', 'arrow', 'head'):
+                    self.scene.plotter.remove_actor(f'rotate-{kind}-{axis}',
+                                                    render=False)
             self.scene.plotter.render()
 
     def _ring_radius(self):
+        if self._mesh is not None:
+            # the box's own size, so the rings sit around it
+            return 0.6 * (max(self.scene.mesh_panel.values()['widths']) or 1.0)
         _points, _unit = display_points(self.objects[self.editing[0]],
                                         self.unit_system)
         span = np.ptp(_points, axis=0).max() if len(_points) > 1 else 1.0
@@ -5005,10 +5045,44 @@ class MainWindow(QMainWindow):
                 pv.lines_from_points(loop).tube(radius=radius * 0.03,
                                                 n_sides=12),
                 color=AXIS_COLORS[axis], name=f'rotate-ring-{axis}')
+            # and an arrow along each axis, for sliding (2026-10-02)
+            shaft = arrow_points(matrix, axis, self._arrow_length(), steps=2)
+            self.scene.plotter.add_mesh(
+                pv.lines_from_points(shaft).tube(radius=radius * 0.03,
+                                                 n_sides=12),
+                color=AXIS_COLORS[axis], name=f'rotate-arrow-{axis}')
+            self.scene.plotter.add_mesh(
+                pv.Cone(center=shaft[-1], direction=matrix[axis],
+                        height=radius * 0.3, radius=radius * 0.1),
+                color=AXIS_COLORS[axis], name=f'rotate-head-{axis}')
         self.scene.plotter.render()
+
+    def _arrow_length(self):
+        """An arrow reaches past the rings, so its head is clear of
+        them."""
+        return self._ring_radius() * 1.6
+
+    def _arrow_screen_points(self):
+        """Each arrow's axis and its pixels, for hit testing — the
+        shaft and its head, read as the ring hit test reads a ring."""
+        from ..viz.pick import ScreenProjector
+
+        _row, matrix = self._rotating_frame()
+        if matrix is None:
+            return []
+        matrix = self._display_frame(matrix)
+        length = self._arrow_length()
+        arrows = []
+        for axis in range(3):
+            projector = ScreenProjector(self.scene.plotter.renderer,
+                                        arrow_points(matrix, axis, length * 1.2))
+            arrows.append((axis, projector.screen()[0]))
+        return arrows
 
     def _display_frame(self, matrix):
         """The frame in the units the scene is drawn in."""
+        if self._mesh is not None:
+            return np.array(matrix, dtype=np.float64)   # held in them
         shown = np.array(matrix, dtype=np.float64)
         shown[3] = _display_length(matrix[3], self.objects[self.editing[0]],
                                    self.unit_system)
@@ -5039,6 +5113,20 @@ class MainWindow(QMainWindow):
         position = self._cursor_position()
         if position is None:
             return
+        # an arrow first: the arrows cross the rings at the origin, and
+        # a press there is a slide, the gesture that needs the origin
+        axis = ring_under_cursor(self._arrow_screen_points(), position)
+        if axis is not None:
+            row, matrix = self._rotating_frame()
+            world = self._cursor_on_axis(matrix, axis, position)
+            if world is None:
+                return
+            self._sliding = {
+                'row': row, 'axis': axis,
+                'start': np.array(matrix, dtype=np.float64),
+                'from': distance_along(self._display_frame(matrix), axis, world)}
+            self._abort(caller, self._rotate_observers[0])
+            return
         axis = ring_under_cursor(self._ring_screen_points(), position)
         if axis is None:
             return                      # not on a ring: let the camera have it
@@ -5056,6 +5144,18 @@ class MainWindow(QMainWindow):
         self._abort(caller, self._rotate_observers[0])
 
     def _on_rotate_move(self, caller, _event):
+        if self._sliding is not None:
+            position = self._cursor_position()
+            if position is None:
+                return
+            start, axis = self._sliding['start'], self._sliding['axis']
+            world = self._cursor_on_axis(start, axis, position)
+            if world is None:
+                return
+            self._apply_slide(distance_along(self._display_frame(start), axis,
+                                             world) - self._sliding['from'])
+            self._abort(caller, self._rotate_observers[1])
+            return
         if self._rotating is None:
             return
         position = self._cursor_position()
@@ -5068,21 +5168,90 @@ class MainWindow(QMainWindow):
             return
         swept = wrapped(angle_in_plane(self._display_frame(start), axis, world)
                         - self._rotating['from'])
-        self._apply_rotation(swept)
+        swept = self._apply_rotation(swept, snap=True)
         self.angle_box.blockSignals(True)
         self.angle_box.setValue(np.degrees(swept))
         self.angle_box.blockSignals(False)
         self._abort(caller, self._rotate_observers[1])
 
     def _on_rotate_release(self, caller, _event):
+        if self._sliding is not None:
+            self._commit_slide()
+            self._abort(caller, self._rotate_observers[2])
+            return
         if self._rotating is None:
             return
         self._commit_rotation()
         self._abort(caller, self._rotate_observers[2])
 
+    def _cursor_on_axis(self, matrix, axis, position):
+        """The point on the frame's axis nearest the cursor's ray."""
+        projector = self._projector or self._gizmo_projector()
+        if projector is None:
+            return None
+        near = projector.unproject(position[0], position[1], -1.0)
+        far = projector.unproject(position[0], position[1], 1.0)
+        shown = self._display_frame(matrix)
+        return axis_hit(shown[3], shown[axis], near, far - near)
+
+    def _apply_slide(self, distance):
+        """Slide the working copy's origin `distance` along the arrow's
+        axis, in the display unit, and land it on the grid — a tenth of
+        an inch or a centimetre in the geometry's own axes, so a turned
+        frame still reads round (2026-10-02); a geometry with no units
+        has no grid. Redraws only the gizmo."""
+        if self._sliding is None:
+            return
+        start, axis, row = (self._sliding['start'], self._sliding['axis'],
+                            self._sliding['row'])
+        if self._mesh is not None:
+            center = start[3] + float(distance) * start[axis]
+            if self._mesh['defined']:
+                center = snapped(center, grid_step(self._mesh['unit']))
+            self._mesh['frame'] = np.array(start, dtype=np.float64)
+            self._mesh['frame'][3] = center
+            self.scene.mesh_panel.set_values(
+                center=tuple(float(v) for v in center), quiet=True)
+            moved = float((center - start[3]) @ start[axis])
+            self._show_gizmo_reading(
+                f'Slide along {"XYZ"[axis]}: {moved:+.4g} {self._mesh["label"]}')
+            self._draw_mesh_outline()
+            self._draw_rings()
+            return
+        geometry = self.objects[self.editing[0]]
+        shown = self._display_frame(start)
+        origin = shown[3] + float(distance) * shown[axis]
+        if geometry.units_defined:
+            origin = snapped(origin, grid_step(self.unit_system.unit('length')))
+            origin = self.unit_system.to_si(origin, 'length')
+        moved = np.array(start, dtype=np.float64)
+        moved[3] = origin
+        geometry.cs_matrix[row] = moved
+        along = float((self._display_frame(moved)[3] - shown[3]) @ shown[axis])
+        label = (self.unit_system.label_text('length') if geometry.units_defined
+                 else 'units')
+        self._show_gizmo_reading(f'Slide along {"XYZ"[axis]}: {along:+.4g} {label}')
+        self._draw_rings()
+        self._draw_live_triad(row, moved)
+
+    def _commit_slide(self):
+        """End the slide: the table and the scene catch up."""
+        if self._sliding is None:
+            return
+        if self._mesh is not None:
+            self._sliding = None
+            self._end_mesh_drag('Moved the box')
+            return
+        self._show_gizmo_reading(None)
+        name = self.editing[0]
+        row = self._sliding['row']
+        self._sliding = None
+        self.table.model().refresh_row(row)
+        self._show_status(f'Moved coordinate system in {name}')
+
     def _cursor_on_ring(self, matrix, axis, position):
         """Where the cursor's ray meets the plane the ring lies in."""
-        projector = self._projector
+        projector = self._projector or self._gizmo_projector()
         if projector is None:
             return None
         near = projector.unproject(position[0], position[1], -1.0)
@@ -5090,16 +5259,90 @@ class MainWindow(QMainWindow):
         shown = self._display_frame(matrix)
         return plane_hit(shown[3], shown[axis], near, far - near)
 
-    def _apply_rotation(self, radians):
-        """Turn the working copy and redraw only the gizmo."""
+    def _apply_rotation(self, radians, snap: bool = False):
+        """Turn the working copy and redraw only the gizmo — and, for
+        the box being placed, only its outline. A drag snaps to whole
+        degrees (`ANGLE_STEP`, Brandon 2026-10-02); a typed angle is
+        taken as typed. Says the angle in the view as it goes, and
+        returns the angle applied."""
         if self._rotating is None:
-            return
+            return radians
+        if snap:
+            step = np.radians(ANGLE_STEP)
+            radians = float(np.round(radians / step) * step)
         turned = rotate_frame(self._rotating['start'],
                               self._rotating['axis'], radians)
+        self._show_gizmo_reading(
+            f'Turn about {"XYZ"[self._rotating["axis"]]}: '
+            f'{np.degrees(radians):+.0f}\u00b0' if snap else
+            f'Turn about {"XYZ"[self._rotating["axis"]]}: '
+            f'{np.degrees(radians):+.4g}\u00b0')
+        if self._mesh is not None:
+            self._mesh['frame'] = turned
+            self.scene.mesh_panel.set_values(angles=angles_of(turned), quiet=True)
+            self._draw_mesh_outline()
+            self._draw_rings()
+            return radians
         geometry = self.objects[self.editing[0]]
         geometry.cs_matrix[self._rotating['row']] = turned
         self._draw_rings()
         self._draw_live_triad(self._rotating['row'], turned)
+        return radians
+
+    def _show_gizmo_reading(self, text: str | None) -> None:
+        """The drag's own number, written over the view while it lasts
+        — the angle of a turn, the distance of a slide (Brandon,
+        2026-10-02: the angle being turned to was nowhere to be seen
+        while the box was dragged). None takes it away."""
+        self._gizmo_reading = text
+        plotter = self.scene.plotter
+        if plotter is None:
+            return
+        plotter.remove_actor('gizmo-reading', render=False)
+        if text:
+            plotter.add_text(
+                text, position='upper_left', font_size=12, name='gizmo-reading',
+                color=resolve_theme(self.theme_name)['scene_text'])
+
+    def _draw_mesh_outline(self) -> None:
+        """The box being placed as its outline alone — twelve edges, or a
+        plate's four — while it is dragged. Building the full preview
+        meshes every brick on every move, slow for a fine block; the
+        outline is the box's corners from its frame and widths, and the
+        full preview comes back on release (2026-10-02)."""
+        import pyvista as pv
+
+        plotter = self.scene.plotter
+        if plotter is None or self._mesh is None:
+            return
+        plotter.remove_actor('plane-preview', render=False)
+        plotter.remove_actor('mesh-outline', render=False)
+        frame = self._mesh['frame']
+        widths = np.asarray(self.scene.mesh_panel.values()['widths'], dtype=float)
+        half = [0.5 * widths[i] * frame[i] for i in range(3)]
+        corners = np.array([frame[3] + sx * half[0] + sy * half[1] + sz * half[2]
+                            for sz in (-1, 1) for sy in (-1, 1) for sx in (-1, 1)])
+        # corner k is (x, y, z) bits; an edge joins corners one bit apart
+        lines = [[2, a, a | (1 << bit)] for a in range(8) for bit in range(3)
+                 if not a & (1 << bit) and widths[bit] > 0.0]
+        if not lines:
+            return
+        plotter.add_mesh(
+            pv.PolyData(corners, lines=np.concatenate(lines)),
+            name='mesh-outline', style='wireframe', line_width=2.0,
+            color=resolve_theme(self.theme_name)['scene_highlight'],
+            pickable=False, reset_camera=False, render=False)
+        plotter.render()
+
+    def _end_mesh_drag(self, said: str) -> None:
+        """A drag of the box is over: the outline goes, and the full
+        preview and its reading come back once."""
+        if self.scene.plotter is not None:
+            self.scene.plotter.remove_actor('mesh-outline', render=False)
+        self._show_gizmo_reading(None)
+        self._mesh_refresh()
+        self._draw_rings()
+        self._show_status(said)
 
     def _draw_live_triad(self, row, matrix):
         """Redraw just this frame's arrows, not the model around it."""
@@ -5116,6 +5359,11 @@ class MainWindow(QMainWindow):
         """End the gesture: the table and the scene catch up."""
         if self._rotating is None:
             return
+        if self._mesh is not None:
+            self._rotating = None
+            self._end_mesh_drag('Turned the box about its center')
+            return
+        self._show_gizmo_reading(None)
         name = self.editing[0]
         row = self._rotating['row']
         self._rotating = None
@@ -6966,6 +7214,13 @@ class MainWindow(QMainWindow):
 
     def _selection_changed(self, *_):
         self.data_pane.reset_plot_mode()
+        # the box being placed belongs to its geometry: selecting
+        # anything else puts the pane away rather than leave a preview
+        # drawn over a different object
+        if self._mesh is not None:
+            current = self.tree.currentItem()
+            if current is None or current.text(0) != self._mesh['name']:
+                self.close_mesh_pane()
         # Making the owner row current means "the whole object", so its
         # grid picks are released — a cell selected minutes ago must not
         # silently turn a later delete-the-object into delete-that-record.
@@ -11088,11 +11343,15 @@ class MainWindow(QMainWindow):
             return
         self._refresh_item(self.object_item(), obj)
         self.render_current()
+        doubled = found.get('duplicates', 0)
+        made_one = (f'; {doubled} element{"s" * (doubled != 1)} filling a cell '
+                    'another already filled made one' if doubled else '')
         self._show_status(
             f'{name}: merged {found["merged"]} node'
             f'{"s" * (found["merged"] != 1)} into {found["into"]} — '
-            f'{obj.num_nodes} nodes remain' if found['merged'] else
-            f'{name}: no two nodes are within {typed:g} {unit} of each other')
+            f'{obj.num_nodes} nodes remain{made_one}' if found['merged'] else
+            f'{name}: no two nodes are within {typed:g} {unit} of each '
+            f'other{made_one}')
 
     def new_geometry_act(self) -> None:
         """An empty geometry in the project, in the display length unit,
@@ -11104,139 +11363,224 @@ class MainWindow(QMainWindow):
                           'Add Plane on its bar puts plates in it')
 
     def add_plane_act(self) -> None:
-        """Planes typed into the selected geometry (`AddPlaneDialog`): the
-        reading and the preview asked of the core as the numbers change,
-        each Add the project's `add_plane`."""
-        from ..core import mesh
-        from .plane_dialog import AddPlaneDialog
-
-        obj = self.current_object()
-        if not isinstance(obj, Geometry):
-            self._show_status('Select a geometry to add a plane to')
-            return
-        name = self.object_item().text(0)
-        # an empty geometry takes the display unit; one whose units are
-        # undefined takes the numbers as given, as its nodes are
-        defined = obj.units_defined or not obj.num_nodes
-        unit = self.unit_system.unit('length') if defined else None
-        label = self.unit_system.label_text('length') if defined else 'units'
-
-        def plane(values):
-            return mesh.plane(values['corner'], values['edge_a'],
-                              values['edge_b'], values['size'],
-                              values['block'], unit=unit)
-
-        def reading(values):
-            try:
-                part = plane(values)
-            except ValueError as refusal:
-                self._draw_plane_preview(None)
-                text = str(refusal)
-                return f'{text[:1].upper()}{text[1:]}.', False
-            self._draw_plane_preview(part)
-            on, _rows = mesh.landing(obj, part)
-            first = part.node_xyz[part.node_index(part.elem_conn[0])]
-            if defined:
-                first = self.unit_system.from_si(first, 'length')
-            across = [float(np.linalg.norm(first[1] - first[0])),
-                      float(np.linalg.norm(first[2] - first[1]))]
-            block = values['block']
-            where = (f'block {block!r}' if block in obj.block_name else
-                     f'a new block {block!r}' if block else
-                     'an unnamed block of its own')
-            shared = int(on.sum())
-            text = (f'{len(part.elem_conn)} plates of {across[0]:.4g} by '
-                    f'{across[1]:.4g} {label}, into {where}: '
-                    f'{part.num_nodes - shared} nodes to add, {shared} on '
-                    'nodes already there.')
-            return text, True
-
-        def add(values):
-            found = self.project.add_plane(
-                name, values['corner'], values['edge_a'], values['edge_b'],
-                values['size'], values['block'], unit=unit or 'm')
-            self._refresh_item(self._item_for_object(name), obj)
-            self.render_current()
-            self._show_status(
-                f'{name}: added {found["elements"]} plates — '
-                f'{found["added"]} nodes, {found["shared"]} shared with '
-                f'the geometry; {obj.num_nodes} nodes in all')
-
-        if self.plane_dialog is not None:
-            self.plane_dialog.close()
-        self.plane_dialog = AddPlaneDialog(
-            self, name, label, list(obj.block_name), reading, add)
-        self.plane_dialog.finished.connect(
-            lambda _result: self._draw_plane_preview(None))
-        self.plane_dialog.show()
+        """Plates typed into the selected geometry, in the pane beside
+        the view (`MeshPanel`, 2026-10-02): a center, widths with one at
+        zero, an element size; each Add the project's `add_plane`."""
+        self._open_mesh_pane('plane')
 
     def add_block_act(self) -> None:
-        """Blocks of bricks typed into the selected geometry
-        (`AddBlockDialog`): Add Plane with a third edge, the reading and
-        the preview asked of the core as the numbers change, each Add
-        the project's `add_block` (2026-09-30)."""
-        from ..core import mesh
-        from .plane_dialog import AddBlockDialog
+        """Bricks typed into the selected geometry, in the same pane: a
+        center, three widths, an element size; each Add the project's
+        `add_block`."""
+        self._open_mesh_pane('block')
 
+    def _open_mesh_pane(self, kind: str) -> None:
+        """Open the pane for the selected geometry, the box's preview in
+        the view, and the rings and arrows around it — the coordinate
+        system's gizmo, turning the box about its center and sliding the
+        center onto the grid (Brandon, 2026-10-02: no window at all)."""
         obj = self.current_object()
         if not isinstance(obj, Geometry):
-            self._show_status('Select a geometry to add a block to')
+            noun = 'a block' if kind == 'block' else 'a plane'
+            self._show_status(f'Select a geometry to add {noun} to')
             return
-        name = self.object_item().text(0)
+        if self.rotate_action.isChecked():
+            self.rotate_action.setChecked(False)
+        if self._mesh is not None:
+            self.close_mesh_pane()
         defined = obj.units_defined or not obj.num_nodes
         unit = self.unit_system.unit('length') if defined else None
         label = self.unit_system.label_text('length') if defined else 'units'
+        panel = self.scene.mesh_panel
+        panel.open_for(kind, label, list(obj.block_name),
+                       default=self._mesh_default_block(obj, kind))
+        frame = np.zeros((4, 3))
+        frame[:3] = np.eye(3)
+        frame[3] = panel.values()['center']
+        self._mesh = {'kind': kind, 'name': self.object_item().text(0),
+                      'unit': unit or 'm', 'defined': unit is not None,
+                      'label': label, 'frame': frame}
+        panel.show()
+        self._mesh_refresh()
+        self._begin_rotating()
 
-        def block(values):
-            return mesh.block(values['corner'], values['edge_a'],
-                              values['edge_b'], values['edge_c'],
-                              values['size'], values['block'], unit=unit)
+    def _mesh_default_block(self, geometry, kind: str) -> str:
+        """The block the pane opens on: the last of the geometry's blocks
+        of the family it adds, so plates keep joining plates, else a name
+        not yet taken. It opened on the geometry's first block of any
+        family, and a plate added after a block went into the block's
+        bricks (Brandon, 2026-10-02)."""
+        from ..core import mesh
 
-        def reading(values):
-            try:
-                part = block(values)
-            except ValueError as refusal:
-                self._draw_plane_preview(None)
-                text = str(refusal)
-                return f'{text[:1].upper()}{text[1:]}.', False
-            self._draw_plane_preview(part)
-            on, _rows = mesh.landing(obj, part)
-            first = part.node_xyz[part.node_index(part.elem_conn[0])]
-            if defined:
-                first = self.unit_system.from_si(first, 'length')
+        family = 'hexes' if kind == 'block' else 'quads'
+        for k in range(len(geometry.block_id) - 1, -1, -1):
+            if mesh.block_families(geometry, int(geometry.block_id[k])) == {family}:
+                return str(geometry.block_name[k])
+        stem = 'block' if kind == 'block' else 'plate'
+        taken = set(geometry.block_name)
+        name, n = stem, 1
+        while name in taken:
+            n += 1
+            name = f'{stem} {n}'
+        return name
+
+    def close_mesh_pane(self) -> None:
+        """Put the pane away, with the preview and the gizmo."""
+        if self._mesh is None:
+            self.scene.mesh_panel.hide()
+            return
+        self._end_rotating()
+        self._mesh = None
+        self.scene.mesh_panel.hide()
+        self._draw_plane_preview(None)
+        if self.scene.plotter is not None:
+            self.scene.plotter.render()
+
+    def _gizmo_projector(self):
+        """A projector for reading the cursor's ray when nothing is being
+        picked — the box's gizmo has no entities under it."""
+        from ..viz.pick import ScreenProjector
+
+        if self.scene.plotter is None:
+            return None
+        return ScreenProjector(self.scene.plotter.renderer, np.zeros((1, 3)))
+
+    def _mesh_edited(self) -> None:
+        """A field changed: the frame follows the fields — its center,
+        and its turn from the three angles."""
+        if self._mesh is None:
+            return
+        values = self.scene.mesh_panel.values()
+        self._mesh['frame'] = frame_from_angles(values['angles'], values['center'])
+        self._mesh_refresh()
+        self._draw_rings()
+
+    def _mesh_square_up(self) -> None:
+        if self._mesh is None:
+            return
+        self._mesh['frame'] = identity_frame(self._mesh['frame'])
+        self.scene.mesh_panel.set_values(angles=(0.0, 0.0, 0.0), quiet=True)
+        self._mesh_refresh()
+        self._draw_rings()
+        self._show_status('Squared the box up with the geometry\'s axes')
+
+    def _mesh_call(self):
+        """(verb, the call's numbers) the fields and the frame make: the
+        corner and edges `add_block` and `add_plane` take, in the
+        display unit. Raises ValueError, said in a sentence, for widths
+        that make no box or no plate."""
+        values = self.scene.mesh_panel.values()
+        frame, kind = self._mesh['frame'], self._mesh['kind']
+        widths = np.asarray(values['widths'], dtype=float)
+        if kind == 'block':
+            if np.any(widths <= 0.0):
+                raise ValueError('a block needs a width along all three axes')
+            used = [0, 1, 2]
+        else:
+            if int(np.sum(widths == 0.0)) != 1:
+                raise ValueError('a plate lies in a plane: leave exactly one '
+                                 'width at zero, the axis it faces')
+            used = [i for i in range(3) if widths[i] > 0.0]
+        edges = [widths[i] * frame[i] for i in used]
+        corner = frame[3] - 0.5 * np.sum(edges, axis=0)
+
+        def tidy(vector):
+            # turned frames leave 6e-17 where a zero belongs; a journal
+            # line reads what a person would have typed
+            return tuple(float(v) + 0.0 for v in np.round(vector, 12))
+
+        return ('add_block' if kind == 'block' else 'add_plane',
+                {'corner': tidy(corner), 'edges': [tidy(e) for e in edges],
+                 'size': values['size'], 'block': values['block']})
+
+    def _mesh_part(self):
+        from ..core import mesh
+
+        verb, call = self._mesh_call()
+        unit = self._mesh['unit'] if self._mesh['defined'] else None
+        build = mesh.block if verb == 'add_block' else mesh.plane
+        return build(call['corner'], *call['edges'], call['size'],
+                     call['block'], unit=unit)
+
+    def _mesh_refresh(self) -> None:
+        """Ask what the fields would add; say it, draw it, and allow Add
+        only when it can be added."""
+        from ..core import mesh
+
+        panel = self.scene.mesh_panel
+        if self._mesh is None:
+            return
+        obj = self.objects.get(self._mesh['name'])
+        try:
+            part = self._mesh_part()
+        except ValueError as refusal:
+            self._draw_plane_preview(None)
+            text = str(refusal)
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            return
+        refusal = mesh.block_refusal(obj, part)
+        if refusal is not None:
+            self._draw_plane_preview(None)
+            panel.show_reading(f'{refusal[:1].upper()}{refusal[1:]}.', False)
+            return
+        self._draw_plane_preview(part)
+        on, _rows = mesh.landing(obj, part)
+        first = part.node_xyz[part.node_index(part.elem_conn[0])]
+        if self._mesh['defined']:
+            first = self.unit_system.from_si(first, 'length')
+        label = self._mesh['label']
+        if self._mesh['kind'] == 'block':
             across = [float(np.linalg.norm(first[1] - first[0])),
                       float(np.linalg.norm(first[3] - first[0])),
                       float(np.linalg.norm(first[4] - first[0]))]
-            block_name = values['block']
-            where = (f'block {block_name!r}' if block_name in obj.block_name
-                     else f'a new block {block_name!r}' if block_name
-                     else 'an unnamed block of its own')
-            shared = int(on.sum())
-            text = (f'{len(part.elem_conn)} bricks of {across[0]:.4g} by '
-                    f'{across[1]:.4g} by {across[2]:.4g} {label}, into '
-                    f'{where}: {part.num_nodes - shared} nodes to add, '
-                    f'{shared} on nodes already there.')
-            return text, True
+            what = (f'{len(part.elem_conn)} bricks of {across[0]:.4g} by '
+                    f'{across[1]:.4g} by {across[2]:.4g} {label}')
+        else:
+            across = [float(np.linalg.norm(first[1] - first[0])),
+                      float(np.linalg.norm(first[2] - first[1]))]
+            what = (f'{len(part.elem_conn)} plates of {across[0]:.4g} by '
+                    f'{across[1]:.4g} {label}')
+        block = panel.values()['block']
+        where = (f'block {block!r}' if block in obj.block_name else
+                 f'a new block {block!r}' if block else
+                 'an unnamed block of its own')
+        shared = int(on.sum())
+        doubled = mesh.already_there(obj, part)
+        overlap = (f' {doubled} of the elements are already there where it '
+                   'overlaps, and are left out.' if doubled else '')
+        panel.show_reading(
+            f'{what}, into {where}: {part.num_nodes - shared} nodes to add, '
+            f'{shared} on nodes already there.{overlap}', True)
 
-        def add(values):
-            found = self.project.add_block(
-                name, values['corner'], values['edge_a'], values['edge_b'],
-                values['edge_c'], values['size'], values['block'],
-                unit=unit or 'm')
-            self._refresh_item(self._item_for_object(name), obj)
-            self.render_current()
-            self._show_status(
-                f'{name}: added {found["elements"]} bricks — '
-                f'{found["added"]} nodes, {found["shared"]} shared with '
-                f'the geometry; {obj.num_nodes} nodes in all')
-
-        if self.block_dialog is not None:
-            self.block_dialog.close()
-        self.block_dialog = AddBlockDialog(
-            self, name, label, list(obj.block_name), reading, add)
-        self.block_dialog.finished.connect(
-            lambda _result: self._draw_plane_preview(None))
-        self.block_dialog.show()
+    def _mesh_add(self) -> None:
+        """Add the box: the project's verb, and the pane stays open for
+        the next, since a model is several and each is usually the last
+        one moved."""
+        if self._mesh is None:
+            return
+        try:
+            verb, call = self._mesh_call()
+        except ValueError as refusal:
+            self._show_status(str(refusal))
+            return
+        name = self._mesh['name']
+        obj = self.objects[name]
+        found = getattr(self.project, verb)(
+            name, call['corner'], *call['edges'], call['size'], call['block'],
+            unit=self._mesh['unit'])
+        self._refresh_item(self._item_for_object(name), obj)
+        self.render_current()
+        noun = 'bricks' if verb == 'add_block' else 'plates'
+        doubled = found.get('duplicates', 0)
+        overlap = (f', {doubled} more already there where it overlaps'
+                   if doubled else '')
+        self._show_status(
+            f'{name}: added {found["elements"]} {noun}{overlap} — '
+            f'{found["added"]} nodes, {found["shared"]} shared with '
+            f'the geometry; {obj.num_nodes} nodes in all')
+        # the redraw took the preview and the gizmo with it
+        self._mesh_refresh()
+        self._draw_rings()
 
     def _draw_plane_preview(self, part) -> None:
         """The plane Add Plane, or the block Add Block, would add, drawn
@@ -14153,7 +14497,7 @@ class MainWindow(QMainWindow):
             self._rows_wired = False
         self.table.setModel(model)
         model.edit_rejected.connect(self._show_status)
-        self.table.resizeColumnsToContents()
+        self._size_choice_columns(self.table, model)
         return model
 
     def _arm_row_deletion(self, name, kind, rows=None):

@@ -19,7 +19,7 @@ import os
 
 import numpy as np
 import pytest
-from conftest import web_close, web_read
+from conftest import web_close, web_read, web_view
 
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.report import Report
@@ -82,11 +82,10 @@ def _view(path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()

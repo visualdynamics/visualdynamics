@@ -14,7 +14,7 @@ import json
 import os
 
 import pytest
-from conftest import web_close, web_read
+from conftest import web_close, web_read, web_view
 from test_project_type import _placeholders
 from test_rattlesnake_sine import _write_run
 
@@ -155,7 +155,6 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.report import render_html
@@ -169,7 +168,7 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     path.write_text(render_html(project[name], project, None,
                                 links=project.links), encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     view.load(QUrl.fromLocalFile(str(path)))
     try:

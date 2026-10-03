@@ -130,7 +130,11 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
     typed row by row into Add Plane (the project verb each Add records)
     must give the demo's planes node for node — same ids, same places,
     same plates — which is what lets the page say a model built by hand
-    solves to the same modes."""
+    solves to the same modes. The table is centers and widths since the
+    pane replaced the dialog (2026-10-02), turned into the corner and
+    edges the verb takes the way the pane turns them: each nonzero width
+    along its axis, in X, Y, Z order, the corner half their sum below
+    the center."""
     import pathlib
 
     import visualdynamics
@@ -138,7 +142,7 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
 
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    table = page.split('| Plane | Block | Corner | Edge A | Edge B |')[1]
+    table = page.split('| Plane | Block | Center | Widths |')[1]
     rows = [[cell.strip() for cell in line.strip('|').split('|')]
             for line in table.split('\n\n')[0].splitlines()[2:]]
 
@@ -148,9 +152,13 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
 
     project = visualdynamics.Project('p')
     name = project.new_geometry(unit='in')
-    for _plane, block, corner, edge_a, edge_b in rows:
-        project.add_plane(name, vector(corner), vector(edge_a),
-                          vector(edge_b), barc.SIZE, block, unit='in')
+    for _plane, block, center, widths in rows:
+        widths = np.array(vector(widths))
+        assert int(np.sum(widths == 0.0)) == 1, 'a plate names its plane'
+        edges = [tuple(widths[i] * np.eye(3)[i]) for i in range(3)
+                 if widths[i] > 0.0]
+        corner = tuple(np.array(vector(center)) - 0.5 * np.sum(edges, axis=0))
+        project.add_plane(name, corner, *edges, barc.SIZE, block, unit='in')
     typed = project[name]
     demo = mesh.assemble(*barc._planes(barc.SIZE))
     assert len(rows) == 12

@@ -476,17 +476,73 @@ def web_read(view, expression, ready=bool, timeout=60.0, interval=0.25):
     return state['last']
 
 
+def web_view():
+    """A `QWebEngineView` whose page it does not own, for a test to load
+    a report into and hand to `web_close` after.
+
+    A view deletes a page it made itself in the same call that detaches
+    it, tearing the live web contents down under a standing widget —
+    the hang the report editor stopped doing on 2026-09-30 (PLAN.md
+    "The discard, detached"). These views used to own their pages,
+    and PLAN recorded that they had never loaded a report and never
+    hung; then one did, a full gate parked in `web_close`'s
+    `setPage(None)` for 43 minutes (2026-10-02, named by the fault
+    handler). The page is made here and kept on the view, so
+    `web_close` can sequence its teardown the way the editor does.
+    """
+    from PySide6.QtWebEngineCore import QWebEnginePage
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+
+    view = QWebEngineView()
+    view._vd_page = QWebEnginePage()
+    view.setPage(view._vd_page)
+    return view
+
+
 def web_close(view):
     """Tear a view down while the application still runs.
 
     A page alive at interpreter exit segfaults the process — two crash
     reports on 2026-09-20 were exactly that — so every test that makes
     a view ends by calling this.
+
+    And a page torn down while its render process is alive can hang the
+    process: Chromium destroys the live web contents synchronously and
+    waits on the renderer to answer. Deleting the page did it (the
+    gate's stall since September), and discarding it after detaching
+    did it too (2026-10-02, named twice by the fault handler at
+    `setLifecycleState(Discarded)`). So the renderer is ended first, by
+    its pid, and the page is deleted only once it has reported the
+    process gone — nothing left to wait on. Test-only: a test's page
+    is finished with, where the app's is a person's report.
     """
+    import os
+    import signal
+    import time
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
+    page = getattr(view, '_vd_page', None) or view.page()
+    pid = int(page.renderProcessPid()) if page is not None else 0
+    gone = []
+    if page is not None:
+        page.renderProcessTerminated.connect(lambda *_: gone.append(True))
+    view.stop()
+    view.hide()
+    if pid > 0:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            gone.append(True)
+        deadline = time.monotonic() + 5.0
+        while not gone and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
     view.setPage(None)
+    if getattr(view, '_vd_page', None) is not None:
+        view._vd_page.deleteLater()
+        view._vd_page = None
     view.deleteLater()
     for _ in range(10):
         app.processEvents()

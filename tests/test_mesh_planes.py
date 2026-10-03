@@ -108,7 +108,8 @@ def test_the_merge_keeps_the_lowest_id_and_refuses_to_fold_an_element():
                         elem_conn=[[7, 5], [3, 9]], elem_type=[21, 21],
                         length_unit='m')
     found = geometry.merge_coincident_nodes(1e-6)
-    assert found == {'merged': 2, 'into': 2}
+    assert found == {'merged': 2, 'into': 2, 'duplicates': 0}, (
+        'two beams on one line can be two members: kept')
     assert sorted(geometry.node_id) == [3, 5]
     assert [list(c) for c in geometry.elem_conn] == [[3, 5], [3, 5]]
     square = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, 'p')
@@ -131,7 +132,8 @@ def test_the_verb_refuses_while_linked_data_names_a_node_it_would_remove():
         project.merge_coincident_nodes('Geometry')
     project.unlink('Modes')
     assert project.merge_coincident_nodes('Geometry') == {'merged': 5,
-                                                          'into': 5}
+                                                          'into': 5,
+                                                          'duplicates': 0}
     assert "project.merge_coincident_nodes('Geometry')" in project.journal[-1]
 
 

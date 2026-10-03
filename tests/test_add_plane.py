@@ -34,7 +34,8 @@ def test_joining_keeps_the_ids_already_there():
     before = floor.node_id.copy()
     wall = mesh.plane((0, 0, 0), (4, 0, 0), (0, 0, 2), 1, 'wall')
     found = mesh.join(floor, wall)
-    assert found == {'added': 10, 'shared': 5, 'elements': 8, 'blocks': [2]}
+    assert found == {'added': 10, 'shared': 5, 'elements': 8, 'duplicates': 0,
+                     'blocks': [2]}
     assert np.array_equal(floor.node_id[:15], before)
     assert floor.node_id[15:].tolist() == list(range(116, 126))
     shared_line = [n for n in floor.elem_conn[8] if n < 116]  # its first
@@ -131,53 +132,192 @@ def test_the_project_offers_a_new_geometry(window, pump):
 
 
 def test_add_plane_types_planes_in_display_units(window, pump):
-    """The dialog reads in the display unit, previews the plane, says what
-    it shares before it is added, refuses skewed edges, and each Add is
-    the project's verb."""
+    """The pane beside the view (no window, 2026-10-02) reads a center
+    and widths in the display unit, the zero width naming the plane;
+    previews the plate, says what it shares before it is added, refuses
+    widths that make no plate, and each Add is the project's verb."""
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.project.new_geometry('Box', unit='in')
     window.show_object('Box')
     select_objects(window, pump, 'Box')
     window.add_plane_act()
     pump()
-    dialog = window.plane_dialog
-    from PySide6.QtWidgets import QLabel
+    panel = window.scene.mesh_panel
+    assert panel.isVisibleTo(window) and panel.title.text() == 'Add Plane'
+    from PySide6.QtWidgets import QDialog, QLabel
 
-    labels = [label.text() for label in dialog.findChildren(QLabel)]
-    assert {'Corner [in]', 'Edge A [in]', 'Edge B [in]',
-            'Element size [in]'} <= set(labels)
-    dialog.set_values(block='floor', corner=(0, 0, 0), edge_a=(4, 0, 0),
-                      edge_b=(0, 2, 0), size=1)
+    assert not [w for w in window.findChildren(QDialog) if w.isVisible()], \
+        'no window of its own'
+    labels = [label.text() for label in panel.findChildren(QLabel)]
+    assert {'Center [in]', 'Width [in]', 'Element size [in]'} <= set(labels)
+    panel.set_values(block='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
     pump()
-    assert dialog.reading_label.text() == (
+    assert panel.reading_label.text() == (
         "8 plates of 1 by 1 in, into a new block 'floor': 15 nodes to add, "
         '0 on nodes already there.')
     assert 'plane-preview' in window.scene.plotter.actors
-    dialog.add_button.click()
+    assert any('rotate-arrow' in name for name in window.scene.plotter.actors), \
+        'the gizmo is around the plate'
+    panel.add_button.click()
     pump()
     box = window.objects['Box']
     assert np.allclose(box.node_xyz.max(axis=0), [4 * INCH, 2 * INCH, 0])
-    dialog.set_values(block='wall', edge_b=(0, 0, 2))
+    assert window.project.journal[-1].startswith("project.add_plane('Box', "
+                                                 '(0.0, 0.0, 0.0), (4.0, ')
+    # a wall: the zero width now along Y, the plate in X-Z
+    panel.set_values(block='wall', center=(2, 0, 1), widths=(4, 0, 2))
     pump()
-    assert dialog.reading_label.text().endswith(
+    assert panel.reading_label.text().endswith(
         '10 nodes to add, 5 on nodes already there.')
-    dialog.add_button.click()
+    panel.add_button.click()
     pump()
     assert box.num_nodes == 25 and list(box.block_name) == ['floor', 'wall']
     assert 'added 8 plates — 10 nodes, 5 shared' in \
         window.statusBar().currentMessage()
-    dialog.set_values(edge_a=(4, 0, 1))
+    panel.set_values(widths=(4, 2, 1))
     pump()
-    assert 'not perpendicular' in dialog.reading_label.text()
-    assert not dialog.add_button.isEnabled()
+    assert 'exactly one width at zero' in panel.reading_label.text()
+    assert not panel.add_button.isEnabled()
     assert 'plane-preview' not in window.scene.plotter.actors, \
-        'a refused plane is not drawn'
-    dialog.set_values(edge_a=(4, 0, 0))
+        'a refused plate is not drawn'
+    panel.close_button.click()
     pump()
-    assert 'plane-preview' in window.scene.plotter.actors
-    dialog.close()
-    pump()
+    assert not panel.isVisibleTo(window)
     assert 'plane-preview' not in window.scene.plotter.actors, \
         'closing takes the preview away'
-    assert window.project.journal[-1].startswith("project.add_plane('Box', "
-                                                 '(0.0, 0.0, 0.0), (4.0, ')
+    assert not any('rotate-' in name for name in window.scene.plotter.actors)
+
+
+def test_the_gizmo_turns_the_box_about_its_center_and_slides_it_onto_the_grid(
+        window, pump):
+    """The coordinate system's rings and arrows, on the box: a quarter
+    turn about Z swaps the plate's edges and keeps its center; a slide
+    along X lands the center on a tenth of an inch and the field shows
+    it (2026-10-02)."""
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    window.project.new_geometry('Box', unit='in')
+    window.show_object('Box')
+    select_objects(window, pump, 'Box')
+    window.add_plane_act()
+    pump()
+    panel = window.scene.mesh_panel
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0), size=1)
+    pump()
+    window._rotating = {'row': 'mesh', 'axis': 2,
+                        'start': np.array(window._mesh['frame']), 'from': 0.0}
+    window._apply_rotation(np.pi / 2)
+    window._commit_rotation()
+    pump()
+    _verb, call = window._mesh_call()
+    assert np.allclose(call['edges'][0], (0, 4, 0)) and \
+        np.allclose(call['edges'][1], (-2, 0, 0)), 'the plate turned'
+    assert np.allclose(window._mesh['frame'][3], (0, 0, 0)), 'about its center'
+    window._sliding = {'row': 'mesh', 'axis': 1,
+                       'start': np.array(window._mesh['frame']), 'from': 0.0}
+    window._apply_slide(1.234)
+    window._commit_slide()
+    pump()
+    center = panel.values()['center']
+    assert np.allclose(center, (-1.2, 0, 0)), center
+    assert 'Moved the box' in window.statusBar().currentMessage()
+    panel.square_button.click()
+    pump()
+    assert np.allclose(window._mesh['frame'][:3], np.eye(3))
+    assert np.allclose(panel.values()['center'], (-1.2, 0, 0)), 'kept where it is'
+    select_objects(window, pump, 'Box')
+
+
+def test_selecting_another_object_puts_the_pane_away(window, pump):
+    window.project.new_geometry('Box', unit='m')
+    window.project.new_geometry('Other', unit='m')
+    window.show_object('Box')
+    window.show_object('Other')
+    select_objects(window, pump, 'Box')
+    window.add_block_act()
+    pump()
+    assert window.scene.mesh_panel.isVisibleTo(window)
+    select_objects(window, pump, 'Other')
+    assert not window.scene.mesh_panel.isVisibleTo(window)
+    assert window._mesh is None
+    assert 'plane-preview' not in window.scene.plotter.actors
+
+
+def test_dragging_the_box_draws_its_outline_snaps_the_angle_and_says_it(
+        window, pump, monkeypatch):
+    """While the box is dragged only its outline is drawn — the bricks
+    are not meshed on every move — the turn snaps to whole degrees and
+    the angle is written over the view; release brings the full preview
+    and its reading back, and takes the number away (2026-10-02)."""
+    from visualdynamics.core import mesh
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    window.project.new_geometry('Box', unit='in')
+    window.show_object('Box')
+    select_objects(window, pump, 'Box')
+    window.add_block_act()
+    pump()
+    panel = window.scene.mesh_panel
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 1), size=0.5)
+    pump()
+    built = []
+    real = mesh.block
+    monkeypatch.setattr(mesh, 'block', lambda *a, **k: built.append(1) or real(*a, **k))
+    start = np.array(window._mesh['frame'])
+    window._rotating = {'row': 'mesh', 'axis': 2, 'start': start, 'from': 0.0}
+    applied = window._apply_rotation(np.radians(37.4), snap=True)
+    assert np.degrees(applied) == pytest.approx(37.0)
+    assert np.allclose(window._mesh['frame'][0],
+                       [np.cos(np.radians(37)), np.sin(np.radians(37)), 0])
+    actors = window.scene.plotter.actors
+    assert 'mesh-outline' in actors and 'plane-preview' not in actors
+    assert 'gizmo-reading' in actors and window._gizmo_reading == 'Turn about Z: +37°'
+    assert built == [], 'nothing meshed while dragging'
+    window._commit_rotation()
+    pump()
+    actors = window.scene.plotter.actors
+    assert 'plane-preview' in actors and 'mesh-outline' not in actors
+    assert 'gizmo-reading' not in actors and window._gizmo_reading is None
+    assert built == [1], 'meshed once, on release'
+    turned = np.array(window._mesh['frame'])
+    window._sliding = {'row': 'mesh', 'axis': 0, 'start': turned, 'from': 0.0}
+    window._apply_slide(1.234)
+    # the center lands on the grid in the geometry's axes, so along the
+    # turned axis the slide reads what it really moved, not a round step
+    moved = float((window._mesh['frame'][3] - turned[3]) @ turned[0])
+    assert window._gizmo_reading == f'Slide along X: {moved:+.4g} in'
+    assert np.allclose(np.round(window._mesh['frame'][3] / 0.1) * 0.1,
+                       window._mesh['frame'][3]), 'the center on the grid'
+    assert 'mesh-outline' in window.scene.plotter.actors
+    window._commit_slide()
+    pump()
+    assert 'plane-preview' in window.scene.plotter.actors
+
+
+def test_the_pane_turns_the_box_by_typed_angles_and_the_rings_write_them_back(
+        window, pump):
+    """Three angle fields, degrees about the geometry's X, Y and Z, for an
+    odd angle; a ring's turn writes them back (Brandon, 2026-10-02)."""
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    window.project.new_geometry('Box', unit='in')
+    window.show_object('Box')
+    select_objects(window, pump, 'Box')
+    window.add_plane_act()
+    pump()
+    panel = window.scene.mesh_panel
+    from PySide6.QtWidgets import QLabel
+
+    assert 'Rotation [°]' in [label.text() for label in panel.findChildren(QLabel)]
+    panel.set_values(center=(0, 0, 0), widths=(4, 2, 0), size=1, angles=(0, 0, 37.5))
+    pump()
+    _verb, call = window._mesh_call()
+    c, s = np.cos(np.radians(37.5)), np.sin(np.radians(37.5))
+    assert np.allclose(call['edges'][0], (4 * c, 4 * s, 0))
+    window._rotating = {'row': 'mesh', 'axis': 2,
+                        'start': np.array(window._mesh['frame']), 'from': 0.0}
+    window._apply_rotation(np.radians(10.0), snap=True)
+    window._commit_rotation()
+    pump()
+    assert panel.values()['angles'] == pytest.approx((0.0, 0.0, 47.5))
+    panel.square_button.click()
+    pump()
+    assert panel.values()['angles'] == (0.0, 0.0, 0.0)

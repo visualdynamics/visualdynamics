@@ -126,3 +126,97 @@ def test_rotation_about_is_a_proper_rotation():
     matrix = rotation_about((1.0, 2.0, 3.0), 0.9)
     assert np.linalg.det(matrix) == pytest.approx(1.0)
     assert np.allclose(matrix @ matrix.T, np.eye(3), atol=1e-12)
+
+
+# ---- sliding (2026-10-02) ---------------------------------------------------
+
+
+def _frame():
+    from visualdynamics.rotate import rotate_frame
+
+    plain = np.vstack([np.eye(3), [1.0, 2.0, 3.0]])
+    return rotate_frame(plain, 2, np.radians(30.0))
+
+
+def test_sliding_moves_the_origin_along_the_frames_own_axis():
+    from visualdynamics.rotate import translate_frame
+
+    frame = _frame()
+    moved = translate_frame(frame, 0, 2.5)
+    assert np.allclose(moved[:3], frame[:3]), 'the basis stays put'
+    assert np.allclose(moved[3], frame[3] + 2.5 * frame[0])
+
+
+def test_the_arrow_runs_from_the_origin_along_the_axis():
+    from visualdynamics.rotate import arrow_points
+
+    frame = _frame()
+    points = arrow_points(frame, 1, 4.0)
+    assert np.allclose(points[0], frame[3])
+    assert np.allclose(points[-1], frame[3] + 4.0 * frame[1])
+    assert len(points) == 24
+
+
+def test_a_ray_crossing_the_axis_hits_where_it_crosses():
+    from visualdynamics.rotate import axis_hit, distance_along
+
+    frame = _frame()
+    target = frame[3] + 3.0 * frame[0]
+    eye = target + np.array([0.0, 0.0, 10.0])
+    hit = axis_hit(frame[3], frame[0], eye, target - eye)
+    assert hit is not None and np.allclose(hit, target)
+    assert distance_along(frame, 0, hit) == pytest.approx(3.0)
+    # a ray that misses the line still reads the nearest point on it
+    offset = axis_hit(frame[3], frame[0], eye + 0.3 * frame[1], target - eye)
+    assert np.allclose(offset, target)
+
+
+def test_a_ray_parallel_to_the_axis_hits_nothing():
+    from visualdynamics.rotate import axis_hit
+
+    frame = _frame()
+    assert axis_hit(frame[3], frame[0], frame[3] + frame[1], frame[0]) is None
+
+
+def test_snapping_lands_on_the_grid_in_every_coordinate():
+    from visualdynamics.rotate import snapped
+
+    assert np.allclose(snapped([1.26, -0.04, 2.56], 0.1), [1.3, 0.0, 2.6])
+    assert np.allclose(snapped([1.26, -0.04, 2.56], 0.0), [1.26, -0.04, 2.56])
+
+
+def test_the_grid_is_a_tenth_of_an_inch_or_a_centimetre():
+    from visualdynamics.rotate import grid_step
+
+    assert grid_step('in') == pytest.approx(0.1)
+    assert grid_step('ft') == pytest.approx(0.1 / 12.0)
+    assert grid_step('mm') == pytest.approx(10.0)
+    assert grid_step('cm') == pytest.approx(1.0)
+    assert grid_step('m') == pytest.approx(0.01)
+
+
+# ---- angles (2026-10-02) ----------------------------------------------------
+
+
+def test_angles_turn_about_the_fixed_axes_x_then_y_then_z():
+    from visualdynamics.rotate import frame_from_angles
+
+    frame = frame_from_angles((90.0, 0.0, 0.0))
+    assert np.allclose(frame[1], [0, 0, 1]) and np.allclose(frame[2], [0, -1, 0])
+    # X then Z: the frame's X axis is carried round Z, its Y up first
+    frame = frame_from_angles((90.0, 0.0, 90.0), origin=(1, 2, 3))
+    assert np.allclose(frame[0], [0, 1, 0]) and np.allclose(frame[1], [0, 0, 1])
+    assert np.allclose(frame[3], [1, 2, 3])
+
+
+def test_the_angles_of_a_frame_undo_the_turn():
+    from visualdynamics.rotate import angles_of, frame_from_angles
+
+    for angles in [(30.0, -20.0, 75.0), (-170.0, 45.0, 10.0), (0.0, 0.0, -90.0),
+                   (12.5, 0.0, 0.0)]:
+        assert angles_of(frame_from_angles(angles)) == pytest.approx(angles)
+    # a quarter turn about Y: X and Z are one turn, said as Z
+    frame = frame_from_angles((25.0, 90.0, 40.0))
+    back = angles_of(frame)
+    assert back[0] == 0.0 and back[1] == pytest.approx(90.0)
+    assert np.allclose(frame_from_angles(back), frame)

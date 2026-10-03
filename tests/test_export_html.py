@@ -13,7 +13,7 @@ import re
 
 import numpy as np
 import pytest
-from conftest import web_close, web_read
+from conftest import web_close, web_read, web_view
 
 import visualdynamics
 from visualdynamics.core.data import Psd, Specification
@@ -90,12 +90,11 @@ def test_the_figure_fills_its_frame(qt_app, tmp_path):
     and the page as tall as the frame."""
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
 
     measured, spec = _pair()
     path = visualdynamics.export_html(tmp_path / 'spec.html', measured,
                                       specification=spec, channel='101Z+')
-    view = QWebEngineView()
+    view = web_view()
     view.resize(600, 300)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()
@@ -122,7 +121,6 @@ def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
     the app's colors and at its widths."""
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
 
     from visualdynamics.plot import (
         CURVE_WIDTH,
@@ -149,7 +147,7 @@ def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
     assert response.get('color') == 0
     assert response.get('alpha') == MEASURED_ALPHA
     assert data['curve_width'] == CURVE_WIDTH
-    view = QWebEngineView()
+    view = web_view()
     view.resize(700, 400)
     view.load(QUrl.fromLocalFile(str(path)))
     view.show()

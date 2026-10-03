@@ -379,6 +379,11 @@ def _list_showing(editor: QComboBox) -> bool:
         return False
 
 
+#: room beside the longest entry in an opened list: the icon column and
+#: the scroll bar
+LIST_PADDING = 48
+
+
 class ChoiceDelegate(QStyledItemDelegate):
     """Edit a column that declares `choices` with a drop-down.
 
@@ -436,6 +441,13 @@ class ChoiceDelegate(QStyledItemDelegate):
                 editor.addItem(column.choice_icon(choice), str(choice))
             else:
                 editor.addItem(str(choice))
+        # the list opens as wide as its longest entry, not as wide as the
+        # cell: a material name cut off in a narrow column could not be
+        # read in the drop-down either (Brandon, 2026-10-02)
+        metrics = editor.fontMetrics()
+        widest = max((metrics.horizontalAdvance(editor.itemText(i))
+                      for i in range(editor.count())), default=0)
+        editor.view().setMinimumWidth(widest + LIST_PADDING)
         editor.activated.connect(lambda _index: self._finish(editor))
         trace_units(f'createEditor: combo, {editor.count()} choices')
         editor.destroyed.connect(lambda: trace_units('editor destroyed'))

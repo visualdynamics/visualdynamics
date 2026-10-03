@@ -89,8 +89,9 @@ def test_the_project_verb_is_journaled_and_ties_blocks_that_meet():
 
 
 def test_add_block_types_blocks_in_display_units(window, pump):
-    """The dialog reads in the display unit, previews the block by its
-    skin, says what it shares, and each Add is the project's verb."""
+    """The same pane: a center and three widths in the display unit,
+    the block previewed by its skin, what it shares said, and each Add
+    the project's verb (2026-10-02, no window)."""
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.project.new_geometry('Frame', unit='in')
     window.show_object('Frame')
@@ -98,29 +99,179 @@ def test_add_block_types_blocks_in_display_units(window, pump):
     assert 'add_block' in [act[0] for act in window.acts_for(['Frame'])]
     window.add_block_act()
     pump()
-    dialog = window.block_dialog
+    panel = window.scene.mesh_panel
+    assert panel.isVisibleTo(window) and panel.title.text() == 'Add Block'
     from PySide6.QtWidgets import QLabel
 
-    labels = [label.text() for label in dialog.findChildren(QLabel)]
-    assert {'Corner [in]', 'Edge A [in]', 'Edge B [in]', 'Edge C [in]',
-            'Element size [in]'} <= set(labels)
-    dialog.set_values(block='rail', corner=(0, 0, 0), edge_a=(4, 0, 0),
-                      edge_b=(0, 1, 0), edge_c=(0, 0, 0.5), size=0.5)
+    labels = [label.text() for label in panel.findChildren(QLabel)]
+    assert {'Center [in]', 'Width [in]', 'Element size [in]'} <= set(labels)
+    panel.set_values(block='rail', center=(2, 0.5, 0.25), widths=(4, 1, 0.5),
+                     size=0.5)
     pump()
-    assert dialog.reading_label.text() == (
+    assert panel.reading_label.text() == (
         "16 bricks of 0.5 by 0.5 by 0.5 in, into a new block 'rail': "
         '54 nodes to add, 0 on nodes already there.')
     assert 'plane-preview' in window.scene.plotter.actors
-    dialog.add_button.click()
+    panel.add_button.click()
     pump()
     frame = window.objects['Frame']
     assert np.allclose(frame.node_xyz.max(axis=0), [4 * INCH, INCH, 0.5 * INCH])
     assert 'added 16 bricks — 54 nodes, 0 shared' in \
         window.statusBar().currentMessage()
-    dialog.set_values(edge_a=(4, 0, 1))
+    panel.set_values(widths=(4, 1, 0))
     pump()
-    assert 'not perpendicular' in dialog.reading_label.text()
-    assert not dialog.add_button.isEnabled()
-    dialog.close()
+    assert 'all three axes' in panel.reading_label.text()
+    assert not panel.add_button.isEnabled()
+    panel.close_button.click()
     pump()
     assert 'plane-preview' not in window.scene.plotter.actors
+
+
+def test_a_plate_never_joins_a_block_of_bricks_by_name():
+    """A plate added under the name of a block of bricks made one block
+    of both, deleted whole from either family's row (Brandon,
+    2026-10-02). The join refuses it, and a plate of its own name goes
+    in a block of its own."""
+    import pytest
+
+    project = visualdynamics.Project('p')
+    g = project.new_geometry(unit='in')
+    project.add_block(g, (0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 0.5), 0.5,
+                      'block', unit='in')
+    with pytest.raises(ValueError, match="block 'block' holds hexes"):
+        project.add_plane(g, (0, 0, 2), (2, 0, 0), (0, 1, 0), 0.5, 'block',
+                          unit='in')
+    geometry = project[g]
+    assert list(geometry.block_name) == ['block'], 'nothing half-added'
+    project.add_plane(g, (0, 0, 2), (2, 0, 0), (0, 1, 0), 0.5, 'plate',
+                      unit='in')
+    assert list(geometry.block_name) == ['block', 'plate']
+    assert not geometry.mixed_blocks()
+
+
+def test_the_pane_opens_on_a_block_of_its_own_family(window, pump):
+    """After a block of bricks, Add Plane opens on a fresh name, not the
+    bricks' block; after a plate, it opens on the plate's block, so
+    plates keep joining plates. A name typed onto the bricks' block is
+    refused before Add."""
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    window.project.new_geometry('Frame', unit='in')
+    window.show_object('Frame')
+    select_objects(window, pump, 'Frame')
+    window.add_block_act()
+    pump()
+    panel = window.scene.mesh_panel
+    assert panel.values()['block'] == 'block'
+    panel.add_button.click()
+    pump()
+    window.add_plane_act()
+    pump()
+    assert panel.values()['block'] == 'plate', 'not the bricks\' block'
+    panel.set_values(block='block')
+    pump()
+    assert 'holds hexes' in panel.reading_label.text()
+    assert not panel.add_button.isEnabled()
+    panel.set_values(block='plate')
+    pump()
+    panel.add_button.click()
+    pump()
+    window.add_plane_act()
+    pump()
+    assert panel.values()['block'] == 'plate', 'the plate\'s block again'
+    window.add_block_act()
+    pump()
+    assert panel.values()['block'] == 'block'
+    assert not window.objects['Frame'].mixed_blocks()
+
+
+def test_adding_many_elements_keeps_one_family_per_block():
+    """`add_elements` keeps the rule `add_element` keeps, before it adds
+    anything; it was the path the join took around it (2026-10-02)."""
+    import pytest
+
+    from visualdynamics.core.geometry import Geometry
+
+    geometry = Geometry(node_id=[1, 2, 3, 4], node_xyz=np.eye(4, 3),
+                        length_unit='m')
+    geometry.add_elements([[1, 2, 3, 4]], [44], [1])
+    with pytest.raises(ValueError, match='one element family'):
+        geometry.add_elements([[1, 2]], [21], [1])
+    assert len(geometry.elem_conn) == 1, 'nothing added by the refusal'
+    with pytest.raises(ValueError, match='one element family'):
+        geometry.add_elements([[1, 2, 3], [1, 2]], [41, 21], [2, 2])
+    geometry.add_elements([[1, 2]], [21], [2])
+    assert not geometry.mixed_blocks()
+
+
+def _cross(project):
+    """Two bars crossing at the origin: an X cross-section, its overlap a
+    cell of eight bricks both bars mesh."""
+    g = project.new_geometry(unit='in')
+    project.add_block(g, (-2, -0.5, 0), (4, 0, 0), (0, 1, 0), (0, 0, 1), 0.5,
+                      'a', unit='in')
+    return g
+
+
+def test_crossing_blocks_fill_their_overlap_once():
+    """The overlap of two crossing bars was meshed by both and counted
+    twice, and the pair of bricks in each cell drew no faces at all, so
+    the middle of the X vanished (Brandon, 2026-10-02). The second bar
+    leaves out the bricks already there; the skin is the X's."""
+    from collections import Counter
+
+    from visualdynamics.viz.geometry import solid_faces
+
+    project = visualdynamics.Project('p')
+    g = _cross(project)
+    found = project.add_block(g, (-0.5, -2, 0), (1, 0, 0), (0, 4, 0),
+                              (0, 0, 1), 0.5, 'b', unit='in')
+    geometry = project[g]
+    assert (found['elements'], found['duplicates']) == (24, 8)
+    assert len(geometry.elem_conn) == 56 and not geometry.duplicate_elements()
+    faces = Counter()
+    for conn in geometry.elem_conn:
+        for face in solid_faces(len(conn)):
+            faces[tuple(sorted(int(conn[i]) for i in face))] += 1
+    # 7 + 7 sq in top and bottom, 3 + 3 + 3 + 3 along the sides, four
+    # 1 sq in ends: 30 sq in of quarter-inch-square faces
+    assert sum(1 for count in faces.values() if count == 1) == 120
+
+
+def test_merging_nodes_makes_elements_on_the_same_nodes_one():
+    """Bars meshed apart and tied after: the merge leaves two bricks in
+    every overlap cell, and makes each pair one, the earlier."""
+    from visualdynamics.core import mesh
+    from visualdynamics.core.geometry import Geometry
+
+    a = mesh.block((-2, -0.5, 0), (4, 0, 0), (0, 1, 0), (0, 0, 1), 0.5, 'a', unit='in')
+    b = mesh.block((-0.5, -2, 0), (1, 0, 0), (0, 4, 0), (0, 0, 1), 0.5, 'b', unit='in')
+    geometry = Geometry(
+        node_id=np.concatenate([a.node_id, b.node_id + 1000]),
+        node_xyz=np.vstack([a.node_xyz, b.node_xyz]),
+        elem_conn=[*a.elem_conn, *[c + 1000 for c in b.elem_conn]],
+        elem_type=[*a.elem_type, *b.elem_type],
+        elem_block=[1] * len(a.elem_conn) + [2] * len(b.elem_conn),
+        block_id=[1, 2], block_name=['a', 'b'], length_unit='m')
+    assert len(geometry.elem_conn) == 64
+    found = geometry.merge_coincident_nodes(1e-9)
+    assert found['duplicates'] == 8
+    assert len(geometry.elem_conn) == 56 and not geometry.duplicate_elements()
+    assert int(np.sum(geometry.elem_block == 1)) == 32, 'the earlier bar keeps the cell'
+
+
+def test_the_pane_says_the_overlap_before_the_add(window, pump):
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    _cross(window.project)
+    window.show_object('Geometry')
+    select_objects(window, pump, 'Geometry')
+    window.add_block_act()
+    pump()
+    panel = window.scene.mesh_panel
+    panel.set_values(block='b', center=(0, 0, 0.5), widths=(1, 4, 1), size=0.5)
+    pump()
+    assert panel.reading_label.text().endswith(
+        '8 of the elements are already there where it overlaps, and are left out.')
+    panel.add_button.click()
+    pump()
+    assert 'added 24 bricks, 8 more already there where it overlaps' in \
+        window.statusBar().currentMessage()

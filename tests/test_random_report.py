@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import fixture_path, web_close, web_read
+from conftest import fixture_path, web_close, web_read, web_view
 
 import visualdynamics
 from visualdynamics.core.report import random_template
@@ -199,14 +199,13 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     path = tmp_path / 'random.html'
     path.write_text(render_html(report_of(run), run.project,
                                 unit_system=visualdynamics.SI), encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     outcome = {}
 
@@ -1164,7 +1163,6 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.core.data import Specification
@@ -1193,7 +1191,7 @@ def test_the_opening_window_fits_the_limits_it_is_judged_against(tmp_path):
     path.write_text(page, encoding='utf-8')
 
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(900, 600)
     view.load(QUrl.fromLocalFile(str(path)))
     # Through the shared reader, which never uses `app.exec()`: on a CI
@@ -1246,7 +1244,6 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     from visualdynamics.core.data import Psd, Specification
@@ -1273,7 +1270,7 @@ def test_the_page_fills_the_frame_and_the_prose_does_not(tmp_path):
     QApplication.instance() or QApplication(['x'])
 
     def measure(frame):
-        view = QWebEngineView()
+        view = web_view()
         view.resize(frame, 900)
         view.show()                      # offscreen, a hidden view has no width
         view.load(QUrl.fromLocalFile(str(path)))
@@ -1335,14 +1332,13 @@ def test_the_bar_chart_zooms_along_its_channels(run, tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
-    from PySide6.QtWebEngineWidgets import QWebEngineView
     from PySide6.QtWidgets import QApplication
 
     path = tmp_path / 'zoom.html'
     path.write_text(render_html(report_of(run), run.project,
                                 unit_system=visualdynamics.SI), encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
-    view = QWebEngineView()
+    view = web_view()
     view.resize(1000, 800)
     state = ("(() => { const c = document.querySelector('canvas.bars');"
              " if (!c || !c.dataset.bars) return null;"

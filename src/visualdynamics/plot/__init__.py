@@ -2486,23 +2486,27 @@ def plot_series(items: Sequence[tuple[str | None, Any, Sequence[int] | None]], u
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:
-    """The louder density over the quieter, in decibels, one curve per
-    shared channel — the signal-to-noise reading of two selected PSDs
-    (Brandon, 2026-08-25). Returns how many channels drew.
+    """The signal-to-noise of the louder density over the quieter, in
+    decibels, one curve per shared channel — the reading of two
+    selected PSDs (Brandon, 2026-08-25). Returns how many channels
+    drew.
 
-    Linear in dB on purpose, not a log axis of the linear ratio: the
-    number being read *is* the decibel. A dashed line at 0 dB marks
-    where the two densities are equal — for a noise floor, where the
-    measurement is the room. `records` restricts to the named rows of
-    the louder side, the grid's own picks.
+    The signal's power is the louder density less the quieter, over
+    the quieter (`snr.signal_to_noise`, 2026-10-03), so a line where
+    the two are equal is not 0 dB but no signal at all, and is left
+    undrawn. Linear in dB on purpose, not a log axis of the linear
+    ratio: the number being read *is* the decibel. A dashed line at
+    0 dB marks where the signal's power equals the noise's.
+    `records` restricts to the named rows of the louder side, the
+    grid's own picks.
     """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
-    from ..core.data import density_ratio
+    from ..core.snr import signal_to_noise
 
     colors = resolve_theme(theme)
-    abscissa, rows, dofs, _dims = density_ratio(signal, floor)
+    abscissa, rows, dofs, _dims = signal_to_noise(signal, floor)
     if records is not None:
         keep = {str(signal.response_dof[k]) for k in records}
         picked = [(row, dof) for row, dof in zip(rows, dofs)
@@ -2533,7 +2537,7 @@ def build_ratio(layout: Any, signal: Any, floor: Any,
     zero.is_zone_edge = True
     plot.addItem(zero, ignoreBounds=True)
     plot.setLabel('bottom', 'frequency [Hz]')
-    plot.setLabel('left', 'ratio [dB]')
+    plot.setLabel('left', 'signal to noise [dB]')
     return len(dofs)
 
 
@@ -2544,11 +2548,16 @@ def plot_ratio(signal: Any, floor: Any, *,
                path: str | os.PathLike | None = None,
                show: bool = True, title: str | None = None,
                size: tuple[int, int] = (1000, 700)) -> Any:
-    """The ratio of two densities in decibels — the headless call for
-    the toolbar's Ratio reading of two selected PSDs.
+    """The signal-to-noise of a driven density over its ambient one,
+    line by line, in decibels — the headless call for the toolbar's
+    Signal to noise reading of two selected PSDs.
 
         visualdynamics.plot.plot_ratio(driven_psds, noise_psds,
                                        path='snr.png')
+
+    The signal's power is the driven less the ambient, over the
+    ambient (`visualdynamics.core.snr`); a line with no signal above
+    the floor is not drawn.
     """
     del unit_system     # a ratio of densities converts to itself
 
@@ -2556,7 +2565,7 @@ def plot_ratio(signal: Any, floor: Any, *,
         build_ratio(widget, signal, floor, records=records, theme=theme)
 
     return _plot_window(build, theme=theme, path=path, show=show,
-                        title=title or 'Ratio', size=size)
+                        title=title or 'Signal to noise', size=size)
 
 
 def plot_comparison(measured: Any, specification: Any, *,
@@ -2642,6 +2651,47 @@ def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or 'Kurtosis by channel', size=size)
+
+
+def plot_snr(signal: Any, floor: Any, *,
+             records: Sequence[int] | None = None,
+             low: float | None = None, theme: Any = None,
+             path: str | os.PathLike | None = None,
+             show: bool = True, title: str | None = None,
+             size: tuple[int, int] | None = None) -> Any:
+    """How far each channel's signal stands above its noise, a bar
+    apiece: RMS signal-to-noise in dB.
+
+        visualdynamics.plot.plot_snr(driven_psds, noise_psds,
+                                     path='snr_bars.png')
+
+    The headless call for the toolbar's RMS signal to noise reading of
+    two selected PSDs. Each channel's power is the area under its
+    density over the band the two share, and the reading is
+    10 log10((P_driven - P_ambient) / P_ambient)
+    (`visualdynamics.core.snr`). `low` is the floor a channel is
+    judged against, `core.snr.THRESHOLD_DB` by default; a channel
+    with no signal above its noise has no bar and is named as at the
+    noise floor, and one whose ambient recorded nothing is left out.
+    """
+    from ..core.snr import rms_signal_to_noise
+    from .bars import ROW_HEIGHT, snr_chart
+
+    rows, _silent = rms_signal_to_noise(signal, floor, records)
+    if not rows:
+        raise ValueError('no shared channel recorded any ambient noise '
+                         'to divide by')
+    colors = resolve_theme(theme)
+    if size is None:
+        size = (900, ROW_HEIGHT * len(rows) + 120)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        snr_chart(widget.addPlot(row=0, col=0), rows, colors, low=low)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or 'RMS signal to noise by channel',
+                        size=size)
 
 
 def plot_scalogram(history: Any, channel: int = 0, *,

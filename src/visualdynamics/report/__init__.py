@@ -524,6 +524,11 @@ def _build_block(block, objects, us, links=None):
             return _sine_bars(block, source, levels)
         if block.get('mode') == 'kurtosis':
             return _kurtosis_bars(block, source)
+        if block.get('mode') == 'snr':
+            floor_object = objects.get(block.get('floor', '') or '')
+            if source is None or floor_object is None:
+                return None
+            return _snr_bars(block, source, floor_object)
         measured = objects.get(block.get('measured'))
         if source is None or measured is None:
             return None
@@ -1329,17 +1334,18 @@ def _plot_block(block, source, objects, us):
             built['note'] = thinning
         return built
     if mode == 'ratio':
-        # two densities divided, in decibels — the signal-to-noise
-        # reading (Brandon, 2026-08-25). The louder is the numerator;
-        # the block names the pair, and either missing keeps this an
-        # unbound slot rather than a half of a ratio.
-        from ..core.data import density_ratio
+        # the signal-to-noise of two densities, in decibels (Brandon,
+        # 2026-08-25; the subtracted form since 2026-10-03, see
+        # `core.snr`). The louder is the signal; the block names the
+        # pair, and either missing keeps this an unbound slot rather
+        # than half of a ratio.
+        from ..core.snr import signal_to_noise
 
         floor_object = objects.get(block.get('floor', '') or '')
         if floor_object is None:
             return None
         try:
-            x, rows, dofs, _dims = density_ratio(source, floor_object)
+            x, rows, dofs, _dims = signal_to_noise(source, floor_object)
         except ValueError:
             return None
         with np.errstate(divide='ignore', invalid='ignore'):
@@ -1352,7 +1358,7 @@ def _plot_block(block, source, objects, us):
         return {'kind': 'plot', 'caption': caption, 'logy': False,
                 'x': [_compact(v) for v in x],
                 'xlabel': f'frequency [{us.label_text("frequency")}]',
-                'ylabel': 'ratio [dB]', 'curves': curves}
+                'ylabel': 'signal to noise [dB]', 'curves': curves}
     if mode == 'cmif':
         from ..plot import cmif_curves
 
@@ -2675,6 +2681,45 @@ def _kurtosis_bars(block, source):
         'floor': None,
         'units': '',
         'ylabel': f'Pearson kurtosis ({NOMINAL:.0f} is Gaussian)',
+    }
+
+
+def _snr_bars(block, signal, floor):
+    """How far each channel's signal stands above its noise: RMS
+    signal-to-noise in dB, a bar apiece, judged against a floor.
+
+    The same rows the app's RMS signal to noise reading draws
+    (`core.snr.rms_signal_to_noise`). A channel with no signal above
+    its noise has no number: it goes out as null, is named as at the
+    noise floor, and counts under the threshold — the worst reading a
+    channel can give, so it is in the count rather than out of it. A
+    channel whose ambient recorded nothing is left out, and the
+    caption says how many.
+    None when the pair cannot pair, which keeps the slot unbound.
+    """
+    from ..core.snr import THRESHOLD_DB, at_floor, rms_signal_to_noise
+
+    try:
+        read, silent = rms_signal_to_noise(signal, floor)
+    except ValueError:
+        return None
+    rows = at_floor(read)
+    if not rows:
+        return None
+    # left off and said, as the kurtosis bars say a dead channel: a
+    # chart of eight bars from twelve channels otherwise reads as all
+    caption = block.get('caption', '')
+    if silent:
+        caption += (f' — {len(silent)} channel{"s" * (len(silent) != 1)} '
+                    'recorded no ambient noise and cannot be read')
+    return {
+        'kind': 'bars', 'caption': caption,
+        'labels': [label for label, _v in rows],
+        'values': [round(float(v), 4) if np.isfinite(v) else None
+                   for _label, v in rows],
+        'low': THRESHOLD_DB, 'high': None, 'side': 'under',
+        'floor': None, 'units': ' dB',
+        'ylabel': 'RMS signal to noise [dB]',
     }
 
 

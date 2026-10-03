@@ -45,10 +45,11 @@ class Report:
         (the matched pairs animated over each other: both sets'
         geometries in one scene, resolved through the object's own
         geometry references, each pair phase-aligned)
-      {'kind': 'bars', 'source': name, 'mode': kurtosis|srs|sine,
+      {'kind': 'bars', 'source': name, 'mode': kurtosis|srs|sine|snr,
                        'caption': str}
         (a bar reading: kurtosis per channel, SRS levels against the
-        target, or sine levels against their tones)
+        target, sine levels against their tones, or — with 'floor' the
+        ambient Psd's name — RMS signal-to-noise per channel)
       {'kind': 'verdict', 'source': Specification-name,
                           'measured': Psd-name, 'level_label': str}
         (the pass/fail box: whether the run passed, read off the
@@ -2014,21 +2015,36 @@ def sysid_template(objects: Mapping[str, Any],
             'is a suspect channel and a dark band a poorly-driven '
             'frequency range.\n\n'
             'Signal to noise ({{figure:Signal to noise}}) says '
-            'whether there was a measurement at all: it is the '
-            'driven density over the ambient one, in decibels, so it '
-            'is the margin above the noise floor channel by channel '
-            'and line by line. Where it approaches zero the '
-            'identification is measuring the room. The two are worth '
-            'reading together — a channel can be well above its '
-            'noise floor and still incoherent, which points at a '
-            'rattle or a loose sensor rather than at the level.'},
+            'whether there was a measurement at all. The driven '
+            'recording holds the signal and the same noise the '
+            'ambient one recorded, so the signal\'s power is the '
+            'driven density less the ambient, and the figure is that '
+            'over the ambient, in decibels: the margin above the '
+            'noise floor, channel by channel and line by line. A line '
+            'with nothing above the floor is not drawn. The RMS '
+            'signal to noise ({{figure:RMS signal to noise}}) is the '
+            'same ratio taken once per channel over the whole band, '
+            'from the area under each density, with the channels '
+            'under the threshold marked. It ranks the channels; the '
+            'figure before it shows where in the band a channel was '
+            'weak. Where either approaches zero the identification is '
+            'measuring the room. The coherence and the '
+            'signal-to-noise are worth reading together. A channel '
+            'can be well above its noise floor and still incoherent, '
+            'which points at a rattle or a loose sensor rather than '
+            'at the level.'},
         {'kind': 'plot', 'source': '@basis:MultipleCoherence',
          'mode': 'stage',
          'caption': 'Multiple coherence, every channel on the stage'},
         {'kind': 'plot', 'mode': 'stage', 'reading': 'ratio',
          'source': loud_density, 'floor': quiet_density,
-         'caption': 'Signal to noise: the driven density over the '
-         'ambient one, per channel, in decibels'},
+         'caption': 'Signal to noise: the driven density less the '
+         'ambient, over the ambient, per channel, in decibels'},
+        {'kind': 'bars', 'mode': 'snr',
+         'source': loud_density, 'floor': quiet_density,
+         'caption': 'RMS signal to noise: each channel\'s driven power '
+         'less its ambient, over the ambient, across the whole band, '
+         'in decibels'},
         {'kind': 'text', 'text':
             '## The Shape Of The Recordings\n\n'
             'A spectrum says nothing about the shape of the '

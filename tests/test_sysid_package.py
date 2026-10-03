@@ -106,30 +106,33 @@ def test_the_package_imports_its_four_readings(tmp_path):
 
 
 def test_the_pair_divides_to_the_planted_ratio(tmp_path):
-    """Driven 1e-4 over ambient 1e-8 is 40 dB, at every line, on the
-    response channels; the drives plant 36 dB the same way — read
-    through density_ratio, the one rule under every ratio view."""
-    from visualdynamics.core.data import density_ratio
+    """Driven 1e-4 over ambient 1e-8: the signal is the driven less the
+    ambient, so the planted signal-to-noise is 10 log10(9999), a hair
+    under 40 dB, at every line on the response channels; the drives
+    plant theirs the same way — read through signal_to_noise, the one
+    rule under every ratio view."""
+    from visualdynamics.core.snr import signal_to_noise
 
     path = _write_package(tmp_path / 'sysid.nc4')
     out = visualdynamics.import_file(path)
-    _x, rows, dofs, _dims = density_ratio(out['Random_excitation_psds'],
+    _x, rows, dofs, _dims = signal_to_noise(out['Random_excitation_psds'],
                                    out['Random_noise_psds'])
     assert dofs == ['4', '7', '9001', '9002', '9003']
     response_db = 10 * np.log10(np.real(rows[0, 1:]))
-    assert np.allclose(response_db, 40.0), 'the planted response ratio'
+    assert np.allclose(response_db, 10 * np.log10((1e-4 - 1e-8) / 1e-8)), \
+        'the planted response signal-to-noise, the noise taken off'
     drive_db = 10 * np.log10(np.real(rows[2, 1:]))
-    assert np.allclose(drive_db, 10 * np.log10(4e-5 / 1e-8))
+    assert np.allclose(drive_db, 10 * np.log10((4e-5 - 1e-8) / 1e-8))
 
 
 def test_silent_ambient_reads_as_no_ratio_not_infinity(tmp_path):
     """A simulated run measures perfect silence; a zero ambient line
     has nothing to divide by and answers NaN, never infinity."""
-    from visualdynamics.core.data import density_ratio
+    from visualdynamics.core.snr import signal_to_noise
 
     path = _write_package(tmp_path / 'sysid.nc4', noise_level=0.0)
     out = visualdynamics.import_file(path)
-    _x, rows, _dofs, _dims = density_ratio(out['Random_excitation_psds'],
+    _x, rows, _dofs, _dims = signal_to_noise(out['Random_excitation_psds'],
                                     out['Random_noise_psds'])
     assert np.all(np.isnan(np.real(rows)))
 
@@ -162,9 +165,9 @@ def test_the_plate_package_holds_the_layout():
     assert frf.abscissa[1] == pytest.approx(2.0), \
         'sysid frame 2048 at 4096 Hz'
     assert out['Random_coherence'].num_records == 8
-    from visualdynamics.core.data import density_ratio
+    from visualdynamics.core.snr import signal_to_noise
 
-    _x, rows, _dofs, _dims = density_ratio(out['Random_excitation_psds'],
+    _x, rows, _dofs, _dims = signal_to_noise(out['Random_excitation_psds'],
                                     out['Random_noise_psds'])
     assert rows.shape[0] == 12, '8 responses and 4 drives'
     response_db = 10 * np.log10(np.real(rows[:8, 1:]))
@@ -199,9 +202,9 @@ def test_the_plate_stream_holds_the_two_phases():
     quiet_history.averaging = \
         project['Time History (2)'].averaging
     quiet_psds = project[project.compute_psds('Time History')]
-    from visualdynamics.core.data import density_ratio
+    from visualdynamics.core.snr import signal_to_noise
 
-    _x, rows, _dofs, _dims = density_ratio(driven_psds, quiet_psds)
+    _x, rows, _dofs, _dims = signal_to_noise(driven_psds, quiet_psds)
     db = 10 * np.log10(np.real(rows[:8, 5:-5]))
     assert 15.0 < np.nanmedian(db) < 60.0, \
         'the workflow reads a finite ratio out of the real save'
@@ -287,7 +290,7 @@ def test_the_streams_densities_read_the_planted_ratio(tmp_path):
     """Broadband driven at 30 dB over broadband ambient: compute the
     two PSDs, divide, read the planted number back — the workflow as
     a script, exactly as the app's Ratio reading does it."""
-    from visualdynamics.core.data import density_ratio
+    from visualdynamics.core.snr import signal_to_noise
 
     path = _write_streamed_sysid(tmp_path / 'sysid_stream.nc4')
     project = visualdynamics.Project('sysid')
@@ -296,14 +299,18 @@ def test_the_streams_densities_read_the_planted_ratio(tmp_path):
     project['Time History'].averaging = \
         project['Time History (2)'].averaging
     quiet_psds = project[project.compute_psds('Time History')]
-    _x, rows, dofs, _dims = density_ratio(driven_psds, quiet_psds)
+    _x, rows, dofs, _dims = signal_to_noise(driven_psds, quiet_psds)
     db = 10 * np.log10(np.real(rows[:, 5:-5]))
-    assert np.median(db) == pytest.approx(30.0, abs=1.0)
+    # nanmedian: these densities are one unaveraged frame, whose lines
+    # scatter so widely that about one in a thousand driven lines falls
+    # under its ambient by chance — no signal there, NaN (`core.snr`)
+    assert np.nanmedian(db) == pytest.approx(30.0, abs=1.0)
     assert dofs == ['101Z+', '104Z+']
 
 
-def test_density_ratio_refuses_disjoint_channels():
-    from visualdynamics.core.data import Psd, density_ratio
+def test_signal_to_noise_refuses_disjoint_channels():
+    from visualdynamics.core.data import Psd
+    from visualdynamics.core.snr import signal_to_noise
 
     freq = np.linspace(1.0, 100.0, 50)
     a = Psd(abscissa=freq, ordinate=np.ones((1, 50)),
@@ -311,18 +318,19 @@ def test_density_ratio_refuses_disjoint_channels():
     b = Psd(abscissa=freq, ordinate=np.ones((1, 50)),
             response_dof=['999X+'])
     with pytest.raises(ValueError, match='share no'):
-        density_ratio(a, b)
+        signal_to_noise(a, b)
 
 
-def test_density_ratio_refuses_mismatched_lines():
-    from visualdynamics.core.data import Psd, density_ratio
+def test_signal_to_noise_refuses_mismatched_lines():
+    from visualdynamics.core.data import Psd
+    from visualdynamics.core.snr import signal_to_noise
 
     a = Psd(abscissa=np.linspace(1.0, 100.0, 50),
             ordinate=np.ones((1, 50)), response_dof=['101Z+'])
     b = Psd(abscissa=np.linspace(1.0, 200.0, 50),
             ordinate=np.ones((1, 50)), response_dof=['101Z+'])
     with pytest.raises(ValueError, match='frequency lines'):
-        density_ratio(a, b)
+        signal_to_noise(a, b)
 
 
 def test_any_number_of_streams_import_in_order(tmp_path):
@@ -401,8 +409,8 @@ def test_two_selected_densities_offer_the_ratio_reading(window, pump):
     x, y = curves[0].getData()
     assert np.nanmax(x) == pytest.approx(1000.0), \
         'linear frequency, not a logged axis'
-    assert np.allclose(y[np.isfinite(y)], 30.0), \
-        'a thousandfold power ratio reads 30 dB'
+    assert np.allclose(y[np.isfinite(y)], 10 * np.log10(999.0)), \
+        'a thousandfold density reads 999 powers of signal, the noise off'
     # a lone PSD, or three, does not offer it
     window.tree.clearSelection()
     window._item_for_object('Noise PSDs').setSelected(True)
@@ -744,7 +752,8 @@ def test_the_densities_overlay_per_quantity_and_pair_by_channel():
     # the pair reads on the stage now, one figure per quantity
     # (Brandon, 2026-08-23) — the app's own 3-D overlay
     pairs = [b for b in report.blocks
-             if b.get('floor') and b.get('reading') != 'ratio']
+             if b.get('floor') and b.get('kind') == 'plot'
+             and b.get('reading') != 'ratio']
     assert [b['quantity'] for b in pairs] == ['force', 'acceleration']
     assert all(b['mode'] == 'stage' for b in pairs)
     assert all(b['source'] == 'Excitation PSDs'

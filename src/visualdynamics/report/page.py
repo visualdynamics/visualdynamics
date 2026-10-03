@@ -406,7 +406,13 @@ function barsBlock(block) {
   block.low_at = block.low;
   block.high_at = block.high;
 
+  /* a one-sided floor (a signal-to-noise): too little is the fault,
+     and a channel with no number at all is the worst of them */
+  const under = block.side === 'under'
+                && (block.high_at === null || block.high_at === undefined);
   const beyond = v => {
+    if (under) return v === null || !isFinite(v) || v < block.low_at
+      ? 'under' : null;
     if (v === null || !isFinite(v)) return null;
     if (block.high_at === null) return v >= block.low_at ? 'over' : null;
     if (v > block.high_at) return 'over';
@@ -437,9 +443,12 @@ function barsBlock(block) {
        kurtosis bar drawn from zero is three units of agreement
        dressed up as a measurement (Brandon, 2026-08-24) */
     const base = block.baseline === undefined ? 0 : block.baseline;
-    let lo = Math.min(base, ...values, block.low_at);
-    let hi = Math.max(base, ...values, block.high_at === null
-                                       ? block.low_at : block.high_at);
+    /* a channel with no number draws no bar, and has no say in the
+       axis either */
+    const known = values.filter(v => v !== null && isFinite(v));
+    let lo = Math.min(base, ...known, block.low_at);
+    let hi = Math.max(base, ...known, block.high_at === null
+                                      ? block.low_at : block.high_at);
     const pad = 0.12 * (hi - lo || 1); lo -= pad; hi += pad;
     if (block.floor !== null && block.floor !== undefined) {
       lo = Math.min(block.floor, hi - 1e-9);
@@ -462,7 +471,7 @@ function barsBlock(block) {
                     : which === 'under' ? 'rgba(76, 146, 217, 0.85)'
                     : 'rgba(140, 140, 148, 0.75)';
         const Y = top + step * (k + 0.16), H = step * 0.68;
-        const X0 = px(base), X = px(v);
+        const X0 = px(base), X = v === null || !isFinite(v) ? X0 : px(v);
         g.fillRect(Math.min(X, X0), Y, Math.abs(X - X0), H);
         g.fillStyle = ink; g.globalAlpha = 0.8;
         g.font = '10px sans-serif'; g.textAlign = 'right';
@@ -479,8 +488,8 @@ function barsBlock(block) {
       [block.low_at, block.high_at].forEach((at, j) => {
         if (at === null || at === undefined) return;
         const X = px(at);
-        const over = j === 1 || block.high_at === null
-                     || block.high_at === undefined;
+        const over = !under && (j === 1 || block.high_at === null
+                                || block.high_at === undefined);
         g.fillStyle = over ? 'rgba(229, 83, 75, 0.16)'
                            : 'rgba(76, 146, 217, 0.16)';
         if (over) g.fillRect(X, top, margin.left + plotW - X, plotH);
@@ -520,7 +529,9 @@ function barsBlock(block) {
     const all = block.values;
     const out = all.filter(v => beyond(v)).length;
     const share = all.length ? 100 * out / all.length : 0;
-    const where = block.high_at === null
+    const where = under
+      ? 'under ' + block.low_at.toFixed(1) + block.units
+      : block.high_at === null
       ? 'over ' + block.low_at.toFixed(1) + block.units
       : 'outside ' + block.low_at.toFixed(1) + ' to '
         + block.high_at.toFixed(1) + block.units;
@@ -540,6 +551,9 @@ function barsBlock(block) {
        working GPU path hands back a fully transparent buffer however
        well it drew. */
     canvas.dataset.bars = all.length;
+    /* and how many it judged out, so the judgment can be read back
+       as well as the drawing */
+    canvas.dataset.out = out;
     canvas.dataset.first = first;
     canvas.dataset.shown = shown;
   }

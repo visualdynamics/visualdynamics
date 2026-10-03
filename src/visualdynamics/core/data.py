@@ -2626,8 +2626,8 @@ def paired_channels(signal: Any, floor: Any) -> list[tuple[int, int, str, str]]:
     bins, so that refuses rather than interpolating an answer nobody
     measured.
 
-    Here rather than inside `density_ratio` because the overlay of
-    the two densities and the ratio of them are the same pair read
+    Here rather than inside `snr.signal_to_noise` because the overlay
+    of the two densities and the ratio of them are the same pair read
     two ways: the report draws them one above the other, and a figure
     that paired its channels differently from the figure below it
     would be two claims about one measurement.
@@ -2650,31 +2650,6 @@ def paired_channels(signal: Any, floor: Any) -> list[tuple[int, int, str, str]]:
         raise ValueError('the two densities share no channel; there '
                          'is no ratio to take')
     return shared
-
-
-def density_ratio(signal: Any, floor: Any):
-    """One density over another, channel by channel, line by line.
-
-    Channels pair by `paired_channels`; a zero floor line answers
-    NaN, never infinity — on real hardware zero means below
-    resolution, in a simulation it means the quiet was exactly
-    silent, and neither is an infinite signal-to-noise.
-
-    Returns ``(abscissa, rows, dofs, dims)`` — the ratio as plain
-    arrays plus each row's quantity, for whoever is reading it: the
-    plot's ratio view, the stage, the report's ratio figure — every
-    ratio divides here, and the quantity rides along so a mixed
-    object's rows can be told apart.
-    """
-    rows, dofs, dims = [], [], []
-    for i, j, dof, dim in paired_channels(signal, floor):
-        top = np.real(np.asarray(signal.ordinate[i]))
-        bottom = np.real(np.asarray(floor.ordinate[j]))
-        with np.errstate(divide='ignore', invalid='ignore'):
-            rows.append(np.where(bottom > 0.0, top / bottom, np.nan))
-        dofs.append(dof)
-        dims.append(dim)
-    return np.asarray(signal.abscissa), np.asarray(rows), dofs, dims
 
 
 class Psd(_Bands, DataArray):

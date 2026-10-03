@@ -95,7 +95,8 @@ class BarChart:
                  changed: Callable[..., None] | None = None,
                  label: str = '', units: str = '',
                  neutral: str = 'response_curve',
-                 baseline: float = 0.0, summary: str = 'over') -> None:
+                 baseline: float = 0.0, summary: str = 'over',
+                 side: str = 'over') -> None:
         self.plot: Any = plot
         self.rows: list[Any] = list(rows)
         self.colors: dict[str, str] = colors
@@ -127,6 +128,13 @@ class BarChart:
         if summary not in ('over', 'title', 'none'):
             raise ValueError(f"summary {summary!r}: 'over', 'title' or 'none'")
         self.summary_place: str = summary
+        #: which way a one-sided chart's single threshold faults:
+        #: 'over' for a ceiling (an error, a share outside the limits),
+        #: 'under' for a floor — a signal-to-noise, where too *little*
+        #: is the fault (2026-10-03). Two-sided charts ignore it.
+        if side not in ('over', 'under'):
+            raise ValueError(f"side {side!r}: 'over' or 'under'")
+        self.side: str = side
         #: the bars themselves, one item holding all of them
         self.bars: Any = None
         self.lines: list[Any] = []
@@ -142,10 +150,18 @@ class BarChart:
     def beyond(self, value: float) -> str | None:
         """Which way this bar is out, or None.
 
-        A one-sided chart has a ceiling and no floor: no amount of
-        staying inside the abort limits is a fault.
+        A one-sided chart has a ceiling and no floor — no amount of
+        staying inside the abort limits is a fault — or, with `side`
+        'under', a floor and no ceiling. On a floor chart a value with
+        no number (NaN) is under it: a signal-to-noise with no signal
+        above the noise is the worst a channel can read, not a blank.
         """
-        if not np.isfinite(value) or self.low is None:
+        if self.low is None:
+            return None
+        if self.high is None and self.side == 'under':
+            return 'under' if not np.isfinite(value) or value < self.low \
+                else None
+        if not np.isfinite(value):
             return None
         if self.high is None:
             return 'over' if value >= self.low else None
@@ -159,6 +175,10 @@ class BarChart:
         """The percentage of channels outside, wherever the lines are."""
         if self.low is None:
             return 0.0
+        if self.high is None and self.side == 'under':
+            values = self.values()
+            out = sum(1 for v in values if self.beyond(v))
+            return 100.0 * out / len(values) if values else 0.0
         return outside_fraction(self.values(), self.low, self.high)
 
     # ---- drawing ----------------------------------------------------------
@@ -169,9 +189,12 @@ class BarChart:
         Named for the fault and not for the threshold, which is the
         distinction the shading got wrong: a one-sided chart's only
         threshold is called 'low' because it is the only one, and what
-        is out is everything *above* it.
+        is out is everything *above* it — unless it is a floor
+        (`side` 'under'), where what is out is everything below.
         """
-        return which == 'high' or self.high is None
+        if self.high is None:
+            return self.side == 'over'
+        return which == 'high'
 
     def _span(self, which, position):
         """(from, to) the shading for this threshold covers.
@@ -190,8 +213,8 @@ class BarChart:
         plot shades its abort zones with — "past the limit" should look
         the same wherever it is said.
 
-        A one-sided chart has only a ceiling, so its single threshold is
-        the red one however it is named.
+        A one-sided chart's single threshold is red for a ceiling and
+        blue for a floor, however it is named.
         """
         import pyqtgraph as pg
         from PySide6.QtGui import QColor
@@ -320,8 +343,11 @@ class BarChart:
                        .rstrip() if top else ''))
         share = self.share()
         out = sum(1 for v in self.values() if self.beyond(v))
-        where = (f'over {self.low:g}{self.units}' if self.high is None
-                 else f'outside {self.low:g} to {self.high:g}{self.units}')
+        where = (f'outside {self.low:g} to {self.high:g}{self.units}'
+                 if self.high is not None
+                 else f'under {self.low:g}{self.units}'
+                 if self.side == 'under'
+                 else f'over {self.low:g}{self.units}')
         return f'{out} of {len(self.rows)} channels {where} — {share:.0f}%'
 
     def key(self, legend: Any) -> None:
@@ -339,6 +365,16 @@ class BarChart:
                  else self.units or '')
         one_sided = self.high is None
         top = self.low if one_sided else self.high
+        if one_sided and self.side == 'under':
+            entries = [(self._brush(self.low + 1.0), 'within tolerance'),
+                       (self._brush(self.low - 1.0), 'under tolerance'),
+                       (self._zone_brush('low'),
+                        f'past {self.low:+g}{units}'.replace('-', '\u2212'))]
+            for brush, name in entries:
+                legend.addItem(pg.BarGraphItem(x=[0.0], height=[1.0],
+                                               width=1.0, pen=None,
+                                               brush=brush), name)
+            return
         entries = [(self._brush(self.baseline if one_sided
                                 else (self.low + self.high) / 2.0),
                     'within tolerance'),
@@ -505,6 +541,28 @@ def kurtosis_chart(plot: Any, rows: Sequence[tuple[str, float]],
     return BarChart(plot, list(rows), colors, low=low, high=high,
                     changed=changed, label='Pearson kurtosis', units='',
                     neutral='specification_curve', baseline=NOMINAL)
+
+
+def snr_chart(plot: Any, rows: Sequence[tuple[str, float]],
+              colors: Mapping[str, str], low: float | None = None,
+              changed: Callable[..., None] | None = None,
+              **options: Any) -> BarChart:
+    """How far each channel's signal stands above its noise: RMS
+    signal-to-noise in dB, a bar apiece (`core.snr`, 2026-10-03).
+
+    One threshold, and it is a floor: a margin can be too small and
+    never too large. A channel with no signal above its noise (NaN)
+    has no bar and counts as under it — it is the worst reading there
+    is, not a missing one. The ordinary channels stand back in gray
+    so the weak ones are the chart, as on the kurtosis chart.
+    """
+    from ..core.snr import THRESHOLD_DB, at_floor
+
+    return BarChart(plot, at_floor(rows), colors,
+                    low=THRESHOLD_DB if low is None else low, high=None,
+                    changed=changed, label='RMS signal to noise',
+                    units='dB', neutral='specification_curve',
+                    side='under', **options)
 
 
 #: (axis label, units) for each reading of a transient replication

@@ -2852,6 +2852,113 @@ def plot_sine_tracking(history: Any, specification: Any, settings: Any, *,
                         size=size)
 
 
+def plot_tracking_filter(history: Any, specification: Any, setting: Any, *,
+                         tone: str | None = None,
+                         channel: str | None = None,
+                         onset: float | None = None,
+                         cursor: float | None = None,
+                         cursor_hz: float | None = None,
+                         span: tuple[float, float] | None = None,
+                         harmonics: Sequence[int] | None = None,
+                         low: float | None = None,
+                         high: float | None = None,
+                         omega0: float | None = None,
+                         unit_system: UnitSystem | None = None,
+                         theme: Any = None,
+                         path: str | os.PathLike | None = None,
+                         show: bool = True, title: str | None = None,
+                         size: tuple[int, int] = (1100, 760)) -> Any:
+    """One tone's tracking band drawn on the record it reads: the
+    record and what the band passes, the record's time-frequency
+    picture with the band's corridor following the sweep, and the
+    band's shape at a cursor.
+
+        from visualdynamics.core.sine_tracking import SineTracking
+        visualdynamics.plot.plot_tracking_filter(
+            history, spec, SineTracking(proportional=0.5),
+            cursor_hz=100.0, path='band.png')
+
+    The passed waveform is `core.sine_tracking.track_waveform`'s, the
+    band `track_sine` reads its levels through; the picture is the
+    wavelet scalogram in dB below its largest, with the cone of
+    influence veiled; the corridor's edges are the drive plus and
+    minus half the bandwidth, so a proportional band runs parallel to
+    the tone up the log axis and a fixed one pinches toward the top.
+    Beside the picture, the band's magnitude at the cursor on the same
+    frequency axis, the drive marked inside it and each harmonic
+    outside; behind the cursor on the record, the band's weight on the
+    record before it, as long as the band takes to settle. Shown in a
+    window, the cursor drags. One setting per call; `plot_sine_tracking`
+    overlays the levels several settings read.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording.
+    specification : SineSweepSpecification
+        The sweep the drive followed.
+    setting : SineTracking
+        The band, which must have one (proportional or fixed).
+    tone : str, optional
+        Which tone; the specification's first by default.
+    channel : str, optional
+        The DOF drawn; the first control channel by default.
+    onset : float, optional
+        Seconds into the recording where the tone's sweep begins;
+        found by matched filter when omitted.
+    cursor : float, optional
+        Where the shape is read, seconds on the record's clock; the
+        middle of the tone's span by default.
+    cursor_hz : float, optional
+        Or the instant the drive first reaches this frequency, Hz. Not
+        both.
+    span : (float, float), optional
+        The stretch of record the time axes show; the whole record by
+        default.
+    harmonics : sequence of int, optional
+        The multiples of the drive marked, `(3,)` by default; empty to
+        mark none.
+    low, high : float, optional
+        The picture's frequency range, Hz: an octave under the sweep up
+        to half again past the highest harmonic marked by default.
+    omega0 : float, optional
+        Cycles under the picture's wavelet,
+        `plot.tracking_filter.OMEGA0` by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sine_tracking import track_waveform
+    from .tracking_filter import HARMONICS, OMEGA0, build_tracking_filter
+
+    if cursor is not None and cursor_hz is not None:
+        raise ValueError('the cursor is placed in seconds or in hertz, '
+                         'not both')
+    waveform = track_waveform(history, specification, setting, tone=tone,
+                              onset=onset, channel=channel)
+    if cursor_hz is not None:
+        cursor = waveform.instant(cursor_hz)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_tracking_filter(
+            widget, history, waveform, cursor=cursor, span=span,
+            harmonics=HARMONICS if harmonics is None else harmonics,
+            low=low, high=high, omega0=OMEGA0 if omega0 is None else omega0,
+            unit_system=unit_system, theme=theme,
+            interactive=path is None)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{waveform.tone} at '
+                                        f'{waveform.dof}, '
+                                        f'{setting.describe()}'),
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

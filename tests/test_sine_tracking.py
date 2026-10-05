@@ -487,3 +487,246 @@ def test_a_waveform_needs_a_band(clean, spec):
         track_waveform(clean, spec, SineTracking(detector='peak'),
                        onset=ONSET)
 
+
+# ---- the band drawn on its record ----------------------------------------
+
+
+@pytest.fixture(scope='module')
+def dirty():
+    """The guide's record: the tone, its third harmonic and broadband
+    noise together."""
+    record = _record('harmonic')
+    noise = AMPLITUDE * 0.2 * np.random.default_rng(3).standard_normal(
+        record.ordinate.shape[1])
+    return TimeHistory(record.abscissa, record.ordinate + noise,
+                       response_dof=[DOF], ordinate_dim=['acceleration'])
+
+
+def _view(history, spec, setting, **kwargs):
+    """The view built on a laid-out widget, as a window shows it."""
+    import pyqtgraph as pg
+
+    from visualdynamics.core.sine_tracking import track_waveform
+    from visualdynamics.plot.tracking_filter import build_tracking_filter
+
+    widget = pg.GraphicsLayoutWidget(size=(1100, 760))
+    widget.resize(1100, 760)
+    waveform = track_waveform(history, spec, setting, onset=ONSET)
+    view = build_tracking_filter(widget, history, waveform, **kwargs)
+    widget.show()
+    from PySide6.QtWidgets import QApplication
+    QApplication.processEvents()
+    return widget, view
+
+
+def _edges(view):
+    """The corridor as drawn: (seconds, lower Hz, upper Hz)."""
+    lower, upper = view.picture.corridor
+    t, low = lower.getData()
+    _t, high = upper.getData()
+    return t, 10.0 ** low, 10.0 ** high
+
+
+@pytest.mark.parametrize('setting', [SineTracking(proportional=0.5),
+                                     SineTracking(fixed=5.0)],
+                         ids=['proportional', 'fixed'])
+def test_the_corridor_is_the_bandwidth_about_the_tone(qt_app, dirty, spec,
+                                                      setting):
+    """At every time the corridor is drawn, its edges are the tone's
+    own frequency — from the sweep's law, not the view's — plus and
+    minus half the bandwidth: a constant share of the drive for a
+    proportional band, a constant width in Hz for a fixed one. The
+    tone is inside it and its third harmonic outside it."""
+    widget, view = _view(dirty, spec, setting)
+    try:
+        t, low, high = _edges(view)
+        tone = _tone().frequency_at(t - ONSET)
+        assert len(t) > 500
+        assert np.allclose(high - low, setting.bandwidth(tone), rtol=1e-9)
+        assert np.allclose((low + high) / 2.0, tone, rtol=1e-9)
+        if setting.kind == 'proportional':
+            assert np.allclose((high - low) / tone, 0.5)
+        else:
+            assert np.allclose(high - low, 5.0)
+        assert np.all((low < tone) & (tone < high))
+        assert np.all(3.0 * tone > high)
+    finally:
+        widget.close()
+
+
+def test_the_picture_puts_the_tone_inside_the_corridor(qt_app, dirty, spec):
+    """Registration, read off the picture itself: at sampled columns
+    the scalogram's ridge falls between the corridor's edges, and the
+    loudest thing above the corridor is the harmonic, at three times
+    the drive."""
+    import pyqtgraph as pg
+
+    widget, view = _view(dirty, spec, SineTracking(proportional=0.5))
+    try:
+        image = next(item for item in view.picture.items
+                     if isinstance(item, pg.ImageItem))
+        decibels = image.image                       # (times, rows)
+        assert list(image.getLevels()) == [-60.0, 0.0], \
+            'decibels below the largest, so the noise has a color'
+        rect = image.mapRectToParent(image.boundingRect())
+        columns = rect.left() + (np.arange(decibels.shape[0]) + 0.5) \
+            * rect.width() / decibels.shape[0]
+        rows = 10.0 ** (rect.top() + (np.arange(decibels.shape[1]) + 0.5)
+                        * rect.height() / decibels.shape[1])
+        t, low, high = _edges(view)
+        checked = 0
+        for at in np.linspace(ONSET + 0.4, ONSET + 3.6, 17):
+            column = int(np.argmin(np.abs(columns - at)))
+            drive = float(_tone().frequency_at(columns[column] - ONSET))
+            lower = float(np.interp(columns[column], t, low))
+            upper = float(np.interp(columns[column], t, high))
+            ridge = rows[int(np.argmax(decibels[column]))]
+            assert lower < ridge < upper, f'{at:.2f} s: ridge {ridge:.1f}'
+            outside = rows > upper * 1.2
+            loudest = rows[outside][int(np.argmax(decibels[column][outside]))]
+            assert loudest == pytest.approx(3.0 * drive, rel=0.08)
+            checked += 1
+        assert checked == 17
+    finally:
+        widget.close()
+
+
+def test_the_cursor_reads_the_band_at_its_instant(qt_app, dirty, spec):
+    """At the instant the tone passes 100 Hz, a 50 % band is 75 to
+    125 Hz and settles in 20 ms, and the shape marks the drive at 0 dB
+    and its third harmonic 72 dB down — on both panels, at the same
+    frequencies."""
+    from visualdynamics.core.sine_tracking import track_waveform
+
+    setting = SineTracking(proportional=0.5)
+    at = track_waveform(dirty, spec, setting, onset=ONSET).instant(100.0)
+    widget, view = _view(dirty, spec, setting, cursor=at)
+    try:
+        assert view.cursor == pytest.approx(at)
+        assert view.drive_hz == pytest.approx(100.0, rel=1e-6)
+        assert view.edges_hz == pytest.approx((75.0, 125.0), rel=1e-6)
+        assert view.harmonic_db[3] == pytest.approx(-72.25, abs=0.01)
+        x, y = view.shape_drive.getData()
+        assert (x[0], 10.0 ** y[0]) == pytest.approx((0.0, 100.0))
+        x, y = view.shape_harmonics.getData()
+        assert (x[0], 10.0 ** y[0]) == pytest.approx((-72.25, 300.0),
+                                                     abs=0.01)
+        x, y = view.picture_drive.getData()
+        assert (x[0], 10.0 ** y[0]) == pytest.approx((at, 100.0))
+        x, y = view.picture_harmonics.getData()
+        assert (x[0], 10.0 ** y[0]) == pytest.approx((at, 300.0))
+        assert [10.0 ** edge.value() for edge in view.shape_edges] == \
+            pytest.approx([75.0, 125.0])
+        assert view.text.splitlines() == [
+            f'at {at:.3f} s, drive 100 Hz',
+            'band 50 Hz wide: 75 to 125 Hz',
+            'settles in about 20 ms (1 / band)',
+            '3 × drive, 300 Hz: −72 dB']
+    finally:
+        widget.close()
+
+
+def test_a_fixed_band_reads_its_harmonic_below_the_floor(qt_app, dirty,
+                                                         spec):
+    widget, view = _view(dirty, spec, SineTracking(fixed=5.0), cursor=2.0)
+    try:
+        assert view.bandwidth_hz == 5.0
+        assert view.edges_hz[1] - view.edges_hz[0] == pytest.approx(5.0)
+        assert view.harmonic_db[3] < -80.0
+        assert view.text.splitlines()[-1].endswith('below −80 dB')
+        x, _y = view.shape_harmonics.getData()
+        assert x[0] == -80.0, 'the mark sits on the floor, not off the panel'
+    finally:
+        widget.close()
+
+
+def test_the_weight_reaches_back_from_the_cursor(qt_app, dirty, spec):
+    """The band's weight on the record ends at the cursor and reaches
+    back a few settling times: five times as far for a band a fifth as
+    wide."""
+    reaches = []
+    for setting in (SineTracking(fixed=25.0), SineTracking(fixed=5.0)):
+        widget, view = _view(dirty, spec, setting, cursor=2.0)
+        try:
+            x, _y = view.weight.getData()
+            assert x[1] == pytest.approx(2.0)
+            reaches.append(x[1] - x[0])
+            assert 2.0 < view.reach * setting.fixed < 6.0
+        finally:
+            widget.close()
+    assert reaches[1] / reaches[0] == pytest.approx(5.0, rel=1e-6)
+
+
+def test_dragging_the_cursor_restates_the_band(qt_app, dirty, spec):
+    """A drag on either time axis moves both cursors and reads the band
+    again where it stopped."""
+    widget, view = _view(dirty, spec, SineTracking(proportional=0.5),
+                         cursor=1.0)
+    try:
+        record_line, picture_line = view.lines
+        assert record_line.movable and picture_line.movable
+        picture_line.setValue(ONSET + 3.0)           # 160 Hz
+        assert view.cursor == pytest.approx(ONSET + 3.0)
+        assert record_line.value() == pytest.approx(ONSET + 3.0)
+        assert view.drive_hz == pytest.approx(160.0, rel=1e-4)
+        assert view.edges_hz == pytest.approx((120.0, 200.0), rel=1e-4)
+        record_line.setValue(-5.0)                   # before the tone
+        assert view.cursor == pytest.approx(ONSET), 'held to the span'
+    finally:
+        widget.close()
+
+
+def test_the_panels_share_their_axes_pixel_for_pixel(qt_app, dirty, spec):
+    """The record and the picture have one time axis — the same left
+    and right edges, so the cursor is one vertical — and the shape
+    stands on the picture's frequency axis: the same top and bottom."""
+    widget, view = _view(dirty, spec, SineTracking(proportional=0.5))
+    try:
+        record = view.record_plot.getViewBox().sceneBoundingRect()
+        picture = view.picture.getViewBox().sceneBoundingRect()
+        shape = view.shape.getViewBox().sceneBoundingRect()
+        assert abs(record.left() - picture.left()) < 1.0
+        assert abs(record.right() - picture.right()) < 1.0
+        assert abs(shape.top() - picture.top()) < 1.0
+        assert abs(shape.bottom() - picture.bottom()) < 1.0
+        assert view.record_plot.getViewBox().viewRange()[0] == \
+            pytest.approx(view.picture.getViewBox().viewRange()[0])
+        assert view.shape.getViewBox().viewRange()[1] == \
+            pytest.approx(view.picture.getViewBox().viewRange()[1])
+    finally:
+        widget.close()
+
+
+def test_the_view_names_what_it_draws(qt_app, dirty, spec):
+    widget, view = _view(dirty, spec, SineTracking(proportional=0.5),
+                         harmonics=(2, 3))
+    try:
+        names = [label.text for _sample, label in view.picture.legend.items]
+        assert names == ['record', 'through the band',
+                         'band edges, −3 dB',
+                         "the band's weight on the record", 'drive',
+                         '2 × drive', '3 × drive']
+        assert view.record_plot.titleLabel.text == \
+            'Sine Tone 1 at 101Z+: filter output, 50 % proportional'
+        symbols = [view.picture_drive.opts['symbol'],
+                   view.picture_harmonics.opts['symbol']]
+        assert symbols == ['o', 't'], 'told apart by shape'
+        dashed = view.picture.corridor[0].opts['pen'].style()
+        from PySide6.QtCore import Qt
+        assert dashed == Qt.PenStyle.DashLine
+    finally:
+        widget.close()
+
+
+def test_the_view_draws_headless(dirty, spec, tmp_path):
+    from visualdynamics.plot import plot_tracking_filter
+
+    path = tmp_path / 'band.png'
+    plot_tracking_filter(dirty, spec, SineTracking(proportional=0.5),
+                         onset=ONSET, cursor_hz=100.0, path=str(path),
+                         show=False)
+    assert path.exists() and path.stat().st_size > 20000
+    with pytest.raises(ValueError, match='not both'):
+        plot_tracking_filter(dirty, spec, SineTracking(fixed=5.0),
+                             onset=ONSET, cursor=2.0, cursor_hz=100.0,
+                             path=str(path), show=False)

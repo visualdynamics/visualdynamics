@@ -33,7 +33,8 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
                     frequencies: np.ndarray, colors: Mapping[str, str],
                     *, label: str = '', units: str = '',
                     omega0: float = wavelet.OMEGA0,
-                    time_label: str = 'time [s]') -> Any:
+                    time_label: str = 'time [s]',
+                    levels: tuple[float, float] | None = None) -> Any:
     """Draw one channel's scalogram onto `plot`, and return the image.
 
     Parameters
@@ -56,6 +57,10 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
         The wavelet's width, for working out the cone.
     time_label : str
         The bottom axis's label, units included.
+    levels : (float, float), optional
+        The color scale's ends. Zero to the largest magnitude by
+        default; a caller drawing the magnitude in decibels, which is
+        never above its reference, gives the range it means.
 
     Returns
     -------
@@ -72,9 +77,12 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
 
     image = pg.ImageItem(np.asarray(magnitude).T)
     image.setColorMap(pg.colormap.get('viridis'))
-    finite = np.isfinite(magnitude)
-    top = float(np.max(magnitude[finite])) if finite.any() else 1.0
-    image.setLevels((0.0, top if top > 0.0 else 1.0))
+    if levels is None:
+        finite = np.isfinite(magnitude)
+        top = float(np.max(magnitude[finite])) if finite.any() else 1.0
+        levels = (0.0, top if top > 0.0 else 1.0)
+    levels = (float(levels[0]), float(levels[1]))
+    image.setLevels(levels)
 
     left, right = float(times[0]), float(times[-1])
     # drawn in log frequency, which is where the rows are actually
@@ -95,7 +103,7 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
     _draw_cone(plot, times, frequencies, colors, omega0)
 
     bar = pg.ColorBarItem(
-        values=(0.0, top if top > 0.0 else 1.0),
+        values=levels,
         colorMap=pg.colormap.get('viridis'),
         label=f'{label} [{units}]' if units else label, interactive=False)
     bar.setImageItem(image, insert_in=plot)

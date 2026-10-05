@@ -98,9 +98,13 @@ decibels](../images/sysid-snr.png)
 Drag the article's geometry in, declare its units, add the setup
 photographs, link the group. The system ID report binds both
 recordings with their frames, the excitation and ambient densities
-side by side, the FRFs and the multiple coherence staged over every
-channel, the signal-to-noise stage, the RMS signal-to-noise bars, and
-the kurtosis of each recording — the record a control run stands on.
+overlaid per channel, the FRF magnitudes, the multiple coherence as a
+map (frequency across, channel down), the signal-to-noise per channel,
+the RMS signal-to-noise bars, and the kurtosis of each recording — the
+record a control run stands on. Every figure in it is 2-D, as in the
+random and random-and-sine reports: the 3-D stage made the files too
+large. A figure of more than two dozen curves continues into further
+figures rather than leaving channels out.
 
 ![The exported report](../images/sysid-report.png)
 

@@ -1268,7 +1268,22 @@ def _plot_block(block, source, objects, us):
                       if base_quantity(row[3]) == wanted_dim]
         if not shared:
             return None
-        shared = shared[:MAX_REPORT_CURVES // 2]
+        # a dozen channels a figure, two curves each, continuing into
+        # further figures rather than dropping the rest (2026-10-05:
+        # this figure replaced the stage in the system ID report)
+        per_page = MAX_REPORT_CURVES // 2
+        pages = -(-len(shared) // per_page)
+        if pages > 1 and 'page' not in block:
+            return [built for k in range(pages)
+                    for built in [_plot_block({**block, 'page': k},
+                                              source, objects, us)]
+                    if built is not None]
+        if pages > 1:
+            first = int(block['page']) * per_page
+            caption = (f'{caption} — channels {first + 1}–'
+                       f'{min(first + per_page, len(shared))} of '
+                       f'{len(shared)}')
+            shared = shared[first:first + per_page]
         x = np.asarray(source.display_abscissa(us), dtype=float)
         loud = np.asarray(source.display_ordinate(
             us, [i for i, _j, _d, _q in shared])).real
@@ -1510,11 +1525,13 @@ def _plot_block(block, source, objects, us):
     # records were dropped from a figure that drew all 24 of its own
     available = len(indices)
     budget = None
-    if isinstance(source, TimeHistory) and not paged:
-        # a time history of many channels continues into further
-        # figures rather than stopping at the first two dozen — the
-        # stage's paging, in 2-D — and each figure shares one point
-        # budget among its curves
+    if not paged:
+        # many records continue into further figures rather than
+        # stopping at the first two dozen — the stage's paging, in
+        # 2-D. Time histories first; every flat figure since the
+        # random, random-and-sine and system ID reports went 2-D only
+        # (Brandon, 2026-10-05), so a plant of 32 FRFs is two figures
+        # and not the first 24 of them
         pages = max(1, -(-available // MAX_REPORT_CURVES))
         if pages > 1 and 'page' not in block:
             return [built for k in range(pages)
@@ -1527,8 +1544,10 @@ def _plot_block(block, source, objects, us):
         if pages > 1:
             caption = (f'{caption} — channels {first + 1}–'
                        f'{first + len(indices)} of {available}')
-        budget = min(max(TIME_FIGURE_POINTS // max(len(indices), 1), 512),
-                     MAX_POINTS_PER_CURVE)
+        if isinstance(source, TimeHistory):
+            # each time figure shares one point budget among its curves
+            budget = min(max(TIME_FIGURE_POINTS // max(len(indices), 1),
+                             512), MAX_POINTS_PER_CURVE)
     wanted = indices[:MAX_REPORT_CURVES]
     source = _positive_lines(source)
     x = np.asarray(source.display_abscissa(us), dtype=float)

@@ -1086,19 +1086,23 @@ def paired_density_blocks(loud: str, quiet: str,
                           caption: str,
                           per_quantity: str) -> list[dict[str, Any]]:
     """The two densities overlaid, one figure per quantity they share
-    — the flat reading of the app's paired stage (Brandon,
-    2026-08-23). Same one-quantity-per-axis rule as the time data,
-    and the same reading order.
+    (Brandon, 2026-08-23). Same one-quantity-per-axis rule as the time
+    data, and the same reading order.
+
+    Flat, each channel's ambient dashed in its own color, continuing
+    into further figures past a dozen channels: the 3-D stage made the
+    report files too large (Brandon, 2026-10-05: the random, random
+    and sine, and system ID reports are 2-D only).
     """
     if not loud or not quiet:
         return []
     shared = (record_dimensions(objects[loud])
               & record_dimensions(objects[quiet]))
     if len(shared) < 2:
-        return [{'kind': 'plot', 'mode': 'stage',
+        return [{'kind': 'plot', 'mode': 'pair',
                  'source': loud, 'floor': quiet, 'caption': caption}]
-    return [{'kind': 'plot', 'mode': 'stage', 'source': loud,
-             'floor': quiet, 'quantity': quantity,
+    return [{'kind': 'plot', 'mode': 'pair', 'source': loud,
+             'floor': quiet, 'select': f'dim:{quantity}',
              'caption': per_quantity.replace('{quantity}', quantity)}
             for quantity in quantity_order(shared)]
 
@@ -1986,23 +1990,23 @@ def sysid_template(objects: Mapping[str, Any],
         {'kind': 'text', 'text':
             '## The Measured Plant\n\n'
             'The densities of the two recordings are drawn together '
-            'per channel, the driven level colored and the ambient '
-            'one stood back in gray behind it: the distance between '
-            'them at any frequency is the margin the identification '
-            'had to work with there, and where they meet there was '
-            'nothing to measure. The plant itself follows — every '
-            'frequency response function on one stage, channels '
-            'receding — which is the deliverable of the run and what '
-            'a controller will invert.'},
+            'per channel, the driven level solid and the ambient one '
+            'dashed in the same color: the distance between them at '
+            'any frequency is the margin the identification had to '
+            'work with there, and where they meet there was nothing '
+            'to measure. The plant itself follows, the magnitude of '
+            'every frequency response function, which is the '
+            'deliverable of the run and what a controller will '
+            'invert.'},
         *paired_density_blocks(
             loud_density, quiet_density, objects,
             'Excitation and ambient densities overlaid, per channel',
-            'Excitation and ambient {quantity} densities on the '
-            'stage, channel by channel — the driven level colored, '
-            'the ambient one stood back in gray behind it'),
-        {'kind': 'plot', 'source': '@basis:Frf', 'mode': 'stage',
-         'caption': 'The measured plant: every FRF on the stage, '
-         'channels receding, colored by level'},
+            'Excitation and ambient {quantity} densities, channel by '
+            'channel — the driven level solid, the ambient one dashed'),
+        # flat, as every figure in this report is (Brandon,
+        # 2026-10-05: the 3-D stage made the files too large)
+        {'kind': 'plot', 'source': '@basis:Frf', 'mode': 'curves',
+         'caption': 'The measured plant: every FRF magnitude'},
         {'kind': 'text', 'text':
             '## Whether To Believe It\n\n'
             'Two readings judge the identification, and they fail in '
@@ -2033,10 +2037,13 @@ def sysid_template(objects: Mapping[str, Any],
             'can be well above its noise floor and still incoherent, '
             'which points at a rattle or a loose sensor rather than '
             'at the level.'},
+        # the map (the app's spectrogram reading): frequency across,
+        # channel down, coherence as color (Brandon, 2026-10-05)
         {'kind': 'plot', 'source': '@basis:MultipleCoherence',
-         'mode': 'stage',
-         'caption': 'Multiple coherence, every channel on the stage'},
-        {'kind': 'plot', 'mode': 'stage', 'reading': 'ratio',
+         'mode': 'map',
+         'caption': 'Multiple coherence, every channel: frequency '
+         'across, channel down'},
+        {'kind': 'plot', 'mode': 'ratio',
          'source': loud_density, 'floor': quiet_density,
          'caption': 'Signal to noise: the driven density less the '
          'ambient, over the ambient, per channel, in decibels'},
@@ -2661,13 +2668,13 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'for; below it the record was clipped, or was not random. '
             'Either way the article saw something other than the '
             'specified test while the spectrum looked correct.'},
-        # the stage, not curves: a dozen channels of coherence stacked
-        # on one 2-D axis is a thicket. The map answered that first
-        # (frequency across, channel down); the stage answers it the
-        # way the app now does, spreading the channels in depth and
-        # keeping each one's own trace readable (Brandon, 2026-08-23)
+        # the map, not curves: a dozen channels of coherence stacked
+        # on one 2-D axis is a thicket. Frequency across, channel down,
+        # coherence as color — the app's spectrogram reading. The
+        # stage that replaced it on 2026-08-23 made the report files
+        # too large (Brandon, 2026-10-05: 2-D only)
         {'kind': 'plot', 'source': '@basis:MultipleCoherence',
-         'mode': 'stage', 'caption': 'Multiple coherence'},
+         'mode': 'map', 'caption': 'Multiple coherence'},
         kurtosis_block(),
         # no figure references here (Brandon, 2026-09-19): the
         # conclusions stand whatever the project holds, and a reference
@@ -2818,8 +2825,9 @@ def mixed_template(objects: Mapping[str, Any],
             'watched for is a channel far from its neighbors — one that '
             'clipped or rattled — and a channel well above three, which '
             'carried peaks neither requirement asked for.'},
+        # the map, as in the random report (Brandon, 2026-10-05)
         {'kind': 'plot', 'source': '@basis:MultipleCoherence',
-         'mode': 'stage', 'caption': 'Multiple coherence'},
+         'mode': 'map', 'caption': 'Multiple coherence'},
         kurtosis_block(),
         {'kind': 'text', 'text':
             '## Conclusions\n\n'

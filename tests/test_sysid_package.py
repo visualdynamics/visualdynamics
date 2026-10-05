@@ -599,11 +599,12 @@ def test_the_sysid_report_renders_from_a_package(tmp_path):
     assert not any('Indicator' in c for c in captions)
     assert any('densities overlaid' in c for c in captions)
     assert any('Signal to noise' in c for c in captions)
-    # the coherence reads on the stage too now (Brandon), so the
-    # figures a package renders are stage figures, not a map
-    assert any(block.get('kind') == 'stage'
-               for block in payload['blocks']), \
-        'the coherence and the ratio are 3-D readings'
+    # 2-D only (Brandon, 2026-10-05: the stage made the files too
+    # large), and the coherence is the map
+    assert not any(block.get('kind') == 'stage'
+                   for block in payload['blocks']), 'no 3-D figure'
+    assert any(block.get('kind') == 'map' for block in payload['blocks']), \
+        'the coherence reads as a map'
     assert not any('Drive point' in c for c in captions), \
         'a package has no drive points; that block stays an unbound slot'
 
@@ -749,34 +750,25 @@ def test_the_densities_overlay_per_quantity_and_pair_by_channel():
     report = sysid_template(objects)
     assert not [b for b in report.blocks if b.get('mode') == 'cmif'], \
         'the CMIF is gone from this report'
-    # the pair reads on the stage now, one figure per quantity
-    # (Brandon, 2026-08-23) — the app's own 3-D overlay
-    pairs = [b for b in report.blocks
-             if b.get('floor') and b.get('kind') == 'plot'
-             and b.get('reading') != 'ratio']
-    assert [b['quantity'] for b in pairs] == ['force', 'acceleration']
-    assert all(b['mode'] == 'stage' for b in pairs)
+    # one flat figure per quantity (Brandon, 2026-08-23; flat since
+    # 2026-10-05, when the report went 2-D only)
+    pairs = [b for b in report.blocks if b.get('mode') == 'pair']
+    assert [b['select'] for b in pairs] == ['dim:force', 'dim:acceleration']
     assert all(b['source'] == 'Excitation PSDs'
                and b['floor'] == 'Noise PSDs' for b in pairs), \
         'the louder set leads, as it does in the ratio below'
     # the ratio still follows, reading the same pair
-    ratio = next(b for b in report.blocks
-                 if b.get('reading') == 'ratio')
+    ratio = next(b for b in report.blocks if b.get('mode') == 'ratio')
     assert (ratio['source'], ratio['floor']) == ('Excitation PSDs',
                                                  'Noise PSDs')
     assert report.blocks.index(pairs[-1]) < report.blocks.index(ratio)
 
-    # a stage block answers with the figures it needs; this pair is
-    # two channels, so one
-    figures = _build_block(pairs[1], objects, visualdynamics.SI, [])
-    assert len(figures) == 1
-    built = figures[0]
-    assert built['kind'] == 'stage'
-    assert [r.get('quiet', False) for r in built['runs']] == [
-        False, True, False, True], \
-        'each station meets its pair: the louder, then the stood-back'
-    assert built['labels'][:2] == ['101Z+', '101Z+'], \
-        'the acceleration channels only, both sides of each station'
+    built = _build_block(pairs[1], objects, visualdynamics.SI, [])
+    assert built['kind'] == 'plot'
+    assert [(c['label'], c.get('dash', False)) for c in built['curves']] == [
+        ('Excitation PSDs: 101Z+', False), ('Noise PSDs: 101Z+', True),
+        ('Excitation PSDs: 104Z+', False), ('Noise PSDs: 104Z+', True)], \
+        'the acceleration channels only, each with its ambient dashed'
 
 
 def test_a_silent_channel_is_not_a_legend_entry():
@@ -807,3 +799,59 @@ def test_a_silent_channel_is_not_a_legend_entry():
     built = _build_block(block, objects, visualdynamics.SI, [])
     assert len(built['curves']) == 2
     assert built['caption'] == 'Densities overlaid'
+
+
+@pytest.mark.parametrize('template', ['random_template', 'mixed_template',
+                                      'sysid_template'])
+def test_the_random_and_system_id_reports_are_2d_only(template):
+    """No 3-D stage in the random, random-and-sine or system ID
+    reports, and the coherence is the map (Brandon, 2026-10-05: the
+    3-D plots made the report files too large)."""
+    from visualdynamics.core import report as templates
+    from visualdynamics.core.data import MultipleCoherence, Psd
+
+    f = np.arange(1.0, 9.0)
+
+    def densities(scale):
+        return Psd(f, np.ones((2, len(f))) * scale,
+                   response_dof=['101Z+', '104Z+'],
+                   ordinate_dim='acceleration**2/frequency')
+
+    objects = {'Noise PSDs': densities(1e-4),
+               'Excitation PSDs': densities(1.0),
+               'Multiple Coherence': MultipleCoherence(
+                   f, np.ones((2, len(f))), response_dof=['101Z+', '104Z+'])}
+    blocks = getattr(templates, template)(objects, links=[]).blocks
+    assert not [b for b in blocks if b.get('mode') == 'stage']
+    coherence = [b for b in blocks
+                 if b.get('source') == '@basis:MultipleCoherence']
+    assert coherence and all(b['mode'] == 'map' for b in coherence)
+
+
+def test_a_flat_figure_continues_rather_than_dropping_channels():
+    """Thirty FRFs are two figures, 24 and 6, and twenty paired
+    channels are two figures of a dozen and eight: nothing is dropped
+    now the stage that held them all is gone (2026-10-05)."""
+    from visualdynamics.core.data import Frf, Psd
+    from visualdynamics.report import _build_block
+
+    f = np.arange(1.0, 9.0)
+    dofs = [f'{k}Z+' for k in range(1, 31)]
+    frf = Frf(f, np.ones((30, len(f)), dtype=complex), response_dof=dofs,
+              reference_dof=['900Z+'] * 30)
+    pages = _build_block({'kind': 'plot', 'mode': 'curves', 'source': 'F',
+                          'caption': 'Plant'}, {'F': frf},
+                         visualdynamics.SI, [])
+    assert [len(p['curves']) for p in pages] == [24, 6]
+    assert pages[1]['caption'].endswith('channels 25–30 of 30')
+
+    def densities(scale):
+        return Psd(f, np.ones((20, len(f))) * scale, response_dof=dofs[:20],
+                   ordinate_dim='acceleration**2/frequency')
+
+    pairs = _build_block({'kind': 'plot', 'mode': 'pair', 'source': 'D',
+                          'floor': 'N', 'caption': 'Pair'},
+                         {'D': densities(1.0), 'N': densities(1e-4)},
+                         visualdynamics.SI, [])
+    assert [len(p['curves']) for p in pairs] == [24, 16]
+    assert pairs[1]['caption'].endswith('channels 13–20 of 20')

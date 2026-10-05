@@ -80,6 +80,18 @@ same span, a whole number of the drive's cycles (`DETECTOR_CYCLES`
 by default), where a pure sine's RMS times the square root of two and
 its mean absolute value times pi/2 are its peak exactly.
 
+**The waveform, the shape and the weight, from the same filter.** A
+level is what a controller reports; the view that explains it draws
+the record through the band, the band's magnitude about the drive and
+the band's weight on the record behind any instant
+(`plot.tracking_filter`). All three come from here, so the picture
+cannot describe a different filter from the one that read the level:
+`track_waveform` is `track_sine`'s own band run over every sample of
+the span, and `SineTracking.response` and `SineTracking.weighting` are
+the frequency and impulse responses of the same Butterworth modes the
+band is integrated with — at the corner a given drive frequency has,
+since a proportional band has a different one at every instant.
+
 **Memory.** One channel's span of the tone is held at a time, with
 its phase, the demodulated record, the filter's output and one mode's
 working arrays beside it — about a hundred bytes a sample. The extraction streams where this does
@@ -274,6 +286,75 @@ class SineTracking:
         """
         return 1.0 / self.bandwidth(frequency)
 
+    def response(self, drive: float, frequencies: Any) -> np.ndarray:
+        """The band's magnitude in dB at `frequencies` when the drive is
+        at `drive` Hz: the shape the record is read through at that
+        instant.
+
+        The low-pass's response at the offset from the drive, which is
+        what a band-pass about the drive is after demodulation; −3 dB
+        at the drive plus and minus half the bandwidth, by the
+        Butterworth's definition. What the image at twice the drive
+        adds (the module docstring's ripple) is not in it: that is the
+        demodulator's artifact, not the band's shape. The analog
+        prototype's response, the one each mode is integrated from;
+        the held input moves it by nothing a picture shows this far
+        below the sample rate.
+
+        Parameters
+        ----------
+        drive : float
+            The drive frequency, Hz.
+        frequencies : float or array-like
+            Where to read the band, Hz.
+
+        Returns
+        -------
+        ndarray
+            dB, the shape of `frequencies`; 0 dB at the drive.
+        """
+        poles, residues = _modes(self.order)
+        corner = float(self.bandwidth(float(drive))) / 2.0
+        offset = (np.asarray(frequencies, dtype=float) - float(drive)) / corner
+        gain = np.zeros(offset.shape, dtype=complex)
+        for pole, residue in zip(poles, residues):
+            gain += residue / (1j * offset - pole)
+        return 20.0 * np.log10(np.maximum(np.abs(gain), 1e-300))
+
+    def weighting(self, drive: float, lags: Any) -> np.ndarray:
+        """How much the record `lags` seconds before an instant counts
+        in the band's output at that instant, when the drive is at
+        `drive` Hz: the low-pass's impulse response, per second.
+
+        It integrates to one (a settled band reads a steady tone at its
+        amplitude), rises from zero, peaks and has a small negative
+        lobe — the overshoot a fourth order has on a step. Its running
+        integral is the band's step response, half way at about 0.9 of
+        one over the bandwidth (`settling`). Zero at negative lags: the
+        band cannot see ahead.
+
+        Parameters
+        ----------
+        drive : float
+            The drive frequency, Hz, which sets a proportional band's
+            corner.
+        lags : float or array-like
+            Seconds before the instant.
+
+        Returns
+        -------
+        ndarray
+            Per second, the shape of `lags`.
+        """
+        poles, residues = _modes(self.order)
+        corner = np.pi * float(self.bandwidth(float(drive)))   # rad/s
+        lags = np.asarray(lags, dtype=float)
+        ahead = np.maximum(lags, 0.0)
+        total = np.zeros(lags.shape, dtype=complex)
+        for pole, residue in zip(poles, residues):
+            total += residue * corner * np.exp(pole * corner * ahead)
+        return np.where(lags >= 0.0, total.real, 0.0)
+
     def describe(self) -> str:
         """The reading in words — 'rms as peak, 10 % proportional'. One
         implementation: a legend, the levels' comments and the guide
@@ -402,6 +483,71 @@ def _detect(signal: np.ndarray, phase: np.ndarray, reads: np.ndarray,
     return means * TO_PEAK[detector]
 
 
+def _tone_at(history: Any, specification: SineSweepSpecification,
+             rows: list[int], tone: str | None, onset: float | None,
+             dt: float) -> tuple[Any, float]:
+    """The tone read, and where its sweep begins in the recording:
+    `onset` seconds in, or found by matched filter on the rows read,
+    as the extraction finds it."""
+    chosen = (specification.tones[0] if tone is None
+              else specification.tone(tone))
+    if onset is None:
+        signals = [history.ordinate[row] for row in rows]
+        onset = (find_environment(signals, dt, [chosen])
+                 + chosen.start_time)
+    return chosen, float(onset)
+
+
+def _laid(history: Any, chosen: Any, onset: float,
+          dt: float) -> tuple[int, int, np.ndarray, np.ndarray]:
+    """The span of the tone the recording holds, on the recording's
+    samples: (first, last, drive frequency, phase), the law evaluated at
+    each sample's own time from the sweep's start, so no grid is laid
+    and then interpolated."""
+    start = round(onset / dt)
+    length = history.ordinate.shape[1]
+    total = int(np.floor(chosen.duration() / dt)) + 1
+    first, last = max(start, 0), min(start + total, length)
+    if last - first < 2:
+        raise ValueError(f'{chosen.name}: the recording holds none of the '
+                         'tone')
+    seconds = (np.arange(first, last) - start) * dt
+    return first, last, chosen.frequency_at(seconds), chosen.phase_at(seconds)
+
+
+class _Demodulated:
+    """One channel's span of the tone moved to zero frequency, with
+    where the band starts settled on it — worked out once per channel
+    and read through as many bands as asked."""
+
+    def __init__(self, x: np.ndarray, phase: np.ndarray) -> None:
+        self.carrier = np.exp(-1j * phase)
+        self.record = x * self.carrier
+        opening = max(int(np.searchsorted(phase, phase[0] + 2.0 * np.pi)),
+                      2)
+        self.settled, self.image = _opening(self.record[:opening],
+                                            phase[:opening])
+
+    def through(self, setting: SineTracking, frequency: np.ndarray,
+                rate: float) -> np.ndarray:
+        """The band's output as a complex amplitude at every sample, in
+        the record's units: its magnitude is the 'filtered' reading."""
+        # held at the sample rate: a band wider than that passes
+        # everything the record holds, and the cap keeps one sample's
+        # decay inside what the recursion's pieces take
+        corners = np.minimum(setting.bandwidth(frequency) / 2.0, rate)
+        # the factor two: a real tone's demodulated amplitude is half
+        # its peak, the other half being the image
+        return 2.0 * _band_passed(self.record, corners, rate, setting.order,
+                                  self.settled, self.image,
+                                  -2.0 * float(frequency[0]))
+
+    def waveform(self, amplitude: np.ndarray) -> np.ndarray:
+        """The band's output moved back up to the drive: the record as
+        the band passes it, the waveform the detectors read."""
+        return np.real(amplitude / self.carrier)
+
+
 def track_sine(history: Any, specification: SineSweepSpecification,
                settings: SineTracking | Sequence[SineTracking], *,
                tone: str | None = None, onset: float | None = None,
@@ -459,27 +605,8 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
     rate = 1.0 / dt
     rows = _rows(history, specification, channels)
-    chosen = (specification.tones[0] if tone is None
-              else specification.tone(tone))
-    if onset is None:
-        signals = [history.ordinate[row] for row in rows]
-        onset = (find_environment(signals, dt, [chosen])
-                 + chosen.start_time)
-    onset = float(onset)
-
-    # the span of the tone the recording holds, on the recording's
-    # samples; the law is evaluated at each sample's own time from the
-    # sweep's start, so no grid is laid and then interpolated
-    start = round(onset / dt)
-    length = history.ordinate.shape[1]
-    total = int(np.floor(chosen.duration() / dt)) + 1
-    first, last = max(start, 0), min(start + total, length)
-    if last - first < 2:
-        raise ValueError(f'{chosen.name}: the recording holds none of the '
-                         'tone')
-    seconds = (np.arange(first, last) - start) * dt
-    frequency = chosen.frequency_at(seconds)
-    phase = chosen.phase_at(seconds)
+    chosen, onset = _tone_at(history, specification, rows, tone, onset, dt)
+    first, last, frequency, phase = _laid(history, chosen, onset, dt)
     # phase runs forward whichever way the frequency sweeps, so the
     # detectors find their spans by searching it
     widest = max([setting.cycles for setting in settings
@@ -491,36 +618,24 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     reads = np.unique(np.linspace(begin, len(phase) - 1,
                                   int(lines)).astype(np.int64))
     order = np.argsort(frequency[reads], kind='stable')
-    opening = max(int(np.searchsorted(phase, phase[0] + 2.0 * np.pi)), 2)
-    carrier = np.exp(-1j * phase)
 
     readings = np.zeros((len(settings), len(rows), len(reads)))
     for c, row in enumerate(rows):
         x = np.real(np.asarray(history.ordinate[row, first:last],
                                dtype=float))
-        demodulated = settled = image = None
+        demodulated = None
         if any(s.kind != 'unfiltered' for s in settings):
-            demodulated = x * carrier
-            settled, image = _opening(demodulated[:opening],
-                                      phase[:opening])
+            demodulated = _Demodulated(x, phase)
         for k, setting in enumerate(settings):
             if setting.kind == 'unfiltered':
                 readings[k, c] = _detect(x, phase, reads, setting.detector,
                                          setting.cycles)
                 continue
-            # held at the sample rate: a band wider than that passes
-            # everything the record holds, and the cap keeps one
-            # sample's decay inside what the recursion's pieces take
-            corners = np.minimum(setting.bandwidth(frequency) / 2.0, rate)
-            # the factor two: a real tone's demodulated amplitude is
-            # half its peak, the other half being the image
-            amplitude = 2.0 * _band_passed(
-                demodulated, corners, rate, setting.order, settled,
-                image, -2.0 * float(frequency[0]))
+            amplitude = demodulated.through(setting, frequency, rate)
             if setting.detector == 'filtered':
                 readings[k, c] = np.abs(amplitude[reads])
             else:
-                passed = np.real(amplitude / carrier)
+                passed = demodulated.waveform(amplitude)
                 readings[k, c] = _detect(passed, phase, reads,
                                          setting.detector, setting.cycles)
 
@@ -536,3 +651,118 @@ def track_sine(history: Any, specification: SineSweepSpecification,
                  for dof in dofs],
         tone=chosen.name, onset=onset, seconds=stamped[order])
         for k, setting in enumerate(settings)]
+
+
+@dataclass(frozen=True, kw_only=True, eq=False)
+class TrackedWaveform:
+    """One channel's span of a tone as a tracking band passes it,
+    sample by sample: what `track_waveform` returns.
+
+    `time` is the record's own clock over the span; `drive` the drive
+    frequency at each of those samples; `passed` the record through
+    the band, in the record's units — the waveform a detector after
+    the band reads — and `level` the band's output amplitude, the
+    'filtered' reading at every sample rather than at a reading's
+    lines. Not compared by value (arrays do not have one), and frozen
+    like the setting it was read with.
+    """
+
+    setting: SineTracking
+    tone: str
+    onset: float
+    dof: str
+    dimension: str
+    unit: str
+    time: np.ndarray
+    drive: np.ndarray
+    passed: np.ndarray
+    level: np.ndarray
+
+    def instant(self, frequency: float) -> float:
+        """The first second, on the record's clock, at which the drive
+        reaches `frequency` — where a cursor goes to look at the band
+        as the tone passes a frequency.
+
+        Parameters
+        ----------
+        frequency : float
+            Hz.
+
+        Returns
+        -------
+        float
+            Seconds on the record's clock.
+        """
+        side = np.sign(self.drive - float(frequency))
+        crossed = np.flatnonzero((side[:-1] != side[1:]) | (side[:-1] == 0))
+        if not crossed.size:
+            raise ValueError(f'the drive never passes {frequency:g} Hz; it '
+                             f'runs {self.drive.min():g} to '
+                             f'{self.drive.max():g} Hz')
+        k = int(crossed[0])
+        if side[k] == 0 or self.drive[k + 1] == self.drive[k]:
+            return float(self.time[k])
+        share = ((float(frequency) - self.drive[k])
+                 / (self.drive[k + 1] - self.drive[k]))
+        return float(self.time[k] + share * (self.time[k + 1]
+                                             - self.time[k]))
+
+
+def track_waveform(history: Any, specification: SineSweepSpecification,
+                   setting: SineTracking, *, tone: str | None = None,
+                   onset: float | None = None,
+                   channel: str | None = None) -> TrackedWaveform:
+    """One channel's span of a tone through a tracking band, at every
+    sample: the waveform the band passes and its output amplitude.
+
+    The same band `track_sine` reads its levels through, run the same
+    way — the tone laid on the recording where its sweep begins,
+    demodulated against its phase, low-passed causally from settled —
+    and kept at every sample instead of read at lines, so the band can
+    be drawn on the record it was applied to.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording, evenly sampled.
+    specification : SineSweepSpecification
+        The sweep the drive followed.
+    setting : SineTracking
+        The band. One with no band is refused: there is nothing to
+        pass the record through.
+    tone : str, optional
+        Which tone; the specification's first by default.
+    onset : float, optional
+        Seconds into the recording where the tone's sweep begins;
+        found by matched filter when omitted.
+    channel : str, optional
+        The DOF read; the specification's first control channel by
+        default. Any channel of the recording may be named.
+
+    Returns
+    -------
+    TrackedWaveform
+        The span's clock, drive frequency, passed waveform and output
+        amplitude, in the recording's own units.
+    """
+    if setting.kind == 'unfiltered':
+        raise ValueError(f'{setting.describe()} has no band to pass the '
+                         'record through')
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
+    rate = 1.0 / dt
+    rows = _rows(history, specification,
+                 None if channel is None else [channel])[:1]
+    chosen, onset = _tone_at(history, specification, rows, tone, onset, dt)
+    first, last, frequency, phase = _laid(history, chosen, onset, dt)
+    row = rows[0]
+    x = np.real(np.asarray(history.ordinate[row, first:last], dtype=float))
+    demodulated = _Demodulated(x, phase)
+    amplitude = demodulated.through(setting, frequency, rate)
+    return TrackedWaveform(
+        setting=setting, tone=chosen.name, onset=onset,
+        dof=history.response_dof[row],
+        dimension=history.ordinate_dim[row],
+        unit=history.ordinate_unit[row],
+        time=np.asarray(history.abscissa, dtype=float)[first:last],
+        drive=frequency, passed=demodulated.waveform(amplitude),
+        level=np.abs(amplitude))

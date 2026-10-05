@@ -385,3 +385,105 @@ def test_levels_and_settings_are_drawn_in_pairs(qt_app, clean, spec):
             build_sine_tracking(layout, levels, [])
     finally:
         layout.close()
+
+
+# ---- the band's shape, its weight, and the waveform it passes -------------
+
+
+def test_the_bands_shape_is_three_db_down_at_its_edges():
+    """The drive plus and minus half the bandwidth are the Butterworth's
+    corners after demodulation: −3 dB, by definition."""
+    for setting, drive in ((SineTracking(proportional=0.5), 100.0),
+                           (SineTracking(proportional=0.1), 250.0),
+                           (SineTracking(fixed=5.0), 300.0)):
+        half = float(setting.bandwidth(drive)) / 2.0
+        shape = setting.response(drive, [drive - half, drive, drive + half])
+        assert shape == pytest.approx([-3.0103, 0.0, -3.0103], abs=1e-3), \
+            setting.describe()
+
+
+def test_the_shape_drawn_is_the_shape_the_band_passes():
+    """The response is the band's own: a steady tone a given offset
+    from the drive comes through `track_sine`'s filter at the level
+    the shape reads there."""
+    from visualdynamics.core.sine_tracking import _band_passed
+
+    rate = 8192.0
+    t = np.arange(int(3.0 * rate)) / rate
+    setting = SineTracking(fixed=50.0)
+    for offset in (10.0, 25.0, 40.0):
+        through = _band_passed(np.exp(2j * np.pi * offset * t),
+                               np.full(len(t), 25.0), rate, setting.order,
+                               0j)
+        measured = 20.0 * np.log10(np.mean(np.abs(through[-2000:])))
+        assert measured == pytest.approx(
+            float(setting.response(100.0, 100.0 + offset)), abs=0.01)
+
+
+def test_the_weight_is_the_bands_settling():
+    """The impulse response integrates to one, and its running integral
+    — the step response — is half way at 0.9 of one over the band and
+    overshoots by about a tenth, the numbers the guide states."""
+    for setting in (SineTracking(proportional=0.1), SineTracking(fixed=5.0)):
+        width = float(setting.bandwidth(250.0))
+        lags = np.linspace(0.0, 20.0 / width, 200001)
+        step = np.cumsum(setting.weighting(250.0, lags)) * (lags[1] - lags[0])
+        assert step[-1] == pytest.approx(1.0, abs=1e-4)
+        half = lags[np.argmax(step >= 0.5)] * width
+        assert half == pytest.approx(0.9, abs=0.01), setting.describe()
+        assert step.max() == pytest.approx(1.108, abs=0.005)
+    assert SineTracking(fixed=5.0).weighting(250.0, -0.1) == 0.0, \
+        'the band cannot see ahead'
+
+
+def test_the_waveform_is_read_through_the_same_band_as_the_levels(harmonic,
+                                                                   spec):
+    """One implementation: the waveform's output amplitude at the
+    instants a level was read is that level."""
+    from visualdynamics.core.sine_tracking import track_waveform
+
+    for setting in FILTERED:
+        level, = track_sine(harmonic, spec, setting, onset=ONSET, lines=50)
+        waveform = track_waveform(harmonic, spec, setting, onset=ONSET)
+        at = np.searchsorted(waveform.time, level.seconds - 0.5 / RATE)
+        assert np.allclose(waveform.level[at], _read(level), rtol=1e-12), \
+            setting.describe()
+
+
+def test_the_band_passes_the_tone_and_not_its_harmonic(harmonic, spec):
+    """What comes through the band is the tone alone, sample by sample:
+    the harmonic's 30 % is gone from the waveform, not only from the
+    level."""
+    from visualdynamics.core.sine_tracking import track_waveform
+
+    waveform = track_waveform(harmonic, spec,
+                              SineTracking(proportional=0.5), onset=ONSET)
+    tone = _tone()
+    clean = AMPLITUDE * np.cos(tone.phase_at(waveform.time - ONSET))
+    assert np.max(np.abs(waveform.passed - clean)) < 0.01 * AMPLITUDE
+    raw = harmonic.ordinate[0, np.searchsorted(harmonic.abscissa,
+                                               waveform.time[0]):]
+    assert np.max(np.abs(raw[:len(clean)] - clean)) > 0.25 * AMPLITUDE
+    assert waveform.unit == 'm/s**2' or waveform.unit is None
+    assert (waveform.dof, waveform.dimension) == (DOF, 'acceleration')
+
+
+def test_the_instant_a_drive_passes_a_frequency(clean, spec):
+    """An octave a second from 20 Hz: 100 Hz is log2(5) seconds in."""
+    from visualdynamics.core.sine_tracking import track_waveform
+
+    waveform = track_waveform(clean, spec, SineTracking(fixed=5.0),
+                              onset=ONSET)
+    assert waveform.instant(100.0) == pytest.approx(
+        ONSET + np.log2(5.0), abs=1.0 / RATE)
+    with pytest.raises(ValueError, match='never passes 1000 Hz'):
+        waveform.instant(1000.0)
+
+
+def test_a_waveform_needs_a_band(clean, spec):
+    from visualdynamics.core.sine_tracking import track_waveform
+
+    with pytest.raises(ValueError, match='no band'):
+        track_waveform(clean, spec, SineTracking(detector='peak'),
+                       onset=ONSET)
+

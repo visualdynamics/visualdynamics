@@ -201,6 +201,12 @@ visualdynamics.random_vibration_report()                # ask for both
 visualdynamics.random_vibration_report(path='reports/')  # ask, write here
 ```
 
+A list of runs is a batch too, for a script that already has them,
+and **File → Reports from Runs…** runs the same batch from the window
+through `visualdynamics.run_report`, which picks each run's report by
+its type ([the sine guide](sine-workflow.md#one-call) has the
+details).
+
 A run *named* in the call and left without a geometry means no
 geometry, as it always has, and nothing opens. `visualdynamics.ASK`
 in either place forces the question, so a script holding a run can

@@ -210,4 +210,20 @@ ID's shape, two streams quiet then loud, is taken as one.
 
 ```python
 visualdynamics.run_report('run.nc4', 'reports/', geometry='article.stp', marking='TEST SERIES 4')
+visualdynamics.run_report(['run_1.nc4', 'run_2.nc4', 'run_3.nc4'], 'reports/',
+                          geometry='article.stp', marking='TEST SERIES 4')
 ```
+
+A list of runs is a batch. Every run's type is read before the first
+report is written, so a batch that holds a run with no one-call
+report, a modal survey for example, is refused before anything is
+written.
+
+The same batch runs from the window: **File → Reports from Runs…**
+asks for the runs, then shows each one with the report it will get.
+Runs with no one-call report are listed and left out. The same dialog
+takes the geometry, where the reports go (beside each run, or one
+folder) and the marking. The reports are written in the window's unit
+system, with the progress bar and Cancel at the bottom of the window;
+a cancel takes effect when the run in progress finishes, and the
+reports already written are kept. The open project is not changed.

@@ -180,10 +180,74 @@ def compliance():
     print(f'{"hole":>24}: {got["lines"]} cells, nothing judged in the notch')
 
 
+def sine_tracking():
+    """One swept tone read the ways a controller reads it: a clipped
+    drive's third harmonic through each detector and band, and a step
+    in level through bands of different widths."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.sine import LOG, SineSweepSpecification, SineTone
+    from visualdynamics.core.sine_tracking import SineTracking, track_sine
+    from visualdynamics.plot import plot_sine_tracking
+    from visualdynamics.units import SI
+
+    rate = 16384.0
+    dof = '101Z+'
+
+    def record(tone, envelope, harmonic=0.0, onset=0.0, tail=0.0):
+        t = np.arange(int((onset + tone.duration() + tail) * rate)) / rate
+        local = np.clip(t - onset, 0.0, None)
+        inside = (t >= onset) & (local <= tone.duration())
+        phase = tone.phase_at(local)
+        wave = np.cos(phase) + harmonic * np.cos(3.0 * phase)
+        x = np.where(inside, envelope(local) * wave, 0.0)
+        return TimeHistory(t, x[None], response_dof=[dof],
+                           ordinate_dim=['acceleration'])
+
+    # a log sweep, 20 to 320 Hz in four seconds, at 10 m/s**2 with a
+    # third harmonic of 30 % in phase: the clipped drive's signature
+    tone = SineTone('Sine Tone 1', 0.5, [20.0, 320.0], [[10.0], [10.0]],
+                    [LOG], [60.0])
+    spec = SineSweepSpecification([tone], [dof], ordinate_unit='m/s**2')
+    clipped = record(tone, lambda _t: 10.0, harmonic=0.3, onset=0.5,
+                     tail=0.25)
+    settings = [SineTracking(detector='peak'), SineTracking(detector='rms'),
+                SineTracking(proportional=0.5),
+                SineTracking(proportional=0.1)]
+    plot_sine_tracking(clipped, spec, settings, unit_system=SI, show=False,
+                       size=(1000, 600),
+                       path=str(OUT / 'sine-tracking-harmonic.png'))
+    for setting, level in zip(settings, track_sine(clipped, spec, settings)):
+        print(f'{setting.describe():>34}: median '
+              f'{np.median(np.abs(level.ordinate[0])):.3f} m/s^2')
+
+    # a linear sweep at 100 Hz/s whose level doubles at 250 Hz: the
+    # requirement steps over one hertz, the record at the same instant
+    stepped = SineTone('Sine Tone 1', 0.0, [50.0, 250.0, 251.0, 450.0],
+                       [[10.0], [10.0], [20.0], [20.0]], [0, 0, 0],
+                       [100.0, 100.0, 100.0])
+    spec = SineSweepSpecification([stepped], [dof], ordinate_unit='m/s**2')
+    doubled = record(stepped, lambda t: np.where(t < 2.0, 10.0, 20.0))
+    settings = [SineTracking(detector='peak'),
+                SineTracking(proportional=0.5),
+                SineTracking(proportional=0.1), SineTracking(fixed=5.0)]
+    plot_sine_tracking(doubled, spec, settings, onset=0.0, lines=2000,
+                       unit_system=SI, show=False, size=(1000, 600),
+                       path=str(OUT / 'sine-tracking-step.png'))
+    for setting, level in zip(settings, track_sine(doubled, spec, settings,
+                                                   onset=0.0, lines=2000)):
+        after = (level.seconds > 2.0) & (np.abs(level.ordinate[0]) >= 15.0)
+        lag = level.seconds[np.flatnonzero(after)[0]] - 2.0
+        print(f'{setting.describe():>34}: half way {1000 * lag:.0f} ms '
+              'after the step')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
     compliance()
+    sine_tracking()
     print('done')
 
 

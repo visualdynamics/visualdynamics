@@ -204,10 +204,10 @@ class TrackingFilterView:
         foreground = colors['plot_foreground']
         background = colors['plot_background']
         lighter = max((foreground, background), key=_lightness)
-        self.corridor_pen = pg.mkPen(colors['filter_preview'],
+        self.corridor_pen: Any = pg.mkPen(colors['filter_preview'],
                                      width=CORRIDOR_WIDTH,
                                      style=Qt.PenStyle.DashLine)
-        self.halo_pen = pg.mkPen(background, width=HALO_WIDTH)
+        self.halo_pen: Any = pg.mkPen(background, width=HALO_WIDTH)
         bounds = (float(waveform.time[0]), float(waveform.time[-1]))
 
         # the cursor on both time axes: the foreground on the record,
@@ -236,9 +236,9 @@ class TrackingFilterView:
             plot.addItem(item, ignoreBounds=True)
             return item
 
-        self.picture_drive = mark(picture, DRIVE_SYMBOL)
-        self.picture_harmonics = mark(picture, HARMONIC_SYMBOL)
-        self.shape_curve = shape.plot(
+        self.picture_drive: Any = mark(picture, DRIVE_SYMBOL)
+        self.picture_harmonics: Any = mark(picture, HARMONIC_SYMBOL)
+        self.shape_curve: Any = shape.plot(
             [], [], pen=pg.mkPen(colors['filter_preview'], width=2))
         self.shape_edges: list[Any] = []
         for _ in range(2):
@@ -246,10 +246,10 @@ class TrackingFilterView:
                                    pen=self.corridor_pen)
             shape.addItem(edge, ignoreBounds=True)
             self.shape_edges.append(edge)
-        self.shape_drive = mark(shape, DRIVE_SYMBOL)
-        self.shape_harmonics = mark(shape, HARMONIC_SYMBOL)
+        self.shape_drive: Any = mark(shape, DRIVE_SYMBOL)
+        self.shape_harmonics: Any = mark(shape, HARMONIC_SYMBOL)
 
-        self.weight = pg.PlotDataItem([], [], pen=pg.mkPen(None),
+        self.weight: Any = pg.PlotDataItem([], [], pen=pg.mkPen(None),
                                       fillLevel=heights[0])
         self.weight.setZValue(-20)       # under the trace it describes
         record_plot.addItem(self.weight, ignoreBounds=True)

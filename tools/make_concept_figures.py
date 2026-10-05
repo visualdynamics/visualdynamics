@@ -243,11 +243,48 @@ def sine_tracking():
               'after the step')
 
 
+def sine_tracking_band():
+    """The tracking band drawn on the record it reads: the same clipped
+    sweep, now under broadband noise too, through a 50 % proportional
+    band and a 5 Hz fixed one, the cursor where the tone passes 100 Hz."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.sine import LOG, SineSweepSpecification, SineTone
+    from visualdynamics.core.sine_tracking import SineTracking
+    from visualdynamics.plot import plot_tracking_filter
+    from visualdynamics.units import SI
+
+    rate = 16384.0
+    dof = '101Z+'
+    tone = SineTone('Sine Tone 1', 0.5, [20.0, 320.0], [[10.0], [10.0]],
+                    [LOG], [60.0])
+    spec = SineSweepSpecification([tone], [dof], ordinate_unit='m/s**2')
+    t = np.arange(int((0.5 + tone.duration() + 0.25) * rate)) / rate
+    local = np.clip(t - 0.5, 0.0, None)
+    inside = (t >= 0.5) & (local <= tone.duration())
+    phase = tone.phase_at(local)
+    # the harmonic figure's record, with noise at a fifth of the tone
+    # over the whole recording, lead-in and tail included
+    x = np.where(inside, 10.0 * (np.cos(phase) + 0.3 * np.cos(3.0 * phase)),
+                 0.0)
+    x = x + 2.0 * np.random.default_rng(7).standard_normal(len(t))
+    history = TimeHistory(t, x[None], response_dof=[dof],
+                          ordinate_dim=['acceleration'])
+    for setting, name in ((SineTracking(proportional=0.5), 'proportional'),
+                          (SineTracking(fixed=5.0), 'fixed')):
+        plot_tracking_filter(history, spec, setting, onset=0.5,
+                             cursor_hz=100.0, unit_system=SI, show=False,
+                             path=str(OUT / f'sine-tracking-band-{name}.png'))
+        print(f'{setting.describe():>34}: drawn')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
     compliance()
     sine_tracking()
+    sine_tracking_band()
     print('done')
 
 

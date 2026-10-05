@@ -74,11 +74,65 @@ out harmonics and noise and lags a change in level, such as a
 resonance passed through quickly; a wide band follows the change and
 counts more of what is not the tone.
 
+## Seeing the band on the record
+
+A level curve says what the band read and hides why. The band is
+easier to understand drawn where it was applied, so
+`plot_tracking_filter` draws one setting on one tone of the record:
+
+- **The record and what the band passes**, the record in gray and the
+  band's output over it in magenta. The tone comes out of the
+  harmonic and the noise at its own amplitude, sample by sample.
+- **The record's scalogram**, time across and frequency up a log
+  axis, colored in dB below its loudest point so the noise floor is
+  visible, with the cone of influence veiled as in the
+  [wavelet guide](wavelet.md). Over it, the band is drawn as a
+  **corridor** that follows the sweep: two dashed lines at the drive
+  frequency plus and minus half the bandwidth, the band's −3 dB edges.
+  The tone runs up the middle of the corridor, the third harmonic runs
+  parallel to it outside, and the noise fills the rest of the picture.
+- **The band's shape at a cursor**, beside the picture on the same
+  frequency axis: its magnitude in dB, with the drive marked inside the
+  band by a circle and the harmonic outside it by a triangle. A readout
+  gives the drive frequency, the band's edges, the settling time (one
+  over the bandwidth) and how far down the band holds the harmonic.
+- **The band's weight on the record**, shaded behind the cursor. The
+  band's output at an instant is the record before that instant,
+  weighted by the filter's impulse response, so the shading shows how
+  far back the reading reaches. That distance is the settling time.
+
+A proportional band is a constant width on the log axis, so its
+corridor runs parallel to the tone. A fixed band is a constant width
+in hertz, so its corridor is wide at the bottom of the axis and
+narrows toward the top. At 100 Hz the 50 % band is 75 to 125 Hz,
+settles in about 20 ms and holds the harmonic 72 dB down. The 5 Hz
+band is 97.5 to 102.5 Hz and holds the harmonic below the shape's
+−80 dB floor, but it takes about 200 ms to settle, and its weight on
+the record is visibly wider.
+
+![The same noisy, clipped sweep through a 50 % proportional band: the
+corridor runs parallel to the tone up the scalogram, the harmonic
+outside it, and the shape at 100 Hz reads the harmonic 72 dB
+down](images/sine-tracking-band-proportional.png)
+
+![The same record through a 5 Hz fixed band: the corridor narrows up
+the log axis, and the band's weight behind the cursor peaks about a
+fifth of a second back](images/sine-tracking-band-fixed.png)
+
+The picture's wavelet resolves frequency to about 7 % either side of
+the tone, so a band narrower than that, such as a 10 % proportional
+band or a few hertz fixed, draws as a corridor inside the tone's
+ridge. That is a limit of any picture of a moving tone, not a fault in
+the band. Shown in a window, the cursor can be dragged along either
+time axis, and the shape, the marks, the weight and the readout follow
+it.
+
 ## In a script
 
 ```python
-from visualdynamics.core.sine_tracking import SineTracking, track_sine
-from visualdynamics.plot import plot_sine_tracking
+from visualdynamics.core.sine_tracking import (SineTracking, track_sine,
+                                               track_waveform)
+from visualdynamics.plot import plot_sine_tracking, plot_tracking_filter
 
 settings = [SineTracking(detector='peak'),          # no band
             SineTracking(proportional=0.5),          # 50 % of the drive
@@ -87,6 +141,11 @@ settings = [SineTracking(detector='peak'),          # no band
 
 levels = track_sine(history, specification, settings)   # one SineLevel each
 plot_sine_tracking(history, specification, settings, path='tracking.png')
+
+band = SineTracking(proportional=0.5)
+waveform = track_waveform(history, specification, band)  # every sample
+plot_tracking_filter(history, specification, band, cursor_hz=100.0,
+                     path='band.png')
 ```
 
 `track_sine` reads one tone (the specification's first, or `tone=`) on
@@ -98,6 +157,18 @@ in the record's own units, stamped with the second each line was
 read, its comment naming the reading (`SineTracking.describe()`).
 `SineTracking.settling(frequency)` is the one-over-the-bandwidth rule
 at a given drive frequency.
+
+`track_waveform` runs the same band over every sample of the tone's
+span and keeps the passed waveform (`passed`) and the band's output
+amplitude (`level`), with the drive frequency at each sample;
+`instant(frequency)` finds when the drive passes a frequency.
+`SineTracking.response(drive, frequencies)` is the band's shape in dB
+at a given drive frequency, and `SineTracking.weighting(drive, lags)`
+its weight on the record before an instant. `plot_tracking_filter`
+draws all of them for one setting. Its cursor is placed by `cursor=`
+in seconds or `cursor_hz=` in hertz, `span=` zooms the time axes, and
+`harmonics=` names the multiples of the drive to mark (the third by
+default).
 
 The plot draws one channel, each reading in its own color and with
 its own marker shape, and the specification's target behind them in
@@ -121,5 +192,5 @@ gray.
 - **A peak is the peak of the samples.** It reads low by at most
   cos(π × drive / sample rate): 0.3 % at a fortieth of the sample
   rate, more on a harmonic near the top of the band.
-- **No view in the application yet.** The readings and the plot are
-  scripting calls; the window does not offer them.
+- **No view in the application yet.** The readings and both plots
+  are scripting calls; the window does not offer them.

@@ -4470,6 +4470,29 @@ def _report_path(run: str | os.PathLike,
     return path
 
 
+def _runs_of(run: Any) -> tuple[list[Any], bool, bool]:
+    """(runs, asked, many) for what a one-call report was handed.
+
+    `ASK` opens the dialog; one path is one run; a list or tuple of
+    paths is a batch, the form the window hands over after its own
+    dialog (2026-10-04) and a script's way of naming a campaign.
+    `many` says whether the answer is a list: always for a list given,
+    and for an asked batch of more than one, as it always was.
+    """
+    if run is ASK:
+        from .gui.ask import for_runs
+        runs = for_runs()
+        if not runs:
+            raise ValueError('no run chosen')
+        return runs, True, len(runs) > 1
+    if isinstance(run, (str, os.PathLike)):
+        return [run], False, False
+    runs = list(run)
+    if not runs:
+        raise ValueError('no run given')
+    return runs, False, True
+
+
 def _one_call_reports(run: Any, path: Any, geometry: Any,
                       unit_system: Any, kind: str,
                       work_up: Any, marking: str | None = None) -> Any:
@@ -4477,18 +4500,11 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
 
     The asking, the batch and the destination, in one place because
     they are one rule (PRINCIPLES.md, 9): a run left out is asked for,
-    several may be chosen, the geometry is asked for only when the run
-    was, and `path` may be a folder each report lands in under its
-    run's own name.
+    several may be chosen or given as a list, the geometry is asked
+    for only when the run was, and `path` may be a folder each report
+    lands in under its run's own name.
     """
-    asked = run is ASK
-    if asked:
-        from .gui.ask import for_runs
-        runs = for_runs()
-        if not runs:
-            raise ValueError('no run chosen')
-    else:
-        runs = [run]
+    runs, asked, many = _runs_of(run)
     # the geometry is asked for only when the run was: a script that
     # names its run and leaves the geometry out means "no geometry",
     # and has meant it since these functions existed. `ASK` says so on
@@ -4509,7 +4525,7 @@ def _one_call_reports(run: Any, path: Any, geometry: Any,
         report = project.generate_report(kind, name='Report', marking=marking)
         written.append(project.export_report(
             report, _report_path(one, path), unit_system))
-    return written if len(written) > 1 else written[0]
+    return written if many else written[0]
 
 
 
@@ -4683,12 +4699,15 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
            photos: Any = None,
            per_octave: int | None = None,
            unit_system: Any = None,
-           marking: str | None = None) -> Any:
+           marking: str | None = None,
+           progress: Any = None) -> Any:
     """A Rattlesnake run in, the report its type calls for out.
 
         visualdynamics.run_report('run.nc4', 'report.html')
         visualdynamics.run_report()               # ask for the runs and the geometry
         visualdynamics.run_report('run.nc4', 'reports/')
+        visualdynamics.run_report(['a.nc4', 'b.nc4'], 'reports/',
+                                  geometry='article.stp')
 
     The one-call report that reads the run's own type (`report_kind`)
     and writes that report: a random run gets `random_vibration_report`'s,
@@ -4700,15 +4719,16 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     folder are the same rule the typed functions share, and a batch
     may mix kinds. The keywords are the union of theirs; `per_octave`
     reaches the random halves alone.
+
+    Every run's kind is read before any report is written, so a batch
+    holding a run with no one-call report is refused whole rather than
+    stopping partway through. `progress(done, total)` is told after
+    each run, the hook the window's bar and Cancel ride on (Reports
+    from Runs, 2026-10-04); a run is the smallest step, so a cancel
+    lands between runs.
     """
-    asked = run is ASK
-    if asked:
-        from .gui.ask import for_runs
-        runs = for_runs()
-        if not runs:
-            raise ValueError('no run chosen')
-    else:
-        runs = [run]
+    runs, asked, many = _runs_of(run)
+    kinds = [report_kind(one) for one in runs]
     if geometry is ASK or (asked and geometry is None):
         from .gui.ask import for_geometry
         geometry = for_geometry()
@@ -4729,11 +4749,14 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
                                                 photos=photos),
     }
     written = []
-    for one in runs:
-        kind = report_kind(one)
+    if progress is not None:
+        progress(0, len(runs))
+    for done, (one, kind) in enumerate(zip(runs, kinds), start=1):
         written.append(_one_call_reports(one, path, geometry, unit_system,
                                          kind, workups[kind], marking=marking))
-    return written if len(written) > 1 else written[0]
+        if progress is not None:
+            progress(done, len(runs))
+    return written if many else written[0]
 
 
 def system_id_report(run: Any = ASK,

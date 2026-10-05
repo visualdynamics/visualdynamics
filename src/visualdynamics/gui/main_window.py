@@ -1455,6 +1455,9 @@ class MainWindow(QMainWindow):
                               lambda: self.generate_report('sysid'))
         report_menu.addAction('&Empty',
                               lambda: self.generate_report('empty'))
+        # the one-call reports over a batch of controller runs, the
+        # same `run_report` a script calls (Brandon, 2026-10-04)
+        file_menu.addAction('Reports from R&uns…', self.reports_from_runs)
         file_menu.addSeparator()
         # light, dark, or the platform's choice, remembered between
         # launches: a Linux desktop Qt could not read left a friend of
@@ -12100,6 +12103,50 @@ class MainWindow(QMainWindow):
         where = (' — Generate Report offers it'
                  if pathlib.Path(path).parent == folder else '')
         self._show_status(f'Saved template {os.path.basename(path)}{where}')
+
+    def reports_from_runs(self) -> None:
+        """File → Reports from Runs…: `visualdynamics.run_report` over a
+        batch of controller runs, asked in a dialog and run with the
+        bar and Cancel.
+
+        Nothing in the open project is touched: each run is worked up
+        in a project of its own, exactly as the script does it, and its
+        report written to disk. The window's unit system is the one
+        the reports are written in, so they read the way the window
+        does.
+        """
+        from ..core.progress import Cancelled
+        from ..project import run_report
+        from .ask import RUN_FILTER
+        from .run_reports import ask_run_reports
+
+        with self._asking():
+            runs, _ = QFileDialog.getOpenFileNames(
+                self, 'Select the runs to report on', '', RUN_FILTER)
+            if not runs:
+                return
+            choices = ask_run_reports(self, [str(run) for run in runs])
+        if choices is None:
+            return
+        count = len(choices['runs'])
+        plural = 's' * (count != 1)
+        try:
+            written = self._run_long(
+                f'Writing {count} report{plural}…', run_report,
+                choices['runs'], choices['path'],
+                geometry=choices['geometry'], marking=choices['marking'],
+                unit_system=self.unit_system)
+        except Cancelled:
+            self._show_status('Reports from runs cancelled; the reports '
+                              'already written are kept')
+            return
+        except (ValueError, OSError) as failure:
+            QMessageBox.warning(self, 'Reports from Runs', str(failure))
+            return
+        where = (f"to {choices['path']}" if choices['path'] is not None
+                 else 'beside each run')
+        self._show_status(
+            f'Wrote {len(written)} report{"s" * (len(written) != 1)} {where}')
 
     def export_report(self) -> None:
         """Write the selected report as one self-contained HTML file."""

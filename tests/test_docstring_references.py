@@ -37,6 +37,8 @@ THEORY = {
     'core.fem': 'the beam element and its eigensolution',
     'core.modal_fit': 'the single-degree-of-freedom residue fit',
     'core.filters': 'filtering, integration and the drift it invents',
+    'core.sine_tracking': 'the tracking filter: complex demodulation '
+                          'through a Butterworth low-pass',
 }
 
 #: and methods, where the theory lives on the call rather than the module

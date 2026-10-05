@@ -199,18 +199,20 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     assert found['canvases'] > 8
 
 
-def test_the_random_report_charts_the_margin_to_abort_not_the_share():
-    """The second compliance chart is the signed margin to the abort
-    limits (Brandon, 2026-10-01: a share of the band cannot go
-    negative, and the question behind the chart was how far)."""
-    from visualdynamics.core.report import random_template
+@pytest.mark.parametrize('template', ['random_template', 'mixed_template'])
+def test_the_random_reports_chart_the_band_outside_abort(template):
+    """The second compliance chart is the share of each channel's band
+    outside the abort limits, in percent. A signed margin to abort in
+    dB replaced it on 2026-10-01 and was taken back out on 2026-10-05
+    (Brandon: "I want that back ... I don't want it in the reports")."""
+    from visualdynamics.core import report as templates
 
-    blocks = random_template({}, links=[]).blocks
+    blocks = getattr(templates, template)({}, links=[]).blocks
     bars = [b for b in blocks if b.get('kind') == 'bars']
-    assert [b['mode'] for b in bars][:4] == ['error', 'margin', 'error', 'margin']
-    assert not any(b.get('mode') == 'lines' for b in blocks)
+    assert [b['mode'] for b in bars][:4] == ['error', 'lines', 'error', 'lines']
     text = ' '.join(b.get('text', '') for b in blocks if b.get('kind') == 'text')
-    assert '{{figure:Margin to the abort limits, by control channel}}' in text
+    assert '{{figure:Band outside the abort limits, by control channel}}' in text
+    assert 'margin to abort' not in text.lower()
 
 
 def test_the_sine_comparison_draws_every_control_channel():

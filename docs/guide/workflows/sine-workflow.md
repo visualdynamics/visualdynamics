@@ -171,6 +171,11 @@ project.save('sine.vdyn')
   What the extractor cannot do is separate two tones that *share* a
   trajectory — a tone and its own harmonic landing on another tone's
   path is read as that tone.
+- **A controller's level is read differently.** Its tracking filter
+  and detector are settings, and a harmonic, noise or a fast change in
+  level moves its reading in ways the extraction's does not move;
+  [How a tracking filter reads a sweep](../sine-tracking.md) reads a
+  record the controller's way, setting by setting.
 - **Where the levels wobble, look at the wavelet first.** A ripple in
   an extracted level can be the article (a resonance walked through),
   the test (two tones beating in one band), or the extraction. The

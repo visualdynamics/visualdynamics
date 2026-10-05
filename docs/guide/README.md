@@ -35,6 +35,8 @@ not. Open each `.vdyn` once in that alpha and save it again.
   through a sweep, against what was asked for
 - [The random and sine workflow](workflows/mixed-workflow.md) — a sweep
   under a random, both judged from one recording
+- [How a tracking filter reads a sweep](sine-tracking.md) — the
+  controller's band and detector, and why its level differs
 - [The system identification workflow](workflows/sysid-workflow.md) —
   a plant measured, and how well
 - [The wavelet reading](wavelet.md) — a time history as a scalogram

@@ -2777,6 +2777,81 @@ def plot_scalogram(history: Any, channel: int = 0, *,
                         title=title or 'Scalogram', size=size or (900, 520))
 
 
+def plot_sine_tracking(history: Any, specification: Any, settings: Any, *,
+                       tone: str | None = None, channel: str | None = None,
+                       onset: float | None = None, lines: int | None = None,
+                       unit_system: UnitSystem | None = None,
+                       theme: Any = None,
+                       path: str | os.PathLike | None = None,
+                       show: bool = True, title: str | None = None,
+                       size: tuple[int, int] = (1000, 700)) -> Any:
+    """One tone of a recording read through several tracking bands and
+    detectors, the levels overlaid against frequency over the
+    specification.
+
+        from visualdynamics.core.sine_tracking import SineTracking
+        visualdynamics.plot.plot_sine_tracking(
+            history, spec,
+            [SineTracking(detector='peak'),
+             SineTracking(proportional=0.5),
+             SineTracking(proportional=0.1)],
+            path='tracking.png')
+
+    The readings are `core.sine_tracking.track_sine`'s, one per
+    setting, on one channel: `channel` names its DOF, the
+    specification's first control channel by default. Each reading
+    is drawn in its own color and with its own marker shape, named by
+    `SineTracking.describe`; the specification's target for the tone
+    stands behind them in gray.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The recording.
+    specification : SineSweepSpecification
+        The sweep the drive followed.
+    settings : SineTracking or sequence of SineTracking
+        The readings to overlay.
+    tone : str, optional
+        Which tone; the specification's first by default.
+    channel : str, optional
+        The DOF drawn; the first control channel by default.
+    onset : float, optional
+        Seconds into the recording where the tone's sweep begins;
+        found by matched filter when omitted.
+    lines : int, optional
+        Readings along the sweep, `core.sine_tracking.LINES` by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.sine_tracking import LINES, SineTracking, track_sine
+    from .sine_tracking import build_sine_tracking
+
+    if isinstance(settings, SineTracking):
+        settings = [settings]
+    settings = list(settings)
+    dof = specification.response_dof[0] if channel is None else channel
+    levels = track_sine(history, specification, settings, tone=tone,
+                        onset=onset, channels=[dof],
+                        lines=LINES if lines is None else lines)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_sine_tracking(widget, levels, settings,
+                            specification=specification,
+                            unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{levels[0].tone} at {dof}, '
+                                        'read through tracking filters'),
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

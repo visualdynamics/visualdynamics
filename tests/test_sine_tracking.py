@@ -324,3 +324,64 @@ def test_a_named_channel_is_read_and_a_missing_one_refused(clean, spec):
         track_sine(clean, spec, SineTracking(proportional=0.5),
                    onset=ONSET, channels=['999X+'])
 
+
+# ---- the plot ------------------------------------------------------------
+
+
+def test_the_readings_draw_headless(harmonic, spec, tmp_path):
+    from visualdynamics.plot import plot_sine_tracking
+
+    path = tmp_path / 'tracking.png'
+    plot_sine_tracking(harmonic, spec,
+                       [SineTracking(detector='peak'),
+                        SineTracking(proportional=0.5),
+                        SineTracking(proportional=0.1)],
+                       onset=ONSET, path=str(path), show=False)
+    assert path.exists() and path.stat().st_size > 2000
+
+
+def test_each_reading_wears_its_own_marker_and_name(qt_app, harmonic, spec):
+    """Told apart by shape as well as color, and named in the legend
+    the way the reading names itself."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.sine_tracking import (
+        SYMBOLS,
+        build_sine_tracking,
+    )
+
+    settings = [SineTracking(detector='peak'),
+                SineTracking(proportional=0.5),
+                SineTracking(proportional=0.1)]
+    levels = track_sine(harmonic, spec, settings, onset=ONSET, lines=100)
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        drawn = build_sine_tracking(layout, levels, settings,
+                                    specification=spec)
+        assert drawn == 3
+        plot = layout.getItem(0, 0)
+        names = [label.text for _sample, label in plot.legend.items]
+        assert names == ['specification'] + [s.describe() for s in settings]
+        symbols = [item.opts['symbol'] for item in plot.listDataItems()
+                   if item.opts.get('symbol') is not None]
+        assert symbols == list(SYMBOLS[:3])
+        markers = [item for item in plot.listDataItems()
+                   if item.opts.get('symbol') is not None]
+        assert all(4 <= len(item.getData()[0]) <= 12 for item in markers)
+    finally:
+        layout.close()
+
+
+def test_levels_and_settings_are_drawn_in_pairs(qt_app, clean, spec):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.sine_tracking import build_sine_tracking
+
+    levels = track_sine(clean, spec, SineTracking(proportional=0.5),
+                        onset=ONSET, lines=20)
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        with pytest.raises(ValueError, match='in pairs'):
+            build_sine_tracking(layout, levels, [])
+    finally:
+        layout.close()

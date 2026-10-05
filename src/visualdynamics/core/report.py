@@ -2506,25 +2506,22 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'per control channel. **RMS error** '
             '({{figure:RMS error by control channel}}) is the level: '
             'how far each channel sits from what was asked for. '
-            '**Margin to abort** '
-            '({{figure:Margin to the abort limits, by control '
-            'channel}}) is the shape: the worst line\'s distance to '
-            'the abort limits in decibels, positive by how far a line '
-            'went out, negative by how much room the nearest line '
-            'left. A channel can sit at exactly the right level and '
-            'still cross an abort limit across half its band. The '
-            'threshold on the first chart is a tolerance someone chose '
-            '— plus or minus three decibels is where most '
-            'specifications land, not where they all do — so it is '
-            'read against the line it carries rather than as a pass '
-            'mark of its own; on the second the line is the limit '
-            'itself.'},
+            '**Lines outside abort** '
+            '({{figure:Band outside the abort limits, by control '
+            'channel}}) is the shape: a channel can sit at exactly the '
+            'right level and still be out of tolerance across half its '
+            'band. The thresholds drawn on both are a tolerance '
+            'someone chose — plus or minus three decibels and a tenth '
+            'of the band are where most specifications land, not '
+            'where they all do — so each chart is read against the '
+            'line it carries rather than as a pass mark of its '
+            'own.'},
         {'kind': 'bars', 'mode': 'error', 'source': '@basis:Specification',
          'measured': '@basis:Psd',
          'caption': 'RMS error by control channel'},
-        {'kind': 'bars', 'mode': 'margin', 'source': '@basis:Specification',
+        {'kind': 'bars', 'mode': 'lines', 'source': '@basis:Specification',
          'measured': '@basis:Psd',
-         'caption': 'Margin to the abort limits, by control channel'},
+         'caption': 'Band outside the abort limits, by control channel'},
         {'kind': 'text', 'text':
             '## Octave Band Comparison\n\nThe same comparison on '
             'octave bands: the control spectra integrated onto bands '
@@ -2539,9 +2536,9 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'how it is usually read.\n\n'
             'Banding conserves the area under each curve, so the RMS '
             'error below is the same number as above; what changes is '
-            'the margin to abort, which is judged over bands rather '
-            'than over lines, against limits that are themselves per '
-            'band.'},
+            'the share of the band outside abort, which is counted '
+            'over bands rather than over lines, against limits that '
+            'are themselves per band.'},
         # the banded objects themselves, not the report banding the
         # narrowband ones for itself (which `'octave': N` on a block
         # still does, for a template that asks): the comparison is
@@ -2555,10 +2552,10 @@ def _random_control_blocks(objects: Mapping[str, Any],
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',
          'caption': 'RMS error by control channel, octave bands'},
-        {'kind': 'bars', 'mode': 'margin',
+        {'kind': 'bars', 'mode': 'lines',
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',
-         'caption': 'Margin to the abort limits, by control channel, '
+         'caption': 'Band outside the abort limits, by control channel, '
                     'octave bands'},
     ]
 
@@ -2682,8 +2679,8 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             'Whether the run met its specification is read off the '
             'control comparison and the two compliance charts under '
             'it: the RMS error says how far each channel sat from the '
-            'level it was asked for, and the margin to abort how far '
-            'each channel\'s worst line sat from the limits. A '
+            'level it was asked for, and the band outside abort how '
+            'much of each channel\'s band fell outside tolerance. A '
             'channel can pass one and fail the other — a channel 2 dB '
             'low everywhere may never cross an abort limit, and one at '
             'exactly the right level may be out across half its band — '
@@ -2829,8 +2826,8 @@ def mixed_template(objects: Mapping[str, Any],
             'Whether the random half met its specification is read off '
             'the control comparison and the two compliance charts under '
             'it: the RMS error says how far each channel sat from the '
-            'level it was asked for, and the margin to abort how far '
-            'each channel\'s worst line sat from the limits. A '
+            'level it was asked for, and the band outside abort how '
+            'much of each channel\'s band fell outside tolerance. A '
             'channel can pass one and fail the other, which is why both '
             'are there; the octave-band figures read the same run the '
             'way a requirement is usually written. Where a control '

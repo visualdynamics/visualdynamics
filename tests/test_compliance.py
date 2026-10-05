@@ -795,37 +795,3 @@ def test_a_banded_comparison_is_judged_on_its_bins_own_edges():
                     centers, lower, over=False, reading='bin',
                     spec_widths=banded.bandwidth, widths=measured.bandwidth)
     assert not plain.any()
-
-
-# ---- the margin to abort ---------------------------------------------------
-
-
-def test_the_margin_is_signed_and_the_worst_line_speaks():
-    """At the specification with the abort limits a factor of two
-    either side, every line is 3 dB inside: the margin is -3.01 dB.
-    Four times the specification on one stretch is 3 dB over the
-    upper limit there, and that line is the answer."""
-    from visualdynamics.core.compliance import channel_margins, margin_db
-
-    s = spec(abort_upper=2.0, abort_lower=0.5)
-    frequencies = np.logspace(1, 3, 400)
-    flat = psd(frequencies, np.full(len(frequencies), 1e-3))
-    # the cells at the band's ends are cut by the written stretch, so
-    # the judged ratio is a few hundredths off the exact factor of two
-    assert margin_db(s, flat, scale_db=0) == pytest.approx(-3.01, abs=0.05)
-    values = np.full(len(frequencies), 1e-3)
-    values[(frequencies > 200) & (frequencies < 300)] = 4e-3
-    high = psd(frequencies, values)
-    assert margin_db(s, high, scale_db=0) == pytest.approx(3.01, abs=0.05)
-    low = psd(frequencies, np.where((frequencies > 200) & (frequencies < 300),
-                                    0.2e-3, 1e-3))
-    assert margin_db(s, low, scale_db=0) == pytest.approx(10 * np.log10(0.5 / 0.2), abs=0.05)
-    assert channel_margins(s, high, scale_db=0) == [('101Z+', pytest.approx(3.01, abs=0.05))]
-
-
-def test_no_abort_limit_gives_no_margin():
-    from visualdynamics.core.compliance import margin_db
-
-    s = spec(warning_upper=1.5)
-    frequencies = np.logspace(1, 3, 100)
-    assert margin_db(s, psd(frequencies, np.full(100, 1e-3)), scale_db=0) is None

@@ -85,14 +85,21 @@ def test_the_polish_cleans_a_corrupted_start(monkeypatch):
 
 
 def test_the_polish_stops_at_the_floor():
-    """A clean start is at the floor within a step or two; the polish
+    """A clean start reaches the floor in a few steps; the polish
     notices a step that no longer halves the worst residual and stops,
-    rather than spending every step it is allowed at the floor."""
+    rather than spending every step it is allowed at the floor.
+
+    The start is seeded. eigsh's own start is random, and over 200 of
+    them the polish took 3 to 6 steps (56, 115, 27 and 2 of them); the
+    bound here was "under 6", which the 2 in 200 broke on a public CI
+    run of 2026-10-05. The claim is the budget, so that is the bound."""
     from scipy.sparse.linalg import eigsh
 
     model, _lower = _rigid_link_model()
     stiffness, mass, _t, _s, sigma, _k = model.scaled_system()
-    _values, vectors = eigsh(stiffness, k=22, M=mass, sigma=sigma, which='LM')
+    start = np.random.default_rng(0).standard_normal(stiffness.shape[0])
+    _values, vectors = eigsh(stiffness, k=22, M=mass, sigma=sigma,
+                             which='LM', v0=start)
     solves = []
     real = fem.polish_modes.__globals__['np'].linalg.norm
 
@@ -110,8 +117,8 @@ def test_the_polish_stops_at_the_floor():
         polish_modes(stiffness, mass, sigma, vectors, 14)
     finally:
         np_linalg.norm = original
-    # two norms per step; well short of POLISH_STEPS
-    assert len(solves) // 2 < fem.POLISH_STEPS // 2, len(solves)
+    # two norms per step, and the polish stopped short of its budget
+    assert len(solves) // 2 < fem.POLISH_STEPS, len(solves)
 
 
 def test_the_demo_plate_solves_the_same_either_way():

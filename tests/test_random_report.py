@@ -497,8 +497,8 @@ def test_the_report_carries_both_bar_charts():
 
     blocks = random_template({}).blocks
     charts = [b for b in blocks if b.get('kind') == 'bars']
-    assert [b['mode'] for b in charts] == ['error', 'margin',
-                                           'error', 'margin',
+    assert [b['mode'] for b in charts] == ['error', 'lines',
+                                           'error', 'lines',
                                            'kurtosis'], (
         'both readings, narrowband and then on octave bands')
     assert [b.get('octave') for b in charts] == [None] * 5, (

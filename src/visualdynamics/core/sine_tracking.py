@@ -521,8 +521,8 @@ class _Demodulated:
     and read through as many bands as asked."""
 
     def __init__(self, x: np.ndarray, phase: np.ndarray) -> None:
-        self.carrier = np.exp(-1j * phase)
-        self.record = x * self.carrier
+        self.carrier: np.ndarray = np.exp(-1j * phase)
+        self.record: np.ndarray = x * self.carrier
         opening = max(int(np.searchsorted(phase, phase[0] + 2.0 * np.pi)),
                       2)
         self.settled, self.image = _opening(self.record[:opening],

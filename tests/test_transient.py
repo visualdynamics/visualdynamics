@@ -80,8 +80,8 @@ def test_the_project_reaches_it_by_type():
 def test_transient_and_shock_are_both_types_and_are_not_each_other():
     assert 'Transient' in PROJECT_TYPES
     assert 'Shock' in PROJECT_TYPES
-    assert PROJECT_TEMPLATES['Transient'] == 'transient'
-    assert PROJECT_TEMPLATES['Shock'] == 'shock'
+    assert PROJECT_TEMPLATES['Transient'] == ('transient',)
+    assert PROJECT_TEMPLATES['Shock'] == ('shock',)
 
 
 def test_each_type_expects_its_own_kind_of_target():

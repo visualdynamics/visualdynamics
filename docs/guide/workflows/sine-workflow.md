@@ -157,12 +157,12 @@ project.save('sine.vdyn')
 - **A mixed run is a project type of its own.** A random environment
   over a quiet sweep — the qualification-with-a-tracked-tone case —
   arrives as a *Random and Sine* project: both specifications import,
-  the tree shows both halves' slots, and *Generate Report* writes one
-  report that judges the random against its PSD and each tone against
-  its level, with the recording and the data-quality readings once.
-  The control spectra in it are of the whole recording, sweep
-  included, and the report says so where a reader would otherwise take
-  the tone for an exceedance.
+  the tree shows both halves' slots, and *Generate Report* writes two
+  reports, a random report judging the random against its PSD and a
+  sine report judging each tone against its level. The random report's
+  control spectra are of the whole recording, sweep included, and it
+  says so where a reader would otherwise take the tone for an
+  exceedance.
 - **The extraction is per-tone, not per-band.** Each tone is read
   along its own trajectory, and all of them together, so two tones
   crossing — or running close for seconds — do not corrupt each
@@ -204,14 +204,15 @@ visualdynamics.sine_report()                     # ask for the runs and the geom
 project = visualdynamics.sine_run('sweep.nc4')   # the project, to go on with
 ```
 
-A run that is random and sine together is `mixed_report`; a run that
-is random alone is `random_vibration_report`. Each refuses the other's
-file by name rather than reporting on half of it.
+A run that is random alone is `random_vibration_report`. A run that is
+random and sine together gets both reports from `run_report`, below.
 
 `visualdynamics.run_report` is the same call without the type: it reads
 the run's own type and writes that report, so a batch may mix sweeps,
-random runs and system identifications. A streamed save with a system
-ID's shape, two streams quiet then loud, is taken as one.
+random runs and system identifications. A random-and-sine run gets
+two, `<name>_random.html` and `<name>_sine.html`, the sine reading the
+whole run even when `last` cuts the random. A streamed save with a
+system ID's shape, two streams quiet then loud, is taken as one.
 
 ```python
 visualdynamics.run_report('run.nc4', 'reports/', geometry='article.stp', marking='TEST SERIES 4')
@@ -225,10 +226,16 @@ report, a modal survey for example, is refused before anything is
 written.
 
 The same batch runs from the window: **File → Reports from Runs…**
-asks for the runs, then shows each one with the report it will get.
-Runs with no one-call report are listed and left out. The same dialog
-takes the geometry, where the reports go (beside each run, or one
-folder) and the marking. The reports are written in the window's unit
+asks for the runs, then lists them in a table. Each run's **Report**
+starts at the report its file declares, and can be changed to another
+or to **Leave out**: a run with no one-call report starts at Leave out,
+with the reason beside its name. Each run's **Last** is how many seconds
+from the end of the run to read, *whole run* by default; the box below
+the table sets it for every random report at once, the random half of a
+random-and-sine run included, and leaves sine and system ID runs whole.
+A script says the same with `kinds={run: 'random', ...}` and
+`last={run: 120.0, ...}`. The same dialog takes the geometry, where the
+reports go (beside each run, or one folder) and the marking. The reports are written in the window's unit
 system, with the progress bar and Cancel at the bottom of the window;
 a cancel takes effect when the run in progress finishes, and the
 reports already written are kept. The open project is not changed.

@@ -51,20 +51,20 @@ def test_a_batch_with_an_unreportable_run_writes_nothing(tmp_path):
 
 def test_the_dialog_lists_each_runs_report_and_leaves_out_the_rest(
         qt_app, tmp_path):
-    from PySide6.QtCore import Qt
-
     from visualdynamics.gui.run_reports import DEFAULT_MARKING, RunReportsDialog
 
     runs = [*_campaign(tmp_path), fixture_path('plate', 'modal.nc4')]
     dialog = RunReportsDialog(runs)
-    texts = [dialog.list.item(i).text() for i in range(dialog.list.count())]
-    assert texts[0] == 'sweep.nc4 — Sine Sweep'
-    assert texts[1] == 'random.nc4 — Random Vibration'
-    assert 'no one-call report' in texts[2]
-    assert not dialog.list.item(2).flags() & Qt.ItemFlag.ItemIsEnabled
+    names = [dialog.table.item(row, 0).text() for row in range(3)]
+    assert names[:2] == ['sweep.nc4', 'random.nc4']
+    assert 'no one-call report' in names[2], 'said, not hidden'
+    assert [box.currentText() for box in dialog.reports] == [
+        'Sine Sweep', 'Random Vibration', 'Leave out']
     assert dialog.write_button.text() == 'Write 2 Reports'
     chosen = dialog.choices()
     assert chosen['runs'] == runs[:2], 'the modal survey is left out'
+    assert chosen['kinds'] == {runs[0]: 'sine', runs[1]: 'random'}
+    assert chosen['last'] == {runs[0]: None, runs[1]: None}, 'whole runs'
     assert chosen['path'] is None, 'beside each run, as run_report does'
     assert chosen['geometry'] is None
     assert chosen['marking'] == DEFAULT_MARKING
@@ -79,22 +79,27 @@ def test_the_file_menu_writes_the_reports(window, monkeypatch, tmp_path):
 
     from visualdynamics.gui import run_reports
 
-    runs = _campaign(tmp_path)
+    # a random-and-sine run the dialog was told to give a random report
+    # alone: one file where its type would write two, so the window is
+    # seen to pass the dialog's per-run choice on (2026-10-06)
+    both = _write_run(tmp_path / 'both.nc4', random=True)
+    runs = [*_campaign(tmp_path), both]
     out = tmp_path / 'reports'
     out.mkdir()
     monkeypatch.setattr(QFileDialog, 'getOpenFileNames',
                         staticmethod(lambda *a, **k: (runs, '')))
     monkeypatch.setattr(run_reports, 'ask_run_reports', lambda parent, paths: {
         'runs': list(paths), 'path': str(out) + os.sep,
-        'geometry': None, 'marking': 'BATCH'})
+        'geometry': None, 'marking': 'BATCH',
+        'kinds': {both: 'random'}, 'last': {}})
     assert any(action.text() == 'Reports from R&uns…'
                for action in window.menuBar().actions()[0].menu().actions())
     before = set(window.project)
     window.reports_from_runs()
     assert sorted(p.name for p in out.iterdir()) == \
-        ['random.html', 'sweep.html']
+        ['both.html', 'random.html', 'sweep.html']
     assert 'BATCH' in (out / 'random.html').read_text(encoding='utf-8')
-    assert window.statusBar().currentMessage().startswith('Wrote 2 reports to')
+    assert window.statusBar().currentMessage().startswith('Wrote 3 reports to')
     assert set(window.project) == before, 'the open project is untouched'
 
 
@@ -124,3 +129,75 @@ def test_a_cancel_stops_the_batch_and_says_so(window, monkeypatch, tmp_path):
     window.reports_from_runs()
     assert seen == ['first'], 'the second run never started'
     assert 'cancelled' in window.statusBar().currentMessage()
+
+
+def test_each_run_can_be_given_its_report_and_its_last(qt_app, tmp_path):
+    """The detected report is a default: a run is given another or left
+    out, and the button counts what will be written (2026-10-06). The
+    one box for every random report sets the random rows' Last and
+    leaves the sweep whole; a row's own Last is still its own."""
+    from visualdynamics.gui.run_reports import RunReportsDialog
+
+    both = _write_run(tmp_path / 'both.nc4', random=True)
+    runs = [*_campaign(tmp_path), both]
+    dialog = RunReportsDialog(runs)
+    assert [box.currentData() for box in dialog.reports] == \
+        ['sine', 'random', 'mixed']
+    assert dialog.write_button.text() == 'Write 4 Reports', \
+        'a random-and-sine run is two reports'
+    dialog.every_random.setValue(120.0)
+    assert [span.value() for span in dialog.lasts] == [0.0, 120.0, 120.0]
+    dialog.lasts[1].setValue(60.0)
+    _sine, random, mixed = dialog.reports
+    random.setCurrentIndex(random.findText('Leave out'))
+    mixed.setCurrentIndex(mixed.findData('random'))
+    assert dialog.write_button.text() == 'Write 2 Reports'
+    chosen = dialog.choices()
+    assert chosen['runs'] == [runs[0], both]
+    assert chosen['kinds'] == {runs[0]: 'sine', both: 'random'}
+    assert chosen['last'] == {runs[0]: None, both: 120.0}
+
+
+def test_run_report_takes_each_runs_report_and_last(tmp_path):
+    """`kinds` overrides the file's own type run by run, `last` may be
+    given run by run, and a kind that is no report is refused before
+    anything is written."""
+    import re
+
+    both = _write_run(tmp_path / 'both.nc4', random=True, seconds=18.0)
+    out = tmp_path / 'reports'
+    out.mkdir()
+    with pytest.raises(ValueError, match='no report is called'):
+        visualdynamics.run_report([both], str(out) + '/',
+                                  kinds={both: 'combined'})
+    assert list(out.iterdir()) == []
+    written = visualdynamics.run_report(
+        [both], str(out) + '/', kinds={both: 'random'}, last={both: 5.0})
+    assert [os.path.basename(p) for p in written] == ['both.html'], \
+        'one random report, not the two its type would get'
+    with open(written[0], encoding='utf-8') as handle:
+        html = handle.read()
+    assert 'Random Vibration Test Report' in html
+    assert float(re.search(r'over ([0-9.]+) ?s', html).group(1)) == \
+        pytest.approx(5.0, abs=0.01)
+
+
+def test_a_channel_with_no_reading_is_a_gap_not_a_failed_report(tmp_path):
+    """A one-second random-and-sine run: some channel's RMS error has no
+    number. It went into the page as NaN, which the page's JSON refuses,
+    and the whole report failed to write (2026-10-06, found by the File
+    menu test above). It is a null now, a labeled row with no bar."""
+    import json
+
+    from visualdynamics.report import render_html
+
+    both = _write_run(tmp_path / 'both.nc4', random=True)
+    project = visualdynamics.random_vibration_run(both)
+    name = project.generate_report('random')
+    html = render_html(project[name], project, None, links=project.links)
+    payload = json.loads(html.split('type="application/json">')[1]
+                         .split('</script>')[0])
+    errors = [b for b in payload['blocks'] if b.get('kind') == 'bars'
+              and b.get('ylabel', '').startswith('RMS error')]
+    assert errors, 'the RMS error chart is on the page'
+    assert any(value is None for chart in errors for value in chart['values'])

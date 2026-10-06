@@ -378,6 +378,18 @@ def si_factor(unit: str, dimension: str | None = None) -> float:
     """Multiplier converting values in `unit` to SI.
 
     Raises for affine units (degC, degF), which need `to_si`/`from_si`.
+
+    Parameters
+    ----------
+    unit : str
+        The unit, e.g. 'mm' or 'lbf'.
+    dimension : str, optional
+        The dimension the unit is meant as, where a spelling is ambiguous.
+
+    Returns
+    -------
+    float
+        The factor: a value in `unit` times this is the value in SI.
     """
     scale, offset = si_transform(unit, dimension)
     if offset:
@@ -403,7 +415,22 @@ def from_si(values: ArrayLike, unit: str,
 
 
 def convert(values: ArrayLike, from_unit: str, to_unit: str) -> Any:
-    """`values` from one unit to another, through SI."""
+    """`values` from one unit to another, through SI.
+
+    Parameters
+    ----------
+    values : array-like
+        The values, in `from_unit`.
+    from_unit : str
+        The unit they are in, e.g. 'in/s**2'.
+    to_unit : str
+        The unit wanted, of the same dimension.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The values in `to_unit`, the shape of `values`.
+    """
     return from_si(to_si(values, from_unit), to_unit)
 
 

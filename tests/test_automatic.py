@@ -270,9 +270,11 @@ def test_a_system_id_averages_both_streams_on_shared_frames(tmp_path):
 def test_a_random_and_sine_run_works_up_both_halves():
     """Automatic on a Random and Sine project fills the random half's
     slots and the sine half's — the PSDs, the octave bands of both the
-    data and the requirement, the sine levels — and makes the mixed
-    report last (Brandon, 2026-10-02: "make sure Compute everything
-    works for Sine and Random and Sine")."""
+    data and the requirement, the sine levels — and makes the type's
+    two reports last, the random's then the sine's (Brandon,
+    2026-10-02: "make sure Compute everything works for Sine and
+    Random and Sine"; two reports since 2026-10-05). Pressed again it
+    adds nothing."""
     import numpy as np
     from test_extract_sine import _recording, _spec
 
@@ -296,11 +298,14 @@ def test_a_random_and_sine_run_works_up_both_halves():
     added = project.work_up()
     kinds = [type(project[name]).__name__ for name in added]
     assert 'Psd' in kinds and 'SineLevelSet' in kinds
-    assert added[-1] == 'Report'
-    report = project['Report']
-    captions = ' '.join(block.get('caption', '') for block in report.blocks)
-    assert 'Control against specification' in captions, 'the random half'
-    assert 'extracted level against the requirement' in captions, 'the sine half'
+    reports = [project[name] for name in added[-2:]]
+    assert [r.title for r in reports] == ['Random Vibration Test Report',
+                                          'Sine Sweep Test Report']
+    random_captions = ' '.join(b.get('caption', '') for b in reports[0].blocks)
+    sine_captions = ' '.join(b.get('caption', '') for b in reports[1].blocks)
+    assert 'Control against specification' in random_captions
+    assert 'extracted level against the requirement' in sine_captions
+    assert project.work_up() == [], 'pressed twice, nothing new'
     assert not [slot[0] for slot in project.missing()
                 if not slot[4] and slot[0] not in
                 ('Geometry', 'Photos', 'Channel Table', 'Multiple Coherence')]
@@ -308,8 +313,9 @@ def test_a_random_and_sine_run_works_up_both_halves():
 
 def test_the_file_menu_offers_every_report(window):
     """The File menu's Generate Report lists the same templates the
-    bar's menu does — the sine and the random-and-sine reports were
-    missing there (Brandon, 2026-10-02)."""
+    bar's menu does — the sine report was missing there (Brandon,
+    2026-10-02). No random-and-sine template since 2026-10-05: that
+    project makes a random report and a sine report."""
     file_menu = next(a.menu() for a in window.menuBar().actions()
                      if a.text().replace('&', '') == 'File')
     report_menu = next(a.menu() for a in file_menu.actions()
@@ -317,4 +323,4 @@ def test_the_file_menu_offers_every_report(window):
                        and a.text().replace('&', '') == 'Generate Report')
     labels = [a.text().replace('&', '') for a in report_menu.actions()]
     assert labels == ['Modal Test', 'Random Vibration', 'Transient', 'Shock',
-                      'Sine Sweep', 'Random and Sine', 'System ID', 'Empty']
+                      'Sine Sweep', 'System ID', 'Empty']

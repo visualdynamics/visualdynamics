@@ -71,7 +71,26 @@ def register_importer(name: str, description: str, sniff: Callable,
                       load: Callable,
                       project_type: Callable | None = None) -> None:
     """Teach visualdynamics a format. Registered ones are tried in order, so a
-    reader added later is asked last."""
+    reader added later is asked last.
+
+    Parameters
+    ----------
+    name : str
+        The importer's name, which `import_file(format=)` takes.
+    description : str
+        What the format is, as a file dialog lists it.
+    sniff : callable
+        ``sniff(path) -> bool``: whether a file is this format.
+    load : callable
+        ``load(path, **kwargs)``: the file read into objects.
+    project_type : callable, optional
+        ``project_type(path) -> str or None``: the project type the file
+        declares, for a format that carries one.
+
+    Returns
+    -------
+    None
+    """
     _IMPORTERS.append(Importer(name, description, sniff, load, project_type))
 
 
@@ -113,6 +132,24 @@ def import_file(path: str | os.PathLike, format: str | None = None,
     project file's objects, a Rattlesnake run's samples (2026-10-02) —
     and quietly unused where it cannot: a UFF file is one parse, and
     nothing inside it reports fractions worth relaying.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The file to read.
+    format : str, optional
+        An importer by name, rather than the one the file is recognized as.
+    progress : callable, optional
+        Called as ``progress(done, total)`` where the reader can count.
+    **kwargs
+        Passed to the importer: declared units (``length_unit='m'``), a
+        window of a long run (``start=``, ``stop=``), channels, and so on.
+
+    Returns
+    -------
+    object
+        The object the file holds; a dict of them by name for a file that
+        holds several, and a `Project` for a project file.
     """
     import inspect
 

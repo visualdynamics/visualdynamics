@@ -687,7 +687,19 @@ def _visualdynamics_path(path: str | os.PathLike) -> str:
 
 
 def save(obj: Any, path: str | os.PathLike) -> None:
-    """Save a visualdynamics object to a .vdyn (HDF5) file."""
+    """Save a visualdynamics object to a .vdyn (HDF5) file.
+
+    Parameters
+    ----------
+    obj : object
+        The object to save.
+    path : str or os.PathLike
+        Where; `.vdyn` is added when the suffix is not there.
+
+    Returns
+    -------
+    None
+    """
     import h5py
 
     with h5py.File(_visualdynamics_path(path), 'w') as f:
@@ -763,6 +775,19 @@ def load(path: str | os.PathLike,
     is minutes of someone's day and the reader is the only thing that
     knows how far along it is. A single-object file reports nothing:
     one object is one step, and a bar with one step is a light bulb.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The `.vdyn` file.
+    progress : callable, optional
+        Called as ``progress(loaded, total)``, once up front and once per
+        object.
+
+    Returns
+    -------
+    object
+        The object the file holds, or a `Project` for a whole test.
     """
     import h5py
 

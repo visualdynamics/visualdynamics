@@ -2703,6 +2703,17 @@ def _kurtosis_bars(block, source):
     }
 
 
+def _bar_value(value):
+    """A bar's value for the page: rounded, or None (JSON null) where
+    there is no number. A channel with no reading — an RMS error with
+    nothing to compare across a short run — went out as NaN, which the
+    page's JSON refuses, and the whole report failed to write
+    (2026-10-06, a one-second random-and-sine run). The page draws a
+    null as a labeled row with no bar."""
+    value = float(value)
+    return round(value, 4) if np.isfinite(value) else None
+
+
 def _snr_bars(block, signal, floor):
     """How far each channel's signal stands above its noise: RMS
     signal-to-noise in dB, a bar apiece, judged against a floor.
@@ -2798,7 +2809,7 @@ def _bars_block(block, specification, measured, us):
     return {
         'kind': 'bars', 'caption': caption,
         'labels': [label for label, _db, _pct in rows],
-        'values': [round(float(pct if lines else db), 4)
+        'values': [_bar_value(pct if lines else db)
                    for _label, db, pct in rows],
         'low': LINES_PERCENT if lines else -ERROR_DB,
         'high': None if lines else ERROR_DB,
@@ -2833,7 +2844,7 @@ def _srs_bars(block, specification, measured):
         'kind': 'bars', 'caption': block.get('caption', ''),
         'labels': [f'{dof} {name}' if many and name else dof
                    for dof, name, _value in rows],
-        'values': [round(float(value), 4) for _d, _n, value in rows],
+        'values': [_bar_value(value) for _d, _n, value in rows],
         # both sides: the deviation is signed — over the ceiling the
         # shock was too hard, under the floor it under-hit — and the
         # unsigned reading that once made every miss look like an
@@ -2860,7 +2871,7 @@ def _sine_bars(block, specification, levels):
         'kind': 'bars', 'caption': block.get('caption', ''),
         'labels': [f'{dof} {tone}' if many else dof
                    for dof, tone, _value in rows],
-        'values': [round(float(value), 4) for _d, _t, value in rows],
+        'values': [_bar_value(value) for _d, _t, value in rows],
         'low': -SINE_ERROR_DB, 'high': SINE_ERROR_DB,
         'units': ' dB',
         'ylabel': 'Sine level deviation, RMS across the sweep [dB]',
@@ -2911,7 +2922,7 @@ def _replication_bars(block, specification, measured):
         'kind': 'bars', 'caption': caption,
         'labels': [f"{r['label']} e{r['frame'] + 1}" if many else r['label']
                    for r in shown],
-        'values': [round(float(r['waveform']), 4) for r in shown],
+        'values': [_bar_value(r['waveform']) for r in shown],
         # a one-sided reading carries its only threshold in `low` and
         # leaves `high` null, which is how the page tells the two apart
         'low': WAVEFORM_PERCENT, 'high': None, 'floor': 0.0,

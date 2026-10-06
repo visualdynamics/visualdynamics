@@ -150,18 +150,16 @@ def test_the_box_carries_the_test_level_it_was_judged_at():
     assert str(full['test_level_db']) == '0.0', 'never a negative zero'
 
 
-def test_a_mixed_report_says_the_level_is_the_randoms():
-    """The mixed report's verdict and level are its random half's; the
-    sine is compared as measured. The box says which (Brandon,
-    2026-09-26)."""
+def test_the_level_label_is_the_reports_to_name():
+    """The box names its level as the report says: 'Test level' unless
+    the block names it. The random report under a sweep names it the
+    random's (test_mixed_type; Brandon, 2026-09-26)."""
     from test_comparison_scale import _measured, _spec
 
-    from visualdynamics.core.report import mixed_template, random_template
+    from visualdynamics.core.report import random_template
     from visualdynamics.report import _verdict_block
     from visualdynamics.report.page import _JS
 
-    mixed = [b for b in mixed_template({}).blocks if b['kind'] == 'verdict']
-    assert mixed[0]['level_label'] == 'Random test level'
     plain = [b for b in random_template({}).blocks if b['kind'] == 'verdict']
     assert 'level_label' not in plain[0], 'a random report says Test level'
     spec = _spec(('101Z+', '102Z+'))

@@ -60,6 +60,16 @@ def from_sep005(timeseries: dict[str, Any] | list[dict[str, Any]]
     Refused, with the reason: a series with no ``data``, with neither
     ``fs`` nor ``time``, a ``time`` vector of the wrong length, or a
     ``channel_name`` list that does not match the channel count.
+
+    Parameters
+    ----------
+    timeseries : dict or list of dict
+        One SEP 005 series, or a list of them.
+
+    Returns
+    -------
+    TimeHistory or dict of str to TimeHistory
+        One for one dict; for a list, every series by name.
     """
     if isinstance(timeseries, dict):
         return _one(timeseries)

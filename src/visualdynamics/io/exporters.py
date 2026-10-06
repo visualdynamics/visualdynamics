@@ -143,6 +143,24 @@ def export_file(obj: Any, path: str | os.PathLike, format: str | None = None,
     go out as they are. Raises ValueError naming what the object *can* be
     written as, since "cannot export" is nearly always a question of which
     format.
+
+    Parameters
+    ----------
+    obj : object
+        What to write: a geometry, data, shapes, a project, and so on.
+    path : str or os.PathLike
+        Where; the suffix picks the format when `format` is not given.
+    format : str, optional
+        An exporter by name (`visualdynamics.io.exporters`), whatever the
+        suffix says.
+    unit_system : UnitSystem, optional
+        The units to write in; the stored values as they are when omitted.
+    **kwargs
+        Passed to the format's writer, e.g. an ESCDF file's `created_by`.
+
+    Returns
+    -------
+    None
     """
     # `~` is the writer's to expand too, or a file lands in a folder
     # named for a tilde (the import's own courtesy, 2026-09-20)

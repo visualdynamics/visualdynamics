@@ -2831,7 +2831,8 @@ class Project(dict):
         ----------
         template : str, default 'modal'
             Which starter to build: 'modal', 'random', 'shock',
-            'transient', 'sine', 'sysid' or 'empty' — or a saved
+            'transient', 'sine', 'sysid' or 'empty' (a random-and-sine
+            project makes 'random' and 'sine', one report each) — or a saved
             template, by the name it was saved under in the templates
             folder or by the path of a `.vdreport` file (a report
             exported on its own; `io.report_template`).
@@ -2919,6 +2920,7 @@ class Project(dict):
         from .core.data import Psd, Specification, TransientSpecification
         from .core.report import (
             PROJECT_TEMPLATES,
+            TEMPLATE_BUILDERS,
             is_banded,
             project_expectations,
         )
@@ -3060,8 +3062,20 @@ class Project(dict):
                         chain = derived(chain, 'integrate') or \
                             make(self.integrate, chain)[0]
                 elif icon == 'Report':
-                    make(self.generate_report,
-                         PROJECT_TEMPLATES[project_type])
+                    # the type's reports in order, each made once: chosen
+                    # by which are already here (by title), not by the
+                    # slot's number, so a random-and-sine project holding
+                    # its sine report gets the random one, not a second
+                    # sine (2026-10-05, two reports for that type)
+                    made = {self[name].title for name in self.names
+                            if isinstance(self[name], Report)}
+                    wanted = next(
+                        (template for template
+                         in PROJECT_TEMPLATES[project_type]
+                         if TEMPLATE_BUILDERS[template]({}, links=[]).title
+                         not in made), None)
+                    if wanted is not None:
+                        make(self.generate_report, wanted)
             except ValueError:
                 # what the data refuses (a coherence with no drive
                 # channel) stays gray; the slots after it still fill
@@ -4313,6 +4327,11 @@ def random_vibration_run(run: str | os.PathLike,
         The geometry's length unit, for a file that does not say.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several.
+
+    Returns
+    -------
+    Project
+        The worked-up project, declared Random Vibration.
     """
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
@@ -4409,6 +4428,25 @@ def system_id_run(run: str | os.PathLike, *,
 
     `last`, `geometry`, `length_unit` and `photos` are
     `random_vibration_run`'s, and mean the same things.
+
+    Parameters
+    ----------
+    run : str or os.PathLike
+        The controller's `.nc4`.
+    last : float, optional
+        Import only the last `last` seconds of the run's streams; a
+        shorter run is taken whole.
+    geometry : str or os.PathLike, optional
+        A geometry file to import and link to the run.
+    length_unit : str, optional
+        The geometry's length unit, for a file that does not say.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+
+    Returns
+    -------
+    Project
+        The worked-up project, declared System ID.
     """
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
@@ -4548,6 +4586,28 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
     with no sine specification is refused by name rather than worked
     up as half of what was asked for; `random_vibration_run` is the
     call for it. The keywords are `random_vibration_run`'s.
+
+    Parameters
+    ----------
+    run : str or os.PathLike
+        The controller's `.nc4`.
+    per_octave : int, optional
+        Bands per octave for the banded PSD and specification; the
+        project's default (a sixth) when omitted.
+    last : float, optional
+        Import only the last `last` seconds of the run's streams; a
+        shorter run is taken whole.
+    geometry : str or os.PathLike, optional
+        A geometry file to import and link to the run.
+    length_unit : str, optional
+        The geometry's length unit, for a file that does not say.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+
+    Returns
+    -------
+    Project
+        The worked-up project, declared Random and Sine.
     """
     project = random_vibration_run(run, per_octave, last=last,
                                    geometry=geometry,
@@ -4561,33 +4621,6 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
             'and sine run — random_vibration_run is the call for it')
     project.extract_sine(project.time_history)
     return project
-
-
-def mixed_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
-                 last: float | None = None,
-                 geometry: Any = None,
-                 photos: Any = None,
-                 per_octave: int | None = None,
-                 unit_system: Any = None,
-                 marking: str | None = None) -> Any:
-    """A Rattlesnake random-and-sine run in, an HTML report out.
-
-        visualdynamics.mixed_report('run.nc4', 'report.html')
-        visualdynamics.mixed_report()                   # ask for both
-        visualdynamics.mixed_report('run.nc4', 'reports/')
-
-    `random_vibration_report`'s twin for a run that was both: the same
-    asking when the run is left out, the same batch and folder rules,
-    the workup of `mixed_run`, and the Random and Sine report — both
-    halves judged from one recording — written as one self-contained
-    HTML file. Returns the path written, or the list of them when
-    several runs were chosen.
-    """
-    return _one_call_reports(
-        run, path, geometry, unit_system, 'mixed',
-        lambda one, geo: mixed_run(one, per_octave, last=last, geometry=geo,
-                                   photos=photos),
-        marking=marking)
 
 
 def sine_run(run: str | os.PathLike, *,
@@ -4608,6 +4641,25 @@ def sine_run(run: str | os.PathLike, *,
     or `mixed_run` is the call for it. The keywords are
     `random_vibration_run`'s, less `per_octave`, which a sweep has no
     use for.
+
+    Parameters
+    ----------
+    run : str or os.PathLike
+        The controller's `.nc4`.
+    last : float, optional
+        Import only the last `last` seconds of the run's streams; a
+        shorter run is taken whole.
+    geometry : str or os.PathLike, optional
+        A geometry file to import and link to the run.
+    length_unit : str, optional
+        The geometry's length unit, for a file that does not say.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+
+    Returns
+    -------
+    Project
+        The worked-up project, declared Sine Sweep.
     """
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
@@ -4656,6 +4708,37 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
     across every page of the report, 'UNCLASSIFIED' unless said — on
     every one-call report since 2026-10-02, when a batch wanted its own
     heading.
+
+    Parameters
+    ----------
+    run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
+        The controller's `.nc4`, or a list of them for a batch; asked for
+        in a file dialog, as many as wanted, when omitted.
+    path : str, os.PathLike or None, optional
+        The file to write, or a folder (one that exists, or a name ending
+        in a separator) the report lands in under the run's own name.
+        Beside the run when omitted. Several runs need a folder or None.
+    last : float, optional
+        Import only the last `last` seconds of the run; a shorter run is
+        taken whole.
+    geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
+        A geometry file to import and link to the run. Asked for once for
+        the whole batch when the run was asked for, Cancel meaning none;
+        `ASK` asks even when the run was given.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+    unit_system : UnitSystem, optional
+        The units the report is written in; the package default,
+        'in-slinch-lbf-s (g)', when omitted.
+    marking : str, optional
+        The banner across the top and bottom of every page;
+        'UNCLASSIFIED' when omitted.
+
+    Returns
+    -------
+    str or list of str
+        The path written; a list of them when several runs were chosen or
+        a list of runs was given.
     """
     return _one_call_reports(
         run, path, geometry, unit_system, 'sine',
@@ -4671,13 +4754,25 @@ _REPORTS_BY_TYPE = {
 
 
 def report_kind(run: str | os.PathLike) -> str:
-    """Which one-call report a Rattlesnake run gets: 'random', 'mixed',
-    'sine' or 'sysid', from the project type the file declares — and
+    """Which one-call reports a Rattlesnake run gets: 'random', 'mixed',
+    'sine' or 'sysid', from the project type the file declares — 'mixed'
+    being a random run with a sweep under it, which gets a random report
+    and a sine report (`run_report`) — and
     'sysid' for a streamed save with a system ID's shape, two streams,
     a quiet one then a loud one, where the window asks and this
     decides (Brandon, 2026-10-02: a batch defaults to the likeliest
     reading). A run of a type with no one-call report, a modal or a
     transient run, is refused by name.
+
+    Parameters
+    ----------
+    run : str or os.PathLike
+        The controller's `.nc4`.
+
+    Returns
+    -------
+    str
+        'random', 'mixed', 'sine' or 'sysid'.
     """
     from .io.rattlesnake import project_type, streamed_sysid_candidate
 
@@ -4693,8 +4788,13 @@ def report_kind(run: str | os.PathLike) -> str:
     return kind
 
 
+#: the reports `run_report` can be told a run gets, by `kinds`
+REPORT_KINDS = ('random', 'mixed', 'sine', 'sysid')
+
+
 def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
-           last: float | None = None,
+           last: Any = None,
+           kinds: Any = None,
            geometry: Any = None,
            photos: Any = None,
            per_octave: int | None = None,
@@ -4711,8 +4811,12 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
 
     The one-call report that reads the run's own type (`report_kind`)
     and writes that report: a random run gets `random_vibration_report`'s,
-    a random-and-sine run `mixed_report`'s, a sweep `sine_report`'s, a
-    system identification `system_id_report`'s — and a streamed save
+    a sweep `sine_report`'s, a system identification
+    `system_id_report`'s, and a random-and-sine run both a random and a
+    sine report, as `<name>_random.html` and `<name>_sine.html` — the
+    random reading only the last `last` seconds when they are given, the
+    sine always the whole run, since a sweep cut short loses tones (the
+    combined report retired 2026-10-05). A streamed save
     that looks like a system ID, two streams quiet then loud, is taken
     as one rather than asked about. Named for what it takes, since
     `visualdynamics.report` is the rendering package. The asking, the batch and the
@@ -4722,13 +4826,76 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
 
     Every run's kind is read before any report is written, so a batch
     holding a run with no one-call report is refused whole rather than
-    stopping partway through. `progress(done, total)` is told after
+    stopping partway through. `kinds` overrides the reading run by run —
+    a restarted random run the system-ID guess took for one, a file
+    that declares no type (Reports from Runs' per-run choice,
+    2026-10-06) — and `last` may be given run by run too. `progress(done, total)` is told after
     each run, the hook the window's bar and Cancel ride on (Reports
     from Runs, 2026-10-04); a run is the smallest step, so a cancel
     lands between runs.
+
+    Parameters
+    ----------
+    run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
+        The controller's `.nc4`, or a list of them for a batch; asked for
+        in a file dialog, as many as wanted, when omitted.
+    path : str, os.PathLike or None, optional
+        The file to write, or a folder (one that exists, or a name ending
+        in a separator) the report lands in under the run's own name.
+        Beside the run when omitted. Several runs need a folder or None.
+    last : float or Mapping, optional
+        Import only the last `last` seconds of the run; a shorter run is
+        taken whole. For a random-and-sine run the random report alone:
+        its sine report reads the whole run. A mapping gives each run its
+        own, by path; a run it leaves out, or maps to None, is read
+        whole.
+    kinds : Mapping, optional
+        The report each run gets, by path: 'random', 'mixed' (a random
+        and a sine report), 'sine' or 'sysid'. A run it leaves out gets
+        the report its file declares (`report_kind`).
+    geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
+        A geometry file to import and link to the run. Asked for once for
+        the whole batch when the run was asked for, Cancel meaning none;
+        `ASK` asks even when the run was given.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+    per_octave : int, optional
+        Bands per octave for the banded PSD and specification; the
+        project's default (a sixth) when omitted. The random
+        halves alone read it.
+    unit_system : UnitSystem, optional
+        The units the report is written in; the package default,
+        'in-slinch-lbf-s (g)', when omitted.
+    marking : str, optional
+        The banner across the top and bottom of every page;
+        'UNCLASSIFIED' when omitted.
+    progress : callable, optional
+        Called as ``progress(done, total)`` before the first run and after
+        each; it may raise to stop the batch between runs.
+
+    Returns
+    -------
+    str or list of str
+        The path written; a list of them when several runs were chosen, a
+        list of runs was given, or a run was random and sine (two
+        reports).
     """
     runs, asked, many = _runs_of(run)
-    kinds = [report_kind(one) for one in runs]
+    chosen = {str(key): value for key, value in (kinds or {}).items()}
+    wrong = sorted({str(value) for value in chosen.values()
+                    if value not in REPORT_KINDS})
+    if wrong:
+        raise ValueError(f'no report is called {", ".join(wrong)}: '
+                         f'the kinds are {", ".join(REPORT_KINDS)}')
+    kinds = [chosen.get(str(one)) or report_kind(one) for one in runs]
+
+    def seconds(one):
+        # one number for the batch, or each run's own; read whole when
+        # a mapping says nothing about it
+        if isinstance(last, Mapping):
+            return last.get(str(one))
+        return last
+
     if geometry is ASK or (asked and geometry is None):
         from .gui.ask import for_geometry
         geometry = for_geometry()
@@ -4740,23 +4907,38 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
             f'{str(path)!r} — give a folder, or no path at all')
     workups = {
         'random': lambda one, geo: random_vibration_run(
-            one, per_octave, last=last, geometry=geo, photos=photos),
-        'mixed': lambda one, geo: mixed_run(
-            one, per_octave, last=last, geometry=geo, photos=photos),
-        'sine': lambda one, geo: sine_run(one, last=last, geometry=geo,
-                                          photos=photos),
-        'sysid': lambda one, geo: system_id_run(one, last=last, geometry=geo,
-                                                photos=photos),
+            one, per_octave, last=seconds(one), geometry=geo, photos=photos),
+        'sine': lambda one, geo: sine_run(one, last=seconds(one),
+                                          geometry=geo, photos=photos),
+        'sysid': lambda one, geo: system_id_run(one, last=seconds(one),
+                                                geometry=geo, photos=photos),
     }
     written = []
     if progress is not None:
         progress(0, len(runs))
     for done, (one, kind) in enumerate(zip(runs, kinds), start=1):
-        written.append(_one_call_reports(one, path, geometry, unit_system,
-                                         kind, workups[kind], marking=marking))
+        if kind == 'mixed':
+            # two reports, each read the way its own test is: the
+            # random from the last `last` seconds when given, the sweep
+            # from the whole run, since a sweep cut short loses tones
+            # (Brandon, 2026-10-05, when the combined report retired)
+            stem, suffix = os.path.splitext(_report_path(one, path))
+            suffix = suffix or '.html'
+            written.append(_one_call_reports(
+                one, f'{stem}_random{suffix}', geometry, unit_system,
+                'random', workups['random'], marking=marking))
+            written.append(_one_call_reports(
+                one, f'{stem}_sine{suffix}', geometry, unit_system, 'sine',
+                lambda whole, geo: sine_run(whole, geometry=geo,
+                                            photos=photos),
+                marking=marking))
+        else:
+            written.append(_one_call_reports(one, path, geometry,
+                                             unit_system, kind,
+                                             workups[kind], marking=marking))
         if progress is not None:
             progress(done, len(runs))
-    return written if many else written[0]
+    return written if many or len(written) > 1 else written[0]
 
 
 def system_id_report(run: Any = ASK,
@@ -4772,9 +4954,9 @@ def system_id_report(run: Any = ASK,
         visualdynamics.system_id_report()            # ask for both
 
     `system_id_run` followed by the System ID report: the measured
-    plant as a CMIF, the coherence map, and the signal-to-noise of the
-    measurement — where that ratio approaches one, the plant is the
-    room.
+    plant's FRFs, the coherence map, and the signal-to-noise of the
+    measurement, line by line and per channel — where it falls to
+    zero decibels, the plant is the room.
 
     Everything about being asked, writing a batch and taking a folder
     is `random_vibration_report`'s, and means the same things: left
@@ -4783,6 +4965,37 @@ def system_id_report(run: Any = ASK,
     batch when the run was asked for, Cancel meaning none;
     `visualdynamics.ASK` forces either question; and `path` may be the
     file to write or the folder to write into.
+
+    Parameters
+    ----------
+    run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
+        The controller's `.nc4`, or a list of them for a batch; asked for
+        in a file dialog, as many as wanted, when omitted.
+    path : str, os.PathLike or None, optional
+        The file to write, or a folder (one that exists, or a name ending
+        in a separator) the report lands in under the run's own name.
+        Beside the run when omitted. Several runs need a folder or None.
+    last : float, optional
+        Import only the last `last` seconds of the run; a shorter run is
+        taken whole.
+    geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
+        A geometry file to import and link to the run. Asked for once for
+        the whole batch when the run was asked for, Cancel meaning none;
+        `ASK` asks even when the run was given.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+    unit_system : UnitSystem, optional
+        The units the report is written in; the package default,
+        'in-slinch-lbf-s (g)', when omitted.
+    marking : str, optional
+        The banner across the top and bottom of every page;
+        'UNCLASSIFIED' when omitted.
+
+    Returns
+    -------
+    str or list of str
+        The path written; a list of them when several runs were chosen or
+        a list of runs was given.
     """
     return _one_call_reports(
         run, path, geometry, unit_system, 'sysid',
@@ -4837,6 +5050,40 @@ def random_vibration_report(run: Any = ASK,
     `generate_report` and `export_report`; reach for those instead when
     the project is wanted afterwards — to write the test summary, or to
     save it as `.vdyn`.
+
+    Parameters
+    ----------
+    run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
+        The controller's `.nc4`, or a list of them for a batch; asked for
+        in a file dialog, as many as wanted, when omitted.
+    path : str, os.PathLike or None, optional
+        The file to write, or a folder (one that exists, or a name ending
+        in a separator) the report lands in under the run's own name.
+        Beside the run when omitted. Several runs need a folder or None.
+    last : float, optional
+        Import only the last `last` seconds of the run; a shorter run is
+        taken whole.
+    geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
+        A geometry file to import and link to the run. Asked for once for
+        the whole batch when the run was asked for, Cancel meaning none;
+        `ASK` asks even when the run was given.
+    photos : str, os.PathLike or sequence of them, optional
+        A folder of photographs, one photograph, or several in order.
+    per_octave : int, optional
+        Bands per octave for the banded PSD and specification; the
+        project's default (a sixth) when omitted.
+    unit_system : UnitSystem, optional
+        The units the report is written in; the package default,
+        'in-slinch-lbf-s (g)', when omitted.
+    marking : str, optional
+        The banner across the top and bottom of every page;
+        'UNCLASSIFIED' when omitted.
+
+    Returns
+    -------
+    str or list of str
+        The path written; a list of them when several runs were chosen or
+        a list of runs was given.
     """
     # no length unit reaches the workup: the report draws the geometry
     # as a shape and never states a coordinate or a scale, so declaring

@@ -730,3 +730,33 @@ def test_the_view_draws_headless(dirty, spec, tmp_path):
         plot_tracking_filter(dirty, spec, SineTracking(fixed=5.0),
                              onset=ONSET, cursor=2.0, cursor_hz=100.0,
                              path=str(path), show=False)
+
+
+def test_rms_and_mean_are_exact_with_few_samples_a_cycle():
+    """At a controller's sample rate a cycle near the top of the band
+    is a few samples long. Read off the samples, RMS was 3.6 % off at
+    10 samples a cycle and mean 9 % at 5.5, on a clean tone (found in
+    review, 2026-10-05; the fixtures above run at 51). Read from the
+    band-limited waveform over exactly the span, both are exact; the
+    peak stays the peak of the samples, by design, and reads low."""
+    rate, amplitude = 4096.0, 2.0
+    tone = SineTone('Up', 0.5, [100.0, 800.0], [[amplitude]] * 2, [0],
+                    [100.0])
+    spec = SineSweepSpecification([tone], [DOF], ordinate_unit='m/s**2')
+    t = np.arange(int(9.0 * rate)) / rate
+    local = np.clip(t - 0.5, 0.0, None)
+    inside = (t >= 0.5) & (local <= tone.duration())
+    x = np.where(inside, amplitude * np.cos(tone.phase_at(local)), 0.0)
+    history = TimeHistory(t, x[None], response_dof=[DOF],
+                          ordinate_dim=['acceleration'])
+    settings = [SineTracking(detector='rms', proportional=0.1),
+                SineTracking(detector='mean', proportional=0.1),
+                SineTracking(detector='rms'), SineTracking(detector='mean'),
+                SineTracking(detector='peak')]
+    levels = track_sine(history, spec, settings, onset=0.5)
+    top = (levels[0].abscissa > 400.0) & (levels[0].abscissa < 780.0)
+    error = [np.max(np.abs(np.abs(np.asarray(level.ordinate[0]))[top]
+                           / amplitude - 1.0)) for level in levels]
+    assert error[0] < 5e-4 and error[2] < 5e-4, f'rms {error[0]}, {error[2]}'
+    assert error[1] < 1.5e-3 and error[3] < 1.5e-3, f'mean {error[1]}, {error[3]}'
+    assert error[4] > 0.05, 'the peak still reads the samples, low up here'

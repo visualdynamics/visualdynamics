@@ -192,5 +192,12 @@ gray.
 - **A peak is the peak of the samples.** It reads low by at most
   cos(π × drive / sample rate): 0.3 % at a fortieth of the sample
   rate, more on a harmonic near the top of the band.
+- **RMS and mean read the waveform between the samples.** Near the
+  top of a band a cycle can be a few samples long, and an average of
+  the samples alone misses the span by part of a sample and the
+  waveform's shape between them. So the two are read from the record
+  upsampled until a cycle has 64 points, over exactly the span's
+  phase: a clean tone reads within 0.1 % down to under three samples
+  a cycle.
 - **No view in the application yet.** The readings and both plots
   are scripting calls; the window does not offer them.

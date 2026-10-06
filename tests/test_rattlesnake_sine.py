@@ -311,7 +311,7 @@ def test_the_one_call_reports_take_a_marking(tmp_path):
     import inspect
 
     for report in (visualdynamics.random_vibration_report,
-                   visualdynamics.mixed_report,
+                   visualdynamics.run_report,
                    visualdynamics.system_id_report,
                    visualdynamics.sine_report):
         assert 'marking' in inspect.signature(report).parameters, report.__name__

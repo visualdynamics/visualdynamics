@@ -108,7 +108,10 @@ def test_every_project_type_has_a_workflow_page():
     workflows = ROOT / 'docs' / 'guide' / 'workflows'
     listed = (workflows / 'SUMMARY.md').read_text(encoding='utf-8')
     assert PROJECT_TEMPLATES, 'there are project types at all'
-    for project_type, slug in PROJECT_TEMPLATES.items():
+    for project_type, templates in PROJECT_TEMPLATES.items():
+        # a type's page is named for its one report; the random-and-
+        # sine type makes two (2026-10-05) and keeps its own page
+        slug = templates[0] if len(templates) == 1 else 'mixed'
         page = workflows / f'{slug}-workflow.md'
         assert page.exists(), f'{project_type} has no workflow page'
         assert f'{slug}-workflow.md' in listed, \

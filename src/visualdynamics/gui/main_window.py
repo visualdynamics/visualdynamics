@@ -1449,8 +1449,6 @@ class MainWindow(QMainWindow):
         # here)
         report_menu.addAction('S&ine Sweep',
                               lambda: self.generate_report('sine'))
-        report_menu.addAction('Random &and Sine',
-                              lambda: self.generate_report('mixed'))
         report_menu.addAction('S&ystem ID',
                               lambda: self.generate_report('sysid'))
         report_menu.addAction('&Empty',
@@ -3159,7 +3157,8 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         if self.project_type:
-            menu.addAction(f'Generate {self.project_type} Report',
+            plural = 's' * (len(PROJECT_TEMPLATES[self.project_type]) > 1)
+            menu.addAction(f'Generate {self.project_type} Report{plural}',
                            self.generate_typed_report)
         else:
             for label, template in (('&Modal Test', 'modal'),
@@ -3167,7 +3166,6 @@ class MainWindow(QMainWindow):
                                     ('&Transient', 'transient'),
                                     ('&Shock', 'shock'),
                                     ('S&ine Sweep', 'sine'),
-                                    ('Random &and Sine', 'mixed'),
                                     ('S&ystem ID', 'sysid'),
                                     ('&Empty', 'empty')):
                 menu.addAction(f'Generate {label} Report',
@@ -11059,8 +11057,11 @@ class MainWindow(QMainWindow):
         self._show_status(f'{added}: {report.describe()}, through {shapes}')
 
     def generate_typed_report(self) -> None:
-        """Generate the report the project's declared type calls for."""
-        self.generate_report(PROJECT_TEMPLATES[self.project_type])
+        """Generate the reports the project's declared type calls for:
+        one, or for a random-and-sine project a random report and a
+        sine report (2026-10-05, when the combined report retired)."""
+        for template in PROJECT_TEMPLATES[self.project_type]:
+            self.generate_report(template)
 
     def _show_placeholder_menu(self, item, position):
         """A gray slot's options: compute it from what the project has,
@@ -12135,6 +12136,7 @@ class MainWindow(QMainWindow):
                 f'Writing {count} report{plural}…', run_report,
                 choices['runs'], choices['path'],
                 geometry=choices['geometry'], marking=choices['marking'],
+                kinds=choices.get('kinds'), last=choices.get('last'),
                 unit_system=self.unit_system)
         except Cancelled:
             self._show_status('Reports from runs cancelled; the reports '

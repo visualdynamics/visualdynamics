@@ -1,11 +1,12 @@
-"""The random-and-sine project type: its slots, its report, its import.
+"""The random-and-sine project type: its slots, its reports, its import.
 
 A random environment with a sine sweep under it is the one mixed run
 that is a project type of its own (Brandon, 2026-09-24): the project
-shows both halves' slots, and one report holds both judgments. Nothing
-in it is a third copy of either half — the slot list is composed from
-the two types' lists, and the report's judgment blocks are the very
-functions the random and sine reports call.
+shows both halves' slots, composed from the two types' lists. It made
+one combined report until 2026-10-05; it makes a random report and a
+sine report since (Brandon: "retire the combined random sine report"),
+each read the way its own test is, and the random one saying what the
+sweep does to its figures.
 """
 
 from __future__ import annotations
@@ -21,9 +22,7 @@ from test_rattlesnake_sine import _write_run
 import visualdynamics
 from visualdynamics.core.report import (
     PROJECT_TEMPLATES,
-    mixed_template,
     project_expectations,
-    random_template,
     sine_template,
 )
 
@@ -39,16 +38,19 @@ def _labels(project_type):
 
 
 def test_the_slots_are_the_randoms_plus_what_the_sine_adds():
+    """The random's slots, what the sine's adds, and two reports."""
     random = _labels('Random Vibration')
     mixed = _labels('Random and Sine')
     assert mixed == random[:-1] + ['Sine Sweep Specification',
-                                   'Sine Level Set', 'Report']
+                                   'Sine Level Set', 'Report', 'Report']
     # labels repeat by design (the second Specification is the banded
-    # one, by ordinal); the icons say which slot is which, and none of
-    # the sine's duplicates one the random already had
+    # one, by ordinal); the icons say which slot is which, and none
+    # repeats but the report's, which is two reports
     icons = [icon for _n, _cls, icon, *_rest
              in project_expectations('Random and Sine')]
-    assert len(set(icons)) == len(icons), 'no slot twice'
+    assert icons.count('Report') == 2
+    rest = [icon for icon in icons if icon != 'Report']
+    assert len(set(rest)) == len(rest), 'no other slot twice'
 
 
 def test_the_tree_shows_both_halves_slots(window, pump):
@@ -62,67 +64,89 @@ def _headings(report):
             if block['kind'] == 'text' and block['text'].startswith('## ')]
 
 
-def test_the_report_holds_both_judgments_once_each():
-    """The random's control comparisons and compliance, then the sine's
-    levels and deviation, with the front matter, the recording, the
-    data quality and the conclusions each once."""
-    report = mixed_template(visualdynamics.Project(), links=[])
-    assert report.title == 'Random and Sine Test Report'
-    assert report.blocks[0]['kind'] == 'verdict', 'the verdict leads'
-    headings = _headings(report)
-    for once in ('## Test Summary', '## Test Article and Instrumentation',
-                 '## Measured Data', '## Control', '## Compliance',
-                 '## Octave Band Comparison', '## The Sweep',
-                 '## Level Against Requirement', '## Deviation',
-                 '## Data Quality', '## Conclusions'):
-        assert headings.count(once) == 1, once
-    assert headings.index('## Control') < headings.index('## The Sweep') \
-        < headings.index('## Data Quality') < headings.index('## Conclusions')
-    bars = [(b['mode'], b['caption']) for b in report.blocks
-            if b['kind'] == 'bars']
-    assert ('error', 'RMS error by control channel') in bars
-    assert ('sine', 'Sine level deviation by tone and channel') in bars
-    assert sum(1 for b in report.blocks
-               if b['kind'] == 'bars' and b.get('mode') == 'kurtosis') == 1
+def _text(report):
+    return ' '.join(b['text'] for b in report.blocks if b['kind'] == 'text')
 
 
-def test_the_judgment_blocks_are_the_single_reports_own():
-    """Composed, not copied: every control and compliance block of the
-    random report and every level and deviation block of the sine
-    report appears in the mixed one as it is."""
-    empty = visualdynamics.Project()
-    mixed = mixed_template(empty, links=[]).blocks
-    random = random_template(empty, links=[]).blocks
-    sine = sine_template(empty, links=[]).blocks
-
-    def judgments(blocks, first, last):
-        heads = [i for i, b in enumerate(blocks)
-                 if b['kind'] == 'text' and b['text'].startswith(first)]
-        tails = [i for i, b in enumerate(blocks)
-                 if b['kind'] == 'text' and b['text'].startswith(last)]
-        return blocks[heads[0]:tails[0]]
-
-    random_part = judgments(random, '## Control', '## Data Quality')
-    sine_part = judgments(sine, '## Level Against Requirement',
-                          '## The Shape Of The Recording')
-    assert random_part and sine_part
-    for block in random_part + sine_part:
-        assert block in mixed, block.get('caption') or block['text'][:40]
+def test_the_type_makes_a_random_report_and_a_sine_report():
+    assert PROJECT_TEMPLATES['Random and Sine'] == ('random', 'sine')
+    assert 'mixed' not in __import__(
+        'visualdynamics.core.report', fromlist=['x']).TEMPLATE_BUILDERS
 
 
-def test_a_mixed_run_imports_as_the_type_and_generates_its_report(
+def _worked_up(project_type, sweep=True):
+    """A project of `project_type` from a recording, a random
+    specification and (with `sweep`) the sweep's, worked up by
+    Automatic: every block of its reports has something to bind."""
+    import numpy as np
+    from test_extract_sine import _recording, _spec
+
+    from visualdynamics.core.data import Specification
+    from visualdynamics.core.report import Report
+
+    spec = _spec()
+    history = _recording(spec, noise=0.5)
+    frequencies = np.logspace(1, 3, 25)
+    level = np.full((2, len(frequencies)), 1e-3)
+    project = visualdynamics.Project()
+    project.add('Time History', history)
+    project.add('PSD Specification', Specification(
+        abscissa=frequencies, ordinate=level,
+        response_dof=list(history.response_dof),
+        ordinate_dim=['acceleration**2/frequency'] * 2,
+        ordinate_unit=['(m/s**2)**2/Hz'] * 2,
+        abort_upper=level * 2.0, abort_lower=level * 0.5))
+    if sweep:
+        project.add('Sine Specification', spec)
+    project.project_type = project_type
+    project.work_up()
+    return {project[n].title: project[n] for n in project.names
+            if isinstance(project[n], Report)}
+
+
+def test_a_random_report_under_a_sweep_says_what_the_sweep_does():
+    """The combined report's two warnings, where the random report is
+    read: the tone's power is in the control spectra, and a kurtosis
+    under three is the sweep; and the level beside the verdict is the
+    random's. A plain random report says none of it."""
+    swept = _worked_up('Random and Sine')['Random Vibration Test Report']
+    plain = _worked_up('Random Vibration', sweep=False)[
+        'Random Vibration Test Report']
+    assert '## The Sweep Under the Random' in _headings(swept)
+    assert '## The Sweep Under the Random' not in _headings(plain)
+    for words in ('may be the tone rather than the random',
+                  'a channel under three is the sweep',
+                  'the tone is the first suspect'):
+        assert words in _text(swept), words
+        assert words not in _text(plain), words
+    verdict = [b for b in swept.blocks if b['kind'] == 'verdict']
+    assert verdict[0]['level_label'] == 'Random test level'
+    assert 'level_label' not in next(b for b in plain.blocks
+                                     if b['kind'] == 'verdict')
+
+
+def test_a_sine_report_under_a_random_says_where_the_random_is_judged():
+    from test_extract_sine import _spec as _sweep
+
+    under = _worked_up('Random and Sine')['Sine Sweep Test Report']
+    alone = sine_template({'Sweep': _sweep()}, links=[])
+    assert 'the random is judged in its own report' in _text(under)
+    assert 'the random is judged in its own report' not in _text(alone)
+
+
+def test_a_mixed_run_imports_as_the_type_and_generates_both_reports(
         window, pump, tmp_path):
     path = _write_run(tmp_path / 'mixed.nc4', random=True)
     window.import_paths([path])
     pump()
     assert window.project_type == 'Random and Sine'
-    assert PROJECT_TEMPLATES[window.project_type] == 'mixed'
     window.generate_typed_report()
     pump()
     from visualdynamics.core.report import Report
 
     reports = [o for o in window.objects.values() if isinstance(o, Report)]
-    assert [r.title for r in reports] == ['Random and Sine Test Report']
+    assert [r.title for r in reports] == ['Random Vibration Test Report',
+                                          'Sine Sweep Test Report']
 
 
 def test_mixed_run_refuses_a_run_with_no_sweep():
@@ -133,25 +157,39 @@ def test_mixed_run_refuses_a_run_with_no_sweep():
         visualdynamics.mixed_run(fixture_path('plate', 'random.nc4'))
 
 
-@needs_stress
-def test_the_one_call_writes_the_report_for_a_mixed_run(tmp_path):
-    path = visualdynamics.mixed_report(os.path.join(STRESS, 'mixed.nc4'),
-                                       tmp_path / 'mixed.html')
-    html = (tmp_path / 'mixed.html').read_text(encoding='utf-8')
-    assert str(path) == str(tmp_path / 'mixed.html')
-    assert 'Random and Sine Test Report' in html
-    for caption in ('Control against specification',
-                    'extracted level against the requirement',
-                    'Sine level deviation by tone and channel'):
-        assert caption in html, caption
+def test_the_one_call_writes_two_reports_the_sine_from_the_whole_run(
+        tmp_path):
+    """`run_report` on a random-and-sine run: `<name>_random.html` and
+    `<name>_sine.html`, the random reading only the last `last` seconds
+    and the sweep the whole run, since a sweep cut short loses tones."""
+    import re
+
+    run = _write_run(tmp_path / 'both.nc4', random=True, seconds=18.0)
+    out = tmp_path / 'reports'
+    out.mkdir()
+    written = visualdynamics.run_report(run, str(out) + '/', last=5.0)
+    assert sorted(os.path.basename(p) for p in written) == \
+        ['both_random.html', 'both_sine.html']
+    pages = {}
+    for p in written:
+        with open(p, encoding='utf-8') as handle:
+            pages[os.path.basename(p)] = handle.read()
+    assert 'Random Vibration Test Report' in pages['both_random.html']
+    assert 'Sine Sweep Test Report' in pages['both_sine.html']
+
+    def seconds(html):
+        return float(re.search(r'over ([0-9.]+) ?s', html).group(1))
+
+    assert seconds(pages['both_random.html']) == pytest.approx(5.0, abs=0.01)
+    assert seconds(pages['both_sine.html']) == pytest.approx(18.0, abs=0.01)
 
 
 @needs_stress
-def test_the_real_mixed_run_renders_both_halves(tmp_path):
-    """The plate's random with the quiet sweep under it, worked up the
-    way the random one-call does, the sweep extracted, and the report
-    rendered in a real browser engine: the control comparisons and the
-    tone's level figure are both on the page."""
+def test_the_real_mixed_run_renders_both_reports(tmp_path):
+    """The plate's random with the quiet sweep under it, worked up and
+    given its two reports, the random one rendered in a real browser
+    engine: the control comparisons, the verdict and the level named as
+    the random's; the sine one carrying the tone's level figure."""
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     pytest.importorskip('PySide6.QtWebEngineWidgets')
     from PySide6.QtCore import QUrl
@@ -159,13 +197,17 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
 
     from visualdynamics.report import render_html
 
-    project = visualdynamics.random_vibration_run(
-        os.path.join(STRESS, 'mixed.nc4'))
+    project = visualdynamics.mixed_run(os.path.join(STRESS, 'mixed.nc4'))
     assert project.project_type == 'Random and Sine'
-    project.extract_sine(project.time_history)
-    name = project.generate_report('mixed')
-    path = tmp_path / 'mixed.html'
-    path.write_text(render_html(project[name], project, None,
+    random_name, sine_name = [project.generate_report(template)
+                              for template in PROJECT_TEMPLATES[
+                                  project.project_type]]
+    sine_html = render_html(project[sine_name], project, None,
+                            links=project.links)
+    assert 'extracted level against the requirement' in sine_html
+    assert 'Sine level deviation by tone and channel' in sine_html
+    path = tmp_path / 'random.html'
+    path.write_text(render_html(project[random_name], project, None,
                                 links=project.links), encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
     view = web_view()
@@ -179,7 +221,6 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
             "    || !document.querySelector('.themetoggle')) return null;"
             "return JSON.stringify({captions: Array.from("
             "  document.querySelectorAll('.caption'), c => c.textContent),"
-            " canvases: document.querySelectorAll('canvas').length,"
             " verdict: document.querySelectorAll('.verdict').length,"
             " level: (document.querySelector('.testlevel') || {}).textContent"
             "});"
@@ -189,17 +230,13 @@ def test_the_real_mixed_run_renders_both_halves(tmp_path):
     found = json.loads(answer)
     captions = ' | '.join(found['captions'])
     assert 'Control against specification' in captions
-    assert 'extracted level against the requirement' in captions
-    assert 'Sine level deviation by tone and channel' in captions
     assert 'RMS error by control channel' in captions
     assert found['verdict'] == 1
-    assert found['level'].startswith(('0 dB', '+', '\u2212')), found['level']
     assert 'Random test level' in found['level'], (
-        "the level beside the verdict is the random half's")
-    assert found['canvases'] > 8
+        "the level beside the verdict is the random's")
 
 
-@pytest.mark.parametrize('template', ['random_template', 'mixed_template'])
+@pytest.mark.parametrize('template', ['random_template'])
 def test_the_random_reports_chart_the_band_outside_abort(template):
     """The second compliance chart is the share of each channel's band
     outside the abort limits, in percent. A signed margin to abort in

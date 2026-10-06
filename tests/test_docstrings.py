@@ -167,3 +167,43 @@ def test_the_verbs_a_script_starts_with_are_documented(verb):
     doc = getattr(visualdynamics.Project, verb).__doc__ or ''
     assert 'Parameters\n' in doc and 'Returns\n' in doc, \
         f'Project.{verb} is where people start; it needs both sections'
+
+
+def test_the_exported_functions_document_their_parameters_and_result():
+    """The surface `docs/architecture.md` names is what `__all__`
+    exports *and* the public methods on those classes; every test above
+    walks methods on `ENFORCED` classes only, so a function exported at
+    the top level was never checked, and twenty of the twenty-two that
+    take arguments went without the sections — the one-call reports,
+    `import_file`, `export_file`, `convert` among them (Brandon,
+    2026-10-05: "I thought all functions were required to have that?").
+
+    Each parameter must head its own entry (``name :``, or ``*args`` /
+    ``**kwargs`` on a line of its own), not merely appear somewhere in
+    the section: `path` is a word the prose of half these functions
+    uses, and a check by substring would pass a table that left it
+    out."""
+    import re
+
+    missing, unnamed, covered = [], [], 0
+    for label, obj in public_surface():
+        if '.' in label or not takes_parameters(obj):
+            continue
+        covered += 1
+        doc = docstring_of(obj) or ''
+        result = ('Yields\n' if inspect.isgeneratorfunction(obj)
+                  else 'Returns\n')
+        if 'Parameters\n' not in doc or result not in doc:
+            missing.append(label)
+            continue
+        section = doc.split('Parameters\n')[1].split(result)[0]
+        for name in inspect.signature(obj).parameters:
+            bare = name.lstrip('*')
+            entry = rf'^\s*\*{{0,2}}{re.escape(bare)}\s*(:|$)'
+            if not re.search(entry, section, flags=re.MULTILINE):
+                unnamed.append(f'{label}: {name}')
+    assert covered >= 20, 'the exported functions shrank; check the walk'
+    assert not missing, ('exported functions without Parameters and '
+                         'Returns:\n  ' + '\n  '.join(missing))
+    assert not unnamed, ('a table that leaves a parameter out:\n  '
+                         + '\n  '.join(unnamed))

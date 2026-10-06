@@ -63,7 +63,6 @@ from .io import (
 from .project import (
     ASK,
     Project,
-    mixed_report,
     mixed_run,
     random_vibration_report,
     random_vibration_run,
@@ -110,6 +109,20 @@ def launch_gui(*paths: str, in_process: bool | None = None) -> Any:
     left alone.
 
     `in_process` overrides the decision either way.
+
+    Parameters
+    ----------
+    *paths : str
+        Files to import on the way in.
+    in_process : bool, optional
+        True to run the window in this interpreter, False to start a fresh
+        process; decided from the Qt already bound when omitted.
+
+    Returns
+    -------
+    subprocess.Popen or None
+        The process handle when the window was started apart; None when it
+        ran here and has closed.
     """
     from .gui import qt_binding
 
@@ -190,7 +203,6 @@ __all__ = [
     'launch_gui',
     'load',
     'mesh',
-    'mixed_report',
     'mixed_run',
     'random_vibration_report',
     'random_vibration_run',

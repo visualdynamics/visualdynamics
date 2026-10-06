@@ -275,6 +275,22 @@ def check_compatibility(objects: Mapping[str, Any],
     active. Everything else is judged against `geometry_name` (the
     active geometry; without it the first geometry found). Returns a
     Report.
+
+    Parameters
+    ----------
+    objects : Mapping[str, Any]
+        The test's objects, by name.
+    geometry_name : str, optional
+        The geometry everything not linked to one is judged against; the
+        first geometry found when omitted.
+    links : sequence of Mapping, optional
+        The project's link groups, which say which geometry each object
+        answers to.
+
+    Returns
+    -------
+    Report
+        What is consistent and what is not, object by object.
     """
     from .core.geometry import Geometry
 

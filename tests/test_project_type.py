@@ -87,11 +87,19 @@ def test_every_type_expects_the_report_itself_last(project_type):
     gray until it is generated, and last, because it is what the others
     add up to.
     """
+    from visualdynamics.core.report import PROJECT_TEMPLATES
+
+    # one report a template: a random-and-sine project makes two, the
+    # random's and the sine's (2026-10-05)
+    reports = len(PROJECT_TEMPLATES[project_type])
     expectations = project_expectations(project_type)
-    name, cls, icon, count, optional, group = expectations[-1]
-    assert (name, icon, count, optional, group) == (
-        'Report', 'Report', 1, False, None)
-    assert cls is Report
+    for k, slot in enumerate(expectations[-reports:], start=1):
+        name, cls, icon, count, optional, group = slot
+        assert (name, icon, count, optional, group) == (
+            'Report', 'Report', k, False, None)
+        assert cls is Report
+    assert all(slot[1] is not Report
+               for slot in expectations[:-reports]), 'the reports are last'
 
 
 @pytest.mark.parametrize('project_type', PROJECT_TYPES)
@@ -112,10 +120,11 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
         binding_tokens,
     )
 
-    report = TEMPLATE_BUILDERS[PROJECT_TEMPLATES[project_type]](
-        visualdynamics.Project(), links=[])
     types = binding_tokens()
-    wanted = {token for block in report.blocks
+    # every report the type makes (two for a random-and-sine project)
+    wanted = {token for template in PROJECT_TEMPLATES[project_type]
+              for block in TEMPLATE_BUILDERS[template](
+                  visualdynamics.Project(), links=[]).blocks
               for value in block.values()
               for token in re.findall(r'@\w+:(\w+)', str(value))}
     assert wanted, 'the template binds symbolically or this proves nothing'

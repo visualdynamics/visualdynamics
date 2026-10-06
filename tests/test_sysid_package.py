@@ -801,8 +801,7 @@ def test_a_silent_channel_is_not_a_legend_entry():
     assert built['caption'] == 'Densities overlaid'
 
 
-@pytest.mark.parametrize('template', ['random_template', 'mixed_template',
-                                      'sysid_template'])
+@pytest.mark.parametrize('template', ['random_template', 'sysid_template'])
 def test_the_random_and_system_id_reports_are_2d_only(template):
     """No 3-D stage in the random, random-and-sine or system ID
     reports, and the coherence is the map (Brandon, 2026-10-05: the

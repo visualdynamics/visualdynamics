@@ -80,6 +80,25 @@ same span, a whole number of the drive's cycles (`DETECTOR_CYCLES`
 by default), where a pure sine's RMS times the square root of two and
 its mean absolute value times pi/2 are its peak exactly.
 
+They are exact only if the span really is a whole number of cycles
+and the waveform between the samples is seen. Read off the samples
+alone, neither holds when a cycle is a few samples long: the span
+snapped to whole samples, and |x| has a corner at every zero crossing
+that a handful of samples cannot place. On a clean 2 m/s**2 tone
+sampled at 4096 Hz, one cycle, RMS read 3.6 % off at 400 Hz (10
+samples a cycle) and mean 9 % at 750 Hz (5.5) (2026-10-05, found in
+review; the tests here run at 51 samples a cycle and never saw it).
+So the two are read from the band-limited waveform: the samples
+around each span upsampled until a cycle has `FINE_POINTS` points
+(`scipy.signal.resample_poly`), and averaged over exactly the span's
+phase, its first point interpolated at the span's start. Measured
+the same way, a clean sweep to 780 Hz: RMS within 0.005 % and mean
+within 0.08 % sampled at 4096 Hz (5.3 samples a cycle at the top),
+both within 0.09 % at 2048 Hz (2.6). The reconstruction leans on `MARGIN` samples
+either side of a span, so a reading looks that far past its instant:
+interpolation, not a lag. The peak stays the peak of the samples, by
+design: that is how a sampled controller reads it.
+
 **The waveform, the shape and the weight, from the same filter.** A
 level is what a controller reports; the view that explains it draws
 the record through the band, the band's magnitude about the drive and
@@ -158,6 +177,22 @@ DETECTOR_WORDS = {'filtered': 'filter output', 'peak': 'peak',
 #: the drive: one, the shortest span a sine's peak, RMS and mean are
 #: exact over
 DETECTOR_CYCLES = 1.0
+
+#: how many points a cycle of the drive is given before the RMS and
+#: mean detectors read it: their spans are upsampled to at least this
+#: (see the module docstring, "exact only if")
+FINE_POINTS = 64
+
+#: how many samples either side of a span the band-limited
+#: reconstruction reads, which covers `resample_poly`'s filter
+MARGIN = 16
+
+#: the reconstruction filter's Kaiser window. `resample_poly`'s own
+#: (beta 5) ripples 0.17 % in its pass band, which every RMS and mean
+#: read carried as a floor; beta 8 reconstructs a sine within 0.005 %
+#: at 20 samples a cycle and 0.02 % at 2.7, where 10 and up give the
+#: top of the band away (measured 2026-10-05)
+RECONSTRUCTION = ('kaiser', 8.0)
 
 #: the low-pass's design order. Four, because of the demodulation's
 #: image — see the module docstring
@@ -469,18 +504,64 @@ def _detect(signal: np.ndarray, phase: np.ndarray, reads: np.ndarray,
             detector: str, cycles: float) -> np.ndarray:
     """A waveform detector's reading at each sample in `reads`, over
     the `cycles` cycles of the drive before it, as the peak of the sine
-    it would be."""
+    it would be. The peak reads the samples; RMS and mean read the
+    band-limited waveform over exactly the span (`_span_average`)."""
     starts = np.searchsorted(phase, phase[reads] - 2.0 * np.pi * cycles)
     if detector == 'peak':
         magnitude = np.abs(signal)
         return np.array([magnitude[lo:hi + 1].max()
                          for lo, hi in zip(starts, reads)])
-    values = signal ** 2 if detector == 'rms' else np.abs(signal)
-    sums = np.concatenate(([0.0], np.cumsum(values)))
-    means = (sums[reads + 1] - sums[starts]) / (reads + 1 - starts)
+    means = np.array([
+        _span_average(signal, phase, hi, phase[hi] - 2.0 * np.pi * cycles,
+                      detector)
+        for hi in reads])
     if detector == 'rms':
         means = np.sqrt(means)
     return means * TO_PEAK[detector]
+
+
+def _span_average(signal: np.ndarray, phase: np.ndarray, end: int,
+                  start_phase: float, detector: str) -> float:
+    """The mean of x**2 ('rms') or |x| ('mean') over the drive's phase
+    from `start_phase` to sample `end`, on the waveform between the
+    samples as well as at them.
+
+    The samples around the span, `MARGIN` either side, are upsampled
+    so a cycle has at least `FINE_POINTS` points; the phase is laid on
+    the fine points by interpolation (it is smooth, the drive's own);
+    the span's first point is interpolated at `start_phase`; and the
+    average is the trapezoid over phase, divided by the phase covered.
+    Averaged over phase rather than time so a pure sine reads exactly
+    on a sweep too, where a cycle's duration changes along it.
+    """
+    from scipy.signal import resample_poly
+
+    first = int(np.searchsorted(phase, start_phase))
+    lo = max(first - 1 - MARGIN, 0)
+    hi = min(end + 1 + MARGIN, len(signal))
+    steps = np.diff(phase[lo:hi])
+    per_cycle = 2.0 * np.pi / float(np.mean(steps)) if len(steps) else 1.0
+    up = max(1, int(np.ceil(FINE_POINTS / per_cycle)))
+    if up > 1:
+        fine = resample_poly(signal[lo:hi], up, 1,
+                             window=RECONSTRUCTION)[:(hi - lo - 1) * up + 1]
+        fine_phase = np.interp(np.arange(len(fine)) / up,
+                               np.arange(hi - lo), phase[lo:hi])
+    else:
+        fine, fine_phase = signal[lo:hi], phase[lo:hi]
+    stop = (end - lo) * up
+    begin = int(np.searchsorted(fine_phase, start_phase))
+    if begin == 0:
+        xs, ps = fine[:stop + 1], fine_phase[:stop + 1]
+    else:
+        share = ((start_phase - fine_phase[begin - 1])
+                 / (fine_phase[begin] - fine_phase[begin - 1]))
+        edge = fine[begin - 1] + share * (fine[begin] - fine[begin - 1])
+        xs = np.concatenate(([edge], fine[begin:stop + 1]))
+        ps = np.concatenate(([start_phase], fine_phase[begin:stop + 1]))
+    values = xs ** 2 if detector == 'rms' else np.abs(xs)
+    span = ps[-1] - ps[0]
+    return float(np.trapezoid(values, ps) / span) if span > 0 else float(values[-1])
 
 
 def _tone_at(history: Any, specification: SineSweepSpecification,

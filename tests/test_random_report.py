@@ -41,7 +41,7 @@ def run(window, pump):
 
 
 def report_of(window):
-    return random_template(window.project, links=window.project.links)
+    return random_template(window.project, object_groups=window.project.object_groups)
 def test_every_block_binds_to_a_real_run(run):
     """An unbound block renders as a gray slot. On a run that carries a
     specification, its PSDs, coherence, time data and a channel table,
@@ -337,7 +337,7 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
     a comparison of steps against steps."""
     from visualdynamics.core.report import resolve_binding
 
-    objects, links = run.project, run.project.links
+    objects, object_groups = run.project, run.project.object_groups
     template = report_of(run)
     octave = [b for b in template.blocks
               if b.get('source') in ('@basis:OctavePsd',
@@ -345,7 +345,7 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
               and b['kind'] != 'verdict']     # the box reads them too
     from visualdynamics.core.report import control_channel_labels
 
-    per_channel = len(control_channel_labels(objects, links,
+    per_channel = len(control_channel_labels(objects, object_groups,
                                              '@basis:OctaveSpecification'))
     assert per_channel > 4, 'the plate has eight: a grid, not a sequence'
     assert len(octave) == 3, \
@@ -354,10 +354,10 @@ def test_the_octave_section_reads_the_banded_pair_from_a_real_run(run):
     for block in octave:
         for field in ('source', 'specification', 'measured'):
             if block.get(field):
-                name = resolve_binding(block[field], objects, links)
+                name = resolve_binding(block[field], objects, object_groups)
                 assert name is not None, (field, block[field])
                 assert objects[name].bandwidth is not None, 'the banded object'
-    assert not [i for i in template.unbound(objects, links)
+    assert not [i for i in template.unbound(objects, object_groups)
                 if template.blocks[i].get('source', '').startswith('@basis:Octave')]
     page = render_html(template, objects, unit_system=visualdynamics.SI)
     assert 'Control against specification, octave bands' in page
@@ -792,7 +792,7 @@ def test_many_control_channels_read_as_a_grid():
     project = visualdynamics.random_vibration_run(
         fixture_path('plate', 'random.nc4'),
         geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
-    report = random_template(project, links=project.links)
+    report = random_template(project, object_groups=project.object_groups)
     grids = [b for b in report.blocks if b.get('grid')]
     assert [b['caption'] for b in grids] == [
         'Control against specification',
@@ -801,7 +801,7 @@ def test_many_control_channels_read_as_a_grid():
         'no per-channel figures beside the grids'
 
     def payload_of(project, report):
-        page = render_html(report, project, links=project.links,
+        page = render_html(report, project, object_groups=project.object_groups,
                            unit_system=visualdynamics.SI)
         return json.loads(re.search(
             r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
@@ -825,7 +825,7 @@ def test_many_control_channels_read_as_a_grid():
     assert not re.search(r'\{\{figure:', text), 'every reference resolves'
     # without a geometry the column is the DOF's own letter
     bare = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
-    payload = payload_of(bare, random_template(bare, links=bare.links))
+    payload = payload_of(bare, random_template(bare, object_groups=bare.object_groups))
     control = [b for b in payload['blocks'] if b['kind'] == 'grid'][1]
     assert control['columns'] == ['Z']
 
@@ -897,19 +897,19 @@ def test_sections_whose_objects_are_absent_are_dropped():
         return [b['text'].split('\n')[0][3:] for b in report.blocks
                 if b.get('kind') == 'text' and b['text'].startswith('## ')]
 
-    assert headings(random_template(thin, links=thin.links)) == [
+    assert headings(random_template(thin, object_groups=thin.object_groups)) == [
         'Test Summary', 'Test Article and Instrumentation', 'Measured Data',
         'Data Quality', 'Conclusions']
     full = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
     # 'Specification' as its own heading went with the figure it
     # introduced; the requirement is read on the Control comparison
-    assert 'Control' in headings(random_template(full, links=full.links))
-    assert 'Specification' not in headings(random_template(full, links=full.links))
+    assert 'Control' in headings(random_template(full, object_groups=full.object_groups))
+    assert 'Specification' not in headings(random_template(full, object_groups=full.object_groups))
     assert 'Octave Band Comparison' in headings(random_template({}))
     outline = random_template({}).blocks
     assert {'scene', 'photo'} <= {b['kind'] for b in outline}, \
         'an empty project keeps every slot of the outline'
-    assert len(outline) > len(random_template(full, links=full.links).blocks), \
+    assert len(outline) > len(random_template(full, object_groups=full.object_groups).blocks), \
         'a run without a geometry or photographs keeps only what binds'
 
 
@@ -944,8 +944,8 @@ def test_the_figures_open_on_the_band_the_target_is_written_on():
     assert against['home_x'] == band
     # and in the grid's cells, which are those very figures
     project = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
-    page = render_html(random_template(project, links=project.links), project,
-                       links=project.links, unit_system=visualdynamics.SI)
+    page = render_html(random_template(project, object_groups=project.object_groups), project,
+                       object_groups=project.object_groups, unit_system=visualdynamics.SI)
     payload = json.loads(re.search(
         r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
     grids = {b['caption']: b for b in payload['blocks'] if b['kind'] == 'grid'}
@@ -969,15 +969,15 @@ def test_the_front_matter_says_only_what_the_project_holds():
     from visualdynamics.core.report import _INSTRUMENTATION_TEXT, instrumentation_text
 
     bare = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
-    template = random_template(bare, links=bare.links)
+    template = random_template(bare, object_groups=bare.object_groups)
     assert not [b for b in template.blocks if b['kind'] in ('scene', 'photo')]
-    prose = instrumentation_text(bare, bare.links)
+    prose = instrumentation_text(bare, bare.object_groups)
     assert prose.startswith('## Test Article and Instrumentation\n\n')
     assert 'geometry' not in prose and 'photograph' not in prose
     assert '{{table:Instrumentation}}' in prose
     assert [b['text'] for b in template.blocks
             if b['kind'] == 'text'][1] == prose
-    page = render_html(template, bare, links=bare.links, edit=True,
+    page = render_html(template, bare, object_groups=bare.object_groups, edit=True,
                        unit_system=visualdynamics.SI)
     assert "'kind': 'unbound'" not in page and '"kind": "unbound"' not in page, \
         'no unbound cards for the editor to show'
@@ -989,11 +989,11 @@ def test_the_front_matter_says_only_what_the_project_holds():
     with_photos.add('Photos', photos)
     with_photos.link('Time History', 'Photos')
     assert 'photographs record the article' in instrumentation_text(
-        with_photos, with_photos.links)
+        with_photos, with_photos.object_groups)
     placed = visualdynamics.random_vibration_run(
         fixture_path('plate', 'random.nc4'),
         geometry=fixture_path('plate', 'geometry.npz'), length_unit='m')
-    assert instrumentation_text(placed, placed.links) == _INSTRUMENTATION_TEXT
+    assert instrumentation_text(placed, placed.object_groups) == _INSTRUMENTATION_TEXT
     assert instrumentation_text({}) == _INSTRUMENTATION_TEXT
 
 
@@ -1010,15 +1010,15 @@ def test_no_reference_is_left_as_written_on_a_thin_projects_page():
 
     for objects in ({}, visualdynamics.random_vibration_run(
             fixture_path('plate', 'random.nc4'))):
-        links = getattr(objects, 'links', None)
-        [conclusions] = [b['text'] for b in random_template(objects, links).blocks
+        object_groups = getattr(objects, 'links', None)
+        [conclusions] = [b['text'] for b in random_template(objects, object_groups).blocks
                          if b.get('kind') == 'text'
                          and b['text'].startswith('## Conclusions')]
         assert '{{figure:' not in conclusions and '{{table:' not in conclusions
 
     def page_of(project):
-        return render_html(random_template(project, links=project.links),
-                           project, links=project.links,
+        return render_html(random_template(project, object_groups=project.object_groups),
+                           project, object_groups=project.object_groups,
                            unit_system=visualdynamics.SI)
 
     run_only = visualdynamics.Project()

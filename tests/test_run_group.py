@@ -12,7 +12,7 @@ from test_rattlesnake_transformation import write_run
 
 
 def _groups(window):
-    return [(group['role'], list(group['members'])) for group in window.project.links]
+    return [(group['role'], list(group['members'])) for group in window.project.object_groups]
 
 
 def test_a_second_run_links_as_its_own_group(window, pump, tmp_path):

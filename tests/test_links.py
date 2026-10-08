@@ -61,7 +61,7 @@ def test_link_and_unlink_maintain_the_groups(window, pump, survey):
     assert window.linked_group('Shapes') == ['Geometry', 'Shapes']
     _select(window, 'Shapes')
     window.unlink_selected()
-    assert window.links == [], 'one member left dissolves the group'
+    assert window.object_groups == [], 'one member left dissolves the group'
 
 
 def test_linked_groups_float_to_the_top(window, pump, survey):
@@ -85,14 +85,14 @@ def test_a_link_holds_one_geometry_and_reports_rather_than_refuses(window,
     window.add_object('Other Geometry', second)
     _select(window, 'Geometry', 'Other Geometry')
     window.link_selected()
-    assert window.links == [], 'two geometries cannot share a link'
+    assert window.object_groups == [], 'two geometries cannot share a link'
     assert 'one geometry' in window.statusBar().currentMessage()
     stranger = ShapeSet([1.0], [0.01], ['999X+'], np.ones((1, 1)))
     window.add_object('Stranger', stranger)
     _select(window, 'Geometry', 'Stranger')
     window.link_selected()
     pump()
-    assert any('Stranger' in group['members'] for group in window.links), (
+    assert any('Stranger' in group['members'] for group in window.object_groups), (
         'shapes naming nodes the geometry lacks link and are flagged')
 
 
@@ -111,7 +111,7 @@ def test_the_window_links_across_a_test_s_virtual_points(window, pump,
     window.link_selected()
     pump()
     assert any('Mostly Ours' in group['members'] and 'Geometry' in group['members']
-               for group in window.links), 'linked despite the virtual point'
+               for group in window.object_groups), 'linked despite the virtual point'
 
 
 def test_renames_and_deletions_keep_links_honest(window, pump, survey):
@@ -125,7 +125,7 @@ def test_renames_and_deletions_keep_links_honest(window, pump, survey):
     assert window.linked_geometry('Truth Shapes') is not None
     _select(window, 'Truth Shapes')
     window.delete_selected()
-    assert window.links == [], 'a deleted member dissolves its pair'
+    assert window.object_groups == [], 'a deleted member dissolves its pair'
 
 
 def test_links_ride_the_project_file(tmp_path, window, window_factory,
@@ -136,9 +136,9 @@ def test_links_ride_the_project_file(tmp_path, window, window_factory,
     window.set_link_role('Shapes', 'Basis')
     path = tmp_path / 'linked.vdyn'
     io.save_test(str(path), 'Linked', dict(window.objects),
-                 links=window.links)
+                 object_groups=window.object_groups)
     contents = io.load(str(path))
-    assert contents.links == [
+    assert contents.object_groups == [
         {'members': ['Geometry', 'Shapes'], 'role': 'Basis'}]
     other = window_factory()
     other.import_paths([str(path)])
@@ -215,7 +215,7 @@ def test_the_bracket_right_click_offers_the_basis(window, pump,
     assert window.tree.span_at(QPoint(200, middle)) is None, (
         'clicks on the objects themselves stay theirs')
     # drive the menu's action directly: exec would block the test
-    group = window.links[span]
+    group = window.object_groups[span]
     assert group['role'] is None
     window.set_link_role(group['members'][0], 'Basis')
     assert window.link_role('Shapes') == 'Basis'
@@ -268,7 +268,7 @@ def test_a_saved_projects_unlinked_objects_stay_unlinked(tmp_path,
     path = str(tmp_path / 'arranged.vdyn')
     visualdynamics.io.save_test(path, 'Arranged', dict(window.objects),
                                 project_type=window.project_type,
-                                links=window.links)
+                                object_groups=window.object_groups)
     fresh = window_factory()
     fresh.import_paths([path])
     pump()
@@ -310,7 +310,7 @@ def test_computing_from_a_member_leaves_it_in_place(window, pump,
 
 def test_a_named_group_paints_its_name_and_the_bracket_menu_names_it(
         window, pump, monkeypatch):
-    """A link group's name (Brandon, 2026-09-30: an activity has a
+    """An object group's name (Brandon, 2026-09-30: an activity has a
     name) rides on its bracket span, is painted up the bracket in its
     color, and is set from the bracket's menu through the project's own
     journaled verb."""
@@ -319,7 +319,7 @@ def test_a_named_group_paints_its_name_and_the_bracket_menu_names_it(
     window.import_paths([fixture_path('plate', 'modal.nc4')])
     pump()
     names = list(window.objects)              # the import linked them all
-    window.project.name_group(names[0], 'Plate run')
+    window.project.name_object_group(names[0], 'Plate run')
     window._paint_links()
     pump()
     span = next(s for s in window.tree.link_spans if s[3] == 'Plate run')
@@ -329,11 +329,11 @@ def test_a_named_group_paints_its_name_and_the_bracket_menu_names_it(
     pump()                                     # paints, offscreen
     monkeypatch.setattr(QInputDialog, 'getText',
                         staticmethod(lambda *a, **k: ('Renamed run', True)))
-    window.name_group(names[0])
+    window.name_object_group(names[0])
     pump()
-    assert window.project.group_of(names[0]) == names
-    assert next(g for g in window.links if names[0] in g['members'])['name'] == 'Renamed run'
+    assert window.project.object_group_of(names[0]) == names
+    assert next(g for g in window.object_groups if names[0] in g['members'])['name'] == 'Renamed run'
     assert window.project.journal[-1] == (
-        f"project.name_group({names[0]!r}, 'Renamed run')")
+        f"project.name_object_group({names[0]!r}, 'Renamed run')")
     assert window.tree.link_spans[0][3] == 'Renamed run' or any(
         s[3] == 'Renamed run' for s in window.tree.link_spans)

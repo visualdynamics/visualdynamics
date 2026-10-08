@@ -203,20 +203,20 @@ def test_symbolic_bindings_resolve_through_the_links(project):
                  'Model FRF': project['FRF'],
                  'Run 7 Modes': project['Shape Set'],
                  'Run 7 FRF': project['FRF']}
-    links = [{'members': ['Run 7 Modes', 'Run 7 FRF'],
+    object_groups = [{'members': ['Run 7 Modes', 'Run 7 FRF'],
               'role': 'Basis'}]
-    report = modal_template(fem_first, links=links)
+    report = modal_template(fem_first, object_groups=object_groups)
     cmif = next(b for b in report.blocks if b.get('mode') == 'cmif')
     assert cmif['source'] == '@basis:Frf', 'no name in the binding'
-    assert resolve_binding(cmif['source'], fem_first, links) == \
+    assert resolve_binding(cmif['source'], fem_first, object_groups) == \
         'Run 7 FRF'
-    assert resolve_binding(cmif['shapes'], fem_first, links) == \
+    assert resolve_binding(cmif['shapes'], fem_first, object_groups) == \
         'Run 7 Modes', (
         'the resynthesis comes from the basis modes, not the model')
-    assert resolve_binding('@other:ShapeSet', fem_first, links) == \
+    assert resolve_binding('@other:ShapeSet', fem_first, object_groups) == \
         'Model Modes', 'the other side: outside the Basis group'
     # the rendered payload proves render-time resolution end to end
-    html = render_html(report, fem_first, links=links)
+    html = render_html(report, fem_first, object_groups=object_groups)
     assert 'Model FRF' not in html.split('type="application/json">')[0]
     payload = json.loads(html.split(
         'type="application/json">')[1].split('</script>')[0])
@@ -844,7 +844,7 @@ def test_a_loaded_reports_page_resolves_with_the_files_links(window, pump,
                                                              tmp_path):
     """A project file's Report renders the moment its row arrives —
     selection follows each object as it is added — which is *before*
-    the file's own link groups are absorbed. That first page resolved
+    the file's own object groups are absorbed. That first page resolved
     every '@basis:' with no Basis declared, fell back to first-of-type,
     and showed the FEM set in every figure that meant the test's; and
     nothing rebuilt it afterwards, because the editor was already
@@ -870,11 +870,11 @@ def test_a_loaded_reports_page_resolves_with_the_files_links(window, pump,
                'Report': Report('R', [{'kind': 'table',
                                        'source': '@basis:ShapeSet',
                                        'caption': ''}])}
-    links = [{'members': ['FEM Modes', 'FEM Geometry'], 'role': 'FEM'},
+    object_groups = [{'members': ['FEM Modes', 'FEM Geometry'], 'role': 'FEM'},
              {'members': ['Test Modes', 'Test Geometry'], 'role': 'Basis'}]
     path = tmp_path / 'survey.vdyn'
     io.save_test(path, 'Survey', objects, project_type='Modal Test',
-                 links=links)
+                 object_groups=object_groups)
 
     window.import_paths([str(path)])
     pump()

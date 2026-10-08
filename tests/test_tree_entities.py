@@ -51,14 +51,14 @@ def test_each_kind_of_entity_says_which_one_it_is(geometry_item, window,
     assert systems[0].startswith(f'CS {int(geometry.cs_id[0])}')
     assert '(cartesian)' in systems[0], 'the kind of frame it is'
 
-    # elements are listed under their block, which sits under its family
-    from conftest import block_row
+    # elements are listed under their element group, which sits under its family
+    from conftest import group_row
 
     quads = category(geometry_item, 'Quads')
-    assert quads.childCount() == 1, 'one block of quads'
-    block = block_row(window, int(geometry.block_id[0]))
-    window._populate_entities(block)
-    elements = [block.child(i).text(0) for i in range(block.childCount())]
+    assert quads.childCount() == 1, 'one element group of quads'
+    group = group_row(window, int(geometry.group_id[0]))
+    window._populate_entities(group)
+    elements = [group.child(i).text(0) for i in range(group.childCount())]
     assert elements[0].startswith(f'Element {int(geometry.elem_id[0])} ')
     assert '(quadshell4, 4 nodes)' in elements[0], (
         'the type it is, and its node count')

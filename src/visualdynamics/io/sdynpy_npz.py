@@ -78,7 +78,7 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
     # the layout carries no blocks, so every element arrived in one; a
     # block holds one family (2026-09-30). A traceline is a block of
     # two-node line elements with no properties, one block per id.
-    geometry.split_blocks_by_family()
+    geometry.split_groups_by_family()
     by_id: dict[int, tuple[str, int, list]] = {}
     for tl_id, color, desc, conn in zip(tl['id'], tl['color'],
                                         tl['description'], tl['connectivity']):
@@ -145,7 +145,7 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     traceline['connectivity'] = _connectivity(
         [np.asarray(chain, dtype=np.int64) for _l, chain in runs])
     drawn_blocks = {line['block'] for line in drawn}
-    kept = [i for i, b in enumerate(geometry.elem_block)
+    kept = [i for i, b in enumerate(geometry.elem_group)
             if int(b) not in drawn_blocks]
 
     element = np.zeros(len(kept), dtype=ELEMENT_DTYPE)

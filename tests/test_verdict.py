@@ -50,15 +50,15 @@ def test_the_verdict_is_two_shares_against_two_thresholds():
 
 
 def _payload(project):
-    page = render_html(random_template(project, links=project.links), project,
-                       links=project.links, unit_system=visualdynamics.SI)
+    page = render_html(random_template(project, object_groups=project.object_groups), project,
+                       object_groups=project.object_groups, unit_system=visualdynamics.SI)
     return json.loads(re.search(
         r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))
 
 
 def test_the_random_report_opens_on_its_verdict():
     project = visualdynamics.random_vibration_run(fixture_path('plate', 'random.nc4'))
-    first = random_template(project, links=project.links).blocks[0]
+    first = random_template(project, object_groups=project.object_groups).blocks[0]
     assert first == {'kind': 'verdict', 'source': '@basis:OctaveSpecification',
                      'measured': '@basis:OctavePsd'}
     blocks = _payload(project)['blocks']

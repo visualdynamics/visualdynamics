@@ -124,8 +124,8 @@ WINGS = tuple(WING_THICKNESS)
 
 
 def _frame_blocks(size: float) -> list:
-    """The rails, the uprights and the fillets between them, each a
-    block named 'frame' with its holes cut from it, the inserts' bricks
+    """The rails, the uprights and the fillets between them, each an
+    element group named 'frame' with its holes cut from it, the inserts' bricks
     into 'inserts'; assembled, they share the faces where they meet.
 
     A rail is meshed as the segments between the uprights' edges and
@@ -211,7 +211,7 @@ def _wing_block(wing: str, size: float) -> Any:
 def geometry(wing: str | None = None, size: float = SIZE,
              wing_size: float = WING_SIZE) -> Any:
     """The frame, a wing, or the frame with a wing screwed on, as a
-    geometry of bricks and rigid links, every block given what it is
+    geometry of bricks and rigid links, every element group given what it is
     made of — ready for `fem.Model.from_geometry`, or for the app's
     Solve Modes.
 
@@ -229,7 +229,7 @@ def geometry(wing: str | None = None, size: float = SIZE,
     Returns
     -------
     Geometry
-        Blocks 'frame' (6061-T6), 'inserts' (the insert material), the
+        Element groups 'frame' (6061-T6), 'inserts' (the insert material), the
         wing (6061-T6) and 'screws' (rigid links over the bricks each
         washer covers), opening on `VIEW`.
     """
@@ -248,19 +248,19 @@ def geometry(wing: str | None = None, size: float = SIZE,
     whole.view = VIEW
     materials = {'frame': ALUMINUM, 'inserts': INSERT,
                  **{name: ALUMINUM for name in WINGS}}
-    whole.block_properties = {
-        int(block): fem.BlockProperties(materials[whole.block_name[i]])
-        for i, block in enumerate(whole.block_id)}
+    whole.group_properties = {
+        int(group): fem.GroupProperties(materials[whole.group_name[i]])
+        for i, group in enumerate(whole.group_id)}
     if part != 'frame' and not alone:
         for screw in SCREWS:
             mesh.tie(whole, washer_patch(whole, part, screw), 'frame',
-                     block='screws')
+                     group='screws')
     return whole
 
 
 def washer_patch(geometry: Any, wing: str, screw: tuple) -> list[int]:
     """The wing's bricks a screw's washer covers: those of the wing's
-    block whose centers lie within `WASHER_RADIUS` of the screw's axis,
+    element group whose centers lie within `WASHER_RADIUS` of the screw's axis,
     the full thickness of the wing — a rigid plug where the screw and
     its washers clamp the plate, tied to the frame under it.
 
@@ -269,7 +269,7 @@ def washer_patch(geometry: Any, wing: str, screw: tuple) -> list[int]:
     geometry : Geometry
         The frame and wing, assembled.
     wing : str
-        The wing's block name.
+        The wing's element group name.
     screw : tuple
         (x, y) of the screw, inches.
 
@@ -327,7 +327,7 @@ SOLVE_TO = 1500.0
 def project(solved: bool = False, size: float = SIZE,
             wing_size: float = WING_SIZE) -> Any:
     """A project to open in the app: the frame, each wing alone, and
-    the frame with each wing, their blocks given their properties —
+    the frame with each wing, their element groups given their properties —
     Solve Modes on any of them gives its modes.
 
         frame.project().save('frame.vdyn')

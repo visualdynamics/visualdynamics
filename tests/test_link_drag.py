@@ -1,4 +1,4 @@
-"""Dragging an object from one link group into another.
+"""Dragging an object from one object group into another.
 
 A typed project sorts arriving objects into its groups by itself, and it
 guesses: import an FEM geometry and its mode shapes into a Modal Test and
@@ -83,8 +83,8 @@ def test_the_project_moves_one_object_without_merging_the_groups(
     it. The move takes the object out first, so only it travels."""
     _two_groups(window, survey)
     window.project.relink('Other', 'Shapes')
-    assert window.project.group_of('Other') == ['Geometry', 'Shapes', 'Other']
-    assert window.project.group_of('FRF') is None, 'a group of one dissolves'
+    assert window.project.object_group_of('Other') == ['Geometry', 'Shapes', 'Other']
+    assert window.project.object_group_of('FRF') is None, 'a group of one dissolves'
 
 
 def test_the_group_it_lands_in_keeps_its_role(window, survey):
@@ -100,7 +100,7 @@ def test_the_group_it_lands_in_keeps_its_role(window, survey):
 def test_dropping_on_nothing_takes_it_out_of_its_group(window, survey):
     _two_groups(window, survey)
     window.project.relink('Other', None)
-    assert window.project.group_of('Other') is None
+    assert window.project.object_group_of('Other') is None
 
 
 def test_a_refused_move_changes_nothing(window, survey):
@@ -112,14 +112,14 @@ def test_a_refused_move_changes_nothing(window, survey):
                                                      'geometry.npz'))
     window.add_object('Geometry 2', second)
     window.project.link('Geometry 2', 'Other')
-    before = [dict(group) for group in window.project.links]
+    before = [dict(group) for group in window.project.object_groups]
     try:
         window.project.relink('Geometry 2', 'Shapes')
     except ValueError:
         pass
     else:
         raise AssertionError('two geometries cannot share a group')
-    assert window.project.links == before
+    assert window.project.object_groups == before
 
 
 # ---- the drag, through the tree --------------------------------------------
@@ -245,17 +245,17 @@ def test_asking_whether_a_move_is_allowed_leaves_the_links_alone(
     """It is answered by trying the move, and it is asked on every mouse
     tick of a drag. Putting the links back is the whole of it."""
     _two_groups(window, survey)
-    before = [dict(group) for group in window.project.links]
+    before = [dict(group) for group in window.project.object_groups]
     for _ in range(5):
         window._can_move_objects(['Other'], 'Shapes')
-    assert window.project.links == before
+    assert window.project.object_groups == before
 
 
 # ---- what must not have broken ---------------------------------------------
 
 
 def test_only_objects_drag_not_their_parts(window, survey):
-    """A link group holds objects. A geometry's Nodes is part of one."""
+    """An object group holds objects. A geometry's Nodes is part of one."""
     _two_groups(window, survey)
     item = window._item_for_object('Geometry')
     item.setExpanded(True)
@@ -398,7 +398,7 @@ def test_a_declared_role_rides_the_project_file(window, pump, survey,
     window.project.save(path)
     back = load(path)
     assert back.role_of('FEM Geometry') is None
-    assert back.group_of('FEM Geometry') == ['FEM Geometry', 'FEM Shapes']
+    assert back.object_group_of('FEM Geometry') == ['FEM Geometry', 'FEM Shapes']
 
 
 # ---- the skeleton is per group, not per project ----------------------------
@@ -468,12 +468,12 @@ def test_a_legacy_side_key_reads_as_the_role_it_meant(
     (Brandon, 2026-08-30; the role retired 2026-09-02)."""
     from visualdynamics import Project
 
-    project = Project('t', {}, links=[
+    project = Project('t', {}, object_groups=[
         {'members': ['a', 'b'], 'role': None, 'side': 'fem'},
         {'members': ['c', 'd'], 'role': 'Basis', 'side': 'experimental'},
         {'members': ['e', 'f'], 'role': 'FEM'},
         {'members': ['g', 'h'], 'side': 'experimental'}])
-    assert project.links == [{'members': ['a', 'b'], 'role': None},
+    assert project.object_groups == [{'members': ['a', 'b'], 'role': None},
                              {'members': ['c', 'd'], 'role': 'Basis'},
                              {'members': ['e', 'f'], 'role': None},
                              {'members': ['g', 'h'], 'role': 'Basis'}]

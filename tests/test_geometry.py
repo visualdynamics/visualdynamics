@@ -8,7 +8,7 @@ import visualdynamics
 PLATE_NPZ = fixture_path('plate', 'geometry.npz')
 PLATE_EXO = fixture_path('plate', 'geometry.exo')
 #: the survey display model: the modal run's nodes and its drawn lines
-#: — blocks of two-node line elements with no properties, what a
+#: — element groups of two-node line elements with no properties, what a
 #: traceline is since 2026-09-30; the meshed plate has faces instead
 SURVEY_NPZ = fixture_path('plate', 'test_geometry.npz')
 
@@ -76,10 +76,10 @@ def test_survey_display_import():
     assert geo.num_nodes > 0
     lines = geo.drawn_lines()
     assert lines, 'the survey model is drawn lines'
-    assert all(geo.is_drawn_line(line['block']) for line in lines)
-    drawn = {line['block'] for line in lines}
-    assert all(int(code) == 21 for code, block in zip(geo.elem_type, geo.elem_block)
-               if int(block) in drawn), 'two-node beams'
+    assert all(geo.is_drawn_line(line['group']) for line in lines)
+    drawn = {line['group'] for line in lines}
+    assert all(int(code) == 21 for code, group in zip(geo.elem_type, geo.elem_group)
+               if int(group) in drawn), 'two-node beams'
 
 
 def test_save_load_round_trip(tmp_path):
@@ -208,37 +208,37 @@ def test_ids_that_other_data_points_at_must_be_unique():
 
 
 def test_a_line_that_lifted_the_pen_is_one_block_of_several_runs():
-    """A UNV trace line that lifts the pen arrives as one block of
-    two-node line elements holding its runs — and deleting the block
+    """A UNV trace line that lifts the pen arrives as one element group of
+    two-node line elements holding its runs — and deleting the element group
     takes the whole thing, gaps and all. `drawn_lines` gives the runs
     back as they were (2026-09-30)."""
     geo = visualdynamics.Geometry(node_id=[1, 2, 3, 4], node_xyz=np.zeros((4, 3)),
                                   length_unit='m')
-    (block,) = geo.attach_drawn_lines([('frame', 3, [[1, 2], [3, 4]])])
-    assert len(geo.elem_conn) == 2 and geo.is_drawn_line(block)
-    assert geo.drawn_lines() == [{'block': block, 'name': 'frame',
+    (group,) = geo.attach_drawn_lines([('frame', 3, [[1, 2], [3, 4]])])
+    assert len(geo.elem_conn) == 2 and geo.is_drawn_line(group)
+    assert geo.drawn_lines() == [{'group': group, 'name': 'frame',
                                   'color': 3, 'chains': [[1, 2], [3, 4]]}]
-    assert geo.delete_blocks([block]) == {'blocks': 1, 'elements': 2,
+    assert geo.delete_groups([group]) == {'groups': 1, 'elements': 2,
                                           'nodes': 4}
     assert not geo.drawn_lines()
 
 
 def test_a_run_of_beams_chains_back_into_its_line():
-    """Four nodes in a row make three segments in one block, read back
-    as the one chain they were; a block with a section is structure,
+    """Four nodes in a row make three segments in one element group, read back
+    as the one chain they were; an element group with a section is structure,
     not a drawn line."""
-    from visualdynamics.core.fem import BlockProperties, Material, Section
+    from visualdynamics.core.fem import GroupProperties, Material, Section
 
     geo = visualdynamics.Geometry(node_id=[1, 2, 3, 4], node_xyz=np.zeros((4, 3)),
                                   length_unit='m')
-    block = geo.add_beams([1, 2, 3, 4], color=2)
+    group = geo.add_beams([1, 2, 3, 4], color=2)
     assert [list(map(int, c)) for c in geo.elem_conn] == [[1, 2], [2, 3], [3, 4]]
     assert list(geo.elem_type) == [21, 21, 21]
     assert geo.drawn_lines()[0]['chains'] == [[1, 2, 3, 4]]
-    geo.block_properties[block] = BlockProperties(
+    geo.group_properties[group] = GroupProperties(
         Material('al', 70e9, 2700.0, 0.33),
         section=Section('rod', 1e-4, 1e-9, 1e-9, 2e-9))
-    assert not geo.is_drawn_line(block) and not geo.drawn_lines()
+    assert not geo.is_drawn_line(group) and not geo.drawn_lines()
 
 
 def test_delete_coordinate_system_reassigns_its_nodes():
@@ -415,22 +415,22 @@ def test_element_ids_are_still_allowed_to_repeat():
 
 
 def test_a_mixed_block_is_split_by_family_on_arrival():
-    """One block, one family (2026-09-30): a source with no blocks lands
-    every element in one, and the block is split so each family has
+    """One element group, one family (2026-09-30): a source with no element groups lands
+    every element in one, and the element group is split so each family has
     its own, named for it beside the old name."""
     from visualdynamics.core.geometry import Geometry, element_family
 
     xyz = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]
     geometry = Geometry(node_id=[1, 2, 3, 4], node_xyz=xyz,
                         elem_conn=[[1, 2, 3, 4], [1, 2, 3], [1, 2]],
-                        elem_type=[44, 41, 21], block_id=[1], block_name=['part'])
-    assert not geometry.mixed_blocks()
-    assert sorted(geometry.block_name) == ['part', 'part beams', 'part triangles']
-    for code, block in zip(geometry.elem_type, geometry.elem_block):
-        row = list(geometry.block_id).index(int(block))
-        assert element_family(int(code)) in ('quads', geometry.block_name[row].split()[-1])
+                        elem_type=[44, 41, 21], group_id=[1], group_name=['part'])
+    assert not geometry.mixed_groups()
+    assert sorted(geometry.group_name) == ['part', 'part beams', 'part triangles']
+    for code, group in zip(geometry.elem_type, geometry.elem_group):
+        row = list(geometry.group_id).index(int(group))
+        assert element_family(int(code)) in ('quads', geometry.group_name[row].split()[-1])
     with pytest.raises(ValueError, match='holds quads'):
-        geometry.add_element([1, 2], block=1)
+        geometry.add_element([1, 2], group=1)
 
 
 def _framed_geometry():

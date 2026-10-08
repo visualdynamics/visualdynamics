@@ -24,7 +24,7 @@ machinery out of it entirely: these three overrides never call up to
 it. One importer, reached two ways, neither of which depends on Qt
 resolving a target through a dock.
 
-Objects drag *within* the tree too, to move one between link groups,
+Objects drag *within* the tree too, to move one between object groups,
 and that rides on the same hand-rolled handling rather than on the item
 machinery: a drag of our own carries a mime type of our own, and a drop
 is read as the object row it lands on.
@@ -88,7 +88,7 @@ PROJECT_ROW = '\x00project'
 #: from the desktop tomorrow is an ordinary import.
 SELF_MIME = 'application/x-visualdynamics-from-this-tree'
 
-#: marks a row as one of the project's objects — what a link group holds.
+#: marks a row as one of the project's objects — what an object group holds.
 #: Sub-items are parts of an object and placeholders are not objects at
 #: all, and no flag tells them apart: Qt gives every item
 #: ItemIsDragEnabled by default, so reading that made a geometry's Nodes
@@ -102,7 +102,7 @@ ROLE_DRAGGABLE = Qt.ItemDataRole.UserRole + 9
 ROLE_DROP_SLOT = Qt.ItemDataRole.UserRole + 10
 
 #: the project's own row. It is not `ROLE_DRAGGABLE` — it cannot be
-#: moved between link groups, which is what that role means — but it can
+#: moved between object groups, which is what that role means — but it can
 #: be dragged *out*, and doing so saves the whole project.
 ROLE_WHOLE_PROJECT = Qt.ItemDataRole.UserRole + 11
 
@@ -304,7 +304,7 @@ class ProjectTree(QTreeWidget):
     #: from the files the same clipboard can write)
     objects_pasted = Signal(list)
     #: objects were dragged onto another object (or onto nothing, which
-    #: is None): the window moves them between link groups
+    #: is None): the window moves them between object groups
     objects_moved = Signal(list, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -367,7 +367,7 @@ class ProjectTree(QTreeWidget):
     def draggable(self, item: QTreeWidgetItem | None) -> bool:
         """Whether an item is one of the project's objects. Sub-items —
         a geometry's Nodes, a record inside a data array — are parts of
-        an object, and an object is what a link group holds."""
+        an object, and an object is what an object group holds."""
         return item is not None and bool(item.data(0, ROLE_DRAGGABLE))
 
     def _target_at(self, position):
@@ -405,7 +405,7 @@ class ProjectTree(QTreeWidget):
         """One drag, two readers.
 
         Inside the tree it carries `OBJECT_MIME` and moves objects
-        between link groups, exactly as before. Outside — Finder,
+        between object groups, exactly as before. Outside — Finder,
         Explorer, a file manager — it carries `text/uri-list` and
         becomes a `.vdyn` saved wherever it lands. `_offer` and
         `dropEvent` both ask for the object names first, so an internal

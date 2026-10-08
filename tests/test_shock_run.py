@@ -176,13 +176,13 @@ def test_the_motion_chain_joins_the_report_when_present():
     history.shocks = [Shock(1.0, 0.5)]
     project.add('Time Data', history)
 
-    bare = shock_template(project, links=project.links)
+    bare = shock_template(project, object_groups=project.object_groups)
     texts = ' '.join(block.get('text', '') for block in bare.blocks)
     assert '## The Motion' not in texts
 
     velocity = project.integrate(project.filter_data('Time Data'))
     project.integrate(velocity)
-    report = shock_template(project, links=project.links)
+    report = shock_template(project, object_groups=project.object_groups)
     captions = [block.get('caption', '') for block in report.blocks
                 if block.get('kind') == 'plot']
     order = [captions.index(next(c for c in captions if start in c))
@@ -219,7 +219,7 @@ def test_the_shock_report_reads_frequency_through_the_scalogram():
                           ordinate_dim='acceleration')
     history.shocks = [Shock(1.0, 0.5)]
     project.add('Time Data', history)
-    report = shock_template(project, links=project.links)
+    report = shock_template(project, object_groups=project.object_groups)
     modes = [block.get('mode') for block in report.blocks
              if block.get('kind') == 'plot']
     assert 'scalogram' in modes, 'the frequency figure is the scalogram'

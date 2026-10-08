@@ -13,13 +13,13 @@ The top row is the project. Under it, one row per object, in a fixed
 order by kind — geometries and photographs first, then the channel
 table, time data, spectra, requirements, shape sets, matched modes and
 the report — so the same project always reads the same way. A blue
-bracket down the left joins the objects of one link group, with the
+bracket down the left joins the objects of one object group, with the
 Basis group's bracket first ([Projects, links, and the Basis](projects.md)).
-A group can be named — right-click its bracket, *Name Group…*, or
-`project.link(..., name=...)` — and the name runs up the bracket
-in its color; it is what the group is called when the
-project is written as an Engineering Sciences Common Data Format file,
-where a group is an activity.
+An object group can be named — right-click its bracket, *Name Object
+Group…*, or `project.link(..., name=...)` — and the name runs up the
+bracket in its color; it is what the group is called when the project
+is written as an Engineering Sciences Common Data Format file, where an
+object group is an activity.
 
 A project with a type shows a gray row for every object its report
 still expects. Right-click one for what can fill it, or press
@@ -77,7 +77,7 @@ to build a model in with *Add Plane*
 
 | selected | what the right side shows |
 | --- | --- |
-| Geometry | The 3-D scene: nodes, coordinate systems and elements, listed by family — Beams, Triangles, Quads, Tetras, Wedges, Hexes — with the blocks of each family under it and a block's elements under the block. Picking a family, a block or an element shows that part; the pencil on a family opens its elements' table, on a block the blocks table on its row, where its material and section are set. The *Rigid Body* reading previews the six rigid-body shapes about a reference point. |
+| Geometry | The 3-D scene: nodes, coordinate systems and elements, listed by family — Beams, Triangles, Quads, Tetras, Wedges, Hexes — with the element groups of each family under it and an element group's elements under the element group. Picking a family, an element group or an element shows that part; the pencil on a family opens its elements' table, on an element group the Element Groups table on its row, where its material and section are set. The *Rigid Body* reading previews the six rigid-body shapes about a reference point. |
 | Photos | The photographs, one at a time; a name is edited in the grid. |
 | Channel table | The spreadsheet: every column typed, the drop-downs and check boxes live ([The channel table](channel-table.md)). |
 | Time history | The record against time, with the averaging frames or the shock windows shaded when they are set, and the readings a record offers on its bar: averaging, filter, truncate, kurtosis, shocks, wavelet. |

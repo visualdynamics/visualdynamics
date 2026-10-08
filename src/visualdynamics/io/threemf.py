@@ -155,7 +155,7 @@ def save(obj: Geometry, path: str | os.PathLike,
         raise ValueError('this geometry has no face elements; '
                          '3MF holds triangles and nothing else')
     names = {int(i): (name or f'block {int(i)}') for i, name in
-             zip(obj.block_id, obj.block_name, strict=True)}
+             zip(obj.group_id, obj.group_name, strict=True)}
     model = ET.Element('model', {'unit': 'meter', 'xmlns': CORE})
     resources = ET.SubElement(model, 'resources')
     build = ET.SubElement(model, 'build')

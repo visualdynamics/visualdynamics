@@ -379,7 +379,7 @@ def test_picking_a_role_in_the_window_stores_journals_and_badges(window, pump):
     grid = window.record_grids[name]
     roles = grid.row_roles()
     assert roles.count('reference') == 4, 'the four load cells, from the file'
-    table_name = next(n for n in window.project.group_of(name)
+    table_name = next(n for n in window.project.object_group_of(name)
                       if n != name and type(window.objects[n]).__name__
                       == 'ChannelTable')
     table = window.objects[table_name]
@@ -432,7 +432,7 @@ def test_the_channel_table_role_cell_is_the_time_datas(window, pump):
     pump()
     name = next(n for n, o in window.objects.items()
                 if isinstance(o, TimeHistory))
-    table_name = next(n for n in window.project.group_of(name)
+    table_name = next(n for n in window.project.object_group_of(name)
                       if type(window.objects[n]).__name__ == 'ChannelTable')
     window._item_for_object(name).setExpanded(True)
     pump()

@@ -77,7 +77,7 @@ def test_deleting_a_category_empties_it_and_leaves_it_there(geometry_item,
     assert len(geometry.elem_conn) == 0, 'every element gone'
     assert geometry.num_nodes > 0, 'the nodes are not the elements'
     assert window.objects.get('Geometry') is geometry, 'the geometry stays'
-    assert geometry_item.childCount() == 8, 'and so do all its categories'
+    assert geometry_item.childCount() == 9, 'and so do all its categories'
     assert any(geometry_item.child(i).text(0).startswith('Quads (0)')
                for i in range(geometry_item.childCount()))
     assert 'Removed' in window.statusBar().currentMessage()

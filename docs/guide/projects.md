@@ -3,7 +3,7 @@
 ## A project is a mapping with structure
 
 `visualdynamics.Project` maps a name to an object, and carries what the tree
-shows around it: link groups, which group is the Basis, the project
+shows around it: object groups, which group is the Basis, the project
 type, the active geometry.
 
 ```python
@@ -29,7 +29,7 @@ complete:
 project.geometry              # anywhere in the project
 project.basis.frf             # scoped to the Basis group
 project.other.shapes          # the one group that is not the Basis
-project.groups[1].geometry    # or any group by position
+project.object_group_selections[1].geometry    # or any object group by position
 ```
 
 The **singular** gives you the one object of that kind. When there are
@@ -79,10 +79,10 @@ geometry = project.basis.geometry
 geometry.nodes                # <202 nodes>
 geometry.coordinate_systems
 geometry.elements
-geometry.blocks               # <3 blocks>: the parts the mesh is divided into
+geometry.groups               # <3 element groups>: the parts the mesh is divided into
 ```
 
-A group is a **view**, not a copy. Its columns are the geometry's own
+Each of these is a **view**, not a copy. Its columns are the geometry's own
 arrays under plural names, and a row under its singular — so both of
 these move a node:
 
@@ -97,29 +97,29 @@ unique and connectivity honest:
 
 ```python
 node = geometry.nodes.add([1.0, 0.0, 0.0])   # returns the new id
-geometry.elements.add([101, 106, 111])       # a triangle, in a block of triangles
-geometry.add_beams([101, 106, 111, 116])     # a drawn line: a block of beams
+geometry.elements.add([101, 106, 111])       # a triangle, in an element group of triangles
+geometry.add_beams([101, 106, 111, 116])     # a drawn line: an element group of beams
 geometry.nodes.delete([305])
 geometry.elements.delete([12])
 ```
 
-Everything is deleted by **id**, in all four groups. Deleting an id
+Everything is deleted by **id**, in all four views. Deleting an id
 that is not there is not an error.
 
-A block is a part: it has an id and a name, and what it holds is read
-off the elements (`elements_in('wing')`, `block_of(elem_id)`). Deleting
-one deletes the part — its elements, and the nodes no other block's
-element uses; nodes it shares with another block stay, so the neighbor
-is not cut into. Blocks that hold the same element types and carry the
+An element group is a part: it has an id and a name, and what it holds is read
+off the elements (`elements_in('wing')`, `group_of(elem_id)`). Deleting
+one deletes the part — its elements, and the nodes no other element group's
+element uses; nodes it shares with another element group stay, so the neighbor
+is not cut into. Element groups that hold the same element types and carry the
 same material and thickness or section can be made one
-(`merge_blocks([7, 9])`, the first keeping its id and name; in the app,
-select them in the tree or the blocks table and press **Merge Blocks**).
-Moving an element between blocks is an edit to the *element* — in the
-app, the Block column of the element table — and a block holds one
-element family, so a quad is refused a block of beams by name. A block
+(`merge_groups([7, 9])`, the first keeping its id and name; in the app,
+select them in the tree or the Element Groups table and press **Merge Element Groups**).
+Moving an element between element groups is an edit to the *element* — in the
+app, the Element group column of the element table — and an element group holds one
+element family, so a quad is refused an element group of beams by name. An element group
 of two-node beams with no properties is a **drawn line**: what a
 traceline was, read and written as one by the formats that keep lines
-apart from elements, and structure the moment the block is given a
+apart from elements, and structure the moment the element group is given a
 section.
 
 Node and coordinate-system ids are unique, because connectivity and
@@ -128,8 +128,8 @@ node placement refer to them. An element id is a label.
 CAD geometry arrives the same way. STEP and IGES (tessellated on
 import by a geometry kernel the packaged builds include and a pip
 install adds with the `step` extra), 3MF and STL come in as triangle face
-elements with **one block per part** — an assembly's names become the
-block names, and 3MF and STL write back out. Such a geometry is
+elements with **one element group per part** — an assembly's names become the
+element group names, and 3MF and STL write back out. Such a geometry is
 context: the shape behind the sensor points, not a set of measurement
 DOFs, so its node ids are the importer's own.
 
@@ -216,7 +216,7 @@ anything.
 
 ```python
 project.link('Geometry', 'FRF', 'Time History')
-project.group_of('FRF')       # the members linked with it
+project.object_group_of('FRF')       # the members linked with it
 project.unlink('Time History')
 ```
 
@@ -253,7 +253,7 @@ or two test runs works the same way as test-against-model.
 project.geometry_for('FEM Modes')      # ('FEM Geometry', <Geometry>)
 ```
 
-Its link group's geometry, else the active one. Animations, DOF
+Its object group's geometry, else the active one. Animations, DOF
 arrows, [compatibility checks](../compatibility.md) and projections all
 ask this, which is
 why a FEM shape set beside its own mesh never reads as inconsistent

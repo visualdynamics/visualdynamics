@@ -56,8 +56,8 @@ answer it asks for. Nothing is ever scaled by a guess: undefined
 objects wear a badge until a person answers.
 
 The article's CAD can stand behind the survey too: a STEP, IGES,
-3MF or STL file imports as face elements, one block per part, and
-sits in the same group as context.
+3MF or STL file imports as face elements, one element group per part,
+and sits in the same object group as context.
 
 ![The Imported Units pane for the geometry: one row, Coordinates /
 length, the Unit cell waiting to be told

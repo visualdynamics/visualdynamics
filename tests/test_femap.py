@@ -16,8 +16,8 @@ import visualdynamics
 from visualdynamics.io import femap
 
 
-def _block(block_id, *lines):
-    return '\n'.join(['   -1', f'   {block_id}', *lines, '   -1']) + '\n'
+def _block(group_id, *lines):
+    return '\n'.join(['   -1', f'   {group_id}', *lines, '   -1']) + '\n'
 
 
 def _header():

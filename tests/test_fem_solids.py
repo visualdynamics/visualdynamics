@@ -21,7 +21,7 @@ from test_fem import ALUMINUM
 
 from visualdynamics.core import fem
 from visualdynamics.core.fem import (
-    BlockProperties,
+    GroupProperties,
     Model,
     Section,
     _hex_matrices,
@@ -188,17 +188,17 @@ def test_a_solid_block_round_trips_through_a_geometry():
         solid.group = 'bar'
     geometry = model.geometry()
     assert set(geometry.elem_type.tolist()) == {115}
-    assert list(geometry.block_name) == ['bar']
-    geometry.block_properties = {int(geometry.block_id[0]): BlockProperties(ALUMINUM)}
-    assert geometry.block_properties[int(geometry.block_id[0])].kind == 'solid'
+    assert list(geometry.group_name) == ['bar']
+    geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(ALUMINUM)}
+    assert geometry.group_properties[int(geometry.group_id[0])].kind == 'solid'
     rebuilt = Model.from_geometry(geometry)
     assert len(rebuilt.solids) == 6
     assert rebuilt.structural_mass == pytest.approx(model.structural_mass)
     assert rebuilt.eigensolution(num_modes=8).frequency == pytest.approx(
         model.eigensolution(num_modes=8).frequency)
     # and the wrong properties are refused by what the elements are
-    geometry.block_properties = {int(geometry.block_id[0]):
-                                 BlockProperties(ALUMINUM, thickness=0.01)}
+    geometry.group_properties = {int(geometry.group_id[0]):
+                                 GroupProperties(ALUMINUM, thickness=0.01)}
     with pytest.raises(ValueError, match='hex8 elements, which take a material alone'):
         Model.from_geometry(geometry)
 
@@ -233,7 +233,7 @@ def test_a_node_nothing_touches_is_grounded_not_refused():
     reference = model.eigensolution(num_modes=8).frequency
     geometry = model.geometry()
     geometry.add_nodes([[0.25, 0.5, 0.5]])          # a point in space
-    geometry.block_properties = {int(geometry.block_id[0]): BlockProperties(ALUMINUM)}
+    geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(ALUMINUM)}
     rebuilt = Model.from_geometry(geometry)
     assert rebuilt.loose_nodes() == [int(geometry.node_id[-1])]
     shapes = rebuilt.eigensolution(num_modes=8)

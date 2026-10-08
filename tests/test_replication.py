@@ -470,7 +470,7 @@ def test_the_transient_report_asks_for_the_waveform_error(tmp_path):
     _transient_file(path, repeats=3, frame=128)
     project = visualdynamics.Project()
     project.import_file(str(path))
-    report = transient_template(project, links=project.links)
+    report = transient_template(project, object_groups=project.object_groups)
     bars = [b for b in report.blocks if b['kind'] == 'bars']
     # no 'srs': that judgment moved to the shock report, where the
     # SRS is the test's own measure rather than a borrowed one
@@ -478,19 +478,19 @@ def test_the_transient_report_asks_for_the_waveform_error(tmp_path):
     # waveform judgment in the standing order (Brandon, 2026-08-23)
     assert [b['mode'] for b in bars] == ['error', 'waveform',
                                          'kurtosis']
-    built = _build_block(bars[1], dict(project), visualdynamics.SI, project.links)
+    built = _build_block(bars[1], dict(project), visualdynamics.SI, project.object_groups)
     assert built is not None
     assert built['labels'] == ['101Z+ e1', '101Z+ e2', '101Z+ e3',
                                '111Z+ e1', '111Z+ e2', '111Z+ e3']
     # the spectral pair binds once the spectra exist, and not before
     assert _build_block(bars[0], dict(project), visualdynamics.SI,
-                        project.links) is None
+                        project.object_groups) is None
 
     # the overlay: the first playing over its target, channel by channel
     overlay = next(b for b in report.blocks
                    if b.get('mode') == 'overlay')
     built = _build_block(overlay, dict(project), visualdynamics.SI,
-                         project.links)
+                         project.object_groups)
     assert built is not None
     assert built['logy'] is False, 'waveforms draw on linear axes'
     assert [ch['label'] for ch in built['channels']] == ['101Z+', '111Z+']
@@ -508,11 +508,11 @@ def test_the_transient_report_asks_for_the_waveform_error(tmp_path):
         if type(project[source]).__name__ in ('TimeHistory',
                                               'TransientSpecification'):
             project.compute_srs(source)
-    shock = shock_template(project, links=project.links)
+    shock = shock_template(project, object_groups=project.object_groups)
     srs_bars = next(b for b in shock.blocks
                     if b.get('kind') == 'bars' and b.get('mode') == 'srs')
     srs = _build_block(srs_bars, dict(project), visualdynamics.SI,
-                       project.links)
+                       project.object_groups)
     assert srs is not None
     # the SRS reading, not the PSD one falling through: a spectrum has
     # no area to integrate, so an RMS-error-over-a-band label here would

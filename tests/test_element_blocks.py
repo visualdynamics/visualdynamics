@@ -1,13 +1,13 @@
-"""Element blocks: which region of a mesh each element belongs to.
+"""Element groups: which region of a mesh each element belongs to.
 
-Exodus has always had them — a mesh is written as named blocks, and the
-block is where the part identity lives — and until this they were read
+Exodus has always had them — a mesh is written as named element groups, and the
+element group is where the part identity lives — and until this they were read
 and thrown away, so a file that went `wing`/`tail` in came back one
 undifferentiated soup. That is a lossy round trip in a package whose rule
 is that anything it reads, it writes.
 
 They earn their place beyond the round trip: `fem.Model.from_geometry`
-reads the section for a member off the block of the element it came from,
+reads the section for a member off the element group of the element it came from,
 so a geometry is a complete description of a structure and a saved file
 rebuilds it with nothing passed alongside. `tests/test_demo_drone.py`
 pins that end of it.
@@ -21,14 +21,14 @@ from visualdynamics.core.geometry import Geometry
 from visualdynamics.io import export_file, import_file, load, save
 
 try:
-    from conftest import block_row
+    from conftest import group_row
 except ImportError:  # pragma: no cover - collected outside tests/
-    block_row = None
+    group_row = None
 
 
 @pytest.fixture
 def two_blocks():
-    """Four quads over six nodes, split into a named pair of blocks."""
+    """Four quads over six nodes, split into a named pair of element groups."""
     return Geometry(
         node_id=[1, 2, 3, 4, 5, 6],
         node_xyz=[[0, 0, 0], [1, 0, 0], [2, 0, 0],
@@ -36,145 +36,145 @@ def two_blocks():
         elem_id=[10, 11],
         elem_conn=[[1, 2, 5, 4], [2, 3, 6, 5]],
         elem_type=[44, 44],
-        elem_block=[7, 9],
-        block_id=[7, 9],
-        block_name=['wing', 'tail'],
+        elem_group=[7, 9],
+        group_id=[7, 9],
+        group_name=['wing', 'tail'],
         length_unit='m')
 
 
 def test_an_element_says_which_block_it_is_in(two_blocks):
-    assert two_blocks.block_of(10) == 'wing'
-    assert two_blocks.block_of(11) == 'tail'
+    assert two_blocks.group_of(10) == 'wing'
+    assert two_blocks.group_of(11) == 'tail'
     assert two_blocks.elements_in('wing') == [10]
     assert two_blocks.elements_in(9) == [11], 'by id as well as by name'
 
 
 def test_a_mesh_with_no_blocks_is_one_block(two_blocks):
     """Most formats do not record the question, and nothing may invent an
-    answer: everything lands in one block with no name."""
+    answer: everything lands in one element group with no name."""
     plain = Geometry(node_id=[1, 2, 3],
                      node_xyz=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
                      elem_conn=[[1, 2, 3]], elem_type=[41])
-    assert list(plain.block_id) == [1]
-    assert plain.block_name == ['']
+    assert list(plain.group_id) == [1]
+    assert plain.group_name == ['']
     assert plain.elements_in(1) == list(plain.elem_id)
 
 
 def test_a_block_no_element_belongs_to_is_refused(two_blocks):
-    """An element in block 3 with no block 3 declared is a file saying
+    """An element in element group 3 with no element group 3 declared is a file saying
     two things that cannot both be true, and it is refused where it is
     written rather than found later by whatever reads it."""
     with pytest.raises(ValueError):
         Geometry(node_id=[1, 2, 3],
                  node_xyz=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
                  elem_conn=[[1, 2, 3]], elem_type=[41],
-                 elem_block=[3], block_id=[1], block_name=[''])
+                 elem_group=[3], group_id=[1], group_name=[''])
 
 
 def test_a_new_element_joins_a_block(two_blocks):
-    two_blocks.add_element([1, 2, 5, 4], block=9)
-    assert two_blocks.block_of(two_blocks.elem_id[-1]) == 'tail'
-    two_blocks.add_element([2, 3, 5], block=12)
-    assert 12 in two_blocks.block_id.tolist(), 'a new block is declared'
-    assert two_blocks.block_of(two_blocks.elem_id[-1]) == ''
-    # one block, one family (2026-09-30): a triangle is refused a block
-    # of quads by name, and with no block named finds its own family
+    two_blocks.add_element([1, 2, 5, 4], group=9)
+    assert two_blocks.group_of(two_blocks.elem_id[-1]) == 'tail'
+    two_blocks.add_element([2, 3, 5], group=12)
+    assert 12 in two_blocks.group_id.tolist(), 'a new element group is declared'
+    assert two_blocks.group_of(two_blocks.elem_id[-1]) == ''
+    # one element group, one family (2026-09-30): a triangle is refused an element group
+    # of quads by name, and with no element group named finds its own family
     import pytest
 
-    with pytest.raises(ValueError, match='block 9 holds quads'):
-        two_blocks.add_element([1, 2, 4], block=9)
+    with pytest.raises(ValueError, match='element group 9 holds quads'):
+        two_blocks.add_element([1, 2, 4], group=9)
     two_blocks.add_element([1, 2, 4])
-    assert int(two_blocks.elem_block[-1]) == 12, 'the triangles already there'
+    assert int(two_blocks.elem_group[-1]) == 12, 'the triangles already there'
     two_blocks.add_element([1, 2])
-    assert int(two_blocks.elem_block[-1]) not in (7, 9, 12), 'a beam block of its own'
+    assert int(two_blocks.elem_group[-1]) not in (7, 9, 12), 'a beam element group of its own'
 
 
 def test_deleting_an_element_takes_its_block_entry_with_it(two_blocks):
     two_blocks.delete_elements([10])
-    assert len(two_blocks.elem_block) == len(two_blocks.elem_id) == 1
-    assert two_blocks.block_of(11) == 'tail'
+    assert len(two_blocks.elem_group) == len(two_blocks.elem_id) == 1
+    assert two_blocks.group_of(11) == 'tail'
 
 
 def test_blocks_ride_the_native_file(two_blocks, tmp_path):
-    path = tmp_path / 'blocks.vdyn'
+    path = tmp_path / 'element groups.vdyn'
     save(two_blocks, path)
     back = load(path)
-    assert list(back.elem_block) == [7, 9]
-    assert list(back.block_id) == [7, 9]
-    assert back.block_name == ['wing', 'tail']
+    assert list(back.elem_group) == [7, 9]
+    assert list(back.group_id) == [7, 9]
+    assert back.group_name == ['wing', 'tail']
     assert back == two_blocks
 
 
 def test_blocks_survive_an_exodus_round_trip(two_blocks, tmp_path):
     """The format they come from, and the reason for the whole feature."""
-    path = tmp_path / 'blocks.exo'
+    path = tmp_path / 'element groups.exo'
     export_file(two_blocks, path)
     back = import_file(path)
-    assert back.block_name == ['wing', 'tail']
-    assert list(back.block_id) == [7, 9]
-    assert back.block_of(back.elem_id[0]) == 'wing'
-    assert back.block_of(back.elem_id[1]) == 'tail'
+    assert back.group_name == ['wing', 'tail']
+    assert list(back.group_id) == [7, 9]
+    assert back.group_of(back.elem_id[0]) == 'wing'
+    assert back.group_of(back.elem_id[1]) == 'tail'
 
 
-# ---- blocks as a group you can read and edit --------------------------------
+# ---- element groups as a group you can read and edit --------------------------------
 
 def test_blocks_are_a_view_like_the_other_four(two_blocks):
     """Same shape as `nodes` and friends: plural on the view, singular on
     a row, and a row written through writes the geometry."""
-    blocks = two_blocks.blocks
-    assert len(blocks) == 2
-    assert list(blocks.ids) == [7, 9]
-    assert blocks.names == ['wing', 'tail']
-    assert blocks[1].id == 9 and blocks[1].name == 'tail'
-    blocks[1].name = 'empennage'
-    assert two_blocks.block_name == ['wing', 'empennage'], 'not a copy'
+    groups = two_blocks.groups
+    assert len(groups) == 2
+    assert list(groups.ids) == [7, 9]
+    assert groups.names == ['wing', 'tail']
+    assert groups[1].id == 9 and groups[1].name == 'tail'
+    groups[1].name = 'empennage'
+    assert two_blocks.group_name == ['wing', 'empennage'], 'not a copy'
 
 
 def test_a_block_can_be_added_empty(two_blocks):
     """It has to exist before an element can be put in it, and exodus
     files carry empty ones anyway."""
-    block_id = two_blocks.blocks.add('fin')
-    assert block_id == 10 and two_blocks.elements_in(10) == []
+    group_id = two_blocks.groups.add('fin')
+    assert group_id == 10 and two_blocks.elements_in(10) == []
     two_blocks.validate()
     with pytest.raises(ValueError, match='already exists'):
-        two_blocks.add_block('again', block_id=10)
+        two_blocks.add_group('again', group_id=10)
 
 
 def test_renumbering_a_block_carries_its_elements(two_blocks):
-    """An element names its block by id, so leaving them behind would put
-    them in a block that is not there — which `validate` refuses."""
-    two_blocks.renumber_block(0, 4)
-    assert list(two_blocks.elem_block) == [4, 9]
+    """An element names its element group by id, so leaving them behind would put
+    them in an element group that is not there — which `validate` refuses."""
+    two_blocks.renumber_group(0, 4)
+    assert list(two_blocks.elem_group) == [4, 9]
     two_blocks.validate()
     with pytest.raises(ValueError, match='already exists'):
-        two_blocks.renumber_block(0, 9)
+        two_blocks.renumber_group(0, 9)
 
 
 def test_deleting_a_block_deletes_its_elements_and_its_own_nodes(two_blocks):
-    """A block deleted is the part deleted (Brandon, 2026-09-27): its
-    elements, and the nodes no other block's element uses. The nodes it
+    """An element group deleted is the part deleted (Brandon, 2026-09-27): its
+    elements, and the nodes no other element group's element uses. The nodes it
     shares with the tail stay, so the tail is not cut into."""
-    report = two_blocks.delete_blocks([7])
-    assert report == {'blocks': 1, 'elements': 1, 'nodes': 2}
-    assert list(two_blocks.block_id) == [9]
+    report = two_blocks.delete_groups([7])
+    assert report == {'groups': 1, 'elements': 1, 'nodes': 2}
+    assert list(two_blocks.group_id) == [9]
     assert two_blocks.elements_in(9) == [11], 'the tail, whole'
     assert list(two_blocks.node_id) == [2, 3, 5, 6], 'the shared edge kept'
     two_blocks.validate()
 
 
 def test_deleting_every_block_leaves_no_mesh(two_blocks):
-    two_blocks.delete_blocks([7, 9])
-    assert list(two_blocks.block_id) == [] and two_blocks.elem_conn == []
+    two_blocks.delete_groups([7, 9])
+    assert list(two_blocks.group_id) == [] and two_blocks.elem_conn == []
     assert two_blocks.num_nodes == 0
 
 
 def test_blocks_of_one_kind_merge_into_the_first(two_blocks):
-    """Merge Blocks: the first keeps its id and name, the rest's elements
+    """Merge Element Groups: the first keeps its id and name, the rest's elements
     move into it."""
-    report = two_blocks.merge_blocks([9, 7])
-    assert report == {'into': 9, 'blocks': 1, 'elements': 1}
-    assert list(two_blocks.block_id) == [9]
-    assert two_blocks.block_name == ['tail']
+    report = two_blocks.merge_groups([9, 7])
+    assert report == {'into': 9, 'groups': 1, 'elements': 1}
+    assert list(two_blocks.group_id) == [9]
+    assert two_blocks.group_name == ['tail']
     assert two_blocks.elements_in(9) == [10, 11]
     two_blocks.validate()
 
@@ -185,41 +185,41 @@ def test_blocks_that_differ_are_not_merged(two_blocks, mixed_block):
     from visualdynamics import fem
 
     aluminum = fem.material('6061-T6')
-    two_blocks.block_properties = {7: fem.BlockProperties(aluminum, 0.01),
-                                   9: fem.BlockProperties(aluminum, 0.02)}
+    two_blocks.group_properties = {7: fem.GroupProperties(aluminum, 0.01),
+                                   9: fem.GroupProperties(aluminum, 0.02)}
     assert 'thickness' in two_blocks.merge_refusal([7, 9])
     with pytest.raises(ValueError, match='differ in material'):
-        two_blocks.merge_blocks([7, 9])
-    two_blocks.block_properties[9] = fem.BlockProperties(aluminum, 0.01)
+        two_blocks.merge_groups([7, 9])
+    two_blocks.group_properties[9] = fem.GroupProperties(aluminum, 0.01)
     assert two_blocks.merge_refusal([7, 9]) is None
-    tri = two_blocks.add_block('fin')
-    two_blocks.add_element([3, 6, 5], block=tri)
+    tri = two_blocks.add_group('fin')
+    two_blocks.add_element([3, 6, 5], group=tri)
     assert two_blocks.merge_refusal([7, tri]) == \
-        'the blocks hold different element types'
-    assert two_blocks.merge_refusal([7]) == 'select two blocks or more to merge'
+        'the element groups hold different element types'
+    assert two_blocks.merge_refusal([7]) == 'select two element groups or more to merge'
 
 
 @pytest.fixture
 def mixed_block():
-    """One named block holding a quad and a triangle — what the drone's
-    'canopy' is, and what exodus cannot write as one block."""
+    """One named element group holding a quad and a triangle — what the drone's
+    'canopy' is, and what exodus cannot write as one element group."""
     return Geometry(
         node_id=[1, 2, 3, 4, 5],
         node_xyz=[[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0.5, 0]],
         elem_id=[10, 11],
         elem_conn=[[1, 2, 3, 4], [2, 5, 3]],
         elem_type=[44, 41],
-        elem_block=[7, 7],
-        block_id=[7],
-        block_name=['canopy'],
+        elem_group=[7, 7],
+        group_id=[7],
+        group_name=['canopy'],
         length_unit='m')
 
 
 def test_a_block_of_two_element_types_splits_into_distinct_blocks(
         mixed_block, tmp_path):
-    """Exodus holds one element type per block, so a block with a quad and
+    """Exodus holds one element type per element group, so an element group with a quad and
     a tri in it goes out as two — and they may share neither the id nor
-    the name it declared. The drone went out as 34 blocks under 22 ids and
+    the name it declared. The drone went out as 34 element groups under 22 ids and
     read back nowhere: this package refuses the duplicate ids outright,
     and ParaView's IOSS reader fails the file at REQUEST_INFORMATION
     without saying why."""
@@ -229,14 +229,14 @@ def test_a_block_of_two_element_types_splits_into_distinct_blocks(
     export_file(mixed_block, path)
     with netCDF4.Dataset(path) as ds:
         ids = [int(i) for i in ds.variables['eb_prop1'][:]]
-    assert len(set(ids)) == len(ids) == 2, 'two blocks, two ids'
+    assert len(set(ids)) == len(ids) == 2, 'two element groups, two ids'
     assert 7 in ids, 'the declared id is kept where it can be'
 
     back = import_file(path)
-    assert back.block_name == ['canopy', 'canopy triangles'], (
+    assert back.group_name == ['canopy', 'canopy triangles'], (
         'the second piece says which type it is, since names must differ')
     assert len(back.elem_id) == 2
-    assert back.block_of(back.elem_id[0]) == 'canopy'
+    assert back.group_of(back.elem_id[0]) == 'canopy'
 
 
 def test_paraviews_reader_takes_a_split_block(mixed_block, tmp_path):
@@ -260,7 +260,7 @@ def test_paraviews_reader_takes_a_split_block(mixed_block, tmp_path):
     assert cells == 2, 'the quad and the tri, both read'
 
 
-# ---- blocks in the app ------------------------------------------------------
+# ---- element groups in the app ------------------------------------------------------
 
 def _show_geometry(window, pump, geometry, name='Geometry'):
     window.add_object(name, geometry)
@@ -281,42 +281,42 @@ def _category(item, label):
 def test_the_tree_lists_blocks_under_their_family(two_blocks, window, pump):
     """A geometry lists its nodes, its coordinate systems and then one
     row per element family, the six always; under a family, one row
-    per block holding elements of it, and under a block its elements
-    (Brandon, 2026-09-30). The pencil sits on a family and on a block."""
-    from conftest import block_row
+    per element group holding elements of it, and under an element group its elements
+    (Brandon, 2026-09-30). The pencil sits on a family and on an element group."""
+    from conftest import group_row
 
     item = _show_geometry(window, pump, two_blocks)
     labels = [item.child(i).text(0) for i in range(item.childCount())]
     assert labels == ['Nodes (6)', 'Coordinate systems (1)', 'Beams (0)',
                       'Triangles (0)', 'Quads (2)', 'Tetras (0)',
-                      'Wedges (0)', 'Hexes (0)']
+                      'Wedges (0)', 'Hexes (0)', 'Points (0)']
     quads = _category(item, 'Quads')
     assert not quads.icon(1).isNull(), 'the edit pencil, like every category'
     assert [quads.child(i).text(0) for i in range(quads.childCount())] == [
         'wing (1)', 'tail (1)']
-    wing = block_row(window, 7)
-    assert not wing.icon(1).isNull(), 'the pencil on a block: its properties'
+    wing = group_row(window, 7)
+    assert not wing.icon(1).isNull(), 'the pencil on an element group: its properties'
     window._populate_entities(wing)
     pump()
     assert [wing.child(i).text(0) for i in range(wing.childCount())] == [
         'Element 10 (quad4, 4 nodes)']
-    assert _category(item, 'Beams').childCount() == 0, 'no block of beams'
+    assert _category(item, 'Beams').childCount() == 0, 'no element group of beams'
 
 
 def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
     from PySide6.QtCore import Qt
 
     _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(block_row(window, 7))
+    window.tree.setCurrentItem(group_row(window, 7))
     window.edit_entities()
     pump()
-    assert window.editing == ('Geometry', 'blocks')
+    assert window.editing == ('Geometry', 'groups')
     model = window.table.model()
     headers = [model.headerData(c, Qt.Orientation.Horizontal)
                for c in range(model.columnCount())]
-    assert headers[:3] == ['Block', 'Name', 'Elements']
+    assert headers[:3] == ['Element group', 'Name', 'Elements']
     assert headers[3] == 'Material', (
-        'then what the block is made of — tests/test_solve_modes.py')
+        'then what the element group is made of — tests/test_solve_modes.py')
     assert model.rowCount() == 2
     assert model.data(model.index(0, 1)) == 'wing'
     # the elements it holds, by id and as runs — not a count, which is
@@ -325,16 +325,16 @@ def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
     assert model.data(model.index(1, 2)) == '11', 'and tail holds 11'
     assert model.flags(model.index(0, 2)) & Qt.ItemFlag.ItemIsEditable, (
         'and the list is editable: naming an element claims it for '
-        'this block, the way a node is typed into a traceline')
+        'this element group, the way a node is typed into a traceline')
     model.setData(model.index(0, 1), 'port wing')
-    assert two_blocks.block_name[0] == 'port wing'
+    assert two_blocks.group_name[0] == 'port wing'
 
 
 def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
-    """There is nothing to click in the view for a block, so the button
+    """There is nothing to click in the view for an element group, so the button
     cannot arm a mode — it adds one and comes straight back up."""
     _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(block_row(window, 7))
+    window.tree.setCurrentItem(group_row(window, 7))
     window.edit_entities()
     pump()
     assert window.add_action.isVisible()
@@ -342,47 +342,47 @@ def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
     pump()
     assert not window.add_action.isChecked(), 'no add mode to be in'
     assert not window.add_mode
-    assert list(two_blocks.block_id) == [7, 9, 10]
+    assert list(two_blocks.group_id) == [7, 9, 10]
     assert window.table.model().rowCount() == 3
-    assert 'Added block 10' in window.statusBar().currentMessage()
+    assert 'Added element group 10' in window.statusBar().currentMessage()
 
 
 def test_deleting_a_block_row_deletes_the_part(two_blocks, window, pump):
-    """From the Blocks table as from a script: the block, its elements
+    """From the Element Groups table as from a script: the element group, its elements
     and its own nodes go (Brandon, 2026-09-27)."""
     _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(block_row(window, 7))
+    window.tree.setCurrentItem(group_row(window, 7))
     window.edit_entities()
     pump()
     window.table.selectRow(0)
     window.delete_entity_rows()
     pump()
-    assert list(two_blocks.block_id) == [9]
-    assert list(two_blocks.elem_id) == [11], 'the wing went with its block'
-    assert 'Removed 1 blocks, 1 elements, 2 nodes' in \
+    assert list(two_blocks.group_id) == [9]
+    assert list(two_blocks.elem_id) == [11], 'the wing went with its element group'
+    assert 'Removed 1 element groups, 1 elements, 2 nodes' in \
         window.statusBar().currentMessage()
 
 
 def test_picking_a_block_highlights_the_elements_it_holds(two_blocks, window,
                                                           pump):
-    """A block has no geometry of its own, so what it draws is its
+    """An element group has no geometry of its own, so what it draws is its
     elements — an empty one correctly lights nothing up."""
     from visualdynamics.gui.main_window import _drawable
 
-    components, entities = _drawable(two_blocks, None, {'blocks': [9]})
+    components, entities = _drawable(two_blocks, None, {'groups': [9]})
     assert entities == {'elements': [1]}, 'the tail element, by row'
     assert components is None
-    components, _entities = _drawable(two_blocks, {'blocks'}, {})
+    components, _entities = _drawable(two_blocks, {'groups'}, {})
     assert components == {'elements'}, 'the category is every element'
-    two_blocks.add_block('fin')
-    _components, entities = _drawable(two_blocks, None, {'blocks': [10]})
-    assert entities == {'elements': []}, 'an empty block is not the whole model'
+    two_blocks.add_group('fin')
+    _components, entities = _drawable(two_blocks, None, {'groups': [10]})
+    assert entities == {'elements': []}, 'an empty element group is not the whole model'
 
 
 def test_an_element_moves_between_blocks_from_its_own_table(two_blocks, window,
                                                             pump):
-    """A block holds nothing itself, so this is where the grouping is
-    actually edited — and a block that does not exist is refused rather
+    """An element group holds nothing itself, so this is where the grouping is
+    actually edited — and an element group that does not exist is refused rather
     than quietly declared."""
     from PySide6.QtCore import Qt
 
@@ -393,22 +393,22 @@ def test_an_element_moves_between_blocks_from_its_own_table(two_blocks, window,
     model = window.table.model()
     headers = [model.headerData(c, Qt.Orientation.Horizontal)
                for c in range(model.columnCount())]
-    assert 'Block' in headers
-    column = headers.index('Block')
+    assert 'Element group' in headers
+    column = headers.index('Element group')
     assert model.data(model.index(0, column)) == 'wing'
     model.setData(model.index(0, column), 'tail')
     assert two_blocks.elements_in('tail') == [10, 11]
     assert model.setData(model.index(0, column), 'nose') is False
-    assert 'no block' in window.statusBar().currentMessage()
+    assert 'no element group' in window.statusBar().currentMessage()
 
 
-# ---- the blocks table's Elements column is editable ----------------------
+# ---- the element groups table's Elements column is editable ----------------------
 
 
 def _blocks_model(geometry):
-    from visualdynamics.gui.object_tables import block_table_model
+    from visualdynamics.gui.object_tables import element_group_table_model
 
-    return block_table_model(geometry)
+    return element_group_table_model(geometry)
 
 
 def _cell(model, row, header):
@@ -442,29 +442,29 @@ def test_the_blocks_table_lists_its_elements_as_runs(qt_app, two_blocks):
     """It used to show a count, which is not a thing anyone can edit."""
     model = _blocks_model(two_blocks)
     text, _index = _cell(model, 0, 'Elements')
-    first = int(two_blocks.block_id[0])
+    first = int(two_blocks.group_id[0])
     expected = sorted(int(i) for i in
-                      two_blocks.elem_id[two_blocks.elem_block == first])
+                      two_blocks.elem_id[two_blocks.elem_group == first])
     from visualdynamics.gui.object_tables import parse_id_runs
     assert parse_id_runs(text) == expected
 
 
 def test_naming_an_element_claims_it_for_this_block(qt_app, two_blocks):
     """The same gesture as typing a node into a traceline: the element
-    moves in, and leaves whatever block it was in by itself."""
+    moves in, and leaves whatever element group it was in by itself."""
     from PySide6.QtCore import Qt
 
     from visualdynamics.gui.object_tables import parse_id_runs
 
     model = _blocks_model(two_blocks)
-    first, second = (int(b) for b in two_blocks.block_id[:2])
-    moving = int(two_blocks.elem_id[two_blocks.elem_block == second][0])
+    first, second = (int(b) for b in two_blocks.group_id[:2])
+    moving = int(two_blocks.elem_id[two_blocks.elem_group == second][0])
     text, index = _cell(model, 0, 'Elements')
     assert model.setData(index, f'{text} {moving}',
                          Qt.ItemDataRole.EditRole)
-    assert int(two_blocks.elem_block[
+    assert int(two_blocks.elem_group[
         two_blocks.elem_id == moving][0]) == first
-    # and it is gone from the block it came from
+    # and it is gone from the element group it came from
     after, _ = _cell(model, 1, 'Elements')
     assert moving not in parse_id_runs(after)
 
@@ -472,7 +472,7 @@ def test_naming_an_element_claims_it_for_this_block(qt_app, two_blocks):
 def test_dropping_an_element_is_refused_with_the_way_to_do_it(qt_app,
                                                               two_blocks):
     """A node can be in no traceline; an element is always in exactly
-    one block, so a removal with no destination is not a state the
+    one element group, so a removal with no destination is not a state the
     geometry can hold. The refusal says how to move it instead."""
     from PySide6.QtCore import Qt
 
@@ -480,9 +480,9 @@ def test_dropping_an_element_is_refused_with_the_way_to_do_it(qt_app,
     said = _refusal(model)
     _text, index = _cell(model, 0, 'Elements')
     assert not model.setData(index, '', Qt.ItemDataRole.EditRole)
-    assert said and 'no block' in said[0]
-    assert 'Add it to the block it belongs in' in said[0]
-    assert list(two_blocks.elem_block) == [7, 9], 'and nothing moved'
+    assert said and 'no element group' in said[0]
+    assert 'Add it to the element group it belongs in' in said[0]
+    assert list(two_blocks.elem_group) == [7, 9], 'and nothing moved'
 
 
 def test_an_unknown_element_is_refused(qt_app, two_blocks):
@@ -497,64 +497,64 @@ def test_an_unknown_element_is_refused(qt_app, two_blocks):
 
 
 def _pick_blocks(window, pump, item, rows):
-    """Select these block rows under the geometry's Quads family."""
-    blocks = _category(item, 'Quads')
-    blocks.setExpanded(True)
+    """Select these element group rows under the geometry's Quads family."""
+    groups = _category(item, 'Quads')
+    groups.setExpanded(True)
     pump()
     window.tree.clearSelection()
-    window.tree.setCurrentItem(blocks.child(rows[0]))
+    window.tree.setCurrentItem(groups.child(rows[0]))
     for row in rows:
-        blocks.child(row).setSelected(True)
+        groups.child(row).setSelected(True)
     pump()
 
 
 def test_two_blocks_of_one_kind_offer_merge_from_the_tree(two_blocks, window,
                                                          pump):
-    """Picking two blocks that may be one puts Merge Blocks on the bar
+    """Picking two element groups that may be one puts Merge Element Groups on the bar
     (Brandon, 2026-09-27); pressing it makes them one, journaled."""
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
     acts = window.acts_for()
     assert [(verb, icon) for verb, _label, icon, _h, _t in acts] == [
-        ('merge_blocks', 'merge_blocks')]
+        ('merge_groups', 'merge_groups')]
     acts[0][3]()
     pump()
-    assert list(two_blocks.block_id) == [7]
+    assert list(two_blocks.group_id) == [7]
     assert two_blocks.elements_in(7) == [10, 11]
     assert window.project.journal[-1] == (
-        "project.merge_blocks('Geometry', [7, 9])")
-    assert 'merged 1 block into wing' in window.statusBar().currentMessage()
+        "project.merge_groups('Geometry', [7, 9])")
+    assert 'merged 1 element group into wing' in window.statusBar().currentMessage()
 
 
 def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
     from visualdynamics import fem
 
     aluminum = fem.material('6061-T6')
-    two_blocks.block_properties = {7: fem.BlockProperties(aluminum, 0.01),
-                                   9: fem.BlockProperties(aluminum, 0.02)}
+    two_blocks.group_properties = {7: fem.GroupProperties(aluminum, 0.01),
+                                   9: fem.GroupProperties(aluminum, 0.02)}
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
     assert window.acts_for() == []
     _pick_blocks(window, pump, item, [0])
-    assert window.acts_for() == [], 'one block has nothing to merge with'
+    assert window.acts_for() == [], 'one element group has nothing to merge with'
 
 
 def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
     from PySide6.QtCore import QItemSelectionModel
 
     _show_geometry(window, pump, two_blocks)
-    window.tree.setCurrentItem(block_row(window, 7))
+    window.tree.setCurrentItem(group_row(window, 7))
     window.edit_entities()
     pump()
     window.table.selectRow(0)
     pump()
-    assert not window.merge_blocks_action.isVisible(), 'one row'
+    assert not window.merge_groups_action.isVisible(), 'one row'
     window.table.selectionModel().select(
         window.table.model().index(1, 0),
         QItemSelectionModel.SelectionFlag.Select
         | QItemSelectionModel.SelectionFlag.Rows)
     pump()
-    assert window.merge_blocks_action.isVisible()
-    window.merge_blocks_action.trigger()
+    assert window.merge_groups_action.isVisible()
+    window.merge_groups_action.trigger()
     pump()
-    assert list(two_blocks.block_id) == [7] and len(two_blocks.elem_id) == 2
+    assert list(two_blocks.group_id) == [7] and len(two_blocks.elem_id) == 2

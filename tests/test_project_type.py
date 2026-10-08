@@ -124,7 +124,7 @@ def test_a_type_has_a_slot_for_everything_its_report_binds(project_type):
     # every report the type makes (two for a random-and-sine project)
     wanted = {token for template in PROJECT_TEMPLATES[project_type]
               for block in TEMPLATE_BUILDERS[template](
-                  visualdynamics.Project(), links=[]).blocks
+                  visualdynamics.Project(), object_groups=[]).blocks
               for value in block.values()
               for token in re.findall(r'@\w+:(\w+)', str(value))}
     assert wanted, 'the template binds symbolically or this proves nothing'

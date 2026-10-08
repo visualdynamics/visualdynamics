@@ -22,7 +22,7 @@ def geometry():
                   [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
         elem_conn=[[1, 2, 3]],
         elem_type=[41],
-        block_name=['edge'],
+        group_name=['edge'],
         length_unit='m')
 
 
@@ -30,7 +30,7 @@ def test_the_groups_are_named_as_the_tree_names_them(geometry):
     assert len(geometry.nodes) == 4
     assert len(geometry.coordinate_systems) == 1
     assert len(geometry.elements) == 1
-    assert len(geometry.blocks) == 1
+    assert len(geometry.groups) == 1
 
 
 def test_a_column_is_the_geometrys_own_array(geometry):
@@ -43,8 +43,8 @@ def test_a_column_is_the_geometrys_own_array(geometry):
 def test_a_row_writes_through_to_the_geometry(geometry):
     geometry.nodes[0].xyz = [9.0, 9.0, 9.0]
     assert list(geometry.node_xyz[0]) == [9.0, 9.0, 9.0]
-    geometry.blocks[0].name = 'renamed'
-    assert geometry.block_name[0] == 'renamed'
+    geometry.groups[0].name = 'renamed'
+    assert geometry.group_name[0] == 'renamed'
 
 
 def test_a_row_reads_the_geometry_as_it_stands_now(geometry):
@@ -100,12 +100,12 @@ def test_the_columns_are_the_table_columns(geometry):
     assert geometry.nodes.columns == (
         'ids', 'xyz', 'colors', 'placement_systems', 'displacement_systems')
     assert geometry.elements.columns == (
-        'ids', 'types', 'colors', 'blocks', 'nodes')
+        'ids', 'types', 'colors', 'groups', 'nodes')
 
 
 def test_a_view_says_what_it_holds(geometry):
     assert repr(geometry.nodes) == '<4 nodes>'
-    assert repr(geometry.blocks) == '<1 block>'
+    assert repr(geometry.groups) == '<1 element group>'
     assert repr(geometry.elements) == '<1 element>'
     assert 'id=1' in repr(geometry.nodes[0])
     assert 'matrix' not in repr(geometry.coordinate_systems[0])

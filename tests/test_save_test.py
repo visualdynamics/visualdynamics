@@ -144,7 +144,7 @@ def _modal_project(window, pump):
 
 
 def test_an_object_ends_up_in_exactly_one_link_group(window, pump):
-    """The invariant everything downstream assumes: `group_of` answers
+    """The invariant everything downstream assumes: `object_group_of` answers
     with the first match, and a bracket is painted over a run of rows
     that has to be contiguous.
 
@@ -154,14 +154,14 @@ def test_an_object_ends_up_in_exactly_one_link_group(window, pump):
     about its objects one at a time, as each was added.
     """
     project = _modal_project(window, pump).project
-    project.links = [
+    project.object_groups = [
         {'members': ['FEM Geometry', 'FEM Modes'], 'role': 'FEM'},
         {'members': ['FEM Modes', 'Experimental Modes'], 'role': 'Basis'}]
     project.absorb_links([])            # any mutation prunes
-    holders = [group['members'] for group in project.links]
+    holders = [group['members'] for group in project.object_groups]
     assert [m for m in holders[0] if m == 'FEM Modes'] == []
     assert 'FEM Modes' in holders[1], 'the later group keeps it'
-    counted = Counter(name for group in project.links
+    counted = Counter(name for group in project.object_groups
                       for name in group['members'])
     assert [name for name, n in counted.items() if n > 1] == []
 
@@ -170,17 +170,17 @@ def test_a_group_emptied_by_that_goes_unless_it_has_a_role(window, pump):
     """An emptied named group keeps its place in the tree; a group
     with no role and no members is nothing at all."""
     project = _modal_project(window, pump).project
-    project.links = [
+    project.object_groups = [
         {'members': ['FEM Geometry', 'FEM Modes'], 'role': None},
         {'members': ['FEM Geometry', 'FEM Modes'], 'role': 'FEM'}]
     project.absorb_links([])
-    assert [group['role'] for group in project.links] == ['FEM']
+    assert [group['role'] for group in project.object_groups] == ['FEM']
 
 
 def test_no_row_is_lost_when_the_links_overlap(window, pump):
     """The bug this is here for lost rows silently.
 
-    The tree orders its rows by walking the link groups, so an object
+    The tree orders its rows by walking the object groups, so an object
     named in two of them put its row in that order twice — the
     positions then ran past the end of the tree, and Qt's `insertChild`
     past the end **drops a child that has already been taken out**,
@@ -199,7 +199,7 @@ def test_no_row_is_lost_when_the_links_overlap(window, pump):
     # nothing missing is exactly the case with no slack in it.
     window.set_project_type(None)
     pump()
-    window.project.links = [
+    window.project.object_groups = [
         {'members': ['FEM Geometry', 'FEM Modes'], 'role': 'FEM'},
         {'members': ['FEM Modes', 'Experimental Modes'], 'role': None},
         {'members': ['Experimental Modes', 'Experimental Geometry'],
@@ -220,14 +220,14 @@ def test_a_project_imported_into_itself_keeps_every_row(window, pump,
     path = tmp_path / 'modal.vdyn'
     io.save_test(path, 'Modal', dict(window.objects),
                  active_geometry=window.active_geometry,
-                 project_type=window.project_type, links=window.links)
+                 project_type=window.project_type, object_groups=window.object_groups)
     for _ in range(3):
         window.import_paths([str(path)])
         pump()
         rows = [window.test_item.child(i).text(0)
                 for i in range(window.test_item.childCount())]
         assert [name for name in window.objects if name not in rows] == []
-        counted = Counter(name for group in window.links
+        counted = Counter(name for group in window.object_groups
                           for name in group['members'])
         assert [name for name, n in counted.items() if n > 1] == []
 
@@ -240,22 +240,22 @@ def test_an_emptied_project_reimported_gets_its_basis_back(window, pump,
     counted as a Basis already held, demoted the file's group to no
     role (Brandon, 2026-09-03)."""
     _modal_project(window, pump)
-    basis = list(window.project.role_group('Basis')['members'])
+    basis = list(window.project.object_group_with_role('Basis')['members'])
     path = tmp_path / 'modal.vdyn'
     io.save_test(path, 'Modal', dict(window.objects),
                  active_geometry=window.active_geometry,
-                 project_type=window.project_type, links=window.links)
+                 project_type=window.project_type, object_groups=window.object_groups)
     window.tree.clearSelection()
     for name in list(window.objects):
         window._item_for_object(name).setSelected(True)
     window.delete_selected()
     pump()
-    assert not window.objects and window.links == []
+    assert not window.objects and window.object_groups == []
     window.import_paths([str(path)])
     pump()
-    assert window.project.role_group('Basis') is not None, 'no Basis'
-    assert set(window.project.role_group('Basis')['members']) == set(basis)
-    assert [g['role'] for g in window.links].count('Basis') == 1
+    assert window.project.object_group_with_role('Basis') is not None, 'no Basis'
+    assert set(window.project.object_group_with_role('Basis')['members']) == set(basis)
+    assert [g['role'] for g in window.object_groups].count('Basis') == 1
 
 
 def test_the_copy_links_to_its_own_geometry(window, pump, tmp_path):
@@ -266,7 +266,7 @@ def test_the_copy_links_to_its_own_geometry(window, pump, tmp_path):
     path = tmp_path / 'modal.vdyn'
     io.save_test(path, 'Modal', dict(window.objects),
                  active_geometry=window.active_geometry,
-                 project_type=window.project_type, links=window.links)
+                 project_type=window.project_type, object_groups=window.object_groups)
     window.import_paths([str(path)])
     pump()
     arrived = window.linked_group('FEM Modes (2)')

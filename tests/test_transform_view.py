@@ -112,7 +112,7 @@ def test_the_entry_turns_round_for_a_modal_record(window, pump):
     pump()
     assert 'Run Physical Responses' in window.project
     assert 'Run Physical Responses' in next(
-        group['members'] for group in window.project.links
+        group['members'] for group in window.project.object_groups
         if 'Plate' in group['members']), \
         'the expansion lands with the geometry it animates on'
     assert window.project.journal[-1] == \
@@ -173,7 +173,7 @@ def test_a_picked_mode_expands_its_contribution_alone(window, pump):
     assert window.project.journal[-1] == \
         "project.expand('Run Modal Responses', 'Modes', records=[5])"
     assert 'Run Physical Responses (M6)' in next(
-        group['members'] for group in window.project.links
+        group['members'] for group in window.project.object_groups
         if 'Plate' in group['members'])
 
 

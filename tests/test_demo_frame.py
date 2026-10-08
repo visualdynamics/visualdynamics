@@ -41,7 +41,7 @@ def test_the_frame_is_the_shared_models_frame():
     inch = geometry.node_xyz / INCH
     assert np.allclose(inch.min(axis=0), [-8, -3, -0.5], atol=1e-9)
     assert np.allclose(inch.max(axis=0), [8, 3, 0], atol=1e-9)
-    assert sorted(geometry.block_name) == ['frame', 'inserts']
+    assert sorted(geometry.group_name) == ['frame', 'inserts']
     assert set(geometry.elem_type.tolist()) == {115}, 'bricks only'
     # 41 inserts: a hole through and the insert in its top, each a
     # column of bricks
@@ -56,8 +56,8 @@ def test_the_frame_is_the_shared_models_frame():
     assert np.linalg.norm(centers[:, :2] - holes[nearest], axis=1).max() < frame.HOLE_RADIUS
     assert centers[:, 2].min() > -frame.INSERT_DEPTH - frame.SIZE, 'the top only'
     assert centers[:, 2].max() < 0.0
-    for block in geometry.block_id:
-        assert geometry.block_properties[int(block)].kind == 'solid'
+    for block in geometry.group_id:
+        assert geometry.group_properties[int(block)].kind == 'solid'
     assert geometry.view == frame.VIEW
 
 
@@ -66,7 +66,7 @@ def test_a_wing_alone_is_a_plate_with_eighteen_holes():
     inch = thin.node_xyz / INCH
     assert np.allclose(inch.min(axis=0), [frame.WING_X, -11, frame.WING_GAP], atol=1e-9)
     assert inch[:, 2].max() == pytest.approx(frame.WING_GAP + frame.WING_THICKNESS['thin wing'])
-    assert list(thin.block_name) == ['thin wing']
+    assert list(thin.group_name) == ['thin wing']
     # every hole is a void: no brick center within its radius
     centers = np.array([inch[thin.node_index(c)].mean(axis=0) for c in thin.elem_conn])
     for hx, hy in frame.WING_HOLES:
@@ -78,12 +78,12 @@ def test_a_wing_alone_is_a_plate_with_eighteen_holes():
 
 def test_the_assembly_ties_the_wing_through_four_washers():
     both = frame.geometry('thick wing', size=COARSE, wing_size=COARSE)
-    assert sorted(both.block_name) == ['frame', 'inserts', 'screws', 'thick wing']
+    assert sorted(both.group_name) == ['frame', 'inserts', 'screws', 'thick wing']
     links = both.elements_in('screws')
     assert len(links) >= 4 * 4, 'each washer covers bricks whose nodes are tied'
     for screw in frame.SCREWS:
         assert frame.washer_patch(both, 'thick wing', screw), 'bricks under it'
-    screws = both.block_properties[int(both.block_id[list(both.block_name).index('screws')])]
+    screws = both.group_properties[int(both.group_id[list(both.group_name).index('screws')])]
     assert screws.material.is_rigid
     model = frame.build('thick wing', size=COARSE, wing_size=COARSE)
     assert len(model.masses) == 4 and all(m.name == 'screw' for m in model.masses)
@@ -99,7 +99,7 @@ def test_the_project_is_the_app_workflow(tmp_path):
                                     'Thin Wing on Frame', 'Thick Wing on Frame']
     project.save(tmp_path / 'frame.vdyn')
     project = visualdynamics.load(tmp_path / 'frame.vdyn')
-    assert project['Frame'].block_properties[1].kind == 'solid'
+    assert project['Frame'].group_properties[1].kind == 'solid'
     assert 'solve_modes' in [verb for verb, _ in project.verbs('Frame')]
     solved = project.solve_modes('Frame', num_modes=8)
     assert int(np.sum(project[solved].frequency == 0.0)) == 6

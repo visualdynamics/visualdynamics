@@ -127,7 +127,7 @@ def test_opening_on_a_set_makes_the_object_and_edits_it(window, pump):
     assert 'Modes Specification' in window.project, 'made on opening'
     made = window.project['Modes Specification']
     assert made.num_records == 6, 'autospectra alone; nothing assumed'
-    assert 'Modes Specification' in window.project.links[0]['members']
+    assert 'Modes Specification' in window.project.object_groups[0]['members']
     assert window.current_object() is made, 'and the sheet carries on there'
     assert panel.isVisible()
     assert window.author_data_action.isChecked(), 'Edit, on the plot bar'

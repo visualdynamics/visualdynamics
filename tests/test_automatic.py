@@ -188,7 +188,7 @@ def test_a_modal_run_gets_its_frfs_and_a_fitted_shape_set():
     frf = next(name for name, obj in project.items() if isinstance(obj, Frf))
     shapes = next(name for name, obj in project.items()
                   if isinstance(obj, ShapeSet))
-    assert shapes in project.group_of(frf), 'fitted from the FRFs made'
+    assert shapes in project.object_group_of(frf), 'fitted from the FRFs made'
     # the other side and the matched pairs are best practice the data
     # cannot supply; only they are left
     assert [slot[0] for slot in project.missing()] == \

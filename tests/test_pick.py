@@ -105,15 +105,15 @@ def test_tolerance_is_respected():
 
 def test_beam_picking_is_accurate_where_unambiguous():
     """Every drawn-line segment whose midpoint is not shared with
-    another (the survey's lines are blocks of beams, 2026-09-30)."""
+    another (the survey's lines are element groups of beams, 2026-09-30)."""
     from visualdynamics.viz.pick import EntityPicker, _segment_distances
 
     # the survey's drawn lines on their own: its faces' edges lie on
     # the same pixels and would make every segment ambiguous
     survey = visualdynamics.import_file(fixture_path('plate/test_geometry.npz'),
                                         length_unit='m')
-    drawn = {line['block'] for line in survey.drawn_lines()}
-    survey.delete_blocks([int(b) for b in survey.block_id
+    drawn = {line['group'] for line in survey.drawn_lines()}
+    survey.delete_groups([int(b) for b in survey.group_id
                           if int(b) not in drawn])
     geometry, plotter, projector = scene(survey)
     screen, _ = projector.screen()

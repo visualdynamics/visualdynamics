@@ -35,7 +35,7 @@ def test_joining_keeps_the_ids_already_there():
     wall = mesh.plane((0, 0, 0), (4, 0, 0), (0, 0, 2), 1, 'wall')
     found = mesh.join(floor, wall)
     assert found == {'added': 10, 'shared': 5, 'elements': 8, 'duplicates': 0,
-                     'blocks': [2]}
+                     'groups': [2]}
     assert np.array_equal(floor.node_id[:15], before)
     assert floor.node_id[15:].tolist() == list(range(116, 126))
     shared_line = [n for n in floor.elem_conn[8] if n < 116]  # its first
@@ -45,12 +45,12 @@ def test_joining_keeps_the_ids_already_there():
 def test_a_block_of_the_same_name_is_joined_and_an_unnamed_one_is_not():
     geometry = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, 'box')
     assert mesh.join(geometry, mesh.plane((1, 0, 0), (0, 1, 0), (0, 0, 1),
-                                          0.5, 'box'))['blocks'] == [1]
+                                          0.5, 'box'))['groups'] == [1]
     assert mesh.join(geometry, mesh.plane((0, 0, 1), (1, 0, 0), (0, 1, 0),
-                                          0.5, ''))['blocks'] == [2]
+                                          0.5, ''))['groups'] == [2]
     assert mesh.join(geometry, mesh.plane((0, 1, 0), (1, 0, 0), (0, 0, 1),
-                                          0.5, ''))['blocks'] == [3]
-    assert list(geometry.block_name) == ['box', '', '']
+                                          0.5, ''))['groups'] == [3]
+    assert list(geometry.group_name) == ['box', '', '']
 
 
 def test_landing_says_what_joining_would_share_without_joining():
@@ -85,7 +85,7 @@ def test_the_project_builds_a_model_from_nothing():
     assert project[name].num_nodes == 0 and project[name].length_unit == 'in'
     assert [verb for verb, _ in project.verbs(name)] == [
         'generate_rigid_body_modes', 'add_plane', 'add_block', 'set_view'], \
-        'an empty geometry has no elements to merge or blocks to solve'
+        'an empty geometry has no elements to merge or element groups to solve'
     first = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 2, 0), 1,
                               'box', unit='in')
     second = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 0, 2), 1,
@@ -94,7 +94,7 @@ def test_the_project_builds_a_model_from_nothing():
     box = project[name]
     assert np.allclose(box.node_xyz.max(axis=0), [4 * INCH, 2 * INCH,
                                                   2 * INCH])
-    assert list(box.block_name) == ['box']
+    assert list(box.group_name) == ['box']
     assert project.journal[-2:] == [
         ("project.add_plane('Box', (0, 0, 0), (4, 0, 0), (0, 2, 0), 1, "
          "'box', unit='in')"),
@@ -150,10 +150,10 @@ def test_add_plane_types_planes_in_display_units(window, pump):
         'no window of its own'
     labels = [label.text() for label in panel.findChildren(QLabel)]
     assert {'Center [in]', 'Width [in]', 'Element size [in]'} <= set(labels)
-    panel.set_values(block='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
+    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
     pump()
     assert panel.reading_label.text() == (
-        "8 plates of 1 by 1 in, into a new block 'floor': 15 nodes to add, "
+        "8 plates of 1 by 1 in, into a new element group 'floor': 15 nodes to add, "
         '0 on nodes already there.')
     assert 'plane-preview' in window.scene.plotter.actors
     assert any('rotate-arrow' in name for name in window.scene.plotter.actors), \
@@ -165,13 +165,13 @@ def test_add_plane_types_planes_in_display_units(window, pump):
     assert window.project.journal[-1].startswith("project.add_plane('Box', "
                                                  '(0.0, 0.0, 0.0), (4.0, ')
     # a wall: the zero width now along Y, the plate in X-Z
-    panel.set_values(block='wall', center=(2, 0, 1), widths=(4, 0, 2))
+    panel.set_values(group='wall', center=(2, 0, 1), widths=(4, 0, 2))
     pump()
     assert panel.reading_label.text().endswith(
         '10 nodes to add, 5 on nodes already there.')
     panel.add_button.click()
     pump()
-    assert box.num_nodes == 25 and list(box.block_name) == ['floor', 'wall']
+    assert box.num_nodes == 25 and list(box.group_name) == ['floor', 'wall']
     assert 'added 8 plates — 10 nodes, 5 shared' in \
         window.statusBar().currentMessage()
     panel.set_values(widths=(4, 2, 1))

@@ -332,7 +332,7 @@ def test_a_runs_channel_table_and_data_are_linked_and_independent():
     project = visualdynamics.Project()
     added = project.import_file(fixture_path('plate', 'random.nc4'))
     assert set(added) == {'Channel Table', 'Time History', 'Specification'}
-    assert set(project.group_of('Channel Table')) == set(added), 'one file, one group'
+    assert set(project.object_group_of('Channel Table')) == set(added), 'one file, one group'
     project.rename_dof('Time History', '101Z+', '201Z+', 'acceleration')
     assert project['Time History'].response_dof[0] == '201Z+'
     assert project['Channel Table'].dof_strings()[0] == '101Z+', \
@@ -344,7 +344,7 @@ def test_a_runs_channel_table_and_data_are_linked_and_independent():
     # a file holding one object links nothing
     alone = visualdynamics.Project()
     alone.import_file(fixture_path('plate', 'shapes.npy'))
-    assert alone.links == []
+    assert alone.object_groups == []
 
 
 def test_a_node_typed_in_the_table_view_moves_the_rows_coordinate(window, pump):

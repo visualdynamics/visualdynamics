@@ -30,15 +30,15 @@ def _two_block_geometry():
                   [2, 0, 0], [3, 0, 0], [3, 1, 0], [2, 1, 0]],
         elem_id=[1, 2], elem_type=[41, 44],
         elem_conn=[np.array([1, 2, 3]), np.array([4, 5, 6, 7])],
-        elem_block=[1, 2], block_id=[1, 2],
-        block_name=['wing', 'body'], length_unit='m')
+        elem_group=[1, 2], group_id=[1, 2],
+        group_name=['wing', 'body'], length_unit='m')
 
 
 def test_3mf_round_trips_blocks_as_named_parts(tmp_path):
     path = tmp_path / 'model.3mf'
     export_file(_two_block_geometry(), path)
     back = import_file(path)
-    assert list(back.block_name) == ['wing', 'body']
+    assert list(back.group_name) == ['wing', 'body']
     assert back.length_unit == 'm', '3MF declares its unit; nothing asks'
     # the quad went out as two triangles, so three faces come back —
     # covering the same area at the same coordinates
@@ -74,7 +74,7 @@ def test_3mf_units_convert_to_meters(tmp_path):
     back = import_file(path)
     assert back.length_unit == 'm'
     assert np.isclose(back.node_xyz.max(), 1.0), '1000 mm is one meter'
-    assert list(back.block_name) == ['plate']
+    assert list(back.group_name) == ['plate']
 
 
 def test_3mf_components_place_each_instance(tmp_path):
@@ -107,7 +107,7 @@ def test_3mf_components_place_each_instance(tmp_path):
     with zipfile.ZipFile(path, 'w') as archive:
         archive.writestr('3D/3dmodel.model', model)
     back = import_file(path)
-    assert list(back.block_name) == ['bracket', 'bracket']
+    assert list(back.group_name) == ['bracket', 'bracket']
     assert len(back.elem_id) == 2
     # the item lifts everything to z=5; the second component also
     # shifts x by 10 — composed, not either alone
@@ -126,7 +126,7 @@ def test_stl_round_trips_triangles_and_merges_vertices(tmp_path):
     # the quad's split shares its diagonal: seven distinct corners,
     # not nine — the merge is what makes the mesh a mesh
     assert len(back.node_id) == 7
-    assert list(back.block_name) == ['model'], (
+    assert list(back.group_name) == ['model'], (
         'binary STL has no names; the file names the one block')
     assert back.length_unit == 'm', 'declared at import, not by the file'
 
@@ -161,8 +161,8 @@ endsolid right plate
     path = tmp_path / 'plates.stl'
     path.write_text(plate, encoding='ascii')
     back = import_file(path)
-    assert list(back.block_name) == ['left plate', 'right plate']
-    assert list(back.elem_block) == [1, 2]
+    assert list(back.group_name) == ['left plate', 'right plate']
+    assert list(back.elem_group) == [1, 2]
 
 
 def test_a_faceless_geometry_is_refused_by_both(tmp_path):
@@ -181,7 +181,7 @@ def test_the_project_import_verb_reaches_them(tmp_path, window, pump):
     [name] = window.project.import_file(str(path))
     geometry = window.project[name]
     assert isinstance(geometry, Geometry)
-    assert list(geometry.block_name) == ['wing', 'body']
+    assert list(geometry.group_name) == ['wing', 'body']
     assert any('import_file' in line for line in window.project.journal)
 
 

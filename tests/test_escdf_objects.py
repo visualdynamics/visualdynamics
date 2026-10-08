@@ -3,7 +3,7 @@
 
 Two round trips, and the reference in the middle. A project written
 here reads back whole, every object from the attachment that holds it
-in its own layout, its link groups as named activities and back. The
+in its own layout, its object groups as named activities and back. The
 same file with every attachment stripped — what a foreign reader would
 keep — reads back from the standard fields alone: nodes, lines,
 elements and per-node axes; records, units and abscissa; frequencies
@@ -75,7 +75,7 @@ def test_a_project_round_trips_whole(tmp_path):
         back = visualdynamics.Project.open(path)
     assert _names(back) == _names(project), 'the order it held them'
     assert back.name == project.name and back.project_type == project.project_type
-    assert back.links == project.links, 'a named group is an activity is a named group'
+    assert back.object_groups == project.object_groups, 'a named group is an activity is a named group'
     assert back.provenance == project.provenance
     for name, obj in project.items():
         again = back[name]
@@ -83,7 +83,7 @@ def test_a_project_round_trips_whole(tmp_path):
     np.testing.assert_allclose(back['FRF'].ordinate, project['FRF'].ordinate)
     assert back['FRF'].reference_unit == project['FRF'].reference_unit
     assert back['SRS'].q == project['SRS'].q
-    assert list(back['Plate FEM'].block_name) == list(project['Plate FEM'].block_name)
+    assert list(back['Plate FEM'].group_name) == list(project['Plate FEM'].group_name)
     np.testing.assert_allclose(back['FEM Modes'].shape_matrix,
                                project['FEM Modes'].shape_matrix)
     assert back['Photos'].images[0] == project['Photos'].images[0]
@@ -153,8 +153,8 @@ def test_the_standard_fields_alone_rebuild_the_objects(tmp_path):
                                project['FEM Modes'].shape_matrix)
     channel_table = back['Channel Table']
     assert list(channel_table.frame['node']) == list(project['Channel Table'].frame['node'])
-    # the activity is the link group, named for it
-    group = next(g for g in back.links if g.get('name') == 'Analysis')
+    # the activity is the object group, named for it
+    group = next(g for g in back.object_groups if g.get('name') == 'Analysis')
     assert set(group['members']) == {'Plate FEM', 'FEM Modes', 'FRF', 'PSD', 'SRS'}
 
 

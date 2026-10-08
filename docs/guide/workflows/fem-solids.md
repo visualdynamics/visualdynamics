@@ -39,7 +39,7 @@ frame.project().save('frame.vdyn')    # the five models this page builds
 | Build it from blocks | the geometry's bar | *Add Block*, once per block |
 | Cut the holes | a script | `mesh.block(..., holes=...)`, which the dialog does not type |
 | Tie the screwed parts | the geometry's Hexes | pick the wing's bricks under each washer, *Tie* to the frame |
-| Give each block its material | the pencil on the block's row | a material; nothing else for a block of solids |
+| Give each element group its material | the pencil on the element group's row | a material; nothing else for an element group of solids |
 | Solve | the geometry's bar | *Solve Modes*, to 1500 Hz |
 
 ## 1. Blocks
@@ -57,7 +57,7 @@ upright's, so the demonstration meshes each rail as the segments
 between the uprights. The frame's top face is at z = 0 with the plate
 below it, as the shared models have it.
 
-| Block | Center | Widths |
+| Element group | Center | Widths |
 |---|---|---|
 | frame, a rail | (0, 2.75, −0.25) | (16, 0.5, 0.5) |
 | frame, the other rail | (0, −2.75, −0.25) | (16, 0.5, 0.5) |
@@ -72,7 +72,7 @@ From a script the same blocks are `mesh.block` and `mesh.assemble` (or
 `project.add_block`, which is what each Add records), and a script can
 say what the dialog does not: the **holes**. Each is a center, a radius
 and the axis it runs along, blind to a depth or through, and either a
-void or the name of the block its bricks go to, such as a threaded
+void or the name of the element group its bricks go to, such as a threaded
 insert given its own material. The bricks on a hole's rim are moved onto its
 circle, so a hole is round and not stair-stepped. The frame's 41
 inserts are each a 0.29 in hole drilled through, with the insert filling
@@ -111,10 +111,10 @@ under it.
 ## 3. Materials and solve
 
 Expand the geometry in the tree, then **Hexes**, and click the pencil
-on a block's row: the blocks table opens on it, one row per part. A
-block of solids takes a material and nothing else.
+on an element group's row: the Element Groups table opens on it, one row per part. An
+element group of solids takes a material and nothing else.
 
-| Block | Material |
+| Element group | Material |
 |---|---|
 | frame | 6061-T6 |
 | inserts | the insert material the shared model states, spread over the hole |
@@ -132,7 +132,7 @@ Two things, and they are different checks.
 
 **The element**, against the finite element model shared on the wiki:
 that mesh, read with the Nastran importer (its PSOLID and MAT1 cards
-become the blocks' materials) and solved here, gives the first ten
+become the element groups' materials) and solved here, gives the first ten
 elastic modes MSC Nastran gives it to within a tenth of a percent, on
 265,000 degrees of freedom, in two minutes and eight gigabytes. That is the
 brick element and the sparse solver agreeing with a solver the audience

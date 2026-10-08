@@ -6,7 +6,7 @@ interpreted against, or the object describes a different structure: airplane
 mode shapes beside a plate geometry are not a test, they are a mistake.
 
 Compatibility is judged against the geometry each object **answers
-to**: its link group's geometry when it has one — a FEM shape set
+to**: its object group's geometry when it has one — a FEM shape set
 beside its own FEM mesh is consistent, whichever geometry is active —
 and the one **active geometry** otherwise, so a test holding two models
 gives a definite answer instead of "compatible with something". Objects
@@ -17,7 +17,7 @@ not paint everything red.
 A data object whose DOFs are **modal coordinates** (`M1` … `Mn`,
 `validate.modal_coordinate`) names no node at all: it answers to a
 *shape set*, the one it was transformed through, and fits wherever a
-set with at least that many modes is — its link group's set when it
+set with at least that many modes is — its object group's set when it
 has one, any set in the project otherwise (Brandon, 2026-09-04: the
 modal responses belong in the group with the shapes and the record
 they came from).
@@ -265,7 +265,7 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
 
 def check_compatibility(objects: Mapping[str, Any],
                         geometry_name: str | None = None,
-                        links: Sequence[Mapping[str, Any]] | None = None
+                        object_groups: Sequence[Mapping[str, Any]] | None = None
                         ) -> Report:
     """Check every object in a test against the geometry it answers to.
 
@@ -283,8 +283,8 @@ def check_compatibility(objects: Mapping[str, Any],
     geometry_name : str, optional
         The geometry everything not linked to one is judged against; the
         first geometry found when omitted.
-    links : sequence of Mapping, optional
-        The project's link groups, which say which geometry each object
+    object_groups : sequence of Mapping, optional
+        The project's object groups, which say which geometry each object
         answers to.
 
     Returns
@@ -300,7 +300,7 @@ def check_compatibility(objects: Mapping[str, Any],
         geometry_name = next(iter(geometries), None)
 
     def home(name: str) -> str | None:
-        for group in links or []:
+        for group in object_groups or []:
             if name in group.get('members', ()):
                 linked = next((member for member in group['members']
                                if member in geometries), None)
@@ -312,7 +312,7 @@ def check_compatibility(objects: Mapping[str, Any],
     def companions(name: str) -> Mapping[str, Any]:
         # a modal object answers to its group's shape sets, or to any
         # in the project while it is not yet linked
-        for group in links or []:
+        for group in object_groups or []:
             if name in group.get('members', ()):
                 return {member: objects[member] for member in group['members']
                         if member in objects}

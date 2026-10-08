@@ -1,7 +1,7 @@
 """The project: every object a test holds, and how they belong together.
 
 The GUI's window keeps exactly what a `Project` keeps — the named
-objects, the link groups, which group is the Basis, the project type,
+objects, the object groups, which group is the Basis, the project type,
 the active geometry — so a project built by clicking and one built in
 a script are the same thing, and either saves to the same `.vdyn`
 file. Scripts get the GUI's own verbs (`add`, `link`, `set_basis`,
@@ -42,13 +42,13 @@ from .core.shapes import ShapeSet
 from .core.sine import SineLevelSet, SineSweepSpecification
 from .names import display_name
 
-# A link group: the objects declared to belong together, and what the
+# An object group: the objects declared to belong together, and what the
 # group is — 'Basis', or None for every other group. One field says it
 # all: 'side' used to ride beside the role saying the same thing in a
 # second vocabulary, and was folded in (Brandon, 2026-08-30); a 'FEM'
 # role named the comparison pair until 2026-09-02, when it went too —
 # a project knows its Basis, and everything else is other (Brandon).
-LinkGroup = dict[str, Any]
+ObjectGroup = dict[str, Any]
 
 # How a test reads: the structure, its photos and instrumentation, the
 # measurements in the order they get derived, then what was identified
@@ -122,10 +122,10 @@ def describe(obj: Any) -> str:
                      for n, word in counts if n)
 
 
-def remap_links(links: Iterable[LinkGroup],
+def remap_links(object_groups: Iterable[ObjectGroup],
                 mapping: dict[str, str],
-                roles_taken: Iterable[str] = ()) -> list[LinkGroup]:
-    """Link groups translated through a {old name: new name} mapping.
+                roles_taken: Iterable[str] = ()) -> list[ObjectGroup]:
+    """Object groups translated through a {old name: new name} mapping.
 
     Importing a project into one that already holds objects renames
     what clashes; its groups have to follow, or the structure the file
@@ -133,7 +133,7 @@ def remap_links(links: Iterable[LinkGroup],
     that has it — the Basis is the project's, not the file's.
     """
     taken, out = set(roles_taken), []
-    for group in links or ():
+    for group in object_groups or ():
         members = [mapping[name] for name in group.get('members', ())
                    if name in mapping]
         if len(members) < 2:
@@ -160,7 +160,7 @@ def retarget(obj: Any, mapping: dict[str, str]) -> None:
         for old, new in mapping.items():
             follow(old, new)
     # the type, not the attribute: a Geometry grew a `blocks` of its own
-    # (its element blocks), and duck-typing walked those instead — a
+    # (its element groups, now `groups`), and duck-typing walked those instead — a
     # rename then died inside a Qt signal, where the traceback goes
     # nowhere and the rename simply does not happen
     if isinstance(obj, Report):
@@ -434,7 +434,7 @@ class Project(dict):
                  objects: dict[str, Any] | None = None,
                  active_geometry: str | None = None,
                  project_type: str | None = None,
-                 links: Iterable[LinkGroup] | None = None,
+                 object_groups: Iterable[ObjectGroup] | None = None,
                  provenance: dict[str, dict[str, Any]] | None = None
                  ) -> None:
         super().__init__(objects or {})
@@ -448,13 +448,13 @@ class Project(dict):
         # otherwise, and are never stored again
         # ... and, since 2026-09-30, an optional 'name': what the group
         # is called, which an ESCDF activity needs and a tree can show
-        self.links: list[dict[str, Any]] = [
+        self.object_groups: list[dict[str, Any]] = [
             {'members': list(group['members']),
              'role': 'Basis' if (group.get('role') == 'Basis'
                                  or group.get('side') == 'experimental'
                                  and not group.get('role')) else None,
              **({'name': str(group['name'])} if group.get('name') else {})}
-            for group in (links or [])]
+            for group in (object_groups or [])]
         #: the roles the last link moved, (history, channel, was, now)
         #: — a front end says so rather than letting FRFs move silently
         self.last_role_changes: list = []
@@ -507,15 +507,15 @@ class Project(dict):
             lines.append('  * the active geometry')
         return '\n'.join(lines)
 
-    def grouped_names(self) -> list[tuple[LinkGroup | None, list[str]]]:
+    def grouped_names(self) -> list[tuple[ObjectGroup | None, list[str]]]:
         """[(group or None, [names])] in the order the tree shows them:
-        the Basis group first, then the other link groups, then what is
+        the Basis group first, then the other object groups, then what is
         unlinked — each in the canonical type order, and objects of one
         type in the order they arrived."""
         def ordered(names: Iterable[str]) -> list[str]:
             return sorted(names, key=lambda name: type_rank(self[name]))
 
-        groups = sorted(self.links, key=lambda g: g['role'] != 'Basis')
+        groups = sorted(self.object_groups, key=lambda g: g['role'] != 'Basis')
         out, linked = [], set()
         for group in groups:
             members = [name for name in group['members'] if name in self]
@@ -596,7 +596,7 @@ class Project(dict):
 
         Anything visualdynamics reads: a geometry, a Rattlesnake run, or a whole
         saved project. A project brings its structure with it — its
-        link groups follow the objects even when a name clash renamed
+        object groups follow the objects even when a name clash renamed
         them — and, into an empty project, its name, type and active
         geometry too. Foreign readers' keys become readable names
         ('Modal_frf' is an FRF), the way the tree spells them.
@@ -638,9 +638,9 @@ class Project(dict):
                 # imported objects carry follow it
                 for obj in result.values():
                     retarget(obj, mapping)
-            self.links += remap_links(
-                result.links, mapping,
-                {group['role'] for group in self.links if group['role']})
+            self.object_groups += remap_links(
+                result.object_groups, mapping,
+                {group['role'] for group in self.object_groups if group['role']})
             if was_empty:
                 self.name = result.name or self.name
                 self.project_type = result.project_type
@@ -664,7 +664,7 @@ class Project(dict):
         return [self.add(display_name(type(result).__name__), result)]
 
     def remove(self, *names: str) -> None:
-        """Delete objects, pruning them out of every link group.
+        """Delete objects, pruning them out of every object group.
 
         Parameters
         ----------
@@ -686,7 +686,7 @@ class Project(dict):
     def rename(self, old: str, new: str) -> str:
         """Rename an object; every reference to it follows.
 
-        Link groups, matched-modes sets and report block bindings all
+        Object groups, matched-modes sets and report block bindings all
         name their objects, and a rename that left any of them pointing
         at the old name would strand a figure or a bracket.
 
@@ -715,7 +715,7 @@ class Project(dict):
         self.update(items)
         if self.active_geometry == old:
             self.active_geometry = new
-        for group in self.links:
+        for group in self.object_groups:
             group['members'] = [new if member == old else member
                                 for member in group['members']]
         for obj in self.values():
@@ -834,7 +834,7 @@ class Project(dict):
         # this list) showed a time history jumping down its group the
         # moment FRFs were computed from it (Brandon, 2026-08-29).
         merged, kept = [], []
-        for group in self.links:
+        for group in self.object_groups:
             if any(name in group['members'] for name in names):
                 merged += [name for name in group['members']
                            if name not in merged]
@@ -868,10 +868,10 @@ class Project(dict):
             if blocks_a_link(issue):
                 raise ValueError(f'cannot link: {issue.message}')
         kept_name = name or next(
-            (group.get('name') for group in self.links
+            (group.get('name') for group in self.object_groups
              if any(n in group['members'] for n in names) and group.get('name')),
             None)
-        self.links = kept + [{'members': merged, 'role': role,
+        self.object_groups = kept + [{'members': merged, 'role': role,
                               **({'name': kept_name} if kept_name else {})}]
         if role is not None:
             self.set_role(merged[0], role)
@@ -893,12 +893,12 @@ class Project(dict):
         None
         """
         names = {str(name) for name in names}
-        self.links = [
+        self.object_groups = [
             {'members': kept, 'role': group['role']}
             for group, kept in
             ((group, [member for member in group['members']
                       if member not in names])
-             for group in self.links)
+             for group in self.object_groups)
             # A *named* group holds one object quite happily: the FEM
             # group of a modal test starts as a lone geometry, and
             # dissolving it is why the group could never be built up one
@@ -938,7 +938,7 @@ class Project(dict):
         target = self.name_of(target)
         if target == name:
             raise ValueError('an object is already in its own group')
-        members = self.group_of(target) or [target]
+        members = self.object_group_of(target) or [target]
         if name in members:
             return list(members)
         role = self.role_of(target)
@@ -946,18 +946,18 @@ class Project(dict):
         # geometry cannot carry, and by then the object has already left
         # where it was: a refused move must leave the links untouched
         # rather than half applied.
-        before = [dict(group) for group in self.links]
+        before = [dict(group) for group in self.object_groups]
         self.unlink(name)
         try:
             # `name` last: it joins the group it landed in, and a group
             # reads in the order its members arrived
             return self.link(*members, name, role=role)
         except (ValueError, KeyError):
-            self.links = before
+            self.object_groups = before
             raise
 
-    def name_group(self, member: str, name: str | None) -> list[str]:
-        """Name the link group an object belongs to, or unname it.
+    def name_object_group(self, member: str, name: str | None) -> list[str]:
+        """Name the object group an object belongs to, or unname it.
 
         Parameters
         ----------
@@ -971,16 +971,16 @@ class Project(dict):
         list of str
             The group's members.
         """
-        for group in self.links:
+        for group in self.object_groups:
             if member in group['members']:
                 if name:
                     group['name'] = str(name)
                 else:
                     group.pop('name', None)
                 return list(group['members'])
-        raise KeyError(f'{member!r} is in no link group')
+        raise KeyError(f'{member!r} is in no object group')
 
-    def group_of(self, name: Any) -> list[str] | None:
+    def object_group_of(self, name: Any) -> list[str] | None:
         """The members linked with `name`, or None.
 
         Parameters
@@ -991,7 +991,7 @@ class Project(dict):
         Returns
         -------
         list of str, or None
-            The names sharing its link group, or None when it is in
+            The names sharing its object group, or None when it is in
             no group.
         """
         group = self._group(self.name_of(name))
@@ -1008,7 +1008,7 @@ class Project(dict):
         Returns
         -------
         str or None
-            Its link group's role, or None if it has none.
+            Its object group's role, or None if it has none.
         """
         group = self._group(self.name_of(name))
         return None if group is None else group['role']
@@ -1023,7 +1023,7 @@ class Project(dict):
         slot for the measured one.
         """
         out: dict[str, list[str]] = {}
-        for group in self.links:
+        for group in self.object_groups:
             if group['role']:
                 out.setdefault(group['role'],
                                []).extend(group['members'])
@@ -1043,7 +1043,7 @@ class Project(dict):
         from .core.report import OTHER_SIDE
 
         sides = dict(self.placed())
-        others = [name for group in self.links if group['role'] != 'Basis'
+        others = [name for group in self.object_groups if group['role'] != 'Basis'
                   for name in group['members']]
         if others:
             sides[OTHER_SIDE] = others
@@ -1071,8 +1071,8 @@ class Project(dict):
         return missing_expectations(self.project_type, dict(self.items()),
                                     sides if 'Basis' in sides else None)
 
-    def role_group(self, role: str) -> LinkGroup | None:
-        """The link group carrying a role, or None.
+    def object_group_with_role(self, role: str) -> ObjectGroup | None:
+        """The object group carrying a role, or None.
 
         Parameters
         ----------
@@ -1081,10 +1081,10 @@ class Project(dict):
 
         Returns
         -------
-        LinkGroup or None
+        ObjectGroup or None
             That group, or None if unset.
         """
-        return next((group for group in self.links
+        return next((group for group in self.object_groups
                      if group['role'] == role), None)
 
     def place(self, name: Any, role: str) -> list[str]:
@@ -1113,7 +1113,7 @@ class Project(dict):
         """
         name = self.name_of(name)
         if role is None:
-            others = [g for g in self.links if g['role'] != 'Basis'
+            others = [g for g in self.object_groups if g['role'] != 'Basis'
                       and name not in g['members']]
             mine = self._group(name)
             if mine is not None and mine['role'] != 'Basis':
@@ -1122,32 +1122,32 @@ class Project(dict):
                 raise ValueError(
                     f'{len(others)} groups besides the Basis — drop '
                     'onto a member of the one meant')
-            before = [dict(existing) for existing in self.links]
+            before = [dict(existing) for existing in self.object_groups]
             self.unlink(name)
             try:
                 if not others:
-                    self.links = self.links + [
+                    self.object_groups = self.object_groups + [
                         {'members': [name], 'role': None}]
                     return [name]
                 return self.link(*others[0]['members'], name)
             except (ValueError, KeyError):
-                self.links = before
+                self.object_groups = before
                 raise
-        group = self.role_group(role)
+        group = self.object_group_with_role(role)
         if group is not None and name in group['members']:
             return list(group['members'])
-        before = [dict(existing) for existing in self.links]
+        before = [dict(existing) for existing in self.object_groups]
         self.unlink(name)
-        group = self.role_group(role)
+        group = self.object_group_with_role(role)
         try:
             if group is None:
-                self.links = self.links + [
+                self.object_groups = self.object_groups + [
                     {'members': [name], 'role': None}]
                 self.set_role(name, role)
                 return [name]
             return self.link(*group['members'], name, role=role)
         except (ValueError, KeyError):
-            self.links = before
+            self.object_groups = before
             raise
 
     def set_channel_role(self, source: Any, dof: str, quantity: str,
@@ -1230,7 +1230,7 @@ class Project(dict):
         history's channels — only the compatible ones: a table none of
         whose rows names one of the history's channels describes some
         other recording, and is left alone."""
-        group = self.group_of(name) or []
+        group = self.object_group_of(name) or []
         obj = self[name]
         out = []
         for other in group:
@@ -1317,9 +1317,9 @@ class Project(dict):
         """
         group = self._group(name)
         if group is None:
-            raise ValueError(f'{name!r} is not in a link group')
+            raise ValueError(f'{name!r} is not in an object group')
         if role is not None:
-            for other in self.links:
+            for other in self.object_groups:
                 if other is not group and other['role'] == role:
                     other['role'] = None
         group['role'] = role
@@ -1357,29 +1357,29 @@ class Project(dict):
         """
         # [] not None: None is the whole project, and a project with
         # no Basis declared has an *empty* one, not every object in it
-        members = next((group['members'] for group in self.links
+        members = next((group['members'] for group in self.object_groups
                         if group['role'] == 'Basis'), [])
         return Selection(self, members, 'the Basis group')
 
     @property
-    def groups(self) -> list[Selection]:
-        """Every link group, the Basis first, each reached by type."""
+    def object_group_selections(self) -> list[Selection]:
+        """Every object group, the Basis first, each reached by type."""
         return [Selection(self, group['members'],
                           f'the {group["role"] or "linked"} group')
-                for group in sorted(self.links,
+                for group in sorted(self.object_groups,
                                     key=lambda g: g['role'] != 'Basis')]
 
     @property
     def other(self) -> Selection:
-        """The one link group that is not the Basis — the model side of
+        """The one object group that is not the Basis — the model side of
         a correlation, usually. Says so when there are several."""
-        others = [group for group in self.links if group['role'] != 'Basis']
+        others = [group for group in self.object_groups if group['role'] != 'Basis']
         if len(others) == 1:
             return Selection(self, others[0]['members'], 'the other group')
         if not others:
             return Selection(self, [], 'the other group')
         raise AttributeError(
-            f'{len(others)} groups besides the Basis — use .groups[i]')
+            f'{len(others)} groups besides the Basis — use .object_group_selections[i]')
 
     def __getattr__(self, attribute: str) -> Any:
         """Objects reached by type across the whole project.
@@ -1417,7 +1417,7 @@ class Project(dict):
             the object is not linked to one.
         """
         name = self.name_of(name)
-        for member in self.group_of(name) or ():
+        for member in self.object_group_of(name) or ():
             if isinstance(self.get(member), Geometry):
                 return member, self[member]
         active = self.active_geometry
@@ -1425,12 +1425,12 @@ class Project(dict):
             return active, self[active]
         return None
 
-    def _group(self, name: str) -> LinkGroup | None:
-        return next((group for group in self.links
+    def _group(self, name: str) -> ObjectGroup | None:
+        return next((group for group in self.object_groups
                      if name in group['members']), None)
 
-    def absorb_links(self, groups: Iterable[LinkGroup]) -> None:
-        """Take on the link groups of a project being imported.
+    def absorb_links(self, groups: Iterable[ObjectGroup]) -> None:
+        """Take on the object groups of a project being imported.
 
         The arriving objects have *already* been placed in named
         groups by the project type's rules — one at a time, as each arrived,
@@ -1440,14 +1440,14 @@ class Project(dict):
 
         Parameters
         ----------
-        groups : iterable of LinkGroup
-            Link groups from another project, merged into this one's.
+        groups : iterable of ObjectGroup
+            Object groups from another project, merged into this one's.
 
         Returns
         -------
         None
         """
-        self.links = list(self.links) + [dict(group) for group in groups]
+        self.object_groups = list(self.object_groups) + [dict(group) for group in groups]
         self._prune_links()
 
     def _prune_links(self) -> None:
@@ -1455,7 +1455,7 @@ class Project(dict):
         nothing in them.
 
         **An object belongs to one group**, and this is where that is
-        made true. Everything downstream assumes it: `group_of` answers
+        made true. Everything downstream assumes it: `object_group_of` answers
         with the first match, a bracket is painted over a contiguous
         run of rows, and the tree orders its rows by walking the groups
         — an object named twice put its row in that order twice, ran
@@ -1472,12 +1472,12 @@ class Project(dict):
         """
         seen: set[str] = set()
         groups = []
-        for group in reversed(self.links):
+        for group in reversed(self.object_groups):
             kept = [member for member in group['members']
                     if member in self and member not in seen]
             seen.update(kept)
             groups.append({'members': kept, 'role': group['role']})
-        self.links = [group for group in reversed(groups)
+        self.object_groups = [group for group in reversed(groups)
                       if len(group['members']) > 1
                       or (group['members'] and group['role'])]
 
@@ -2189,7 +2189,7 @@ class Project(dict):
             low, high = geometry.extent
             tolerance = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
         going = geometry.coincident_nodes(tolerance)
-        for other in self.group_of(name) or []:
+        for other in self.object_group_of(name) or []:
             obj = self.get(other)
             dofs = [*(getattr(obj, 'response_dof', None) or []),
                     *(getattr(obj, 'reference_dof', None) or []),
@@ -2266,7 +2266,7 @@ class Project(dict):
         geometry.view = view
 
     def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
-                  size: float, block: str = '', *, unit: str = 'm',
+                  size: float, group: str = '', *, unit: str = 'm',
                   tolerance: float | None = None) -> dict:
         """Add a meshed rectangle of plates to a geometry (Add Plane): a
         corner, two perpendicular edges and an element size, each edge
@@ -2275,9 +2275,9 @@ class Project(dict):
         become them, so planes meeting along a line are tied there, and
         the nodes already there keep their ids (`mesh.join`).
 
-        Planes given the same block name are one block — the five walls
+        Planes given the same element group name are one element group — the five walls
         of a box, each named 'box', are the box, given its material once
-        in the Blocks table.
+        in the Element Groups table.
 
         Parameters
         ----------
@@ -2289,8 +2289,8 @@ class Project(dict):
             The two edges from that corner, as vectors; perpendicular.
         size : float
             The element size aimed at.
-        block : str, optional
-            The block the plates go in, by name: an existing block of
+        group : str, optional
+            The element group the plates go in, by name: an existing element group of
             that name, or a new one.
         unit : str, default 'm'
             The unit the lengths above are in. A geometry whose units
@@ -2305,7 +2305,7 @@ class Project(dict):
         dict
             'added', the nodes added; 'shared', the plane's nodes that
             fell on nodes already there; 'elements', the plates added;
-            'blocks', the block they went into.
+            'groups', the element group they went into.
         """
         from .core import mesh
 
@@ -2314,12 +2314,12 @@ class Project(dict):
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
         defined = geometry.units_defined or not geometry.num_nodes
-        part = mesh.plane(corner, edge_a, edge_b, size, block,
+        part = mesh.plane(corner, edge_a, edge_b, size, group,
                           unit=unit if defined else None)
         return mesh.join(geometry, part, tolerance)
 
     def tie_elements(self, source: Any, elements: Any, to: Any,
-                     block: str | None = None) -> dict:
+                     group: str | None = None) -> dict:
         """Tie a patch of a geometry's elements rigidly to the part under
         it (Tie): each node of the patch linked by a rigid, massless link
         to the nearest node of `to` — a bolted joint, from the elements
@@ -2332,16 +2332,16 @@ class Project(dict):
         elements : sequence of int
             The patch, by element id.
         to : str, int or sequence of int
-            A block, by name or id, or a second patch, by element ids.
-        block : str, optional
-            The block the links go into, made rigid if new. Defaults to
-            the geometry's first rigid block, or a new one named 'ties'.
+            An element group, by name or id, or a second patch, by element ids.
+        group : str, optional
+            The element group the links go into, made rigid if new. Defaults to
+            the geometry's first rigid element group, or a new one named 'ties'.
 
         Returns
         -------
         dict
             'links', how many were added; 'shared', patch nodes the
-            target already holds; 'block', where the links went.
+            target already holds; 'group', where the links went.
         """
         from .core import mesh
 
@@ -2350,10 +2350,10 @@ class Project(dict):
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
         to = to if isinstance(to, (str, int)) else [int(e) for e in to]
-        return mesh.tie(geometry, [int(e) for e in elements], to, block)
+        return mesh.tie(geometry, [int(e) for e in elements], to, group)
 
-    def merge_blocks(self, source: Any, blocks: Any) -> dict:
-        """Merge a geometry's blocks into one (Merge Blocks): the first
+    def merge_groups(self, source: Any, groups: Any) -> dict:
+        """Merge a geometry's element groups into one (Merge Element Groups): the first
         keeps its id, name and properties and the others' elements move
         into it — refused unless they hold the same element types and
         carry the same material and thickness or section
@@ -2363,25 +2363,25 @@ class Project(dict):
         ----------
         source : str or object
             The geometry, by name or as the object itself.
-        blocks : sequence of int
-            The blocks, by id; the first is the one kept.
+        groups : sequence of int
+            The element groups, by id; the first is the one kept.
 
         Returns
         -------
         dict
-            'into', the block kept; 'blocks', how many merged into it;
+            'into', the element group kept; 'groups', how many merged into it;
             'elements', how many elements moved.
         """
         name = self.name_of(source)
         geometry = self[name]
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
-        return geometry.merge_blocks([int(b) for b in blocks])
+        return geometry.merge_groups([int(b) for b in groups])
 
     def add_block(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
-                  edge_c: Any, size: float, block: str = '', *,
+                  edge_c: Any, size: float, group: str = '', *,
                   unit: str = 'm', holes: Any = (),
-                  hole_block: str | None = None,
+                  hole_group: str | None = None,
                   tolerance: float | None = None) -> dict:
         """Add a meshed box of solid bricks to a geometry (Add Block):
         a corner, three perpendicular edges and an element size, each
@@ -2391,9 +2391,9 @@ class Project(dict):
         there become them, so blocks meeting over a face are tied there
         (`mesh.join`).
 
-        Blocks given the same block name are one block — the rails and
-        uprights of a frame, each named 'frame', are the frame, given
-        its material once in the Blocks table.
+        Blocks given the same element group name are one element group —
+        the rails and uprights of a frame, each named 'frame', are the
+        frame, given its material once in the Element Groups table.
 
         Parameters
         ----------
@@ -2405,18 +2405,18 @@ class Project(dict):
             The three edges from that corner, as vectors; perpendicular.
         size : float
             The element size aimed at.
-        block : str, optional
-            The block the bricks go in, by name: an existing block of
-            that name, or a new one.
+        group : str, optional
+            The element group the bricks go in, by name: an existing
+            group of that name, or a new one.
         unit : str, default 'm'
             The unit the lengths above are in. A geometry whose units
             are not defined takes them as given.
         holes : sequence of tuple, optional
             Holes as `mesh.block` takes them: (center, radius, axis) or
             (center, radius, axis, depth).
-        hole_block : str, optional
-            The block the holes' bricks go to — an insert's — or None
-            to leave them out.
+        hole_group : str, optional
+            The element group the holes' bricks go to — an insert's —
+            or None to leave them out.
         tolerance : float, optional
             How close a node must be to one already there to be it, in
             meters. Defaults to a millionth of the size of the two
@@ -2425,9 +2425,9 @@ class Project(dict):
         Returns
         -------
         dict
-            'added', the nodes added; 'shared', the block's nodes that
+            'added', the nodes added; 'shared', the box's nodes that
             fell on nodes already there; 'elements', the bricks added;
-            'blocks', the blocks they went into.
+            'groups', the element groups they went into.
         """
         from .core import mesh
 
@@ -2436,23 +2436,23 @@ class Project(dict):
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{name!r} is not a geometry')
         defined = geometry.units_defined or not geometry.num_nodes
-        part = mesh.block(corner, edge_a, edge_b, edge_c, size, block,
+        part = mesh.block(corner, edge_a, edge_b, edge_c, size, group,
                           unit=unit if defined else None, holes=holes,
-                          hole_name=hole_block)
+                          hole_name=hole_group)
         return mesh.join(geometry, part, tolerance)
 
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
                     name: str | None = None, progress: Any = None) -> str:
-        """The normal modes of a geometry whose blocks carry their
+        """The normal modes of a geometry whose element groups carry their
         properties (Solve Modes): the finite element model built from
-        the blocks, solved, and the shapes added in the geometry's
+        the element groups, solved, and the shapes added in the geometry's
         group.
 
-        The geometry is the model: each block a material and a thickness
-        or a section (`fem.BlockProperties`, set in the Blocks table or
-        on `geometry.block_properties`), every quad a plate, every
+        The geometry is the model: each element group a material and a thickness
+        or a section (`fem.GroupProperties`, set in the Element Groups table or
+        on `geometry.group_properties`), every quad a plate, every
         triangle a triangle, every two-node line a beam
         (`fem.Model.from_geometry`). The solution is free-free unless the
         geometry says otherwise later; the six rigid-body modes come
@@ -2487,11 +2487,11 @@ class Project(dict):
         geometry = self[source]
         if not isinstance(geometry, Geometry):
             raise TypeError(f'{source!r} is not a geometry')
-        if not geometry.block_properties:
+        if not geometry.group_properties:
             raise ValueError(
-                f'{source} has no block properties: give each block a '
-                'material and a thickness or a section, in the Blocks '
-                'table or on geometry.block_properties')
+                f'{source} has no element group properties: give each element group a '
+                'material and a thickness or a section, in the Element Groups '
+                'table or on geometry.group_properties')
         model = Model.from_geometry(geometry, name=source)
         shapes = model.eigensolution(maximum_frequency=maximum_frequency,
                                      num_modes=num_modes, damping=damping,
@@ -2681,7 +2681,7 @@ class Project(dict):
             first, second, pairs, macs,
             first_geometry=first_home[0] if first_home else None,
             second_geometry=second_home[0] if second_home else None)
-        # Unlinked, unlike every other derived object. A link group is a
+        # Unlinked, unlike every other derived object. An object group is a
         # side of the comparison, and this object *is* the comparison —
         # it names a set on each side, so putting it in one of them
         # claims it belongs to the half it is measuring against the
@@ -2783,7 +2783,7 @@ class Project(dict):
 
         names = tuple(self.name_of(n) for n in names)
         merged = merge_objects([self[n] for n in names])
-        group = self.group_of(names[0]) or []
+        group = self.object_group_of(names[0]) or []
         self.remove(*names)
         added = self.add(name or names[0], merged)
         rest = [member for member in group if member in self]
@@ -2858,7 +2858,7 @@ class Project(dict):
 
         builders = TEMPLATE_BUILDERS
         if template in builders:
-            report = builders[template](self, links=self.links)
+            report = builders[template](self, object_groups=self.object_groups)
         elif template == 'empty':
             report = Report('Report')
         else:
@@ -3072,7 +3072,7 @@ class Project(dict):
                     wanted = next(
                         (template for template
                          in PROJECT_TEMPLATES[project_type]
-                         if TEMPLATE_BUILDERS[template]({}, links=[]).title
+                         if TEMPLATE_BUILDERS[template]({}, object_groups=[]).title
                          not in made), None)
                     if wanted is not None:
                         make(self.generate_report, wanted)
@@ -3103,7 +3103,7 @@ class Project(dict):
         from .report import render_html
 
         name = self.name_of(name)
-        html = render_html(self[name], self, unit_system, links=self.links)
+        html = render_html(self[name], self, unit_system, object_groups=self.object_groups)
         path = os.path.expanduser(str(path))
         with open(path, 'w', encoding='utf-8') as out:
             out.write(html)
@@ -3524,7 +3524,7 @@ class Project(dict):
             return str(path)
         save_test(str(path), self.name, dict(self),
                   active_geometry=self.active_geometry,
-                  project_type=self.project_type, links=self.links,
+                  project_type=self.project_type, object_groups=self.object_groups,
                   provenance=self.provenance)
         return str(path)
 
@@ -3680,8 +3680,8 @@ class Project(dict):
         ('SpecificationDraft(',
          'from visualdynamics.core.author import SpecificationDraft'),
         ('np.array(', 'import numpy as np'),
-        ('BlockProperties(',
-         ('from visualdynamics.core.fem import RIGID, BlockProperties, '
+        ('GroupProperties(',
+         ('from visualdynamics.core.fem import RIGID, GroupProperties, '
           'Material, Section')),
     )
 
@@ -3860,9 +3860,9 @@ _VERB_APPLIES: tuple = (
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
     ('generate_rigid_body_modes', lambda p, o: isinstance(o, Geometry)),
-    # a geometry is a model once its blocks say what they are made of
+    # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
-                                  and bool(o.block_properties))),
+                                  and bool(o.group_properties))),
     # coincident nodes matter to connectivity, so a geometry of elements;
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
@@ -3950,7 +3950,7 @@ PARTNER_VERBS = frozenset(verb for verb, _applies in _SELECTION_APPLIES)
 
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
-    'relink', 'name_group',
+    'relink', 'name_object_group',
     'place', 'set_role', 'set_basis', 'merge', 'set_channel_role',
     'compute_spectra', 'compute_psds', 'compute_cpsds', 'compute_octave',
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
@@ -3958,7 +3958,7 @@ _JOURNALED_VERBS = (
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'merge_coincident_nodes', 'new_geometry', 'add_plane', 'add_block',
     'tie_elements',
-    'merge_blocks', 'set_view',
+    'merge_groups', 'set_view',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',

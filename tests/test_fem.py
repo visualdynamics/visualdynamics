@@ -663,9 +663,9 @@ def two_block_strip():
         elem_id=[12, 10, 11],
         elem_conn=[[5, 7, 8, 6], [1, 3, 4, 2], [3, 5, 6, 4]],
         elem_type=[44, 44, 44],
-        elem_block=[2, 1, 1],
-        block_id=[1, 2],
-        block_name=['frame', 'prop'],
+        elem_group=[2, 1, 1],
+        group_id=[1, 2],
+        group_name=['frame', 'prop'],
         length_unit='m')
 
 
@@ -743,7 +743,7 @@ def test_a_geometry_with_no_blocks_still_rebuilds_as_one_part():
     plain = Geometry(node_id=strip.node_id, node_xyz=strip.node_xyz,
                      elem_id=strip.elem_id, elem_conn=strip.elem_conn,
                      elem_type=strip.elem_type, length_unit='m')
-    assert plain.block_name == [''], 'the fixture is the case'
+    assert plain.group_name == [''], 'the fixture is the case'
     model = fem.Model.from_geometry(plain, MASSLESS, MEMBER, total_mass=1.0,
                                     sections={'prop': STIFF})
     assert {b.section.name for b in model.beams} == {'member'}

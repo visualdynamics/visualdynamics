@@ -69,8 +69,8 @@ def test_the_project_exports_and_imports_it(project, tmp_path):
     # into one with the objects: the symbolic bindings resolve
     for name, obj in project.items():
         target.add(name, obj)
-    assert loaded.unbound(target, target.links) == source[made].unbound(
-        source, source.links)
+    assert loaded.unbound(target, target.object_groups) == source[made].unbound(
+        source, source.object_groups)
 
 
 def test_generate_report_takes_a_saved_template_by_name_or_path(project,

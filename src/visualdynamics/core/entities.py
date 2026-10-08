@@ -1,7 +1,7 @@
 """A geometry's entities, grouped the way the project tree lists them.
 
 `geometry.nodes`, `.coordinate_systems`, `.elements` and
-`.blocks` each hand back a view: the same rows you can expand in the
+`.groups` each hand back a view: the same rows you can expand in the
 tree, reachable from a script under the same names. A view is a window onto
 the geometry's own arrays and never a copy of them, so writing through a
 row writes into the geometry:
@@ -46,17 +46,17 @@ COLUMNS: dict[str, tuple[Column, ...]] = {
         ('ids', 'id', 'elem_id'),
         ('types', 'type', 'elem_type'),
         ('colors', 'color', 'elem_color'),
-        ('blocks', 'block', 'elem_block'),
+        ('groups', 'group', 'elem_group'),
         ('nodes', 'nodes', 'elem_conn'),
     ),
-    # A block is a *grouping* of elements rather than a thing in space: it
+    # An element group is a *grouping* of elements rather than a thing in space: it
     # has an id and a name and nothing else, and what it holds is read off
     # the elements that name it (`elements_in`). Listing it beside the
-    # other three is what the file says — exodus writes a mesh as blocks —
+    # other three is what the file says — exodus writes a mesh as element blocks —
     # and it is the only one of the four nothing is drawn for.
-    'blocks': (
-        ('ids', 'id', 'block_id'),
-        ('names', 'name', 'block_name'),
+    'groups': (
+        ('ids', 'id', 'group_id'),
+        ('names', 'name', 'group_name'),
     ),
 }
 
@@ -66,19 +66,19 @@ VERBS: dict[str, tuple[str, str]] = {
     'coordinate_systems': ('add_coordinate_system',
                            'delete_coordinate_systems'),
     'elements': ('add_element', 'delete_elements'),
-    'blocks': ('add_block', 'delete_blocks'),
+    'groups': ('add_group', 'delete_groups'),
 }
 
 LABELS: dict[str, str] = {
     'nodes': 'node',
     'coordinate_systems': 'coordinate system',
     'elements': 'element',
-    'blocks': 'block',
+    'groups': 'element group',
 }
 
 
 class EntityRow:
-    """One node, coordinate system, element or block, in place.
+    """One node, coordinate system, element or element group, in place.
 
     Holds a row number rather than the values, so it reads and writes the
     geometry as it stands. Delete rows out from under one and it will be

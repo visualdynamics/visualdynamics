@@ -357,7 +357,7 @@ def test_the_verbs_name_link_and_journal():
         'verb': 'transform', 'source': 'Run',
         'params': {'shapes': 'Modes'},
         'state': project.provenance[name]['state']}
-    assert name in project.links[0]['members'], \
+    assert name in project.object_groups[0]['members'], \
         'the modal responses belong with the shapes and the record'
     assert project[name].transform_report.worst_residual == pytest.approx(0.0)
     assert project.journal[-1] == "project.transform('Run', 'Modes')"
@@ -368,7 +368,7 @@ def test_the_verbs_name_link_and_journal():
 
     back = project.expand(name, 'Modes')
     assert back == 'Run Physical Responses'
-    assert back in project.links[0]['members'], \
+    assert back in project.object_groups[0]['members'], \
         'the expansion lands back in the geometry\'s group'
     assert np.allclose(project[back].ordinate, project['Run'].ordinate)
     assert project.journal[-1] == \
@@ -451,9 +451,9 @@ def test_a_modal_object_answers_to_the_shape_set_it_came_through():
 
     project = _project()
     name = project.transform('Run', 'Modes')
-    report = check_compatibility(dict(project.items()), 'Plate', project.links)
+    report = check_compatibility(dict(project.items()), 'Plate', project.object_groups)
     assert report.is_compatible(name)
-    assert project.links[0]['members'] == ['Plate', 'Modes', 'Run', name]
+    assert project.object_groups[0]['members'] == ['Plate', 'Modes', 'Run', name]
 
     # nine coordinates against a six-mode set: refused by name, and
     # the report marks the coordinates past the set
@@ -463,7 +463,7 @@ def test_a_modal_object_answers_to_the_shape_set_it_came_through():
     project.add('Big', big)
     with pytest.raises(ValueError, match="'Modes' has 6 modes"):
         project.link('Modes', 'Big')
-    report = check_compatibility(dict(project.items()), 'Plate', project.links)
+    report = check_compatibility(dict(project.items()), 'Plate', project.object_groups)
     issue = report.issue_for('Big')
     assert issue is not None and issue.kind == 'modes-not-in-set'
     assert issue.sub_items == [6, 7, 8]
@@ -474,12 +474,12 @@ def test_a_modal_object_answers_to_the_shape_set_it_came_through():
         T, np.zeros((2, len(T))), response_dof=['M1', 'M2'],
         ordinate_dim='acceleration')
     project.add('Loose', loose)
-    report = check_compatibility(dict(project.items()), 'Plate', project.links)
+    report = check_compatibility(dict(project.items()), 'Plate', project.object_groups)
     assert report.is_compatible('Loose')
     # and with no set anywhere, it says what to link
     alone = visualdynamics.Project('alone')
     alone.add('Loose', loose)
-    report = check_compatibility(dict(alone.items()), None, alone.links)
+    report = check_compatibility(dict(alone.items()), None, alone.object_groups)
     assert 'no shape set to answer to' in report.issue_for('Loose').message
 
 

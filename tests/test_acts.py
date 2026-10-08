@@ -262,5 +262,5 @@ def test_merge_blocks_has_a_glyph_of_its_own(qt_app):
         return bytes(data)
 
     drawn = {name: pixels(name) for name in
-             ('merge_blocks', 'merge', 'merge_nodes', 'no such glyph')}
+             ('merge_groups', 'merge', 'merge_nodes', 'no such glyph')}
     assert len(set(drawn.values())) == 4

@@ -30,7 +30,7 @@ barc.project().save('barc.vdyn')    # the model this page builds, already built
 | Start a geometry | the project row's bar | **+** *New Geometry* |
 | Build it from planes | the geometry's bar | *Add Plane*, once per plane |
 | Tie the bolted parts | the geometry's Quads | pick the elements under each washer, *Tie* to the part below |
-| Give each part its material and thickness | the pencil on each block's row | pick a material, type a thickness |
+| Give each part its material and thickness | the pencil on each element group's row | pick a material, type a thickness |
 | Solve | the bar | *Solve Modes* |
 
 ## 1. The geometry, from planes
@@ -41,14 +41,14 @@ size. Each edge is divided evenly into the whole number of elements
 nearest that size, so the elements come out close to square. A plane's
 nodes that fall on nodes already in the geometry become them, so planes
 meeting along a line — the box's corners, a channel's web and flanges —
-are tied there; and planes given the same block name are one block: the
+are tied there; and planes given the same element group name are one element group: the
 box's five walls are the box.
 
 Choose the inch system in the unit menu, select the project's row and
 press **+** (*New Geometry*): an empty geometry, in inches, named
 *Geometry*. Select it and
 press **Add Plane**. A pane opens beside the 3-D view. Type each row
-below — block, center, widths — with an element size of 0.125 in, and
+below — element group, center, widths — with an element size of 0.125 in, and
 press **Add**. A plate leaves one width at zero, the axis it faces: the
 bottom's zero width along Y puts it in the X-Z plane. The pane stays
 open for the next row, draws the plate in the 3-D view as it is typed,
@@ -58,7 +58,7 @@ around the preview turn it about its center and the arrows slide the
 center along its axes, onto a tenth of an inch; the table's rows need
 neither.
 
-| Plane | Block | Center | Widths |
+| Plane | Element group | Center | Widths |
 |---|---|---|---|
 | box, bottom | box | (0, −2.875, 1.5) | (5.75, 0, 3) |
 | box, right side | box | (2.875, 0, 1.5) | (0, 5.75, 3) |
@@ -113,7 +113,7 @@ Where the parts are bolted, their mid-surfaces do not meet — a channel's
 foot sits 0.1875 in above the box wall's mid-surface — so nothing is
 shared and something has to join them. That is what a **rigid,
 massless link** is: a two-node line whose second node moves exactly as
-the first does, carried by its rotation, adding no mass. A block of
+the first does, carried by its rotation, adding no mass. An element group of
 two-node lines given the material *rigid (massless)* is a set of them.
 
 How the links are laid out is the modeling decision that matters most
@@ -147,7 +147,7 @@ bolt, click one element of its patch in the 3-D view and Shift-click
 (Cmd-click on a Mac) the rest; then press **Tie** on the bar and pick
 the part below from its menu — *box* for a foot, *left channel* or
 *right channel* for the beam. Every node of the patch is linked to the
-nearest node of that part, and the links go into a block of rigid,
+nearest node of that part, and the links go into an element group of rigid,
 massless links that the first Tie makes (*ties*) and every later one
 joins. Ten Ties make the 178 links. (For a joint where the nearest node
 of a whole part might be the wrong one, *A second selection…* in the
@@ -161,11 +161,11 @@ solved — is on the website's
 ## 3. Materials, thicknesses, solve
 
 Expand the geometry in the tree — yours, or **BARC** — then **Quads**,
-and click the pencil on a block's row: the blocks table opens on it,
+and click the pencil on an element group's row: the Element Groups table opens on it,
 one row per part, and to the right of Name and Elements the property
 columns, in the display units.
 
-| Block | Material | Thickness |
+| Element group | Material | Thickness |
 |---|---|---|
 | box | 6061-T6 | 0.25 in |
 | right channel, left channel, beam | 6061-T6 | 0.125 in |
@@ -215,7 +215,7 @@ as a model of its own. The joints follow the finite element model shared
 on the wiki. The channels' feet share nodes with the box over their
 whole footprint. The beam rests 0.001 in over the channels, so it touches
 them only where it is tied, over each washer. Each bolt is a point mass
-at its head: a block of point elements given a mass in the Blocks table.
+at its head: an element group of point elements given a mass in the Element Groups table.
 
 ```python
 from visualdynamics.demo import barc

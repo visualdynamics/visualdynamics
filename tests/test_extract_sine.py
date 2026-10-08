@@ -212,7 +212,7 @@ def test_the_project_verb_extracts_and_links():
     names = project.extract_sine('Time History')
     assert names == ['Sine Levels'], 'one extraction, one object'
     assert project['Sine Levels'].tone_names == ['Up', 'Down']
-    assert 'Time History' in (project.group_of('Sine Levels') or [])
+    assert 'Time History' in (project.object_group_of('Sine Levels') or [])
 
 
 # ---- the oracle: real controller runs -----------------------------------

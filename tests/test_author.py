@@ -341,7 +341,7 @@ def test_the_verb_links_journals_and_refreshes(tmp_path):
     draft = _draft()
     name = project.author_specification('Modes', draft)
     assert name == 'Modes Specification'
-    assert name in project.links[0]['members'], \
+    assert name in project.object_groups[0]['members'], \
         'a modal object belongs with its set'
     assert project.journal[-1].startswith(
         "project.author_specification('Modes', SpecificationDraft(")
@@ -376,7 +376,7 @@ def test_a_specification_is_replaced_in_place():
     edited = opened.scaled_db(3.0).with_band('warning', -1.0, 1.0)
     same = project.author_specification(name, edited, replace=True)
     assert same == name
-    assert name in project.links[0]['members'], 'links kept'
+    assert name in project.object_groups[0]['members'], 'links kept'
     pairs = _pairs(project[name])
     assert np.allclose(np.real(project[name].ordinate[pairs[('M1', 'M1')]]),
                        np.array([0.01, 0.04, 0.04]) * 10 ** 0.3)
@@ -398,7 +398,7 @@ def test_a_channel_tables_control_channels_are_a_door(tmp_path):
     made = project[name]
     assert made.response_dof[:8:9] == draft.channels[:1]
     assert made.num_records == len(draft.channels) ** 2
-    assert name in next(group['members'] for group in project.links
+    assert name in next(group['members'] for group in project.object_groups
                         if 'Channel Table' in group['members'])
 
 

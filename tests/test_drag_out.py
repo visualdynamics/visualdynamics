@@ -1,7 +1,7 @@
 """Dragging an object out of the window writes it as `.vdyn`.
 
 The tree's drag already carried its own mime type so objects could be
-moved between link groups. It now carries a second reading of the same
+moved between object groups. It now carries a second reading of the same
 gesture — `text/uri-list` — so the same drag, released on the desktop
 instead of on another row, saves a file there. Finder, Explorer and
 Linux file managers all read that type; the tree ignores it.
@@ -164,7 +164,7 @@ def test_an_object_that_has_gone_is_skipped_rather_than_raising(loaded,
 
 def test_the_project_row_is_draggable_out_but_not_between_groups(loaded):
     """`ROLE_WHOLE_PROJECT` is not `ROLE_DRAGGABLE`: the project can be
-    dragged to the desktop, and cannot be dropped into a link group."""
+    dragged to the desktop, and cannot be dropped into an object group."""
     window = loaded
     assert window.test_item.data(0, ROLE_WHOLE_PROJECT)
     assert not window.tree.draggable(window.test_item)

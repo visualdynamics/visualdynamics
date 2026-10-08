@@ -66,7 +66,7 @@ def test_refresh_recomputes_in_place_and_references_hold(worked_up):
     after = project[psds]
     assert after is not before, 'genuinely recomputed'
     assert psds in project, 'under its own name'
-    assert any(psds in group['members'] for group in project.links), \
+    assert any(psds in group['members'] for group in project.object_groups), \
         'the link held through the refresh'
     assert len(after.abscissa) == history.averaging.frame_length // 2 + 1
 

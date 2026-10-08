@@ -1,4 +1,4 @@
-"""Test/model geometry: nodes, coordinate systems, elements and blocks.
+"""Test/model geometry: nodes, coordinate systems, elements and element groups.
 
 Node coordinates are stored in SI meters once their units are known, resolved
 into the global cartesian frame. A geometry imported from a source that does
@@ -130,7 +130,7 @@ ELEMENT_TYPES = {
 }
 
 #: the element families the tree lists under a geometry (Brandon,
-#: 2026-09-30: one sub-item per element type, blocks under each), in
+#: 2026-09-30: one sub-item per element type, element groups under each), in
 #: listing order, with how each is told apart: drawn shape, then the
 #: corner count of the first-order element and its higher-order
 #: siblings. Every 2412 code lands in one of them.
@@ -426,13 +426,13 @@ DEFAULT_VIEW = View()
 
 
 class Geometry:
-    """Nodes, coordinate systems, elements and blocks.
+    """Nodes, coordinate systems, elements and element groups.
 
     Parameters are array-likes; connectivity lists contain one integer array
     of node ids per element. All coordinates in SI meters.
 
     The arrays below are the storage; `nodes`, `coordinate_systems`,
-    `elements` and `blocks` are **views** onto them, which
+    `elements` and `groups` are **views** onto them, which
     is how the tree lists a geometry and how a script should usually
     reach one. A view is not a copy — writing through a row writes here.
 
@@ -453,19 +453,19 @@ class Geometry:
         cs_matrix: `(systems, 4, 3)` — three direction rows then the
             origin, so `cs_matrix[i, 3]` is where system *i* sits.
         (There are no tracelines (2026-09-30). A line drawn through
-        nodes is a block of two-node line elements with no properties —
+        nodes is an element group of two-node line elements with no properties —
         `add_beams` makes one, `drawn_lines` reads them back for the
-        formats that keep tracelines apart — and the same block becomes
-        structure the moment its block carries a section. One storage
+        formats that keep tracelines apart — and the same element group becomes
+        structure the moment its element group carries a section. One storage
         for one drawn idea; PLAN.md "Geometry by element family".)
         elem_id: Element ids. Labels — nothing refers to them.
         elem_type: UFF dataset 2412 descriptor code per element
             (`ELEMENT_TYPES` names them and says how each is drawn).
         elem_color: Palette index per element.
         elem_conn: One array of node ids per element.
-        elem_block: Which block each element belongs to, by block id.
-        block_id: The declared blocks. Unique, since elements name them.
-        block_name: A name per block — `'wing'`, `'arm front left'`. This
+        elem_group: Which element group each element belongs to, by element group id.
+        group_id: The declared element groups. Unique, since elements name them.
+        group_name: A name per element group — `'wing'`, `'arm front left'`. This
             is where a mesh records that a region is a different part
             from its neighbor, and `fem.Model.from_geometry` reads a
             member's section from it.
@@ -488,11 +488,11 @@ class Geometry:
                  elem_type: ArrayLike | None = None,
                  elem_color: ArrayLike | None = None,
                  elem_conn: Sequence[ArrayLike] | None = None,
-                 elem_block: Ids | None = None,
-                 block_id: Ids | None = None,
-                 block_name: Sequence[str] | None = None,
+                 elem_group: Ids | None = None,
+                 group_id: Ids | None = None,
+                 group_name: Sequence[str] | None = None,
                  length_unit: str | None = None,
-                 block_properties: Mapping[int, Any] | None = None) -> None:
+                 group_properties: Mapping[int, Any] | None = None) -> None:
         # coordinates are taken as given; length_unit records what they are
         # in (None = undefined, values are the file's raw numbers)
         self.length_unit: str | None = length_unit
@@ -524,35 +524,36 @@ class Geometry:
             else self._default(None, e, None, arange=True))
         self.elem_type: NDArray[np.int64] = self._default(elem_type, e, 0)
         self.elem_color: NDArray[np.int64] = self._default(elem_color, e, 1)
-        # Which block each element belongs to, and what the blocks are
+        # Which element group each element belongs to, and what the element groups are
         # called. This is how a mesh says "these elements are the wing and
         # those are the tail": exodus calls them element blocks, and it is
         # the only place a file records that a region is made of something
-        # different from its neighbor. Read without keeping it, a
-        # two-block file comes back as one anonymous block on the way out.
-        self.elem_block: IdArray = (
-            _ids(elem_block, 'element block ids') if elem_block is not None
+        # different from its neighbor. Read without keeping it, a file of
+        # two element groups comes back as one anonymous group on the way
+        # out.
+        self.elem_group: IdArray = (
+            _ids(elem_group, 'element group ids') if elem_group is not None
             else self._default(None, e, 1))
-        found = (np.unique(self.elem_block) if e
+        found = (np.unique(self.elem_group) if e
                  else np.array([], dtype=np.int64))
-        self.block_id: IdArray = (
-            _ids(block_id, 'block ids', unique=True)
-            if block_id is not None else found)
-        self.block_name: list[str] = (list(block_name) if block_name is not None
-                                      else [''] * len(self.block_id))
-        # What each block is made of, when the geometry is a model in
-        # waiting: {block id: fem.BlockProperties} — a material and a
-        # thickness for a block of plates, a material and a section for
-        # a block of beams. This is how every finite element format
-        # states a structure, one property set per block of one
+        self.group_id: IdArray = (
+            _ids(group_id, 'element group ids', unique=True)
+            if group_id is not None else found)
+        self.group_name: list[str] = (list(group_name) if group_name is not None
+                                      else [''] * len(self.group_id))
+        # What each element group is made of, when the geometry is a model in
+        # waiting: {element group id: fem.GroupProperties} — a material and a
+        # thickness for an element group of plates, a material and a section for
+        # an element group of beams. This is how every finite element format
+        # states a structure, one property set per element group of one
         # element type, and it is what `fem.Model.from_geometry` builds
         # from (Brandon, 2026-09-25). Held here rather than in the
         # model so it is saved with the geometry and comes back. The
         # values are the FE module's own classes; this module only
         # carries them.
-        self.block_properties: dict[int, Any] = (
-            {int(k): v for k, v in block_properties.items()}
-            if block_properties else {})
+        self.group_properties: dict[int, Any] = (
+            {int(k): v for k, v in group_properties.items()}
+            if group_properties else {})
         self.elem_conn: list[IdArray] = [
             np.asarray(c, dtype=np.int64) for c in (elem_conn or [])]
         # a source states both what an element is and which nodes it
@@ -572,12 +573,12 @@ class Geometry:
         self.mass_properties: MassProperties | None = None
         #: how it opens in 3-D (`View`); None opens on `DEFAULT_VIEW`
         self.view: View | None = None
-        # one block, one family (2026-09-30): a source that mixes them —
-        # UNV 2412 and the sdynpy layout carry no blocks at all, so every
+        # one element group, one family (2026-09-30): a source that mixes them —
+        # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
         # refused, the same way a mislabeled type is mended above. Here
         # rather than in each reader, so every source is read the same way.
-        self.split_blocks_by_family()
+        self.split_groups_by_family()
         self.validate()
 
     @property
@@ -610,29 +611,29 @@ class Geometry:
             if missing:
                 raise ValueError(
                     f"element {i} references unknown node ids {sorted(missing)}")
-        if len(self.block_name) != len(self.block_id):
+        if len(self.group_name) != len(self.group_id):
             raise ValueError(
-                f'{len(self.block_name)} block names for '
-                f'{len(self.block_id)} blocks')
-        _ids(self.block_id, 'block ids', unique=True)
-        stray = set(np.unique(self.elem_block).tolist()) - set(
-            self.block_id.tolist())
+                f'{len(self.group_name)} element group names for '
+                f'{len(self.group_id)} element groups')
+        _ids(self.group_id, 'element group ids', unique=True)
+        stray = set(np.unique(self.elem_group).tolist()) - set(
+            self.group_id.tolist())
         if stray:
             raise ValueError(
-                'elements name blocks the geometry does not have: '
+                'elements name element groups the geometry does not have: '
                 + ', '.join(str(b) for b in sorted(stray)))
         for code in np.unique(self.elem_type) if len(self.elem_type) else []:
             if int(code) not in ELEMENT_TYPES:
                 raise ValueError(f"Unknown element type code {int(code)}")
-        # one block, one family (2026-09-30): a block's properties are
-        # one kind, and the tree lists a block under its family
-        mixed = self.mixed_blocks()
+        # one element group, one family (2026-09-30): an element group's properties are
+        # one kind, and the tree lists an element group under its family
+        mixed = self.mixed_groups()
         if mixed:
             raise ValueError(
-                'a block holds one element family; '
-                + ', '.join(f'block {b} holds {" and ".join(fams)}'
+                'an element group holds one element family; '
+                + ', '.join(f'element group {b} holds {" and ".join(fams)}'
                             for b, fams in mixed.items())
-                + ' — split_blocks_by_family() sorts them out')
+                + ' — split_groups_by_family() sorts them out')
 
     @property
     def num_nodes(self) -> int:
@@ -660,14 +661,14 @@ class Geometry:
         return EntityView(self, 'elements')
 
     @property
-    def blocks(self) -> EntityView:
-        """Every element block: `ids` and `names`.
+    def groups(self) -> EntityView:
+        """Every element group: `ids` and `names`.
 
-        A block groups elements rather than holding them — which elements
-        are in one is read off `elem_block` (`elements_in`), so moving an
-        element between blocks is an edit to the element.
+        An element group groups elements rather than holding them — which elements
+        are in one is read off `elem_group` (`elements_in`), so moving an
+        element between element groups is an edit to the element.
         """
-        return EntityView(self, 'blocks')
+        return EntityView(self, 'groups')
 
     def node_index(self, node_ids: Ids) -> np.ndarray:
         """Positions of the given node ids in the node arrays.
@@ -948,19 +949,19 @@ class Geometry:
         self.cs_matrix = np.concatenate([self.cs_matrix, matrix[np.newaxis]])
         return cs_id
 
-    def add_beams(self, node_ids: Ids, block: int | None = None,
+    def add_beams(self, node_ids: Ids, group: int | None = None,
                   color: int = 1, elem_type: int = 21) -> int:
         """A chain of two-node line elements through the given nodes, in
         order — what a traceline was (2026-09-30), and a run of beams
-        once the block carries a section. Returns the block's id.
+        once the element group carries a section. Returns the element group's id.
 
         Parameters
         ----------
         node_ids : sequence of int
             The nodes the line runs through, in order; two at least.
-        block : int, optional
-            The block the segments join. A new, unnamed block when
-            omitted — a drawn line is its own block, named by what
+        group : int, optional
+            The element group the segments join. A new, unnamed element group when
+            omitted — a drawn line is its own element group, named by what
             the line was called.
         color : int, default 1
             The display color index, on every segment.
@@ -971,7 +972,7 @@ class Geometry:
         Returns
         -------
         int
-            The block the segments are in.
+            The element group the segments are in.
         """
         nodes = [int(n) for n in node_ids]
         if len(nodes) < 2:
@@ -983,14 +984,14 @@ class Geometry:
             raise ValueError(f'{elem_type} is not a two-node line element type')
         from itertools import pairwise
 
-        block = self.add_block() if block is None else int(block)
+        group = self.add_group() if group is None else int(group)
         for a, b in pairwise(nodes):
             self.add_element([a, b], elem_type=int(elem_type), color=color,
-                             block=block)
-        return block
+                             group=group)
+        return group
 
-    def mixed_blocks(self) -> dict[int, list[str]]:
-        """{block id: families} for every block holding more than one
+    def mixed_groups(self) -> dict[int, list[str]]:
+        """{element group id: families} for every element group holding more than one
         element family — none, in a geometry that keeps the rule.
 
         Returns
@@ -998,47 +999,47 @@ class Geometry:
         dict of int to list of str
         """
         found: dict[int, list[str]] = {}
-        for code, block in zip(self.elem_type, self.elem_block):
+        for code, group in zip(self.elem_type, self.elem_group):
             if int(code) not in ELEMENT_TYPES:
                 continue                 # validate names the stray code
             family = element_family(int(code))
-            families = found.setdefault(int(block), [])
+            families = found.setdefault(int(group), [])
             if family not in families:
                 families.append(family)
         return {b: f for b, f in found.items() if len(f) > 1}
 
-    def split_blocks_by_family(self) -> dict[int, list[int]]:
-        """One block, one family: a block holding elements of more than
+    def split_groups_by_family(self) -> dict[int, list[int]]:
+        """One element group, one family: an element group holding elements of more than
         one family keeps its first family and each other family moves
-        into a new block named for it beside the old name. What a
-        source without blocks — UNV 2412, the sdynpy layout — needs on
+        into a new element group named for it beside the old name. What a
+        source without element groups — UNV 2412, the sdynpy layout — needs on
         the way in (Brandon, 2026-09-30: split on import rather than
-        show one block under two families and edit it twice).
+        show one element group under two families and edit it twice).
 
         Returns
         -------
         dict of int to list of int
-            {old block: [the new blocks made from it]}, empty when
+            {old element group: [the new element groups made from it]}, empty when
             nothing was mixed.
         """
         made: dict[int, list[int]] = {}
-        for block, families in self.mixed_blocks().items():
-            row = int(np.flatnonzero(self.block_id == block)[0])
-            base = self.block_name[row]
+        for group, families in self.mixed_groups().items():
+            row = int(np.flatnonzero(self.group_id == group)[0])
+            base = self.group_name[row]
             for family in families[1:]:
                 label = FAMILY_LABELS[family].lower()
-                new = self.add_block(f'{base} {label}'.strip())
+                new = self.add_group(f'{base} {label}'.strip())
                 rows = [i for i, (code, b) in enumerate(
-                    zip(self.elem_type, self.elem_block))
-                    if int(b) == block and element_family(int(code)) == family]
-                self.elem_block[rows] = new
-                made.setdefault(block, []).append(new)
+                    zip(self.elem_type, self.elem_group))
+                    if int(b) == group and element_family(int(code)) == family]
+                self.elem_group[rows] = new
+                made.setdefault(group, []).append(new)
         return made
 
     def attach_drawn_lines(self, lines: Sequence[tuple[str, int, Sequence[Ids]]]
                            ) -> list[int]:
         """Drawn lines from a format that keeps them apart from
-        elements, each as its own block of two-node line elements with
+        elements, each as its own element group of two-node line elements with
         no properties — the reader's half of `drawn_lines`.
 
         Parameters
@@ -1051,35 +1052,35 @@ class Geometry:
         Returns
         -------
         list of int
-            The blocks made, one per line.
+            The element groups made, one per line.
         """
-        blocks = []
+        groups = []
         for name, color, chains in lines:
-            block = self.add_block(str(name))
+            group = self.add_group(str(name))
             for chain in chains:
-                self.add_beams(chain, block=block, color=int(color))
-            blocks.append(block)
-        return blocks
+                self.add_beams(chain, group=group, color=int(color))
+            groups.append(group)
+        return groups
 
-    def is_drawn_line(self, block: int) -> bool:
-        """Whether a block is a drawn line: every element in it a
-        two-node line element, and no properties on the block — the
+    def is_drawn_line(self, group: int) -> bool:
+        """Whether an element group is a drawn line: every element in it a
+        two-node line element, and no properties on the element group — the
         one discriminator, on screen and in every file (PLAN.md
-        "Geometry by element family"). An empty block is not one.
+        "Geometry by element family"). An empty element group is not one.
 
         Parameters
         ----------
-        block : int
-            The block's identifier.
+        group : int
+            The element group's identifier.
 
         Returns
         -------
         bool
         """
-        block = int(block)
-        if block in self.block_properties:
+        group = int(group)
+        if group in self.group_properties:
             return False
-        rows = np.flatnonzero(self.elem_block == block)
+        rows = np.flatnonzero(self.elem_group == group)
         if not len(rows):
             return False
         return all(ELEMENT_TYPES.get(int(self.elem_type[r]),
@@ -1088,24 +1089,24 @@ class Geometry:
 
     def drawn_lines(self) -> list[dict[str, Any]]:
         """The drawn lines, as the formats that keep tracelines apart
-        from elements write them: per drawn-line block, in block order,
-        `{'block', 'name', 'color', 'chains'}` — the chains the block's
+        from elements write them: per drawn-line element group, in element group order,
+        `{'group', 'name', 'color', 'chains'}` — the chains the element group's
         segments make when walked in element order, each a list of
         node ids, a new chain wherever a segment does not start where
-        the last one ended. A block read from one polyline gives that
+        the last one ended. An element group read from one polyline gives that
         polyline back; one from a UNV line that lifted the pen gives
-        its runs back under the one block.
+        its runs back under the one element group.
 
         Returns
         -------
         list of dict
         """
         out = []
-        for row, block in enumerate(self.block_id):
-            block = int(block)
-            if not self.is_drawn_line(block):
+        for row, group in enumerate(self.group_id):
+            group = int(group)
+            if not self.is_drawn_line(group):
                 continue
-            rows = np.flatnonzero(self.elem_block == block)
+            rows = np.flatnonzero(self.elem_group == group)
             chains: list[list[int]] = []
             for r in rows:
                 a, b = (int(n) for n in self.elem_conn[r][:2])
@@ -1113,13 +1114,13 @@ class Geometry:
                     chains[-1].append(b)
                 else:
                     chains.append([a, b])
-            out.append({'block': block, 'name': self.block_name[row],
+            out.append({'group': group, 'name': self.group_name[row],
                         'color': int(self.elem_color[rows[0]]),
                         'chains': chains})
         return out
 
-    def block_of(self, elem_id: int) -> str:
-        """The name of the block an element belongs to, or ''.
+    def group_of(self, elem_id: int) -> str:
+        """The name of the element group an element belongs to, or ''.
 
         Parameters
         ----------
@@ -1129,64 +1130,64 @@ class Geometry:
         Returns
         -------
         str
-            The name of the block it belongs to.
+            The name of the element group it belongs to.
         """
         row = int(np.flatnonzero(self.elem_id == int(elem_id))[0])
-        block = int(self.elem_block[row])
-        where = np.flatnonzero(self.block_id == block)
-        return self.block_name[int(where[0])] if len(where) else ''
+        group = int(self.elem_group[row])
+        where = np.flatnonzero(self.group_id == group)
+        return self.group_name[int(where[0])] if len(where) else ''
 
-    def elements_in(self, block: int | str) -> list[int]:
-        """The ids of the elements in a block, named or numbered.
+    def elements_in(self, group: int | str) -> list[int]:
+        """The ids of the elements in an element group, named or numbered.
 
         Parameters
         ----------
-        block : int or str
-            A block, by identifier or by name.
+        group : int or str
+            An element group, by identifier or by name.
 
         Returns
         -------
         list of int
             The identifiers of the elements it holds.
         """
-        if isinstance(block, str):
-            where = [i for i, name in enumerate(self.block_name)
-                     if name == block]
+        if isinstance(group, str):
+            where = [i for i, name in enumerate(self.group_name)
+                     if name == group]
             if not where:
                 return []
-            block = int(self.block_id[where[0]])
+            group = int(self.group_id[where[0]])
         return [int(self.elem_id[i])
-                for i in np.flatnonzero(self.elem_block == int(block))]
+                for i in np.flatnonzero(self.elem_group == int(group))]
 
-    def add_block(self, name: str = '', block_id: int | None = None) -> int:
-        """Declare an element block. Returns its id.
+    def add_group(self, name: str = '', group_id: int | None = None) -> int:
+        """Declare an element group. Returns its id.
 
-        A block with nothing in it is legitimate — exodus files carry
-        empty ones, and a block has to exist before an element can be put
+        An element group with nothing in it is legitimate — exodus files carry
+        empty ones, and an element group has to exist before an element can be put
         in it.
 
         Parameters
         ----------
         name : str, optional
-            What to call the block.
-        block_id : int, optional
+            What to call the element group.
+        group_id : int, optional
             Its identifier. The next free one when omitted.
 
         Returns
         -------
         int
-            The block's identifier.
+            The element group's identifier.
         """
-        block_id = (self._next_id(self.block_id) if block_id is None
-                    else int(block_id))
-        if block_id in self.block_id:
-            raise ValueError(f'block {block_id} already exists')
-        self.block_id = np.append(self.block_id, block_id)
-        self.block_name.append(str(name))
-        return block_id
+        group_id = (self._next_id(self.group_id) if group_id is None
+                    else int(group_id))
+        if group_id in self.group_id:
+            raise ValueError(f'element group {group_id} already exists')
+        self.group_id = np.append(self.group_id, group_id)
+        self.group_name.append(str(name))
+        return group_id
 
     def add_element(self, node_ids: Ids, elem_type: int | None = None,
-                    color: int = 1, block: int | None = None) -> int:
+                    color: int = 1, group: int | None = None) -> int:
         """Append an element. Type defaults to whatever fits the node count:
         2 nodes a beam, 3 a triangle, 4 a quadrilateral. Returns its index.
 
@@ -1199,11 +1200,11 @@ class Geometry:
             count when omitted.
         color : int, default 1
             Its display color index.
-        block : int, optional
-            Which block it belongs to. Left out, the first block that
-            holds this element's family, else a new one: a block holds
+        group : int, optional
+            Which element group it belongs to. Left out, the first element group that
+            holds this element's family, else a new one: an element group holds
             one family (2026-09-30), so a beam added to a mesh of
-            plates goes in a block of its own rather than theirs.
+            plates goes in an element group of its own rather than theirs.
 
         Returns
         -------
@@ -1223,34 +1224,34 @@ class Geometry:
         if int(elem_type) not in ELEMENT_TYPES:
             raise ValueError(f'unknown element type {elem_type}')
         family = element_family(int(elem_type))
-        if block is None:
+        if group is None:
             held_by = {int(b): element_family(int(code))
-                       for code, b in zip(self.elem_type, self.elem_block)}
-            block = next((b for b in self.block_id.tolist()
+                       for code, b in zip(self.elem_type, self.elem_group)}
+            group = next((b for b in self.group_id.tolist()
                           if held_by.get(int(b), family) == family), None)
-            if block is None:
-                block = self.add_block()
-        block = int(block)
-        # one block, one family: the block's properties are one kind
-        rows = np.flatnonzero(self.elem_block == block)
+            if group is None:
+                group = self.add_group()
+        group = int(group)
+        # one element group, one family: the element group's properties are one kind
+        rows = np.flatnonzero(self.elem_group == group)
         if len(rows):
             held = element_family(int(self.elem_type[rows[0]]))
             if held != family:
                 raise ValueError(
-                    f'block {block} holds {held}; a {family[:-1]} goes in '
-                    'a block of its own')
+                    f'element group {group} holds {held}; a {family[:-1]} goes in '
+                    'an element group of its own')
         self.elem_id = np.append(self.elem_id, self._next_id(self.elem_id))
         self.elem_type = np.append(self.elem_type, int(elem_type))
         self.elem_color = np.append(self.elem_color, int(color))
-        if block not in self.block_id.tolist():
-            self.block_id = np.append(self.block_id, block)
-            self.block_name.append('')
-        self.elem_block = np.append(self.elem_block, block)
+        if group not in self.group_id.tolist():
+            self.group_id = np.append(self.group_id, group)
+            self.group_name.append('')
+        self.elem_group = np.append(self.elem_group, group)
         self.elem_conn.append(nodes)
         return len(self.elem_conn) - 1
 
     def add_elements(self, connectivity: Sequence[Ids],
-                     elem_types: Ids, blocks: Ids) -> None:
+                     elem_types: Ids, groups: Ids) -> None:
         """Append elements — `add_element` for many at once, the nodes
         checked once for all of them.
 
@@ -1260,8 +1261,8 @@ class Geometry:
             Each element's nodes, in order.
         elem_types : sequence of int
             Each element's type code.
-        blocks : sequence of int
-            The block each belongs to; a block not declared yet is.
+        groups : sequence of int
+            The element group each belongs to; an element group not declared yet is.
 
         Returns
         -------
@@ -1279,34 +1280,34 @@ class Geometry:
         wrong = sorted(set(types) - set(ELEMENT_TYPES))
         if wrong:
             raise ValueError(f'unknown element type {wrong[0]}')
-        blocks = [int(b) for b in blocks]
-        # one block, one family — the rule `add_element` keeps one element
+        groups = [int(b) for b in groups]
+        # one element group, one family — the rule `add_element` keeps one element
         # at a time, kept here for many at once. Its absence let a plate
-        # joined by name into a block of bricks make one block of both
+        # joined by name into an element group of bricks make one element group of both
         # (Brandon, 2026-10-02); checked before anything is appended, so
         # a refused call leaves the geometry as it was
         coming: dict[int, set[str]] = {}
-        for block, code in zip(blocks, types):
-            coming.setdefault(block, set()).add(element_family(code))
-        for block, families in coming.items():
+        for group, code in zip(groups, types):
+            coming.setdefault(group, set()).add(element_family(code))
+        for group, families in coming.items():
             held = {element_family(int(code)) for code
-                    in self.elem_type[self.elem_block == block]}
+                    in self.elem_type[self.elem_group == group]}
             if len(held | families) > 1:
                 raise ValueError(
-                    f'block {block} would hold '
-                    f'{" and ".join(sorted(held | families))}: a block holds '
+                    f'element group {group} would hold '
+                    f'{" and ".join(sorted(held | families))}: an element group holds '
                     'one element family')
-        for block in dict.fromkeys(blocks):
-            if block not in self.block_id.tolist():
-                self.block_id = np.append(self.block_id, block)
-                self.block_name.append('')
+        for group in dict.fromkeys(groups):
+            if group not in self.group_id.tolist():
+                self.group_id = np.append(self.group_id, group)
+                self.group_name.append('')
         first = self._next_id(self.elem_id)
         self.elem_id = np.concatenate(
             [self.elem_id, np.arange(first, first + len(conn))]).astype(np.int64)
         self.elem_type = np.concatenate([self.elem_type, types]).astype(np.int64)
         self.elem_color = np.concatenate(
             [self.elem_color, np.ones(len(conn))]).astype(np.int64)
-        self.elem_block = np.concatenate([self.elem_block, blocks]).astype(np.int64)
+        self.elem_group = np.concatenate([self.elem_group, groups]).astype(np.int64)
         self.elem_conn.extend(conn)
 
     # ---- deletion -----------------------------------------------------------
@@ -1337,31 +1338,31 @@ class Geometry:
         for conn in self.elem_conn:
             conn[conn == old] = node_id
 
-    def renumber_block(self, row: int, block_id: int) -> None:
-        """Give a block a new id, carrying its elements over.
+    def renumber_group(self, row: int, group_id: int) -> None:
+        """Give an element group a new id, carrying its elements over.
 
-        An element names its block by id, so a renumber that left them
-        alone would put every element of the block in a block that is no
+        An element names its element group by id, so a renumber that left them
+        alone would put every element of the element group in an element group that is no
         longer there — which `validate` refuses, after the damage.
 
         Parameters
         ----------
         row : int
-            Which block, by row.
-        block_id : int
+            Which element group, by row.
+        group_id : int
             Its new identifier.
 
         Returns
         -------
         None
         """
-        block_id = int(block_id)
-        clash = np.flatnonzero(self.block_id == block_id)
+        group_id = int(group_id)
+        clash = np.flatnonzero(self.group_id == group_id)
         if len(clash) and clash[0] != row:
-            raise ValueError(f'block {block_id} already exists')
-        old = int(self.block_id[row])
-        self.block_id[row] = block_id
-        self.elem_block[self.elem_block == old] = block_id
+            raise ValueError(f'element group {group_id} already exists')
+        old = int(self.group_id[row])
+        self.group_id[row] = group_id
+        self.elem_group[self.elem_group == old] = group_id
 
     def renumber_coordinate_system(self, row: int, cs_id: int) -> None:
         """Give a coordinate system a new id, repointing the nodes using it.
@@ -1476,7 +1477,7 @@ class Geometry:
         plate on a plate's nodes is how a doubler or a layer is modeled,
         but no two solids fill one cell on purpose.
 
-        Two blocks that overlap and share their nodes there — the bars
+        Two element groups that overlap and share their nodes there — the bars
         of an X cross-section — put two elements in every cell of the
         overlap: the region counted twice, its stiffness and mass
         doubled, and every face of each pair drawn as interior, so the
@@ -1497,7 +1498,7 @@ class Geometry:
 
     def merge_duplicate_elements(self) -> int:
         """Make elements that are one cell one element (`duplicate_elements`):
-        the later of each pair is removed, the earlier — and its block —
+        the later of each pair is removed, the earlier — and its element group —
         stays. Returns how many were removed."""
         going = self.duplicate_elements()
         if going:
@@ -1599,111 +1600,111 @@ class Geometry:
         return sorted((row for row, value in enumerate(id_array)
                        if int(value) in wanted), reverse=True)
 
-    def delete_blocks(self, block_ids: Ids) -> dict[str, int]:
-        """Remove blocks with what they hold: their elements, and the
+    def delete_groups(self, group_ids: Ids) -> dict[str, int]:
+        """Remove element groups with what they hold: their elements, and the
         nodes no element outside them uses.
 
         Deleting a part deletes the part (Brandon, 2026-09-27). It used to
-        move a deleted block's elements into the first block left, which
+        move a deleted element group's elements into the first element group left, which
         made a delete a merge; merging is its own act now
-        (`merge_blocks`). A node an element of another block also uses
+        (`merge_groups`). A node an element of another element group also uses
         stays, so a neighboring part is not cut into along the line the
         two share.
 
         Parameters
         ----------
-        block_ids : int or sequence of int
+        group_ids : int or sequence of int
             The identifiers, one or many.
 
         Returns
         -------
         dict of str to int
-            How many blocks, elements and nodes went.
+            How many element groups, elements and nodes went.
         """
-        wanted = {int(block) for block in block_ids}
-        keep = ~np.isin(self.block_id, list(wanted))
+        wanted = {int(group) for group in group_ids}
+        keep = ~np.isin(self.group_id, list(wanted))
         removed = int((~keep).sum())
         if not removed:
-            return {'blocks': 0, 'elements': 0, 'nodes': 0}
+            return {'groups': 0, 'elements': 0, 'nodes': 0}
         inside, outside = set(), set()
         doomed = []
         for row, conn in enumerate(self.elem_conn):
             nodes = {int(n) for n in conn}
-            if int(self.elem_block[row]) in wanted:
+            if int(self.elem_group[row]) in wanted:
                 inside |= nodes
                 doomed.append(int(self.elem_id[row]))
             else:
                 outside |= nodes
         self.delete_elements(doomed)
         gone = self.delete_nodes(sorted(inside - outside))
-        self.block_name = [name for name, k in zip(self.block_name, keep) if k]
-        for block in wanted:                 # a deleted block's properties go with it
-            self.block_properties.pop(block, None)
-        self.block_id = self.block_id[keep]
-        return {'blocks': removed, 'elements': len(doomed),
+        self.group_name = [name for name, k in zip(self.group_name, keep) if k]
+        for group in wanted:                 # a deleted element group's properties go with it
+            self.group_properties.pop(group, None)
+        self.group_id = self.group_id[keep]
+        return {'groups': removed, 'elements': len(doomed),
                 'nodes': gone['nodes']}
 
-    def merge_refusal(self, block_ids: Ids) -> str | None:
-        """Why these blocks cannot be one, or None when they can: they
+    def merge_refusal(self, group_ids: Ids) -> str | None:
+        """Why these element groups cannot be one, or None when they can: they
         must hold the same element types and carry the same properties.
-        A merged block is given one material and one thickness or
+        A merged element group is given one material and one thickness or
         section, so merging different ones would change the model
         without saying so.
 
         Parameters
         ----------
-        block_ids : sequence of int
-            The blocks, by identifier.
+        group_ids : sequence of int
+            The element groups, by identifier.
 
         Returns
         -------
         str or None
         """
-        ids = list(dict.fromkeys(int(b) for b in block_ids))
+        ids = list(dict.fromkeys(int(b) for b in group_ids))
         if len(ids) < 2:
-            return 'select two blocks or more to merge'
-        missing = [b for b in ids if b not in self.block_id.tolist()]
+            return 'select two element groups or more to merge'
+        missing = [b for b in ids if b not in self.group_id.tolist()]
         if missing:
-            return f'no block {missing[0]}'
+            return f'no element group {missing[0]}'
         kinds = {frozenset(int(t) for t in
-                           self.elem_type[self.elem_block == block])
-                 for block in ids}
+                           self.elem_type[self.elem_group == group])
+                 for group in ids}
         if len(kinds) > 1:
-            return 'the blocks hold different element types'
-        held = [self.block_properties.get(block) for block in ids]
+            return 'the element groups hold different element types'
+        held = [self.group_properties.get(group) for group in ids]
         if any(other != held[0] for other in held[1:]):
-            return ('the blocks differ in material, thickness or section')
+            return ('the element groups differ in material, thickness or section')
         return None
 
-    def merge_blocks(self, block_ids: Ids) -> dict[str, int]:
-        """One block from several (Merge Blocks, Brandon 2026-09-27): the
+    def merge_groups(self, group_ids: Ids) -> dict[str, int]:
+        """One element group from several (Merge Element Groups, Brandon 2026-09-27): the
         elements of the rest moved into the first, the rest removed —
         refused, with the reason, unless `merge_refusal` allows it.
 
         Parameters
         ----------
-        block_ids : sequence of int
-            The blocks; the first keeps its id, name and properties.
+        group_ids : sequence of int
+            The element groups; the first keeps its id, name and properties.
 
         Returns
         -------
         dict of str to int
-            'into', the block kept; 'blocks', how many were merged into
+            'into', the element group kept; 'groups', how many were merged into
             it; 'elements', how many elements moved.
         """
-        reason = self.merge_refusal(block_ids)
+        reason = self.merge_refusal(group_ids)
         if reason is not None:
             raise ValueError(reason)
-        ids = list(dict.fromkeys(int(b) for b in block_ids))
+        ids = list(dict.fromkeys(int(b) for b in group_ids))
         into, others = ids[0], set(ids[1:])
-        moved = np.isin(self.elem_block, list(others))
-        self.elem_block[moved] = into
-        keep = ~np.isin(self.block_id, list(others))
-        self.block_name = [name for name, k in zip(self.block_name, keep) if k]
-        for block in others:
-            self.block_properties.pop(block, None)
-        self.block_id = self.block_id[keep]
-        return {'into': into, 'blocks': len(others),
+        moved = np.isin(self.elem_group, list(others))
+        self.elem_group[moved] = into
+        keep = ~np.isin(self.group_id, list(others))
+        self.group_name = [name for name, k in zip(self.group_name, keep) if k]
+        for group in others:
+            self.group_properties.pop(group, None)
+        self.group_id = self.group_id[keep]
+        return {'into': into, 'groups': len(others),
                 'elements': int(moved.sum())}
 
     def delete_elements(self, elem_ids: Ids) -> dict[str, int]:
@@ -1728,10 +1729,10 @@ class Geometry:
         self.elem_id = self.elem_id[keep]
         self.elem_type = self.elem_type[keep]
         self.elem_color = self.elem_color[keep]
-        self.elem_block = self.elem_block[keep]
-        # A block whose last element has gone is still a block: exodus
+        self.elem_group = self.elem_group[keep]
+        # An element group whose last element has gone is still an element group: exodus
         # files carry empty ones, and forgetting the name would lose on a
-        # round trip exactly what blocks were added to keep.
+        # round trip exactly what element groups were added to keep.
         return {'elements': len(rows)}
 
     def __eq__(self, other: object) -> bool:
@@ -1740,7 +1741,7 @@ class Geometry:
         scalar = all(np.array_equal(getattr(self, f), getattr(other, f)) for f in (
             'node_id', 'node_def_cs', 'node_disp_cs', 'node_color',
             'cs_id', 'cs_type',
-            'elem_id', 'elem_type', 'elem_color', 'elem_block'))
+            'elem_id', 'elem_type', 'elem_color', 'elem_group'))
         arrays = (np.allclose(self.node_xyz, other.node_xyz)
                   and np.allclose(self.cs_matrix, other.cs_matrix))
         ragged = (len(self.elem_conn) == len(other.elem_conn)
@@ -1753,7 +1754,7 @@ class Geometry:
     def __repr__(self) -> str:
         units = self.length_unit if self.units_defined else 'units undefined'
         return (f"Geometry({self.num_nodes} nodes, {len(self.cs_id)} coordinate systems, "
-                f"{len(self.elem_conn)} elements, {len(self.block_id)} blocks, "
+                f"{len(self.elem_conn)} elements, {len(self.group_id)} element groups, "
                 f"{units})")
 
     def save(self, path: str | os.PathLike) -> None:

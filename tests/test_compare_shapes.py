@@ -469,7 +469,7 @@ def test_matches_need_no_report_and_the_template_binds_them(
     template = modal_template(window.objects)
     block = next(b for b in template.blocks if b.get('kind') == 'pairs')
     assert block['source'] == '@any:MatchedModes', (
-        'symbolic, and unscoped: the matches are in no link group')
+        'symbolic, and unscoped: the matches are in no object group')
     payload = json.loads(
         render_html(template, window.objects).split(
             'type="application/json">')[1].split('</script>')[0])

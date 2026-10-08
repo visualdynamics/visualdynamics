@@ -157,8 +157,8 @@ def test_what_the_specification_does_not_define_survives(tmp_path):
                       'node_y_direction': np.array([[0, 1., 0]]),
                       'node_z_direction': np.array([[0, 0, 1.]]),
                       'position_units': 'in'}
-    mystery.extras = {'block_name': ('str', np.array(['frame'], dtype=object)),
-                      'block_id': ('u8', np.array([7], dtype=np.uint64))}
+    mystery.extras = {'group_name': ('str', np.array(['frame'], dtype=object)),
+                      'group_id': ('u8', np.array([7], dtype=np.uint64))}
     file.metadata['m'] = mystery
     unknown = escdf.Dataset('u', 'visualdynamics_report', 'a report')
     file.activities['a'] = escdf.Activity('a', 'An activity', links=['m'],
@@ -179,11 +179,11 @@ def test_what_the_specification_does_not_define_survives(tmp_path):
     path = tmp_path / 'extras.escdf'
     escdf.write(file, path)
     again = escdf.read(path)
-    assert again.metadata['m'].extras['block_name'][1].tolist() == ['frame']
+    assert again.metadata['m'].extras['group_name'][1].tolist() == ['frame']
     assert again.activities['a'].data['u'].extras['html'] == ('str', '<p>hi</p>')
     with pytest.warns(UserWarning):
         theirs = reference.ESCDF.load(str(path))
-    assert theirs.metadata['m'].block_name[...].tolist() == ['frame']
+    assert theirs.metadata['m'].group_name[...].tolist() == ['frame']
     report = theirs.get_activity_data('a', 'u')
     assert report.dataset_type == 'unknown' and report.html[...] == '<p>hi</p>'
 

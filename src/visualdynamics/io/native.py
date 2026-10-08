@@ -86,19 +86,25 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         group.attrs['view_up'] = np.asarray(view.up, dtype=np.float64)
     # what each block is made of, one subgroup per block that has it:
     # the material's numbers, and a thickness or a section — the model
-    # a geometry can build of itself (2026-09-25)
+    # a geometry can build of itself (2026-09-25) — or, for a block of
+    # point masses, the mass alone (2026-10-07)
     blocks = getattr(geom, 'block_properties', None) or {}
     if blocks:
         holder = group.create_group('block_properties')
         for block, props in blocks.items():
             entry = holder.create_group(str(int(block)))
-            entry.attrs['material_name'] = props.material.name
-            entry.attrs['youngs_modulus'] = float(props.material.youngs_modulus)
-            entry.attrs['density'] = float(props.material.density)
-            entry.attrs['poissons_ratio'] = float(props.material.poissons_ratio)
-            if props.material.modulus_of_rigidity is not None:
-                entry.attrs['modulus_of_rigidity'] = float(
-                    props.material.modulus_of_rigidity)
+            if props.mass is not None:
+                entry.attrs['mass'] = float(props.mass)
+            if props.material is not None:
+                entry.attrs['material_name'] = props.material.name
+                entry.attrs['youngs_modulus'] = float(
+                    props.material.youngs_modulus)
+                entry.attrs['density'] = float(props.material.density)
+                entry.attrs['poissons_ratio'] = float(
+                    props.material.poissons_ratio)
+                if props.material.modulus_of_rigidity is not None:
+                    entry.attrs['modulus_of_rigidity'] = float(
+                        props.material.modulus_of_rigidity)
             if props.thickness is not None:
                 entry.attrs['thickness'] = float(props.thickness)
             if props.section is not None:
@@ -126,12 +132,14 @@ def _load_block_properties(group) -> dict:
     out = {}
     for key, entry in group['block_properties'].items():
         attrs = entry.attrs
-        material = Material(
-            str(attrs.get('material_name', '')),
-            float(attrs['youngs_modulus']), float(attrs['density']),
-            float(attrs['poissons_ratio']),
-            (float(attrs['modulus_of_rigidity'])
-             if 'modulus_of_rigidity' in attrs else None))
+        material = None
+        if 'youngs_modulus' in attrs:
+            material = Material(
+                str(attrs.get('material_name', '')),
+                float(attrs['youngs_modulus']), float(attrs['density']),
+                float(attrs['poissons_ratio']),
+                (float(attrs['modulus_of_rigidity'])
+                 if 'modulus_of_rigidity' in attrs else None))
         section = None
         if 'section' in attrs:
             area, iy, iz, j = (float(v) for v in attrs['section'])
@@ -146,7 +154,8 @@ def _load_block_properties(group) -> dict:
                        else None),
             section=section,
             orientation=(tuple(float(v) for v in attrs['orientation'])
-                         if 'orientation' in attrs else None))
+                         if 'orientation' in attrs else None),
+            mass=float(attrs['mass']) if 'mass' in attrs else None)
     return out
 
 

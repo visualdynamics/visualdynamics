@@ -4925,7 +4925,9 @@ class MainWindow(QMainWindow):
         names = list(geometry.block_name)
         for k, block in enumerate(geometry.block_id):
             properties = geometry.block_properties.get(int(block))
-            if (properties is not None and properties.material.is_rigid) \
+            # nothing to tie to in a link or a lumped mass
+            if (properties is not None
+                    and properties.kind in ('rigid', 'mass')) \
                     or not geometry.elements_in(int(block)):
                 continue
             label = names[k] or f'Block {int(block)}'
@@ -5564,7 +5566,11 @@ class MainWindow(QMainWindow):
         """Create the element from the nodes picked so far."""
         nodes, self._picked_nodes = self._picked_nodes, []
         self._draw_picked()
-        if self.editing is None or len(nodes) < 2:
+        # a point element is one node, and its one pick commits it; a
+        # line or a face needs two at least (2026-10-07: the floor of
+        # two kept a point mass from ever being added by clicking)
+        least = 1 if self.element_type[1] == 1 else 2
+        if self.editing is None or len(nodes) < least:
             return
         name, _component = self.editing
         geometry = self.objects.get(name)

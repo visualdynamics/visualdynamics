@@ -144,7 +144,12 @@ the handbook's typical room-temperature values (`fem.material(name)`
 in a script; `fem.MATERIAL_LIBRARY` carries each entry's note). They
 are typical values, not the part's: with a certification in hand, type
 its numbers over them, and any name typed into the cell is accepted as
-a name. The properties land on
+a name. A block of point elements takes a mass alone, typed in the
+Mass column, and every element in it puts that mass at its node: a
+bolt, a sensor or a fitting too small to mesh
+(`fem.BlockProperties(mass=...)` in a script). A Nastran deck's plain
+CONM2 cards arrive this way, one block per distinct mass, and a deck
+written back carries the masses on its CONM2 cards. The properties land on
 `geometry.block_properties` as
 [`fem.BlockProperties`](../api/visualdynamics.core.fem.md) and ride
 the native file. *Solve Modes* (`project.solve_modes`) then builds the

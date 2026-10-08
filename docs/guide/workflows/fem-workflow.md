@@ -204,3 +204,27 @@ model = barc.build()
 shapes = model.eigensolution(maximum_frequency=2000)
 print(shapes.frequency[6:16])                 # the first ten elastic modes
 ```
+
+## The BARC from bricks
+
+The same structure is also built from solid bricks, the way the
+[four-unit frame](fem-solids.md) is: each part as the boxes it is made
+of, meshed into eight-node bricks. It is the higher-fidelity model, and
+it comes with the removable component (the two channels and the beam)
+as a model of its own. The joints follow the finite element model shared
+on the wiki. The channels' feet share nodes with the box over their
+whole footprint. The beam rests 0.001 in over the channels, so it touches
+them only where it is tied, over each washer. Each bolt is a point mass
+at its head: a block of point elements given a mass in the Blocks table.
+
+```python
+from visualdynamics.demo import barc
+
+barc.solid_project(solved=True).save('barc-bricks.vdyn')  # both, solved
+```
+
+At an eighth of an inch the assembly has 15,267 nodes and solves in
+about ten seconds. Its first ten elastic modes land 1 to 4 % above the
+ones measured on the BARC and shared on the wiki, and its mode shapes
+follow the shared model's in order. Leaving the bolt masses out raises
+the modes by up to 8 %.

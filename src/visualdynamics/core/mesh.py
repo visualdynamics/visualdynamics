@@ -586,8 +586,10 @@ def tie(geometry: Geometry, elements: Any, to: Any,
         if name in names:
             block_id = int(geometry.block_id[names.index(name)])
             held = geometry.block_properties.get(block_id)
-            if held is not None and not held.material.is_rigid:
-                raise ValueError(f'block {name!r} is {held.material.name}, '
+            if held is not None and held.kind != 'rigid':
+                made = ('point masses' if held.material is None
+                        else held.material.name)
+                raise ValueError(f'block {name!r} is {made}, '
                                  'not rigid: name another for the ties')
         else:
             block_id = geometry.add_block(name)

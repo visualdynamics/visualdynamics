@@ -565,21 +565,34 @@ class BlockProperties:
     `Model.add_beam` takes it — for a block of beams; a block of
     solids takes the material alone. A block given both, or plates or
     beams given neither, is refused when the model is built, by name.
+
+    A block of point elements is a set of lumped masses and takes a
+    mass alone, no material (2026-10-07): ``BlockProperties(mass=m)``
+    puts ``m`` kilograms at the node of every element in the block —
+    a bolt, a sensor, a fitting too small to mesh — which is how a
+    finite element deck states one, a CONM2 or a point-mass block.
     """
 
-    material: Material
+    material: Material | None = None
     thickness: float | None = None            #: m, for a block of plates
     section: Section | None = None            #: for a block of beams
     orientation: tuple[float, float, float] | None = None
+    mass: float | None = None                 #: kg, each, for point masses
 
     @property
     def kind(self) -> str:
-        """'plate', 'beam', 'solid', 'rigid', or what is wrong with it.
-        A rigid block takes no thickness and no section, and any left
-        from before the material was picked are ignored; a material
+        """'plate', 'beam', 'solid', 'rigid', 'mass', or what is wrong
+        with it. A rigid block takes no thickness and no section, and any
+        left from before the material was picked are ignored; a material
         alone is a block of solids (2026-09-30), which take nothing
         else — a block of plates or beams given only a material is
-        refused where the elements are built, by what they are."""
+        refused where the elements are built, by what they are. A mass
+        makes a block of point masses whatever else is set: the mass is
+        the one number such a block can use."""
+        if self.mass is not None:
+            return 'mass'
+        if self.material is None:
+            return 'no material'
         if self.material.is_rigid:
             return 'rigid'
         if self.thickness is not None and self.section is None:
@@ -1059,7 +1072,9 @@ class Model:
         `geometry.block_properties` names what each block is made of
         (`BlockProperties`), every element becomes the element it is:
         a quad a plate, a triangle a triangle, a two-node line a beam,
-        each with its block's material and thickness or section. That
+        each with its block's material and thickness or section, and a
+        point element in a block given a mass a lumped mass at its
+        node. That
         is the model an exodus file means, one property set per block
         of one element type (Brandon, 2026-09-25), and the demonstration
         plate rebuilt from its own geometry this way is the same model
@@ -1912,6 +1927,55 @@ class Model:
         touched = {n for solid in self.solids for n in solid.nodes}
         return [n for n in self.node_ids if n in touched and n not in rotating]
 
+    def idle_lead_rotations(self) -> list[tuple[int, int]]:
+        """(lead node, axis 0-2) for each rotation of a rigid body's lead
+        that nothing acts on: a body only solids touch, whose nodes lie
+        on one line, cannot feel a rotation about that line — it moves
+        no follower, and a solid has no rotational stiffness — so that
+        rotation is a degree of freedom with neither mass nor stiffness.
+
+        Found tying a beam of bricks to the channels under it (the BARC
+        in hexes, 2026-10-07): the two meshes' columns line up, so each
+        tied channel node leads only the beam nodes straight above it,
+        and the app's Tie on any two conforming brick meshes does the
+        same. Grounded like the rotations of a node only solids touch
+        (`dangling_rotations`): the rotation about the line where the
+        line runs along a global axis, all three where the body's nodes
+        coincide. A line at a slant is left to the factorization's own
+        refusal, which names it; grounding an oblique axis would need a
+        rotated basis, and no model here has needed one.
+
+        Returns
+        -------
+        list of (int, int)
+            The lead's node and the rotation's axis, in the model's
+            order.
+        """
+        if not self.solids:
+            return []
+        carried = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
+        carried |= {n for plate in self.plates for n in plate.nodes}
+        carried |= {n for triangle in self.triangles for n in triangle.nodes}
+        carried |= {m.node for m in self.masses if any(m.inertia)}
+        idle = []
+        for body in self.rigid_bodies():
+            if any(node in carried for node in body):
+                continue
+            lead = body[0]
+            arms = np.array([self._nodes[node] - self._nodes[lead]
+                             for node in body[1:]], dtype=float)
+            size = float(np.abs(arms).max()) if arms.size else 0.0
+            if size == 0.0:
+                idle.extend((lead, axis) for axis in range(3))
+                continue
+            _u, spread, direction = np.linalg.svd(arms / size)
+            if spread.size > 1 and spread[1] > 1e-9 * spread[0]:
+                continue                      # not on one line: all stiff
+            axis = int(np.argmax(np.abs(direction[0])))
+            if abs(direction[0][axis]) > 1.0 - 1e-9:
+                idle.append((lead, axis))
+        return idle
+
     def loose_nodes(self) -> list[int]:
         """The nodes nothing touches: no element, no rigid link, no
         lumped mass. A finite element deck carries them routinely — a
@@ -1943,8 +2007,9 @@ class Model:
 
     def _free_dofs(self, fixed) -> np.ndarray:
         """Which rows survive after grounding what `fixed` names, the
-        rotations of the nodes only solids touch, and every degree of
-        freedom of a node nothing touches."""
+        rotations of the nodes only solids touch, the rotations of a
+        rigid body's lead nothing acts on (`idle_lead_rotations`), and
+        every degree of freedom of a node nothing touches."""
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
         held = set()
         for node in self.loose_nodes():
@@ -1961,6 +2026,8 @@ class Model:
                     'a plate or a rigid link holds')
             for node in dangling:
                 held.update(range(index[node] + 3, index[node] + 6))
+        held.update(index[node] + 3 + axis
+                    for node, axis in self.idle_lead_rotations())
         for item in fixed:
             text = str(item).strip()
             digits = 0
@@ -2068,6 +2135,17 @@ def _from_blocks(model: Model, geometry: Geometry,
     joined |= {n for plate in model.plates for n in plate.nodes}
     joined |= {n for triangle in model.triangles for n in triangle.nodes}
     joined |= {n for solid in model.solids for n in solid.nodes}
+    # a point mass on a node nothing holds is a mass free to fly off:
+    # three modes at 0 Hz that are no rigid-body motion, said here by
+    # node rather than left for the reader of the mode list to find
+    held = joined | {n for link in model.rigid_links
+                     for n in (link.node_a, link.node_b)}
+    stray = [m.node for m in model.masses if m.node not in held]
+    if stray:
+        shown = ', '.join(str(n) for n in stray[:4])
+        raise ValueError(f'a point mass sits on node {shown}, which no '
+                         'element touches: put it on a node of the '
+                         'structure')
     # nodes no element touches are grounded at solve time
     # (`Model.loose_nodes`), not refused: a deck's reference points
     pieces = [piece for piece in model.pieces()
@@ -2105,7 +2183,11 @@ def _element_by_block(model: Model, geometry: Geometry,
             raise ValueError(
                 f'{named(block)} has no properties: give every block a '
                 'material and a thickness or a section (fem.BlockProperties)')
-        if props.kind not in ('plate', 'beam', 'solid', 'rigid'):
+        if props.kind == 'no material':
+            raise ValueError(f'{named(block)} has no material: give it '
+                             'one, or a mass if it is a block of point '
+                             'masses')
+        if props.kind not in ('plate', 'beam', 'solid', 'rigid', 'mass'):
             raise ValueError(f'{named(block)} has {props.kind}: a block of '
                              'plates takes a thickness, a block of beams a '
                              'section, never both')
@@ -2138,23 +2220,32 @@ def _element_by_block(model: Model, geometry: Geometry,
         elif (shape == 'volume' and len(nodes) in SOLID_CODES
                 and props.kind == 'solid'):
             model.add_solid(nodes, props.material, group=label)
+        elif shape == 'point' and len(nodes) == 1 and props.kind == 'mass':
+            model.add_mass(nodes[0], props.mass, name=label)
         elif props.kind == 'rigid':
             raise ValueError(f'{named(block)} holds {shape_name} elements; a '
                              'rigid (massless) block holds two-node lines, '
                              'one link each')
+        elif props.kind == 'mass':
+            raise ValueError(f'{named(block)} holds {shape_name} elements; a '
+                             'block given a mass holds point elements, one '
+                             'mass each')
         else:
             wanted = ('a thickness' if shape == 'face' else 'a section'
-                      if shape == 'line' else 'a material alone')
+                      if shape == 'line' else 'a mass' if shape == 'point'
+                      else 'a material alone')
             solvable = ((shape in ('face', 'line') and len(nodes) in (2, 3, 4))
-                        or (shape == 'volume' and len(nodes) in SOLID_CODES))
+                        or (shape == 'volume' and len(nodes) in SOLID_CODES)
+                        or (shape == 'point' and len(nodes) == 1))
             raise ValueError(
                 f'{named(block)} holds {shape_name} elements, which take '
                 f'{wanted}; it was given {props.kind} properties'
                 if solvable
                 else f'{named(block)} holds {shape_name} elements, and the '
                      'solver has no element for them: two-node beams, '
-                     'three-node triangles, four-node quads, and eight-node '
-                     'hexahedra, six-node wedges and four-node tetrahedra only')
+                     'three-node triangles, four-node quads, eight-node '
+                     'hexahedra, six-node wedges, four-node tetrahedra and '
+                     'one-node point masses only')
         built += 1
     return built
 

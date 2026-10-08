@@ -1008,6 +1008,9 @@ _PROPERTY_FIELDS = (
     ('Iz', 'section', 'iz', 'length**4'),
     ('J', 'section', 'j', 'length**4'),
     ('Orientation', '', 'orientation', None),
+    # a block of point elements: the mass at each one's node, and
+    # nothing else (2026-10-07)
+    ('Mass', '', 'mass', 'mass'),
 )
 
 
@@ -1084,6 +1087,20 @@ def _set_property(holder, field, dimension=None, unit_system=None):
         block = int(geometry.block_id[row])
         props = geometry.block_properties.get(block)
         text = str(text).strip()
+        if field == 'mass':
+            # a mass makes the block point masses, and a mass alone;
+            # cleared, the block has nothing left to say
+            value = float(text) if text else None
+            if value is not None and unit_system is not None:
+                value = float(unit_system.to_si(value, 'mass'))
+            if value is not None:
+                geometry.block_properties[block] = BlockProperties(mass=value)
+            elif props is not None and props.kind == 'mass':
+                geometry.block_properties.pop(block, None)
+            return
+        if props is not None and props.kind == 'mass':
+            raise ValueError('a block of point masses takes a mass alone — '
+                             'clear its Mass to give it a material')
         if holder == 'section' and field in ('shape', 'dimensions'):
             geometry.block_properties[block] = _set_section_shape(
                 props, field, text, unit_system)
@@ -1120,7 +1137,8 @@ def _set_property(holder, field, dimension=None, unit_system=None):
         if props is None:
             props = BlockProperties(Material('', 0.0, 0.0, 0.3))
         if holder == 'material':
-            props = replace(props, material=replace(props.material,
+            material = props.material or Material('', 0.0, 0.0, 0.3)
+            props = replace(props, material=replace(material,
                                                     **{field: value}))
         elif holder == 'section':
             section = props.section or Section('', 0.0, 0.0, 0.0, 0.0)
@@ -1191,6 +1209,8 @@ def _property_journal(geometry, row, _text):
     props = geometry.block_properties.get(block)
     if props is None:
         return f'.block_properties.pop({block}, None)'
+    if props.kind == 'mass':
+        return f'.block_properties[{block}] = BlockProperties(mass={props.mass!r})'
     m = props.material
     if m.is_rigid:
         # the rigid link by name: its modulus is infinite, and 'inf' is
@@ -1255,7 +1275,7 @@ def _property_columns(unit_system=None):
 
 #: the headers with no display system to ask
 _SI_LABELS = {'pressure': 'Pa', 'mass/length**3': 'kg/m³', 'length': 'm',
-              'length**2': 'm²', 'length**4': 'm⁴'}
+              'length**2': 'm²', 'length**4': 'm⁴', 'mass': 'kg'}
 
 
 def block_label(geometry: Geometry, row: int) -> str:
@@ -1374,7 +1394,7 @@ def block_table_model(geometry: Geometry,
         # What the block is made of, for a model built from the
         # geometry (Brandon, 2026-09-25): a material for any block, a
         # thickness for a block of plates, a section for a block of
-        # beams. SI throughout, as the model is inside; blank until
+        # beams, a mass for a block of point masses. SI throughout, as the model is inside; blank until
         # set. Every cell's journal line restates the whole property
         # set, so a replay lands on the same object whichever cell was
         # edited last.

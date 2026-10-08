@@ -193,9 +193,12 @@ def test_the_barc_opens_upright_without_being_turned():
     assert np.argmax(np.abs(up)) == 1 and up[1] > 0
 
 
-def test_the_downloadable_project_opens_solved(tmp_path):
+@pytest.mark.slow
+def test_the_downloadable_projects_open_solved(tmp_path):
     """The downloads page's BARC is cut by tools/cut_examples.py from
-    `project(solved=True)`: the model and its modes, solved."""
+    `project(solved=True)` and `solid_project(solved=True)`: the models
+    and their modes, solved. Slow since the bricks joined it: the
+    assembly of bricks solves in about ten seconds."""
     import importlib.util
     import pathlib
 
@@ -209,6 +212,96 @@ def test_the_downloadable_project_opens_solved(tmp_path):
     source, projects, _sentence, _about = tool.SETS[
         'VisualDynamics-examples-barc.zip']
     source(str(tmp_path))
+    assert projects == ('barc', 'barc-bricks')
     project = visualdynamics.Project.open(tmp_path / f'{projects[0]}.vdyn')
     assert sorted(project.keys()) == ['BARC', 'BARC Modes']
     assert project['BARC Modes'].frequency.max() <= barc.SOLVE_TO
+    project = visualdynamics.Project.open(tmp_path / f'{projects[1]}.vdyn')
+    assert sorted(project.keys()) == ['BARC', 'BARC Modes',
+                                      'Removable Component',
+                                      'Removable Component Modes']
+    elastic = [f for f in project['Removable Component Modes'].frequency
+               if f > 1.0]
+    assert np.allclose(elastic[:7], PART_CHECKED, rtol=0.005)
+    assert 'top bolts' in list(project['Removable Component'].block_name), \
+        'the bolt masses ride the saved project'
+
+
+# ---- the BARC from bricks (2026-10-07) -----------------------------------
+
+#: the first ten elastic modes of the assembly of bricks at `barc.SIZE`,
+#: Hz — the build checked against the wiki's model and test: 1 to 4 %
+#: above the measured modes, the shapes in the shared model's order
+SOLID_CHECKED = (191.8, 213.1, 271.6, 457.9, 490.7, 581.5, 603.1, 696.7,
+                 1150.0, 1226.0)
+#: the removable component's first seven, checked against the shared
+#: model of it: 6 % under for the first two, within 2 % above after
+PART_CHECKED = (280.0, 435.6, 596.3, 1320.8, 1633.8, 1954.8, 2025.9)
+
+
+def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
+    """The bricks' volume is the solid model's without its bolt holes
+    (the box 16.9 in³ as a tube with its slot, the channels and beam
+    as drawn); the bolts are point masses at their heads, eight #8 at
+    the feet and two 1/4 in at the beam, and the beam rests over the
+    channels, tied at its bolts only."""
+    from visualdynamics.core.fem import RIGID, Model
+
+    geometry = barc.solid_geometry()
+    assert list(geometry.block_name) == ['box', 'right channel',
+                                         'left channel', 'beam', 'bolt ties',
+                                         'foot bolts', 'top bolts']
+    ids = dict(zip(geometry.block_name, geometry.block_id.tolist()))
+    assert geometry.block_properties[ids['bolt ties']].material is RIGID
+    assert len(geometry.elements_in('foot bolts')) == 8
+    assert len(geometry.elements_in('top bolts')) == 2
+    model = Model.from_geometry(geometry)
+    lb = 0.45359237
+    assert sum(m.mass for m in model.masses) == pytest.approx(
+        (8 * 0.00744 + 2 * 0.0125) * lb)
+    bricks = (6 * 6 - 5.5 * 5.5 - 0.5 * 0.25) * 3.0 + 2 * (
+        2 * 0.125 + 1.75 * 0.125) + 5 * 0.125
+    assert model.structural_mass == pytest.approx(
+        bricks * INCH3 * barc.MATERIAL.density)
+    assert len(model.pieces()) == 1
+    inch = geometry.node_xyz / 0.0254
+    beam = geometry.node_index(np.unique(np.concatenate(
+        [geometry.elem_conn[i] for i in np.flatnonzero(
+            geometry.elem_block == ids['beam'])])))
+    assert inch[beam, 1].min() == pytest.approx(5.0 + barc.BEAM_GAP), \
+        'the beam is not fused to the channels'
+
+
+def test_the_removable_component_stays_where_it_was_checked():
+    geometry = barc.solid_geometry('removable component')
+    assert 'box' not in list(geometry.block_name)
+    assert 'foot bolts' not in list(geometry.block_name), \
+        'its foot bolts stay with the box'
+    shapes = barc.solid_build('removable component').eigensolution(
+        maximum_frequency=barc.PART_SOLVE_TO)
+    assert int(np.sum(shapes.frequency == 0.0)) == 6, 'free-free'
+    elastic = [f for f in shapes.frequency if f > 1.0][:7]
+    assert np.allclose(elastic, PART_CHECKED, rtol=0.005), np.round(elastic, 1)
+    with pytest.raises(ValueError, match='not one of'):
+        barc.solid_geometry('bench')
+
+
+@pytest.mark.slow
+def test_the_bricks_stay_where_they_were_checked():
+    shapes = barc.solid_build().eigensolution(maximum_frequency=barc.SOLVE_TO)
+    assert int(np.sum(shapes.frequency == 0.0)) == 6, 'free-free'
+    elastic = [f for f in shapes.frequency if f > 1.0][:10]
+    assert np.allclose(elastic, SOLID_CHECKED, rtol=0.005), np.round(elastic, 1)
+
+
+def test_a_coarser_mesh_of_bricks_still_holds_together():
+    """Every box is cut at every other's faces before it is meshed: at
+    a quarter inch a channel's eighth-inch web met a flange with no line
+    of nodes there, hung from one edge, and the BARC read 76 Hz for
+    192 (2026-10-07). Coarse now reads within a percent and a half of
+    the checked mesh."""
+    shapes = barc.solid_build('BARC', 0.25).eigensolution(
+        maximum_frequency=1300.0)
+    elastic = [f for f in shapes.frequency if f > 1.0][:8]
+    assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.015), \
+        np.round(elastic, 1)

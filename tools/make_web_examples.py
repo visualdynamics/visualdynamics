@@ -248,6 +248,48 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
     return size_kb
 
 
+#: the BARC of bricks drawn at the planes figure's quarter inch: 2,900
+#: nodes and a 1.5 MB page, where the example's eighth of an inch makes
+#: 15,000 nodes and 7.9 MB
+BARC_BRICKS_WEB_SIZE = 0.25
+
+
+def build_barc_bricks(size: float = BARC_BRICKS_WEB_SIZE,
+                      write: bool = True) -> int:
+    """The BARC of bricks, its first elastic modes animated: the model
+    the examples page puts beside the one from planes
+    (`visualdynamics.demo.barc.solid_build`, 2026-10-07)."""
+    import visualdynamics
+    import visualdynamics.report as report_module
+    from visualdynamics.core.report import Report
+    from visualdynamics.demo import barc
+
+    model = barc.solid_build('BARC', size)
+    shapes = model.eigensolution(maximum_frequency=1300.0)
+    elastic = [i for i, f in enumerate(shapes.frequency) if f > 1.0][:BARC_MODES]
+    shapes.delete_modes([i for i in range(shapes.num_shapes)
+                         if i not in elastic])
+    geometry = barc.solid_geometry('BARC', size)
+    demo = visualdynamics.Project('Examples')
+    demo.add('BARC', geometry)
+    demo.add('Modes', shapes)
+    demo.link('BARC', 'Modes')
+    report = Report('', [{
+        'kind': 'scene', 'geometry': 'BARC', 'shapes': 'Modes',
+        'caption': 'Finite element modes of the BARC, built from bricks — '
+                   'pick one from the list, and drag to turn it'}])
+    report.marking = ''
+    html = report_module.render_html(report, dict(demo.items()),
+                                     visualdynamics.SI, links=demo.links)
+    html = html.replace('</body>', EMBED.strip() + '\n')
+    size_kb = len(html.encode('utf-8')) // 1024
+    if write:
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / 'barc-bricks.html').write_text(html, encoding='utf-8')
+    print(f'  barc-bricks.html {size_kb:5d} KB  ({model.num_nodes} nodes)')
+    return size_kb
+
+
 #: the four-unit frame figure's element size, inches: the website draws
 #: the frame with its thick wing a third of an inch coarse — 3,400 nodes
 #: and a two-megabyte page — where the example solves at a twelfth
@@ -294,5 +336,6 @@ def build_frame(size: float = FRAME_WEB_SIZE, write: bool = True) -> int:
 
 if __name__ == '__main__':
     build_barc()
+    build_barc_bricks()
     build_frame()
     sys.exit(build())

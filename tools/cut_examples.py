@@ -19,8 +19,9 @@ provisional, and the next alpha's `.escdf` re-cuts them without
 touching an application tag. `modal_hard` stays out: 5 GB exists to
 stress the fitter, not to be downloaded.
 
-The BARC (2026-09-26) and the four-unit frame (2026-09-30) are the
-exception to all of that: no runs, just models, so their projects are
+The BARC (2026-09-26, its bricks 2026-10-07) and the four-unit frame
+(2026-09-30) are the exception to all of that: no runs, just models,
+so their projects are
 built and solved from `visualdynamics.demo.barc` and `.frame` as the
 zip is cut, need nothing from `stressdata/`, and are small. Name one
 zip to cut (and upload) only that one, leaving the others on the
@@ -48,12 +49,16 @@ not photographs."""
 
 
 def _barc(out_dir: str) -> None:
-    """The BARC has no runs to cut: its project is built and solved
-    from the demonstration module, in seconds, on any machine."""
+    """The BARC has no runs to cut: its projects are built and solved
+    from the demonstration module, in seconds, on any machine — the
+    model from planes the finite element workflow builds, and the
+    assembly and its removable component from bricks (2026-10-07)."""
     sys.path.insert(0, os.path.join(ROOT, 'src'))
     from visualdynamics.demo import barc
 
     barc.project(solved=True).save(os.path.join(out_dir, 'barc.vdyn'))
+    barc.solid_project(solved=True).save(
+        os.path.join(out_dir, 'barc-bricks.vdyn'))
 
 
 def _frame(out_dir: str) -> None:
@@ -101,15 +106,18 @@ SETS = {
          'in this bundle.')),
     'VisualDynamics-examples-barc.zip': (
         _barc,
-        ('barc',),
+        ('barc', 'barc-bricks'),
         ('The BARC: a finite element model built from planes and solved '
          "— the documentation's finite element workflow, already carried "
-         'out.'),
-        ('The model is visualdynamics.demo.barc, rebuilt with\n'
-         'barc.project(solved=True). It was checked against the finite\n'
-         'element models shared on the SEM Dynamic Substructuring Focus\n'
-         'Group wiki, https://wiki.sem.org/wiki/BARC, where the BARC\'s\n'
-         'solid model, test data and models are.')),
+         'out — and the BARC and its removable component built from '
+         'bricks, with the bolts as point masses, solved.'),
+        ('The models are visualdynamics.demo.barc, rebuilt with\n'
+         'barc.project(solved=True) and barc.solid_project(solved=True).\n'
+         'They were checked against the finite element models and the\n'
+         'test shared on the SEM Dynamic Substructuring Focus Group wiki,\n'
+         'https://wiki.sem.org/wiki/BARC, where the BARC\'s solid model,\n'
+         'test data and models are. None of the wiki\'s files are in\n'
+         'this bundle.')),
 }
 
 README = """Visual Dynamics example projects — {title}

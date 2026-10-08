@@ -184,3 +184,38 @@ def test_tie_to_a_second_selection(window, pump, monkeypatch):
     assert window.project.journal[-1] == (
         f"project.tie_elements('Geometry', [{foot[0]}], "
         f'[{int(plate.elem_id[5])}])')
+
+
+def test_a_tie_between_conforming_bricks_solves():
+    """Two brick blocks, one resting a thousandth of an inch over the
+    other on the same grid, tied over a patch: each tied node below
+    leads only the nodes straight above it, so its rotation about that
+    vertical line moves nothing, and solids give a rotation nothing to
+    act on — a degree of freedom with neither mass nor stiffness, and
+    the model would not factor (2026-10-07, the BARC in hexes). That
+    rotation is grounded now (`Model.idle_lead_rotations`), and the
+    tied pair solves free-free: six rigid-body modes, then elastic."""
+    x, y, z = np.eye(3)
+    base = mesh.block((0, 0, 0), 2 * x, 2 * y, 0.125 * z, 0.25, 'base',
+                      unit='in')
+    lid = mesh.block((0, 0, 0.126), 2 * x, 2 * y, 0.125 * z, 0.25, 'lid',
+                     unit='in')
+    whole = mesh.assemble(base, lid)
+    whole.block_properties = {
+        int(b): fem.BlockProperties(fem.material('6061-T6'))
+        for b in whole.block_id}
+    xyz = whole.node_xyz / 0.0254
+    patch = []
+    for element in whole.elements_in('lid'):
+        row = int(np.flatnonzero(whole.elem_id == element)[0])
+        center = xyz[whole.node_index(whole.elem_conn[row])].mean(axis=0)
+        if abs(center[0] - 1.0) <= 0.25 and abs(center[1] - 1.0) <= 0.25:
+            patch.append(element)
+    mesh.tie(whole, patch, 'base')
+    model = fem.Model.from_geometry(whole)
+    idle = model.idle_lead_rotations()
+    assert idle and {axis for _node, axis in idle} == {2}, \
+        'the rotation about the vertical line, and only that one'
+    frequencies = model.eigensolution(num_modes=8).frequency
+    assert np.sum(np.abs(frequencies) < 1.0) == 6
+    assert frequencies[6] > 1.0

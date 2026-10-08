@@ -194,6 +194,9 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
     materials: dict[int, dict[str, float | None]] = {}
     solids: dict[int, int] = {}
     shells: dict[int, tuple[int, float | None]] = {}
+    # each CONM2's mass, by element, when the card is a plain point
+    # mass: one block per distinct mass afterwards
+    point_masses: dict[int, float] = {}
 
     for card in cards:
         name = str(card[0]).upper()
@@ -223,6 +226,17 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
             tracelines.append([int(card[2]), int(card[3])])
         elif name == 'CONM2':
             elements.append((int(card[1]), 161, [int(card[2])], 0))
+            # EID G CID M X1 X2 X3, then the inertias: a mass carried
+            # off its grid or with inertia is not a point mass, and its
+            # block is left without properties for the analyst to state
+            # rather than given a mass that would put it in the wrong
+            # place
+            card = _pad(card, 5)
+            mass, rest = card[4], card[5:]
+            if (isinstance(mass, (int, float)) and mass > 0
+                    and not any(isinstance(v, (int, float)) and v
+                                for v in rest)):
+                point_masses[int(card[1])] = float(mass)
         elif name in ('CELAS1', 'CELAS2'):
             # the grounded spring keeps its one live grid; a
             # two-grid spring keeps the first, the way the
@@ -261,6 +275,22 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                 f'{path}: unsupported connection card {name} — an '
                 'element silently dropped is a mesh that lies')
 
+    # a block per distinct CONM2 mass, numbered after every property
+    # id so none is taken, carrying its mass (2026-10-07)
+    mass_blocks: dict[float, int] = {}
+    if point_masses:
+        after = max((e[3] for e in elements), default=0) + 1
+        for mass in sorted(set(point_masses.values())):
+            mass_blocks[mass] = after + len(mass_blocks)
+        elements = [(eid, code, grids, mass_blocks[point_masses[eid]])
+                    if code == 161 and eid in point_masses
+                    else (eid, code, grids, pid)
+                    for eid, code, grids, pid in elements]
+    mass_names = {block: f'CONM2 {mass:g}'
+                  for mass, block in mass_blocks.items()}
+    properties = _block_properties(materials, solids, shells)
+    properties.update({block: _mass_properties(mass)
+                       for mass, block in mass_blocks.items()})
     geometry = Geometry(
         node_id=[n[0] for n in nodes],
         node_xyz=_resolve_positions(nodes, systems, path),
@@ -280,9 +310,10 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
         elem_conn=[np.array(e[2]) for e in elements],
         elem_block=[e[3] for e in elements],
         block_id=sorted({e[3] for e in elements}),
-        block_name=[f'property {pid}' if pid else ''
+        block_name=[mass_names.get(pid) or (f'property {pid}' if pid
+                                            else '')
                     for pid in sorted({e[3] for e in elements})],
-        block_properties=_block_properties(materials, solids, shells),
+        block_properties=properties,
     )
     # the PLOTELs are one drawn line — a block of two-node line
     # elements with no properties — chained where they join
@@ -325,6 +356,12 @@ def _block_properties(materials: dict, solids: dict, shells: dict) -> dict:
         if made is not None and thickness is not None:
             out[pid] = BlockProperties(made, thickness=thickness)
     return out
+
+
+def _mass_properties(mass: float):
+    from ..core.fem import BlockProperties
+
+    return BlockProperties(mass=mass)
 
 
 def _looks_like_connection(card) -> bool:
@@ -457,7 +494,9 @@ def save(geometry: Geometry, path: str | os.PathLike,
     PID 1 and no PSHELL/PSOLID/MAT cards are written, because
     properties are the analyst's statement about the structure and
     inventing them here would put made-up stiffness in a real deck.
-    Grids go out large-field for full precision. Drawn lines become
+    A point mass is the exception that is no invention: a CONM2 carries
+    the mass its block was given, when it was given one, and 0.0
+    otherwise. Grids go out large-field for full precision. Drawn lines become
     PLOTEL chains — Nastran's own display-only line. Values are
     written in SI, the geometry's storage.
     """
@@ -493,6 +532,7 @@ def save(geometry: Geometry, path: str | os.PathLike,
     # properties — goes out as PLOTEL chains and not as elements too
     drawn = geometry.drawn_lines()
     drawn_blocks = {line['block'] for line in drawn}
+    blocks = getattr(geometry, 'block_properties', None) or {}
     for i, code in enumerate(geometry.elem_type):
         if int(geometry.elem_block[i]) in drawn_blocks:
             continue
@@ -504,8 +544,10 @@ def save(geometry: Geometry, path: str | os.PathLike,
                 f'(element {int(geometry.elem_id[i])})')
         conn = [int(n) for n in geometry.elem_conn[i]]
         if name == 'CONM2':
+            props = blocks.get(int(geometry.elem_block[i]))
+            mass = props.mass if props is not None and props.mass else 0.0
             lines.append(_card(name, int(geometry.elem_id[i]),
-                               conn[0], 0, 0.0))
+                               conn[0], 0, float(mass)))
         elif name == 'CELAS2':
             lines.append(_card(name, int(geometry.elem_id[i]),
                                0.0, conn[0], 1))

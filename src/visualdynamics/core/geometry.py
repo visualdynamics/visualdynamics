@@ -107,10 +107,11 @@ ELEMENT_TYPES = {
     172: ('shell_axisym3', 3, 'line'),
     # Springs, dampers and gaps come in two kinds: between two nodes,
     # which draws as the line it is, and from a node to ground, which
-    # is one node and draws as a point. 136 is the exception and stays
-    # one node here on purpose — the Nastran reader writes a CELAS2 as
-    # a 136 at a single grid, and exodus maps its SPRING to one.
-    136: ('spring', 1, 'point'),
+    # is one node and draws as a point. 136 was one node here until
+    # 2026-10-08, to fit a Nastran reader that kept a CELAS at its first
+    # grid; it is two, as the universal file has it, since the reader
+    # keeps both grids and the stiffness.
+    136: ('spring', 2, 'line'),
     137: ('spring_rotational', 2, 'line'),
     138: ('spring_ground', 1, 'point'),
     139: ('spring_ground_rotational', 1, 'point'),

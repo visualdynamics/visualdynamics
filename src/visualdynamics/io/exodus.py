@@ -190,6 +190,8 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
                     f"Unsupported exodus element type {type_name!r} "
                     f"in block {group_id} of {path}")
             conn = np.asarray(conn_var[()], dtype=np.int64)  # 1-based local indices
+            if code == 136 and conn.ndim == 2 and conn.shape[1] == 1:
+                code = 138           # a SPRING of one node is to ground
             kept_blocks.append(int(group_id))
             kept_names.append(names[i - 1])
             for row in conn:

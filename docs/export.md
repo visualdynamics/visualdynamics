@@ -134,10 +134,16 @@ and its modes, so a test column can stand beside a model column:
 
 - **Nastran bulk data** reads and writes the mesh — grids (all three
   field formats, bare-exponent floats included), CORD2 chains,
-  elements, concentrated masses, PLOTELs as drawn lines. Constraints
-  and analysis cards are skipped knowingly on the way in; the written
-  deck is interchange, not a runnable model — no properties or
-  materials are invented, and the header says who wrote it.
+  elements, concentrated masses, PLOTELs as drawn lines. CELAS1 and
+  CELAS2 springs read with their stiffness (a CELAS1's from its PELAS),
+  one element group per stiffness and direction, and SPC and SPC1 cards
+  as ground points held in their components; a deck with more than one
+  SPC set, an SPC that enforces a displacement, or a spring joining two
+  different components is refused by name. Rigid elements and analysis
+  cards are skipped knowingly on the way in; the written deck is
+  interchange, not a runnable model — no properties or materials are
+  invented, springs go out as CELAS2 with their stiffness and ground as
+  SPC1, and the header says who wrote it.
 - **A Nastran punch file** brings the modes: SOL 103 eigenvectors
   read into a ShapeSet, frequencies from the eigenvalues. Complex
   output refuses by name until a real file shows its header layout.

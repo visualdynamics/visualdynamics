@@ -91,6 +91,28 @@ from .shapes import ShapeSet
 #: transmits moments, so rotations are structural here rather than a
 #: bookkeeping convenience — leaving them out would model pin joints.
 DIRECTIONS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
+#: the six global directions by name, unsigned: what a ground holds
+AXES = ('X', 'Y', 'Z', 'RX', 'RY', 'RZ')
+
+
+def ground_axes(directions: Any) -> tuple[str, ...]:
+    """A ground's directions as `AXES` names, in their order: True for
+    all six, False or None or nothing for none, else names ('X', 'RY'),
+    a sign or case making no difference — 'x+' is 'X'."""
+    if directions is True:
+        return AXES
+    if not directions:
+        return ()
+    if isinstance(directions, str):
+        directions = directions.replace(',', ' ').split()
+    wanted = set()
+    for name in directions:
+        axis = str(name).strip().upper().rstrip('+-')
+        if axis not in AXES:
+            raise ValueError(f'{name!r} is not a direction to hold: '
+                             + ', '.join(AXES))
+        wanted.add(axis)
+    return tuple(axis for axis in AXES if axis in wanted)
 
 #: When a mode's strain energy is called zero, so its frequency is set to
 #: zero exactly rather than left at the 1e-4 Hz round-off gives it.
@@ -579,9 +601,11 @@ class GroupProperties:
     between its two nodes in each direction given (`Model.add_spring`),
     the nodes free to coincide, and every point element a spring from its
     node to ground — a Nastran CBUSH, or CELAS cards one direction at a
-    time. A group given ``ground=True`` holds points, and each one's node
-    is held in all six directions (`Model.add_ground`): a support, and the
-    far end of a spring to ground drawn as a line.
+    time. A group given ``ground`` holds points, and each one's node is
+    held in each direction given (`Model.add_ground`): all six with
+    ``ground=True``, the translations alone with ``ground=('X', 'Y',
+    'Z')`` — a support, or the far end of a spring to ground drawn as a
+    line. A Nastran SPC1 reads as one, its components the directions.
     """
 
     material: Material | None = None
@@ -591,7 +615,11 @@ class GroupProperties:
     mass: float | None = None                 #: kg, each, for point masses
     #: N/m along X, Y, Z and N m/rad about them, None for free: springs
     stiffness: tuple[float | None, ...] | None = None
-    ground: bool = False                      #: points held in all six
+    #: the directions points are held in (`AXES`); True for all six
+    ground: tuple[str, ...] | bool = ()
+
+    def __post_init__(self) -> None:
+        self.ground = ground_axes(self.ground)
 
     @property
     def kind(self) -> str:
@@ -889,7 +917,8 @@ class Model:
         masses: Lumped masses, as `LumpedMass` records at a node.
         springs: Discrete springs between two degrees of freedom or to
             ground, as `Spring` records (`add_spring`).
-        grounds: The nodes held in all six directions (`add_ground`).
+        grounds: The nodes held, and in which directions, {node: axes
+            0-5} (`add_ground`).
         faces: Surfaces, as `Face` records naming three or four nodes.
             They carry no stiffness — a face is drawn, and its *edges*
             are what carry members.
@@ -907,7 +936,8 @@ class Model:
         self.solids: list[Solid] = []
         self.rigid_links: list[RigidLink] = []
         self.springs: list[Spring] = []
-        self.grounds: list[int] = []
+        #: {node: the axes held, 0-5}
+        self.grounds: dict[int, tuple[int, ...]] = {}
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
 
@@ -1116,17 +1146,20 @@ class Model:
         self.springs.append(spring)
         return spring
 
-    def add_ground(self, node: int) -> int:
-        """Hold a node in all six directions: a support, solved for as
-        `fixed` would hold it, but carried by the model — what a ground
-        point in a geometry builds. A node nothing else touches is held
-        whole already (`loose_nodes`); this holds one the structure
-        touches too.
+    def add_ground(self, node: int, directions: Any = True) -> int:
+        """Hold a node in some or all of the six directions: a support,
+        solved for as `fixed` would hold it, but carried by the model —
+        what a ground point in a geometry builds. A node nothing else
+        touches is held whole already (`loose_nodes`); this holds one the
+        structure touches too. Held twice, a node is held in both sets.
 
         Parameters
         ----------
         node : int
             The node, already in the model.
+        directions : bool or sequence of str, default True
+            The directions held, as `AXES` names ('X', 'RY'); True for
+            all six.
 
         Returns
         -------
@@ -1136,9 +1169,16 @@ class Model:
         if int(node) not in self._nodes:
             raise ValueError(f'ground names node {node}, which is not in '
                              'the model')
-        if int(node) not in self.grounds:
-            self.grounds.append(int(node))
+        axes = {AXES.index(axis) for axis in ground_axes(directions)}
+        if not axes:
+            raise ValueError(f'a ground at node {node} holds no direction')
+        held = set(self.grounds.get(int(node), ())) | axes
+        self.grounds[int(node)] = tuple(sorted(held))
         return int(node)
+
+    def _rotation_held(self, node: int, code: int) -> bool:
+        """Whether the rotation `code` (4-6) of `node` is grounded."""
+        return abs(code) - 1 in self.grounds.get(node, ())
 
     def _spring_end(self, text: str) -> tuple[int, int]:
         """(node, signed direction code) of a spring end, '101RY+'."""
@@ -2104,7 +2144,9 @@ class Model:
                                        (spring.node_b, spring.direction_b))
                     if node is not None and abs(code) <= 3}
         # a held node's rotations are held already
-        held = set(self.loose_nodes()) | set(self.grounds)
+        held = set(self.loose_nodes()) | {
+            node for node, axes in self.grounds.items()
+            if {3, 4, 5} <= set(axes)}
         return [n for n in self.node_ids
                 if n in touched and n not in rotating and n not in held]
 
@@ -2194,21 +2236,24 @@ class Model:
         freedom of a node nothing touches."""
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
         held = set()
-        for node in [*self.loose_nodes(), *self.grounds]:
+        for node in self.loose_nodes():
             held.update(range(index[node], index[node] + 6))
+        for node, axes in self.grounds.items():
+            held.update(index[node] + axis for axis in axes)
         # a rotational spring's end must rotate with something, or be held:
         # on a node only solids, masses or other springs touch it would be
         # grounded with that node's rotations, silently, or be a rotation
         # with stiffness and no mass
         rotating = self._rotating_nodes()
-        whole = set(self.loose_nodes()) | set(self.grounds)
+        whole = set(self.loose_nodes())
         twisted = sorted({node for spring in self.springs
                           for node, code in ((spring.node_a,
                                               spring.direction_a),
                                              (spring.node_b,
                                               spring.direction_b))
                           if node is not None and abs(code) > 3
-                          and node not in rotating and node not in whole})
+                          and node not in rotating and node not in whole
+                          and not self._rotation_held(node, code)})
         if twisted:
             raise ValueError(
                 f'a spring acts on a rotation of node {twisted[0]}, but '
@@ -2432,7 +2477,7 @@ def _element_by_group(model: Model, geometry: Geometry,
         elif shape == 'point' and len(nodes) == 1 and props.kind == 'mass':
             model.add_mass(nodes[0], props.mass, name=label)
         elif shape == 'point' and len(nodes) == 1 and props.kind == 'ground':
-            model.add_ground(nodes[0])
+            model.add_ground(nodes[0], props.ground)
         elif (props.kind == 'spring' and len(nodes) in (1, 2)
                 and shape in ('point', 'line')):
             for direction, k in zip(DIRECTIONS, props.stiffness):

@@ -1014,12 +1014,21 @@ _PROPERTY_FIELDS = (
     # a group of springs: a stiffness per global direction, typed by
     # label in the display system (2026-10-08)
     ('Stiffness', '', 'stiffness', None),
+    # a group of points held: the directions, 'all' for six
+    ('Ground', '', 'ground', None),
 )
 
 #: the Material list's entry that makes a group of points ground
 GROUND = 'ground (fixed)'
 #: the Stiffness cell's labels, in `fem.DIRECTIONS` order
 STIFFNESS_LABELS = ('Kx', 'Ky', 'Kz', 'Krx', 'Kry', 'Krz')
+
+
+def _ground_text(ground):
+    """'all', or the directions held: 'X, Y, Z'."""
+    if not ground:
+        return ''
+    return 'all' if len(ground) == 6 else ', '.join(ground)
 
 
 def _stiffness_dimension(index):
@@ -1112,6 +1121,8 @@ def _property_value(geometry, row, holder, field, dimension=None,
     if field == 'stiffness':
         return (_stiffness_text(props.stiffness, unit_system)
                 if props.stiffness is not None else '')
+    if field == 'ground':
+        return _ground_text(props.ground)
     owner = getattr(props, holder) if holder else props
     if owner is None:
         return ''
@@ -1168,6 +1179,15 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             return
         if holder == 'material' and field == 'name' and text == GROUND:
             geometry.group_properties[group] = GroupProperties(ground=True)
+            return
+        if field == 'ground':
+            # directions make the group ground, and nothing else; cleared,
+            # it has nothing left to say
+            if text:
+                geometry.group_properties[group] = GroupProperties(
+                    ground=True if text.lower() == 'all' else text)
+            elif props is not None and props.kind == 'ground':
+                geometry.group_properties.pop(group, None)
             return
         if props is not None and props.kind == 'mass':
             raise ValueError('an element group of point masses takes a mass alone — '
@@ -1293,7 +1313,8 @@ def _property_journal(geometry, row, _text):
     if props.kind == 'mass':
         return f'.group_properties[{group}] = GroupProperties(mass={props.mass!r})'
     if props.kind == 'ground':
-        return f'.group_properties[{group}] = GroupProperties(ground=True)'
+        held = (True if len(props.ground) == 6 else tuple(props.ground))
+        return f'.group_properties[{group}] = GroupProperties(ground={held!r})'
     if props.kind == 'spring':
         return (f'.group_properties[{group}] = '
                 f'GroupProperties(stiffness={tuple(props.stiffness)!r})')
@@ -1339,7 +1360,7 @@ def _property_columns(unit_system=None):
     for title, holder, field, dimension in _PROPERTY_FIELDS:
         kwargs = ({'alignment': LEFT}
                   if field in ('name', 'orientation', 'shape', 'dimensions',
-                               'stiffness')
+                               'stiffness', 'ground')
                   else {'format': lambda v: v if v == '' else f'{v:.6g}'})
         if holder == 'material' and field == 'name':
             # the library as a shortlist, not a rule: pick one and the

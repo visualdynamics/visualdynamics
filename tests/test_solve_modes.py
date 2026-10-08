@@ -101,7 +101,7 @@ def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
                       'ρ [kg/m³]', 'Thickness [m]', 'Section', 'Shape',
                       'Dimensions [m]', 'A [m²]', 'Iy [m⁴]', 'Iz [m⁴]',
                       'J [m⁴]', 'Orientation', 'Mass [kg]',
-                      'Stiffness [N/m, N·m/rad]']
+                      'Stiffness [N/m, N·m/rad]', 'Ground']
     assert model.data(model.index(0, _column(model, 'E [Pa]'))) == '', \
         'blank until set'
     _set(model, 'Material', '6061-T6')

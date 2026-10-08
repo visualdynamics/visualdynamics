@@ -266,6 +266,19 @@ FAMILY_ADD_TYPES = {'beams': (21, 2), 'triangles': (41, 3), 'quads': (44, 4),
 DRAWN_AS = {'groups': 'elements'}
 
 
+def _coincident_nodes(geometry, node):
+    """Every node in the same place as `node`, by id, `node` first —
+    within a billionth of the geometry's size, so a mesh's own spacing
+    never counts."""
+    xyz = np.asarray(geometry.node_xyz, dtype=float)
+    span = float(np.ptp(xyz, axis=0).max()) if len(xyz) else 0.0
+    at = xyz[geometry.node_index([node])[0]]
+    close = np.flatnonzero(np.abs(xyz - at).max(axis=1) <= 1e-9 * max(span, 1e-30))
+    others = sorted(int(geometry.node_id[i]) for i in close
+                    if int(geometry.node_id[i]) != int(node))
+    return [int(node), *others]
+
+
 def _row_for_entity(geometry, component, entity):
     """Table row for a picked entity — id for nodes and coordinate systems,
     index for elements."""
@@ -5546,12 +5559,19 @@ class MainWindow(QMainWindow):
         if node is None:
             return
         node = int(node)
+        # nodes in one place answer one pixel: an extending click takes
+        # the first of them not picked yet, so a spring between two
+        # coincident nodes is two clicks on the spot (2026-10-08), and
+        # unpicks them, last first, once all are taken
+        here = _coincident_nodes(geometry, node)
+        free = [n for n in here if n not in self._picked_nodes]
         if not extend:
             self._picked_nodes = [node]
-        elif node in self._picked_nodes:
-            self._picked_nodes.remove(node)     # picked twice: unpick it
+        elif free:
+            self._picked_nodes.append(free[0])
         else:
-            self._picked_nodes.append(node)
+            last = max(here, key=self._picked_nodes.index)
+            self._picked_nodes.remove(last)     # picked twice: unpick it
         self._draw_picked()
         # a beam takes the line's grammar (2026-09-30): pick as many
         # nodes as the line runs through, and Enter makes the chain; a
@@ -5729,10 +5749,21 @@ class MainWindow(QMainWindow):
         self._hover_mesh.lines = cells['lines']
         rows = ([] if component != 'nodes' or self._hovered is None
                 else geometry.node_index([self._hovered]))
-        self._label_nodes('hover-label', rows, [self._hovered],
+        self._label_nodes('hover-label', rows, [self._hover_caption(geometry)],
                           resolve_theme(self.theme_name)['scene_highlight'])
         if render:
             self.scene.plotter.render()
+
+    def _hover_caption(self, geometry):
+        """The hovered node's id, or every id in that place and how many
+        ('104, 200 (2 here)'): coincident nodes draw as one, and the
+        caption is how a person knows a second is under the first."""
+        if self._hovered is None:
+            return ''
+        here = _coincident_nodes(geometry, int(self._hovered))
+        if len(here) == 1:
+            return str(here[0])
+        return f'{", ".join(str(n) for n in here)} ({len(here)} here)'
 
     def _extend_pressed(self):
         """Is the multi-select modifier down: Shift, or Cmd on a Mac and

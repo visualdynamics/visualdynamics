@@ -159,7 +159,14 @@ coincide, as a joint between two parts meshed to the same point is. A
 group of points given a stiffness is springs from each node to ground,
 and a group of points given *ground (fixed)* from the Material list
 holds each node in all six directions, which is a support, or the far
-end of a spring line to ground. A point mass hung on spring lines needs
+end of a spring line to ground. The Ground column names the directions
+held instead (`X, Y, Z` pins a node and leaves it free to turn; `all`
+is all six). A Nastran deck's CELAS springs and SPC supports arrive as
+such groups, and a deck written back carries them as CELAS2 and SPC1
+cards. Nodes in one place draw as one: hovering there captions every id
+(`104, 200 (2 here)`), and Shift-clicking the spot again while adding an
+element takes the one not picked yet, so a spring between two
+coincident nodes is two clicks. A point mass hung on spring lines needs
 no beam at its node. The Points family is always in the tree, so the
 first point can be clicked into place (`fem.GroupProperties(stiffness=
 (...))` and `GroupProperties(ground=True)` in a script, or

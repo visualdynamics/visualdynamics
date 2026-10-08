@@ -114,7 +114,7 @@ _CLASSES: dict[str, type] = {
 #: the standard's element names by this program's descriptor, where a
 #: descriptor has one; the rest stay in the whole-object attachment
 _ELEMENT_NAMES: dict[int, str] = {
-    **dict.fromkeys((11, 21, 22, 31, 121, 122, 137, 141, 151), 'bar2'),
+    **dict.fromkeys((11, 21, 22, 31, 121, 122, 136, 137, 141, 151), 'bar2'),
     **dict.fromkeys((23, 24, 32), 'bar3'),
     **dict.fromkeys((41, 51, 61, 71, 91), 'tri3'),
     **dict.fromkeys((42, 52, 62, 72, 92), 'tri6'),
@@ -123,7 +123,7 @@ _ELEMENT_NAMES: dict[int, str] = {
     111: 'tet4', 118: 'tet10', 115: 'hex8', 104: 'hex8', 116: 'hex20',
     105: 'hex20', 112: 'wedge6', 101: 'wedge6', 113: 'wedge15',
     102: 'wedge15',
-    **dict.fromkeys((136, 138, 139, 142, 152, 161), 'sphere1'),
+    **dict.fromkeys((138, 139, 142, 152, 161), 'sphere1'),
 }
 _ELEMENT_CODES: dict[str, int] = {
     'bar2': 21, 'bar3': 23, 'tri3': 41, 'tri6': 42, 'quad4': 44,

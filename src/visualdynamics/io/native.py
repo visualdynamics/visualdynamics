@@ -105,13 +105,14 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
             if props.mass is not None:
                 entry.attrs['mass'] = float(props.mass)
             # a spring's six stiffnesses, NaN where a direction is free;
-            # a ground group, a flag (2026-10-08)
+            # a ground group, the directions it holds, 'X Y Z RX RY RZ'
+            # (a39 wrote True for all six, and still reads)
             if props.stiffness is not None:
                 entry.attrs['stiffness'] = np.array(
                     [np.nan if k is None else float(k)
                      for k in props.stiffness], dtype=np.float64)
             if props.ground:
-                entry.attrs['ground'] = True
+                entry.attrs['ground'] = ' '.join(props.ground)
             if props.material is not None:
                 entry.attrs['material_name'] = props.material.name
                 entry.attrs['youngs_modulus'] = float(
@@ -176,8 +177,18 @@ def _load_block_properties(group) -> dict:
             stiffness=(tuple(None if np.isnan(k) else float(k)
                              for k in attrs['stiffness'])
                        if 'stiffness' in attrs else None),
-            ground=bool(attrs.get('ground', False)))
+            ground=_ground(attrs.get('ground')))
     return out
+
+
+def _ground(value):
+    """A ground group's directions as stored: a name list, or a flag
+    from a39 meaning all six."""
+    if isinstance(value, bytes):
+        value = value.decode('utf-8')
+    if isinstance(value, str):
+        return value
+    return bool(value)
 
 
 def _load_mass_properties(group):

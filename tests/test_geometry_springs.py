@@ -68,7 +68,7 @@ def test_a_ground_point_holds_its_node_as_fixed_does():
     geometry = _beams_geometry(free)
     _group(geometry, 'support', [[1]], POINT, GroupProperties(ground=True))
     built = Model.from_geometry(geometry)
-    assert built.grounds == [1]
+    assert built.grounds == {1: (0, 1, 2, 3, 4, 5)}
     expected = free.eigensolution(num_modes=8, fixed=['1']).frequency
     got = built.eigensolution(num_modes=8).frequency
     assert got == pytest.approx(expected, rel=1e-9)

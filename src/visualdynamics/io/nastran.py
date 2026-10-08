@@ -49,6 +49,7 @@ from typing import Any
 
 import numpy as np
 
+from ..core.fem import AXES
 from ..core.geometry import ELEMENT_TYPES, Geometry, placed, to_local
 from .sniffing import text_head
 
@@ -197,6 +198,13 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
     # each CONM2's mass, by element, when the card is a plain point
     # mass: one element group per distinct mass afterwards
     point_masses: dict[int, float] = {}
+    # each CELAS: (eid, g1, component, g2 or None, its stiffness or the
+    # PELAS id that holds it), one group per stiffness and direction
+    # afterwards; the PELAS cards; each SPC'd grid's components
+    springs: list[tuple[int, int, int, int | None, Any]] = []
+    pelas: dict[int, float] = {}
+    supports: dict[int, set[int]] = {}
+    spc_sets: set[int] = set()
 
     for card in cards:
         name = str(card[0]).upper()
@@ -238,11 +246,23 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
                                 for v in rest)):
                 point_masses[int(card[1])] = float(mass)
         elif name in ('CELAS1', 'CELAS2'):
-            # the grounded spring keeps its one live grid; a
-            # two-grid spring keeps the first, the way the
-            # vocabulary's point element does
-            grid = card[4] if name == 'CELAS1' else card[3]
-            elements.append((int(card[1]), 136, [int(grid)], 0))
+            # EID PID|K G1 C1 G2 C2: a CELAS1 names the PELAS holding its
+            # stiffness, a CELAS2 carries it (2026-10-08: the reader kept
+            # the first grid alone and dropped the stiffness, and read a
+            # CELAS1's grid out of its component field)
+            card = _pad(card, 7)
+            springs.append(_spring_card(path, name, card))
+        elif name == 'PELAS':
+            # up to two properties to a card: PID K GE S, twice
+            card = _pad(card, 9)
+            for at in (1, 5):
+                if isinstance(card[at], int) and isinstance(
+                        card[at + 1], (int, float)):
+                    pelas[int(card[at])] = float(card[at + 1])
+        elif name in ('SPC', 'SPC1'):
+            spc_sets.add(int(card[1]))
+            for grid, component in _support_card(path, name, card):
+                supports.setdefault(grid, set()).update(component)
         elif name in _ELEMENT_CARDS:
             grids = [int(g) for g in card[_GRIDS_START + 1:]
                      if isinstance(g, (int, float)) and g]
@@ -291,6 +311,47 @@ def load(path: str | os.PathLike, length_unit: str | None = None) -> Any:
     properties = _block_properties(materials, solids, shells)
     properties.update({group: _mass_properties(mass)
                        for mass, group in mass_blocks.items()})
+    if len(spc_sets) > 1:
+        raise ValueError(
+            f'{path}: the deck holds SPC sets '
+            + ', '.join(str(s) for s in sorted(spc_sets))
+            + '; a geometry holds one set of supports — keep the one the '
+            'case control selects')
+    # a group per distinct CELAS stiffness and direction, and per
+    # distinct set of SPC components, numbered after every group so far
+    # (2026-10-08)
+    after = max([e[3] for e in elements] + list(mass_names), default=0) + 1
+    next_eid = max([e[0] for e in elements], default=0) + 1
+    made: dict[Any, int] = {}
+    for eid, g1, component, g2, stiffness in springs:
+        if isinstance(stiffness, tuple):
+            stiffness = pelas.get(stiffness[1])
+        code = ((136 if component <= 3 else 137) if g2
+                else (138 if component <= 3 else 139))
+        grids = [g1, g2] if g2 else [g1]
+        if stiffness is None:
+            # its PELAS is not in the deck: where it is, with nothing said
+            elements.append((eid, code, grids, 0))
+            continue
+        key = ('spring', stiffness, component)
+        if key not in made:
+            made[key] = after + len(made)
+            values = [None] * 6
+            values[component - 1] = stiffness
+            properties[made[key]] = _spring_properties(tuple(values))
+            mass_names[made[key]] = (f'CELAS {stiffness:g} '
+                                     f'{AXES[component - 1]}')
+        elements.append((eid, code, grids, made[key]))
+    for grid in sorted(supports):
+        held = tuple(sorted(supports[grid]))
+        key = ('ground', held)
+        if key not in made:
+            made[key] = after + len(made)
+            properties[made[key]] = _ground_properties(
+                [AXES[c - 1] for c in held])
+            mass_names[made[key]] = 'SPC ' + ''.join(str(c) for c in held)
+        elements.append((next_eid, 161, [grid], made[key]))
+        next_eid += 1
     geometry = Geometry(
         node_id=[n[0] for n in nodes],
         node_xyz=_resolve_positions(nodes, systems, path),
@@ -356,6 +417,78 @@ def _block_properties(materials: dict, solids: dict, shells: dict) -> dict:
         if made is not None and thickness is not None:
             out[pid] = GroupProperties(made, thickness=thickness)
     return out
+
+
+def _spring_card(path, name, card) -> tuple:
+    """(eid, g1, component, g2 or None, stiffness or ('PELAS', pid)).
+    A spring joins one direction at both ends here: one that joins two
+    different components is refused by name rather than read as half of
+    what it says."""
+    eid = int(card[1])
+    g1, c1, g2, c2 = card[3], card[4], card[5], card[6]
+    if not isinstance(g1, int) or g1 == 0:
+        raise ValueError(f'{path}: {name} {eid} acts on a scalar point; '
+                         'only grid points are read')
+    if not isinstance(c1, int) or not 1 <= c1 <= 6:
+        raise ValueError(f'{path}: {name} {eid} names component {c1!r}; '
+                         'a grid point has components 1 to 6')
+    if isinstance(g2, int) and g2:
+        if c2 != c1:
+            raise ValueError(
+                f'{path}: {name} {eid} joins component {c1} of grid {g1} '
+                f'to component {c2} of grid {g2}; a spring here joins one '
+                'direction at both ends')
+    else:
+        g2 = None
+    stiffness = (('PELAS', int(card[2])) if name == 'CELAS1'
+                 else float(card[2]) if isinstance(card[2], (int, float))
+                 else None)
+    return eid, int(g1), int(c1), g2, stiffness
+
+
+def _support_card(path, name, card):
+    """(grid, components) for each grid an SPC or SPC1 holds. An SPC
+    that enforces a displacement is no support, and is refused."""
+    def components(value):
+        digits = str(value or '')
+        if not digits or not set(digits) <= set('123456'):
+            raise ValueError(f'{path}: {name} names components {value!r}; '
+                             'a grid point has components 1 to 6')
+        return {int(d) for d in digits}
+
+    if name == 'SPC':
+        card = _pad(card, 8)
+        for at in (2, 5):
+            grid, held, enforced = card[at], card[at + 1], card[at + 2]
+            if not isinstance(grid, int) or not grid:
+                continue
+            if isinstance(enforced, (int, float)) and enforced:
+                raise ValueError(f'{path}: SPC {card[1]} enforces a '
+                                 f'displacement at grid {grid}; only '
+                                 'supports are read')
+            yield grid, components(held)
+        return
+    held = components(card[2])
+    grids = card[3:]
+    if len(grids) >= 3 and str(grids[1]).upper() == 'THRU':
+        for grid in range(int(grids[0]), int(grids[2]) + 1):
+            yield grid, held
+        return
+    for grid in grids:
+        if isinstance(grid, int) and grid:
+            yield grid, held
+
+
+def _spring_properties(stiffness):
+    from ..core.fem import GroupProperties
+
+    return GroupProperties(stiffness=stiffness)
+
+
+def _ground_properties(axes):
+    from ..core.fem import GroupProperties
+
+    return GroupProperties(ground=tuple(axes))
 
 
 def _mass_properties(mass: float):
@@ -457,7 +590,8 @@ _CARD_NAMES = {11: 'CROD', 21: 'CBAR', 22: 'CBAR', 23: 'CBAR',
                111: 'CTETRA', 118: 'CTETRA', 112: 'CPENTA',
                113: 'CPENTA', 115: 'CHEXA', 116: 'CHEXA', 117: 'CHEXA',
                201: 'CPYRAM', 202: 'CPYRAM',
-               136: 'CELAS2', 161: 'CONM2'}
+               136: 'CELAS2', 137: 'CELAS2', 138: 'CELAS2',
+               139: 'CELAS2', 161: 'CONM2'}
 
 
 def _small(value) -> str:
@@ -467,7 +601,28 @@ def _small(value) -> str:
         return f'{value:<8.8s}'
     if isinstance(value, (int, np.integer)):
         return f'{int(value):8d}'
-    return f'{float(value):8.6G}'[:8].rjust(8)
+    return _real8(float(value)).rjust(8)
+
+
+def _real8(value: float) -> str:
+    """A real in eight characters, as many digits as fit, in Nastran's
+    own short form where an exponent is needed ('1.2346+7'). Cut to
+    eight, '1.23457E+07' was '1.23457E', a number no reader parses back
+    (2026-10-08, found writing a stiffness)."""
+    if value == 0.0:
+        return '0.'
+    for digits in range(7, 0, -1):
+        text = f'{value:.{digits}G}'
+        if 'E' in text:
+            mantissa, exponent = text.split('E')
+            if '.' not in mantissa:
+                mantissa += '.'
+            text = mantissa + f'{int(exponent):+d}'
+        elif '.' not in text:
+            text += '.'
+        if len(text) <= 8:
+            return text
+    raise ValueError(f'{value!r} does not fit a small field')
 
 
 def _card(name: str, *fields) -> str:
@@ -496,7 +651,10 @@ def save(geometry: Geometry, path: str | os.PathLike,
     inventing them here would put made-up stiffness in a real deck.
     A point mass is the exception that is no invention: a CONM2 carries
     the mass its element group was given, when it was given one, and 0.0
-    otherwise. Grids go out large-field for full precision. Drawn lines become
+    otherwise. Springs and supports likewise: a group of springs goes
+    out as a CELAS2 per element and direction with its stiffness, and a
+    ground group as SPC1 cards of its components (2026-10-08). Grids go
+    out large-field for full precision. Drawn lines become
     PLOTEL chains — Nastran's own display-only line. Values are
     written in SI, the geometry's storage.
     """
@@ -533,8 +691,29 @@ def save(geometry: Geometry, path: str | os.PathLike,
     drawn = geometry.drawn_lines()
     drawn_groups = {line['group'] for line in drawn}
     groups = getattr(geometry, 'group_properties', None) or {}
+    # a spring of several directions is a CELAS2 per direction, the ones
+    # after the first numbered past every element; a ground point is a
+    # grid on an SPC1 of its components, and no element (2026-10-08)
+    spare = 1 + max((int(e) for e in geometry.elem_id), default=0)
+    supports: dict[str, list[int]] = {}
     for i, code in enumerate(geometry.elem_type):
         if int(geometry.elem_group[i]) in drawn_groups:
+            continue
+        props = groups.get(int(geometry.elem_group[i]))
+        conn = [int(n) for n in geometry.elem_conn[i]]
+        if props is not None and props.kind == 'ground':
+            held = ''.join(str(AXES.index(a) + 1) for a in props.ground)
+            supports.setdefault(held, []).append(conn[0])
+            continue
+        if props is not None and props.kind == 'spring':
+            eid = int(geometry.elem_id[i])
+            for k, stiffness in enumerate(props.stiffness):
+                if not stiffness:
+                    continue
+                far = (conn[-1], k + 1) if len(conn) == 2 else ()
+                lines.append(_card('CELAS2', eid, float(stiffness), conn[0],
+                                   k + 1, *far))
+                eid, spare = spare, spare + 1
             continue
         code = int(code)
         name = _CARD_NAMES.get(code)
@@ -542,18 +721,21 @@ def save(geometry: Geometry, path: str | os.PathLike,
             raise ValueError(
                 f'no bulk card for a {VOCABULARY[code][0]} '
                 f'(element {int(geometry.elem_id[i])})')
-        conn = [int(n) for n in geometry.elem_conn[i]]
         if name == 'CONM2':
-            props = groups.get(int(geometry.elem_group[i]))
             mass = props.mass if props is not None and props.mass else 0.0
             lines.append(_card(name, int(geometry.elem_id[i]),
                                conn[0], 0, float(mass)))
         elif name == 'CELAS2':
+            # a spring element in no group of springs: where it is, with
+            # no stiffness to say
+            far = (conn[1], 1) if len(conn) == 2 else ()
             lines.append(_card(name, int(geometry.elem_id[i]),
-                               0.0, conn[0], 1))
+                               0.0, conn[0], 1, *far))
         else:
             lines.append(_card(name, int(geometry.elem_id[i]), 1, *conn))
-    plotel = 1 + (max((int(e) for e in geometry.elem_id), default=0))
+    for held, grids in supports.items():
+        lines.append(_card('SPC1', 1, int(held), *grids))
+    plotel = spare
     for line in drawn:
         for chain in line['chains']:
             for a, b in pairwise(chain):

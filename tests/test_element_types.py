@@ -118,15 +118,16 @@ def test_the_solid_and_thick_shell_cubics_are_known():
 
 def test_springs_dampers_and_gaps_come_in_two_kinds():
     """Between two nodes it is a line; from a node to ground it is one
-    node and a point. 136 is the exception on purpose — the Nastran
-    reader writes a CELAS2 as a 136 at a single grid."""
-    for code in (137, 141, 151):
+    node and a point. 136 was the exception, one node, to fit a Nastran
+    reader that kept a CELAS at its first grid; since the reader keeps
+    both grids and the stiffness (2026-10-08) it is two, as the
+    universal file has it."""
+    for code in (136, 137, 141, 151):
         _name, nodes, render = ELEMENT_TYPES[code]
         assert (nodes, render) == (2, 'line'), code
     for code in (138, 139, 142, 152, 161):
         _name, nodes, render = ELEMENT_TYPES[code]
         assert (nodes, render) == (1, 'point'), code
-    assert ELEMENT_TYPES[136] == ('spring', 1, 'point'), 'a CELAS2 at one grid'
 
 
 def test_a_line_element_names_at_least_the_two_it_is_drawn_between():

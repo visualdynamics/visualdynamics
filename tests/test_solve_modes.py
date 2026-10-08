@@ -1,11 +1,11 @@
-"""Solve Modes: a geometry whose blocks carry their properties is a
+"""Solve Modes: a geometry whose element groups carry their properties is a
 finite element model, and the app solves it (Brandon, 2026-09-25).
 
-The second slice of the block model. The Blocks table grew the property
-columns — a material for any block, a thickness for plates, a section
-for beams — writing into `geometry.block_properties` with journal lines
+The second slice of the element group model. The Element Groups table grew the property
+columns — a material for any element group, a thickness for plates, a section
+for beams — writing into `geometry.group_properties` with journal lines
 a session script replays; and `Project.solve_modes` builds the model
-from the blocks and adds its normal modes in the geometry's group, with
+from the element groups and adds its normal modes in the geometry's group, with
 a Solve Modes act on the bar that asks the two numbers the solution
 takes.
 """
@@ -16,15 +16,15 @@ import math
 
 import numpy as np
 import pytest
-from conftest import edit_block, edit_category, select_objects
+from conftest import edit_category, edit_element_group, select_objects
 from PySide6.QtCore import Qt
 from test_acts import _bar
 from test_fem import ALUMINUM, square_plate
 
 import visualdynamics
-from visualdynamics.core.fem import BlockProperties, Model, Section
+from visualdynamics.core.fem import GroupProperties, Model, Section
 from visualdynamics.core.shapes import ShapeSet
-from visualdynamics.gui.object_tables import block_table_model
+from visualdynamics.gui.object_tables import GROUND, element_group_table_model
 from visualdynamics.project import Project
 
 EDIT = Qt.ItemDataRole.EditRole
@@ -33,8 +33,8 @@ EDIT = Qt.ItemDataRole.EditRole
 def _plate_geometry(mesh=4, properties=True):
     geometry = square_plate(mesh).geometry()
     if properties:
-        geometry.block_properties = {
-            int(geometry.block_id[0]): BlockProperties(ALUMINUM, 0.01)}
+        geometry.group_properties = {
+            int(geometry.group_id[0]): GroupProperties(ALUMINUM, 0.01)}
     return geometry
 
 
@@ -66,14 +66,14 @@ def test_solve_modes_adds_the_models_modes_in_the_geometrys_group():
     assert int(np.sum(shapes.frequency == 0.0)) == 6, 'free-free'
     assert np.allclose(shapes.damping, 0.02)
     assert any({'Skin', 'Skin Modes'} <= set(group['members'])
-               for group in project.links), 'linked to its geometry'
+               for group in project.object_groups), 'linked to its geometry'
     assert project.provenance[name]['verb'] == 'solve_modes'
 
 
 def test_solve_modes_refuses_a_bare_geometry_and_a_non_geometry():
     project = Project()
     project.add('Bare', _plate_geometry(properties=False))
-    with pytest.raises(ValueError, match='no block properties'):
+    with pytest.raises(ValueError, match='no element group properties'):
         project.solve_modes('Bare')
     project.add('Shapes', ShapeSet([10.0], [0.01], ['1Z+'], [[1.0]]))
     with pytest.raises(TypeError, match='not a geometry'):
@@ -94,13 +94,14 @@ def _set(model, title, text, row=0):
 
 def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     titles = [model.headerData(c, Qt.Orientation.Horizontal)
               for c in range(model.columnCount())]
-    assert titles == ['Block', 'Name', 'Elements', 'Material', 'E [Pa]', 'ν',
+    assert titles == ['Element group', 'Name', 'Elements', 'Material', 'E [Pa]', 'ν',
                       'ρ [kg/m³]', 'Thickness [m]', 'Section', 'Shape',
                       'Dimensions [m]', 'A [m²]', 'Iy [m⁴]', 'Iz [m⁴]',
-                      'J [m⁴]', 'Orientation', 'Mass [kg]']
+                      'J [m⁴]', 'Orientation', 'Mass [kg]',
+                      'Stiffness [N/m, N·m/rad]']
     assert model.data(model.index(0, _column(model, 'E [Pa]'))) == '', \
         'blank until set'
     _set(model, 'Material', '6061-T6')
@@ -108,7 +109,7 @@ def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
     _set(model, 'ρ [kg/m³]', '2700')
     _set(model, 'ν', '0.33')
     _set(model, 'Thickness [m]', '0.003')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material.name == '6061-T6'
     assert props.material.youngs_modulus == 68.9e9
     assert props.material.density == 2700.0
@@ -121,14 +122,14 @@ def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
 def test_a_section_fills_the_same_way_and_an_orientation_is_three_numbers(
         qt_app):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     _set(model, 'Section', 'rib')
     _set(model, 'A [m²]', '3e-4')
     _set(model, 'Iy [m⁴]', '2.25e-9')
     _set(model, 'Iz [m⁴]', '2.5e-10')
     _set(model, 'J [m⁴]', '7e-10')
     _set(model, 'Orientation', '0, 0, 1')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.section == Section('rib', 3e-4, 2.25e-9, 2.5e-10, 7e-10)
     assert props.orientation == (0.0, 0.0, 1.0)
     assert props.kind == 'beam'
@@ -144,7 +145,7 @@ def test_a_section_fills_the_same_way_and_an_orientation_is_three_numbers(
 def test_property_edits_journal_the_whole_set_and_replay(window, pump,
                                                         tmp_path):
     """Whichever cell was touched last, the journal line rebuilds the
-    block's whole property set, so the session script lands on the same
+    element group's whole property set, so the session script lands on the same
     object — and `solve_modes` replays after it with the same modes."""
     from test_workflow_journals import _replay
 
@@ -158,7 +159,7 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     # it from the unit menu
     window.unit_combo.setCurrentText('m-kg-N-s')
     pump()
-    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
+    edit_element_group(window, pump, int(window.objects['Geometry'].group_id[0]))
     model = window.table.model()
     _set(model, 'Material', 'Al')
     _set(model, 'E [Pa]', '70e9')
@@ -167,10 +168,10 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     pump()
     window.project.solve_modes('Geometry', maximum_frequency=500.0)
     script = window.project.session_script()
-    assert ('from visualdynamics.core.fem import RIGID, BlockProperties, '
+    assert ('from visualdynamics.core.fem import RIGID, GroupProperties, '
             'Material, Section') in script
-    assert script.count('.block_properties[') == 4, 'one line per edit'
-    assert ("BlockProperties(Material('Al', 70000000000.0, 2700.0, 0.3), "
+    assert script.count('.group_properties[') == 4, 'one line per edit'
+    assert ("GroupProperties(Material('Al', 70000000000.0, 2700.0, 0.3), "
             'thickness=0.01)') in script
     assert "solve_modes('Geometry', maximum_frequency=500.0" in script
     _replay(window)
@@ -271,12 +272,13 @@ def test_picking_a_library_material_fills_the_row(qt_app):
     from visualdynamics.core.fem import MATERIALS, material
 
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     column = model.columns[_column(model, 'Material')]
-    assert column.choices == list(MATERIALS) and column.choices_editable, (
-        'the library as a drop-down that still takes a typed name')
+    assert column.choices == [*MATERIALS, GROUND] and column.choices_editable, (
+        'the library as a drop-down that still takes a typed name, and '
+        'ground last')
     _set(model, 'Material', 'Ti-6Al-4V')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material is material('Ti-6Al-4V')
     shown = float(model.data(model.index(0, _column(model, 'E [Pa]'))))
     assert shown == pytest.approx(16.5e6 * 6894.757293168361, rel=1e-5), (
@@ -285,22 +287,22 @@ def test_picking_a_library_material_fills_the_row(qt_app):
     # the thickness the row had stays; a second pick swaps the material
     _set(model, 'Thickness [m]', '0.005')
     _set(model, 'Material', '304 stainless')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material is material('304 stainless')
     assert props.thickness == 0.005
     # a name outside the library is a name, and the numbers are the user's
     _set(model, 'Material', 'my alloy')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material.name == 'my alloy'
     assert props.material.density == material('304 stainless').density, (
         'renaming keeps the numbers already in the row')
 
 
 
-# ---- the Blocks table in the display unit system (2026-09-26) ----------
+# ---- the Element Groups table in the display unit system (2026-09-26) ----------
 
 def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
-    """Brandon: the Blocks table should show, and expect, the current
+    """Brandon: the Element Groups table should show, and expect, the current
     display unit system. Held in SI on the geometry and in the journal,
     as the model is inside."""
     from visualdynamics.core.fem import material
@@ -309,7 +311,7 @@ def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
     inch = SYSTEMS['in-slinch-lbf-s']
     psi, inches = 6894.757293168361, 0.0254
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry, inch)
+    model = element_group_table_model(geometry, inch)
     titles = [model.headerData(c, Qt.Orientation.Horizontal)
               for c in range(model.columnCount())]
     for title in ('E [psi]', 'ρ [slinch/in³]', 'Thickness [in]', 'A [in²]',
@@ -323,18 +325,18 @@ def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
         == pytest.approx(0.098 / 386.08858, rel=1e-6)
     # typed in inches, stored in meters
     _set(model, 'Thickness [in]', '0.5')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.thickness == pytest.approx(0.5 * inches)
     assert props.material is material('6061-T6')
     # typed in psi, stored in pascals; ν has no unit and is not scaled
     _set(model, 'E [psi]', '1e7')
     _set(model, 'ν', '0.33')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material.youngs_modulus == pytest.approx(1e7 * psi)
     assert props.material.poissons_ratio == 0.33
     # a section's second moments in in⁴
     _set(model, 'Iy [in⁴]', '2')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.section.iy == pytest.approx(2 * inches ** 4)
 
 
@@ -342,7 +344,7 @@ def test_the_blocks_table_journals_in_si_whatever_it_shows(qt_app):
     from visualdynamics.units import SYSTEMS
 
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry, SYSTEMS['mm-kg-N-s'])
+    model = element_group_table_model(geometry, SYSTEMS['mm-kg-N-s'])
     lines = []
     model.edit_journaled.connect(lines.append)
     _set(model, 'Thickness [mm]', '5')
@@ -357,7 +359,7 @@ def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
     window.add_object(path_name, geometry)
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     pump()
-    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
+    edit_element_group(window, pump, int(window.objects['Geometry'].group_id[0]))
     model = window.table.model()
     assert float(model.data(model.index(0, _column(model, 'Thickness [in]')))) \
         == pytest.approx(0.01 / 0.0254)
@@ -369,7 +371,7 @@ def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
 
 
 def test_switching_the_unit_system_restates_the_node_table(window, pump):
-    """The same gap, found through the Blocks table: an open node table
+    """The same gap, found through the Element Groups table: an open node table
     kept the coordinates' unit of the moment it was opened."""
 
     window.add_object('Geometry', _plate_geometry())
@@ -392,7 +394,7 @@ def test_switching_the_unit_system_restates_the_node_table(window, pump):
 # ---- sections from their shapes (2026-09-26) -----------------------------
 
 def _section_of(geometry):
-    return geometry.block_properties[int(geometry.block_id[0])].section
+    return geometry.group_properties[int(geometry.group_id[0])].section
 
 
 def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
@@ -402,7 +404,7 @@ def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
 
     inch = 0.0254
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry, SYSTEMS['in-slinch-lbf-s'])
+    model = element_group_table_model(geometry, SYSTEMS['in-slinch-lbf-s'])
     shape_column = model.columns[_column(model, 'Shape')]
     assert shape_column.choices == ['round tube', 'rod', 'rectangle',
                                     'rectangular tube', 'I-beam', 'channel',
@@ -426,7 +428,7 @@ def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
 
 def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     _set(model, 'Shape', 'rectangle')
     _set(model, 'Dimensions [m]', 'b=0.01, h=0.03')
     said = []
@@ -444,7 +446,7 @@ def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
 
 def test_wrong_dimensions_are_refused_by_name(qt_app):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     said = []
     model.edit_rejected.connect(said.append)
     index = model.index(0, _column(model, 'Dimensions [m]'))
@@ -460,7 +462,7 @@ def test_wrong_dimensions_are_refused_by_name(qt_app):
 
 def test_an_angle_says_where_to_point_it(qt_app):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     _set(model, 'Shape', 'angle')
     shown = _set(model, 'Dimensions [m]', '0.1, 0.1, 0.01')
     assert shown.endswith('; orient 45.0° from the long leg'), shown
@@ -473,12 +475,12 @@ def test_an_unfinished_section_is_refused_when_the_model_is_built():
     frame = visualdynamics.Geometry(
         node_id=[1, 2, 3], node_xyz=[[0, 0, 0], [0, 0, 1], [1, 0, 1]],
         elem_id=[1, 2], elem_type=[21, 21], elem_conn=[[1, 2], [2, 3]],
-        elem_block=[1, 1], block_id=[1], block_name=['frame'],
+        elem_group=[1, 1], group_id=[1], group_name=['frame'],
         length_unit='m',
-        block_properties={1: BlockProperties(
+        group_properties={1: GroupProperties(
             ALUMINUM, section=Section('tube', 0, 0, 0, 0, 'round tube', ()),
             orientation=(0.0, 1.0, 0.0))})
-    with pytest.raises(ValueError, match=r'block 1 \(frame\): the section is '
+    with pytest.raises(ValueError, match=r'element group 1 \(frame\): the section is '
                                           r'not finished — its round tube has '
                                           r'no dimensions yet'):
         Model.from_geometry(frame)
@@ -487,7 +489,7 @@ def test_an_unfinished_section_is_refused_when_the_model_is_built():
 def test_a_shaped_section_journals_and_saves_by_its_dimensions(qt_app,
                                                               tmp_path):
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     lines = []
     model.edit_journaled.connect(lines.append)
     _set(model, 'Section', 'beam')
@@ -509,22 +511,22 @@ def test_a_rigid_link_is_picked_like_a_material_and_journals_by_name(qt_app):
     from visualdynamics.core.fem import RIGID
 
     geometry = _plate_geometry(properties=False)
-    model = block_table_model(geometry)
+    model = element_group_table_model(geometry)
     assert 'rigid (massless)' in model.columns[_column(model, 'Material')].choices
     lines = []
     model.edit_journaled.connect(lines.append)
     _set(model, 'Material', 'rigid (massless)')
-    props = geometry.block_properties[int(geometry.block_id[0])]
+    props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material is RIGID and props.kind == 'rigid'
     assert model.data(model.index(0, _column(model, 'E [Pa]'))) == ''
-    assert lines[-1].endswith('BlockProperties(RIGID)'), lines[-1]
+    assert lines[-1].endswith('GroupProperties(RIGID)'), lines[-1]
     said = []
     model.edit_rejected.connect(said.append)
     assert not model.setData(model.index(0, _column(model, 'E [Pa]')), '1e9',
                              EDIT)
     assert 'has no modulus, density or ratio' in said[-1]
     namespace = {}
-    replay = ('from visualdynamics.core.fem import RIGID, BlockProperties\n'
+    replay = ('from visualdynamics.core.fem import RIGID, GroupProperties\n'
               'props = ' + lines[-1].split(' = ', 1)[1])
     exec(replay, namespace)  # noqa: S102 — the table's own journal line
     assert namespace['props'].material is RIGID
@@ -633,7 +635,7 @@ def test_the_act_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch)
 
 
 def test_the_material_column_and_its_list_are_wide_enough_to_read(window, pump):
-    """The Blocks table's Material column starts empty, and sized to its
+    """The Element Groups table's Material column starts empty, and sized to its
     contents it was too narrow to read a material in, in the cell or in
     the drop-down (Brandon, 2026-10-02). The column opens no narrower
     than the widest choice, the list opens as wide as its longest
@@ -643,7 +645,7 @@ def test_the_material_column_and_its_list_are_wide_enough_to_read(window, pump):
     from visualdynamics.core.fem import MATERIALS
 
     window.add_object('Geometry', _plate_geometry(properties=False))
-    edit_block(window, pump, int(window.objects['Geometry'].block_id[0]))
+    edit_element_group(window, pump, int(window.objects['Geometry'].group_id[0]))
     model = window.table.model()
     column = _column(model, 'Material')
     metrics = window.table.fontMetrics()

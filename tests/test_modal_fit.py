@@ -2227,9 +2227,9 @@ def test_fitted_shapes_join_their_frfs_group(window, pump, survey):
     window.project.relink('FEM Shapes', 'FEM Geometry')
     window._links_changed()
     pump()
-    assert set(window.project.group_of('FEM Geometry')) == {
+    assert set(window.project.object_group_of('FEM Geometry')) == {
         'FEM Geometry', 'FEM Shapes'}
-    assert 'FRF' in window.project.group_of('Test Geometry')
+    assert 'FRF' in window.project.object_group_of('Test Geometry')
 
     item = window._item_for_object('FRF')
     window.tree.setCurrentItem(item)
@@ -2239,9 +2239,9 @@ def test_fitted_shapes_join_their_frfs_group(window, pump, survey):
     window.confirm_mode_button.click()
     pump()
     assert 'FRF Modes' in window.objects
-    assert 'FRF Modes' in window.project.group_of('FRF'), (
+    assert 'FRF Modes' in window.project.object_group_of('FRF'), (
         'the fit belongs with the FRF it came from')
-    assert set(window.project.group_of('FEM Geometry')) == {
+    assert set(window.project.object_group_of('FEM Geometry')) == {
         'FEM Geometry', 'FEM Shapes'}, 'the model side is untouched'
 
 

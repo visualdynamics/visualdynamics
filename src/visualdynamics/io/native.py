@@ -57,16 +57,25 @@ def _read_strings(group: h5py.Group, name: str) -> list[str]:
     return [s.decode('utf-8') for s in group[name][()]]
 
 
+#: a geometry's element-group arrays, by the names a file stores them
+#: under
+ON_DISK = {'elem_group': 'elem_block', 'group_id': 'block_id'}
+
+
 def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     group.attrs['dimension'] = geom.dimension
     group.attrs['length_unit'] = geom.length_unit or ''
+    # the element groups go to disk under the names they had when the
+    # file format was set, 'elem_block', 'block_id' and 'block_name'
+    # (2026-10-08: called element groups everywhere else), so every
+    # project saved before or since reads the same
     for name in ('node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
                  'cs_id', 'cs_type', 'cs_matrix',
-                 'elem_id', 'elem_type', 'elem_color', 'elem_block',
-                 'block_id'):
-        group.create_dataset(name, data=getattr(geom, name))
+                 'elem_id', 'elem_type', 'elem_color', 'elem_group',
+                 'group_id'):
+        group.create_dataset(ON_DISK.get(name, name), data=getattr(geom, name))
     _write_strings(group, 'cs_name', geom.cs_name)
-    _write_strings(group, 'block_name', geom.block_name)
+    _write_strings(group, 'block_name', geom.group_name)
     _write_ragged(group, 'elem_conn', geom.elem_conn)
     # the rigid-body settings, when set — the point always, the mass
     # and inertia only when the set is to be mass-normalized, so an
@@ -84,17 +93,25 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     if view is not None:
         group.attrs['view_eye'] = np.asarray(view.eye, dtype=np.float64)
         group.attrs['view_up'] = np.asarray(view.up, dtype=np.float64)
-    # what each block is made of, one subgroup per block that has it:
+    # what each element group is made of, one subgroup per element group that has it:
     # the material's numbers, and a thickness or a section — the model
-    # a geometry can build of itself (2026-09-25) — or, for a block of
+    # a geometry can build of itself (2026-09-25) — or, for an element group of
     # point masses, the mass alone (2026-10-07)
-    blocks = getattr(geom, 'block_properties', None) or {}
-    if blocks:
+    groups = getattr(geom, 'group_properties', None) or {}
+    if groups:
         holder = group.create_group('block_properties')
-        for block, props in blocks.items():
-            entry = holder.create_group(str(int(block)))
+        for group_id, props in groups.items():
+            entry = holder.create_group(str(int(group_id)))
             if props.mass is not None:
                 entry.attrs['mass'] = float(props.mass)
+            # a spring's six stiffnesses, NaN where a direction is free;
+            # a ground group, a flag (2026-10-08)
+            if props.stiffness is not None:
+                entry.attrs['stiffness'] = np.array(
+                    [np.nan if k is None else float(k)
+                     for k in props.stiffness], dtype=np.float64)
+            if props.ground:
+                entry.attrs['ground'] = True
             if props.material is not None:
                 entry.attrs['material_name'] = props.material.name
                 entry.attrs['youngs_modulus'] = float(
@@ -127,7 +144,7 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
 def _load_block_properties(group) -> dict:
     if 'block_properties' not in group:
         return {}
-    from ..core.fem import BlockProperties, Material, Section
+    from ..core.fem import GroupProperties, Material, Section
 
     out = {}
     for key, entry in group['block_properties'].items():
@@ -148,14 +165,18 @@ def _load_block_properties(group) -> dict:
                               str(attrs.get('section_shape', '')),
                               tuple(float(v) for v in
                                     attrs.get('section_dimensions', ())))
-        out[int(key)] = BlockProperties(
+        out[int(key)] = GroupProperties(
             material,
             thickness=(float(attrs['thickness']) if 'thickness' in attrs
                        else None),
             section=section,
             orientation=(tuple(float(v) for v in attrs['orientation'])
                          if 'orientation' in attrs else None),
-            mass=float(attrs['mass']) if 'mass' in attrs else None)
+            mass=float(attrs['mass']) if 'mass' in attrs else None,
+            stiffness=(tuple(None if np.isnan(k) else float(k)
+                             for k in attrs['stiffness'])
+                       if 'stiffness' in attrs else None),
+            ground=bool(attrs.get('ground', False)))
     return out
 
 
@@ -174,23 +195,23 @@ def _load_mass_properties(group):
 def load_geometry(group: h5py.Group) -> Geometry:
     from ..core.geometry import Geometry
 
-    data = {name: group[name][()] for name in (
+    data = {name: group[ON_DISK.get(name, name)][()] for name in (
         'node_id', 'node_xyz', 'node_def_cs', 'node_disp_cs', 'node_color',
         'cs_id', 'cs_type', 'cs_matrix',
-        'elem_id', 'elem_type', 'elem_color', 'elem_block', 'block_id')}
-    data['block_name'] = _read_strings(group, 'block_name')
+        'elem_id', 'elem_type', 'elem_color', 'elem_group', 'group_id')}
+    data['group_name'] = _read_strings(group, 'block_name')
     data['cs_name'] = _read_strings(group, 'cs_name')
     data['elem_conn'] = _read_ragged(group, 'elem_conn')
     data['length_unit'] = group.attrs.get('length_unit', '') or None
-    data['block_properties'] = _load_block_properties(group)
+    data['group_properties'] = _load_block_properties(group)
     geometry = Geometry(**data)
     if 'traceline_conn' in group:
         # a file from before 2026-09-30 carried tracelines apart from
-        # elements, and could hold a block of more than one family: a
-        # traceline becomes a block of two-node line elements with no
-        # properties, one block per id, and the blocks are split by
+        # elements, and could hold an element group of more than one family: a
+        # traceline becomes an element group of two-node line elements with no
+        # properties, one element group per id, and the element groups are split by
         # family — the geometry it reads as now, saved back that way
-        geometry.split_blocks_by_family()
+        geometry.split_groups_by_family()
         by_id: dict[int, tuple[str, int, list]] = {}
         for tl_id, color, desc, conn in zip(
                 group['traceline_id'][()], group['traceline_color'][()],
@@ -736,7 +757,7 @@ def save_test(path: str | os.PathLike, name: str,
               objects: Mapping[str, Any],
               active_geometry: str | None = None,
               project_type: str | None = None,
-              links: Sequence[Mapping[str, Any]] | None = None,
+              object_groups: Sequence[Mapping[str, Any]] | None = None,
               provenance: Mapping[str, Any] | None = None) -> None:
     """Save a whole test — every named object — to one .vdyn file.
 
@@ -748,13 +769,13 @@ def save_test(path: str | os.PathLike, name: str,
 
     with h5py.File(_visualdynamics_path(path), 'w') as f:
         save_test_into(f, name, objects, active_geometry, project_type,
-                       links, provenance)
+                       object_groups, provenance)
 
 
 def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
                    active_geometry: str | None = None,
                    project_type: str | None = None,
-                   links: Sequence[Mapping[str, Any]] | None = None,
+                   object_groups: Sequence[Mapping[str, Any]] | None = None,
                    provenance: Mapping[str, Any] | None = None) -> None:
     """`save_test` into an open, empty HDF5 file (see `save_into`)."""
     f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
@@ -762,7 +783,7 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
     f.attrs['active_geometry'] = active_geometry or ''
     f.attrs['project_type'] = project_type or ''
     import json
-    f.attrs['links'] = json.dumps(links or [])
+    f.attrs['links'] = json.dumps(object_groups or [])
     # how each derived object was computed, for the staleness
     # badges — settings fingerprints, so they survive the file
     f.attrs['provenance'] = json.dumps(provenance or {})

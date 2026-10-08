@@ -177,11 +177,11 @@ plausible wrong numbers instead of failing — so the reader names the
 format it found and stops. The spec is mirrored at
 `docs/uff_spec/58b.asc`.
 
-⁵ Already-tessellated CAD hand-off: export to either from SolidWorks or any CAD tool. 3MF keeps each part as a named block and declares its unit; STL is one unnamed, unit-less mesh (a block per `solid` in the rare ASCII form). Faces only — a geometry without face elements is refused. On mesh density: this geometry is context behind the sensor points, so coarse export settings are the right habit — a fine tessellation costs drawing time and buys nothing.
+⁵ Already-tessellated CAD hand-off: export to either from SolidWorks or any CAD tool. 3MF keeps each part as a named element group and declares its unit; STL is one unnamed, unit-less mesh (an element group per `solid` in the rare ASCII form). Faces only — a geometry without face elements is refused. On mesh density: this geometry is context behind the sensor points, so coarse export settings are the right habit — a fine tessellation costs drawing time and buys nothing.
 
 ⁶ B-rep CAD, tessellated on import by the bundled OpenCASCADE kernel
 (LGPL-2.1 with exception — one more replaceable library, see
-NOTICE.md): named parts become named blocks, coordinates convert to
+NOTICE.md): named parts become named element groups, coordinates convert to
 meters from whatever the file declares. Import only — Visual Dynamics
 holds meshes, not surfaces, so writing B-rep back would be an
 invention. A pip install keeps the kernel optional
@@ -224,7 +224,7 @@ attached rendered, a complete HTML page, and photographs as the images
 they are. A file another program wrote reads by its standard fields:
 nodes, lines, elements and per-node axes (a node with its own frame
 gets a coordinate system), records with their units, frequencies and
-shapes, activities as named link groups; a type the specifications do
+shapes, activities as named object groups; a type the specifications do
 not define is left out with a note. The reader and writer were held to
 the format's reference implementation both ways as they were written,
 and the specification files it defines the types with ship inside the
@@ -340,28 +340,29 @@ reader restores the assignment from them, so the systems, the
 assignments and the (global) values together round-trip the model
 exactly.
 
-### Element blocks survive the round trip
+### Element groups survive the round trip
 
-An exodus mesh is written as named blocks, and the block is where a part
-identity lives — `wing`, `tail`, `nacelle front left`. A geometry carries
-them (`elem_block` per element, `block_id`/`block_name` declaring them),
-so a file read and written back says what it said, which it did not
-before: every element used to come back in one unnamed block.
+An exodus mesh is written as named element blocks, and the block is where
+a part's identity lives — `wing`, `tail`, `nacelle front left`. A
+geometry carries them as element groups (`elem_group` per element,
+`group_id`/`group_name` declaring them), so a file read and written back
+says what it said, which it did not before: every element used to come
+back in one unnamed group.
 
 They are not only for the round trip. `fem.Model.from_geometry` reads the
-section of a member off the block of the element it came from, so a saved
-geometry is a complete description of a structure — `sections={'prop':
-BLADE}` and nothing else passed alongside the file. Asking a node instead
-does not work: a node on a seam between two blocks belongs to both and
-can answer for only one.
+section of a member off the element group of the element it came from,
+so a saved geometry is a complete description of a structure —
+`sections={'prop': BLADE}` and nothing else passed alongside the file.
+Asking a node instead does not work: a node on a seam between two element
+groups belongs to both and can answer for only one.
 
-Formats that do not record the question import as a single block with no
-name, which is what they said. Nothing invents a division.
+Formats that do not record the question import as a single element group
+with no name, which is what they said. Nothing invents a division.
 
 One case does not round-trip, and cannot: exodus holds a single element
-type per block, so a block with quads *and* triangles in it — the drone's
-`canopy` — goes out as two, and comes back as two. They may share neither
-the id nor the name the block declared. The first piece keeps both; the
+type per block, so an element group with quads *and* triangles in it —
+the drone's `canopy` — goes out as two blocks, and comes back as two
+groups. They may share neither the id nor the name the group declared. The first piece keeps both; the
 next takes the lowest free id and its element type in the name (`canopy
 TRI3`). Writing them as one id was a file nothing would read: ParaView's
 IOSS reader fails it at `REQUEST_INFORMATION` and reports zero cells,
@@ -369,25 +370,26 @@ without saying why, and Visual Dynamics refuses the duplicate ids
 outright. `vtkExodusIIReader` read it happily, so only the IOSS reader
 catches this.
 
-**exodus** has no traceline, and needs none: a drawn line *is* a
-block of two-node beam elements with no properties here, and goes out
-as that block and comes back as it. Coordinate systems survive — as
+**exodus** has no traceline, and needs none: a drawn line *is* an
+element group of two-node beam elements with no properties here, and
+goes out as that block and comes back as it. Coordinate systems survive — as
 frames, with their assignments riding as node sets (above) — but their
 *names* do not: a frame is an id, three points and a tag.
 
 **A drawn line in every format.** Visual Dynamics keeps no separate
-tracelines: a line drawn through nodes is a block of two-node line
-elements with no properties, and that is the one discriminator on the
-way out. UNV, sdynpy, ESCDF and Nastran keep lines apart from
-elements, so such a block is written as the format's line (dataset 82,
+tracelines: a line drawn through nodes is an element group of two-node
+line elements with no properties, and that is the one discriminator on
+the way out. UNV, sdynpy, ESCDF and Nastran keep lines apart from
+elements, so such a group is written as the format's line (dataset 82,
 the traceline array, `line_connection`, PLOTEL chains) and not as
-elements as well; a block that carries a section is structure and is
-written as elements. On the way in a line arrives as its own block,
-named for the line and colored by it, a UNV line that lifted the pen
-as one block of several runs. A block holds one element family, so a
-source that mixes families in a block — UNV and sdynpy carry no blocks
-at all, a Nastran PSHELL covers quads and triangles alike — is split
-on arrival, the new blocks named for their family beside the old name.
+elements as well; a group that carries a section is structure and is
+written as elements. On the way in a line arrives as its own element
+group, named for the line and colored by it, a UNV line that lifted the
+pen as one group of several runs. An element group holds one element
+family, so a source that mixes families in a group — UNV and sdynpy
+carry no groups at all, a Nastran PSHELL covers quads and triangles
+alike — is split on arrival, the new groups named for their family
+beside the old name.
 
 **UNV** writes geometry as datasets 2411, 82, 2412 and 2420, and data as
 one dataset 58 per record. Both coherence types keep their own function

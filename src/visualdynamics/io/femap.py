@@ -311,20 +311,20 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
     elements: list[tuple[int, int, int, list[int]]] = []
     sets: dict[int, dict[str, Any]] = {}
 
-    for block_id, body in _blocks(lines):
+    for group_id, body in _blocks(lines):
         if not body:
             continue
-        if block_id == 100:
+        if group_id == 100:
             version = _fields(body[-1])[0]
-        elif block_id == 403:
+        elif group_id == 403:
             _parse_403(body, nodes, path)
-        elif block_id == 404:
+        elif group_id == 404:
             _parse_404(body, elements, path, version)
-        elif block_id == 450:
+        elif group_id == 450:
             _parse_450(body, sets)
-        elif block_id == 451:
+        elif group_id == 451:
             _parse_451(body, sets, path)
-        elif block_id == 1051:
+        elif group_id == 1051:
             _parse_1051(body, sets, path)
 
     out: dict[str, Any] = {}

@@ -592,7 +592,7 @@ def test_the_shock_template_names_the_specification():
     from visualdynamics.core.report import shock_template
 
     project = visualdynamics.Project()
-    report = shock_template(project, links=[])
+    report = shock_template(project, object_groups=[])
     srs_blocks = [b for b in report.blocks
                   if b.get('source') == '@basis:Srs'
                   and b.get('kind') == 'plot']

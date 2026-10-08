@@ -212,7 +212,7 @@ def test_the_blocks_name_the_parts_by_side(model):
     the sensor set is picked by — which of the four arms a node is on —
     and `instrumented` silently returns four empty groups."""
     drawn = model.geometry(beams=False)
-    names = set(drawn.block_name)
+    names = set(drawn.group_name)
     assert {'arm front left', 'arm rear right', 'leg front left',
             'nacelle rear left', 'canopy', 'battery', 'camera'} <= names
-    assert len(drawn.block_id) == len(names)
+    assert len(drawn.group_id) == len(names)

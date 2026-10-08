@@ -56,9 +56,10 @@ root attributes:
     test_name         the project's name
     project_type      '' or e.g. 'Modal Test', 'Random Vibration'
     active_geometry   '' or the name unlinked objects read against
-    links             JSON: [{"members": [names...], "role": null or
-                      "Basis"}, ...] (files before 2026-08-30 carried a
-                      "side" key too; it is read and never written)
+    links             JSON, the project's object groups: [{"members":
+                      [names...], "role": null or "Basis"}, ...] (files
+                      before 2026-08-30 carried a "side" key too; it is
+                      read and never written)
     provenance        JSON: {name: {"verb", "source", "params",
                       "state"}, ...} — how each derived object was
                       computed, with the settings fingerprint the
@@ -89,20 +90,27 @@ root attributes:
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,
             elem_block, block_id, block_name
 
+    The element groups are stored under the names they had when the
+    format was set: `elem_block`, `block_id` and `block_name` on disk are
+    a geometry's `elem_group`, `group_id` and `group_name`, and
+    `block_properties` its `group_properties` (2026-10-08). Every file
+    written before or since reads the same.
+
     A file from before 2026-09-30 also holds `traceline_id`,
     `traceline_color`, `traceline_desc` and `traceline_conn_flat /
-    _offsets`: a loader turns each traceline id into a block of two-node
-    beam elements with no properties, named by its description, and
-    splits any block holding more than one element family. The file is
-    written back without them.
-    block_properties/<block id>/   (only blocks given properties)
+    _offsets`: a loader turns each traceline id into an element group
+    of two-node beam elements with no properties, named by its
+    description, and splits any group holding more than one element
+    family. The file is written back without them.
+    block_properties/<group id>/   (only element groups given properties)
             attrs   material_name, youngs_modulus, density, poissons_ratio,
                     modulus_of_rigidity (when set), thickness (plates) or
                     section_name + section [area, iy, iz, j] (beams),
                     and section_shape + section_dimensions when the
                     section was built from a shape (fem.SHAPES; meters,
                     in the constructor's order),
-                    orientation (beams, when set)
+                    orientation (beams, when set);
+                    mass alone, kg, for a group of point masses
 
 ## `data/` — every measurement class
 

@@ -287,7 +287,7 @@ def test_the_verb_adds_the_set_to_the_geometry_group():
     project = _project()
     name = project.generate_rigid_body_modes('Plate')
     assert name == 'Plate Rigid Body Modes'
-    assert project.links == [{'members': ['Plate', name], 'role': None}]
+    assert project.object_groups == [{'members': ['Plate', name], 'role': None}]
     assert project['Plate'].mass_properties == \
         project['Plate'].suggest_mass_properties(), \
         'the adopted suggestion is stored, so the fingerprint is honest'

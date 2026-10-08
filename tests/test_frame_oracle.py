@@ -40,8 +40,8 @@ def test_the_shared_frame_mesh_solves_to_nastrans_frequencies():
     nastran_hz = np.asarray(reference[key]['f'][0, 0]).ravel()
 
     geometry = nastran.load(deck, length_unit='m')
-    assert sorted(geometry.block_properties) == [11, 12]
-    assert geometry.block_properties[11].kind == 'solid'
+    assert sorted(geometry.group_properties) == [11, 12]
+    assert geometry.group_properties[11].kind == 'solid'
     model = Model.from_geometry(geometry)
     assert model.structural_mass == pytest.approx(0.6287, abs=5e-4)
     shapes = model.eigensolution(num_modes=16, solver='sparse')

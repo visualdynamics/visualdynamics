@@ -42,7 +42,7 @@ def test_schema1_values_are_intact():
     changes are most likely to disturb."""
     p = native.load(os.path.join(str(CORPUS), 'schema1.vdyn'))
     assert p.project_type == 'Modal Test'
-    assert p.links == [{'members': ['Geometry', 'Time History',
+    assert p.object_groups == [{'members': ['Geometry', 'Time History',
                                     'Time History PSDs',
                                     'Time History SRS', 'FRF', 'Shapes'],
                         'role': 'Basis'}]

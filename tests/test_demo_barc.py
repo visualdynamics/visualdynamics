@@ -29,12 +29,12 @@ def solved():
 
 def test_the_geometry_is_the_solid_model():
     geometry = barc.geometry()
-    assert list(geometry.block_name) == ['box', 'right channel',
+    assert list(geometry.group_name) == ['box', 'right channel',
                                          'left channel', 'beam', 'bolts']
-    bolts = int(geometry.block_id[list(geometry.block_name).index('bolts')])
-    assert geometry.block_properties[bolts].material is RIGID
-    box = int(geometry.block_id[0])
-    assert geometry.block_properties[box].thickness == pytest.approx(0.25 * 0.0254)
+    bolts = int(geometry.group_id[list(geometry.group_name).index('bolts')])
+    assert geometry.group_properties[bolts].material is RIGID
+    box = int(geometry.group_id[0])
+    assert geometry.group_properties[box].thickness == pytest.approx(0.25 * 0.0254)
     inch = geometry.node_xyz / 0.0254
     assert inch[:, 0].min() == pytest.approx(-2.875)            # mid-surface
     assert inch[:, 1].max() == pytest.approx(barc.BEAM_Y)
@@ -121,7 +121,7 @@ def test_the_docs_page_builds_the_demos_mesh():
     assert built.num_nodes == planes_only
     assert np.allclose(np.sort(built.node_xyz, axis=0),
                        np.sort(demo.node_xyz, axis=0))
-    assert list(built.block_name) == ['box', 'right channel', 'left channel',
+    assert list(built.group_name) == ['box', 'right channel', 'left channel',
                                       'beam']
 
 
@@ -142,7 +142,7 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
 
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    table = page.split('| Plane | Block | Center | Widths |')[1]
+    table = page.split('| Plane | Element group | Center | Widths |')[1]
     rows = [[cell.strip() for cell in line.strip('|').split('|')]
             for line in table.split('\n\n')[0].splitlines()[2:]]
 
@@ -167,7 +167,7 @@ def test_the_docs_table_typed_into_add_plane_is_the_demos_mesh():
     assert all(np.array_equal(a, b) for a, b in zip(typed.elem_conn,
                                                     demo.elem_conn,
                                                     strict=True))
-    assert list(typed.block_name) == list(demo.block_name)
+    assert list(typed.group_name) == list(demo.group_name)
 
 
 def test_the_barc_opens_upright_without_being_turned():
@@ -223,7 +223,7 @@ def test_the_downloadable_projects_open_solved(tmp_path):
     elastic = [f for f in project['Removable Component Modes'].frequency
                if f > 1.0]
     assert np.allclose(elastic[:7], PART_CHECKED, rtol=0.005)
-    assert 'top bolts' in list(project['Removable Component'].block_name), \
+    assert 'top bolts' in list(project['Removable Component'].group_name), \
         'the bolt masses ride the saved project'
 
 
@@ -248,11 +248,11 @@ def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
     from visualdynamics.core.fem import RIGID, Model
 
     geometry = barc.solid_geometry()
-    assert list(geometry.block_name) == ['box', 'right channel',
+    assert list(geometry.group_name) == ['box', 'right channel',
                                          'left channel', 'beam', 'bolt ties',
                                          'foot bolts', 'top bolts']
-    ids = dict(zip(geometry.block_name, geometry.block_id.tolist()))
-    assert geometry.block_properties[ids['bolt ties']].material is RIGID
+    ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
+    assert geometry.group_properties[ids['bolt ties']].material is RIGID
     assert len(geometry.elements_in('foot bolts')) == 8
     assert len(geometry.elements_in('top bolts')) == 2
     model = Model.from_geometry(geometry)
@@ -267,15 +267,15 @@ def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
     inch = geometry.node_xyz / 0.0254
     beam = geometry.node_index(np.unique(np.concatenate(
         [geometry.elem_conn[i] for i in np.flatnonzero(
-            geometry.elem_block == ids['beam'])])))
+            geometry.elem_group == ids['beam'])])))
     assert inch[beam, 1].min() == pytest.approx(5.0 + barc.BEAM_GAP), \
         'the beam is not fused to the channels'
 
 
 def test_the_removable_component_stays_where_it_was_checked():
     geometry = barc.solid_geometry('removable component')
-    assert 'box' not in list(geometry.block_name)
-    assert 'foot bolts' not in list(geometry.block_name), \
+    assert 'box' not in list(geometry.group_name)
+    assert 'foot bolts' not in list(geometry.group_name), \
         'its foot bolts stay with the box'
     shapes = barc.solid_build('removable component').eigensolution(
         maximum_frequency=barc.PART_SOLVE_TO)

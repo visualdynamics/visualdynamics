@@ -145,18 +145,18 @@ def test_property_cards_become_block_properties(tmp_path):
         'MAT1,2,2.1E11,8.0E10,,7800.\n'
         'PSOLID,11,1\nPSHELL,21,2,0.002\nPSHELL,31,9,0.001\n')
     geometry = nastran.load(deck)
-    assert list(geometry.block_id) == [11, 21, 31]
-    assert list(geometry.block_name) == ['property 11', 'property 21',
+    assert list(geometry.group_id) == [11, 21, 31]
+    assert list(geometry.group_name) == ['property 11', 'property 21',
                                          'property 31']
-    assert list(geometry.elem_block) == [11, 21, 31]
-    solid = geometry.block_properties[11]
+    assert list(geometry.elem_group) == [11, 21, 31]
+    solid = geometry.group_properties[11]
     assert solid.kind == 'solid'
     assert solid.material.youngs_modulus == 6.9e10
     assert solid.material.density == 2700.0
     assert solid.material.poissons_ratio == 0.33
-    shell = geometry.block_properties[21]
+    shell = geometry.group_properties[21]
     assert shell.kind == 'plate' and shell.thickness == 0.002
     # E and G given, nu left blank: nu follows from them
     assert shell.material.poissons_ratio == pytest.approx(2.1e11 / 1.6e11 - 1)
     assert shell.material.shear_modulus == 8.0e10
-    assert 31 not in geometry.block_properties, 'MAT1 9 is not in the deck'
+    assert 31 not in geometry.group_properties, 'MAT1 9 is not in the deck'

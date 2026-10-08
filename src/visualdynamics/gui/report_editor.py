@@ -170,7 +170,7 @@ class ReportEditor(QWidget):
         #: callables the window sets, so the editor reads the project
         #: as it stands rather than a copy taken when it opened
         self.objects: Callable[[], dict[str, Any]] | None = None
-        self.links: Callable[[], list[Any]] | None = None
+        self.object_groups: Callable[[], list[Any]] | None = None
         self.unit_system: Any = None
         #: the block the bar and the pane act on, or None for the report
         self.selected: int | None = None
@@ -481,7 +481,7 @@ class ReportEditor(QWidget):
                 form.addRow(self.text_editor)
             else:
                 objects = self.objects() if self.objects else {}
-                links = self.links() if self.links else None
+                object_groups = self.object_groups() if self.object_groups else None
                 form.addRow(QLabel(
                     f'<b>Block {self.selected + 1}</b> — {block.get("kind")}'
                     + (f' ({block.get("mode")})' if block.get('mode') else '')))
@@ -505,7 +505,7 @@ class ReportEditor(QWidget):
                     # chooses which (Brandon, 2026-08-29)
                     self._combo(form, 'channel', 'Channel', block.get('channel', ''),
                                 [(name, name) for name in
-                                 scalogram_channel_options(block, objects, links)])
+                                 scalogram_channel_options(block, objects, object_groups)])
                 if block.get('dofs'):
                     # which data object the DOF arrows read from
                     self._combo(form, 'dofs_source', 'DOFs from',
@@ -559,10 +559,10 @@ class ReportEditor(QWidget):
     def show_report(self, report: Report,
                     objects: Callable[[], dict[str, Any]],
                     unit_system: Any,
-                    links: Callable[[], list[Any]] | None = None) -> None:
+                    object_groups: Callable[[], list[Any]] | None = None) -> None:
         self.report = report
         self.objects = objects
-        self.links = links
+        self.object_groups = object_groups
         self.unit_system = unit_system
         self._scroll = 0
         self.selected = None
@@ -588,7 +588,7 @@ class ReportEditor(QWidget):
         try:
             html = render_html(self.report, self.objects(), self.unit_system,
                                edit=True, channel_js=self._channel_js,
-                               links=self.links() if self.links else None,
+                               object_groups=self.object_groups() if self.object_groups else None,
                                selected=self.selected, labels=labels)
         except Exception as failure:  # noqa: BLE001 — the page reports it
             # A build that raised used to leave the view white and the

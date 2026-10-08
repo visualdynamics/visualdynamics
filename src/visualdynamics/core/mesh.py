@@ -2,16 +2,16 @@
 
 A structure made of flat plates — a box, a channel, a bracket — is
 described most simply as the planes it is made of: each a rectangle at
-its mid-thickness, meshed into rectangular plate elements and put in a
-block of its own. `plane` makes one; `assemble` joins them into one
+its mid-thickness, meshed into rectangular plate elements and put in an
+element group of its own. `plane` makes one; `assemble` joins them into one
 geometry and merges the nodes they share, so the plates are tied along
 the lines where their mid-surfaces meet (Brandon, 2026-09-26, for the
 BARC example). Where mid-surfaces do not meet — a bolted foot sitting on
 a wall — nothing is shared, and the join is a rigid link
 (`fem.RIGID`) between a node on each.
 
-Each block is then given a material and a thickness (`fem.BlockProperties`,
-or the Blocks table) and `fem.Model.from_geometry` builds the model.
+Each element group is then given a material and a thickness
+(`fem.GroupProperties`, or the Element Groups table) and `fem.Model.from_geometry` builds the model.
 
 Nodes on a shared line coincide because both planes divide it the
 same way: give planes that meet the same element size.
@@ -32,7 +32,7 @@ __all__ = ['assemble', 'block', 'join', 'landing', 'plane', 'tie']
 
 def plane(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
           size: float, name: str = '', *, unit: str | None = 'm') -> Geometry:
-    """A rectangle meshed into four-node plate elements, in one block.
+    """A rectangle meshed into four-node plate elements, in one element group.
 
     Each edge is divided evenly into the whole number of elements that
     comes nearest `size`, so the elements come out close to square and
@@ -52,7 +52,7 @@ def plane(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     size : float
         The element size aimed at.
     name : str, optional
-        The block's name — the part this plane is.
+        The element group's name — the part this plane is.
     unit : str or None, default 'm'
         The unit every length given here is in. The geometry holds them
         in SI, as any geometry with its units defined does, and remembers
@@ -61,7 +61,7 @@ def plane(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     Returns
     -------
     Geometry
-        Nodes numbered from 1, one block holding every element.
+        Nodes numbered from 1, one element group holding every element.
     """
     from ..units import si_transform
 
@@ -94,15 +94,16 @@ def plane(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
             conn.append(node[[first, first + 1, first + count_a + 1,
                               first + count_a]])
     return Geometry(node_id=node, node_xyz=xyz * scale, elem_conn=conn,
-                    elem_type=[44] * len(conn), elem_block=[1] * len(conn),
-                    block_id=[1], block_name=[name], length_unit=unit)
+                    elem_type=[44] * len(conn), elem_group=[1] * len(conn),
+                    group_id=[1], group_name=[name], length_unit=unit)
 
 
 def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
           edge_c: ArrayLike, size: float, name: str = '', *,
           unit: str | None = 'm', holes: Sequence[Any] = (),
           hole_name: str | None = None) -> Geometry:
-    """A rectangular block meshed into eight-node bricks, in one block.
+    """A rectangular block meshed into eight-node bricks, in one element
+    group.
 
     `plane` one dimension up (2026-09-30, for the four-unit frame
     example): a corner and three perpendicular edges, each divided
@@ -116,9 +117,9 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     block. A hole is (center, radius, axis) with the center a point on
     the axis and the axis 0, 1 or 2 for the edge it runs along;
     (center, radius, axis, depth) for a blind hole that depth from the
-    face the axis enters at; and a fifth item names the block its
-    bricks go to instead of leaving — a threaded insert, given its own
-    material in the Blocks table — or is None for a void. A hole with
+    face the axis enters at; and a fifth item names the element group
+    its bricks go to instead of leaving — a threaded insert, given its
+    own material in the Element Groups table — or is None for a void. A hole with
     no fifth item takes `hole_name`. Holes apply in order, a later one
     over an earlier: a through hole, then an insert named to the same
     radius part way down, then a void of the insert's bore, is a
@@ -143,20 +144,20 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     size : float
         The element size aimed at.
     name : str, optional
-        The block's name — the part this is.
+        The element group's name — the part this is.
     unit : str or None, default 'm'
         The unit every length given here is in, as for `plane`.
     holes : sequence of tuple, optional
         Cylindrical holes, as above, in the same unit and the same frame.
     hole_name : str, optional
-        The block the bricks of a hole that names none go to; None
-        removes them.
+        The element group the bricks of a hole that names none go to;
+        None removes them.
 
     Returns
     -------
     Geometry
-        Nodes numbered from 1; one block, and one more for each name
-        the holes put bricks in.
+        Nodes numbered from 1; one element group, and one more for each
+        name the holes put bricks in.
     """
     from ..units import si_transform
 
@@ -193,8 +194,8 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
                                + 0.5 * (grids[2][k + 1] - grids[2][k])
                                * np.array([0.0, 0.0, 1.0]))
     centers = np.array(centers)
-    # 1 is the block, 0 a brick removed, 2 and up the named blocks
-    blocks = np.ones(len(conn), dtype=int)
+    # 1 is the element group, 0 a brick removed, 2 and up the named element groups
+    groups = np.ones(len(conn), dtype=int)
     names = [name]
     rims: list[tuple[np.ndarray, np.ndarray, float, int]] = []
     conn_array = np.array(conn) - 1 if conn else np.empty((0, 8), int)
@@ -230,11 +231,11 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
                                  np.unique(conn_array[beyond]))
             rims.append((rim, along, radius, axis))
         if target is None:
-            blocks[inside] = 0
+            groups[inside] = 0
         else:
             if target not in names:
                 names.append(target)
-            blocks[inside] = names.index(target) + 1
+            groups[inside] = names.index(target) + 1
     for rim, along, radius, axis in rims:
         across = [d for d in range(3) if d != axis]
         for row in rim:
@@ -261,10 +262,10 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
                     np.sign(offset[other]) or 1.0) * np.sqrt(reach)
             local[row, across] = target
         xyz = corner + local @ np.array(axes)
-    if not (blocks > 0).all():
-        keep = blocks > 0
+    if not (groups > 0).all():
+        keep = groups > 0
         conn = [c for c, k in zip(conn, keep) if k]
-        blocks = blocks[keep]
+        groups = groups[keep]
         used = np.unique(np.concatenate(conn)) if conn else np.array([], int)
         renumber = {int(old): new for new, old in enumerate(used, 1)}
         xyz = xyz[used - 1]
@@ -272,12 +273,12 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
         node = np.arange(1, len(xyz) + 1)
     if not conn:
         raise ValueError(f'{name or "a block"}: the holes leave nothing')
-    present = [k for k in range(1, len(names) + 1) if (blocks == k).any()]
+    present = [k for k in range(1, len(names) + 1) if (groups == k).any()]
     return Geometry(node_id=node, node_xyz=xyz * scale, elem_conn=conn,
                     elem_type=[115] * len(conn),
-                    elem_block=[int(b) for b in blocks],
-                    block_id=present,
-                    block_name=[names[k - 1] for k in present],
+                    elem_group=[int(b) for b in groups],
+                    group_id=present,
+                    group_name=[names[k - 1] for k in present],
                     length_unit=unit)
 
 
@@ -312,40 +313,40 @@ def landing(geometry: Geometry, part: Geometry,
     return distance <= tolerance, nearest
 
 
-def block_families(geometry: Geometry, block_id: int) -> set[str]:
-    """The element families a block of `geometry` holds: empty for a
-    block with no elements yet."""
+def group_families(geometry: Geometry, group_id: int) -> set[str]:
+    """The element families an element group of `geometry` holds: empty for an
+    element group with no elements yet."""
     import numpy as np
 
     from .geometry import element_family
 
-    mask = np.asarray(geometry.elem_block) == int(block_id)
+    mask = np.asarray(geometry.elem_group) == int(group_id)
     return {element_family(int(code)) for code in np.asarray(geometry.elem_type)[mask]}
 
 
-def block_refusal(geometry: Geometry, part: Geometry) -> str | None:
-    """Why `part` cannot join `geometry` by block name, or None.
+def group_refusal(geometry: Geometry, part: Geometry) -> str | None:
+    """Why `part` cannot join `geometry` by element group name, or None.
 
-    A block holds one element family (`Geometry.mixed_blocks`), and a
-    part whose block is named like one already holding another family
-    would make it two at once: a plate added under the name of a block
-    of bricks was one block, deleted whole from either family's row in
+    An element group holds one element family (`Geometry.mixed_groups`), and a
+    part whose element group is named like one already holding another family
+    would make it two at once: a plate added under the name of an element group
+    of bricks was one element group, deleted whole from either family's row in
     the tree (Brandon, 2026-10-02). The one rule `join` refuses by and
     the Add pane reads before it offers Add.
     """
     from .geometry import FAMILY_LABELS
 
-    names = list(geometry.block_name)
-    for k, block in enumerate(part.block_id):
-        name = part.block_name[k]
+    names = list(geometry.group_name)
+    for k, group in enumerate(part.group_id):
+        name = part.group_name[k]
         if not name or name not in names:
             continue
-        held = block_families(geometry, int(geometry.block_id[names.index(name)]))
-        coming = block_families(part, int(block))
+        held = group_families(geometry, int(geometry.group_id[names.index(name)]))
+        coming = group_families(part, int(group))
         if held and coming and held != coming:
             have = ', '.join(FAMILY_LABELS[f].lower() for f in sorted(held))
             want = ', '.join(FAMILY_LABELS[f].lower() for f in sorted(coming))
-            return (f'block {name!r} holds {have}, and {want} need a block of '
+            return (f'element group {name!r} holds {have}, and {want} need an element group of '
                     'their own: give them another name')
     return None
 
@@ -390,11 +391,11 @@ def join(geometry: Geometry, part: Geometry,
     them — which is what makes this the way a plane is added to a model
     under construction (Add Plane) as well as how `assemble` builds one.
 
-    A block of the part named like one already in the geometry joins it:
+    An element group of the part named like one already in the geometry joins it:
     the five planes of a box, each named 'box', are one part, given its
-    material once. An unnamed block is always a block of its own. A
-    named block holding another element family is refused
-    (`block_refusal`): a block holds one family.
+    material once. An unnamed element group is always an element group of its own. A
+    named element group holding another element family is refused
+    (`group_refusal`): an element group holds one family.
 
     Parameters
     ----------
@@ -413,15 +414,15 @@ def join(geometry: Geometry, part: Geometry,
     dict
         'added', the nodes added; 'shared', the part's nodes that fell on
         nodes already there; 'elements', the elements added; 'duplicates', the part's
-        elements left out for being elements already there; 'blocks',
-        the ids of the blocks they went into.
+        elements left out for being elements already there; 'groups',
+        the ids of the element groups they went into.
     """
     if (geometry.num_nodes and part.num_nodes
             and geometry.units_defined != part.units_defined):
         raise ValueError('one has its length unit defined and the other '
                          'does not, so their coordinates do not mean the '
                          'same thing')
-    refusal = block_refusal(geometry, part)
+    refusal = group_refusal(geometry, part)
     if refusal is not None:
         raise ValueError(refusal)
     on, nearest = landing(geometry, part, tolerance)
@@ -429,46 +430,46 @@ def join(geometry: Geometry, part: Geometry,
     renumber = dict(zip(part.node_id[~on].tolist(), new_ids.tolist()))
     renumber.update(zip(part.node_id[on].tolist(),
                         geometry.node_id[nearest[on]].tolist()))
-    names = list(geometry.block_name)
-    block_map = {}
-    for k, block in enumerate(part.block_id):
-        name = part.block_name[k]
+    names = list(geometry.group_name)
+    group_map = {}
+    for k, group in enumerate(part.group_id):
+        name = part.group_name[k]
         if name and name in names:
-            block_map[int(block)] = int(geometry.block_id[names.index(name)])
+            group_map[int(group)] = int(geometry.group_id[names.index(name)])
             continue
-        new = geometry.add_block(name)
+        new = geometry.add_group(name)
         names.append(name)
-        block_map[int(block)] = new
-        if int(block) in part.block_properties:
-            geometry.block_properties[new] = part.block_properties[int(block)]
+        group_map[int(group)] = new
+        if int(group) in part.group_properties:
+            geometry.group_properties[new] = part.group_properties[int(group)]
     # an element of the part that is an element already there — the
     # overlap of two crossing bars — fills that cell once, as the one
     # already there; adding it again counted the overlap twice
     # (2026-10-02)
     there = _solid_cells(geometry)
-    conn, types, blocks = [], [], []
-    for element, code, block in zip(part.elem_conn, part.elem_type,
-                                    part.elem_block):
+    conn, types, groups = [], [], []
+    for element, code, group in zip(part.elem_conn, part.elem_type,
+                                    part.elem_group):
         renamed = [renumber[int(n)] for n in element]
         if (int(code), tuple(sorted(renamed))) in there:
             continue
         conn.append(renamed)
         types.append(int(code))
-        blocks.append(block_map[int(block)])
+        groups.append(group_map[int(group)])
     duplicates = len(part.elem_conn) - len(conn)
-    geometry.add_elements(conn, types, blocks)
+    geometry.add_elements(conn, types, groups)
     if geometry.length_unit is None:
         geometry.length_unit = part.length_unit
     return {'added': len(new_ids), 'shared': int(on.sum()),
             'elements': len(conn), 'duplicates': duplicates,
-            'blocks': sorted(set(block_map.values()))}
+            'groups': sorted(set(group_map.values()))}
 
 
 def assemble(*parts: Geometry, tolerance: float | None = None) -> Geometry:
     """One geometry from several, joined in turn (`join`): nodes numbered
     from 1 in the order they arrive, a node falling on one already there
     becoming it — so planes meeting along a line are tied there — and
-    blocks of the same name one block. Unnamed blocks stay apart.
+    element groups of the same name one element group. Unnamed element groups stay apart.
 
     Parameters
     ----------
@@ -500,9 +501,9 @@ def assemble(*parts: Geometry, tolerance: float | None = None) -> Geometry:
     return whole
 
 
-#: the block ties go into when none is named and the geometry has no
-#: rigid block yet
-TIE_BLOCK = 'ties'
+#: the element group ties go into when none is named and the geometry has no
+#: rigid element group yet
+TIE_GROUP = 'ties'
 
 
 def _element_rows(geometry: Geometry, elements: Any) -> np.ndarray:
@@ -516,10 +517,10 @@ def _element_rows(geometry: Geometry, elements: Any) -> np.ndarray:
 
 
 def tie(geometry: Geometry, elements: Any, to: Any,
-        block: str | None = None) -> dict:
+        group: str | None = None) -> dict:
     """Tie a patch of elements rigidly to what lies under it (Tie): every
     node of `elements` joined by a rigid, massless link to the nearest
-    node of `to`, the links added to a rigid block. A bolted joint is the
+    node of `to`, the links added to a rigid element group. A bolted joint is the
     use (Brandon, 2026-09-26): select the elements under a washer, tie
     them to the part below — one step per bolt where two clicks per link
     had been the only way.
@@ -535,22 +536,22 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     elements : sequence of int
         The patch, by element id.
     to : str, int or sequence of int
-        What to tie to: a block, by name or id — its nearest nodes — or a
+        What to tie to: an element group, by name or id — its nearest nodes — or a
         second patch, by element ids.
-    block : str, optional
-        The block the links go into, by name, made rigid if new. Defaults
-        to the geometry's first rigid block, or a new one named 'ties'.
+    group : str, optional
+        The element group the links go into, by name, made rigid if new. Defaults
+        to the geometry's first rigid element group, or a new one named 'ties'.
 
     Returns
     -------
     dict
         'links', how many were added; 'shared', the patch's nodes left
-        alone because the target holds them already; 'block', the id of
-        the block the links went into.
+        alone because the target holds them already; 'group', the id of
+        the element group the links went into.
     """
     from scipy.spatial import cKDTree
 
-    from .fem import RIGID, BlockProperties
+    from .fem import RIGID, GroupProperties
 
     patch_rows = _element_rows(geometry, elements)
     if not len(patch_rows):
@@ -558,7 +559,7 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     if isinstance(to, (str, int, np.integer)):
         target_ids = geometry.elements_in(to if isinstance(to, str) else int(to))
         if not target_ids:
-            raise ValueError(f'block {to!r} holds no elements')
+            raise ValueError(f'element group {to!r} holds no elements')
     else:
         target_ids = list(to)
     target_rows = _element_rows(geometry, target_ids)
@@ -574,28 +575,28 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     xyz = geometry.node_xyz
     _distance, nearest = cKDTree(xyz[geometry.node_index(target)]).query(
         xyz[geometry.node_index(followers)])
-    rigid = [int(b) for b in geometry.block_id
-             if getattr(geometry.block_properties.get(int(b)), 'material',
+    rigid = [int(b) for b in geometry.group_id
+             if getattr(geometry.group_properties.get(int(b)), 'material',
                         None) is not None
-             and geometry.block_properties[int(b)].material.is_rigid]
-    names = list(geometry.block_name)
-    if block is None and rigid:
-        block_id = rigid[0]
+             and geometry.group_properties[int(b)].material.is_rigid]
+    names = list(geometry.group_name)
+    if group is None and rigid:
+        group_id = rigid[0]
     else:
-        name = TIE_BLOCK if block is None else block
+        name = TIE_GROUP if group is None else group
         if name in names:
-            block_id = int(geometry.block_id[names.index(name)])
-            held = geometry.block_properties.get(block_id)
+            group_id = int(geometry.group_id[names.index(name)])
+            held = geometry.group_properties.get(group_id)
             if held is not None and held.kind != 'rigid':
-                made = ('point masses' if held.material is None
-                        else held.material.name)
-                raise ValueError(f'block {name!r} is {made}, '
+                made = {'mass': 'point masses', 'spring': 'springs',
+                        'ground': 'ground'}.get(held.kind) or held.material.name
+                raise ValueError(f'element group {name!r} is {made}, '
                                  'not rigid: name another for the ties')
         else:
-            block_id = geometry.add_block(name)
-        geometry.block_properties[block_id] = BlockProperties(RIGID)
+            group_id = geometry.add_group(name)
+        geometry.group_properties[group_id] = GroupProperties(RIGID)
     geometry.add_elements([[int(target[k]), int(node)]
                            for k, node in zip(nearest, followers)],
-                          [21] * len(followers), [block_id] * len(followers))
+                          [21] * len(followers), [group_id] * len(followers))
     return {'links': len(followers), 'shared': len(patch) - len(followers),
-            'block': block_id}
+            'group': group_id}

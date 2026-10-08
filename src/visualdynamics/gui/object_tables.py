@@ -911,10 +911,10 @@ def _set_connectivity(attribute, geometry_check=True):
 def id_runs_text(ids) -> str:
     """Sorted ids as runs: `[1,2,3,7,9,10]` -> `'1-3 7 9-10'`.
 
-    A block's elements are not a handful like an element's nodes — the
+    An element group's elements are not a handful like an element's nodes — the
     demonstration drone puts 478 in one — and they come in runs,
     because a mesh is built a part at a time. Written out one by one
-    the drone's 22 blocks need 21 731 characters; as runs they need
+    the drone's 22 element groups need 21 731 characters; as runs they need
     595, which is the difference between a cell you can read and one
     you cannot.
     """
@@ -953,22 +953,22 @@ def parse_id_runs(text: str) -> list[int]:
     return found
 
 
-def _block_elements_text(geometry: Geometry, row: int) -> str:
-    block = int(geometry.block_id[row])
-    return id_runs_text(geometry.elem_id[geometry.elem_block == block])
+def _group_elements_text(geometry: Geometry, row: int) -> str:
+    group = int(geometry.group_id[row])
+    return id_runs_text(geometry.elem_id[geometry.elem_group == group])
 
 
-def _set_block_elements(geometry: Any, row: int, text: str) -> None:
-    """Claim these elements for this block.
+def _set_group_elements(geometry: Any, row: int, text: str) -> None:
+    """Claim these elements for this element group.
 
     Editing the list *moves elements in*: an element named here leaves
-    whatever block it was in, because it can only be in one. That also
+    whatever element group it was in, because it can only be in one. That also
     means the list cannot be used to take an element *out* — every
-    element is in exactly one block, always (the constructor refuses
-    strays, and deleting a block rehouses its elements rather than
+    element is in exactly one element group, always (the constructor refuses
+    strays, and deleting an element group rehouses its elements rather than
     orphaning them), so a removal with no destination is not a state
     the geometry can hold. Removing is done by adding: name the
-    element in the block it should go to, and it leaves this one by
+    element in the element group it should go to, and it leaves this one by
     itself. The refusal says so rather than guessing a destination.
     """
     wanted = parse_id_runs(text)
@@ -976,22 +976,22 @@ def _set_block_elements(geometry: Any, row: int, text: str) -> None:
     missing = sorted(set(wanted) - known)
     if missing:
         raise ValueError(f'unknown elements {missing}')
-    block = int(geometry.block_id[row])
-    here = {int(i) for i in geometry.elem_id[geometry.elem_block == block]}
+    group = int(geometry.group_id[row])
+    here = {int(i) for i in geometry.elem_id[geometry.elem_group == group]}
     dropped = sorted(here - set(wanted))
     if dropped:
         shown = ', '.join(str(i) for i in dropped[:4])
         more = f' (and {len(dropped) - 4} more)' if len(dropped) > 4 else ''
         raise ValueError(
-            f'element {shown}{more} would be left with no block — every '
-            'element is in exactly one. Add it to the block it belongs '
+            f'element {shown}{more} would be left with no element group — every '
+            'element is in exactly one. Add it to the element group it belongs '
             'in instead; it leaves this one by itself')
     if wanted:
-        geometry.elem_block[np.isin(geometry.elem_id,
-                                    list(wanted))] = block
+        geometry.elem_group[np.isin(geometry.elem_id,
+                                    list(wanted))] = group
 
 
-#: the Blocks table's property columns: (title, field of the property
+#: the Element Groups table's property columns: (title, field of the property
 #: set or of its material/section, kind)
 _PROPERTY_FIELDS = (
     # (title, holder, field, dimension — None where there is no unit)
@@ -1008,14 +1008,68 @@ _PROPERTY_FIELDS = (
     ('Iz', 'section', 'iz', 'length**4'),
     ('J', 'section', 'j', 'length**4'),
     ('Orientation', '', 'orientation', None),
-    # a block of point elements: the mass at each one's node, and
+    # an element group of point elements: the mass at each one's node, and
     # nothing else (2026-10-07)
     ('Mass', '', 'mass', 'mass'),
+    # a group of springs: a stiffness per global direction, typed by
+    # label in the display system (2026-10-08)
+    ('Stiffness', '', 'stiffness', None),
 )
+
+#: the Material list's entry that makes a group of points ground
+GROUND = 'ground (fixed)'
+#: the Stiffness cell's labels, in `fem.DIRECTIONS` order
+STIFFNESS_LABELS = ('Kx', 'Ky', 'Kz', 'Krx', 'Kry', 'Krz')
+
+
+def _stiffness_dimension(index):
+    return 'force/length' if index < 3 else 'force*length'
+
+
+def _stiffness_text(stiffness, unit_system):
+    """'Kz=1e+05, Kry=2000' in the display system, free directions left
+    out."""
+    shown = []
+    for k, (label, value) in enumerate(zip(STIFFNESS_LABELS, stiffness)):
+        if value is None:
+            continue
+        if unit_system is not None:
+            value = float(unit_system.from_si(value, _stiffness_dimension(k)))
+        shown.append(f'{label}={value:.6g}')
+    return ', '.join(shown)
+
+
+def _parse_stiffness(text, unit_system):
+    """Six stiffnesses in SI from 'Kz=1e5, Kry=2e3', each labeled, in the
+    display system; a direction not named is free."""
+    values = [None] * 6
+    lower = [label.lower() for label in STIFFNESS_LABELS]
+    for token in text.replace(';', ',').split(','):
+        token = token.strip()
+        if not token:
+            continue
+        label, eq, number = token.partition('=')
+        label = label.strip().lower()
+        if not eq or label not in lower:
+            raise ValueError('a stiffness is given by direction: '
+                             + ', '.join(f'{name}=' for name in STIFFNESS_LABELS)
+                             + ' (Kz=1e5, Kry=2e3)')
+        k = lower.index(label)
+        value = float(number)
+        if not value > 0.0:
+            raise ValueError(f'{STIFFNESS_LABELS[k]} is positive, or left out '
+                             'for a direction that is free')
+        if unit_system is not None:
+            value = float(unit_system.to_si(value, _stiffness_dimension(k)))
+        values[k] = value
+    if not any(values):
+        raise ValueError('a group of springs needs a stiffness in one '
+                         'direction at least')
+    return tuple(values)
 
 
 def _properties_of(geometry, row):
-    return geometry.block_properties.get(int(geometry.block_id[row]))
+    return geometry.group_properties.get(int(geometry.group_id[row]))
 
 
 #: the short names a shape's dimensions are written with in the table,
@@ -1053,6 +1107,11 @@ def _property_value(geometry, row, holder, field, dimension=None,
     props = _properties_of(geometry, row)
     if props is None:
         return ''
+    if field == 'name' and holder == 'material' and props.ground:
+        return GROUND
+    if field == 'stiffness':
+        return (_stiffness_text(props.stiffness, unit_system)
+                if props.stiffness is not None else '')
     owner = getattr(props, holder) if holder else props
     if owner is None:
         return ''
@@ -1075,34 +1134,55 @@ def _property_value(geometry, row, holder, field, dimension=None,
 
 
 def _set_property(holder, field, dimension=None, unit_system=None):
-    """A setter that rewrites the block's property set with one field
+    """A setter that rewrites the element group's property set with one field
     changed — a material or a section made on first touch with the
     other fields blank, so a person can fill a row cell by cell. A
     number is typed in the display system and stored in SI."""
     from dataclasses import replace
 
-    from ..core.fem import MATERIALS, BlockProperties, Material, Section
+    from ..core.fem import MATERIALS, GroupProperties, Material, Section
 
     def set_value(geometry, row, text):
-        block = int(geometry.block_id[row])
-        props = geometry.block_properties.get(block)
+        group = int(geometry.group_id[row])
+        props = geometry.group_properties.get(group)
         text = str(text).strip()
         if field == 'mass':
-            # a mass makes the block point masses, and a mass alone;
-            # cleared, the block has nothing left to say
+            # a mass makes the element group point masses, and a mass alone;
+            # cleared, the element group has nothing left to say
             value = float(text) if text else None
             if value is not None and unit_system is not None:
                 value = float(unit_system.to_si(value, 'mass'))
             if value is not None:
-                geometry.block_properties[block] = BlockProperties(mass=value)
+                geometry.group_properties[group] = GroupProperties(mass=value)
             elif props is not None and props.kind == 'mass':
-                geometry.block_properties.pop(block, None)
+                geometry.group_properties.pop(group, None)
+            return
+        if field == 'stiffness':
+            # a stiffness makes the group springs, and a stiffness alone;
+            # cleared, the group has nothing left to say
+            if text:
+                geometry.group_properties[group] = GroupProperties(
+                    stiffness=_parse_stiffness(text, unit_system))
+            elif props is not None and props.kind == 'spring':
+                geometry.group_properties.pop(group, None)
+            return
+        if holder == 'material' and field == 'name' and text == GROUND:
+            geometry.group_properties[group] = GroupProperties(ground=True)
             return
         if props is not None and props.kind == 'mass':
-            raise ValueError('a block of point masses takes a mass alone — '
+            raise ValueError('an element group of point masses takes a mass alone — '
                              'clear its Mass to give it a material')
+        if props is not None and props.kind == 'spring':
+            raise ValueError('a group of springs takes a stiffness alone — '
+                             'clear its Stiffness to give it a material')
+        if (props is not None and props.kind == 'ground'
+                and not (holder == 'material' and field == 'name'
+                         and text in MATERIALS)):
+            raise ValueError('a ground group holds its points fixed and takes '
+                             'nothing else — pick a material to make it '
+                             'something else')
         if holder == 'section' and field in ('shape', 'dimensions'):
-            geometry.block_properties[block] = _set_section_shape(
+            geometry.group_properties[group] = _set_section_shape(
                 props, field, text, unit_system)
             return
         if (holder == 'section' and props is not None
@@ -1117,10 +1197,11 @@ def _set_property(holder, field, dimension=None, unit_system=None):
                              'modulus, density or ratio — pick a material '
                              'to give it one')
         if holder == 'material' and field == 'name' and text in MATERIALS:
-            # a library name fills the row; any other name is a name
-            geometry.block_properties[block] = replace(
-                props or BlockProperties(MATERIALS[text]),
-                material=MATERIALS[text])
+            # a library name fills the row; any other name is a name. A
+            # ground group picked a material is a group of that material
+            geometry.group_properties[group] = replace(
+                props or GroupProperties(MATERIALS[text]),
+                material=MATERIALS[text], ground=False)
             return
         if field == 'name':
             value = text
@@ -1135,7 +1216,7 @@ def _set_property(holder, field, dimension=None, unit_system=None):
                     and unit_system is not None):
                 value = float(unit_system.to_si(value, dimension))
         if props is None:
-            props = BlockProperties(Material('', 0.0, 0.0, 0.3))
+            props = GroupProperties(Material('', 0.0, 0.0, 0.3))
         if holder == 'material':
             material = props.material or Material('', 0.0, 0.0, 0.3)
             props = replace(props, material=replace(material,
@@ -1147,13 +1228,13 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             props = replace(props, section=replace(section, **{field: value}))
         else:
             props = replace(props, **{field: value})
-        geometry.block_properties[block] = props
+        geometry.group_properties[group] = props
 
     return set_value
 
 
 def _set_section_shape(props, field, text, unit_system):
-    """The block's properties with its section's shape or dimensions
+    """The element group's properties with its section's shape or dimensions
     changed. A shape picked keeps the dimensions it can (the same shape,
     or as many as the new one takes are there — not guessed); Custom
     keeps the four numbers and lets them be typed. Dimensions are typed
@@ -1161,10 +1242,10 @@ def _set_section_shape(props, field, text, unit_system):
     ('D=1, t=0.065'), anything after a ';' ignored."""
     from dataclasses import replace
 
-    from ..core.fem import SHAPES, BlockProperties, Material, Section, with_article
+    from ..core.fem import SHAPES, GroupProperties, Material, Section, with_article
 
     if props is None:
-        props = BlockProperties(Material('', 0.0, 0.0, 0.3))
+        props = GroupProperties(Material('', 0.0, 0.0, 0.3))
     section = props.section or Section('', 0.0, 0.0, 0.0, 0.0)
     if field == 'shape':
         shape = text.strip()
@@ -1204,18 +1285,23 @@ def _set_section_shape(props, field, text, unit_system):
 
 
 def _property_journal(geometry, row, _text):
-    """The block's whole property set, as the line that rebuilds it."""
-    block = int(geometry.block_id[row])
-    props = geometry.block_properties.get(block)
+    """The element group's whole property set, as the line that rebuilds it."""
+    group = int(geometry.group_id[row])
+    props = geometry.group_properties.get(group)
     if props is None:
-        return f'.block_properties.pop({block}, None)'
+        return f'.group_properties.pop({group}, None)'
     if props.kind == 'mass':
-        return f'.block_properties[{block}] = BlockProperties(mass={props.mass!r})'
+        return f'.group_properties[{group}] = GroupProperties(mass={props.mass!r})'
+    if props.kind == 'ground':
+        return f'.group_properties[{group}] = GroupProperties(ground=True)'
+    if props.kind == 'spring':
+        return (f'.group_properties[{group}] = '
+                f'GroupProperties(stiffness={tuple(props.stiffness)!r})')
     m = props.material
     if m.is_rigid:
         # the rigid link by name: its modulus is infinite, and 'inf' is
         # not a number a script can replay
-        return f'.block_properties[{block}] = BlockProperties(RIGID)'
+        return f'.group_properties[{group}] = GroupProperties(RIGID)'
     material = (f'Material({m.name!r}, {m.youngs_modulus!r}, {m.density!r}, '
                 f'{m.poissons_ratio!r}'
                 + (f', {m.modulus_of_rigidity!r}'
@@ -1235,7 +1321,7 @@ def _property_journal(geometry, row, _text):
                          + (f', {s.shape!r}' if s.shape else '') + ')')
     if props.orientation is not None:
         parts.append(f'orientation={tuple(props.orientation)!r}')
-    return (f'.block_properties[{block}] = BlockProperties('
+    return (f'.group_properties[{group}] = GroupProperties('
             + ', '.join(parts) + ')')
 
 
@@ -1252,12 +1338,15 @@ def _property_columns(unit_system=None):
 
     for title, holder, field, dimension in _PROPERTY_FIELDS:
         kwargs = ({'alignment': LEFT}
-                  if field in ('name', 'orientation', 'shape', 'dimensions')
+                  if field in ('name', 'orientation', 'shape', 'dimensions',
+                               'stiffness')
                   else {'format': lambda v: v if v == '' else f'{v:.6g}'})
         if holder == 'material' and field == 'name':
             # the library as a shortlist, not a rule: pick one and the
-            # row fills, or type any name and fill the row yourself
-            kwargs.update(choices=list(MATERIALS), choices_editable=True)
+            # row fills, or type any name and fill the row yourself; ground
+            # last, beside rigid, as the other thing a group can be that
+            # is no material
+            kwargs.update(choices=[*MATERIALS, GROUND], choices_editable=True)
         if field == 'shape':
             kwargs.update(choices=[*SHAPES, CUSTOM])
         if dimension is not None:
@@ -1265,6 +1354,13 @@ def _property_columns(unit_system=None):
                     if unit_system is not None
                     else _SI_LABELS[dimension])
             title = f'{title} [{unit}]'
+        if field == 'stiffness':
+            # two units in one cell: along an axis, and about it
+            along, about = (
+                (unit_system.label_text('force/length'),
+                 unit_system.label_text('force*length'))
+                if unit_system is not None else ('N/m', 'N·m'))
+            title = f'{title} [{along}, {about}/rad]'
         columns.append(Column(
             title, (lambda g, r, h=holder, f=field, d=dimension:
                     _property_value(g, r, h, f, d, unit_system)),
@@ -1278,36 +1374,36 @@ _SI_LABELS = {'pressure': 'Pa', 'mass/length**3': 'kg/m³', 'length': 'm',
               'length**2': 'm²', 'length**4': 'm⁴', 'mass': 'kg'}
 
 
-def block_label(geometry: Geometry, row: int) -> str:
-    """How a block reads in a list: its name, or its id when unnamed.
+def group_label(geometry: Geometry, row: int) -> str:
+    """How an element group reads in a list: its name, or its id when unnamed.
 
-    Exodus files often carry unnamed blocks, and 'block 3' is what a
+    Exodus files often carry unnamed element groups, and 'element group 3' is what a
     person calls that one — inventing a name for it would be putting
     words in the file's mouth.
     """
-    name = geometry.block_name[row].strip()
-    return name or f'block {int(geometry.block_id[row])}'
+    name = geometry.group_name[row].strip()
+    return name or f'element group {int(geometry.group_id[row])}'
 
 
-def _block_labels(geometry):
-    return [block_label(geometry, row) for row in range(len(geometry.block_id))]
+def _group_labels(geometry):
+    return [group_label(geometry, row) for row in range(len(geometry.group_id))]
 
 
-def _set_element_block(geometry, row, text):
-    """Move an element into a block, named or numbered.
+def _set_element_group(geometry, row, text):
+    """Move an element into an element group, named or numbered.
 
-    The block has to exist: `add_element` may declare one because it is
+    The element group has to exist: `add_element` may declare one because it is
     building the element in the first place, but retyping a cell into a
     number nobody has declared is a typo far more often than it is a new
-    block, and the Blocks table is where one is made.
+    element group, and the Element Groups table is where one is made.
     """
     wanted = text.strip()
-    for i in range(len(geometry.block_id)):
-        if wanted in (block_label(geometry, i), geometry.block_name[i].strip(),
-                      str(int(geometry.block_id[i]))):
-            geometry.elem_block[row] = int(geometry.block_id[i])
+    for i in range(len(geometry.group_id)):
+        if wanted in (group_label(geometry, i), geometry.group_name[i].strip(),
+                      str(int(geometry.group_id[i]))):
+            geometry.elem_group[row] = int(geometry.group_id[i])
             return
-    raise ValueError(f'no block {wanted!r}; add it in the Blocks table')
+    raise ValueError(f'no element group {wanted!r}; add it in the Element Groups table')
 
 
 def element_table_model(geometry: Geometry,
@@ -1325,9 +1421,9 @@ def element_table_model(geometry: Geometry,
                 return
         raise ValueError(f'unknown element type {text!r}')
 
-    def block_of_row(geometry: Geometry, row: int) -> str:
-        where = np.flatnonzero(geometry.block_id == int(geometry.elem_block[row]))
-        return block_label(geometry, int(where[0])) if len(where) else ''
+    def group_of_row(geometry: Geometry, row: int) -> str:
+        where = np.flatnonzero(geometry.group_id == int(geometry.elem_group[row]))
+        return group_label(geometry, int(where[0])) if len(where) else ''
 
     columns = [
         Column('Element', lambda g, r: int(g.elem_id[r]),
@@ -1340,12 +1436,12 @@ def element_table_model(geometry: Geometry,
                alignment=LEFT),
         _color_column('Color', 'elem_color'),
         # which part of the structure this element is, and the only way to
-        # move one between blocks — a block holds nothing itself
-        Column('Block', block_of_row, set=_set_element_block,
+        # move one between element groups — an element group holds nothing itself
+        Column('Element group', group_of_row, set=_set_element_group,
                journal=lambda g, r, _t:
-               f'.elem_block[{r}] = {int(g.elem_block[r])}',
+               f'.elem_group[{r}] = {int(g.elem_group[r])}',
                alignment=LEFT,
-               row_choices=lambda g, _r: _block_labels(g)),
+               row_choices=lambda g, _r: _group_labels(g)),
         Column('Nodes', lambda g, r: _connectivity_text(g.elem_conn[r]),
                set=_set_connectivity('elem_conn'),
                journal=_connectivity_journal('elem_conn'),
@@ -1355,59 +1451,59 @@ def element_table_model(geometry: Geometry,
                           lambda g: len(g.elem_conn), parent)
 
 
-def block_table_model(geometry: Geometry,
+def element_group_table_model(geometry: Geometry,
                       unit_system: UnitSystem | None = None,
                       parent: QObject | None = None) -> TableModel:
-    """The element blocks: what the mesh is divided into.
+    """The element groups: what the mesh is divided into.
 
     Three columns, all editable. The elements are listed as runs
-    (`1-36 156-245`) and naming one here claims it for this block —
+    (`1-36 156-245`) and naming one here claims it for this element group —
     the same gesture as typing a node into an element, with one
     difference the model forces: a node can be in no element at all,
-    while an element is always in exactly one block. So the list adds
+    while an element is always in exactly one element group. So the list adds
     and moves, and a removal that would orphan an element is refused
-    with the reason (see `_set_block_elements`). The Elements column
+    with the reason (see `_set_group_elements`). The Elements column
     in the *elements* table moves them one at a time; this one moves
     them by the hundred.
     """
     def set_name(geometry: Any, row: int, text: str) -> None:
-        geometry.block_name[row] = text
+        geometry.group_name[row] = text
 
     columns = [
-        Column('Block', lambda g, r: int(g.block_id[r]),
-               set=_renumber('renumber_block'),
-               journal=_renumber_journal('renumber_block')),
-        Column('Name', lambda g, r: g.block_name[r], set=set_name,
-               journal=lambda g, r, t: f'.block_name[{r}] = {t!r}',
+        Column('Element group', lambda g, r: int(g.group_id[r]),
+               set=_renumber('renumber_group'),
+               journal=_renumber_journal('renumber_group')),
+        Column('Name', lambda g, r: g.group_name[r], set=set_name,
+               journal=lambda g, r, t: f'.group_name[{r}] = {t!r}',
                alignment=LEFT),
         # The elements themselves, as runs, and editable: naming an
-        # element here claims it for this block. Editing the *count*
+        # element here claims it for this element group. Editing the *count*
         # would have been meaningless — a number is not a thing you
         # can change — and the count is still readable at a glance
         # from the runs.
-        Column('Elements', _block_elements_text, set=_set_block_elements,
-               # membership moves elements between blocks; the honest
+        Column('Elements', _group_elements_text, set=_set_group_elements,
+               # membership moves elements between element groups; the honest
                # replay is the post-state of the whole assignment array
-               journal=lambda g, _r, _t: '.elem_block = np.array('
-               f'{[int(b) for b in g.elem_block]!r})',
+               journal=lambda g, _r, _t: '.elem_group = np.array('
+               f'{[int(b) for b in g.elem_group]!r})',
                alignment=LEFT),
-        # What the block is made of, for a model built from the
-        # geometry (Brandon, 2026-09-25): a material for any block, a
-        # thickness for a block of plates, a section for a block of
-        # beams, a mass for a block of point masses. SI throughout, as the model is inside; blank until
+        # What the element group is made of, for a model built from the
+        # geometry (Brandon, 2026-09-25): a material for any element group, a
+        # thickness for an element group of plates, a section for an element group of
+        # beams, a mass for an element group of point masses. SI throughout, as the model is inside; blank until
         # set. Every cell's journal line restates the whole property
         # set, so a replay lands on the same object whichever cell was
         # edited last.
         *_property_columns(unit_system),
     ]
-    return TableModel(geometry, columns, lambda g: len(g.block_id), parent)
+    return TableModel(geometry, columns, lambda g: len(g.group_id), parent)
 
 
 ENTITY_TABLES = {
     'nodes': node_table_model,
     'coordinate_systems': coordinate_system_table_model,
     'elements': element_table_model,
-    'blocks': block_table_model,
+    'groups': element_group_table_model,
 }
 
 

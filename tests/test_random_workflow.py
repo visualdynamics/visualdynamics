@@ -99,7 +99,7 @@ def test_the_report_binds_the_narrowband_set_not_the_bands(worked_up):
     from visualdynamics.core.report import resolve_binding
 
     narrow, _banded = _measured(worked_up)
-    name = resolve_binding('@basis:Psd', worked_up, worked_up.links)
+    name = resolve_binding('@basis:Psd', worked_up, worked_up.object_groups)
     assert worked_up[name] is narrow
 
 
@@ -195,7 +195,7 @@ def test_the_geometry_and_the_photos_ride_along(qt_app, tmp_path):
         length_unit='m', photos=folder)
     assert project['Geometry'].length_unit == 'm'
     assert project['Photos'].names == ['front', 'side']
-    [group] = project.links
+    [group] = project.object_groups
     assert {'Time History', 'Geometry', 'Photos'} <= set(group['members'])
     path = visualdynamics.random_vibration_report(
         fixture_path('plate', RUN), tmp_path / 'run.html', last=10.0,

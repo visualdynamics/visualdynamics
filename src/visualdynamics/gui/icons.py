@@ -1161,9 +1161,9 @@ def _draw_tie(painter, color):
         painter.drawEllipse(QPointF(x, 48), 5, 5)
 
 
-def _draw_merge_blocks(painter, color):
-    """Two small blocks of elements closing into one larger block: parts
-    of a geometry made one part (Merge Blocks) — its own glyph, apart
+def _draw_merge_groups(painter, color):
+    """Two small groups of elements closing into one larger group: parts
+    of a geometry made one part (Merge Element Groups) — its own glyph, apart
     from Merge into One's objects and Merge Coincident Nodes' points."""
     painter.setPen(_pen(color, 4))
     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -1441,11 +1441,11 @@ def _draw_elements(painter, color):
     painter.drawLine(QPointF(13, 32), QPointF(51, 32))
 
 
-def _draw_blocks(painter, color):
-    """Two groups of cells, one filled: elements sorted into blocks.
+def _draw_groups(painter, color):
+    """Two groups of cells, one filled: elements sorted into element groups.
 
     The elements icon is one mesh divided into cells; this is that mesh
-    divided into *parts*, which is what a block is — so the difference
+    divided into *parts*, which is what an element group is — so the difference
     between them has to be the grouping, not the cells.
     """
     painter.setPen(_pen(color, 5))
@@ -1703,7 +1703,7 @@ def control_icon(name: str) -> QIcon:
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
      'plane': _draw_plane, 'block': _draw_block, 'tie': _draw_tie,
-     'merge_blocks': _draw_merge_blocks, 'solve_modes': _draw_solve_modes,
+     'merge_groups': _draw_merge_groups, 'solve_modes': _draw_solve_modes,
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
      'sine': _draw_sine,
      'refresh': _draw_refresh,
@@ -1716,7 +1716,7 @@ _CHILD_DRAW = {
     'nodes': _draw_nodes,
     'coordinate_systems': _draw_coordinate_systems,
     'elements': _draw_elements,
-    'blocks': _draw_blocks,
+    'groups': _draw_groups,
     # the element families a geometry lists (2026-09-30)
     'beams': _draw_beam,
     'triangles': _draw_tri,

@@ -342,7 +342,7 @@ def test_the_project_keeps_and_links_them(window, pump):
     added = window.project.compute_cpsds('Time')
     assert added == 'Time CPSDs'
     assert window.objects[added].num_records == 4
-    assert set(window.project.group_of('Time')) >= {'Time', added}
+    assert set(window.project.object_group_of('Time')) >= {'Time', added}
 
 
 def test_the_calculator_computes_them(window, pump):

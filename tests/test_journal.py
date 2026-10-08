@@ -399,7 +399,7 @@ def test_report_edits_journal_as_the_state_that_stands(window, pump):
 
 
 def test_moving_an_object_between_groups_journals_the_verb(window, pump):
-    """A drag between link groups journals as the command a script
+    """A drag between object groups journals as the command a script
     would write — place, relink or unlink, one object by name — not
     as a wholesale project.links list (Brandon, 2026-08-30: 'the user
     needs to list all objects to do it')."""
@@ -412,13 +412,13 @@ def test_moving_an_object_between_groups_journals_the_verb(window, pump):
             if line == "project.unlink('Geometry')"]
     assert len(said) == 1
     assert not [line for line in window.project.journal
-                if line.startswith('project.links = ')], (
+                if line.startswith('project.object_groups = ')], (
         'no wholesale list restatement')
 
     room: dict = {}
     exec(window.project.session_script(), room)         # noqa: S102
     replayed = room['project']
-    grouped = {n for g in replayed.links for n in g['members']}
+    grouped = {n for g in replayed.object_groups for n in g['members']}
     assert 'Geometry' not in grouped, 'the move replayed'
 
 
@@ -638,5 +638,5 @@ def test_a_drag_trial_journals_nothing_and_the_landing_settles(window,
     pump()
     lines = [line for line in window.project.journal
              if 'relink' in line or 'unlink' in line
-             or line.startswith('project.links = ')]
+             or line.startswith('project.object_groups = ')]
     assert lines == ["project.unlink('Geometry')"], lines

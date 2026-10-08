@@ -135,7 +135,7 @@ def test_a_line_of_beams_is_as_long_as_you_say_and_commits_on_enter(
         plate, window, pump):
     """A beam takes the line's grammar (2026-09-30): it is however many
     nodes were picked, chained, so it is the one that needs saying when
-    it is done — and the chain lands in one block."""
+    it is done — and the chain lands in one element group."""
     edit(window, pump, 'Beams')
     window.set_add_mode(True)
     screen = screen_of(window)
@@ -148,7 +148,7 @@ def test_a_line_of_beams_is_as_long_as_you_say_and_commits_on_enter(
     pump()
     assert len(plate.elem_conn) == before + 2
     assert [int(t) for t in plate.elem_type[-2:]] == [21, 21]
-    assert len({int(b) for b in plate.elem_block[-2:]}) == 1, 'one block'
+    assert len({int(b) for b in plate.elem_group[-2:]}) == 1, 'one element group'
     assert [list(map(int, c)) for c in plate.elem_conn[-2:]] == \
         [[int(plate.node_id[2]), int(plate.node_id[3])],
          [int(plate.node_id[3]), int(plate.node_id[4])]]
@@ -232,24 +232,24 @@ def test_the_geometry_is_still_valid_after_all_of_that(plate, window, pump):
     assert np.isfinite(plate.node_xyz).all()
 
 
-# ---- which block new elements go into (2026-09-26) ------------------------
+# ---- which element group new elements go into (2026-09-26) ------------------------
 
 def _block_box(window):
-    box = window.element_block_box
+    box = window.element_group_box
     return [box.itemText(i) for i in range(box.count())], box.currentText()
 
 
 def test_the_block_drop_down_is_offered_only_while_adding_elements(plate, window,
                                                                   pump):
     edit(window, pump, 'Quads')
-    assert not window._element_block_handle.isVisible()
+    assert not window._element_group_handle.isVisible()
     window.set_add_mode(True)
-    assert window._element_block_handle.isVisible()
+    assert window._element_group_handle.isVisible()
     items, _current = _block_box(window)
-    assert items == ['Block 1 — body', 'New block']
+    assert items == ['Element group 1 — body', 'New element group']
     edit(window, pump, 'Nodes')
     window.set_add_mode(True)
-    assert not window._element_block_handle.isVisible()
+    assert not window._element_group_handle.isVisible()
 
 
 def test_the_drop_down_offers_the_familys_blocks_and_a_new_one(plate,
@@ -257,31 +257,31 @@ def test_the_drop_down_offers_the_familys_blocks_and_a_new_one(plate,
                                                                 pump):
     """A quad added to a model of quads joins them — a file's four-node
     shells are the same kind as the quad add mode makes; a beam added to
-    it has no block of beams to join, so only a new block is offered —
-    a block holds one family (2026-09-30), where a plate block would
-    refuse it. Editing from a block row starts on that block."""
+    it has no element group of beams to join, so only a new element group is offered —
+    an element group holds one family (2026-09-30), where a plate element group would
+    refuse it. Editing from an element group row starts on that element group."""
     edit(window, pump, 'Quads')
     window.set_add_mode(True)
-    assert _block_box(window) == (['Block 1 — body', 'New block'],
-                                  'Block 1 — body')
+    assert _block_box(window) == (['Element group 1 — body', 'New element group'],
+                                  'Element group 1 — body')
     edit(window, pump, 'Beams')
     window.set_add_mode(True)
-    assert _block_box(window) == (['New block'], 'New block')
-    from conftest import edit_block
+    assert _block_box(window) == (['New element group'], 'New element group')
+    from conftest import edit_element_group
 
-    edit_block(window, pump, 1)
-    assert window.editing == ('Geometry', 'blocks')
-    assert window.editing_scope == ('block', 1)
+    edit_element_group(window, pump, 1)
+    assert window.editing == ('Geometry', 'groups')
+    assert window.editing_scope == ('group', 1)
 
 
 def test_links_picked_one_after_another_share_the_new_block(plate, window,
                                                             pump):
-    """The first beam makes the block and the drop-down then shows it, so
-    every link picked after joins it — one block to make rigid."""
+    """The first beam makes the element group and the drop-down then shows it, so
+    every link picked after joins it — one element group to make rigid."""
     edit(window, pump, 'Beams')
     window.set_add_mode(True)
     screen = screen_of(window)
-    blocks_before = list(plate.block_id)
+    blocks_before = list(plate.group_id)
     for a, b in ((0, 8), (2, 10)):
         window.hover_at(*screen[a])
         window._add_at(*screen[a])
@@ -289,24 +289,24 @@ def test_links_picked_one_after_another_share_the_new_block(plate, window,
         window._add_at(*screen[b], extend=True)
         window.commit_action.trigger()      # a line is said done with Enter
     pump()
-    new = [int(b) for b in plate.block_id if int(b) not in blocks_before]
-    assert len(new) == 1, 'one new block for both links'
-    assert [int(b) for b in plate.elem_block[-2:]] == new * 2
-    assert _block_box(window)[1] == f'Block {new[0]}'
+    new = [int(b) for b in plate.group_id if int(b) not in blocks_before]
+    assert len(new) == 1, 'one new element group for both links'
+    assert [int(b) for b in plate.elem_group[-2:]] == new * 2
+    assert _block_box(window)[1] == f'Element group {new[0]}'
     journal = window.project.journal
-    assert any(line.endswith(".add_block()") for line in journal)
-    assert journal[-1].endswith(f'block={new[0]}, elem_type=21)'), journal[-1]
+    assert any(line.endswith(".add_group()") for line in journal)
+    assert journal[-1].endswith(f'group={new[0]}, elem_type=21)'), journal[-1]
 
 
 def test_a_block_picked_in_the_drop_down_is_honored(plate, window, pump):
-    """Two blocks of beams: the one picked in the drop-down is where
+    """Two element groups of beams: the one picked in the drop-down is where
     the next line lands."""
     first = plate.add_beams([int(plate.node_id[0]), int(plate.node_id[1])])
     second = plate.add_beams([int(plate.node_id[2]), int(plate.node_id[3])])
     window._refresh_item(window._item_for_object('Geometry'), plate)
     edit(window, pump, 'Beams')
     window.set_add_mode(True)
-    box = window.element_block_box
+    box = window.element_group_box
     assert {box.itemData(i) for i in range(box.count())} == {first, second, None}
     box.setCurrentIndex(box.findData(second))
     screen = screen_of(window)
@@ -316,4 +316,4 @@ def test_a_block_picked_in_the_drop_down_is_honored(plate, window, pump):
     window._add_at(*screen[5], extend=True)
     window.commit_action.trigger()
     pump()
-    assert int(plate.elem_block[-1]) == second, 'where it was told'
+    assert int(plate.elem_group[-1]) == second, 'where it was told'

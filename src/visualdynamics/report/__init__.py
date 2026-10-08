@@ -107,13 +107,13 @@ SCALOGRAM_COLUMNS = 240
 def render_html(report: Report, objects: Mapping[str, Any],
                 unit_system: UnitSystem | None = None, edit: bool = False,
                 channel_js: str | None = None,
-                links: Sequence[Mapping[str, Any]] | None = None,
+                object_groups: Sequence[Mapping[str, Any]] | None = None,
                 selected: int | None = None,
                 labels: list[tuple[str, str]] | None = None,
                 fill: bool = False, theme: str | None = None) -> str:
     """The report as one HTML document string.
 
-    `links` is the project's link groups: symbolic bindings like
+    `links` is the project's object groups: symbolic bindings like
     '@basis:Frf' resolve against them, so a report depends on the
     project's *structure*, never on what anyone named their objects.
     Reading mode skips blocks whose references cannot resolve —
@@ -159,7 +159,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
         payload['selected'] = -1 if selected is None else int(selected)
     figures = tables = 0
     for index, block in enumerate(report.blocks):
-        built = _build_block(block, objects, us, links)
+        built = _build_block(block, objects, us, object_groups)
         if built is None:
             if not edit:
                 continue
@@ -171,7 +171,7 @@ def render_html(report: Report, objects: Mapping[str, Any],
                       ('source', 'geometry', 'dofs_source', 'shapes')
                       if block.get(key)]
             resolvable = bool(needed) and all(
-                resolve_binding(name, objects, links) in objects
+                resolve_binding(name, objects, object_groups) in objects
                 for name in needed)
             built = {'kind': 'unbound',
                      'was': block.get('kind', 'block'),
@@ -313,13 +313,13 @@ _REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 
 
 def resolve_references(text: str, objects: Mapping[str, Any], us: UnitSystem,
-                       links: Sequence[Mapping[str, Any]] | None = None) -> str:
+                       object_groups: Sequence[Mapping[str, Any]] | None = None) -> str:
     """{{Object Name.field}} in report text becomes the live value.
 
     The whole point is templates: a summary that says how the data was
     sampled fills itself in whatever project the template lands in.
     The name may be a symbolic selector — {{@basis:TimeHistory.
-    sample_rate}} — resolved against the link groups, so the text
+    sample_rate}} — resolved against the object groups, so the text
     depends on no one's naming either. A reference that cannot
     resolve — no such object, or a field the object cannot answer —
     stays visible as written, the same way an unbound block stays a
@@ -330,7 +330,7 @@ def resolve_references(text: str, objects: Mapping[str, Any], us: UnitSystem,
     def swap(match: re.Match) -> str:
         name, dot, field = match.group(1).rpartition('.')
         obj = (objects.get(resolve_binding(name.strip(), objects,
-                                           links) or '')
+                                           object_groups) or '')
                if dot else None)
         if obj is not None:
             value = _field_value(obj, field.strip(), us)
@@ -362,7 +362,7 @@ def _field_value(obj, field, us):
         return {
             'num_nodes': lambda: f'{len(obj.node_id)}',
             'num_elements': lambda: f'{len(obj.elem_id)}',
-            'num_blocks': lambda: f'{len(obj.block_id)}',
+            'num_blocks': lambda: f'{len(obj.group_id)}',
         }.get(field, lambda: None)()
     if isinstance(obj, ChannelTable):
         return f'{obj.num_channels}' if field == 'num_channels' else None
@@ -446,13 +446,13 @@ def _resolve_figures(text, labeled):
     return _FIGURE.sub(swap, text)
 
 
-def _build_block(block, objects, us, links=None):
+def _build_block(block, objects, us, object_groups=None):
     from ..core.report import resolve_binding
 
     # symbolic bindings resolve here, once, into a working copy — every
     # builder below sees plain names, and the stored block keeps its
     # selector
-    resolved = {key: (resolve_binding(block.get(key), objects, links)
+    resolved = {key: (resolve_binding(block.get(key), objects, object_groups)
                       or '')
                 for key in ('source', 'geometry', 'shapes', 'dofs_source',
                             'measured', 'specification') if block.get(key)}
@@ -465,19 +465,19 @@ def _build_block(block, objects, us, links=None):
         # (a caption is what figures are *labeled* by; one referring
         # to another resolves at markdown time like the prose)
         block['caption'] = resolve_references(
-            block['caption'], objects, us, links)
+            block['caption'], objects, us, object_groups)
     kind = block.get('kind')
     if kind == 'text':
         # markdown waits: figure references need every label assigned
         return {'kind': 'text', 'text': resolve_references(
-            block.get('text', ''), objects, us, links)}
+            block.get('text', ''), objects, us, object_groups)}
     if kind == 'plot':
         source = objects.get(block.get('source'))
         if source is None:
             return None
         if block.get('grid'):
             geometry = objects.get(
-                resolve_binding('@basis:Geometry', objects, links) or '')
+                resolve_binding('@basis:Geometry', objects, object_groups) or '')
             return _grid_block(block, source, objects, us, geometry)
         return _plot_block(block, source, objects, us)
     if kind == 'scene':
@@ -494,7 +494,7 @@ def _build_block(block, objects, us, links=None):
         # the basis geometry brings the channel table its direction
         # columns, as it does in the window
         geometry = objects.get(
-            resolve_binding('@basis:Geometry', objects, links) or '')
+            resolve_binding('@basis:Geometry', objects, object_groups) or '')
         return _table_block(block, source, geometry)
     if kind == 'photo':
         source = objects.get(block.get('source'))
@@ -536,7 +536,7 @@ def _build_block(block, objects, us, links=None):
     if kind == 'pairs':
         return _pairs_block(block, objects)
     if kind == 'overlay':
-        return _overlay_block(block, objects, us, links)
+        return _overlay_block(block, objects, us, object_groups)
     if kind == 'verdict':
         source = objects.get(block.get('source'))
         measured = objects.get(block.get('measured'))
@@ -1029,7 +1029,7 @@ def _scalogram_candidates(block, source):
             == wanted_dim]
 
 
-def scalogram_channel_options(block, objects, links=()):
+def scalogram_channel_options(block, objects, object_groups=()):
     """The DOF names a scalogram block may draw — for the editor's
     drop-down (Brandon, 2026-08-29: the figure shows one channel, so
     the reader chooses which).
@@ -1040,8 +1040,8 @@ def scalogram_channel_options(block, objects, links=()):
         The scalogram plot block.
     objects : mapping
         The report's objects, name to object.
-    links : sequence, optional
-        The project's link groups, for symbolic source bindings.
+    object_groups : sequence, optional
+        The project's object groups, for symbolic source bindings.
 
     Returns
     -------
@@ -1050,7 +1050,7 @@ def scalogram_channel_options(block, objects, links=()):
     """
     from ..core.report import resolve_binding
 
-    name = resolve_binding(block.get('source', ''), objects, links)
+    name = resolve_binding(block.get('source', ''), objects, object_groups)
     source = objects.get(name)
     if source is None or not hasattr(source, 'response_dof'):
         return []
@@ -1878,7 +1878,7 @@ def _scene_block(block, geometry, shapes, us, objects):
     return built
 
 
-def _overlay_block(block, objects, us, links=None):
+def _overlay_block(block, objects, us, object_groups=None):
     """The matched pairs animated over each other: both geometries in
     one scene — the basis side blue, the other orange — each pair's
     two modes phase-aligned (through the projection when the
@@ -1909,8 +1909,8 @@ def _overlay_block(block, objects, us, links=None):
 
     def linked_geometry(name: str) -> Any:
         # matches committed before the object remembered its
-        # geometries: the link groups still know
-        group = next((g['members'] for g in (links or [])
+        # geometries: the object groups still know
+        group = next((g['members'] for g in (object_groups or [])
                       if name in g['members']), [])
         return next((objects[member] for member in group
                      if isinstance(objects.get(member), Geometry)),
@@ -1932,7 +1932,7 @@ def _overlay_block(block, objects, us, links=None):
     # the window asks. Without this the report drew both solid and the
     # near mesh simply hid the far one.
     def role_of(name: str) -> str | None:
-        return next((group.get('role') for group in (links or [])
+        return next((group.get('role') for group in (object_groups or [])
                      if name in group['members']), None)
 
     basis_is_second = (role_of(matched.second) == 'Basis'
@@ -3106,7 +3106,7 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
                          'to show')
     report = Report('', [block], marking='')
     html = render_html(report, dict(holder.items()), unit_system,
-                       links=holder.links, fill=fill, theme=theme)
+                       object_groups=holder.object_groups, fill=fill, theme=theme)
     path = pathlib.Path(path)
     path.write_text(html, encoding='utf-8')
     return str(path)

@@ -215,7 +215,7 @@ def test_generate_makes_the_set_in_the_group(window, pump):
     scene.rigid_panel.apply_button.click()
     pump()
     assert 'Plate Rigid Body Modes' in window.project
-    assert window.project.links == [
+    assert window.project.object_groups == [
         {'members': ['Plate', 'Plate Rigid Body Modes'], 'role': None}]
     made = window.project['Plate Rigid Body Modes']
     assert made.num_shapes == 6 and made.unscaled

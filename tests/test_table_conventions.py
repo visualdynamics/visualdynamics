@@ -14,9 +14,9 @@ from PySide6.QtTest import QTest
 
 import visualdynamics
 from visualdynamics.gui.object_tables import (
-    block_table_model,
     channel_table_model,
     coordinate_system_table_model,
+    element_group_table_model,
     element_table_model,
     node_table_model,
     shape_table_model,
@@ -50,7 +50,7 @@ def every_model():
         ('coordinate systems', coordinate_system_table_model(geo,
                                                              DEFAULT_SYSTEM)),
         ('elements', element_table_model(meshed, DEFAULT_SYSTEM)),
-        ('blocks', block_table_model(meshed, DEFAULT_SYSTEM)),
+        ('blocks', element_group_table_model(meshed, DEFAULT_SYSTEM)),
         ('shapes', shape_table_model(shapes)),
         ('channels', channel_table_model(channels)),
         ('imported units', units_table_model(data)),

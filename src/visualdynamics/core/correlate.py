@@ -50,7 +50,7 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     `tolerance` is a fraction of the test geometry's extent: a test
     node whose nearest FEM node lies further away is not matched, and
     its DOFs are dropped from the result rather than guessed. A FEM
-    geometry of plates (its blocks giving thicknesses) is allowed half
+    geometry of plates (its element groups giving thicknesses) is allowed half
     its thickest plate beyond that, since its sensors are on surfaces
     and its nodes on mid-surfaces.
 
@@ -90,11 +90,11 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
     # all sat 0.125 in off the model's wall and every one was dropped
     # (2026-09-26). So the thickest plate's half-thickness is allowed
     # beyond the tolerance — held in meters, so only when the units are
-    # defined, and nothing at all for a geometry whose blocks give none.
+    # defined, and nothing at all for a geometry whose element groups give none.
     surface = 0.0
     if fem_geometry.units_defined:
         thicknesses = [getattr(properties, 'thickness', None) for properties
-                       in (getattr(fem_geometry, 'block_properties', None)
+                       in (getattr(fem_geometry, 'group_properties', None)
                            or {}).values()]
         surface = 0.5 * max((t for t in thicknesses if t), default=0.0)
     limit += surface

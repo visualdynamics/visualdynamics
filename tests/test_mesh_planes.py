@@ -18,7 +18,7 @@ from conftest import select_objects
 from test_fem import ALUMINUM
 
 from visualdynamics.core import mesh
-from visualdynamics.core.fem import BlockProperties, Model
+from visualdynamics.core.fem import GroupProperties, Model
 from visualdynamics.core.geometry import Geometry
 from visualdynamics.core.merge import merge
 from visualdynamics.core.shapes import ShapeSet
@@ -28,7 +28,7 @@ from visualdynamics.project import Project
 def test_a_plane_is_a_block_of_rectangles():
     floor = mesh.plane((0, 0, 0), (0.4, 0, 0), (0, 0.2, 0), 0.1, 'floor')
     assert floor.num_nodes == 15 and len(floor.elem_conn) == 8
-    assert list(floor.block_name) == ['floor'] and set(floor.elem_type) == {44}
+    assert list(floor.group_name) == ['floor'] and set(floor.elem_type) == {44}
     assert floor.length_unit == 'm'
     with pytest.raises(ValueError, match='not perpendicular'):
         mesh.plane((0, 0, 0), (1, 0, 0), (1, 1, 0), 0.5, 'skew')
@@ -61,9 +61,9 @@ def test_two_planes_meeting_share_their_corner_line():
     wall = mesh.plane((0, 0, 0), (0.4, 0, 0), (0, 0, 0.2), 0.1, 'wall')
     both = mesh.assemble(floor, wall)
     assert both.num_nodes == 15 + 15 - 5, 'the corner line shared'
-    assert list(both.block_name) == ['floor', 'wall']
-    both.block_properties = {1: BlockProperties(ALUMINUM, 0.003),
-                             2: BlockProperties(ALUMINUM, 0.003)}
+    assert list(both.group_name) == ['floor', 'wall']
+    both.group_properties = {1: GroupProperties(ALUMINUM, 0.003),
+                             2: GroupProperties(ALUMINUM, 0.003)}
     model = Model.from_geometry(both)
     assert len(model.pieces()) == 1
     assert int(np.sum(model.eigensolution(num_modes=8).frequency == 0)) == 6
@@ -78,7 +78,7 @@ def test_a_box_from_planes_is_the_box_meshed_whole():
              mesh.plane((s, s, 0), (-s, 0, 0), (0, 0, h), size, 'top'),
              mesh.plane((0, s, 0), (0, -s, 0), (0, 0, h), size, 'left')]
     box = mesh.assemble(*walls)
-    box.block_properties = {b: BlockProperties(ALUMINUM, 0.002)
+    box.group_properties = {b: GroupProperties(ALUMINUM, 0.002)
                             for b in range(1, 5)}
     built = Model.from_geometry(box)
     # the same tube by hand: nodes around the perimeter, up the height
@@ -181,5 +181,5 @@ def test_planes_of_one_name_are_one_block():
              mesh.plane((0, 0, 0), (0, 0.1, 0), (0, 0, 0.05), 0.025, ''),
              mesh.plane((0, 0.1, 0), (0.1, 0, 0), (0, 0, 0.05), 0.025, '')]
     whole = mesh.assemble(*walls)
-    assert list(whole.block_name) == ['box', 'lid', '', '']
+    assert list(whole.group_name) == ['box', 'lid', '', '']
     assert len(whole.elements_in('box')) == 2 * len(walls[0].elem_conn)

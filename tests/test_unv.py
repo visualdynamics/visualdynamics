@@ -49,7 +49,7 @@ def test_unv_beam_element_orientation_record_skipped():
     assert np.array_equal(beam, [5, 6])
     assert geo.elem_type.tolist() == [94, 21, 21, 21]
     # and the 2412 elements landed in blocks of their own families
-    assert int(geo.elem_block[0]) != int(geo.elem_block[1])
+    assert int(geo.elem_group[0]) != int(geo.elem_group[1])
 
 
 def test_unv_traceline_pen_up_is_one_block_of_two_runs():

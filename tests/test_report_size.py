@@ -36,7 +36,7 @@ def test_the_random_report_draws_its_time_histories_flat():
     project = visualdynamics.random_vibration_run(
         visualdynamics.__file__.replace('src/visualdynamics/__init__.py',
                                         'testdata/plate/random.nc4'))
-    blocks = random_template(project, links=project.links).blocks
+    blocks = random_template(project, object_groups=project.object_groups).blocks
     time = [b for b in blocks if b.get('source') == '@basis:TimeHistory'
             and b.get('kind') == 'plot' and 'time histor' in b.get('caption', '')]
     assert time and all(b['mode'] == 'curves' for b in time)
@@ -156,8 +156,8 @@ def test_the_modal_report_is_megabytes_not_tens_of_them():
     from visualdynamics.report import render_html
 
     project = _modal_project()
-    page = render_html(modal_template(project, links=project.links), project,
-                       links=project.links)
+    page = render_html(modal_template(project, object_groups=project.object_groups), project,
+                       object_groups=project.object_groups)
     assert len(page) < 6 * 2 ** 20, f'{len(page) / 2 ** 20:.1f} MB'
     payload = json.loads(re.search(
         r'<script id="data"[^>]*>(.*?)</script>', page, re.DOTALL).group(1))

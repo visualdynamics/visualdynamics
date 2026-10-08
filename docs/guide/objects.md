@@ -23,22 +23,22 @@ Two rules hold across all of them:
 
 ## Geometry — [`core.geometry`](../api/visualdynamics.core.geometry.md)
 
-Kind `geometry`. Nodes, coordinate systems, elements and blocks, held
+Kind `geometry`. Nodes, coordinate systems, elements and element groups, held
 as flat arrays: `node_id`, `node_xyz` (meters), the placement and
 measurement system of each node, `cs_matrix` (three direction rows
 and an origin per system), one connectivity array per element, and
-the block each element belongs to with its name. `nodes`,
-`coordinate_systems`, `elements` and `blocks` are row **views** onto
+the element group each element belongs to with its name. `nodes`,
+`coordinate_systems`, `elements` and `groups` are row **views** onto
 those arrays — what a script usually reaches; writing through a row
 writes the array.
 
-There are no tracelines. A line drawn through nodes is a **block of
-two-node beam elements with no properties** — `add_beams` chains one
-through the nodes, `drawn_lines` reads them back as the runs they
-were — and the same block becomes structure the moment its block is
-given a section. A block holds one **element family** (beams,
+There are no tracelines. A line drawn through nodes is an **element
+group of two-node beam elements with no properties** — `add_beams`
+chains one through the nodes, `drawn_lines` reads them back as the runs
+they were — and the same group becomes structure the moment it is given
+a section. An element group holds one **element family** (beams,
 triangles, quads, tetras, wedges, hexes; `element_family` names a
-type code's), which is how exodus has always meant a block; a source
+type code's), which is what exodus has always meant by an element block; a source
 that mixes families is split on arrival.
 
 Comes from universal files, Exodus, Nastran and Femap decks, STEP and
@@ -78,12 +78,12 @@ project.set_view('BARC', View(eye=(1, 1, -1), up=(0, 1, 0)))  # built y-up
 model is looked at changes; its nodes are not turned. The view is
 saved with the geometry.
 
-A geometry is also a finite element model once its blocks say what
-they are made of. The pencil on a block's row in the tree opens the
-blocks table on it, and its property columns take, per
-block, a material (name, E, ν, ρ) and either a thickness — for a block
-of quads or triangles — or a section and an orientation vector for a
-block of beams. A section is built from its **shape**: round tube, rod,
+A geometry is also a finite element model once its element groups say what
+they are made of. The pencil on an element group's row in the tree opens the
+Element Groups table on it, and its property columns take, per
+element group, a material (name, E, ν, ρ) and either a thickness — for an element group
+of quads or triangles — or a section and an orientation vector for an
+element group of beams. A section is built from its **shape**: round tube, rod,
 rectangle, rectangular tube, I-beam, channel or angle, picked in the
 Shape column, whose Dimensions cell then says what it needs (`D=?, t=?`
 for a round tube) and computes A, Iy, Iz and the torsion constant J
@@ -96,24 +96,24 @@ its principal moments and its Dimensions cell says where to point the
 orientation (45° from the long leg for an equal angle). A channel's and
 an angle's shear center is off the centroid, and the twisting that
 causes is not modeled; a rolled channel's tapered flanges put its
-weak-axis Iz under the uniform-flange value given here. A block of
+weak-axis Iz under the uniform-flange value given here. An element group of
 two-node lines may instead be made **rigid (massless)**, the last entry
 of the Material list: each line is then a rigid link, its second node
 moving exactly as its first does (translated by the first's rotation
 about it), adding no mass — what a bolt joining two plates whose
-mid-surfaces do not meet is. Such a block needs no section, and its
+mid-surfaces do not meet is. Such an element group needs no section, and its
 modulus, density and ratio read blank. In the app a link is a beam
 element: edit the geometry's Elements, switch on add mode (**+**), choose
-the beam and, in the **Block** drop-down beside it, *New block*; click
-the two nodes of each link — every link picked joins that new block —
-and give the block *rigid (massless)* in the blocks table. The drop-down
-lists the blocks of the family being added to and a new one, and opens
-on the block the editing began from, so a beam never lands among
+the beam and, in the **Element group** drop-down beside it, *New element group*; click
+the two nodes of each link — every link picked joins that new element group —
+and give the element group *rigid (massless)* in the Element Groups table. The drop-down
+lists the element groups of the family being added to and a new one, and opens
+on the element group the editing began from, so a beam never lands among
 plates. A bolted joint is quicker as a patch: select the elements under
 the washer (click one, Shift-click the rest) and press **Tie** on the
-bar — every node of the patch is linked to the nearest node of the block
+bar — every node of the patch is linked to the nearest node of the element group
 picked from its menu, or of a second patch picked next, and the links
-go into the geometry's rigid block, made the first time
+go into the geometry's rigid element group, made the first time
 (`project.tie_elements`, `mesh.tie`). Plates themselves connect only
 where they share nodes: a structure built from planes is tied along the
 lines where its planes meet. **+** *New Geometry* on the project row's
@@ -123,7 +123,7 @@ zero to name the plane it lies in, and an element size, in the display
 unit, typed in a pane beside the 3-D view and drawn there as it is
 typed, turned by angles about X, Y and Z or by the rings around the
 preview, a degree at a time, and slid onto the grid by its arrows —
-into the block named, its nodes that fall on nodes
+into the element group named, its nodes that fall on nodes
 already there becoming them (`project.new_geometry`, `project.add_plane`; in
 [`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
 and `mesh.assemble`). *Add Block* is the same pane with all three widths: a box
@@ -144,19 +144,33 @@ the handbook's typical room-temperature values (`fem.material(name)`
 in a script; `fem.MATERIAL_LIBRARY` carries each entry's note). They
 are typical values, not the part's: with a certification in hand, type
 its numbers over them, and any name typed into the cell is accepted as
-a name. A block of point elements takes a mass alone, typed in the
+a name. An element group of point elements takes a mass alone, typed in the
 Mass column, and every element in it puts that mass at its node: a
 bolt, a sensor or a fitting too small to mesh
-(`fem.BlockProperties(mass=...)` in a script). A Nastran deck's plain
-CONM2 cards arrive this way, one block per distinct mass, and a deck
-written back carries the masses on its CONM2 cards. The properties land on
-`geometry.block_properties` as
-[`fem.BlockProperties`](../api/visualdynamics.core.fem.md) and ride
+(`fem.GroupProperties(mass=...)` in a script). A Nastran deck's plain
+CONM2 cards arrive this way, one element group per distinct mass, and a deck
+written back carries the masses on its CONM2 cards.
+
+A group of two-node lines can be springs instead of beams: type a
+stiffness by direction in its Stiffness cell (`Kz=1e5, Kry=2e3`, in the
+display units, along and about the global axes), and each line becomes a
+spring between its two nodes in each direction given, the nodes free to
+coincide, as a joint between two parts meshed to the same point is. A
+group of points given a stiffness is springs from each node to ground,
+and a group of points given *ground (fixed)* from the Material list
+holds each node in all six directions, which is a support, or the far
+end of a spring line to ground. A point mass hung on spring lines needs
+no beam at its node. The Points family is always in the tree, so the
+first point can be clicked into place (`fem.GroupProperties(stiffness=
+(...))` and `GroupProperties(ground=True)` in a script, or
+`Model.add_spring` and `Model.add_ground` on a model directly). The properties land on
+`geometry.group_properties` as
+[`fem.GroupProperties`](../api/visualdynamics.core.fem.md) and ride
 the native file. *Solve Modes* (`project.solve_modes`) then builds the
-model from the blocks (`fem.Model.from_geometry`) and adds its normal
+model from the element groups (`fem.Model.from_geometry`) and adds its normal
 modes in the geometry's group — free-free, the six rigid-body modes at
 0 Hz first — asking for the highest frequency wanted and the damping to
-give every mode. A block with no properties, or the wrong kind for its
+give every mode. An element group with no properties, or the wrong kind for its
 elements, is refused by name.
 
 ## Photos — [`core.photos`](../api/visualdynamics.core.photos.md)
@@ -387,7 +401,7 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `add_block`, a meshed box of solid bricks, likewise; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_blocks`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block, a material alone for a block of solids), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `add_block`, a meshed box of solid bricks, likewise; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_groups`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block, a material alone for a block of solids), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |

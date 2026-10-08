@@ -124,7 +124,7 @@ class Report:
         self.blocks = rest[:to] + lifted + rest[to:]
 
     def unbound(self, objects: Mapping[str, Any],
-                links: Sequence[Mapping[str, Any]] | None = None) -> list[int]:
+                object_groups: Sequence[Mapping[str, Any]] | None = None) -> list[int]:
         """Block indices whose references the project cannot resolve —
         a missing name, or a symbolic selector with nothing to pick."""
         out = []
@@ -133,7 +133,7 @@ class Report:
                       for key in ('source', 'geometry', 'dofs_source',
                                   'shapes')
                       if block.get(key)]
-            if any(resolve_binding(name, objects, links) not in objects
+            if any(resolve_binding(name, objects, object_groups) not in objects
                    for name in needed):
                 out.append(i)
         return out
@@ -251,14 +251,14 @@ def binding_types() -> dict[str, type]:
 
 
 def resolve_binding(value: str | None, objects: Mapping[str, Any],
-                    links: Sequence[Mapping[str, Any]] | None = None) -> str | None:
+                    object_groups: Sequence[Mapping[str, Any]] | None = None) -> str | None:
     """The object name a binding field means.
 
     A literal name passes through untouched. A symbolic selector —
     '@basis:Frf', '@other:ShapeSet', '@any:MatchedModes' — resolves
     against the project at render time, so a report never depends on
     what anyone named their objects: 'basis' is the first object of
-    the type in the Basis link group, 'other' the first outside it,
+    the type in the Basis object group, 'other' the first outside it,
     'any' the first anywhere. Without a Basis declared, 'basis'
     degrades to the first of the type and 'other' to the second, so a
     small unlinked project still renders. Returns the name, or None
@@ -301,7 +301,7 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
          and not any(isinstance(obj, kind) for kind in bounds)
          and is_banded(obj) == bool(banded)),
         key=lambda name: isinstance(objects[name], flavors))
-    basis = next((set(group['members']) for group in (links or [])
+    basis = next((set(group['members']) for group in (object_groups or [])
                   if group.get('role') == 'Basis'), None)
     if role == 'basis':
         if basis is None:
@@ -348,12 +348,12 @@ def symbolic_options(block: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 
 def photo_options(block: Mapping[str, Any], objects: Mapping[str, Any],
-                  links: Sequence[Mapping[str, Any]] | None = None) -> list[str]:
+                  object_groups: Sequence[Mapping[str, Any]] | None = None) -> list[str]:
     """The photo names a photo block's bound Photos object holds."""
     from .photos import Photos
 
     owner = objects.get(
-        resolve_binding(block.get('source'), objects, links) or '')
+        resolve_binding(block.get('source'), objects, object_groups) or '')
     return list(owner.names) if isinstance(owner, Photos) else []
 
 
@@ -584,7 +584,7 @@ _INSTRUMENTATION_TEXT = (
 
 
 def instrumentation_text(objects: Mapping[str, Any],
-                         links: Sequence[Mapping[str, Any]] | None = None
+                         object_groups: Sequence[Mapping[str, Any]] | None = None
                          ) -> str:
     """The front matter's prose, saying only what the project holds.
 
@@ -599,9 +599,9 @@ def instrumentation_text(objects: Mapping[str, Any],
     """
     if not objects:
         return _INSTRUMENTATION_TEXT
-    if resolve_binding('@basis:Geometry', objects, links) in objects:
+    if resolve_binding('@basis:Geometry', objects, object_groups) in objects:
         return _INSTRUMENTATION_TEXT
-    photos = resolve_binding('@basis:Photos', objects, links)
+    photos = resolve_binding('@basis:Photos', objects, object_groups)
     sentences = []
     if photos in objects and getattr(objects[photos], 'names', None):
         sentences.append('The photographs record the article as it was '
@@ -635,7 +635,7 @@ def project_expectations(
     Every type ends with the report itself. It is the one object the
     others exist to produce, and a project that has everything a report
     needs but no report is not finished — so it is a slot like the rest,
-    gray until it is generated. It carries no link group: a report reads
+    gray until it is generated. It carries no object group: a report reads
     the whole project and belongs to no one side of it.
     """
     from ..names import display_name
@@ -943,7 +943,7 @@ def expectation_satisfiers(
         project_type: str, objects: Mapping[str, Any],
         placed: Mapping[str, Sequence[str]] | None = None
         ) -> dict[str, list[str]]:
-    """{link group: [object names]} — which objects satisfy each of
+    """{object group: [object names]} — which objects satisfy each of
     the type's *named* expectations, so the Basis members link
     together. The count-th instance of a class (in project order)
     satisfies a count-th expectation. Slots on the other side carry no
@@ -1024,7 +1024,7 @@ def quantity_order(dims: set[str]) -> list[str]:
 
 
 def time_data_blocks(source: str, objects: Mapping[str, Any],
-                     links: Sequence[Mapping[str, Any]] | None,
+                     object_groups: Sequence[Mapping[str, Any]] | None,
                      caption: str, per_quantity: str,
                      mode: str = 'curves',
                      averaging: bool = True) -> list[dict[str, Any]]:
@@ -1052,7 +1052,7 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
     as an envelope on one shared time axis, which is the same picture
     at every zoom the page offers. `mode='stage'` is still there for a
     template that wants depth."""
-    name = resolve_binding(source, objects, links)
+    name = resolve_binding(source, objects, object_groups)
     obj = objects.get(name)
     dims = record_dimensions(obj) if obj is not None else set()
     # the averaging frames are drawn unless the template says they are
@@ -1118,7 +1118,7 @@ def paired_density_blocks(loud: str, quiet: str,
 
 
 def front_matter(objects: Mapping[str, Any],
-                 links: Sequence[Mapping[str, Any]] | None,
+                 object_groups: Sequence[Mapping[str, Any]] | None,
                  dofs_source: str) -> list[dict[str, Any]]:
     """The blocks every report opens with, in one order (Brandon,
     2026-08-23): the test geometry, a DOF scene per data type —
@@ -1130,7 +1130,7 @@ def front_matter(objects: Mapping[str, Any],
     """
     geometry = '@basis:Geometry'
     photos = '@basis:Photos'
-    photos_name = resolve_binding(photos, objects, links)
+    photos_name = resolve_binding(photos, objects, object_groups)
     if photos_name in objects and getattr(objects[photos_name],
                                           'names', None):
         photo_blocks = [
@@ -1148,7 +1148,7 @@ def front_matter(objects: Mapping[str, Any],
     # the empty card it left in the editor read as a fault (Brandon,
     # 2026-09-08). Every quantity when the source is not there to ask:
     # a bare project keeps the outline as slots to fill.
-    source_name = resolve_binding(dofs_source, objects, links)
+    source_name = resolve_binding(dofs_source, objects, object_groups)
     source = objects.get(source_name) if source_name else None
     scenes = list(DOF_SCENE_QUANTITIES)
     if source is not None and hasattr(source, 'known_dim'):
@@ -1167,11 +1167,11 @@ def front_matter(objects: Mapping[str, Any],
     return blocks
 
 
-def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A modal-test report from whatever the project holds.
 
     Sources bind *symbolically* — '@basis:Frf' and friends, resolved
-    against the link groups at render time — so the report never
+    against the object groups at render time — so the report never
     depends on what anyone named their objects. Blocks whose type the
     project lacks are still added, unbound, so the outline of a proper
     modal report is there to fill in.
@@ -1218,7 +1218,7 @@ def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'The channel table ({{table:Instrumentation}}) lists the '
             'instrumentation at each location: sensor, sensitivity, '
             'and calibration status.'},
-        *front_matter(objects, links, frf),
+        *front_matter(objects, object_groups, frf),
         {'kind': 'text', 'text':
             '## Measured Data\n\n'
             'The force and response time histories '
@@ -1340,7 +1340,7 @@ def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'case for a test run on its own.'},
         {'kind': 'plot', 'source': shapes, 'mode': 'mac',
          'shapes': _fem_shapes(objects,
-                               resolve_binding(shapes, objects, links)),
+                               resolve_binding(shapes, objects, object_groups)),
          'caption': 'Test-analysis correlation: cross-MAC between the '
          'identified test modes and the finite element model '
          'projected onto the test DOFs'},
@@ -1392,7 +1392,7 @@ def modal_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
     ])
 
 
-def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A shock report: the transients, and the SRS against its target.
 
     The time histories lead the data and are not decoration. A shock
@@ -1442,7 +1442,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
     # actually built cannot drift from it.
     def figures(source: str, caption: str, per_quantity: str
                 ) -> list[dict[str, Any]]:
-        return (time_data_blocks(source, objects, links, caption,
+        return (time_data_blocks(source, objects, object_groups, caption,
                                  per_quantity) if source else [])
 
     filtered_blocks = figures(
@@ -1580,7 +1580,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'measurement range — a shock is where an under-ranged '
             'accelerometer clips, and the table is where that is '
             'caught.'},
-        *front_matter(objects, links, '@basis:TimeHistory'),
+        *front_matter(objects, object_groups, '@basis:TimeHistory'),
         {'kind': 'text', 'text':
             '## The Events\n\n'
             'The measured transients ({{figure:Measured}}), with the '
@@ -1592,7 +1592,7 @@ def shock_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]
             'None of that survives into a spectrum, which is why the '
             'traces come first and are not decoration.'},
         *time_data_blocks(
-            '@basis:TimeHistory', objects, links,
+            '@basis:TimeHistory', objects, object_groups,
             'Measured shock transients',
             'Measured {quantity} shock transients'),
         *motion_blocks,
@@ -1763,7 +1763,7 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def sine_template(objects: Mapping[str, Any],
-                  links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+                  object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A sine sweep report: the tones, and the levels they reached.
 
     The level figures and the deviation bars are `_sine_level_blocks`:
@@ -1818,7 +1818,7 @@ def sine_template(objects: Mapping[str, Any],
             'was at each location — for a swept test the control '
             'channels are the ones the levels below are read from, '
             'and the table is where they are identified.'},
-        *front_matter(objects, links, '@basis:TimeHistory'),
+        *front_matter(objects, object_groups, '@basis:TimeHistory'),
         {'kind': 'text', 'text':
             '## The Recording\n\n'
             'The measured time histories ({{figure:Measured}}). A '
@@ -1830,7 +1830,7 @@ def sine_template(objects: Mapping[str, Any],
             'record, so anything visible here is inherited by every '
             'figure after it.'},
         *time_data_blocks(
-            '@basis:TimeHistory', objects, links,
+            '@basis:TimeHistory', objects, object_groups,
             'Measured time histories',
             'Measured {quantity} time histories', averaging=False),
     ]
@@ -1867,7 +1867,7 @@ def sine_template(objects: Mapping[str, Any],
 
 
 def sysid_template(objects: Mapping[str, Any],
-                   links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+                   object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A system identification report: the measured plant, and whether
     to believe it.
 
@@ -1931,13 +1931,13 @@ def sysid_template(objects: Mapping[str, Any],
                 'clipped')]
         time_blocks: list[dict[str, Any]] = [
             *time_data_blocks(
-                by_level[0][0], objects, links,
+                by_level[0][0], objects, object_groups,
                 'Ambient (noise) time history, with the frames '
                 'the noise densities are averaged over',
                 'Ambient (noise) {quantity} time histories, with the '
                 'frames the noise densities are averaged over'),
             *time_data_blocks(
-                by_level[-1][0], objects, links,
+                by_level[-1][0], objects, object_groups,
                 'Excitation time history, with the frames the '
                 'driven densities are averaged over',
                 'Excitation {quantity} time histories, with the '
@@ -1994,7 +1994,7 @@ def sysid_template(objects: Mapping[str, Any],
             '({{table:Instrumentation}}) lists what was at each '
             'location: sensor, sensitivity, and calibration '
             'status.'},
-        *front_matter(objects, links, '@basis:TimeHistory'
+        *front_matter(objects, object_groups, '@basis:TimeHistory'
                       if any(isinstance(obj, TimeHistory)
                              for obj in objects.values())
                       else '@basis:Frf'),
@@ -2113,7 +2113,7 @@ def sysid_template(objects: Mapping[str, Any],
 
 
 def transient_template(objects: Mapping[str, Any],
-                       links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+                       object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A transient replication report: what was asked for, and what came
     back — two waveforms of the same thing.
 
@@ -2151,8 +2151,8 @@ def transient_template(objects: Mapping[str, Any],
             f'The run was recorded on {ref(time, "num_channels")} '
             f'channels at {ref(time, "sample_rate")} over '
             f'{ref(time, "duration")}.'},
-        {'kind': 'text', 'text': instrumentation_text(objects, links)},
-        *front_matter(objects, links, time),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups)},
+        *front_matter(objects, object_groups, time),
         {'kind': 'text', 'text':
             '## Specification\n\nThe waveform the controller was asked '
             'to reproduce at each control point '
@@ -2307,7 +2307,7 @@ def control_channels_of(spec: Any) -> list[str]:
 
 
 def control_channel_labels(objects: Mapping[str, Any],
-                           links: Sequence[Mapping[str, Any]] | None,
+                           object_groups: Sequence[Mapping[str, Any]] | None,
                            token: str = '@basis:Specification') -> list[str]:
     """The control channels the specification a token binds names, as
     the comparison figure labels them — each its own figure in the
@@ -2315,7 +2315,7 @@ def control_channel_labels(objects: Mapping[str, Any],
     channel rather than one figure with a drop-down). Empty when the
     token binds nothing yet, and the template writes one figure that
     picks."""
-    name = resolve_binding(token, objects, links)
+    name = resolve_binding(token, objects, object_groups)
     return control_channels_of(objects[name] if name and name in objects
                                else None)
 
@@ -2412,7 +2412,7 @@ def _figures_text(labels: Sequence[str], sequence: str, grid: str) -> str:
 
 
 def prune_unbound(report: Report, objects: Mapping[str, Any],
-                  links: Sequence[Mapping[str, Any]] | None = None
+                  object_groups: Sequence[Mapping[str, Any]] | None = None
                   ) -> Report:
     """Drop what the project cannot fill, once it holds anything
     (Brandon, 2026-09-19): every figure block that fails to bind, and
@@ -2436,7 +2436,7 @@ def prune_unbound(report: Report, objects: Mapping[str, Any],
 
     def bound(block):
         needed = [block.get(key) for key in keys if block.get(key)]
-        return all(resolve_binding(name, objects, links) in objects
+        return all(resolve_binding(name, objects, object_groups) in objects
                    for name in needed)
 
     def heading(block):
@@ -2461,11 +2461,11 @@ def prune_unbound(report: Report, objects: Mapping[str, Any],
 
 
 def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
-                 links: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+                 object_groups: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
     """A specification's own figures, one per control channel — no
     drop-down anywhere in the random report (Brandon, 2026-09-18);
     one figure that picks when nothing binds yet."""
-    labels = control_channel_labels(objects, links, token)
+    labels = control_channel_labels(objects, object_groups, token)
     if not labels:
         return [{'kind': 'plot', 'source': token, 'mode': 'curves',
                  'caption': caption}]
@@ -2481,11 +2481,11 @@ def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
 
 def _comparisons(psd_token: str, spec_token: str, caption: str,
                  objects: Mapping[str, Any],
-                 links: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+                 object_groups: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
     """The control-against-specification figures: one per control
     channel the bound specification names, each opening on its own
     channel; one figure that picks when nothing binds yet."""
-    labels = control_channel_labels(objects, links, spec_token)
+    labels = control_channel_labels(objects, object_groups, spec_token)
     if not labels:
         return [{'kind': 'plot', 'source': psd_token,
                  'specification': spec_token, 'mode': 'curves',
@@ -2501,7 +2501,7 @@ def _comparisons(psd_token: str, spec_token: str, caption: str,
 
 
 def _random_control_blocks(objects: Mapping[str, Any],
-                           links: Sequence[Mapping[str, Any]] | None
+                           object_groups: Sequence[Mapping[str, Any]] | None
                            ) -> list[dict[str, Any]]:
     """The random half's judgment: the control spectra against the
     specification, the two compliance readings, and the same on octave
@@ -2513,7 +2513,7 @@ def _random_control_blocks(objects: Mapping[str, Any],
     requirement with nothing measured against it was a page the reader
     had already seen (Brandon, 2026-09-21).
     """
-    controls = control_channel_labels(objects, links)
+    controls = control_channel_labels(objects, object_groups)
     return [
         {'kind': 'text', 'text':
             '## Control\n\nThe measured control spectra against the '
@@ -2533,7 +2533,7 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'an abort limit — red above the upper, blue below the '
             'lower.'},
         *_comparisons('@basis:Psd', '@basis:Specification',
-                      'Control against specification', objects, links),
+                      'Control against specification', objects, object_groups),
         {'kind': 'text', 'text':
             '## Compliance\n\nThe same comparison read two ways, a bar '
             'per control channel. **RMS error** '
@@ -2580,7 +2580,7 @@ def _random_control_blocks(objects: Mapping[str, Any],
         # as the narrowband one is — see above.
         *_comparisons('@basis:OctavePsd', '@basis:OctaveSpecification',
                       'Control against specification, octave bands',
-                      objects, links),
+                      objects, object_groups),
         {'kind': 'bars', 'mode': 'error',
          'source': '@basis:OctaveSpecification',
          'measured': '@basis:OctavePsd',
@@ -2593,7 +2593,7 @@ def _random_control_blocks(objects: Mapping[str, Any],
     ]
 
 
-def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any]] | None = None) -> Report:
+def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
     """A random vibration report: what was asked for, what arrived, and
     by how much they differ.
 
@@ -2639,7 +2639,7 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
         — the page's rule for an unmatched reference, right for an
         author and wrong for a reader (Brandon, 2026-09-19) — so the
         prose says only what the project holds."""
-        return not objects or resolve_binding(token, objects, links) in objects
+        return not objects or resolve_binding(token, objects, object_groups) in objects
 
     return prune_unbound(Report('Random Vibration Test Report', [
         # the verdict first, under the title: whether the environment
@@ -2673,20 +2673,20 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
             + (f', giving {ref(psd, "frequency_resolution")} resolution '
                f'out to {ref(psd, "max_frequency")}.' if present(psd)
                else '.')},
-        {'kind': 'text', 'text': instrumentation_text(objects, links)},
-        *front_matter(objects, links, time),
+        {'kind': 'text', 'text': instrumentation_text(objects, object_groups)},
+        *front_matter(objects, object_groups, time),
         {'kind': 'text', 'text':
             '## Measured Data\n\nThe measured time histories, one '
             'figure per quantity, with the frames a PSD is averaged '
             'over marked on them ({{figure:Measured}}) — which part '
             'of the run was analyzed, and under what window.'},
         *time_data_blocks(
-            time, objects, links,
+            time, objects, object_groups,
             'Measured time histories, with the frames the spectra '
             'are averaged over',
             'Measured {quantity} time histories, with the frames '
             'the spectra are averaged over'),
-        *_random_control_blocks(objects, links),
+        *_random_control_blocks(objects, object_groups),
         *([{'kind': 'text', 'text':
             '## The Sweep Under the Random\n\n'
             'The control spectra above are of the whole recording, '
@@ -2771,7 +2771,7 @@ def random_template(objects: Mapping[str, Any], links: Sequence[Mapping[str, Any
                if swept else '')
             + '. A channel clean on both and still outside '
             'tolerance is a real exceedance.'},
-    ]), objects, links)
+    ]), objects, object_groups)
 
 
 #: every built-in report template by the key `Project.generate_report`

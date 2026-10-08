@@ -194,7 +194,7 @@ def test_a_channel_with_no_reading_is_a_gap_not_a_failed_report(tmp_path):
     both = _write_run(tmp_path / 'both.nc4', random=True)
     project = visualdynamics.random_vibration_run(both)
     name = project.generate_report('random')
-    html = render_html(project[name], project, None, links=project.links)
+    html = render_html(project[name], project, None, object_groups=project.object_groups)
     payload = json.loads(html.split('type="application/json">')[1]
                          .split('</script>')[0])
     errors = [b for b in payload['blocks'] if b.get('kind') == 'bars'

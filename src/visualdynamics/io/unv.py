@@ -712,7 +712,7 @@ def _build_geometry(nodes, tracelines, elements, scale, length_unit,
                                        systems)
     # 2412 carries no blocks, so every element arrived in one; a block
     # holds one family (2026-09-30)
-    geometry.split_blocks_by_family()
+    geometry.split_groups_by_family()
     # an 82 line is a block of two-node line elements with no
     # properties; a line that lifted the pen is one block of several
     # runs, so it goes back out under its one id
@@ -823,7 +823,7 @@ def _geometry_datasets(geometry, unit_system=None):
     if len(geometry.elem_conn):
         elements = []
         for i, conn in enumerate(geometry.elem_conn):
-            if int(geometry.elem_block[i]) in drawn_blocks:
+            if int(geometry.elem_group[i]) in drawn_blocks:
                 continue
             ids = [int(n) for n in conn]
             descriptor = int(geometry.elem_type[i])

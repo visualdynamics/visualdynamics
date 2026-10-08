@@ -10,7 +10,7 @@ Focus Group wiki, https://wiki.sem.org/wiki/BARC.
 
 Here it is built the way a person would build a simple plate model with
 this package (Brandon, 2026-09-26): each part as the planes it is made
-of, meshed at mid-thickness (`visualdynamics.mesh`), each part a block
+of, meshed at mid-thickness (`visualdynamics.mesh`), each part an element group
 given its material and thickness, and the bolts as rigid, massless
 links. Every dimension below comes from the shared solid model (inches):
 
@@ -40,8 +40,8 @@ joints follow the finite element model shared on the wiki: the feet
 are joined to the box over their whole footprint (the bricks share
 nodes there), the beam rests 0.001 in over the channels so it joins
 them only where it is bolted, tied over each washer with `mesh.tie`,
-and the bolts are point masses, a block of point elements given a mass
-(`fem.BlockProperties(mass=...)`). Without the bolt masses the
+and the bolts are point masses, an element group of point elements given a mass
+(`fem.GroupProperties(mass=...)`). Without the bolt masses the
 assembly reads 1 to 8 % stiffer. Checked against the wiki's models and
 test: the assembly's first ten elastic modes 1 to 4 % above the
 measured ones, its shapes matching the shared model's in order.
@@ -124,7 +124,7 @@ VIEW = View(eye=(1.0, 1.0, -1.0), up=(0.0, 1.0, 0.0))
 
 
 def geometry(size: float = SIZE) -> Any:
-    """The BARC as a geometry of plates and rigid links, every block
+    """The BARC as a geometry of plates and rigid links, every element group
     given what it is made of — ready for `fem.Model.from_geometry`, or
     for the app's Solve Modes.
 
@@ -136,24 +136,24 @@ def geometry(size: float = SIZE) -> Any:
     Returns
     -------
     Geometry
-        Blocks 'box', 'right channel', 'left channel', 'beam' (6061-T6
+        Element groups 'box', 'right channel', 'left channel', 'beam' (6061-T6
         plates) and 'bolts' (rigid links over the elements each washer
         covers, `washer_patch`), opening on `VIEW`.
     """
     whole = mesh.assemble(*_planes(size))
     whole.view = VIEW
-    whole.block_properties = {
-        int(block): fem.BlockProperties(
-            MATERIAL, THICKNESS[whole.block_name[i]] * INCH)
-        for i, block in enumerate(whole.block_id)}
+    whole.group_properties = {
+        int(group): fem.GroupProperties(
+            MATERIAL, THICKNESS[whole.group_name[i]] * INCH)
+        for i, group in enumerate(whole.group_id)}
     for bolt in BOLTS:
         patch, below = washer_patch(whole, bolt)
-        mesh.tie(whole, patch, below, block='bolts')
+        mesh.tie(whole, patch, below, group='bolts')
     return whole
 
 
 def washer_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
-    """The elements a bolt's washer covers, and the block it bolts them to:
+    """The elements a bolt's washer covers, and the element group it bolts them to:
     the elements of the part on top whose centers lie within the washer's
     radius of the bolt along both edges — at `SIZE`, the element the bolt
     passes through and the eight around it under a foot, the 4 × 4 around
@@ -171,7 +171,7 @@ def washer_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
     Returns
     -------
     (list of int, str)
-        The element ids, and the name of the block below.
+        The element ids, and the name of the element group below.
     """
     (bx, bz), _lower, upper, radius = bolt
     side = 'left channel' if bx < 0 else 'right channel'
@@ -207,7 +207,7 @@ SOLVE_TO = 2000.0
 
 
 def project(size: float = SIZE, solved: bool = False) -> Any:
-    """A project to open in the app: the BARC's geometry, its blocks
+    """A project to open in the app: the BARC's geometry, its element groups
     given their properties — Solve Modes on it gives its modes.
 
         barc.project().save('barc.vdyn')
@@ -262,7 +262,7 @@ PART_SOLVE_TO = 2600.0
 
 
 def _boxes(part: str) -> list:
-    """The parts as boxes, inches: (corner, extent, block)."""
+    """The parts as boxes, inches: (corner, extent, element group)."""
     t = 0.125
     box = [
         ((-3, -3, 0), (6, 0.25, BOX_DEPTH)),                    # bottom
@@ -287,7 +287,8 @@ def _boxes(part: str) -> list:
 
 
 def _bricks(size: float, part: str) -> list:
-    """The parts as blocks of bricks, each a block of its own name.
+    """The parts as boxes meshed into bricks, each in the element group of
+    its own name.
 
     Every box is cut at every other box's faces before it is meshed, so
     two boxes that meet share their face's nodes at any size. Meshed
@@ -319,7 +320,7 @@ def _bricks(size: float, part: str) -> list:
 
 def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     """The BARC, or its removable component, as a geometry of bricks,
-    rigid ties and point masses, every block given what it is made of —
+    rigid ties and point masses, every element group given what it is made of —
     ready for `fem.Model.from_geometry`, or for the app's Solve Modes.
 
     Parameters
@@ -333,7 +334,7 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     Returns
     -------
     Geometry
-        Blocks 'box' (the assembly only), 'right channel', 'left
+        Element groups 'box' (the assembly only), 'right channel', 'left
         channel', 'beam' (6061-T6 bricks), 'bolt ties' (rigid links
         from the beam over each washer to its channel) and the bolts'
         masses, 'foot bolts' (the assembly only) and 'top bolts',
@@ -343,8 +344,8 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
         raise ValueError(f'{part!r} is not one of {PARTS}')
     whole = mesh.assemble(*_bricks(size, part))
     whole.view = VIEW
-    whole.block_properties = {int(block): fem.BlockProperties(MATERIAL)
-                              for block in whole.block_id}
+    whole.group_properties = {int(group): fem.GroupProperties(MATERIAL)
+                              for group in whole.group_id}
     xyz = whole.node_xyz / INCH
     for (bx, bz), _face, kind in SOLID_BOLTS:
         if kind != 'top':
@@ -357,7 +358,7 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
                     and abs(center[2] - bz) <= TIE_RADIUS):
                 patch.append(element)
         mesh.tie(whole, patch, 'left channel' if bx < 0 else 'right channel',
-                 block='bolt ties')
+                 group='bolt ties')
     # each bolt's mass at the node of its head face nearest its axis
     xyz = whole.node_xyz / INCH
     for kind in ('foot', 'top'):
@@ -370,9 +371,9 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
             nearest = on_face[np.argmin(np.hypot(xyz[on_face, 0] - bx,
                                                  xyz[on_face, 2] - bz))]
             nodes.append([int(whole.node_id[nearest])])
-        block = whole.add_block(f'{kind} bolts')
-        whole.add_elements(nodes, [161] * len(nodes), [block] * len(nodes))
-        whole.block_properties[block] = fem.BlockProperties(
+        group = whole.add_group(f'{kind} bolts')
+        whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))
+        whole.group_properties[group] = fem.GroupProperties(
             mass=BOLT_MASS[kind] * POUND)
     return whole
 

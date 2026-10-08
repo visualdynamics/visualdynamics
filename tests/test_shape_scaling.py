@@ -182,7 +182,7 @@ def _compared(window, pump, factor):
 def test_the_scene_caption_names_both_sets_and_their_ratio(window, pump):
     """One line, and it names the objects rather than their roles.
 
-    'basis' and 'other' are a property of the link groups; someone
+    'basis' and 'other' are a property of the object groups; someone
     looking at two animations wants to know which of the two things in
     front of them is the bigger, by the name in the tree.
     """
@@ -239,7 +239,7 @@ def test_the_report_overlay_carries_it_too(window, pump):
     window.project.link('Geometry', 'Test Modes', 'FEM Modes')
     built = _overlay_block({'source': 'Matches', 'caption': 'Matched pairs'},
                            dict(window.objects), visualdynamics.SI,
-                           window.project.links)
+                           window.project.object_groups)
     assert built is not None
     assert built['note'] and '31.62' in built['note']
 
@@ -254,7 +254,7 @@ def test_the_report_says_nothing_when_there_is_nothing_to_say(window, pump):
     window.project.link('Geometry', 'Test Modes', 'FEM Modes')
     built = _overlay_block({'source': 'Matches', 'caption': 'Matched pairs'},
                            dict(window.objects), visualdynamics.SI,
-                           window.project.links)
+                           window.project.object_groups)
     assert built is not None
     assert built['note'] is None
 
@@ -272,6 +272,6 @@ def test_the_page_renders_a_note_it_is_given(window, pump):
     report = Report('Correlation', [
         {'kind': 'overlay', 'source': 'Matches', 'caption': 'Matched pairs'}])
     page = render_html(report, window.project, unit_system=visualdynamics.SI,
-                       links=window.project.links)
+                       object_groups=window.project.object_groups)
     assert '31.62' in page
     assert 'class="note"' in page or "className = 'note'" in page

@@ -25,8 +25,8 @@ def _floor_and_foot():
         mesh.plane((0, 0, 0), (4, 0, 0), (0, 4, 0), 1, 'floor'),
         mesh.plane((1, 1, 0.25), (2, 0, 0), (0, 2, 0), 1, 'foot'))
     aluminum = fem.material('6061-T6')
-    geometry.block_properties = {1: fem.BlockProperties(aluminum, 0.01),
-                                 2: fem.BlockProperties(aluminum, 0.01)}
+    geometry.group_properties = {1: fem.GroupProperties(aluminum, 0.01),
+                                 2: fem.GroupProperties(aluminum, 0.01)}
     return geometry
 
 
@@ -35,8 +35,8 @@ def test_a_patch_ties_to_the_nearest_nodes_of_a_block():
     patch = geometry.elements_in('foot')[:1]             # one element
     found = mesh.tie(geometry, patch, 'floor')
     assert found['links'] == 4 and found['shared'] == 0
-    assert geometry.block_name[-1] == 'ties'
-    assert geometry.block_properties[found['block']].material is RIGID
+    assert geometry.group_name[-1] == 'ties'
+    assert geometry.group_properties[found['group']].material is RIGID
     links = geometry.elements_in('ties')
     rows = np.flatnonzero(np.isin(geometry.elem_id, links))
     for row in rows:
@@ -51,7 +51,7 @@ def test_a_second_tie_joins_the_rigid_block_and_shared_nodes_are_left():
     foot = geometry.elements_in('foot')
     first = mesh.tie(geometry, foot[:1], 'floor')
     second = mesh.tie(geometry, foot[1:2], 'floor')
-    assert second['block'] == first['block'], 'one block of ties'
+    assert second['group'] == first['group'], 'one element group of ties'
     assert second['links'] == 4
     floor = geometry.elements_in('floor')
     with pytest.raises(ValueError, match='every node is shared'):
@@ -60,14 +60,14 @@ def test_a_second_tie_joins_the_rigid_block_and_shared_nodes_are_left():
 
 def test_ties_join_the_rigid_block_already_there_whatever_its_name():
     """The demo's links are in 'bolts'; a tie made in the app on its
-    project joins them rather than starting a block of its own."""
+    project joins them rather than starting an element group of its own."""
     geometry = _floor_and_foot()
     foot = geometry.elements_in('foot')
-    mesh.tie(geometry, foot[:1], 'floor', block='bolts')
+    mesh.tie(geometry, foot[:1], 'floor', group='bolts')
     found = mesh.tie(geometry, foot[1:2], 'floor')
-    assert geometry.block_name[list(geometry.block_id).index(
-        found['block'])] == 'bolts'
-    assert 'ties' not in geometry.block_name
+    assert geometry.group_name[list(geometry.group_id).index(
+        found['group'])] == 'bolts'
+    assert 'ties' not in geometry.group_name
 
 
 def test_a_patch_ties_to_a_second_patch():
@@ -86,7 +86,7 @@ def test_ties_refuse_a_block_that_is_not_rigid():
     geometry = _floor_and_foot()
     with pytest.raises(ValueError, match='not rigid'):
         mesh.tie(geometry, geometry.elements_in('foot')[:1], 'floor',
-                 block='floor')
+                 group='floor')
 
 
 def test_the_tied_model_solves_as_one_piece():
@@ -159,7 +159,7 @@ def test_tie_to_a_block_from_its_menu(window, pump, monkeypatch):
     _select_rows(window, pump, foot_rows[2:3])
     window.tie_action.trigger()
     assert 'ties' not in [a.text() for a in popped[0].actions()], \
-        'a rigid block is not something to tie to'
+        'a rigid element group is not something to tie to'
 
 
 def test_tie_to_a_second_selection(window, pump, monkeypatch):
@@ -187,7 +187,7 @@ def test_tie_to_a_second_selection(window, pump, monkeypatch):
 
 
 def test_a_tie_between_conforming_bricks_solves():
-    """Two brick blocks, one resting a thousandth of an inch over the
+    """Two brick element groups, one resting a thousandth of an inch over the
     other on the same grid, tied over a patch: each tied node below
     leads only the nodes straight above it, so its rotation about that
     vertical line moves nothing, and solids give a rotation nothing to
@@ -201,9 +201,9 @@ def test_a_tie_between_conforming_bricks_solves():
     lid = mesh.block((0, 0, 0.126), 2 * x, 2 * y, 0.125 * z, 0.25, 'lid',
                      unit='in')
     whole = mesh.assemble(base, lid)
-    whole.block_properties = {
-        int(b): fem.BlockProperties(fem.material('6061-T6'))
-        for b in whole.block_id}
+    whole.group_properties = {
+        int(b): fem.GroupProperties(fem.material('6061-T6'))
+        for b in whole.group_id}
     xyz = whole.node_xyz / 0.0254
     patch = []
     for element in whole.elements_in('lid'):

@@ -74,12 +74,12 @@ class MeshPanel(QWidget):
         self.kind: str = 'block'
         self.title: QLabel = QLabel('Add Block')
         grid = panel_grid(self, self.title)
-        self.block: QComboBox = QComboBox()
-        self.block.setEditable(True)
-        self.block.setToolTip('The block the elements go in: one of the '
-                              "geometry's, or a new name")
-        grid.addWidget(QLabel('Block'), 1, 0)
-        grid.addWidget(self.block, 1, 1)
+        self.group: QComboBox = QComboBox()
+        self.group.setEditable(True)
+        self.group.setToolTip('The element group the elements go in: one '
+                              "of the geometry's, or a new name")
+        grid.addWidget(QLabel('Element group'), 1, 0)
+        grid.addWidget(self.group, 1, 1)
         self.center_label: QLabel = QLabel('Center')
         self.center_label.setEnabled(False)
         grid.addWidget(self.center_label, 2, 0, 1, 2)
@@ -140,15 +140,15 @@ class MeshPanel(QWidget):
         commit_on_enter(*self.center, *self.widths, *self.angles, self.size)
         for box in (*self.center, *self.widths, *self.angles, self.size):
             box.valueChanged.connect(lambda _value: self.changed.emit())
-        self.block.currentTextChanged.connect(lambda _text: self.changed.emit())
+        self.group.currentTextChanged.connect(lambda _text: self.changed.emit())
         self.add_button.clicked.connect(self.add_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
         self.square_button.clicked.connect(self.square_asked.emit)
 
-    def open_for(self, kind: str, unit: str, blocks: Sequence[str],
+    def open_for(self, kind: str, unit: str, groups: Sequence[str],
                  default: str | None = None) -> None:
         """Set the pane up for a block or a plane, in the display unit
-        `unit`, with the geometry's blocks to choose from, opening on
+        `unit`, with the geometry's element groups to choose from, opening on
         `default`; the fields open on the defaults."""
         self.kind = kind
         noun = 'Block' if kind == 'block' else 'Plane'
@@ -156,13 +156,13 @@ class MeshPanel(QWidget):
         self.center_label.setText(f'Center [{unit}]')
         self.width_label.setText(f'Width [{unit}]')
         self.size_label.setText(f'Element size [{unit}]')
-        names = [name for name in blocks if name]
-        self.block.blockSignals(True)
-        self.block.clear()
-        self.block.addItems(names)
-        self.block.setCurrentText(default or ('block' if kind == 'block'
+        names = [name for name in groups if name]
+        self.group.blockSignals(True)
+        self.group.clear()
+        self.group.addItems(names)
+        self.group.setCurrentText(default or ('block' if kind == 'block'
                                               else 'plate'))
-        self.block.blockSignals(False)
+        self.group.blockSignals(False)
         defaults = DEFAULTS[kind]
         self.set_values(center=defaults['center'], widths=defaults['widths'],
                         angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE, quiet=True)
@@ -173,22 +173,22 @@ class MeshPanel(QWidget):
                 'widths': tuple(box.value() for box in self.widths),
                 'angles': tuple(box.value() for box in self.angles),
                 'size': self.size.value(),
-                'block': self.block.currentText().strip()}
+                'group': self.group.currentText().strip()}
 
     def set_values(self, quiet: bool = False, **values) -> None:
         """Fill fields by name — center=(x, y, z), widths=(x, y, z),
-        angles=(x, y, z) in degrees, size=..., block=...; how a test
+        angles=(x, y, z) in degrees, size=..., group=...; how a test
         types, and how the gizmo writes the center and the angles back.
         `quiet` fills them without a `changed`."""
         boxes = [*self.center, *self.widths, *self.angles, self.size]
         if quiet:
             for box in boxes:
                 box.blockSignals(True)
-            self.block.blockSignals(True)
+            self.group.blockSignals(True)
         try:
             for key, value in values.items():
-                if key == 'block':
-                    self.block.setCurrentText(value)
+                if key == 'group':
+                    self.group.setCurrentText(value)
                 elif key == 'size':
                     self.size.setValue(value)
                 else:
@@ -198,7 +198,7 @@ class MeshPanel(QWidget):
             if quiet:
                 for box in boxes:
                     box.blockSignals(False)
-                self.block.blockSignals(False)
+                self.group.blockSignals(False)
         if not quiet:
             self.changed.emit()
 

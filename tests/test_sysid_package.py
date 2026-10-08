@@ -485,7 +485,7 @@ def test_answering_yes_types_the_project(window, pump, tmp_path,
     # one file is one measurement: the run's specification joins the
     # group its histories landed in — the rename used to leave the
     # linking asking for the old names, and the join quietly refused
-    group = next(g for g in window.links
+    group = next(g for g in window.object_groups
                  if 'Noise Time History' in g['members'])
     assert 'Excitation Time History' in group['members']
     spec_names = [name for name, obj in window.objects.items()
@@ -687,7 +687,7 @@ def test_the_sysid_report_shows_noise_then_excitation(window, pump,
     assert 'Noise Time History' in window.objects
 
     report = sysid_template(dict(window.objects),
-                            links=window.project.links)
+                            object_groups=window.project.object_groups)
     time_plots = [b for b in report.blocks if b.get('kind') == 'plot'
                   and 'Time History' in str(b.get('source'))]
     assert [b['source'] for b in time_plots] == \
@@ -820,7 +820,7 @@ def test_the_random_and_system_id_reports_are_2d_only(template):
                'Excitation PSDs': densities(1.0),
                'Multiple Coherence': MultipleCoherence(
                    f, np.ones((2, len(f))), response_dof=['101Z+', '104Z+'])}
-    blocks = getattr(templates, template)(objects, links=[]).blocks
+    blocks = getattr(templates, template)(objects, object_groups=[]).blocks
     assert not [b for b in blocks if b.get('mode') == 'stage']
     coherence = [b for b in blocks
                  if b.get('source') == '@basis:MultipleCoherence']

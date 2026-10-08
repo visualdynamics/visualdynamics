@@ -33,7 +33,7 @@ def test_an_empty_project_is_a_named_empty_structure():
     project = visualdynamics.Project('Beam Airplane Modal Test')
     assert project.name == 'Beam Airplane Modal Test'
     assert list(project) == [] and len(project) == 0
-    assert project.links == [] and not project.basis
+    assert project.object_groups == [] and not project.basis
     assert project.project_type is None
     assert project.active_geometry is None
     assert isinstance(project, dict), 'a project *is* its objects'
@@ -58,7 +58,7 @@ def test_linking_merges_groups_and_refuses_a_second_geometry():
     project.add('More Shapes', _shapes())
     project.link('Geometry', 'Shapes')
     project.link('Shapes', 'More Shapes')        # merges into one group
-    assert set(project.group_of('Geometry')) == {
+    assert set(project.object_group_of('Geometry')) == {
         'Geometry', 'Shapes', 'More Shapes'}
     project.add('Other Geometry', _geometry(900))
     with pytest.raises(ValueError, match='one geometry'):
@@ -84,7 +84,7 @@ def test_linking_reports_dofs_the_geometry_lacks_and_does_not_refuse():
     project.add('Stranger Shapes', _shapes(900))
     assert project.link('Geometry', 'Stranger Shapes') == [
         'Geometry', 'Stranger Shapes']
-    report = check_compatibility(dict(project), 'Geometry', project.links)
+    report = check_compatibility(dict(project), 'Geometry', project.object_groups)
     assert not report.is_compatible('Stranger Shapes')
     assert report.issue_for('Stranger Shapes').missing_dofs == ['900X+']
 
@@ -105,7 +105,7 @@ def test_a_few_points_the_model_lacks_are_not_another_structure():
                                    np.ones((1, 3))))
     assert project.link('Geometry', 'Shapes') == ['Geometry', 'Shapes']
 
-    report = check_compatibility(dict(project), 'Geometry', project.links)
+    report = check_compatibility(dict(project), 'Geometry', project.object_groups)
     assert not report.is_compatible('Shapes'), 'still flagged, not refused'
     assert report.issue_for('Shapes').missing_dofs == ['1X+']
 
@@ -139,7 +139,7 @@ def test_an_object_that_is_all_virtual_points_links_too():
     project.add('Control', Psd(np.array([1.0, 2.0]), np.ones((3, 2)),
                                response_dof=['1', '2', '3']))
     assert project.link('Geometry', 'Control') == ['Geometry', 'Control']
-    report = check_compatibility(dict(project), 'Geometry', project.links)
+    report = check_compatibility(dict(project), 'Geometry', project.object_groups)
     assert report.issue_for('Control').missing_dofs == ['1', '2', '3']
 
 
@@ -180,7 +180,7 @@ def test_the_geometry_an_object_answers_to():
     project.add('FEM Shapes', _shapes(900))
     project.link('FEM Geometry', 'FEM Shapes')
     assert project.geometry_for('FEM Shapes')[0] == 'FEM Geometry', (
-        'its link group, not the active geometry')
+        'its object group, not the active geometry')
     project.add('Stranger', _shapes())
     assert project.geometry_for('Stranger')[0] == 'Geometry', (
         'unlinked: the active one')
@@ -196,7 +196,7 @@ def test_renaming_carries_every_reference_with_it():
                                         'mode': 'mac', 'caption': ''}]))
     project.rename('Shapes', 'Experimental Modes')
     assert 'Shapes' not in project and 'Experimental Modes' in project
-    assert project.group_of('Geometry') == ['Geometry',
+    assert project.object_group_of('Geometry') == ['Geometry',
                                             'Experimental Modes']
     assert project['Matched'].first == 'Experimental Modes'
     assert project['Report'].blocks[0]['source'] == 'Experimental Modes'
@@ -212,9 +212,9 @@ def test_removing_prunes_the_links():
     project.add('More Shapes', _shapes())
     project.link('Geometry', 'Shapes', 'More Shapes')
     project.remove('Shapes')
-    assert project.group_of('Geometry') == ['Geometry', 'More Shapes']
+    assert project.object_group_of('Geometry') == ['Geometry', 'More Shapes']
     project.remove('More Shapes')
-    assert project.links == [], 'a group of one dissolves'
+    assert project.object_groups == [], 'a group of one dissolves'
     project.remove('Geometry')
     assert project.active_geometry is None
 
@@ -279,7 +279,7 @@ def test_the_tree_order_is_the_projects_order(window, pump, survey):
     from_tree = [window.test_item.child(i).text(0)
                  for i in range(window.test_item.childCount())]
     project = visualdynamics.Project('x', objects=dict(window.objects),
-                           links=window.links)
+                           object_groups=window.object_groups)
     assert project.ordered_names() == from_tree
 
 
@@ -331,7 +331,7 @@ def test_importing_a_project_into_a_full_one_keeps_both(tmp_path):
 
     added = project.import_file(tmp_path / 'second.vdyn')
     assert added == ['Geometry (2)', 'Shapes (2)', 'Matched']
-    assert project.group_of('Geometry (2)') == ['Geometry (2)',
+    assert project.object_group_of('Geometry (2)') == ['Geometry (2)',
                                                 'Shapes (2)'], (
         'the imported links came with it, renamed')
     assert project.role_of('Geometry (2)') is None, (
@@ -404,7 +404,7 @@ def test_the_workflow_verbs_derive_and_link(survey, tmp_path):
     modes = project.fit_modes('FRF', bounds=(5.0, 60.0), limit=3)
     assert modes == 'FRF Modes'
     assert project[modes].num_shapes >= 1
-    assert modes in project.group_of('FRF'), 'linked to what it came from'
+    assert modes in project.object_group_of('FRF'), 'linked to what it came from'
 
     # a report, bound symbolically, exported as one file
     report = project.generate_report('modal')
@@ -452,7 +452,7 @@ def test_matching_uses_the_displayed_comparison(survey):
     assert all(mac >= 0.9 for mac in matched.macs)
     assert matched.first_geometry == 'Test Geometry'
     assert matched.second_geometry == 'FEM Geometry'
-    assert project.group_of(name) is None, (
+    assert project.object_group_of(name) is None, (
         'a comparison names a set on each side, so it joins neither')
     assert matched.first_geometry == 'Test Geometry', (
         'and needs no group to find its geometries — it holds them')
@@ -553,8 +553,8 @@ def test_the_two_front_ends_reach_the_same_project(window, pump):
     assert clicked.active_geometry == scripted.active_geometry
     assert np.allclose(clicked['FRF Modes'].frequency,
                        scripted['FRF Modes'].frequency)
-    assert (clicked.group_of('Time History PSDs')
-            == scripted.group_of('Time History PSDs'))
+    assert (clicked.object_group_of('Time History PSDs')
+            == scripted.object_group_of('Time History PSDs'))
 
 
 # ---- reaching objects by what they are -------------------------------------
@@ -639,7 +639,7 @@ def test_groups_are_reached_the_same_way(survey):
 
     assert project.basis.frf is frfs
     assert project.other.shapes is shapes, 'the one group that is not it'
-    assert [group.names for group in project.groups] == [
+    assert [group.names for group in project.object_group_selections] == [
         ['Test Geometry', 'FRF'], ['FEM Geometry', 'FEM Modes']]
     assert not visualdynamics.Project().basis, 'no Basis declared: empty, not everything'
 
@@ -653,7 +653,7 @@ def test_verbs_take_objects_as_well_as_names():
     added = project.compute_psds(project.time_history)
     assert added == 'Time History PSDs'
     assert project.psd is project[added]
-    assert added in project.group_of(project.time_history)
+    assert added in project.object_group_of(project.time_history)
     assert project.name_of(project.psd) == added
     with pytest.raises(ValueError, match='not in this project'):
         project.name_of(_time_history())
@@ -682,8 +682,8 @@ def test_a_refusing_property_keeps_its_own_message():
     project.set_basis('Test Modes')
     with pytest.raises(AttributeError, match='besides the Basis'):
         _ = project.other
-    assert len(project.groups) == 3, 'and every one is reachable'
-    assert project.groups[2].shapes is project['Updated Modes']
+    assert len(project.object_group_selections) == 3, 'and every one is reachable'
+    assert project.object_group_selections[2].shapes is project['Updated Modes']
 
 
 def test_no_object_type_sorts_after_the_report():

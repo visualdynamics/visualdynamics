@@ -129,7 +129,7 @@ def test_a_sine_report_under_a_random_says_where_the_random_is_judged():
     from test_extract_sine import _spec as _sweep
 
     under = _worked_up('Random and Sine')['Sine Sweep Test Report']
-    alone = sine_template({'Sweep': _sweep()}, links=[])
+    alone = sine_template({'Sweep': _sweep()}, object_groups=[])
     assert 'the random is judged in its own report' in _text(under)
     assert 'the random is judged in its own report' not in _text(alone)
 
@@ -203,12 +203,12 @@ def test_the_real_mixed_run_renders_both_reports(tmp_path):
                               for template in PROJECT_TEMPLATES[
                                   project.project_type]]
     sine_html = render_html(project[sine_name], project, None,
-                            links=project.links)
+                            object_groups=project.object_groups)
     assert 'extracted level against the requirement' in sine_html
     assert 'Sine level deviation by tone and channel' in sine_html
     path = tmp_path / 'random.html'
     path.write_text(render_html(project[random_name], project, None,
-                                links=project.links), encoding='utf-8')
+                                object_groups=project.object_groups), encoding='utf-8')
     QApplication.instance() or QApplication(['x'])
     view = web_view()
     view.resize(1000, 800)
@@ -244,7 +244,7 @@ def test_the_random_reports_chart_the_band_outside_abort(template):
     (Brandon: "I want that back ... I don't want it in the reports")."""
     from visualdynamics.core import report as templates
 
-    blocks = getattr(templates, template)({}, links=[]).blocks
+    blocks = getattr(templates, template)({}, object_groups=[]).blocks
     bars = [b for b in blocks if b.get('kind') == 'bars']
     assert [b['mode'] for b in bars][:4] == ['error', 'lines', 'error', 'lines']
     text = ' '.join(b.get('text', '') for b in blocks if b.get('kind') == 'text')
@@ -269,7 +269,7 @@ def test_the_sine_comparison_draws_every_control_channel():
     history, spec = _flat_sweep(noise=1.0)
     levels = extract_sine(history, spec, cycles=40.0, workers=1, refine=False)
     assert isinstance(levels, SineLevelSet)
-    few = sine_template({'Sweep': spec, 'Levels': levels}, links=[]).blocks
+    few = sine_template({'Sweep': spec, 'Levels': levels}, object_groups=[]).blocks
     figures = [b for b in few if b.get('kind') == 'plot' and b.get('tone')]
     assert [b.get('channel') for b in figures] == list(spec.response_dof)
     assert all(not b.get('grid') for b in figures)
@@ -279,7 +279,7 @@ def test_the_sine_comparison_draws_every_control_channel():
                   np.repeat(tone.amplitude[:, :1], 6, axis=1),
                   tone.segment_type, tone.segment_rate)],
         [f'{n}Z+' for n in range(101, 107)], ordinate_unit='m/s**2')
-    many = sine_template({'Sweep': wide, 'Levels': levels}, links=[]).blocks
+    many = sine_template({'Sweep': wide, 'Levels': levels}, object_groups=[]).blocks
     figures = [b for b in many if b.get('kind') == 'plot' and b.get('tone')]
     assert len(figures) == 1 and figures[0]['grid'] is True
 
@@ -312,7 +312,7 @@ def test_a_six_channel_sine_report_renders_the_grid():
                       ordinate_unit=['m/s**2'] * 6)
     levels = extract_sine(six, wide, cycles=40.0, workers=1, refine=False)
     objects = {'Sweep': wide, 'Record': six, 'Levels': levels}
-    html = render_html(sine_template(objects, links=[]), objects)
+    html = render_html(sine_template(objects, object_groups=[]), objects)
     data = json.loads(html.split('type="application/json">')[1]
                       .split('</script>')[0])
     grids = [b for b in data['blocks'] if b.get('kind') == 'grid']
@@ -339,7 +339,7 @@ def test_the_sine_report_draws_no_averaging_frames_on_its_time_figures():
 
     def time_figures(template):
         objects = {'Sweep': spec, 'Record': history}
-        html = render_html(template(objects, links=[]), objects)
+        html = render_html(template(objects, object_groups=[]), objects)
         data = json.loads(html.split('type="application/json">')[1]
                           .split('</script>')[0])
         return [b for b in data['blocks'] if b.get('kind') == 'plot'
@@ -390,7 +390,7 @@ def test_many_sweeps_on_few_channels_tile_into_a_grid_per_sweep():
                       base.segment_type, base.segment_rate)
              for k in range(9)]
     nine = SineSweepSpecification(tones, dofs, ordinate_unit='m/s**2')
-    blocks = sine_template({'Sweep': nine}, links=[]).blocks
+    blocks = sine_template({'Sweep': nine}, object_groups=[]).blocks
     figures = [b for b in blocks if b.get('kind') == 'plot' and b.get('tone')]
     assert not figures, 'nothing extracted yet: the one symbolic figure'
     three = TimeHistory(history.abscissa, np.vstack([history.ordinate, history.ordinate[:1]]),
@@ -400,10 +400,10 @@ def test_many_sweeps_on_few_channels_tile_into_a_grid_per_sweep():
     levels = extract_sine(three, nine, tones=[t.name for t in tones], cycles=40.0,
                           workers=1, refine=False)
     objects = {'Sweep': nine, 'Record': three, 'Levels': levels}
-    blocks = sine_template(objects, links=[]).blocks
+    blocks = sine_template(objects, object_groups=[]).blocks
     figures = [b for b in blocks if b.get('kind') == 'plot' and b.get('tone')]
     assert len(figures) == 9 and all(b.get('grid') is True for b in figures)
-    html = render_html(sine_template(objects, links=[]), objects)
+    html = render_html(sine_template(objects, object_groups=[]), objects)
     data = json.loads(html.split('type="application/json">')[1].split('</script>')[0])
     grids = [b for b in data['blocks'] if b.get('kind') == 'grid']
     assert len(grids) == 9

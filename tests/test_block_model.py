@@ -1,8 +1,8 @@
-"""A finite element model built from a geometry's blocks.
+"""A finite element model built from a geometry's element groups.
 
-The way every finite element format states a structure: blocks, each of
-one element type, each given what it is made of. A geometry whose blocks
-carry `BlockProperties` builds every element as the element it is —
+The way every finite element format states a structure: element groups, each of
+one element type, each given what it is made of. A geometry whose element groups
+carry `GroupProperties` builds every element as the element it is —
 quads to plates, triangles to triangles, two-node lines to beams — and
 the proof is the demonstration plate rebuilt from its own exported
 geometry: the same matrices to rounding (Brandon, 2026-09-25).
@@ -17,7 +17,7 @@ import pytest
 from test_fem import ALUMINUM, square_plate, triangle_plate
 
 import visualdynamics
-from visualdynamics.core.fem import BlockProperties, Material, Model, Section
+from visualdynamics.core.fem import GroupProperties, Material, Model, Section
 
 
 def _aligned(built: Model, original: Model):
@@ -29,10 +29,10 @@ def _aligned(built: Model, original: Model):
     return stiff_b[grid], mass_b[grid], stiff_o, mass_o
 
 
-def _with_properties(model: Model, props: BlockProperties):
+def _with_properties(model: Model, props: GroupProperties):
     geometry = model.geometry()
-    assert len(geometry.block_id) == 1, 'one block, one property set'
-    geometry.block_properties = {int(geometry.block_id[0]): props}
+    assert len(geometry.group_id) == 1, 'one element group, one property set'
+    geometry.group_properties = {int(geometry.group_id[0]): props}
     return geometry
 
 
@@ -40,7 +40,7 @@ def test_the_demo_plate_rebuilds_from_its_own_geometry():
     from visualdynamics.demo import plate
 
     original = plate.build()
-    geometry = _with_properties(original, BlockProperties(plate.ALUMINUM,
+    geometry = _with_properties(original, GroupProperties(plate.ALUMINUM,
                                                           plate.THICKNESS))
     built = Model.from_geometry(geometry)
     assert len(built.plates) == len(original.plates) and not built.beams
@@ -55,14 +55,14 @@ def test_the_demo_plate_rebuilds_from_its_own_geometry():
 def test_a_triangle_mesh_rebuilds_the_same_way():
     original = triangle_plate(6)
     built = Model.from_geometry(_with_properties(
-        original, BlockProperties(ALUMINUM, 0.01)))
+        original, GroupProperties(ALUMINUM, 0.01)))
     assert len(built.triangles) == len(original.triangles)
     k_b, m_b, k_o, m_o = _aligned(built, original)
     assert np.abs(k_b - k_o).max() <= 1e-12 * np.abs(k_o).max()
     assert np.abs(m_b - m_o).max() <= 1e-12 * np.abs(m_o).max()
 
 
-def _portal(section_props: BlockProperties | None = None):
+def _portal(section_props: GroupProperties | None = None):
     """A portal frame, built member by member — and, when asked, the
     geometry that would rebuild it."""
     steel = Material('steel', 200e9, 7850.0, 0.29)
@@ -81,8 +81,8 @@ def test_a_beam_block_rebuilds_a_frame():
     original, steel, tube, orientation = _portal()
     geometry = original.geometry(beams=True)
     assert list(geometry.elem_type) == [21] * 4, 'beams export as beam2'
-    geometry.block_properties = {
-        int(geometry.block_id[0]): BlockProperties(steel, section=tube,
+    geometry.group_properties = {
+        int(geometry.group_id[0]): GroupProperties(steel, section=tube,
                                                    orientation=orientation)}
     built = Model.from_geometry(geometry)
     assert len(built.beams) == 4 and not built.plates
@@ -92,27 +92,27 @@ def test_a_beam_block_rebuilds_a_frame():
 
 
 def test_a_stiffened_panel_mixes_blocks():
-    """A plate block and a beam block on shared nodes: one structure,
+    """A plate element group and a beam element group on shared nodes: one structure,
     six rigid modes, the stiffener's stiffness in the answer."""
     plate = square_plate(4)
     bare = plate.eigensolution(num_modes=8).frequency
     geometry = plate.geometry()
-    block = int(geometry.block_id[0])
-    # a stiffener along the middle row of nodes, as a second block
+    group = int(geometry.group_id[0])
+    # a stiffener along the middle row of nodes, as a second element group
     middle = [1 + 2 * 5 + i for i in range(5)]
     conn = list(geometry.elem_conn) + [np.array([a, b]) for a, b
                                        in pairwise(middle)]
     types = list(geometry.elem_type) + [21] * 4
-    blocks = list(geometry.elem_block) + [block + 1] * 4
+    groups = list(geometry.elem_group) + [group + 1] * 4
     stiffened = visualdynamics.Geometry(
         node_id=geometry.node_id, node_xyz=geometry.node_xyz,
         elem_id=list(range(1, len(conn) + 1)), elem_type=types,
-        elem_conn=conn, elem_block=blocks,
-        block_id=[block, block + 1], block_name=['skin', 'stiffener'],
+        elem_conn=conn, elem_group=groups,
+        group_id=[group, group + 1], group_name=['skin', 'stiffener'],
         length_unit='m',
-        block_properties={
-            block: BlockProperties(ALUMINUM, 0.01),
-            block + 1: BlockProperties(
+        group_properties={
+            group: GroupProperties(ALUMINUM, 0.01),
+            group + 1: GroupProperties(
                 ALUMINUM, section=Section.rectangle('rib', 0.01, 0.03),
                 orientation=(0.0, 0.0, 1.0))})
     model = Model.from_geometry(stiffened)
@@ -128,27 +128,27 @@ def test_a_stiffened_panel_mixes_blocks():
 def test_a_block_without_properties_is_refused_by_name():
     plate = square_plate(2)
     geometry = plate.geometry()
-    geometry.block_name = ['skin']
-    geometry.block_properties = {99: BlockProperties(ALUMINUM, 0.01)}
-    with pytest.raises(ValueError, match=r'block 1 \(skin\) has no properties'):
+    geometry.group_name = ['skin']
+    geometry.group_properties = {99: GroupProperties(ALUMINUM, 0.01)}
+    with pytest.raises(ValueError, match=r'element group 1 \(skin\) has no properties'):
         Model.from_geometry(geometry)
 
 
 def test_the_wrong_kind_of_properties_is_refused_by_name():
     plate = square_plate(2)
     geometry = plate.geometry()
-    block = int(geometry.block_id[0])
-    geometry.block_properties = {block: BlockProperties(
+    group = int(geometry.group_id[0])
+    geometry.group_properties = {group: GroupProperties(
         ALUMINUM, section=Section.rod('rod', 0.01))}
     with pytest.raises(ValueError, match='quad4 elements, which take a thickness'):
         Model.from_geometry(geometry)
-    geometry.block_properties = {block: BlockProperties(
+    geometry.group_properties = {group: GroupProperties(
         ALUMINUM, thickness=0.01, section=Section.rod('rod', 0.01))}
     with pytest.raises(ValueError, match='both a thickness and a section'):
         Model.from_geometry(geometry)
-    # a material alone is a block of solids (2026-09-30), which these
+    # a material alone is an element group of solids (2026-09-30), which these
     # quads are not
-    geometry.block_properties = {block: BlockProperties(ALUMINUM)}
+    geometry.group_properties = {group: GroupProperties(ALUMINUM)}
     with pytest.raises(ValueError, match='quad4 elements, which take a thickness'):
         Model.from_geometry(geometry)
 
@@ -159,8 +159,8 @@ def test_an_element_the_solver_has_no_element_for_is_refused_by_name():
         node_xyz=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [.5, 0, 0], [.5, .5, 0],
                   [0, .5, 0]],
         elem_id=[1], elem_type=[42], elem_conn=[np.arange(1, 7)],
-        elem_block=[1], block_id=[1], block_name=['curved'], length_unit='m',
-        block_properties={1: BlockProperties(ALUMINUM, 0.01)})
+        elem_group=[1], group_id=[1], group_name=['curved'], length_unit='m',
+        group_properties={1: GroupProperties(ALUMINUM, 0.01)})
     with pytest.raises(ValueError, match='tri6 elements, and the solver has '
                                           'no element for them'):
         Model.from_geometry(geometry)
@@ -168,7 +168,7 @@ def test_an_element_the_solver_has_no_element_for_is_refused_by_name():
 
 def test_without_block_properties_the_grillage_needs_its_inputs():
     geometry = square_plate(2).geometry()
-    with pytest.raises(ValueError, match='no block properties'):
+    with pytest.raises(ValueError, match='no element group properties'):
         Model.from_geometry(geometry)
     # and with them, the grillage as it always was
     model = Model.from_geometry(geometry, ALUMINUM, Section.rod('rod', 0.01))
@@ -179,11 +179,11 @@ def test_block_properties_survive_the_native_file(tmp_path):
     from visualdynamics.demo import plate
 
     original = plate.build()
-    geometry = _with_properties(original, BlockProperties(plate.ALUMINUM,
+    geometry = _with_properties(original, GroupProperties(plate.ALUMINUM,
                                                           plate.THICKNESS))
     visualdynamics.save(geometry, tmp_path / 'plate.vdyn')
     back = visualdynamics.load(tmp_path / 'plate.vdyn')
-    props = back.block_properties[int(back.block_id[0])]
+    props = back.group_properties[int(back.group_id[0])]
     assert props.thickness == plate.THICKNESS
     assert props.material.youngs_modulus == plate.ALUMINUM.youngs_modulus
     assert props.material.name == '6061-T6' and props.section is None
@@ -191,13 +191,13 @@ def test_block_properties_survive_the_native_file(tmp_path):
     assert np.allclose(rebuilt.eigensolution(num_modes=10).frequency,
                        original.eigensolution(num_modes=10).frequency,
                        rtol=1e-9, atol=1e-6)
-    # a beam block's section and orientation round-trip too
+    # a beam element group's section and orientation round-trip too
     frame, steel, tube, orientation = _portal()
     geometry = frame.geometry(beams=True)
-    geometry.block_properties = {int(geometry.block_id[0]): BlockProperties(
+    geometry.group_properties = {int(geometry.group_id[0]): GroupProperties(
         steel, section=tube, orientation=orientation)}
     visualdynamics.save(geometry, tmp_path / 'frame.vdyn')
     back = visualdynamics.load(tmp_path / 'frame.vdyn')
-    props = back.block_properties[int(back.block_id[0])]
+    props = back.group_properties[int(back.group_id[0])]
     assert props.section == tube and props.orientation == orientation
     assert props.thickness is None

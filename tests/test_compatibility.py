@@ -52,9 +52,9 @@ def test_a_linked_geometry_answers_for_its_group():
         'FEM geometry': load('plate', 'geometry.npz'),
         'FEM shapes': load('plate', 'shapes.npy'),
     }
-    links = [{'members': ['FEM geometry', 'FEM shapes'], 'role': None}]
+    object_groups = [{'members': ['FEM geometry', 'FEM shapes'], 'role': None}]
     report = visualdynamics.check_compatibility(objects, 'test geometry',
-                                      links=links)
+                                      object_groups=object_groups)
     assert report.is_compatible('FEM shapes'), (
         'judged against the linked FEM mesh, not the active test one')
     # unlinked, the active geometry judges — and flags it

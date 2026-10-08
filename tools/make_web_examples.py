@@ -195,7 +195,7 @@ def build():
             report = Report('', [block])
             report.marking = ''      # no classification banner on a shop window
             html = report_module.render_html(
-                report, objects, visualdynamics.SI, links=demo.links)
+                report, objects, visualdynamics.SI, object_groups=demo.object_groups)
             assert html.count('</body>') == 1
             html = html.replace('</body>', EMBED.strip() + '\n')
             (OUT / filename).write_text(html, encoding='utf-8')
@@ -238,7 +238,7 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
                    'pick one from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
-                                     visualdynamics.SI, links=demo.links)
+                                     visualdynamics.SI, object_groups=demo.object_groups)
     html = html.replace('</body>', EMBED.strip() + '\n')
     size_kb = len(html.encode('utf-8')) // 1024
     if write:
@@ -280,7 +280,7 @@ def build_barc_bricks(size: float = BARC_BRICKS_WEB_SIZE,
                    'pick one from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
-                                     visualdynamics.SI, links=demo.links)
+                                     visualdynamics.SI, object_groups=demo.object_groups)
     html = html.replace('</body>', EMBED.strip() + '\n')
     size_kb = len(html.encode('utf-8')) // 1024
     if write:
@@ -324,7 +324,7 @@ def build_frame(size: float = FRAME_WEB_SIZE, write: bool = True) -> int:
                    'from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
-                                     visualdynamics.SI, links=demo.links)
+                                     visualdynamics.SI, object_groups=demo.object_groups)
     html = html.replace('</body>', EMBED.strip() + '\n')
     size_kb = len(html.encode('utf-8')) // 1024
     if write:

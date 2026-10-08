@@ -243,15 +243,15 @@ ENTITY_COMPONENT = {
     'node': 'nodes',
     'coordinate_system': 'coordinate_systems',
     'element': 'elements',
-    'block': 'blocks',
+    'group': 'groups',
 }
 
 # geometry categories: (label, attribute holding the collection, component)
-# Blocks come after the elements they group, and are the one category with
+# Element groups come after the elements they group, and are the one category with
 # nothing of their own in the view: picking one shows its elements.
 #: the two categories a geometry lists before its element families
 #: (Brandon, 2026-09-30: nodes, coordinate systems, then one sub-item
-#: per element family with the blocks of that family under it)
+#: per element family with the element groups of that family under it)
 GEOMETRY_PARTS = [
     ('Nodes', 'node_id', 'nodes'),
     ('Coordinate systems', 'cs_id', 'coordinate_systems'),
@@ -263,7 +263,7 @@ FAMILY_ADD_TYPES = {'beams': (21, 2), 'triangles': (41, 3), 'quads': (44, 4),
                     'pyramids': (201, 5), 'points': (161, 1)}
 
 # what is drawn for a category, where that is not the category itself
-DRAWN_AS = {'blocks': 'elements'}
+DRAWN_AS = {'groups': 'elements'}
 
 
 def _row_for_entity(geometry, component, entity):
@@ -277,8 +277,8 @@ def _row_for_entity(geometry, component, entity):
     if component == 'coordinate_systems':
         rows = np.flatnonzero(geometry.cs_id == entity)
         return int(rows[0]) if len(rows) else None
-    if component == 'blocks':
-        rows = np.flatnonzero(geometry.block_id == entity)
+    if component == 'groups':
+        rows = np.flatnonzero(geometry.group_id == entity)
         return int(rows[0]) if len(rows) else None
     total = len(geometry.elem_conn)
     return int(entity) if 0 <= int(entity) < total else None
@@ -290,7 +290,7 @@ def _entity_key(geometry, component, row):
     return int({'nodes': geometry.node_id,
                 'coordinate_systems': geometry.cs_id,
                 'elements': geometry.elem_id,
-                'blocks': geometry.block_id}[component][row])
+                'groups': geometry.group_id}[component][row])
 
 
 def _delete_from_geometry(geometry, component, keys):
@@ -298,33 +298,33 @@ def _delete_from_geometry(geometry, component, keys):
         'nodes': geometry.delete_nodes,
         'coordinate_systems': geometry.delete_coordinate_systems,
         'elements': geometry.delete_elements,
-        'blocks': geometry.delete_blocks,
+        'groups': geometry.delete_groups,
     }[component](keys)
 
 
-def _block_element_rows(geometry, block_ids):
-    """Which element rows the given blocks hold — what a block *is* in the
-    view, since a block has no geometry of its own."""
-    wanted = [int(b) for b in block_ids]
+def _group_element_rows(geometry, group_ids):
+    """Which element rows the given element groups hold — what an element group *is* in the
+    view, since an element group has no geometry of its own."""
+    wanted = [int(b) for b in group_ids]
     return [int(row) for row in np.flatnonzero(
-        np.isin(geometry.elem_block, wanted))]
+        np.isin(geometry.elem_group, wanted))]
 
 
 def _drawable(geometry, components, entities):
     """The same selection, in what the renderer can draw.
 
-    A block is a label on elements, so picking one draws the elements it
+    An element group is a label on elements, so picking one draws the elements it
     holds and picking the category draws all of them. Translating here
     rather than in the renderer keeps `add_geometry` knowing only about
-    things that have coordinates — and means an empty block correctly
+    things that have coordinates — and means an empty element group correctly
     highlights nothing rather than the whole model.
     """
-    if components and 'blocks' in components:
+    if components and 'groups' in components:
         components = {DRAWN_AS.get(c, c) for c in components}
-    if entities and entities.get('blocks'):
-        rows = _block_element_rows(geometry, entities['blocks'])
+    if entities and entities.get('groups'):
+        rows = _group_element_rows(geometry, entities['groups'])
         entities = {kind: values for kind, values in entities.items()
-                    if kind != 'blocks'}
+                    if kind != 'groups'}
         entities['elements'] = sorted({*entities.get('elements', []), *rows})
     return components, entities
 
@@ -334,8 +334,8 @@ def _label_kinds(geometry: Geometry, components: Any,
     """Which kinds the selection wants captioned with their ids.
 
     Picking a category captions all of it; picking entities captions
-    those. Worked out **before** `_drawable` translates blocks into the
-    elements they hold, because a block's caption is its own name at the
+    those. Worked out **before** `_drawable` translates element groups into the
+    elements they hold, because an element group's caption is its own name at the
     middle of its elements and the elements' captions are their ids —
     after the translation there is nothing left to tell those apart.
 
@@ -735,7 +735,7 @@ class MainWindow(QMainWindow):
         #: clicking in the view creates things
         self.add_mode: bool = False
         #: what narrows the table being edited: ('family', name) or
-        #: ('block', id), None for a category (2026-09-30)
+        #: ('group', id), None for a category (2026-09-30)
         self.editing_scope: tuple | None = None
         self._picked_nodes = []       # nodes gathered for an element
         self._shape_source = None     # (geometry, shape set) while a mode plays
@@ -1249,7 +1249,7 @@ class MainWindow(QMainWindow):
         self.test_item.setData(0, ROLE_REFERENCE, ('test', None, None))
         # draggable *out* of the window, where it saves the whole
         # project; not ROLE_DRAGGABLE, which means movable between
-        # link groups and the project belongs to none
+        # object groups and the project belongs to none
         self.test_item.setData(0, ROLE_WHOLE_PROJECT, True)
         self.test_item.setFlags(self.test_item.flags() | Qt.ItemFlag.ItemIsEditable)
         self.tree.addTopLevelItem(self.test_item)
@@ -1689,12 +1689,12 @@ class MainWindow(QMainWindow):
         return self.project
 
     @property
-    def links(self) -> list:
-        return self.project.links
+    def object_groups(self) -> list:
+        return self.project.object_groups
 
-    @links.setter
-    def links(self, groups: list[dict[str, Any]]) -> None:
-        self.project.links = list(groups)
+    @object_groups.setter
+    def object_groups(self, groups: list[dict[str, Any]]) -> None:
+        self.project.object_groups = list(groups)
 
     @property
     def project_type(self) -> str | None:
@@ -1782,32 +1782,32 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.tie_action)
         self.tie_action.setVisible(False)
 
-        # the same act from the Blocks table: two rows or more that may
-        # be one block
-        self.merge_blocks_action: QAction = QAction(
-            control_icon('merge_blocks'), '', self)
-        self.merge_blocks_action.setToolTip(
-            'Merge Blocks — make the selected blocks one block: the first '
+        # the same act from the Element Groups table: two rows or more that may
+        # be one element group
+        self.merge_groups_action: QAction = QAction(
+            control_icon('merge_groups'), '', self)
+        self.merge_groups_action.setToolTip(
+            'Merge Element Groups — make the selected element groups one element group: the first '
             'keeps its name and properties')
-        self.merge_blocks_action.triggered.connect(self._merge_block_rows)
-        toolbar.addAction(self.merge_blocks_action)
-        self.merge_blocks_action.setVisible(False)
+        self.merge_groups_action.triggered.connect(self._merge_group_rows)
+        toolbar.addAction(self.merge_groups_action)
+        self.merge_groups_action.setVisible(False)
 
         # what a click builds while adding elements is the family of the
         # row the editing began from (Brandon, 2026-09-30): the beam /
         # triangle / quad chooser that sat here went with the Elements
         # category it belonged to
-        # which block new elements go into (Brandon, 2026-09-26): the
-        # geometry's blocks and a new one. Before this every element went
-        # into the first block, and a beam added to a model of plates —
-        # a rigid link, a stiffener — landed in a plate block that then
+        # which element group new elements go into (Brandon, 2026-09-26): the
+        # geometry's element groups and a new one. Before this every element went
+        # into the first element group, and a beam added to a model of plates —
+        # a rigid link, a stiffener — landed in a plate element group that then
         # refused to build
-        self.element_block_box: QComboBox = QComboBox()
-        self.element_block_box.setToolTip('Add elements into this block')
-        self.element_block_box.setSizeAdjustPolicy(
+        self.element_group_box: QComboBox = QComboBox()
+        self.element_group_box.setToolTip('Add elements into this element group')
+        self.element_group_box.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self._element_block_handle = toolbar.addWidget(self.element_block_box)
-        self._element_block_handle.setVisible(False)
+        self._element_group_handle = toolbar.addWidget(self.element_group_box)
+        self._element_group_handle.setVisible(False)
 
         self.rotate_action: QAction = QAction(control_icon('rotate'), '', self)
         self.rotate_action.setCheckable(True)
@@ -2408,7 +2408,7 @@ class MainWindow(QMainWindow):
         self._mark_computable(item, obj)
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
         # what the tree reads as "this row is an object", and so is
-        # draggable between link groups: sub-items are parts of one
+        # draggable between object groups: sub-items are parts of one
         item.setData(0, ROLE_DRAGGABLE, True)
         item.setData(0, ROLE_ORIGINAL_NAME, name)  # name before an edit
         item.setData(0, ROLE_REFERENCE, ('object', name, None))
@@ -2463,20 +2463,23 @@ class MainWindow(QMainWindow):
     def _build_families(self, item, geometry, name):
         """One row per element family under a geometry — the six always,
         the rare two (points, pyramids) when present — and under each
-        family one row per block holding elements of it, the block's
-        elements listed when the block is opened (Brandon, 2026-09-30:
-        each element type a sub-item, blocks under it, the pencil on a
-        block for its properties). An empty block has no family and no
+        family one row per element group holding elements of it, the element group's
+        elements listed when the element group is opened (Brandon, 2026-09-30:
+        each element type a sub-item, element groups under it, the pencil on an
+        element group for its properties). An empty element group has no family and no
         row until an element lands in it."""
         families = {}
-        for row, (code, block) in enumerate(zip(geometry.elem_type,
-                                                geometry.elem_block)):
+        for row, (code, group) in enumerate(zip(geometry.elem_type,
+                                                geometry.elem_group)):
             families.setdefault(element_family(int(code)), {}).setdefault(
-                int(block), []).append(row)
-        listed = list(FAMILIES) + [f for f in RARE_FAMILIES if f in families]
+                int(group), []).append(row)
+        # points always (2026-10-08): a ground point or a spring to ground
+        # starts from one, and a family the tree hides cannot be added to
+        listed = list(FAMILIES) + [f for f in RARE_FAMILIES
+                                   if f == 'points' or f in families]
         for family in listed:
-            blocks = families.get(family, {})
-            count = sum(len(rows) for rows in blocks.values())
+            groups = families.get(family, {})
+            count = sum(len(rows) for rows in groups.values())
             child = QTreeWidgetItem([f'{FAMILY_LABELS[family]} ({count})'])
             child.setIcon(0, child_icon(family, 'Geometry',
                                         geometry.units_defined, not count))
@@ -2486,21 +2489,21 @@ class MainWindow(QMainWindow):
             child.setIcon(1, control_icon('edit'))
             child.setToolTip(
                 1, f'Edit the {FAMILY_LABELS[family].lower()} in a table')
-            for block in geometry.block_id:
-                if int(block) not in blocks:
+            for group in geometry.group_id:
+                if int(group) not in groups:
                     continue
-                block = int(block)
-                row = int(np.flatnonzero(geometry.block_id == block)[0])
-                label = geometry.block_name[row].strip() or f'Block {block}'
-                held = len(blocks[block])
+                group = int(group)
+                row = int(np.flatnonzero(geometry.group_id == group)[0])
+                label = geometry.group_name[row].strip() or f'Element group {group}'
+                held = len(groups[group])
                 grand = QTreeWidgetItem([f'{label} ({held})'])
-                grand.setIcon(0, child_icon('blocks', 'Geometry',
+                grand.setIcon(0, child_icon('groups', 'Geometry',
                                             geometry.units_defined))
-                grand.setData(0, ROLE_REFERENCE, ('block', name, block))
+                grand.setData(0, ROLE_REFERENCE, ('group', name, group))
                 grand.setData(0, ROLE_POPULATED, False)
                 grand.setFlags(grand.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 grand.setIcon(1, control_icon('edit'))
-                grand.setToolTip(1, 'Edit this block — its name and what '
+                grand.setToolTip(1, 'Edit this element group — its name and what '
                                     'it is made of — in a table')
                 grand.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
@@ -2508,21 +2511,21 @@ class MainWindow(QMainWindow):
             item.addChild(child)
 
     def _populate_entities(self, item):
-        """List a category's individual entities — or a block's elements
+        """List a category's individual entities — or an element group's elements
         — the first time it opens."""
         reference = item.data(0, ROLE_REFERENCE)
         if reference is None or item.data(0, ROLE_POPULATED):
             return
         kind, name, component = reference
-        if kind not in ('component', 'block'):
+        if kind not in ('component', 'group'):
             return
         geometry = self.objects.get(name)
         if geometry is None:
             return
         item.setData(0, ROLE_POPULATED, True)
-        if kind == 'block':
+        if kind == 'group':
             labels = [entry for entry in self._entity_labels(geometry, 'elements')
-                      if int(geometry.elem_block[entry[1]]) == int(component)]
+                      if int(geometry.elem_group[entry[1]]) == int(component)]
             component = 'elements'
         else:
             labels = list(self._entity_labels(geometry, component))
@@ -2564,12 +2567,12 @@ class MainWindow(QMainWindow):
                 yield 'element', index, (
                     f'Element {int(geometry.elem_id[index])} '
                     f'({type_name}, {len(conn)} nodes)')
-        elif component == 'blocks':
-            for index, block_id in enumerate(geometry.block_id):
-                name = geometry.block_name[index].strip()
-                held = int((geometry.elem_block == int(block_id)).sum())
-                yield 'block', int(block_id), (
-                    f'Block {int(block_id)}' + (f' — {name}' if name else '')
+        elif component == 'groups':
+            for index, group_id in enumerate(geometry.group_id):
+                name = geometry.group_name[index].strip()
+                held = int((geometry.elem_group == int(group_id)).sum())
+                yield 'group', int(group_id), (
+                    f'Element group {int(group_id)}' + (f' — {name}' if name else '')
                     + f' ({held} elements)')
 
     def _build_record_grid(self, item, obj, name):
@@ -2848,7 +2851,7 @@ class MainWindow(QMainWindow):
         method = {'nodes': 'delete_nodes',
                   'coordinate_systems': 'delete_coordinate_systems',
                   'elements': 'delete_elements',
-                  'blocks': 'delete_blocks'}[component]
+                  'groups': 'delete_groups'}[component]
         self.project.record_call(geometry, method,
                                  sorted(int(k) for k in keys))
 
@@ -3072,18 +3075,18 @@ class MainWindow(QMainWindow):
         object offers Recompute first, ahead of anything else it can do.
         """
         if names is None:
-            # two blocks or more of one geometry, picked in the tree, that
+            # two element groups or more of one geometry, picked in the tree, that
             # may be one (Brandon, 2026-09-27): only when they may —
             # a refused merge is not offered (principle 3)
             picked = self._selected_entities()
-            if picked is not None and picked[1] == 'blocks':
+            if picked is not None and picked[1] == 'groups':
                 geometry = self.objects.get(picked[0])
                 if (geometry is not None and len(picked[2]) > 1
                         and geometry.merge_refusal(picked[2]) is None):
-                    return [('merge_blocks', 'Merge Blocks', 'merge_blocks',
-                             lambda: self.merge_blocks_act(picked[0],
+                    return [('merge_groups', 'Merge Element Groups', 'merge_groups',
+                             lambda: self.merge_groups_act(picked[0],
                                                            picked[2]),
-                             ('Make the selected blocks one block: the '
+                             ('Make the selected element groups one element group: the '
                               'first keeps its name and properties'))]
             if self.test_item.isSelected():
                 return [('generate_report', 'Generate Report', 'report',
@@ -3282,7 +3285,7 @@ class MainWindow(QMainWindow):
             return
         reference = item.data(0, ROLE_REFERENCE)
         if reference is not None and reference[0] in ('component', 'family',
-                                                      'block'):
+                                                      'group'):
             # the pencil is a toggle: editing this category closes it,
             # anything else opens (or switches to) its table
             if (self.editing == (reference[1], self._component_of(reference))
@@ -3327,8 +3330,8 @@ class MainWindow(QMainWindow):
         return names
 
     def _group_of(self, name):
-        """The link group dict holding `name`, or None."""
-        return next((group for group in self.links
+        """The object group dict holding `name`, or None."""
+        return next((group for group in self.object_groups
                      if name in group['members']), None)
 
     def linked_group(self, name: str) -> list[str] | None:
@@ -3337,7 +3340,7 @@ class MainWindow(QMainWindow):
         return None if group is None else group['members']
 
     def link_role(self, name: str) -> str | None:
-        """The role of `name`'s link group — 'Basis', or None for an
+        """The role of `name`'s object group — 'Basis', or None for an
         unroled or unlinked object. The Basis group defines the DOF
         space comparisons happen in: other sets project onto its DOFs,
         its modes are the MAC rows and the frequency-error baseline."""
@@ -3345,14 +3348,14 @@ class MainWindow(QMainWindow):
         return None if group is None else group['role']
 
     def set_link_role(self, name: str, role: str | None) -> None:
-        """Declare a link group the Basis of comparisons — explicit,
+        """Declare an object group the Basis of comparisons — explicit,
         so nothing downstream has to guess which group is which."""
         group = self._group_of(name)
         if group is None:
             return
         # the role means one thing: taking it takes it from any other
         if role is not None:
-            for other in self.links:
+            for other in self.object_groups:
                 if other is not group and other['role'] == role:
                     other['role'] = None
         group['role'] = role
@@ -3434,7 +3437,7 @@ class MainWindow(QMainWindow):
         a handful of groups, not a computation.
         """
         def snapshot() -> list[dict[str, Any]]:
-            return [dict(group) for group in self.links]
+            return [dict(group) for group in self.object_groups]
 
         before = snapshot()
         try:
@@ -3454,7 +3457,7 @@ class MainWindow(QMainWindow):
         except (ValueError, KeyError) as refusal:
             return None, before, refusal
         finally:
-            self.project.links = before
+            self.project.object_groups = before
 
     def _allowed_move(self, names, target):
         """The links after dropping these objects there, or None when
@@ -3566,7 +3569,7 @@ class MainWindow(QMainWindow):
         # and which objects the report's '@basis:' bindings mean. A
         # project file's Report renders the moment its row arrives —
         # selection follows each object as it is added — which is
-        # *before* the file's own link groups are absorbed, so that
+        # *before* the file's own object groups are absorbed, so that
         # first page resolved every symbolic binding with no Basis and
         # showed the FEM set in every figure that meant the test's.
         # Nothing rebuilt it afterwards, because the editor was already
@@ -3583,7 +3586,7 @@ class MainWindow(QMainWindow):
     def _type_rank(self, name):
         return type_rank(self.objects.get(name))
 
-    def _object_order(self, links):
+    def _object_order(self, object_groups):
         """Every object's tree position under `links` — the one
         ordering rule, asked with the standing links by `_reorder_tree`
         and with a trial's outcome by the drag's landing line."""
@@ -3592,7 +3595,7 @@ class MainWindow(QMainWindow):
         # holds anything; a group with no role follows them
         linked = [name
                   for group in sorted(
-                      links,
+                      object_groups,
                       key=lambda g: (self._role_rank(g['role']),
                                      g['role'] != 'Basis'))
                   for name in sorted(
@@ -3642,7 +3645,7 @@ class MainWindow(QMainWindow):
         after; the gray placeholders keep the bottom. Everywhere —
         inside a group and out — types keep the canonical order, and
         objects of one type keep their arrival order."""
-        wanted = self._object_order(self.links)
+        wanted = self._object_order(self.object_groups)
         selected = self.tree.selectedItems()
         current = self.tree.currentItem()
         moved = []
@@ -3674,7 +3677,7 @@ class MainWindow(QMainWindow):
     LINK_ROLE_COLORS: ClassVar[dict] = {'Basis': '#4c92d9'}
 
     def _role_holder(self, role):
-        """The real link group holding the type's `role`.
+        """The real object group holding the type's `role`.
 
         A group that was *declared* to hold this role answers first;
         only where nobody has said is the role worked out from the
@@ -3688,11 +3691,11 @@ class MainWindow(QMainWindow):
         if role == OTHER_SIDE:
             # the other side has no name: it is the one group that is
             # not the Basis, when there is exactly one
-            others = [g for g in self.links if g['role'] != 'Basis']
+            others = [g for g in self.object_groups if g['role'] != 'Basis']
             return others[0] if len(others) == 1 else None
         from ..core.report import expectation_satisfiers
 
-        declared = self.project.role_group(role)
+        declared = self.project.object_group_with_role(role)
         if declared is not None:
             return declared
         # sides, not roles: an object in a group on the other side is
@@ -3709,7 +3712,7 @@ class MainWindow(QMainWindow):
         """{id(group): color}, exactly as the brackets paint them —
         the Basis blue, other groups the rest of the curve palette."""
         colors, others = {}, 0
-        for group in self.links:
+        for group in self.object_groups:
             if group['role'] == 'Basis':
                 colors[id(group)] = self.LINK_ROLE_COLORS['Basis']
             else:
@@ -3718,13 +3721,13 @@ class MainWindow(QMainWindow):
         return colors
 
     def _link_color(self, name):
-        """The bracket color of `name`'s link group, or None."""
+        """The bracket color of `name`'s object group, or None."""
         group = self._group_of(name)
         return (None if group is None
                 else self._group_colors()[id(group)])
 
     def _paint_links(self):
-        """Real link groups get their brackets; the type's placeholder
+        """Real object groups get their brackets; the type's placeholder
         slots join their role's bracket too, so a fresh Modal project
         shows both groups before anything exists. The Basis is told
         apart by its blue, bold bracket alone — no text — and other
@@ -3733,7 +3736,7 @@ class MainWindow(QMainWindow):
         tag_groups = {tag: self._role_holder(tag) for tag in placeholders}
         colors = self._group_colors()
         spans = []
-        for group in self.links:
+        for group in self.object_groups:
             items = [self._item_for_object(name)
                      for name in group['members'] if name in self.objects]
             for tag, owner in tag_groups.items():
@@ -3793,7 +3796,7 @@ class MainWindow(QMainWindow):
             # ...and 'elsewhere' is any other group, named or not: the
             # other side has no name since 2026-09-02, and the pair
             # dragged into it must count as placed all the same
-            elsewhere = {name for g in self.links if g['role'] != role
+            elsewhere = {name for g in self.object_groups if g['role'] != role
                          for name in g['members']}
             members = [name for name in members if name not in elsewhere]
             here = set(placed.get(role, ()))
@@ -3973,7 +3976,7 @@ class MainWindow(QMainWindow):
 
     def _placeholder_position(self, role):
         """Where a role's placeholder slots go: right after the last
-        real member of the link group holding that role, else None —
+        real member of the object group holding that role, else None —
         meaning wherever the run of roles has got to, which is that
         role's own place."""
         group = self._role_holder(role)
@@ -4007,7 +4010,7 @@ class MainWindow(QMainWindow):
             'nodes': lambda g: g.node_id.tolist(),
             'coordinate_systems': lambda g: g.cs_id.tolist(),
             'elements': lambda g: g.elem_id.tolist(),
-            'blocks': lambda g: g.block_id.tolist(),
+            'groups': lambda g: g.group_id.tolist(),
         }
         removed, refused = {}, []
         for component in components:
@@ -4075,7 +4078,7 @@ class MainWindow(QMainWindow):
         else:
             self.render_current()
         self._show_status('Removed ' + ', '.join(
-            f'{count} {kind.replace("_", " ")}'
+            f'{count} {"element groups" if kind == "groups" else kind.replace("_", " ")}'
             for kind, count in report.items() if count) or 'Nothing to remove')
 
     def delete_entity_rows(self) -> None:
@@ -4175,7 +4178,7 @@ class MainWindow(QMainWindow):
                  if isinstance(obj, Geometry)), None)
         self.report = check_compatibility(self.objects,
                                           self.active_geometry,
-                                          links=self.links)
+                                          object_groups=self.object_groups)
         self._paint_compatibility()
 
     def _paint_compatibility(self):
@@ -4338,7 +4341,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _size_choice_columns(table, model) -> None:
         """Columns sized to their contents, and a column offering choices
-        no narrower than the widest of them. The Blocks table's Material
+        no narrower than the widest of them. The Element Groups table's Material
         column starts empty and sized to nothing, and a material name
         could not be read in it (Brandon, 2026-10-02); the units columns
         had the same rule since September. The header stays interactive,
@@ -4641,7 +4644,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _component_of(reference):
         """Which table a tree row edits: a category its own, a family
-        the elements, a block the blocks, an entity its category."""
+        the elements, an element group the element groups, an entity its category."""
         kind, _name, detail = reference
         if kind == 'component':
             return detail
@@ -4652,21 +4655,21 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _scope_of(reference):
         """What narrows the editing: ('family', name) from a family row,
-        ('block', id) from a block row, None from a category."""
+        ('group', id) from an element group row, None from a category."""
         kind, _name, detail = reference
         if kind == 'family':
             return ('family', detail)
-        if kind == 'block':
-            return ('block', int(detail))
+        if kind == 'group':
+            return ('group', int(detail))
         return None
 
     @property
     def editing_family(self) -> str | None:
         """The element family being added to, read off the editing
-        scope: the family row's own, a block row's from what the block
+        scope: the family row's own, an element group row's from what the element group
         holds, an element row's from the element. None outside the
         elements table."""
-        if self.editing is None or self.editing[1] not in ('elements', 'blocks'):
+        if self.editing is None or self.editing[1] not in ('elements', 'groups'):
             return None
         geometry = self.objects.get(self.editing[0])
         scope = self.editing_scope
@@ -4674,21 +4677,21 @@ class MainWindow(QMainWindow):
             return None
         if scope[0] == 'family':
             return scope[1]
-        rows = np.flatnonzero(geometry.elem_block == scope[1])
+        rows = np.flatnonzero(geometry.elem_group == scope[1])
         if len(rows):
             return element_family(int(geometry.elem_type[rows[0]]))
         return None
 
     def edit_entities(self) -> None:
         """Edit a geometry's nodes, coordinate systems, a family of its
-        elements or one of its blocks in a table beside the model."""
+        elements or one of its element groups in a table beside the model."""
         kind, obj, detail = self.current_reference()
         reference = (kind, None, detail)
         component = self._component_of(reference) if kind else None
         if not isinstance(obj, Geometry) or component not in ENTITY_TABLES:
             self._show_status(
-                'Select nodes, coordinate systems, an element family or a '
-                'block to edit them')
+                'Select nodes, coordinate systems, an element family or an '
+                'element group to edit them')
             return
         item = self.object_item()
         self.editing = (item.text(0), component)
@@ -4706,9 +4709,9 @@ class MainWindow(QMainWindow):
         self._select_scope_rows(obj)
         self._draw_edit_selection()
         self.add_action.setVisible(True)
-        # a block is not placed in space, so its + adds a row outright
+        # an element group is not placed in space, so its + adds a row outright
         # rather than arming a mode that waits for a click in the view
-        self.add_action.setToolTip('Add an empty block' if component == 'blocks'
+        self.add_action.setToolTip('Add an empty element group' if component == 'groups'
                                    else 'Add items by clicking in the view')
         self._begin_picking(obj, self._picking_component())
         self._update_toolbar_actions()
@@ -4718,19 +4721,19 @@ class MainWindow(QMainWindow):
             'leaves editing')
 
     def _editing_words(self) -> str:
-        """'the quads', 'block 7', 'nodes': what the table is of."""
+        """'the quads', 'element group 7', 'nodes': what the table is of."""
         component = self.editing[1]
         scope = self.editing_scope
         if scope is not None and scope[0] == 'family':
             return 'the ' + FAMILY_LABELS[scope[1]].lower()
-        if scope is not None and scope[0] == 'block':
-            return f'block {scope[1]}'
+        if scope is not None and scope[0] == 'group':
+            return f'element group {scope[1]}'
         return component.replace('_', ' ')
 
     def _select_scope_rows(self, geometry):
         """Open the table on what was clicked: a family's rows of the
-        elements table, a block's row of the blocks table. The table
-        holds every row — one row per element, one per block — and the
+        elements table, an element group's row of the Element Groups table. The table
+        holds every row — one row per element, one per element group — and the
         scope says which are being looked at."""
         scope = self.editing_scope
         model = self.table.model()
@@ -4739,11 +4742,11 @@ class MainWindow(QMainWindow):
         component = self.editing[1]
         # a family's rows are most of the table, and a selection is a
         # statement (Tie reads it): the family row opens the table on
-        # nothing selected, a block row on its block
-        if component == 'elements' and scope[0] == 'block':
-            rows = [int(r) for r in np.flatnonzero(geometry.elem_block == scope[1])]
-        elif component == 'blocks' and scope[0] == 'block':
-            rows = [int(r) for r in np.flatnonzero(geometry.block_id == scope[1])]
+        # nothing selected, an element group row on its element group
+        if component == 'elements' and scope[0] == 'group':
+            rows = [int(r) for r in np.flatnonzero(geometry.elem_group == scope[1])]
+        elif component == 'groups' and scope[0] == 'group':
+            rows = [int(r) for r in np.flatnonzero(geometry.group_id == scope[1])]
         else:
             return
         selection = self.table.selectionModel()
@@ -4762,15 +4765,15 @@ class MainWindow(QMainWindow):
     def set_add_mode(self, enabled: bool) -> None:
         """Toggle creating things by clicking in the 3D view."""
         enabled = bool(enabled) and self.editing is not None
-        if enabled and self.editing[1] == 'blocks':
-            # Nothing to click: a block is a name over elements, not a
+        if enabled and self.editing[1] == 'groups':
+            # Nothing to click: an element group is a name over elements, not a
             # place. The button adds one and comes straight back up —
             # arming a mode that could never be satisfied would be a
             # control that looks live and does nothing. The button comes
             # back up first, because that re-enters here and would
             # otherwise overwrite what was just said in the status bar.
             self.add_action.setChecked(False)
-            self._add_block()
+            self._add_group()
             return
         if not enabled and self._picked_nodes:
             self._commit_picked_nodes()
@@ -4792,24 +4795,24 @@ class MainWindow(QMainWindow):
 
     def _picking_component(self):
         """What the cursor selects: nodes while building a line or element,
-        and nothing at all while editing blocks, which are not in the view
+        and nothing at all while editing element groups, which are not in the view
         to be clicked on."""
         _name, component = self.editing
         if self.add_mode and component == 'elements':
             return 'nodes'
-        if component == 'blocks':
+        if component == 'groups':
             return None
         return component
 
-    def _add_block(self):
-        """Add an empty block and put the cursor on its row to be named."""
+    def _add_group(self):
+        """Add an empty element group and put the cursor on its row to be named."""
         name, _component = self.editing
         geometry = self.objects.get(name)
         if geometry is None:
             return
-        block_id = geometry.add_block()
-        self.project.record_call(geometry, 'add_block')
-        self._after_geometry_change(name, geometry, f'Added block {block_id}')
+        group_id = geometry.add_group()
+        self.project.record_call(geometry, 'add_group')
+        self._after_geometry_change(name, geometry, f'Added element group {group_id}')
         model = self.table.model()
         if model is not None:
             row = model.rowCount() - 1
@@ -4849,13 +4852,13 @@ class MainWindow(QMainWindow):
         self.tie_action.setVisible(
             elements and (selected or self._tie_patch is not None))
         self.tie_action.setChecked(self._tie_patch is not None)
-        self.merge_blocks_action.setVisible(
+        self.merge_groups_action.setVisible(
             self._block_rows_to_merge() is not None)
 
     def _block_rows_to_merge(self):
-        """(geometry name, block ids) when the Blocks table has two rows
-        or more selected that may be one block, else None."""
-        if (self.editing is None or self.editing[1] != 'blocks'
+        """(geometry name, element group ids) when the Element Groups table has two rows
+        or more selected that may be one element group, else None."""
+        if (self.editing is None or self.editing[1] != 'groups'
                 or self.add_mode or self.table.selectionModel() is None):
             return None
         name = self.editing[0]
@@ -4864,28 +4867,28 @@ class MainWindow(QMainWindow):
                        in self.table.selectionModel().selectedRows()})
         if geometry is None or len(rows) < 2:
             return None
-        blocks = [_entity_key(geometry, 'blocks', row) for row in rows]
-        if geometry.merge_refusal(blocks) is not None:
+        groups = [_entity_key(geometry, 'groups', row) for row in rows]
+        if geometry.merge_refusal(groups) is not None:
             return None
-        return name, blocks
+        return name, groups
 
-    def _merge_block_rows(self):
+    def _merge_group_rows(self):
         picked = self._block_rows_to_merge()
         if picked is not None:
-            self.merge_blocks_act(*picked)
+            self.merge_groups_act(*picked)
 
-    def merge_blocks_act(self, name, blocks):
-        """The project's `merge_blocks`, and what it did, said."""
+    def merge_groups_act(self, name, groups):
+        """The project's `merge_groups`, and what it did, said."""
         geometry = self.objects.get(name)
         try:
-            found = self.project.merge_blocks(name, blocks)
+            found = self.project.merge_groups(name, groups)
         except (ValueError, TypeError) as refusal:
             self._show_status(f'{name}: {refusal}')
             return
-        kept = geometry.block_name[list(geometry.block_id).index(
-            found['into'])] or f'Block {found["into"]}'
-        message = (f'{name}: merged {found["blocks"]} block'
-                   f'{"s" * (found["blocks"] != 1)} into {kept} — '
+        kept = geometry.group_name[list(geometry.group_id).index(
+            found['into'])] or f'Element group {found["into"]}'
+        message = (f'{name}: merged {found["groups"]} element group'
+                   f'{"s" * (found["groups"] != 1)} into {kept} — '
                    f'{found["elements"]} elements moved')
         if self.editing is not None:
             self._after_geometry_change(name, geometry, message)
@@ -4897,7 +4900,7 @@ class MainWindow(QMainWindow):
         self._update_tie_action()
 
     def tie_selected(self) -> None:
-        """Tie the selected elements: to the nearest nodes of a block,
+        """Tie the selected elements: to the nearest nodes of an element group,
         chosen from a menu, or to a second selection — picked next, and
         tied on the second press."""
         self.tie_action.setChecked(self._tie_patch is not None)
@@ -4922,17 +4925,17 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         heading = menu.addAction('Tie to the nearest nodes of')
         heading.setEnabled(False)
-        names = list(geometry.block_name)
-        for k, block in enumerate(geometry.block_id):
-            properties = geometry.block_properties.get(int(block))
+        names = list(geometry.group_name)
+        for k, group in enumerate(geometry.group_id):
+            properties = geometry.group_properties.get(int(group))
             # nothing to tie to in a link or a lumped mass
             if (properties is not None
-                    and properties.kind in ('rigid', 'mass')) \
-                    or not geometry.elements_in(int(block)):
+                    and properties.kind in ('rigid', 'mass', 'spring', 'ground')) \
+                    or not geometry.elements_in(int(group)):
                 continue
-            label = names[k] or f'Block {int(block)}'
+            label = names[k] or f'Element group {int(group)}'
             target = names[k] if names[k] and names.count(names[k]) == 1 \
-                else int(block)
+                else int(group)
             menu.addAction(label).triggered.connect(
                 lambda _checked=False, to=target, text=label:
                 self._tie(name, list(picked), to, text))
@@ -4957,15 +4960,15 @@ class MainWindow(QMainWindow):
             self._show_status(f'{name}: {refusal}')
             self._update_tie_action()
             return
-        block = geometry.block_name[
-            list(geometry.block_id).index(found['block'])] or \
-            f'Block {found["block"]}'
+        group = geometry.group_name[
+            list(geometry.group_id).index(found['group'])] or \
+            f'Element group {found["group"]}'
         shared = (f'; {found["shared"]} nodes it shares already'
                   if found['shared'] else '')
         self._after_geometry_change(
             name, geometry,
             f'{name}: tied {len(patch)} elements to {label} — '
-            f'{found["links"]} rigid links in {block}{shared}')
+            f'{found["links"]} rigid links in {group}{shared}')
         self._update_tie_action()
 
     # ---- turning a coordinate system ---------------------------------------
@@ -5433,42 +5436,42 @@ class MainWindow(QMainWindow):
             action.setVisible(turning)
 
     def _update_element_type_actions(self):
-        """Show the block new elements go into only while adding
+        """Show the element group new elements go into only while adding
         elements."""
         adding = (self.add_mode and self.editing is not None
                   and self.editing[1] == 'elements')
-        self._element_block_handle.setVisible(adding)
+        self._element_group_handle.setVisible(adding)
         self._update_tie_action()
         if adding:
-            self._fill_element_blocks()
+            self._fill_element_groups()
 
-    #: the drop-down's last entry: new elements start a block of their own
-    NEW_BLOCK = 'New block'
+    #: the drop-down's last entry: new elements start an element group of their own
+    NEW_GROUP = 'New element group'
 
-    def _fill_element_blocks(self, keep: int | None = None):
-        """The blocks of the family being added to — a block holds one
+    def _fill_element_groups(self, keep: int | None = None):
+        """The element groups of the family being added to — an element group holds one
         family (2026-09-30) — the empty ones, and a new one; choosing
-        `keep` when given, else the block the editing began from, else
-        the family's first block, else a new one — so a beam never
+        `keep` when given, else the element group the editing began from, else
+        the family's first element group, else a new one — so a beam never
         lands among plates."""
         geometry = self.objects.get(self.editing[0]) if self.editing else None
-        box = self.element_block_box
+        box = self.element_group_box
         blocked = box.blockSignals(True)
         box.clear()
         family = self.editing_family
         if geometry is not None:
             held = {}
-            for code, block in zip(geometry.elem_type, geometry.elem_block):
-                held.setdefault(int(block), element_family(int(code)))
-            for k, block in enumerate(geometry.block_id):
-                if held.get(int(block), family) != family:
+            for code, group in zip(geometry.elem_type, geometry.elem_group):
+                held.setdefault(int(group), element_family(int(code)))
+            for k, group in enumerate(geometry.group_id):
+                if held.get(int(group), family) != family:
                     continue
-                name = geometry.block_name[k]
-                box.addItem(f'Block {int(block)}' + (f' — {name}' if name
-                                                     else ''), int(block))
-        box.addItem(self.NEW_BLOCK, None)
+                name = geometry.group_name[k]
+                box.addItem(f'Element group {int(group)}' + (f' — {name}' if name
+                                                     else ''), int(group))
+        box.addItem(self.NEW_GROUP, None)
         scope = self.editing_scope
-        if keep is None and scope is not None and scope[0] == 'block':
+        if keep is None and scope is not None and scope[0] == 'group':
             keep = scope[1]
         if keep is not None and box.findData(keep) >= 0:
             box.setCurrentIndex(box.findData(keep))
@@ -5476,22 +5479,22 @@ class MainWindow(QMainWindow):
             box.setCurrentIndex(0)
         box.blockSignals(blocked)
 
-    def _element_block(self, geometry) -> int:
-        """The block the next element goes into — made now when the
+    def _element_group(self, geometry) -> int:
+        """The element group the next element goes into — made now when the
         drop-down says a new one, and chosen in it from then on, so every
-        element picked after it joins the same new block."""
-        chosen = self.element_block_box.currentData()
+        element picked after it joins the same new element group."""
+        chosen = self.element_group_box.currentData()
         if chosen is not None:
             return int(chosen)
-        block = geometry.add_block()
-        self.project.record_call(geometry, 'add_block')
-        self._fill_element_blocks(keep=block)
-        return block
+        group = geometry.add_group()
+        self.project.record_call(geometry, 'add_group')
+        self._fill_element_groups(keep=group)
+        return group
 
     @property
     def element_type(self) -> tuple[int, int]:
         """(type code, node count) a click builds: the family being
-        edited says what, and a block that holds nothing yet takes a
+        edited says what, and an element group that holds nothing yet takes a
         triangle, the smallest face."""
         return FAMILY_ADD_TYPES.get(self.editing_family or 'triangles')
 
@@ -5578,23 +5581,23 @@ class MainWindow(QMainWindow):
             return
         try:
             code, count = self.element_type
-            block = self._element_block(geometry)
+            group = self._element_group(geometry)
             if ELEMENT_TYPES[code][2] == 'line':
-                # the chain through every node picked, in one block
-                geometry.add_beams(nodes, block=block, elem_type=code)
+                # the chain through every node picked, in one element group
+                geometry.add_beams(nodes, group=group, elem_type=code)
                 self.project.record_call(
                     geometry, 'add_beams', [int(n) for n in nodes],
-                    block=block, elem_type=code)
+                    group=group, elem_type=code)
                 message = (f'Added {len(nodes) - 1} '
                            f'{ELEMENT_TYPES[code][0]} element'
                            f'{"s" * (len(nodes) != 2)} through {len(nodes)} nodes')
             else:
                 if len(nodes) != count:
                     code = None      # Enter with fewer picks: fit the count
-                geometry.add_element(nodes, elem_type=code, block=block)
+                geometry.add_element(nodes, elem_type=code, group=group)
                 self.project.record_call(
                     geometry, 'add_element', [int(n) for n in nodes],
-                    elem_type=code, block=block)
+                    elem_type=code, group=group)
                 kind = ELEMENT_TYPES[int(geometry.elem_type[-1])][0]
                 message = f'Added {kind} element'
         except ValueError as e:
@@ -5614,7 +5617,7 @@ class MainWindow(QMainWindow):
         """Track what the cursor is over, so clicking selects what is lit.
 
         `component` is None where there is nothing in the view to pick —
-        editing blocks — and then nothing is tracked at all.
+        editing element groups — and then nothing is tracked at all.
         """
         from ..viz.geometry import display_points
         from ..viz.pick import EntityPicker, ScreenProjector
@@ -5720,7 +5723,7 @@ class MainWindow(QMainWindow):
         # element lights up the nodes the picker is returning
         component = self._picking_component()
         if component is None:
-            return                       # blocks: nothing in the view to hover
+            return                       # element groups: nothing in the view to hover
         cells = _hover_cells(geometry, component, self._hovered)
         self._hover_mesh.verts = cells['verts']
         self._hover_mesh.lines = cells['lines']
@@ -5889,13 +5892,13 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _entity_keys(geometry, component, rows):
-        """What add_geometry wants: node, cs or block ids, or row indices."""
+        """What add_geometry wants: node, cs or element group ids, or row indices."""
         if component == 'nodes':
             return [int(geometry.node_id[row]) for row in rows]
         if component == 'coordinate_systems':
             return [int(geometry.cs_id[row]) for row in rows]
-        if component == 'blocks':
-            return [int(geometry.block_id[row]) for row in rows]
+        if component == 'groups':
+            return [int(geometry.group_id[row]) for row in rows]
         return list(rows)
 
     @staticmethod
@@ -6855,7 +6858,7 @@ class MainWindow(QMainWindow):
         Basis stayed empty beside an orange bracket (Brandon,
         2026-09-19).
         """
-        grouped = {member for group in self.links
+        grouped = {member for group in self.object_groups
                    for member in group['members']}
         placed = next((name for name in names if name in grouped), None)
         loose = [name for name in names if name not in grouped]
@@ -6920,7 +6923,7 @@ class MainWindow(QMainWindow):
                 # demoted to no role, and later-wins carried every
                 # member into it: a project emptied and re-imported
                 # came back with no Basis at all (Brandon, 2026-09-03).
-                taken = {group['role'] for group in self.links
+                taken = {group['role'] for group in self.object_groups
                          if group['role']}
                 mapping, contents = {}, list(result.items())
                 for n, (name, obj) in enumerate(contents):
@@ -6931,7 +6934,7 @@ class MainWindow(QMainWindow):
                     for obj in result.values():
                         retarget(obj, mapping)
                 self.project.absorb_links(
-                    remap_links(result.links, mapping, taken))
+                    remap_links(result.object_groups, mapping, taken))
                 # the provenance travels like the links, through the same
                 # renames — dropped here, a freshly regenerated project
                 # opened with no staleness bookkeeping at all (Brandon,
@@ -6948,7 +6951,7 @@ class MainWindow(QMainWindow):
                         self.set_active_geometry(result.active_geometry)
                     if getattr(result, 'project_type', None):
                         self.set_project_type(result.project_type)
-                if self.links:
+                if self.object_groups:
                     self._links_changed()
                 imported = list(mapping.values())
             elif isinstance(result, dict):
@@ -7298,7 +7301,7 @@ class MainWindow(QMainWindow):
         self.unit_system = SYSTEMS[name]
         self.render_current()
         # an open geometry edit table was built once, in the system of
-        # its day: the nodes' coordinates and the blocks' properties
+        # its day: the nodes' coordinates and the element groups' properties
         # are shown in the display system, and follow it (2026-09-26)
         if self.editing is not None:
             self._reload_edit_table()
@@ -7477,7 +7480,7 @@ class MainWindow(QMainWindow):
                 if kind == 'component' and detail:
                     entry['components'].add(detail)
                 elif kind == 'family':
-                    # a family is its elements, as a block is its own
+                    # a family is its elements, as an element group is its own
                     rows = [i for i, code in enumerate(obj.elem_type)
                             if element_family(int(code)) == detail]
                     entry['entities'].setdefault('elements', []).extend(rows)
@@ -7678,7 +7681,7 @@ class MainWindow(QMainWindow):
         counts = {'nodes': entry['object'].num_nodes,
                   'coordinate_systems': len(entry['object'].cs_id),
                   'elements': len(entry['object'].elem_conn),
-                  'blocks': len(entry['object'].block_id)}
+                  'groups': len(entry['object'].group_id)}
         return component if not counts.get(component, 1) else None
 
     def _deflection_for(self, geometries, series, shapes):
@@ -7814,9 +7817,9 @@ class MainWindow(QMainWindow):
     def _show_bracket_menu(self, span, position):
         """Right-clicking a link bracket: the group's own options.
         Placeholder-only brackets hold no group yet and offer none."""
-        if span >= len(self.links):
+        if span >= len(self.object_groups):
             return
-        group = self.links[span]
+        group = self.object_groups[span]
         menu = QMenu(self.tree)
         basis = menu.addAction('&Basis of Comparisons')
         basis.setCheckable(True)
@@ -7826,34 +7829,34 @@ class MainWindow(QMainWindow):
             self.set_link_role(
                 name, None if self.link_role(name) == 'Basis'
                 else 'Basis'))
-        named = menu.addAction('&Name Group…' if not group.get('name')
-                               else '&Rename Group…')
+        named = menu.addAction('&Name Object Group…' if not group.get('name')
+                               else '&Rename Object Group…')
         named.triggered.connect(
             lambda _checked=False, name=group['members'][0]:
-            self.name_group(name))
+            self.name_object_group(name))
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
-    def name_group(self, member: str, name: str | None = None) -> None:
-        """Name the link group `member` is in — asked in a dialog when
+    def name_object_group(self, member: str, name: str | None = None) -> None:
+        """Name the object group `member` is in — asked in a dialog when
         `name` is not given — and paint it on the bracket. The name is
         what an ESCDF activity is called on export."""
         from PySide6.QtWidgets import QInputDialog
 
-        current = self.project.group_of(member)
+        current = self.project.object_group_of(member)
         if current is None:
             return
         if name is None:
-            held = next((g.get('name', '') for g in self.links
+            held = next((g.get('name', '') for g in self.object_groups
                          if member in g['members']), '')
             name, ok = QInputDialog.getText(
-                self, 'Name Group', 'The group\'s name:', text=held)
+                self, 'Name Object Group', 'The object group\'s name:', text=held)
             if not ok:
                 return
-        self.project.name_group(member, name.strip() or None)
+        self.project.name_object_group(member, name.strip() or None)
         self._paint_links()
         self.tree.viewport().update()
-        self._show_status(f'Group named {name.strip()!r}' if name.strip()
-                          else 'Group name removed')
+        self._show_status(f'Object group named {name.strip()!r}' if name.strip()
+                          else 'Object group name removed')
 
     def _render_matches(self, name, matched):
         """The matched-modes object on its own: the table, rows
@@ -8260,7 +8263,7 @@ class MainWindow(QMainWindow):
         whole set, at length — and the report still uses it.
 
         Named by the objects rather than by their roles: 'basis' and
-        'other' are a property of the link groups, and a reader looking
+        'other' are a property of the object groups, and a reader looking
         at two animations wants to know which of the two things in front
         of them is the bigger.
         """
@@ -8731,7 +8734,7 @@ class MainWindow(QMainWindow):
         the sheet then asks rather than guesses."""
         linked = []
         for name in names:
-            linked.extend(self.project.group_of(name) or [])
+            linked.extend(self.project.object_group_of(name) or [])
         candidates = [n for n in linked if n in self.objects] + [
             n for n in self.objects if n not in linked]
         for name in candidates:
@@ -11474,8 +11477,8 @@ class MainWindow(QMainWindow):
         unit = self.unit_system.unit('length') if defined else None
         label = self.unit_system.label_text('length') if defined else 'units'
         panel = self.scene.mesh_panel
-        panel.open_for(kind, label, list(obj.block_name),
-                       default=self._mesh_default_block(obj, kind))
+        panel.open_for(kind, label, list(obj.group_name),
+                       default=self._mesh_default_group(obj, kind))
         frame = np.zeros((4, 3))
         frame[:3] = np.eye(3)
         frame[3] = panel.values()['center']
@@ -11486,20 +11489,20 @@ class MainWindow(QMainWindow):
         self._mesh_refresh()
         self._begin_rotating()
 
-    def _mesh_default_block(self, geometry, kind: str) -> str:
-        """The block the pane opens on: the last of the geometry's blocks
-        of the family it adds, so plates keep joining plates, else a name
-        not yet taken. It opened on the geometry's first block of any
-        family, and a plate added after a block went into the block's
+    def _mesh_default_group(self, geometry, kind: str) -> str:
+        """The element group the pane opens on: the last of the geometry's
+        groups of the family it adds, so plates keep joining plates, else
+        a name not yet taken. It opened on the geometry's first group of
+        any family, and a plate added after a block went into the block's
         bricks (Brandon, 2026-10-02)."""
         from ..core import mesh
 
         family = 'hexes' if kind == 'block' else 'quads'
-        for k in range(len(geometry.block_id) - 1, -1, -1):
-            if mesh.block_families(geometry, int(geometry.block_id[k])) == {family}:
-                return str(geometry.block_name[k])
+        for k in range(len(geometry.group_id) - 1, -1, -1):
+            if mesh.group_families(geometry, int(geometry.group_id[k])) == {family}:
+                return str(geometry.group_name[k])
         stem = 'block' if kind == 'block' else 'plate'
-        taken = set(geometry.block_name)
+        taken = set(geometry.group_name)
         name, n = stem, 1
         while name in taken:
             n += 1
@@ -11573,7 +11576,7 @@ class MainWindow(QMainWindow):
 
         return ('add_block' if kind == 'block' else 'add_plane',
                 {'corner': tidy(corner), 'edges': [tidy(e) for e in edges],
-                 'size': values['size'], 'block': values['block']})
+                 'size': values['size'], 'group': values['group']})
 
     def _mesh_part(self):
         from ..core import mesh
@@ -11582,7 +11585,7 @@ class MainWindow(QMainWindow):
         unit = self._mesh['unit'] if self._mesh['defined'] else None
         build = mesh.block if verb == 'add_block' else mesh.plane
         return build(call['corner'], *call['edges'], call['size'],
-                     call['block'], unit=unit)
+                     call['group'], unit=unit)
 
     def _mesh_refresh(self) -> None:
         """Ask what the fields would add; say it, draw it, and allow Add
@@ -11600,7 +11603,7 @@ class MainWindow(QMainWindow):
             text = str(refusal)
             panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
             return
-        refusal = mesh.block_refusal(obj, part)
+        refusal = mesh.group_refusal(obj, part)
         if refusal is not None:
             self._draw_plane_preview(None)
             panel.show_reading(f'{refusal[:1].upper()}{refusal[1:]}.', False)
@@ -11622,10 +11625,10 @@ class MainWindow(QMainWindow):
                       float(np.linalg.norm(first[2] - first[1]))]
             what = (f'{len(part.elem_conn)} plates of {across[0]:.4g} by '
                     f'{across[1]:.4g} {label}')
-        block = panel.values()['block']
-        where = (f'block {block!r}' if block in obj.block_name else
-                 f'a new block {block!r}' if block else
-                 'an unnamed block of its own')
+        group = panel.values()['group']
+        where = (f'element group {group!r}' if group in obj.group_name else
+                 f'a new element group {group!r}' if group else
+                 'an unnamed element group of its own')
         shared = int(on.sum())
         doubled = mesh.already_there(obj, part)
         overlap = (f' {doubled} of the elements are already there where it '
@@ -11648,7 +11651,7 @@ class MainWindow(QMainWindow):
         name = self._mesh['name']
         obj = self.objects[name]
         found = getattr(self.project, verb)(
-            name, call['corner'], *call['edges'], call['size'], call['block'],
+            name, call['corner'], *call['edges'], call['size'], call['group'],
             unit=self._mesh['unit'])
         self._refresh_item(self._item_for_object(name), obj)
         self.render_current()
@@ -11740,12 +11743,12 @@ class MainWindow(QMainWindow):
 
     def solve_modes_act(self) -> None:
         """The normal modes of the selected geometry, built from its
-        blocks' properties: the two numbers the solution takes are asked
+        element groups' properties: the two numbers the solution takes are asked
         for once, and the shapes land in the geometry's group."""
         obj = self.current_object()
-        if not (isinstance(obj, Geometry) and obj.block_properties):
-            self._show_status('Select a geometry whose blocks carry their '
-                              'properties (the Blocks table) to solve')
+        if not (isinstance(obj, Geometry) and obj.group_properties):
+            self._show_status('Select a geometry whose element groups carry their '
+                              'properties (the Element Groups table) to solve')
             return
         top, ok = QInputDialog.getDouble(
             self, 'Solve Modes', 'Highest frequency to solve for [Hz]:',
@@ -12051,7 +12054,7 @@ class MainWindow(QMainWindow):
         if self.report_editor.report is not report:
             self.report_editor.show_report(report, lambda: self.objects,
                                            self.unit_system,
-                                           links=lambda: self.links)
+                                           object_groups=lambda: self.object_groups)
         elif self.report_editor.unit_system is not self.unit_system:
             # the display system changed underneath the open report —
             # it shows display units, so it re-renders in the new ones
@@ -12063,7 +12066,7 @@ class MainWindow(QMainWindow):
         self.report_editor.show()
         if self.report_editor.failure:
             return f'{name}: could not be built — {self.report_editor.failure}'
-        unbound = len(report.unbound(self.objects, self.links))
+        unbound = len(report.unbound(self.objects, self.object_groups))
         note = (f'; {unbound} block{"s" * (unbound != 1)} unbound — pick '
                 'a source' if unbound else '')
         return (f'{name}: {report.num_blocks} '
@@ -12073,7 +12076,7 @@ class MainWindow(QMainWindow):
         """A new Report object from a starter template, opened to edit.
 
         Templates bind symbolically — '@basis:Frf' and friends,
-        resolved against the link groups at render time — so the
+        resolved against the object groups at render time — so the
         report depends on the project's structure, never on what
         anyone named their objects.
         """
@@ -12174,7 +12177,7 @@ class MainWindow(QMainWindow):
         skipped = len(obj.unbound(self.objects))
         with open(path, 'w', encoding='utf-8') as out:
             out.write(render_html(obj, self.objects, self.unit_system,
-                                  links=self.links))
+                                  object_groups=self.object_groups))
         note = (f' ({skipped} unbound block'
                 f'{"s" * (skipped != 1)} left out)') if skipped else ''
         self._show_status(
@@ -13250,7 +13253,7 @@ class MainWindow(QMainWindow):
         another grid and two scales for one run is a contradiction."""
         from ..core.data import Psd, Specification
 
-        group = self.project.group_of(name) or [name]
+        group = self.project.object_group_of(name) or [name]
         if name not in group:
             group = [name, *group]
         return [n for n in group

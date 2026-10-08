@@ -498,20 +498,20 @@ class Shape:
     def geometry(self, length_unit: str = 'm') -> Geometry:
         """What was drawn, as a Geometry: quads and triangles, no lines.
 
-        Each face goes into the block of the part that drew it, so the
+        Each face goes into the element group of the part that drew it, so the
         geometry says by itself which region is which — and a saved file
         can rebuild the structure without anything passed alongside it.
 
-        Blocks are named for the whole part, sides and all ('arm front
+        Element groups are named for the whole part, sides and all ('arm front
         left', not 'arm'). Collapsing them to the part alone reads more
         tidily and loses the one thing the sensor set is picked by: which
         of the four arms a node is on.
         """
         ids = sorted(self.xyz)
-        parts, blocks = {}, []
+        parts, groups = {}, []
         for group in self.face_group:
             part = group or 'body'
-            blocks.append(parts.setdefault(part, len(parts) + 1))
+            groups.append(parts.setdefault(part, len(parts) + 1))
         return Geometry(
             node_id=ids,
             node_xyz=np.array([self.xyz[n] for n in ids]),
@@ -519,9 +519,9 @@ class Shape:
             elem_type=[44 if len(nodes) == 4 else 41
                        for nodes, _ in self.faces],
             elem_color=[color for _, color in self.faces],
-            elem_block=blocks,
-            block_id=list(parts.values()),
-            block_name=list(parts),
+            elem_group=groups,
+            group_id=list(parts.values()),
+            group_name=list(parts),
             length_unit=length_unit)
 
 
@@ -1083,7 +1083,7 @@ def build(sides: int = 12, arm_stations: int = 9, leg_stations: int = 5,
     # every edge of every face, and the mass shared over the nodes. There
     # is one description of this aircraft, and the physics is derived from
     # it rather than written beside it.
-    # No groups passed: the geometry's own blocks say which part each face
+    # No groups passed: the geometry's own element groups say which part each face
     # belongs to, so a model built here and a model rebuilt from a saved
     # file are the same model. They were not while the parts arrived
     # alongside the drawing — 16 blade members read as frame.
@@ -1159,9 +1159,9 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
         if leg:
             found['feet'].append(min(leg, key=lambda n: model.position(n)[2]))
 
-    # The shell, not the canopy block: the canopy is the apex cap alone —
+    # The shell, not the canopy element group: the canopy is the apex cap alone —
     # eight triangles — and the ring at 0.9 of the body radius is the
-    # waist below it. Asking one block for both put all four body sensors
+    # waist below it. Asking one element group for both put all four body sensors
     # and the center one on the same node.
     body = [n for n in model.node_ids if part_of(model, n) == 'body']
     found['body'] = [nearest(body, (BODY_R * 0.9 * math.cos(math.radians(a)),

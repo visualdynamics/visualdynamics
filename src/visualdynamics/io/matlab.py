@@ -228,7 +228,7 @@ def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
             native.save_test_into(f, obj.name, dict(obj),
                                   active_geometry=obj.active_geometry,
                                   project_type=obj.project_type,
-                                  links=obj.links, provenance=obj.provenance)
+                                  object_groups=obj.object_groups, provenance=obj.provenance)
         else:
             native.save_into(obj, f)
         tree = _tree_out(f)

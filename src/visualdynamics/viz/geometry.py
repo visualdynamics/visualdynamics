@@ -566,7 +566,7 @@ def label_choices(labels: Sequence[str] | Mapping[str, Sequence[int] | None]
     Both spellings read naturally where they are used. A script says
     `labels=['nodes']` and means *the nodes that are drawn*; the window,
     which knows exactly what the user picked, says
-    `labels={'blocks': [3]}`. None means "whatever this kind draws",
+    `labels={'groups': [3]}`. None means "whatever this kind draws",
     which is the right answer for both.
     """
     if labels is None:
@@ -589,7 +589,7 @@ def labels_fit(geometry: Geometry, kind: str,
     counts = {'nodes': geometry.num_nodes,
               'coordinate_systems': len(geometry.cs_id),
               'elements': len(geometry.elem_conn),
-              'blocks': len(geometry.block_id)}
+              'groups': len(geometry.group_id)}
     return counts.get(kind, 0) <= ENTITY_LABEL_LIMIT
 
 
@@ -601,12 +601,12 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
     `points` is the geometry's nodes as drawn, so a caption lands in the
     same units and the same frame as the thing it names. Everything but
     a node is captioned at the **centroid of its own nodes**: the middle
-    of an element's corners, of a block's
+    of an element's corners, of an element group's
     elements. That is where a reader looks for the name of a shape, and
     it keeps the number off the vertices, which are already carrying
     node ids whenever both are shown.
 
-    `chosen` is the ids (nodes, coordinate systems, blocks) or indices
+    `chosen` is the ids (nodes, coordinate systems, element groups) or indices
     (elements) to caption; None captions every one of the
     kind. Returns nothing past `ENTITY_LABEL_LIMIT`; see `labels_fit`.
     """
@@ -635,23 +635,23 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
                 spots.append(spot)
                 texts.append(str(int(geometry.elem_id[int(i)])))
 
-    elif kind == 'blocks':
-        # a block holds no coordinates of its own: it is a label on
+    elif kind == 'groups':
+        # an element group holds no coordinates of its own: it is a label on
         # elements, so it is captioned in the middle of the elements
         # that carry its id
         wanted = ({int(b) for b in chosen} if chosen is not None
-                  else {int(b) for b in geometry.block_id})
-        blocks = np.asarray(geometry.elem_block, dtype=np.int64)
-        for row, block in enumerate(geometry.block_id):
-            if int(block) not in wanted:
+                  else {int(b) for b in geometry.group_id})
+        groups = np.asarray(geometry.elem_group, dtype=np.int64)
+        for row, group in enumerate(geometry.group_id):
+            if int(group) not in wanted:
                 continue
-            members = np.flatnonzero(blocks == int(block))
+            members = np.flatnonzero(groups == int(group))
             nodes = [n for i in members for n in geometry.elem_conn[int(i)]]
             spot = center(nodes)
             if spot is not None:
                 spots.append(spot)
-                name = str(geometry.block_name[row]).strip()
-                texts.append(name or str(int(block)))
+                name = str(geometry.group_name[row]).strip()
+                texts.append(name or str(int(group)))
 
     return (np.asarray(spots) if spots else np.empty((0, 3))), texts
 
@@ -678,7 +678,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
     in the tree gets highlighted.
 
     `labels` names the kinds to caption with their ids — any of 'nodes',
-    'coordinate_systems', 'elements', 'blocks'. Captions
+    'coordinate_systems', 'elements', 'groups'. Captions
     follow `entities` when it restricts the drawing, so labeling a
     picked element names that one and not all of them, and a kind with
     more than `ENTITY_LABEL_LIMIT` of them is left uncaptioned (see
@@ -748,7 +748,7 @@ def add_geometry(plotter: Any, geometry: Geometry,
                          render_points_as_spheres=True, opacity=opacity)
 
     # Elements, split by render class and grouped by color (a drawn
-    # line is a block of two-node line elements since 2026-09-30, and
+    # line is an element group of two-node line elements since 2026-09-30, and
     # draws as its line elements do: direct color per group)
     faces, lines, cell_points = {}, {}, {}
     wanted_elements = picked.get('elements')

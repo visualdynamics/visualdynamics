@@ -17,7 +17,7 @@ import pytest
 from test_fem import ALUMINUM
 
 import visualdynamics
-from visualdynamics.core.fem import RIGID, BlockProperties, Model, Section, material
+from visualdynamics.core.fem import RIGID, GroupProperties, Model, Section, material
 
 
 def _strip(model, first, nx=6, ny=2, x0=0.0, z=0.0, length=0.3,
@@ -144,23 +144,23 @@ def test_links_are_refused_where_they_mean_nothing():
 
 
 def test_a_rigid_block_builds_links_and_the_file_keeps_it(tmp_path):
-    """Picked as a block's material, a rigid link needs no section; its
-    two-node lines become links, and a block of faces is refused by name.
-    The geometry a model exports puts its links in a block of their own."""
+    """Picked as an element group's material, a rigid link needs no section; its
+    two-node lines become links, and an element group of faces is refused by name.
+    The geometry a model exports puts its links in an element group of their own."""
     model = Model('stack')
     lower = _strip(model, 1, group='lower')
     upper = _strip(model, 101, z=0.03, group='upper')
     model.add_rigid_link(lower[(0, 0)], upper[(0, 0)], group='bolts')
     model.add_rigid_link(lower[(6, 2)], upper[(6, 2)], group='bolts')
     geometry = model.geometry()
-    names = list(geometry.block_name)
+    names = list(geometry.group_name)
     assert 'bolts' in names
-    ids = {name: int(geometry.block_id[i]) for i, name in enumerate(names)}
-    geometry.block_properties = {
-        ids['lower']: BlockProperties(ALUMINUM, 0.004),
-        ids['upper']: BlockProperties(ALUMINUM, 0.004),
-        ids['bolts']: BlockProperties(RIGID, section=Section.rod('left', 0.01))}
-    assert geometry.block_properties[ids['bolts']].kind == 'rigid', (
+    ids = {name: int(geometry.group_id[i]) for i, name in enumerate(names)}
+    geometry.group_properties = {
+        ids['lower']: GroupProperties(ALUMINUM, 0.004),
+        ids['upper']: GroupProperties(ALUMINUM, 0.004),
+        ids['bolts']: GroupProperties(RIGID, section=Section.rod('left', 0.01))}
+    assert geometry.group_properties[ids['bolts']].kind == 'rigid', (
         'a section left from before the pick is ignored')
     rebuilt = Model.from_geometry(geometry)
     assert len(rebuilt.rigid_links) == 2 and not rebuilt.beams
@@ -169,8 +169,8 @@ def test_a_rigid_block_builds_links_and_the_file_keeps_it(tmp_path):
                        rtol=1e-9, atol=1e-6)
     visualdynamics.save(geometry, tmp_path / 'stack.vdyn')
     back = visualdynamics.load(tmp_path / 'stack.vdyn')
-    assert back.block_properties[ids['bolts']].material.is_rigid
-    geometry.block_properties[ids['lower']] = BlockProperties(RIGID)
-    with pytest.raises(ValueError, match=r'a rigid \(massless\) block holds '
+    assert back.group_properties[ids['bolts']].material.is_rigid
+    geometry.group_properties[ids['lower']] = GroupProperties(RIGID)
+    with pytest.raises(ValueError, match=r'a rigid \(massless\) element group holds '
                                           'two-node lines'):
         Model.from_geometry(geometry)

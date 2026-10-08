@@ -76,9 +76,9 @@ def _block_names(variables, count):
 
 def _export_blocks(geometry, count):
     """(id, name) per element — what block each one goes out in."""
-    block = np.asarray(getattr(geometry, 'elem_block', []), dtype=np.int64)
-    ids = np.asarray(getattr(geometry, 'block_id', []), dtype=np.int64)
-    names = list(getattr(geometry, 'block_name', []))
+    block = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
+    names = list(getattr(geometry, 'group_name', []))
     named = {int(b): (int(b), names[i] if i < len(names) else '')
              for i, b in enumerate(ids)}
     return [named.get(int(block[i]), (0, '')) if i < len(block) else (0, '')
@@ -114,11 +114,11 @@ def _unique_block_labels(keys):
     used_ids, used_names, labels = set(), set(), []
     for index, ((_id, declared_name), _code, type_name, _count) in \
             enumerate(keys):
-        block_id = declared[index]
-        if block_id <= 0 or block_id in used_ids:
-            block_id = next(i for i in free
+        group_id = declared[index]
+        if group_id <= 0 or group_id in used_ids:
+            group_id = next(i for i in free
                             if i not in reserved and i not in used_ids)
-        used_ids.add(block_id)
+        used_ids.add(group_id)
         name = str(declared_name)
         if name and name in used_names:
             name = f'{name} {type_name}'
@@ -127,7 +127,7 @@ def _unique_block_labels(keys):
                     break
                 name = f'{declared_name} {type_name} {suffix}'
         used_names.add(name)
-        labels.append((block_id, name[:32]))
+        labels.append((group_id, name[:32]))
     return labels
 
 
@@ -166,20 +166,20 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
                     if 'node_num_map' in v
                     else np.arange(1, num_nodes + 1))
 
-        block_ids = (np.asarray(v['eb_prop1'][()])
+        group_ids = (np.asarray(v['eb_prop1'][()])
                      if 'eb_prop1' in v else [])
         # eb_status 0 is the format's own 'not really here' — the one
         # block an element-less file writes as a placeholder has no
         # connect variable to read
         status = (np.asarray(v['eb_status'][()]) if 'eb_status' in v
-                  else np.ones(len(block_ids)))
-        names = _block_names(v, len(block_ids))
-        elem_type, elem_conn, elem_block = [], [], []
+                  else np.ones(len(group_ids)))
+        names = _block_names(v, len(group_ids))
+        elem_type, elem_conn, elem_group = [], [], []
         kept_blocks, kept_names = [], []
-        for i, block_id in enumerate(block_ids, start=1):
+        for i, group_id in enumerate(group_ids, start=1):
             if not status[i - 1]:
                 continue
-            if blocks is not None and block_id not in blocks:
+            if blocks is not None and group_id not in blocks:
                 continue
             conn_var = v[f'connect{i}']
             type_name = str(conn_var.elem_type).upper()
@@ -188,14 +188,14 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
             except KeyError:
                 raise ValueError(
                     f"Unsupported exodus element type {type_name!r} "
-                    f"in block {block_id} of {path}")
+                    f"in block {group_id} of {path}")
             conn = np.asarray(conn_var[()], dtype=np.int64)  # 1-based local indices
-            kept_blocks.append(int(block_id))
+            kept_blocks.append(int(group_id))
             kept_names.append(names[i - 1])
             for row in conn:
                 elem_type.append(code)
                 elem_conn.append(node_ids[row - 1])
-                elem_block.append(int(block_id))
+                elem_group.append(int(group_id))
 
         elem_ids = (np.asarray(v['elem_num_map'][()])
                     if 'elem_num_map' in v and blocks is None
@@ -209,9 +209,9 @@ def load(path: str | os.PathLike, length_unit: str | None = None,
         elem_id=elem_ids,
         elem_type=elem_type,
         elem_conn=elem_conn,
-        elem_block=elem_block or None,
-        block_id=kept_blocks or None,
-        block_name=kept_names or None,
+        elem_group=elem_group or None,
+        group_id=kept_blocks or None,
+        group_name=kept_names or None,
         length_unit=length_unit,
         **systems,
     )
@@ -897,7 +897,7 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
         properties.setncattr('name', 'ID')   # 'name' is reserved on the
                                              # netCDF4 object itself
         status = ds.createVariable('eb_status', 'i4', ('num_el_blk',))
-        block_names = ds.createVariable(
+        group_names = ds.createVariable(
             'eb_names', 'S1', ('num_el_blk', 'len_string'))
         written = _unique_block_labels(list(blocks))
         for i, ((_label, _code, name, count), rows) in enumerate(
@@ -911,11 +911,11 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
             connect[:] = np.array(
                 [[row_of[int(n)] for n in connectivity[i]] for i in rows],
                 dtype=np.int32)
-            block_id, text = written[i - 1]
-            properties[i - 1] = block_id
+            group_id, text = written[i - 1]
+            properties[i - 1] = group_id
             status[i - 1] = 1
             if text:
-                block_names[i - 1, :len(text)] = np.array(list(text),
+                group_names[i - 1, :len(text)] = np.array(list(text),
                                                           dtype='S1')
         if not blocks:
             properties[0] = 1

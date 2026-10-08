@@ -50,7 +50,7 @@ def test_a_step_box_arrives_as_meter_triangles(tmp_path):
         'a 100 x 50 x 25 mm box is 0.1 x 0.05 x 0.025 m')
     assert (geometry.elem_type == 41).all(), 'tri3 face elements'
     assert len(geometry.elem_id) >= 12, 'a box tessellates to >= 12 tris'
-    assert len(geometry.block_id) == 1
+    assert len(geometry.group_id) == 1
 
 
 def test_iges_reads_through_the_same_door(tmp_path):

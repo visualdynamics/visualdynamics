@@ -106,8 +106,8 @@ def edit_category(window, pump, label):
     return child
 
 
-def block_row(window, block_id):
-    """A block's row in the tree, under its family (2026-09-30)."""
+def group_row(window, group_id):
+    """An element group's row in the tree, under its family (2026-09-30)."""
     from visualdynamics.gui.main_window import ROLE_REFERENCE
 
     item = window._item_for_object('Geometry')
@@ -116,16 +116,17 @@ def block_row(window, block_id):
         family = item.child(i)
         for j in range(family.childCount()):
             row = family.child(j)
-            if row.data(0, ROLE_REFERENCE) == ('block', item.text(0), block_id):
+            if row.data(0, ROLE_REFERENCE) == ('group', item.text(0), group_id):
                 family.setExpanded(True)
                 return row
-    raise LookupError(f'no row for block {block_id}')
+    raise LookupError(f'no row for element group {group_id}')
 
 
-def edit_block(window, pump, block_id):
-    """Open a block's edit table — the blocks table on its row — the way
-    the pencil on the block's row does, and return the row."""
-    row = block_row(window, block_id)
+def edit_element_group(window, pump, group_id):
+    """Open an element group's edit table — the Element Groups table on
+    its row — the way the pencil on the group's row does, and return the
+    row."""
+    row = group_row(window, group_id)
     window.tree.clearSelection()
     window.tree.setCurrentItem(row)
     row.setSelected(True)

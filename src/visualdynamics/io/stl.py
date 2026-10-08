@@ -82,11 +82,11 @@ def mesh_geometry(parts: list[tuple[str, np.ndarray]],
     block per part, vertices merged where coordinates are identical."""
     seen: dict[bytes, int] = {}
     xyz: list[np.ndarray] = []
-    elem_conn, elem_block = [], []
-    block_id, block_name = [], []
+    elem_conn, elem_group = [], []
+    group_id, group_name = [], []
     for index, (name, corners) in enumerate(parts, start=1):
-        block_id.append(index)
-        block_name.append(name)
+        group_id.append(index)
+        group_name.append(name)
         for triangle in corners:
             conn = []
             for corner in triangle:
@@ -97,15 +97,15 @@ def mesh_geometry(parts: list[tuple[str, np.ndarray]],
                     xyz.append(corner)
                 conn.append(node)
             elem_conn.append(np.asarray(conn, dtype=np.int64))
-            elem_block.append(index)
+            elem_group.append(index)
     count = len(elem_conn)
     return Geometry(
         node_id=np.arange(1, len(xyz) + 1),
         node_xyz=np.asarray(xyz, dtype=np.float64).reshape(-1, 3),
         elem_id=np.arange(1, count + 1),
         elem_type=np.full(count, TRI3, dtype=np.int64),
-        elem_conn=elem_conn, elem_block=np.asarray(elem_block),
-        block_id=np.asarray(block_id), block_name=block_name,
+        elem_conn=elem_conn, elem_group=np.asarray(elem_group),
+        group_id=np.asarray(group_id), group_name=group_name,
         length_unit=length_unit)
 
 
@@ -147,7 +147,7 @@ def faces_as_triangles(geometry: Geometry) -> list[tuple[int, np.ndarray]]:
              for position, i in enumerate(geometry.node_id)}
     by_block: dict[int, list[np.ndarray]] = {}
     for kind, conn, block in zip(geometry.elem_type, geometry.elem_conn,
-                                 geometry.elem_block, strict=True):
+                                 geometry.elem_group, strict=True):
         name, _count, render = ELEMENT_TYPES.get(
             int(kind), ('?', 0, 'point'))
         if render != 'face':

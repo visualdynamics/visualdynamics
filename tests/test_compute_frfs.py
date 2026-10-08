@@ -260,7 +260,7 @@ def test_the_project_verb_links_them():
     project.import_file(fixture_path('plate', 'modal_spectra.nc4'))
     name = project.compute_frfs(project.time_history)
     assert isinstance(project[name], Frf)
-    assert name in (project.group_of('Time History') or [])
+    assert name in (project.object_group_of('Time History') or [])
     assert name.endswith('Hv FRFs'), 'the estimator is part of the name'
 
 

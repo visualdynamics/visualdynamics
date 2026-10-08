@@ -266,11 +266,11 @@ def test_the_report_animates_the_matched_overlay(window, pump):
     assert np.max(np.linalg.norm(real[:2], axis=1)) == pytest.approx(1.0)
     assert np.max(np.linalg.norm(real[2:], axis=1)) == pytest.approx(1.0)
     # matches committed before the object remembered its geometries
-    # still animate: the renderer falls back to the link groups
+    # still animate: the renderer falls back to the object groups
     matched.first_geometry = None
     matched.second_geometry = None
     payload = json.loads(
-        render_html(report, window.objects, links=window.links).split(
+        render_html(report, window.objects, object_groups=window.object_groups).split(
             'type="application/json">')[1].split('</script>')[0])
     aged = payload['blocks'][0]
     assert aged['kind'] == 'scene' and len(aged['points']) == 10
@@ -327,7 +327,7 @@ def test_sensors_on_a_plates_surface_are_found_on_its_mid_surface():
     from visualdynamics.core.shapes import ShapeSet
 
     plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.25, 'plate')
-    plate.block_properties = {1: fem.BlockProperties(
+    plate.group_properties = {1: fem.GroupProperties(
         fem.material('6061-T6'), 0.1)}
     dofs = [f'{n}Z+' for n in plate.node_id]
     fem_shapes = ShapeSet([10.0], [0.0], dofs,

@@ -10,9 +10,9 @@ against — and because building one should not require reaching for another
 package.
 
 There are three ways in. Build a structure member by member, as the
-example below does. Give a geometry's blocks their properties — a material
-and a thickness for a block of plates, a material and a section for a
-block of beams (`BlockProperties`) — and let `from_geometry` build every
+example below does. Give a geometry's element groups their properties — a material
+and a thickness for an element group of plates, a material and a section for an
+element group of beams (`GroupProperties`) — and let `from_geometry` build every
 element as the element it is, which is how an exodus file means a
 structure and the way a user builds a model of a simple article. Or draw
 a shape as a surface mesh and let `from_geometry`, given one material and
@@ -178,7 +178,7 @@ class Material:
     @property
     def is_rigid(self) -> bool:
         """Whether this is `RIGID`: a link, not a material. A modulus
-        left blank in the Blocks table (None) is a material not yet
+        left blank in the Element Groups table (None) is a material not yet
         finished, not a link."""
         return (self.youngs_modulus is not None
                 and math.isinf(self.youngs_modulus))
@@ -223,7 +223,7 @@ _METALS = 'typical room-temperature handbook values for the wrought alloy'
 _PLASTIC = ('typical room-temperature values; a plastic varies by grade '
             'and supplier more than a metal does')
 
-#: The materials the Blocks table offers and `material()` answers to:
+#: The materials the Element Groups table offers and `material()` answers to:
 #: common structural alloys and a few plastics, each as the handbooks
 #: state it. Typical values, to be checked against the part's own
 #: certification when it matters; every entry says so in its note.
@@ -249,7 +249,7 @@ MATERIAL_LIBRARY: tuple[LibraryMaterial, ...] = (
     _handbook('nylon 6/6', 0.41, 0.0412, 0.39, _PLASTIC),
 )
 
-#: A block of two-node lines made of this is a set of rigid, massless
+#: An element group of two-node lines made of this is a set of rigid, massless
 #: links (Brandon, 2026-09-26): each joins two nodes so that one moves as
 #: the other plus its rotation about it, and adds no mass. What a bolt
 #: joining two plates whose mid-surfaces do not meet is, in a model built
@@ -268,7 +268,7 @@ MATERIALS[RIGID.name] = RIGID
 
 def material(name: str) -> Material:
     """A library material by name — `material('6061-T6')` — the same
-    entry the Blocks table's Material drop-down fills a row from.
+    entry the Element Groups table's Material drop-down fills a row from.
 
     Raises `KeyError` naming the library when the name is not in it,
     so a typo reads as one rather than as a missing material.
@@ -539,7 +539,7 @@ def angle_major_axis(long_leg: float, short_leg: float,
 
 
 #: the shapes a section can be built from: {shape: (constructor, the
-#: dimensions it takes, in order)} — what the Blocks table offers, and
+#: dimensions it takes, in order)} — what the Element Groups table offers, and
 #: what a file or a session script rebuilds a section from
 SHAPES: dict[str, tuple[str, tuple[str, ...]]] = {
     'round tube': ('round_tube', ('outer diameter', 'wall')),
@@ -555,42 +555,61 @@ SHAPES: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 @dataclass
-class BlockProperties:
-    """What a block of a geometry is made of, for `Model.from_geometry`.
+class GroupProperties:
+    """What an element group of a geometry is made of, for `Model.from_geometry`.
 
-    One property set per block of one element type, the way every
+    One property set per element group of one element type, the way every
     finite element format states a structure: a material for any
-    block, plus a thickness for a block of plates (triangles or
+    element group, plus a thickness for an element group of plates (triangles or
     quads) or a section — and an orientation vector for the roll, as
-    `Model.add_beam` takes it — for a block of beams; a block of
-    solids takes the material alone. A block given both, or plates or
+    `Model.add_beam` takes it — for an element group of beams; an element group of
+    solids takes the material alone. An element group given both, or plates or
     beams given neither, is refused when the model is built, by name.
 
-    A block of point elements is a set of lumped masses and takes a
-    mass alone, no material (2026-10-07): ``BlockProperties(mass=m)``
-    puts ``m`` kilograms at the node of every element in the block —
+    An element group of point elements is a set of lumped masses and takes a
+    mass alone, no material (2026-10-07): ``GroupProperties(mass=m)``
+    puts ``m`` kilograms at the node of every element in the element group —
     a bolt, a sensor, a fitting too small to mesh — which is how a
-    finite element deck states one, a CONM2 or a point-mass block.
+    finite element deck states one, a CONM2 or a point-mass element group.
+
+    Springs and ground (2026-10-08, Brandon: a spring is a kind of line
+    element, and ground a kind of point). A group given a ``stiffness``,
+    six numbers in the global X, Y, Z, RX, RY and RZ directions with None
+    for free, is a group of springs: every two-node line in it a spring
+    between its two nodes in each direction given (`Model.add_spring`),
+    the nodes free to coincide, and every point element a spring from its
+    node to ground — a Nastran CBUSH, or CELAS cards one direction at a
+    time. A group given ``ground=True`` holds points, and each one's node
+    is held in all six directions (`Model.add_ground`): a support, and the
+    far end of a spring to ground drawn as a line.
     """
 
     material: Material | None = None
-    thickness: float | None = None            #: m, for a block of plates
-    section: Section | None = None            #: for a block of beams
+    thickness: float | None = None            #: m, for an element group of plates
+    section: Section | None = None            #: for an element group of beams
     orientation: tuple[float, float, float] | None = None
     mass: float | None = None                 #: kg, each, for point masses
+    #: N/m along X, Y, Z and N m/rad about them, None for free: springs
+    stiffness: tuple[float | None, ...] | None = None
+    ground: bool = False                      #: points held in all six
 
     @property
     def kind(self) -> str:
         """'plate', 'beam', 'solid', 'rigid', 'mass', or what is wrong
-        with it. A rigid block takes no thickness and no section, and any
+        with it. A rigid element group takes no thickness and no section, and any
         left from before the material was picked are ignored; a material
-        alone is a block of solids (2026-09-30), which take nothing
-        else — a block of plates or beams given only a material is
+        alone is an element group of solids (2026-09-30), which take nothing
+        else — an element group of plates or beams given only a material is
         refused where the elements are built, by what they are. A mass
-        makes a block of point masses whatever else is set: the mass is
-        the one number such a block can use."""
+        makes an element group of point masses whatever else is set: the mass is
+        the one number such an element group can use; ground and a stiffness
+        likewise make a group of supports and of springs."""
+        if self.ground:
+            return 'ground'
         if self.mass is not None:
             return 'mass'
+        if self.stiffness is not None:
+            return 'spring'
         if self.material is None:
             return 'no material'
         if self.material.is_rigid:
@@ -870,6 +889,7 @@ class Model:
         masses: Lumped masses, as `LumpedMass` records at a node.
         springs: Discrete springs between two degrees of freedom or to
             ground, as `Spring` records (`add_spring`).
+        grounds: The nodes held in all six directions (`add_ground`).
         faces: Surfaces, as `Face` records naming three or four nodes.
             They carry no stiffness — a face is drawn, and its *edges*
             are what carry members.
@@ -887,6 +907,7 @@ class Model:
         self.solids: list[Solid] = []
         self.rigid_links: list[RigidLink] = []
         self.springs: list[Spring] = []
+        self.grounds: list[int] = []
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
 
@@ -1018,7 +1039,7 @@ class Model:
         node_a, node_b : int
             The nodes, both already in the model, and different.
         group : str, optional
-            The part the link belongs to — its block, from a geometry.
+            The part the link belongs to — its element group, from a geometry.
 
         Returns
         -------
@@ -1069,7 +1090,7 @@ class Model:
             Positive: N/m between translations, N m/rad between
             rotations.
         name : str, optional
-            What the spring is called — its block, from a geometry.
+            What the spring is called — its element group, from a geometry.
 
         Returns
         -------
@@ -1094,6 +1115,30 @@ class Model:
         spring = Spring(node_a, code_a, node_b, code_b, float(stiffness), name)
         self.springs.append(spring)
         return spring
+
+    def add_ground(self, node: int) -> int:
+        """Hold a node in all six directions: a support, solved for as
+        `fixed` would hold it, but carried by the model — what a ground
+        point in a geometry builds. A node nothing else touches is held
+        whole already (`loose_nodes`); this holds one the structure
+        touches too.
+
+        Parameters
+        ----------
+        node : int
+            The node, already in the model.
+
+        Returns
+        -------
+        int
+            The node.
+        """
+        if int(node) not in self._nodes:
+            raise ValueError(f'ground names node {node}, which is not in '
+                             'the model')
+        if int(node) not in self.grounds:
+            self.grounds.append(int(node))
+        return int(node)
 
     def _spring_end(self, text: str) -> tuple[int, int]:
         """(node, signed direction code) of a spring end, '101RY+'."""
@@ -1172,23 +1217,23 @@ class Model:
         mode families it has — which is the question a display model usually
         raises first.
 
-        **A geometry whose blocks carry properties builds itself.** When
-        `geometry.block_properties` names what each block is made of
-        (`BlockProperties`), every element becomes the element it is:
+        **A geometry whose element groups carry properties builds itself.** When
+        `geometry.group_properties` names what each element group is made of
+        (`GroupProperties`), every element becomes the element it is:
         a quad a plate, a triangle a triangle, a two-node line a beam,
-        each with its block's material and thickness or section, and a
-        point element in a block given a mass a lumped mass at its
+        each with its element group's material and thickness or section, and a
+        point element in an element group given a mass a lumped mass at its
         node. That
-        is the model an exodus file means, one property set per block
+        is the model an exodus file means, one property set per element group
         of one element type (Brandon, 2026-09-25), and the demonstration
         plate rebuilt from its own geometry this way is the same model
-        to the last digit (`tests/test_block_model.py`). A block with no
+        to the last digit (`tests/test_block_model.py`). An element group with no
         properties, or an element type the solver has no element for,
         is refused by name; `material` and `section` are not consulted.
-        Without block properties the grillage below is built, and
+        Without element group properties the grillage below is built, and
         `material` and `section` are required for it.
 
-        A drawn line — a block of two-node line elements with no
+        A drawn line — an element group of two-node line elements with no
         properties, what a traceline was — is an element like any other
         here and gives its run, which is what a wireframe geometry
         needs to hold together at all.
@@ -1201,34 +1246,34 @@ class Model:
         """
         model = cls(name or getattr(geometry, 'name', '') or 'geometry',
                     length_unit=geometry.length_unit or 'm')
-        properties = dict(getattr(geometry, 'block_properties', {}) or {})
+        properties = dict(getattr(geometry, 'group_properties', {}) or {})
         if properties:
-            return _from_blocks(model, geometry, properties, total_mass,
+            return _from_groups(model, geometry, properties, total_mass,
                                 groups)
         if material is None or section is None:
             raise ValueError(
-                'the geometry carries no block properties, so a material '
+                'the geometry carries no element group properties, so a material '
                 'and a section are needed to make a grillage of it — or '
-                'give each block its properties (fem.BlockProperties) and '
+                'give each element group its properties (fem.GroupProperties) and '
                 'the elements build themselves')
         labels = dict(groups or {})
         if not labels:
-            # A geometry that carries element blocks says for itself which
+            # A geometry that carries element groups says for itself which
             # part each node belongs to, so nothing has to be passed
             # alongside it. That matters because a side-channel does not
             # survive being saved: a geometry written to a file and read
             # back could not reproduce the model it came from.
-            labels = _labels_from_blocks(geometry)
+            labels = _labels_from_groups(geometry)
         for node, xyz in zip(geometry.node_id, geometry.node_xyz):
             model.add_node(int(node), *[float(v) for v in xyz],
                            group=labels.get(int(node), ''))
 
-        # A member takes its section from the block of the element it came
+        # A member takes its section from the element group of the element it came
         # from, not from labels on its end nodes. A node on a seam belongs
         # to two parts and can only answer for one, which left 24 of the
         # drone's 1248 blade members reading as ordinary frame; an element
-        # belongs to exactly one block and is never ambiguous.
-        parts = _block_labels(geometry)
+        # belongs to exactly one element group and is never ambiguous.
+        parts = _group_labels(geometry)
         runs: list[tuple[list[int], str]] = []
         for index, (kind, conn) in enumerate(zip(geometry.elem_type,
                                                  geometry.elem_conn)):
@@ -2037,25 +2082,31 @@ class Model:
         return transform
 
     def dangling_rotations(self) -> list[int]:
-        """The nodes whose rotations nothing acts on: touched by solids
-        and by nothing that carries a rotation — no beam, plate or
-        triangle, and no rigid link, whose lead's rotation moves its
-        followers. A solid has no rotational stiffness, so these
-        rotations are grounded by the eigensolution; left free they
-        would be degrees of freedom with neither mass nor stiffness,
-        which no factorization survives.
+        """The nodes whose rotations nothing acts on: touched by solids or
+        translational springs and by nothing that carries a rotation — no
+        beam, plate or triangle, and no rigid link, whose lead's rotation
+        moves its followers. Neither a solid nor a spring along an axis
+        gives a rotation stiffness, so these rotations are grounded by the
+        eigensolution; left free they would be degrees of freedom with
+        neither mass nor stiffness, which no factorization survives. A
+        mass on springs is the newer case (2026-10-08): a tuned mass hung
+        from a structure by spring lines, its node no beam's.
 
         Returns
         -------
         list of int
-            The nodes, in the model's order; empty for a model with no
-            solids.
+            The nodes, in the model's order.
         """
-        if not self.solids:
-            return []
         rotating = self._rotating_nodes()
         touched = {n for solid in self.solids for n in solid.nodes}
-        return [n for n in self.node_ids if n in touched and n not in rotating]
+        touched |= {node for spring in self.springs
+                    for node, code in ((spring.node_a, spring.direction_a),
+                                       (spring.node_b, spring.direction_b))
+                    if node is not None and abs(code) <= 3}
+        # a held node's rotations are held already
+        held = set(self.loose_nodes()) | set(self.grounds)
+        return [n for n in self.node_ids
+                if n in touched and n not in rotating and n not in held]
 
     def idle_lead_rotations(self) -> list[tuple[int, int]]:
         """(lead node, axis 0-2) for each rotation of a rigid body's lead
@@ -2110,7 +2161,7 @@ class Model:
         """The nodes nothing touches: no element, no rigid link, no
         lumped mass. A finite element deck carries them routinely — a
         reference point, a constraint's own grid — and a model built
-        from its blocks grounds them whole rather than refusing the
+        from its element groups grounds them whole rather than refusing the
         deck (2026-09-30); the grillage path still refuses, since there
         a loose node is a drawing that was never wired.
 
@@ -2137,13 +2188,33 @@ class Model:
 
     def _free_dofs(self, fixed) -> np.ndarray:
         """Which rows survive after grounding what `fixed` names, the
-        rotations of the nodes only solids touch, the rotations of a
-        rigid body's lead nothing acts on (`idle_lead_rotations`), and
-        every degree of freedom of a node nothing touches."""
+        ground points (`add_ground`), the rotations nothing acts on
+        (`dangling_rotations`), the rotations of a rigid body's lead
+        nothing acts on (`idle_lead_rotations`), and every degree of
+        freedom of a node nothing touches."""
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
         held = set()
-        for node in self.loose_nodes():
+        for node in [*self.loose_nodes(), *self.grounds]:
             held.update(range(index[node], index[node] + 6))
+        # a rotational spring's end must rotate with something, or be held:
+        # on a node only solids, masses or other springs touch it would be
+        # grounded with that node's rotations, silently, or be a rotation
+        # with stiffness and no mass
+        rotating = self._rotating_nodes()
+        whole = set(self.loose_nodes()) | set(self.grounds)
+        twisted = sorted({node for spring in self.springs
+                          for node, code in ((spring.node_a,
+                                              spring.direction_a),
+                                             (spring.node_b,
+                                              spring.direction_b))
+                          if node is not None and abs(code) > 3
+                          and node not in rotating and node not in whole})
+        if twisted:
+            raise ValueError(
+                f'a spring acts on a rotation of node {twisted[0]}, but '
+                'nothing that carries a rotation touches the node — no '
+                'beam, plate or rigid link; put it on a node one of those '
+                'holds, or on a ground point')
         dangling = self.dangling_rotations()
         if dangling:
             inert = sorted({m.node for m in self.masses
@@ -2151,22 +2222,10 @@ class Model:
             if inert:
                 raise ValueError(
                     f'the mass at node {inert[0]} has rotary inertia, but '
-                    'only solids touch the node and a solid gives a '
-                    'rotation nothing to act on; put it on a node a beam, '
-                    'a plate or a rigid link holds')
-            # grounded, such a rotation would take the spring with it
-            twisted = sorted({node for spring in self.springs
-                              for node, code in ((spring.node_a,
-                                                  spring.direction_a),
-                                                 (spring.node_b,
-                                                  spring.direction_b))
-                              if abs(code) > 3 and node in set(dangling)})
-            if twisted:
-                raise ValueError(
-                    f'a spring acts on a rotation of node {twisted[0]}, but '
-                    'only solids touch the node and a solid gives a '
-                    'rotation nothing to act on; put it on a node a beam, '
-                    'a plate or a rigid link holds')
+                    'nothing that carries a rotation touches the node — '
+                    'a solid, a point mass or a spring gives a rotation '
+                    'nothing to act on; put it on a node a beam, a plate '
+                    'or a rigid link holds')
             for node in dangling:
                 held.update(range(index[node] + 3, index[node] + 6))
         held.update(index[node] + 3 + axis
@@ -2210,8 +2269,8 @@ class Model:
             connectivity.append([beam.node_a, beam.node_b])
             types.append(21)
             colors.append(beam.color)
-        # rigid links are two-node lines too, in blocks of their own — a
-        # geometry given `RIGID` on those blocks rebuilds them
+        # rigid links are two-node lines too, in element groups of their own — a
+        # geometry given `RIGID` on those element groups rebuilds them
         for link in self.rigid_links:
             connectivity.append([link.node_a, link.node_b])
             types.append(21)
@@ -2234,15 +2293,15 @@ class Model:
             connectivity.append(list(face.nodes))
             types.append(44 if len(face.nodes) == 4 else 41)
             colors.append(face.color)
-        # Elements go into the block of the part they belong to, so the
+        # Elements go into the element group of the part they belong to, so the
         # geometry states its own regions and a saved file can rebuild the
-        # structure. Without this the blocks live only on the drawing, and
+        # structure. Without this the element groups live only on the drawing, and
         # the model's own geometry — which is what gets saved — carries
         # nothing: the file comes back with every member the same section.
         # The part comes off the element, never off its first node: a node
         # on a seam belongs to two parts and answers for one, which put
-        # five of the drone's blade members into the frame block.
-        parts, blocks = {}, []
+        # five of the drone's blade members into the frame element group.
+        parts, groups = {}, []
         for part in ([b.group for b in (self.beams if beams else ())]
                      + [link.group or 'rigid links'
                         for link in self.rigid_links]
@@ -2250,29 +2309,29 @@ class Model:
                      + [t.group for t in self.triangles]
                      + [s.group for s in self.solids]
                      + [f.group for f in self.faces]):
-            blocks.append(parts.setdefault(part or 'body', len(parts) + 1))
+            groups.append(parts.setdefault(part or 'body', len(parts) + 1))
         return Geometry(
             node_id=node_ids,
             node_xyz=np.array([self._nodes[node] for node in node_ids]),
             elem_conn=connectivity or None,
             elem_type=types or None,
             elem_color=colors or None,
-            elem_block=blocks or None,
-            block_id=list(parts.values()) or None,
-            block_name=list(parts) or None,
+            elem_group=groups or None,
+            group_id=list(parts.values()) or None,
+            group_name=list(parts) or None,
             length_unit=self.length_unit)
 
 
-def _from_blocks(model: Model, geometry: Geometry,
-                 properties: dict[int, BlockProperties],
+def _from_groups(model: Model, geometry: Geometry,
+                 properties: dict[int, GroupProperties],
                  total_mass: float | None, groups) -> Model:
-    """`from_geometry`'s block path: nodes, then every element as
+    """`from_geometry`'s element group path: nodes, then every element as
     itself, then the same checks the grillage path makes."""
-    labels = dict(groups or {}) or _labels_from_blocks(geometry)
+    labels = dict(groups or {}) or _labels_from_groups(geometry)
     for node, xyz in zip(geometry.node_id, geometry.node_xyz):
         model.add_node(int(node), *[float(v) for v in xyz],
                        group=labels.get(int(node), ''))
-    if not _element_by_block(model, geometry, properties):
+    if not _element_by_group(model, geometry, properties):
         raise ValueError('the geometry has no elements to build from')
     joined = {n for beam in model.beams for n in (beam.node_a, beam.node_b)}
     joined |= {n for plate in model.plates for n in plate.nodes}
@@ -2283,6 +2342,9 @@ def _from_blocks(model: Model, geometry: Geometry,
     # node rather than left for the reader of the mode list to find
     held = joined | {n for link in model.rigid_links
                      for n in (link.node_a, link.node_b)}
+    held |= {n for spring in model.springs
+             for n in (spring.node_a, spring.node_b) if n is not None}
+    held |= set(model.grounds)
     stray = [m.node for m in model.masses if m.node not in held]
     if stray:
         shown = ', '.join(str(n) for n in stray[:4])
@@ -2303,36 +2365,40 @@ def _from_blocks(model: Model, geometry: Geometry,
     return model
 
 
-def _element_by_block(model: Model, geometry: Geometry,
-                      properties: dict[int, BlockProperties]) -> int:
-    """Every element as the element it is, with its block's properties.
+def _element_by_group(model: Model, geometry: Geometry,
+                      properties: dict[int, GroupProperties]) -> int:
+    """Every element as the element it is, with its element group's properties.
     Returns how many were built."""
-    ids = np.asarray(getattr(geometry, 'block_id', []), dtype=np.int64)
-    names = list(getattr(geometry, 'block_name', []))
-    block_name = {int(b): (names[i] if i < len(names) else '')
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
+    names = list(getattr(geometry, 'group_name', []))
+    group_name = {int(b): (names[i] if i < len(names) else '')
                   for i, b in enumerate(ids)}
-    blocks = np.asarray(getattr(geometry, 'elem_block', []), dtype=np.int64)
+    groups = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
 
-    def named(block: int) -> str:
-        label = block_name.get(block, '')
-        return f'block {block}' + (f' ({label})' if label else '')
+    def named(group: int) -> str:
+        label = group_name.get(group, '')
+        return f'element group {group}' + (f' ({label})' if label else '')
 
     built = 0
     for index, (kind, conn) in enumerate(zip(geometry.elem_type,
                                              geometry.elem_conn)):
-        block = int(blocks[index]) if index < len(blocks) else 0
-        props = properties.get(block)
+        group = int(groups[index]) if index < len(groups) else 0
+        props = properties.get(group)
         if props is None:
             raise ValueError(
-                f'{named(block)} has no properties: give every block a '
-                'material and a thickness or a section (fem.BlockProperties)')
+                f'{named(group)} has no properties: give every element group a '
+                'material and a thickness or a section (fem.GroupProperties)')
         if props.kind == 'no material':
-            raise ValueError(f'{named(block)} has no material: give it '
-                             'one, or a mass if it is a block of point '
+            raise ValueError(f'{named(group)} has no material: give it '
+                             'one, or a mass if it is an element group of point '
                              'masses')
-        if props.kind not in ('plate', 'beam', 'solid', 'rigid', 'mass'):
-            raise ValueError(f'{named(block)} has {props.kind}: a block of '
-                             'plates takes a thickness, a block of beams a '
+        if props.kind == 'spring' and not any(props.stiffness or ()):
+            raise ValueError(f'{named(group)} is a group of springs with no '
+                             'stiffness in any direction: give it one')
+        if props.kind not in ('plate', 'beam', 'solid', 'rigid', 'mass',
+                              'spring', 'ground'):
+            raise ValueError(f'{named(group)} has {props.kind}: an element group of '
+                             'plates takes a thickness, an element group of beams a '
                              'section, never both')
         if props.kind == 'beam' and not min(
                 props.section.area, props.section.iy, props.section.iz,
@@ -2343,12 +2409,12 @@ def _element_by_block(model: Model, geometry: Geometry,
             what = (f'its {props.section.shape} has no dimensions yet'
                     if props.section.shape and not props.section.dimensions
                     else 'its A, Iy, Iz and J must all be positive')
-            raise ValueError(f'{named(block)}: the section is not finished — '
+            raise ValueError(f'{named(group)}: the section is not finished — '
                              f'{what}')
         nodes = [int(n) for n in conn]
         shape_name, _count, shape = ELEMENT_TYPES.get(
             int(kind), (f'type {int(kind)}', 0, 'unknown'))
-        label = block_name.get(block, '')
+        label = group_name.get(group, '')
         if shape == 'face' and len(nodes) == 3 and props.kind == 'plate':
             model.add_triangle(nodes, props.material, props.thickness,
                                group=label)
@@ -2365,26 +2431,46 @@ def _element_by_block(model: Model, geometry: Geometry,
             model.add_solid(nodes, props.material, group=label)
         elif shape == 'point' and len(nodes) == 1 and props.kind == 'mass':
             model.add_mass(nodes[0], props.mass, name=label)
+        elif shape == 'point' and len(nodes) == 1 and props.kind == 'ground':
+            model.add_ground(nodes[0])
+        elif (props.kind == 'spring' and len(nodes) in (1, 2)
+                and shape in ('point', 'line')):
+            for direction, k in zip(DIRECTIONS, props.stiffness):
+                if k:
+                    model.add_spring(f'{nodes[0]}{direction}',
+                                     f'{nodes[-1]}{direction}'
+                                     if len(nodes) == 2 else None,
+                                     k, name=label)
         elif props.kind == 'rigid':
-            raise ValueError(f'{named(block)} holds {shape_name} elements; a '
-                             'rigid (massless) block holds two-node lines, '
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'rigid (massless) element group holds two-node lines, '
                              'one link each')
         elif props.kind == 'mass':
-            raise ValueError(f'{named(block)} holds {shape_name} elements; a '
-                             'block given a mass holds point elements, one '
+            raise ValueError(f'{named(group)} holds {shape_name} elements; an '
+                             'element group given a mass holds point elements, one '
                              'mass each')
+        elif props.kind == 'ground':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'ground group holds point elements, one held '
+                             'node each')
+        elif props.kind == 'spring':
+            raise ValueError(f'{named(group)} holds {shape_name} elements; a '
+                             'group of springs holds two-node lines, a spring '
+                             'between their nodes, or points, a spring to '
+                             'ground')
         else:
-            wanted = ('a thickness' if shape == 'face' else 'a section'
-                      if shape == 'line' else 'a mass' if shape == 'point'
+            wanted = ('a thickness' if shape == 'face' else
+                      'a section or a stiffness' if shape == 'line' else
+                      'a mass, a stiffness or ground' if shape == 'point'
                       else 'a material alone')
             solvable = ((shape in ('face', 'line') and len(nodes) in (2, 3, 4))
                         or (shape == 'volume' and len(nodes) in SOLID_CODES)
                         or (shape == 'point' and len(nodes) == 1))
             raise ValueError(
-                f'{named(block)} holds {shape_name} elements, which take '
+                f'{named(group)} holds {shape_name} elements, which take '
                 f'{wanted}; it was given {props.kind} properties'
                 if solvable
-                else f'{named(block)} holds {shape_name} elements, and the '
+                else f'{named(group)} holds {shape_name} elements, and the '
                      'solver has no element for them: two-node beams, '
                      'three-node triangles, four-node quads, eight-node '
                      'hexahedra, six-node wedges, four-node tetrahedra and '
@@ -2393,23 +2479,23 @@ def _element_by_block(model: Model, geometry: Geometry,
     return built
 
 
-def _block_labels(geometry) -> list[str]:
-    """The block name of each element, in the geometry's own order."""
-    names = list(getattr(geometry, 'block_name', []))
-    ids = np.asarray(getattr(geometry, 'block_id', []), dtype=np.int64)
+def _group_labels(geometry) -> list[str]:
+    """The element group name of each element, in the geometry's own order."""
+    names = list(getattr(geometry, 'group_name', []))
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
     named = {int(b): (names[i] if i < len(names) else '')
              for i, b in enumerate(ids)}
-    block = np.asarray(getattr(geometry, 'elem_block', []), dtype=np.int64)
-    return [named.get(int(b), '') for b in block]
+    group = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    return [named.get(int(b), '') for b in group]
 
 
-def _labels_from_blocks(geometry) -> dict[int, str]:
-    """{node: block name} from a geometry's own element blocks.
+def _labels_from_groups(geometry) -> dict[int, str]:
+    """{node: element group name} from a geometry's own element groups.
 
-    A node on the seam between two blocks belongs to the one holding most
-    of its elements, ties going to the block declared first. It cannot
+    A node on the seam between two element groups belongs to the one holding most
+    of its elements, ties going to the element group declared first. It cannot
     belong to both — a node has one part in every format that records the
-    question — and giving it to whichever block happened to be numbered
+    question — and giving it to whichever element group happened to be numbered
     first emptied the parts that sit *between* others: the drone's canopy
     is ringed by waist, camera mount and four arms, and came back with a
     single node in it, which is one accelerometer where four were meant.
@@ -2418,15 +2504,15 @@ def _labels_from_blocks(geometry) -> dict[int, str]:
     which are never ambiguous; these labels name the part a node is in,
     for reading a mode and for placing sensors.
     """
-    names = list(getattr(geometry, 'block_name', []))
-    ids = np.asarray(getattr(geometry, 'block_id', []), dtype=np.int64)
+    names = list(getattr(geometry, 'group_name', []))
+    ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
     named = {int(b): (names[i] if i < len(names) else '')
              for i, b in enumerate(ids)}
     order = {name: i for i, name in enumerate(names)}
-    block = np.asarray(getattr(geometry, 'elem_block', []), dtype=np.int64)
+    group = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
     votes: dict[int, dict[str, int]] = {}
     for i, conn in enumerate(geometry.elem_conn):
-        label = named.get(int(block[i]), '') if i < len(block) else ''
+        label = named.get(int(group[i]), '') if i < len(group) else ''
         if not label:
             continue
         for node in conn:

@@ -16,7 +16,7 @@ here reads back whole, and a foreign reader sees an attachment it can
 ignore. A report rides twice: rendered to its self-contained HTML, for
 anyone with the file, and as its definition, so it reopens editable.
 
-An activity is a link group (Brandon: *an Activity should perhaps be
+An activity is an object group (Brandon: *an Activity should perhaps be
 equal to a linked group of objects*): the group's results are the
 activity's data, and the geometry and channel tables it reads against
 are metadata at the root, linked. A named group is an activity with
@@ -258,7 +258,7 @@ def _geometry_dataset(name: str, geometry: Geometry) -> escdf.Dataset:
     drawn_blocks = {line['block'] for line in drawn}
     rows = [i for i, code in enumerate(geometry.elem_type)
             if int(code) in _ELEMENT_NAMES
-            and int(geometry.elem_block[i]) not in drawn_blocks]
+            and int(geometry.elem_group[i]) not in drawn_blocks]
     if rows:
         values['element_connection'] = [np.asarray(geometry.elem_conn[i], dtype=np.uint64)
                                         for i in rows]
@@ -378,7 +378,7 @@ def _note(kind: str) -> str:
 def to_file(project: Project, created_by: str | None = None,
             unit_system: Any = None) -> escdf.File:
     """A project as an ESCDF `File`: the objects as the standard's
-    types, each whole in an attachment, an activity per link group.
+    types, each whole in an attachment, an activity per object group.
 
     Parameters
     ----------
@@ -432,7 +432,7 @@ def to_file(project: Project, created_by: str | None = None,
             from ..report import render_html
 
             html = render_html(obj, dict(project.items()), unit_system or SI,
-                               links=project.links)
+                               object_groups=project.object_groups)
             dataset = escdf.Dataset(key, 'parameter_set', name)
             _attach(dataset, [(f'{key}.html', np.frombuffer(html.encode('utf-8'),
                                                             dtype=np.uint8)),
@@ -454,7 +454,7 @@ def to_file(project: Project, created_by: str | None = None,
     # the project's own record: what the standard has no field for
     record = escdf.Dataset(PROJECT_RECORD, 'parameter_set', project.name)
     record.values['notes'] = np.array([(
-        'Visual Dynamics project record: attachments hold the link groups, '
+        'Visual Dynamics project record: attachments hold the object groups, '
         'the provenance of derived objects and the project settings, as JSON.')],
         dtype=object)
     settings = {'name': project.name, 'project_type': project.project_type,
@@ -463,15 +463,15 @@ def to_file(project: Project, created_by: str | None = None,
     record.values['attachment_names'] = np.array(
         ['links.json', 'provenance.json', 'project.json'], dtype=object)
     record.values['attachments'] = [
-        np.frombuffer(json.dumps(project.links).encode('utf-8'), dtype=np.uint8),
+        np.frombuffer(json.dumps(project.object_groups).encode('utf-8'), dtype=np.uint8),
         np.frombuffer(json.dumps(project.provenance).encode('utf-8'), dtype=np.uint8),
         np.frombuffer(json.dumps(settings).encode('utf-8'), dtype=np.uint8)]
     file.metadata[PROJECT_RECORD] = record
     file.metadata.update(metadata)
-    # activities: one per link group, its results inside, its metadata linked
+    # activities: one per object group, its results inside, its metadata linked
     placed: set[str] = set()
     activity_names: set[str] = set()
-    for group in project.links:
+    for group in project.object_groups:
         members = [m for m in group['members'] if m in names]
         if not members:
             continue
@@ -603,8 +603,8 @@ def _geometry_from(dataset: escdf.Dataset) -> Geometry:
         kwargs.update(elem_id=list(range(1, len(conn) + 1)), elem_conn=conn,
                       elem_type=[_ELEMENT_CODES.get(n, 44) for n in names],
                       elem_color=_indices(v.get('element_color'), len(conn)),
-                      elem_block=[1] * len(conn), block_id=[1],
-                      block_name=[dataset.descriptive_name or dataset.name])
+                      elem_group=[1] * len(conn), group_id=[1],
+                      group_name=[dataset.descriptive_name or dataset.name])
     if v.get('line_connection') is None and v.get('element_connection') is None:
         # said, because a geometry that arrives as bare nodes looks like
         # a reader that dropped its elements (Brandon, 2026-09-30)
@@ -616,7 +616,7 @@ def _geometry_from(dataset: escdf.Dataset) -> Geometry:
     # the file's elements arrive in one block; a block holds one
     # family (2026-09-30). Each line is a block of two-node line
     # elements with no properties, one block per line
-    geometry.split_blocks_by_family()
+    geometry.split_groups_by_family()
     if v.get('line_connection') is not None:
         lines = [[int(n) for n in c] for c in v['line_connection']]
         colors = _indices(v.get('line_color'), len(lines))
@@ -837,7 +837,7 @@ def _object_from(dataset: escdf.Dataset) -> Any | None:
 
 def from_file(file: escdf.File) -> Project:
     """A project from an ESCDF `File`: every dataset an object, each
-    activity a link group named for it, and the project's own record
+    activity an object group named for it, and the project's own record
     when the file carries one.
 
     Parameters
@@ -889,7 +889,7 @@ def from_file(file: escdf.File) -> Project:
                       settings.get('active_geometry'), settings.get('project_type'),
                       provenance=provenance)
     if links_record and all(m in objects for g in links_record for m in g['members']):
-        project.links = Project('x', links=links_record).links
+        project.object_groups = Project('x', object_groups=links_record).object_groups
     else:
         for activity in file.activities.values():
             members = [kept[n] for n in list(activity.data) + list(activity.links)

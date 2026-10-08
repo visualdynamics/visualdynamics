@@ -717,6 +717,28 @@ class RigidLink:
 
 
 @dataclass
+class Spring:
+    """A discrete spring between two degrees of freedom, or from one to
+    ground: the flexible counterpart of a `RigidLink`, and what a
+    Nastran CELAS states (2026-10-08, proposed for two-beam
+    substructuring cases, where a test article meets its fixture at
+    coincident nodes with no length between them for a beam).
+
+    Each end is a node and a signed direction code (`direction_code`:
+    1-3 the translations, 4-6 the rotations); the spring resists the
+    difference of the two motions, each taken along its own sign, so
+    'X+' to 'X+' is the ordinary axial spring. `node_b` None grounds it.
+    """
+
+    node_a: int
+    direction_a: int
+    node_b: int | None
+    direction_b: int
+    stiffness: float          #: N/m between translations, N m/rad rotations
+    name: str = ''
+
+
+@dataclass
 class LumpedMass:
     """A rigid item carried at a node: a motor, a battery, a camera.
 
@@ -846,6 +868,8 @@ class Model:
         beams: Every member, as `Beam` records naming two nodes, a
             material and a section.
         masses: Lumped masses, as `LumpedMass` records at a node.
+        springs: Discrete springs between two degrees of freedom or to
+            ground, as `Spring` records (`add_spring`).
         faces: Surfaces, as `Face` records naming three or four nodes.
             They carry no stiffness — a face is drawn, and its *edges*
             are what carry members.
@@ -862,6 +886,7 @@ class Model:
         self.triangles: list[Triangle] = []
         self.solids: list[Solid] = []
         self.rigid_links: list[RigidLink] = []
+        self.springs: list[Spring] = []
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
 
@@ -1009,6 +1034,85 @@ class Model:
         link = RigidLink(int(node_a), int(node_b), group)
         self.rigid_links.append(link)
         return link
+
+    def add_spring(self, dof_a: str, dof_b: str | None, stiffness: float,
+                   name: str = '') -> Spring:
+        """A spring between two degrees of freedom, or from one to ground.
+
+        The ends are written the way `fixed` writes them, a node and a
+        direction: ``model.add_spring('101Z+', '201Z+', 5e5)`` joins two
+        nodes' Z translations, ``model.add_spring('101RY+', '201RY+',
+        2e3)`` their rotations about Y, and ``model.add_spring('1Z+',
+        None, 1e4)`` grounds node 1 in Z. The nodes may coincide — a
+        joint between two parts meshed to the same point, which no beam
+        can be — and a joint stiff in more than one direction is one
+        spring per direction. It adds no mass. A spring to a node
+        nothing else touches is a spring to ground, since that node is
+        grounded whole (`loose_nodes`).
+
+        A spring far stiffer than the structure costs the solve digits:
+        two beams joined by springs ten orders over their EI/L read
+        0.2 % low on the dense solver (2026-10-08), where five orders
+        were within 3e-5 of the one beam. A joint meant to be rigid is
+        a rigid link (`add_rigid_link`), which costs nothing.
+
+        Parameters
+        ----------
+        dof_a : str
+            The first end, as '<node><direction>': 'X+' to 'Z+' a
+            translation, 'RX+' to 'RZ+' a rotation; a minus sign turns
+            the end around.
+        dof_b : str or None
+            The second end, the same way, or None for ground. Both ends
+            are translations or both rotations.
+        stiffness : float
+            Positive: N/m between translations, N m/rad between
+            rotations.
+        name : str, optional
+            What the spring is called — its block, from a geometry.
+
+        Returns
+        -------
+        Spring
+        """
+        ends = [self._spring_end(text) for text in (dof_a, dof_b)
+                if text is not None]
+        if not float(stiffness) > 0.0:
+            raise ValueError(f'a spring\'s stiffness is positive; it was '
+                             f'given {stiffness!r}')
+        if len(ends) == 2:
+            (node_a, code_a), (node_b, code_b) = ends
+            if (abs(code_a) > 3) != (abs(code_b) > 3):
+                raise ValueError(f'{dof_a!r} and {dof_b!r}: a spring joins two '
+                                 'translations or two rotations')
+            if node_a == node_b and abs(code_a) == abs(code_b):
+                raise ValueError(f'{dof_a!r} and {dof_b!r} are one degree of '
+                                 'freedom; a spring joins two, or one to '
+                                 'ground')
+        else:
+            (node_a, code_a), (node_b, code_b) = ends[0], (None, 0)
+        spring = Spring(node_a, code_a, node_b, code_b, float(stiffness), name)
+        self.springs.append(spring)
+        return spring
+
+    def _spring_end(self, text: str) -> tuple[int, int]:
+        """(node, signed direction code) of a spring end, '101RY+'."""
+        text = str(text).strip()
+        digits = 0
+        while digits < len(text) and text[digits].isdigit():
+            digits += 1
+        node = int(text[:digits]) if digits else None
+        if node not in self._nodes:
+            raise ValueError(f'{text!r} does not name a node in the model')
+        if not text[digits:]:
+            raise ValueError(f'{text!r} names a node and no direction; a '
+                             'spring acts along one, \'X+\' to \'RZ+\'')
+        try:
+            code = direction_code(text[digits:])
+        except (KeyError, ValueError):
+            raise ValueError(f'{text!r}: {text[digits:]!r} is not a '
+                             'direction, \'X+\' to \'RZ+\'') from None
+        return node, code
 
     def rigid_bodies(self) -> list[list[int]]:
         """The groups of nodes the rigid links join, each in the model's
@@ -1211,6 +1315,12 @@ class Model:
         for link in self.rigid_links:
             neighbors[link.node_a].add(link.node_b)
             neighbors[link.node_b].add(link.node_a)
+        # a spring joins what it connects: a test article on springs to
+        # its fixture is one structure, not two free bodies
+        for spring in self.springs:
+            if spring.node_b is not None:
+                neighbors[spring.node_a].add(spring.node_b)
+                neighbors[spring.node_b].add(spring.node_a)
         return connected_pieces(neighbors)
 
     def wire_faces(self, material: Material, section: Section,
@@ -1491,6 +1601,25 @@ class Model:
                              for item in self.masses])
             yield rows, None, mass
 
+        # a spring is k v v^T over its one or two rows, v each end's sign
+        # (the second negated: it resists the difference), and no mass
+        for grounded in (False, True):
+            springs = [spring for spring in self.springs
+                       if (spring.node_b is None) == grounded]
+            if not springs:
+                continue
+            ends = [[(spring.node_a, spring.direction_a)]
+                    + ([] if grounded else
+                       [(spring.node_b, -spring.direction_b)])
+                    for spring in springs]
+            rows = np.array([[index[node] + abs(code) - 1 for node, code in end]
+                             for end in ends], dtype=np.int64)
+            signs = np.array([[np.sign(code) for _node, code in end]
+                              for end in ends], dtype=np.float64)
+            k = (np.array([spring.stiffness for spring in springs])[:, None, None]
+                 * signs[:, :, None] * signs[:, None, :])
+            yield rows, k, np.zeros_like(k)
+
     def matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Assemble the global mass and stiffness matrices, dense.
 
@@ -1530,7 +1659,8 @@ class Model:
         rows_k, cols_k, vals_k, rows_m, cols_m, vals_m = [], [], [], [], [], []
         if ticker is not None:
             ticker.add(len(self.beams) + len(self.plates)
-                       + len(self.triangles) + len(self.solids))
+                       + len(self.triangles) + len(self.solids)
+                       + len(self.springs))
         for rows, k, m in self._batches():
             count, r = rows.shape
             i = np.broadcast_to(rows[:, :, None], (count, r, r)).ravel()
@@ -2021,6 +2151,19 @@ class Model:
             if inert:
                 raise ValueError(
                     f'the mass at node {inert[0]} has rotary inertia, but '
+                    'only solids touch the node and a solid gives a '
+                    'rotation nothing to act on; put it on a node a beam, '
+                    'a plate or a rigid link holds')
+            # grounded, such a rotation would take the spring with it
+            twisted = sorted({node for spring in self.springs
+                              for node, code in ((spring.node_a,
+                                                  spring.direction_a),
+                                                 (spring.node_b,
+                                                  spring.direction_b))
+                              if abs(code) > 3 and node in set(dangling)})
+            if twisted:
+                raise ValueError(
+                    f'a spring acts on a rotation of node {twisted[0]}, but '
                     'only solids touch the node and a solid gives a '
                     'rotation nothing to act on; put it on a node a beam, '
                     'a plate or a rigid link holds')

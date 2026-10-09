@@ -792,3 +792,41 @@ def test_two_groups_straddling_a_rung_are_not_one_level():
     spec = _spec(EIGHT)
     run = _measured(spec, [4.6] * 4 + [7.4] * 4, wiggle=0.05)
     assert detect_scale_db(spec, run) == 0
+
+
+def test_the_scaling_edit_is_a_journaled_verb(window, pump):
+    """The Scaling field wrote `scale_db` silently, and a replayed
+    session compared at the detected level instead (found 2026-10-09).
+    It is `Project.set_comparison_scale` now — the family rule with
+    it — and the journal says so, settled to the last value."""
+    octave = _family(window, pump)
+    _select(window, pump, 'Spec', octave)
+    window._comparison_scale_edited('2')
+    pump()
+    assert window.project.journal[-1] == (
+        f'project.set_comparison_scale({octave!r}, 2)')
+    window._comparison_scale_edited('')
+    pump()
+    assert window.project.journal[-1] == (
+        f'project.set_comparison_scale({octave!r}, None)')
+
+
+def test_a_script_holds_and_reads_the_familys_scale():
+    import visualdynamics
+
+    spec = _spec()
+    project = visualdynamics.Project('Scale')
+    project.add('Spec', spec)
+    project.add('PSDs', _measured(spec, [6.0]))
+    octave = project.compute_octave('PSDs', 6)
+    detected = project.comparison_scale('Spec', 'PSDs')
+    assert project.comparison_scale('Spec', octave) == detected, \
+        'detected once, on the narrowband, for the whole family'
+    assert sorted(project.set_comparison_scale(octave, 3)) == sorted(
+        ['PSDs', octave])
+    assert project['PSDs'].scale_db == 3
+    assert project.comparison_scale('Spec', 'PSDs') == 3
+    project.set_comparison_scale('PSDs', None)
+    assert project.comparison_scale('Spec', octave) == detected
+    with pytest.raises(ValueError, match='whole decibels'):
+        project.set_comparison_scale('PSDs', 2.5)

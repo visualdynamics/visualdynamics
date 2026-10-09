@@ -30,6 +30,44 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
 
 
+#: the least a saved animation of a cycle lasts: whole cycles to at
+#: least this, since a video player does not loop the way the window does
+MOVIE_SECONDS = 6.0
+
+
+def cycle_parameters(cycle_seconds: float, fps: int = 30,
+                     seconds: float = MOVIE_SECONDS) -> np.ndarray:
+    """The phases a saved mode-shape animation steps through.
+
+    Whole cycles, at least `seconds` of them, at the speed the window
+    plays (`cycle_seconds` a cycle) — and the last frame stops one step
+    short of 2π, so a player set to loop shows no stutter where the
+    file wraps.
+    """
+    per_cycle = max(2, round(cycle_seconds * fps))
+    cycles = max(1, int(np.ceil(seconds * fps / per_cycle - 1e-9)))
+    return 2 * np.pi * np.arange(per_cycle * cycles) / per_cycle
+
+
+def sweep_parameters(count: int, seconds: float,
+                     fps: int = 30) -> np.ndarray:
+    """The sample (or line) indices a saved sweep steps through: all
+    `count` of them, once, in `seconds` — how the window plays a
+    record through."""
+    frames = max(1, round(seconds * fps))
+    return (np.arange(frames) * count // frames).astype(int)
+
+
+def movie_frames(plotter: Any, animator: Any,
+                 parameters: Any) -> Any:
+    """The scene at each parameter, rendered, as images — the frames a
+    movie is made of, pulled one at a time."""
+    for parameter in parameters:
+        animator.set_parameter(parameter)
+        plotter.render()
+        yield plotter.screenshot(return_img=True)
+
+
 def _color_range(deflection: Deflection) -> float:
     """The top of the color scale: the furthest any node ever travels.
 
@@ -207,18 +245,173 @@ class EnvelopeAnimator(GeometryAnimator):
             self.scalars_source.Modified()
 
 
+def _render_cycle(geometry: Geometry, build: Any, *, colors: Any,
+                  cycle_seconds: float, screenshot: str | None,
+                  movie: str | None) -> Any:
+    """A swept-phase scene rendered off screen: the still at peak phase
+    for `screenshot`, whole cycles for `movie`. `build(plotter)` puts
+    the moving geometry in and returns its animator."""
+    import pyvista as pv
+
+    from .geometry import annotate_scene
+
+    if screenshot is not None and movie is not None:
+        raise ValueError('ask for a screenshot or a movie, not both')
+    plotter = pv.Plotter(off_screen=True)
+    try:
+        plotter.set_background(colors['scene_background'])
+        animator = build(plotter)
+        animator.set_parameter(0.0)
+        annotate_scene(plotter, animator.axis_unit, colors)
+        place_view(plotter, geometry.opening_view, render=False)
+        if screenshot is not None:
+            return plotter.screenshot(str(screenshot))
+        from ..gui.movie import MOVIE_FPS, write_movie
+
+        write_movie(movie, movie_frames(
+            plotter, animator, cycle_parameters(cycle_seconds, MOVIE_FPS)),
+            fps=MOVIE_FPS)
+        return str(movie)
+    finally:
+        plotter.close()
+
+
+def _single(geometry: Geometry, deflection: Any, *,
+            unit_system: UnitSystem | None, scale: float,
+            colormap: bool) -> Any:
+    """`_render_cycle`'s builder for one deflected geometry."""
+    def build(plotter: Any) -> GeometryAnimator:
+        animator = GeometryAnimator(plotter, geometry, deflection,
+                                    unit_system=unit_system,
+                                    colormap=colormap)
+        animator.set_scale(scale)
+        return animator
+    return build
+
+
+#: an overlaid pair's two flat colors when nothing chooses them: the
+#: report's blue and orange
+PAIR_COLORS = ('#4c92d9', '#ff8c2b')
+
+
+def build_pair(plotter: Any, first: tuple[Geometry, Any],
+               second: tuple[Geometry, Any], *,
+               colors: tuple[str | None, str | None] = PAIR_COLORS,
+               alphas: tuple[float, float] = (1.0, 0.25),
+               unit_system: UnitSystem | None = None,
+               **draw: Any) -> PairedAnimator:
+    """Two (geometry, deflection) copies moving in step in one scene,
+    each on its own mesh in one flat color at its own opacity — the
+    overlay the window, the report and `animate_pair` all show."""
+    return PairedAnimator(*(
+        GeometryAnimator(plotter, geometry, deflection,
+                         unit_system=unit_system, color_override=color,
+                         opacity=alpha, **draw)
+        for (geometry, deflection), color, alpha
+        in ((first, colors[0], alphas[0]), (second, colors[1], alphas[1]))))
+
+
+def pair_deflections(a: ShapeSet, i: int, b: ShapeSet, j: int,
+                     a_geometry: Geometry, b_geometry: Geometry,
+                     projected: ShapeSet | None = None,
+                     on_basis: bool = False) -> tuple[tuple, tuple]:
+    """The two (geometry, deflection) copies of an overlaid pair: a's
+    mode i on a's geometry, b's mode j phase-aligned to it
+    (`paired_mode`) on b's — or, `on_basis`, the projection of b on a's
+    geometry, both sampled at the basis DOFs. `projected` is b carried
+    onto a's DOFs, needed when the geometries differ."""
+    from ..core.shapes import aligned_mode, paired_mode
+    from ..deform import ShapeDeflection
+
+    first = (a_geometry, ShapeDeflection(a_geometry, a.coordinate,
+                                         a.shape_matrix[i]))
+    if on_basis and projected is not None:
+        second = (a_geometry, ShapeDeflection(
+            a_geometry, projected.coordinate,
+            aligned_mode(a, i, projected, j)))
+    else:
+        second = (b_geometry, ShapeDeflection(
+            b_geometry, b.coordinate,
+            paired_mode(a, i, b, j,
+                        None if a_geometry is b_geometry else projected)))
+    return first, second
+
+
+def animate_pair(first: tuple[Geometry, Any], second: tuple[Geometry, Any],
+                 *, colors: tuple[str | None, str | None] = PAIR_COLORS,
+                 alphas: tuple[float, float] | None = None,
+                 caption: str = '',
+                 unit_system: UnitSystem | None = None,
+                 scale: float = 1.0, cycle_seconds: float = 2.0,
+                 theme: Any = None, screenshot: str | None = None,
+                 movie: str | None = None, show: bool = True) -> Any:
+    """Two deflections overlaid and swinging together, as the window
+    animates a picked MAC cell (`pair_deflections` makes the pair).
+
+    Each copy is scaled to its own peak, so the picture compares shape
+    and not level — the caption's scale note says what that hid.
+    `screenshot` is the still at peak phase, `movie` whole cycles as an
+    MP4; otherwise a window plays it.
+    """
+    from ..theme import OVERLAY_ALPHA
+    from ..theme import theme as resolve_theme
+
+    colors_ = resolve_theme(theme)
+    alphas = alphas or (1.0, OVERLAY_ALPHA)
+
+    def build(plotter: Any) -> PairedAnimator:
+        pair = build_pair(plotter, first, second, colors=colors,
+                          alphas=alphas, unit_system=unit_system,
+                          text_color=colors_['scene_text'])
+        pair.set_scale(scale)
+        if caption:
+            plotter.add_text(caption, position='upper_left', font_size=11,
+                             color=colors_['scene_text'],
+                             name='scene-caption')
+        return pair
+
+    if screenshot is not None or movie is not None:
+        return _render_cycle(first[0], build, colors=colors_,
+                             cycle_seconds=cycle_seconds,
+                             screenshot=screenshot, movie=movie)
+
+    import numpy as np
+    from pyvistaqt import BackgroundPlotter
+
+    from . import undeferred
+    from .geometry import annotate_scene
+
+    plotter = undeferred(BackgroundPlotter(title='Overlaid modes',
+                                            show=show))
+    plotter.set_background(colors_['scene_background'])
+    pair = build(plotter)
+    annotate_scene(plotter, pair.axis_unit, colors_)
+    place_view(plotter, first[0].opening_view)
+    interval = 33
+    step = 2 * np.pi * interval / (cycle_seconds * 1000.0)
+
+    def advance() -> None:
+        pair.set_parameter(pair.parameter + step)
+
+    plotter.add_callback(advance, interval=interval)
+    return plotter
+
+
 def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
                   unit_system: UnitSystem | None = None,
                   scale: float = 1.0, colormap: bool = True,
                   cycle_seconds: float = 2.0, theme: Any = None,
                   screenshot: str | None = None,
+                  movie: str | None = None,
                   show: bool = True) -> Any:
     """One mode shape moving on a geometry, as the GUI animates it.
 
     Colored by displacement on viridis like the desktop scene. With
     `screenshot` the deflected shape is rendered to a file at peak
     phase instead — an animation has no still to save, so the still is
-    the one that shows the shape.
+    the one that shows the shape. With `movie` it is saved as an MP4
+    (H.264) of whole cycles at `cycle_seconds` a cycle, and the path
+    is returned (`gui.movie.write_movie`).
     """
     import numpy as np
 
@@ -229,21 +422,12 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
     colors = resolve_theme(theme)
     deflection = ShapeDeflection(geometry, shapes.coordinate,
                                  shapes.shape_matrix[mode])
-    if screenshot is not None:
-        import pyvista as pv
-
-        plotter = pv.Plotter(off_screen=True)
-        plotter.set_background(colors['scene_background'])
-        animator = GeometryAnimator(plotter, geometry, deflection,
-                                    unit_system=unit_system,
-                                    colormap=colormap)
-        animator.set_scale(scale)
-        animator.set_parameter(0.0)
-        annotate_scene(plotter, animator.axis_unit, colors)
-        place_view(plotter, geometry.opening_view, render=False)
-        image = plotter.screenshot(str(screenshot))
-        plotter.close()
-        return image
+    if screenshot is not None or movie is not None:
+        return _render_cycle(
+            geometry, _single(geometry, deflection, unit_system=unit_system,
+                              scale=scale, colormap=colormap),
+            colors=colors, cycle_seconds=cycle_seconds,
+            screenshot=screenshot, movie=movie)
 
     from pyvistaqt import BackgroundPlotter
 
@@ -276,8 +460,9 @@ def animate_envelope(geometry: Geometry, data: Any,
                      quantity: str | None = None,
                      unit_system: UnitSystem | None = None,
                      scale: float = 1.0, colormap: bool = True,
-                     theme: Any = None,
+                     seconds: float = 10.0, theme: Any = None,
                      screenshot: str | None = None,
+                     movie: str | None = None,
                      show: bool = True) -> Any:
     """A PSD's envelope on a geometry, as the GUI shows it: two copies
     deflected ±sqrt(PSD) at one line, colored dB below the loudest.
@@ -286,6 +471,10 @@ def animate_envelope(geometry: Geometry, data: Any,
     cannot share a normalization — defaulting to the commonest among
     the records. Cross records are left out: their phase belongs to an
     operating deflection shape, not an envelope.
+
+    `screenshot` is the still at one line; `movie` sweeps every line
+    once through in `seconds`, as Play does in the window, with the
+    line's frequency captioned on each frame, and returns the path.
     """
     import numpy as np
 
@@ -330,16 +519,39 @@ def animate_envelope(geometry: Geometry, data: Any,
         annotate_scene(plotter, pair.axis_unit, colors)
         return pair
 
-    if screenshot is not None:
+    if screenshot is not None and movie is not None:
+        raise ValueError('ask for a screenshot or a movie, not both')
+    if screenshot is not None or movie is not None:
         import pyvista as pv
 
         plotter = pv.Plotter(off_screen=True)
-        plotter.set_background(colors['scene_background'])
-        build(plotter)
-        place_view(plotter, geometry.opening_view, render=False)
-        image = plotter.screenshot(str(screenshot))
-        plotter.close()
-        return image
+        try:
+            plotter.set_background(colors['scene_background'])
+            pair = build(plotter)
+            place_view(plotter, geometry.opening_view, render=False)
+            if screenshot is not None:
+                return plotter.screenshot(str(screenshot))
+            from ..gui.movie import MOVIE_FPS, write_movie
+
+            class Captioned:
+                """The pair, with the window's corner caption following
+                the line — an envelope frame without its frequency
+                says nothing."""
+
+                def set_parameter(self, line: int) -> None:
+                    pair.set_parameter(line)
+                    plotter.add_text(
+                        f'Envelope — {abscissa[line]:.5g} Hz',
+                        position='upper_left', font_size=11,
+                        color=colors['scene_text'], name='scene-caption')
+
+            write_movie(movie, movie_frames(
+                plotter, Captioned(),
+                sweep_parameters(len(abscissa), seconds, MOVIE_FPS)),
+                fps=MOVIE_FPS)
+            return str(movie)
+        finally:
+            plotter.close()
 
     from pyvistaqt import BackgroundPlotter
 
@@ -359,6 +571,7 @@ def animate_ods(geometry: Geometry, data: Any,
                 scale: float = 1.0, colormap: bool = True,
                 cycle_seconds: float = 2.0, theme: Any = None,
                 screenshot: str | None = None,
+                movie: str | None = None,
                 show: bool = True) -> Any:
     """The operating deflection shape of complex spectra at one line,
     as the GUI animates it when the object is selected with a geometry.
@@ -366,7 +579,8 @@ def animate_ods(geometry: Geometry, data: Any,
     The pattern is the records' complex values at the chosen frequency
     — the strongest line when none is named — swept in phase like a
     complex mode. Record choice follows `animation_records`: one record
-    per DOF, first reference of a whole FRF.
+    per DOF, first reference of a whole FRF. `screenshot` and `movie`
+    save it as `animate_shape` does.
     """
     import numpy as np
 
@@ -391,21 +605,12 @@ def animate_ods(geometry: Geometry, data: Any,
                            0, len(abscissa) - 1)))
     caption = f'ODS — {abscissa[deflection.line]:.5g} Hz'
 
-    if screenshot is not None:
-        import pyvista as pv
-
-        plotter = pv.Plotter(off_screen=True)
-        plotter.set_background(colors['scene_background'])
-        animator = GeometryAnimator(plotter, geometry, deflection,
-                                    unit_system=unit_system,
-                                    colormap=colormap)
-        animator.set_scale(scale)
-        animator.set_parameter(0.0)
-        annotate_scene(plotter, animator.axis_unit, colors)
-        place_view(plotter, geometry.opening_view, render=False)
-        image = plotter.screenshot(str(screenshot))
-        plotter.close()
-        return image
+    if screenshot is not None or movie is not None:
+        return _render_cycle(
+            geometry, _single(geometry, deflection, unit_system=unit_system,
+                              scale=scale, colormap=colormap),
+            colors=colors, cycle_seconds=cycle_seconds,
+            screenshot=screenshot, movie=movie)
 
     from pyvistaqt import BackgroundPlotter
 
@@ -424,6 +629,91 @@ def animate_ods(geometry: Geometry, data: Any,
 
     def advance() -> None:
         animator.set_parameter(animator.parameter + step)
+
+    plotter.add_callback(advance, interval=interval)
+    return plotter
+
+
+def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
+                 unit_system: UnitSystem | None = None,
+                 scale: float = 1.0, colormap: bool = True,
+                 seconds: float = 10.0, theme: Any = None,
+                 screenshot: str | None = None,
+                 movie: str | None = None,
+                 show: bool = True) -> Any:
+    """Time records moving on a geometry, as the GUI plays them: the
+    record once through in `seconds`, one record per DOF
+    (`animation_records`).
+
+    With `screenshot` the still is the sample where some record is
+    furthest from zero — the first sample is usually rest, and a still
+    of rest says nothing. With `movie` the record is saved once through
+    as an MP4 (H.264) and the path returned.
+    """
+    import numpy as np
+
+    from ..deform import TimeDeflection, animation_records
+    from ..theme import theme as resolve_theme
+    from .geometry import annotate_scene
+
+    if screenshot is not None and movie is not None:
+        raise ValueError('ask for a screenshot or a movie, not both')
+    indices, _notes = animation_records(data, records)
+    dofs = [data.response_dof[i] for i in indices]
+    ordinate = np.asarray(data.ordinate)[list(indices)].real
+    deflection = TimeDeflection(geometry, dofs, ordinate)
+    if not len(deflection.rows):
+        raise ValueError('none of the records land on this geometry')
+    colors = resolve_theme(theme)
+    samples = deflection.num_frames
+
+    if screenshot is not None or movie is not None:
+        import pyvista as pv
+
+        plotter = pv.Plotter(off_screen=True)
+        try:
+            plotter.set_background(colors['scene_background'])
+            animator = GeometryAnimator(plotter, geometry, deflection,
+                                        unit_system=unit_system,
+                                        colormap=colormap)
+            animator.set_scale(scale)
+            annotate_scene(plotter, animator.axis_unit, colors)
+            place_view(plotter, geometry.opening_view, render=False)
+            if screenshot is not None:
+                animator.set_parameter(
+                    int(np.abs(ordinate).max(axis=0).argmax()))
+                return plotter.screenshot(str(screenshot))
+            from ..gui.movie import MOVIE_FPS, write_movie
+
+            write_movie(movie, movie_frames(
+                plotter, animator,
+                sweep_parameters(samples, seconds, MOVIE_FPS)),
+                fps=MOVIE_FPS)
+            return str(movie)
+        finally:
+            plotter.close()
+
+    from pyvistaqt import BackgroundPlotter
+
+    from . import undeferred
+
+    plotter = undeferred(BackgroundPlotter(title='Time history',
+                                            show=show))
+    plotter.set_background(colors['scene_background'])
+    animator = GeometryAnimator(plotter, geometry, deflection,
+                                unit_system=unit_system, colormap=colormap)
+    animator.set_scale(scale)
+    annotate_scene(plotter, animator.axis_unit, colors)
+    place_view(plotter, geometry.opening_view)
+
+    # the record once through in `seconds`, looping, on the window's clock
+    interval = 33
+    step = samples * interval / (seconds * 1000.0)
+    position = [0.0]
+
+    def advance() -> None:
+        position[0] = (position[0] + step) % samples
+        animator.set_parameter(int(position[0]))
 
     plotter.add_callback(advance, interval=interval)
     return plotter

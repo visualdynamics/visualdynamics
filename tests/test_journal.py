@@ -447,15 +447,18 @@ def test_the_wavelet_view_journals_and_replays_its_figure(window, pump,
     pump()
     window.data_pane.wavelet_panel.per_octave_box.setValue(9)
     pump()
+    # the scalogram opens as a surface, so the surface's call is the
+    # line (2026-10-09; it was the flat call, not what was on screen)
     lines = [line for line in window.project.journal
-             if line.startswith('visualdynamics.plot.plot_scalogram(')]
+             if line.startswith('visualdynamics.viz.scalogram.'
+                                'plot_scalogram_stage(')]
     assert len(lines) == 1, 'the view settles to the reading that stands'
     assert 'per_octave=9' in lines[0]
 
     monkeypatch.chdir(tmp_path)
     room: dict = {}
     exec(window.project.session_script(), room)         # noqa: S102
-    assert (tmp_path / 'scalogram.png').stat().st_size > 0, \
+    assert (tmp_path / 'scalogram-3d.png').stat().st_size > 0, \
         'the replay wrote the figure the session looked at'
 
 

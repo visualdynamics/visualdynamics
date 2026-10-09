@@ -16,7 +16,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
 from ..core.channel_table import title_of
-from ..core.shapes import scale_ratios
 from ..core.unit_choices import (
     ALL_ORDINATE_UNITS,
     shown_dimension,
@@ -76,48 +75,14 @@ def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],
     displayed, possibly projected). A set gone from the project, or a
     mode index past its end, shows dashes rather than guessing.
     """
-    a_name, b_name = matched.first, matched.second
-    a, b = objects.get(a_name), objects.get(b_name)
+    from ..core.tables import MATCHED_DECIMALS, cell_text, matched_rows
 
-    def parameters(shape_set: Any,
-                   mode: int) -> tuple[float | None, float | None]:
-        if shape_set is None or not 0 <= mode < shape_set.num_shapes:
-            return None, None
-        return (float(shape_set.frequency[mode]),
-                float(shape_set.damping[mode]) * 100.0)
-
-    # the scale each pair was normalized by, which the overlay
-    # animation cannot show: it draws both shapes to their own peak, so
-    # a set thirty times the other looks identical to one that agrees
-    ratios = (scale_ratios(a, b, matched.pairs)
-              if a is not None and b is not None
-              else [None] * len(matched.pairs))
-    rows = []
-    for index, ((row, column), mac) in enumerate(
-            zip(matched.pairs, matched.macs)):
-        fa, da = parameters(a, row)
-        fb, db = parameters(b, column)
-        delta = (f'{(fb - fa) / fa * 100.0:+.2f}'
-                 if fa and fb is not None else '—')
-        rows.append((row + 1, fa, da, column + 1, fb, db, delta,
-                     float(mac), ratios[index]))
-    def number(decimals: int) -> Callable[[Any], str]:
-        return lambda v: '—' if v is None else f'{v:.{decimals}f}'
-
+    headers, rows = matched_rows(matched, objects)
     columns = [
-        Column(f'{a_name} Mode', lambda s, r: s[r][0]),
-        Column('Frequency [Hz]', lambda s, r: s[r][1],
-               format=number(4)),
-        Column('Damping [%]', lambda s, r: s[r][2], format=number(3)),
-        Column(f'{b_name} Mode', lambda s, r: s[r][3]),
-        Column('Frequency [Hz]', lambda s, r: s[r][4],
-               format=number(4)),
-        Column('Damping [%]', lambda s, r: s[r][5], format=number(3)),
-        Column('Δf [%]', lambda s, r: s[r][6]),
-        Column('MAC', lambda s, r: s[r][7], format=number(3)),
-        Column(f'{b_name}/{a_name}', lambda s, r: s[r][8],
-               format=number(2)),
-    ]
+        Column(title, lambda s, r, i=i: s[r][i],
+               **({} if decimals is None else
+                  {'format': lambda v, d=decimals: cell_text(v, d)}))
+        for i, (title, decimals) in enumerate(zip(headers, MATCHED_DECIMALS))]
     return TableModel(rows, columns, len, parent)
 
 

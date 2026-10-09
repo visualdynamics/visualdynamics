@@ -15,12 +15,8 @@ from __future__ import annotations
 
 import itertools
 
-import numpy as np
 import pytest
-from conftest import fixture_path
 
-import visualdynamics
-from visualdynamics.core.data import TimeHistory
 from visualdynamics.gui.main_window import (
     FRAMES_PER_SECOND,
     NORMAL_SPEED,
@@ -31,47 +27,6 @@ from visualdynamics.gui.main_window import (
 )
 
 FRAMES = 31          # not a whole number of cycles at any speed
-
-
-def _geometry():
-    geometry = visualdynamics.import_file(fixture_path('plate', 'geometry.npz'))
-    geometry.define_units('m')
-    return geometry
-
-
-@pytest.fixture
-def shaking(window, pump):
-    """A mode shape animating on its geometry."""
-    geometry = _geometry()
-    window.add_object('Geometry', geometry)
-    window.add_object('Shapes',
-                      visualdynamics.import_file(fixture_path('plate',
-                                                     'shapes.npy')))
-    window.tree.clearSelection()
-    for name in ('Geometry', 'Shapes'):
-        window._item_for_object(name).setSelected(True)
-    window.render_current()
-    pump()
-    return window
-
-
-@pytest.fixture
-def playing(window, pump):
-    """A time history animating on its geometry."""
-    geometry = _geometry()
-    window.add_object('Geometry', geometry)
-    dofs = [f'{int(node)}Z+' for node in geometry.node_id[:20]]
-    t = np.arange(2048) / 512.0
-    window.add_object('Time', TimeHistory(
-        t, np.sin(2 * np.pi * 3 * t)[None, :].repeat(len(dofs), 0),
-        response_dof=dofs, ordinate_dim='acceleration',
-        ordinate_unit='m/s**2'))
-    window.tree.clearSelection()
-    for name in ('Geometry', 'Time'):
-        window._item_for_object(name).setSelected(True)
-    window.render_current()
-    pump()
-    return window
 
 
 def _traveled(window, frames, position, wrap):

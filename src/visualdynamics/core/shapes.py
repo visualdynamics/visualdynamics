@@ -110,6 +110,76 @@ def aligned_mode(a: ShapeSet, i: int, b: ShapeSet, j: int) -> np.ndarray:
     return apply_alignment(b.shape_matrix[j], alignment_factor(a, i, b, j))
 
 
+def paired_mode(a: ShapeSet, i: int, b: ShapeSet, j: int,
+                projected: ShapeSet | None = None) -> np.ndarray:
+    """b's mode j, phase-aligned to swing with a's mode i when the two
+    are overlaid — over b's own coordinates.
+
+    Sets on one geometry share DOFs and align directly. Sets on two
+    geometries share none, so the alignment is measured against
+    `projected` — b carried onto a's DOFs (`correlate.project_shapes`)
+    — and applied to b's dense original. The one rule the window's
+    overlay, the report's and `ShapeSet.animate_pair` all draw by.
+    """
+    if projected is None:
+        return aligned_mode(a, i, b, j)
+    return apply_alignment(b.shape_matrix[j],
+                           alignment_factor(a, i, projected, j))
+
+
+def pair_scale_note(a_name: str, a: ShapeSet, b_name: str, b: ShapeSet,
+                    i: int, j: int) -> str | None:
+    """One line: how big this pair's second shape is against its first.
+
+    Overlaying scales each shape to its own peak, which is what makes a
+    sparse test set and a dense model comparable — and also what hides
+    one set being thirty times the other. So the number the overlay
+    cannot show is written above it.
+
+    **For the pair on screen, not for the sets.** A constant factor
+    across every mode is a unit or a normalization convention; a factor
+    that is 1.00 everywhere and 3.4 on one mode is that mode fitted
+    badly, and a figure averaged over the set hides exactly that.
+    `ScaleComparison.message` is the other reading — over a whole set,
+    at length — and the report still uses it.
+
+    Named by the objects rather than by their roles: a reader looking
+    at two animations wants to know which of the two things in front
+    of them is the bigger.
+    """
+    try:
+        ratios = compare_scaling(a, b, [(i, j)]).ratios
+    except (ValueError, IndexError):
+        return None
+    if not ratios.size or not np.isfinite(ratios[0]):
+        return None
+    # an unscaled fit has no drive point pinning its size, so the ratio
+    # is arithmetic rather than physics — said in a word, because the
+    # number is about to be read as if it meant one
+    unscaled = [name for name, shapes in ((a_name, a), (b_name, b))
+                if getattr(shapes, 'unscaled', False)]
+    note = f'{b_name}/{a_name} = {float(ratios[0]):.2f}'
+    return note + (f'  ({", ".join(unscaled)} unscaled)'
+                   if unscaled else '')
+
+
+def pair_caption(a_name: str, a: ShapeSet, b_name: str, b: ShapeSet,
+                 i: int, j: int) -> str:
+    """What the corner of an overlay says: each mode on a line of its
+    own — set, number, description, frequency, damping — and the scale
+    note under them (`pair_scale_note`)."""
+    def described(name: str, shape_set: ShapeSet, mode: int) -> str:
+        description = str(shape_set.description[mode]).strip()
+        return (f'{name}  mode {mode + 1}'
+                + (f'  {description}' if description else '')
+                + f'  {float(shape_set.frequency[mode]):.4f} Hz'
+                f'  {float(shape_set.damping[mode]) * 100:.3f} %')
+
+    caption = described(a_name, a, i) + '\n' + described(b_name, b, j)
+    scaling = pair_scale_note(a_name, a, b_name, b, i, j)
+    return caption + ('\n' + scaling if scaling else '')
+
+
 #: how far the two sets' levels may differ before it is worth saying so,
 #: as a fraction. Two properly mass-normalized sets of one structure in
 #: one unit system land far closer than this; a tenth is loose enough
@@ -818,6 +888,66 @@ class ShapeSet:
         """
         from ..viz.animate import animate_shape
         return animate_shape(geometry, self, mode, **kwargs)
+
+    def animate_pair(self, geometry: Geometry, mode: int,
+                     other: ShapeSet, other_mode: int,
+                     other_geometry: Geometry | None = None, *,
+                     on_basis: bool = False,
+                     names: tuple[str, str] = ('first', 'second'),
+                     **kwargs: Any) -> Any:
+        """This mode and another set's overlaid, swinging together, as
+        the window animates a picked cell of the two sets' cross-MAC.
+
+        The other mode is phase-aligned to this one (`paired_mode`) and
+        each is scaled to its own peak, so the picture compares shape;
+        the caption names both modes and says how their sizes compare
+        (`pair_caption`). On two geometries the other set is projected
+        onto this one's DOFs to measure the alignment
+        (`correlate.project_shapes`), and drawn on its own geometry —
+        or, `on_basis`, the projection on this one's.
+
+        Parameters
+        ----------
+        geometry : Geometry
+            This set's geometry.
+        mode : int
+            This set's mode, by index.
+        other : ShapeSet
+            The set compared against.
+        other_mode : int
+            Its mode, by index.
+        other_geometry : Geometry, optional
+            The other set's geometry; this one's when omitted.
+        on_basis : bool, default False
+            Draw the other set's projection on this geometry instead.
+        names : tuple of str
+            What the caption calls the two sets.
+        **kwargs
+            Passed through to `viz.animate.animate_pair`: `colors`,
+            `alphas`, `scale`, `screenshot=`, `movie=`.
+
+        Returns
+        -------
+        object
+            The plotter, the still, or the movie's path.
+        """
+        from ..viz.animate import animate_pair, pair_deflections
+
+        other_geometry = other_geometry or geometry
+        projected = None
+        if other_geometry is not geometry:
+            from .correlate import project_shapes
+            projected, _report = project_shapes(other, other_geometry,
+                                                self, geometry)
+        first, second = pair_deflections(self, mode, other, other_mode,
+                                         geometry, other_geometry,
+                                         projected, on_basis)
+        if not len(first[1].rows) or not len(second[1].rows):
+            raise ValueError('a set of the pair has no DOFs on its '
+                             'geometry')
+        kwargs.setdefault('caption', pair_caption(
+            names[0], self, names[1], other, mode, other_mode))
+        return animate_pair(first, second, **kwargs)
 
     def plot(self, geometry: Geometry | None = None, mode: int = 0,
              **kwargs: Any) -> Any:

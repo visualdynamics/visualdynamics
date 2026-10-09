@@ -15,11 +15,13 @@ here changes those terms.
 | **PySide6 (Qt for Python)** | **LGPL-3.0** | see below |
 | **OpenCASCADE** (via cadquery-ocp/OCP, Apache-2.0 bindings) | **LGPL-2.1 with exception** | see below |
 | **libquadmath**, inside the numpy and scipy wheels | **LGPL-2.1-or-later** | see below |
+| **FFmpeg** (libavcodec, libavformat, libavutil, libswscale, libswresample), inside the PySide6 wheels for Qt Multimedia | **LGPL-2.1-or-later** — built without its GPL parts (no libx264), as the libraries report of themselves | the same as Qt's: shared libraries, shipped unmodified and replaceable; source at ffmpeg.org (n7.1.5) |
 | libgfortran / libgcc, inside those same wheels | GPL-3.0 **with the GCC Runtime Library Exception** | none — the exception exists to permit this |
 
-Eight Qt modules ship: `QtCore`, `QtGui`, `QtWidgets`, `QtOpenGL` and
+Nine Qt modules ship: `QtCore`, `QtGui`, `QtWidgets`, `QtOpenGL` and
 `QtSvg` from Qt Essentials, plus `QtWebEngineWidgets`,
-`QtWebEngineCore` and `QtWebChannel` — add-ons, and deliberate; `QtTest` is used by the test
+`QtWebEngineCore`, `QtWebChannel` and `QtMultimedia` (saving an
+animation as a video) — add-ons, and deliberate; `QtTest` is used by the test
 suite only. **All of them are offered under LGPLv3**, checked against
 Qt's own module licensing pages, so the obligations below cover the
 whole of what is used. Essentials-vs-add-ons is not the boundary that

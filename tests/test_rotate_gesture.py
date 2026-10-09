@@ -169,3 +169,66 @@ def test_a_dragged_turn_snaps_to_a_degree_and_a_typed_one_does_not(systems,
     assert np.degrees(applied) == pytest.approx(37.4), 'typed exactly'
     window._commit_rotation()
     pump()
+
+
+def test_turns_and_slides_journal_as_calls_that_replay(systems, window,
+                                                      pump):
+    """The rings and arrows wrote the frame and journaled nothing, so a
+    replayed session lost every turn (found 2026-10-09). Each gesture
+    now ends as one `place_coordinate_system` call, a second nudge of
+    the same kind settling the line rather than adding one."""
+    window.table.selectRow(0)
+    pump()
+    window.rotate_action.setChecked(True)
+    pump()
+    start = np.array(systems.cs_matrix[0])
+    window._rotating = {'row': 0, 'axis': 2, 'start': start.copy(),
+                        'from': 0.0}
+    window._apply_rotation(np.radians(37.4), snap=True)
+    window._commit_rotation()
+    pump()
+    assert window.project.journal[-1].endswith(
+        'place_coordinate_system(1, angles=(0.0, 0.0, 37.0))'), \
+        'the drag ends as its own line'
+    window.angle_box.setValue(12.5)
+    pump()
+    window._sliding = {'row': 0, 'axis': 0,
+                       'start': np.array(systems.cs_matrix[0]), 'from': 0.0}
+    window._apply_slide(0.25)
+    window._commit_slide()
+    pump()
+    lines = [line for line in window.project.journal
+             if '.place_coordinate_system(' in line]
+    assert len(lines) == 2, lines
+    assert 'angles=' in lines[0] and 'origin=' in lines[1]
+    assert not np.allclose(systems.cs_matrix[0], start), 'it did move'
+    room: dict = {}
+    exec(window.project.session_script(), room)          # noqa: S102
+    replayed = room['project']['Geometry']
+    assert np.allclose(replayed.cs_matrix[0], systems.cs_matrix[0],
+                       atol=1e-9)
+
+
+def test_place_coordinate_system_turns_and_moves_one_frame():
+    import visualdynamics
+    from visualdynamics.rotate import frame_from_angles
+
+    geometry = visualdynamics.import_file(fixture_path('plate',
+                                                       'geometry.npz'))
+    cs = geometry.add_coordinate_system(origin=(1.0, 2.0, 3.0))
+    geometry.place_coordinate_system(cs, angles=(0.0, 0.0, 90.0))
+    row = list(geometry.cs_id).index(cs)
+    assert np.allclose(geometry.cs_matrix[row, :3],
+                       frame_from_angles((0, 0, 90))[:3])
+    assert np.allclose(geometry.cs_matrix[row, 3], (1.0, 2.0, 3.0)), \
+        'a turn keeps the origin'
+    geometry.place_coordinate_system(cs, origin=(4.0, 5.0, 6.0))
+    assert np.allclose(geometry.cs_matrix[row, :3],
+                       frame_from_angles((0, 0, 90))[:3]), 'a move keeps the turn'
+    geometry.place_coordinate_system(cs, rotation=np.eye(3))
+    assert np.allclose(geometry.cs_matrix[row, :3], np.eye(3))
+    with pytest.raises(ValueError, match='not both'):
+        geometry.place_coordinate_system(cs, angles=(0, 0, 0),
+                                         rotation=np.eye(3))
+    with pytest.raises(KeyError, match='no coordinate system 999'):
+        geometry.place_coordinate_system(999, angles=(0, 0, 0))

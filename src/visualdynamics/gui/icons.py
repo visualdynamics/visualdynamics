@@ -855,6 +855,22 @@ def _draw_copy(painter, color):
     painter.drawPath(path)
 
 
+def _draw_movie(painter, color):
+    """A strip of film with Play on it: Save Animation, beside Copy on
+    the 3-D view's bar while something is moving."""
+    from PySide6.QtCore import QRectF
+
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(8, 12, 48, 40), 4, 4)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    for x in (14, 26, 38, 50):
+        painter.drawRect(QRectF(x - 3, 16, 6, 5))
+        painter.drawRect(QRectF(x - 3, 43, 6, 5))
+    painter.drawPolygon([QPointF(27, 25), QPointF(27, 39), QPointF(39, 32)])
+
+
 def _draw_refresh(painter, color):
     """A circular arrow: this object no longer matches its source's
     settings, click to recompute it."""
@@ -1707,7 +1723,8 @@ def control_icon(name: str) -> QIcon:
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,
      'sine': _draw_sine,
      'refresh': _draw_refresh,
-     'copy': _draw_copy}.get(name, _draw_default)(painter, CONTROL_COLOR)
+     'copy': _draw_copy, 'movie': _draw_movie}.get(
+         name, _draw_default)(painter, CONTROL_COLOR)
     painter.end()
     return QIcon(pixmap)
 

@@ -1037,6 +1037,30 @@ class TimeHistory(DataArray):
     abscissa_dim = 'time'
     complex_ordinate = False
 
+    def animate(self, geometry: Any, records: Any = None,
+                **kwargs: Any) -> Any:
+        """The records moving on a geometry, sample by sample, as the
+        GUI plays a time history selected with one.
+
+        Parameters
+        ----------
+        geometry : Geometry
+            The geometry to move.
+        records : sequence of int, optional
+            Which records. One per DOF either way (`animation_records`).
+        **kwargs
+            Passed through to the scene: `screenshot=` for the still at
+            the furthest the model gets, `movie=` for the record once
+            through as an MP4, `seconds=` for how long that takes.
+
+        Returns
+        -------
+        object
+            The plotter, or the file written.
+        """
+        from ..viz.animate import animate_time
+        return animate_time(geometry, self, records, **kwargs)
+
     def compute_spectra(self) -> Spectrum:
         """The averaged spectrum of every channel — sdynpy's convention.
 

@@ -1982,8 +1982,57 @@ def _application():
     return QApplication.instance() or QApplication([])
 
 
-def _mark(layout, data, marks, theme=None):
-    """The frames or the shocks over every plot in `layout`.
+#: the readings `plot_data(marks=...)` puts over a trace
+FLAT_READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
+
+
+def octave_preview(items: Iterable[Any], psd: Any,
+                   per_octave: int | None, unit_system: Any,
+                   colors: Mapping[str, str],
+                   records: Sequence[int] | None = None
+                   ) -> list[tuple[Any, Any]]:
+    """The banded conversion as steps over the narrowband it
+    integrates, on each plot whose quantity matches — a mixed object's
+    forces never step across its accelerations' axes — and only for
+    `records` when given, so the steps say what the plot says. The
+    window's octave view and `plot_data(marks='octave')`; returns the
+    (plot, curve) pairs drawn.
+
+    Raises
+    ------
+    ValueError
+        When the spectrum cannot be banded.
+    """
+    import pyqtgraph as pg
+
+    from ..viz.marks import octave_steps
+
+    banded, x, rows = octave_steps(psd, per_octave, unit_system)
+    wanted = (range(rows.shape[0]) if records is None
+              else [int(i) for i in records])
+    pen = pg.mkPen(colors['filter_preview'], width=2)
+    drawn = []
+    for item in items:
+        if not isinstance(item, pg.PlotItem):
+            continue
+        key = getattr(item, 'series_key', None)
+        for k in wanted:
+            if key is not None and (banded.ordinate_dim[k],
+                                    banded.dimension_hint[k]) \
+                    != (key[1], key[2]):
+                continue
+            curve = pg.PlotDataItem(x, rows[k], pen=pen)
+            curve.setZValue(20)
+            curve.is_zone_edge = True     # a preview, not data
+            item.addItem(curve, ignoreBounds=True)
+            drawn.append((item, curve))
+    return drawn
+
+
+def _mark(layout, data, marks, theme=None, per_octave=None,
+          unit_system=None):
+    """A reading over every plot in `layout` — the frames, the shocks,
+    the cut, the filter's preview or the octave steps.
 
     Locked, because a mark you can drag is a mark that reports the drag
     to somebody, and in a standalone plot there is nobody. Returns the
@@ -1992,24 +2041,43 @@ def _mark(layout, data, marks, theme=None):
     import pyqtgraph as pg
 
     from ..core.averaging import Averaging
-    from ..core.data import TimeHistory
+    from ..core.data import Psd, TimeHistory
 
     if marks is None:
         return []
-    if marks not in ('averaging', 'shocks'):
-        raise ValueError(f"{marks!r} is not a reading of a time history: "
-                         "'averaging' or 'shocks'")
+    if marks not in FLAT_READINGS:
+        raise ValueError(f'{marks!r} is not a reading of a plot: '
+                         + ', '.join(repr(r) for r in FLAT_READINGS))
+    colors = resolve_theme(theme)
+    plots = [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
+    if marks == 'octave':
+        if not isinstance(data, Psd):
+            raise TypeError('octave bands read a PSD, not '
+                            f'{type(data).__name__}')
+        return octave_preview(plots, data, per_octave, unit_system, colors)
     if not isinstance(data, TimeHistory):
         raise TypeError(f'{marks} marks belong on a time history, not on '
                         f'{type(data).__name__}')
-    colors = resolve_theme(theme)
-    plots = [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
     if marks == 'shocks':
         from ..core.shocks import suggest
         from .shocks import ShockOverlay
 
         found = tuple(data.shocks or suggest(data))
         return [ShockOverlay(plot, found, colors, locked=True)
+                for plot in plots]
+    if marks == 'filter':
+        from .filtering import FilterOverlay
+
+        filtering = data.filtering or data.suggest_filtering()
+        return [FilterOverlay(plot, filtering, data.sample_rate, colors)
+                for plot in plots]
+    if marks == 'truncation':
+        from .truncation import TruncationOverlay
+
+        abscissa = np.asarray(data.abscissa, dtype=float)
+        truncation = data.truncation or data.suggest_truncation()
+        return [TruncationOverlay(plot, truncation, float(abscissa[0]),
+                                  float(abscissa[-1]), colors)
                 for plot in plots]
     from .averaging import AveragingOverlay
 
@@ -2025,6 +2093,7 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
               title: str | None = None, size: tuple[int, int] = (1000, 700),
               path: str | os.PathLike | None = None,
               marks: str | None = None,
+              per_octave: int | None = None,
               **kwargs: Any) -> Any:
     """Plot a data array in a window, or to a file with `path`.
 
@@ -2034,12 +2103,15 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
     Qt event loop already running, this blocks until the window is
     closed.
 
-    `marks` puts a time history's own reading over the trace, which is
-    what the app's two toggles do: `'averaging'` brackets the frames a
-    spectrum is averaged over, `'shocks'` brackets the events an SRS is
-    computed from. Both are read from the history — whatever it carries,
-    or what the detector would suggest — and neither can be dragged
-    here, since there is nothing on the other end of a drag in a file.
+    `marks` puts a reading over the trace, which is what the app's
+    toggles do: on a time history `'averaging'` brackets the frames a
+    spectrum is averaged over, `'shocks'` the events an SRS is computed
+    from, `'truncation'` grays the ends a cut would drop, and
+    `'filter'` draws the filtered twin over the record; on a PSD
+    `'octave'` steps the bands it would integrate to, `per_octave`.
+    Each is read from the object — whatever it carries, or what its
+    detector would suggest — and none can be dragged here, since there
+    is nothing on the other end of a drag in a file.
     """
     # the pane owns which part of a complex ordinate is drawn, so the
     # draw reads it back rather than being told once at the call
@@ -2054,7 +2126,8 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
                      else held or 'magnitude')
         build_plot(widget, data, unit_system=unit_system, theme=theme,
                    component=component, **kwargs)
-        overlays.extend(_mark(widget, data, marks, theme))
+        overlays.extend(_mark(widget, data, marks, theme, per_octave,
+                              unit_system))
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or repr(data), size=size,
@@ -2744,25 +2817,10 @@ def plot_scalogram(history: Any, channel: int = 0, *,
     from ..core import wavelet as wavelet_math
     from .scalogram import scalogram_image
 
-    rate = history.sample_rate
-    values = np.real(np.asarray(history.ordinate)[channel])
-    duration = len(history.abscissa) / rate
-    default_low, default_high = wavelet_math.default_range(rate, duration)
-    top = high if high is not None else default_high
-    bottom = low if low is not None else default_low
-    frequencies = wavelet_math.log_frequencies(
-        bottom, top,
-        wavelet_math.PER_OCTAVE if per_octave is None else per_octave)
-    frequencies = frequencies[frequencies < rate / 2.0]
-    if frequencies.size < 2:
-        raise ValueError('no frequencies this record can carry in that '
-                         f'range; it reaches {rate / 2.0:g} Hz')
-    width = wavelet_math.OMEGA0 if omega0 is None else omega0
-    # held to a picture's width, each column its slice's peak — the
-    # app's own reading, and the one a long record survives
-    clock, magnitude = wavelet_math.scalogram_peaks(
-        values, rate, frequencies, width)
-    clock = clock + float(history.abscissa[0])
+    # the app's own reading, flat here and a surface on the stage
+    clock, magnitude, frequencies, width = wavelet_math.reading(
+        history, channel, low=low, high=high, per_octave=per_octave,
+        omega0=omega0)
     colors = resolve_theme(theme)
 
     def build(widget: Any) -> Any:

@@ -92,6 +92,14 @@ else
   echo "warning: no Sparkle.framework at $SPARKLE — this build cannot update itself" >&2
 fi
 
+# Can this bundle save an animation? The files being inside it say
+# nothing about whether the encoder inside them answers, so the frozen
+# app writes and reads back a second of H.264 (gui.movie.check) before
+# anything is signed or shipped. VideoToolbox is on every Mac, so any
+# answer but yes stops the build (PLAN.md, "Saving an animation").
+"$APP/Contents/MacOS/Visual Dynamics" --check-movie "$(mktemp -d)/check.mp4" ||
+  { echo "the packaged app cannot save an animation" >&2; exit 1; }
+
 if [[ -n $SIGN ]]; then
   # --deep is deprecated and unreliable for nested code; sign inside
   # out. Every Mach-O *by content*, not by name: the first notarized

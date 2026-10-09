@@ -447,3 +447,23 @@ def test_a_record_that_starts_late_is_drawn_on_its_own_clock(window, pump):
     assert mapped.right() == pytest.approx(start + count / rate,
                                            abs=2.0 / rate)
     assert image.image.shape[0] == held_columns(count) <= COLUMNS
+
+
+def test_the_surface_is_a_call_a_session_replays(showing, tmp_path,
+                                                monkeypatch):
+    """The 3-D scalogram had no call — the console journaled the flat
+    one while a surface was on screen (found 2026-10-09). It journals
+    `plot_scalogram_stage` now, which reads the record the window's way
+    (`core.wavelet.reading`), and the session script draws it."""
+    window, _history = showing
+    line = window.project.journal[-1]
+    assert line.startswith('visualdynamics.viz.scalogram.'
+                           "plot_scalogram_stage(project['Time History']")
+    monkeypatch.chdir(tmp_path)
+    exec(window.project.session_script(), {})              # noqa: S102
+    assert (tmp_path / 'scalogram-3d.png').stat().st_size > 2000
+    window.data_pane.waterfall_action.trigger()             # flat
+    window.render_current()
+    assert window.project.journal[-1].startswith(
+        "visualdynamics.plot.plot_scalogram(project['Time History']")
+

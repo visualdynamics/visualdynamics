@@ -36,7 +36,7 @@ from ..plot import (
     bin_edges,
     drawing_shape,
 )
-from ..theme import OVERLAY_ALPHA
+from ..theme import overlay_alphas
 from ..units import DEFAULT_SYSTEM
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -579,50 +579,21 @@ def _verdict_block(specification, measured, level_label='Test level'):
 
 def _pairs_block(block, objects):
     """The matched-modes table: both sets' parameters side by side
-    with the frequency error against the first set and the MAC of each
-    pair. The block binds a MatchedModes object by name."""
+    with the frequency error against the first set, the MAC of each
+    pair and their sizes' ratio — `core.tables.matched_rows`, the rows
+    the window and `Project.table` read too. The block binds a
+    MatchedModes object by name."""
     from ..core.matches import MatchedModes
-    from ..core.shapes import scale_ratios
+    from ..core.tables import table_of
 
     bound = objects.get(block.get('source'))
-    if not isinstance(bound, MatchedModes):
+    if not isinstance(bound, MatchedModes) or not bound.pairs:
         return None
-    source = objects.get(bound.first)
-    other = objects.get(bound.second)
-    pairs, macs = bound.pairs, bound.macs
-    if source is None or other is None:
+    if objects.get(bound.first) is None or objects.get(bound.second) is None:
         return None
-    # the scale each pair was normalized by. The overlay figure below
-    # this table draws both shapes to their own peak, so it cannot show
-    # one set being thirty times the other; this column is where that
-    # shows, and 1.00 down the column is the reader's evidence that the
-    # comparison is of shape alone.
-    ratios = scale_ratios(source, other, pairs)
-    rows = []
-    for index, (row, column) in enumerate(pairs):
-        if not (0 <= row < source.num_shapes
-                and 0 <= column < other.num_shapes):
-            continue
-        fa = float(source.frequency[row])
-        fb = float(other.frequency[column])
-        delta = f'{(fb - fa) / fa * 100.0:+.2f}' if fa else '—'
-        mac = macs[index]
-        rows.append([
-            str(row + 1), f'{fa:.4f}',
-            f'{float(source.damping[row]) * 100:.3f}',
-            str(column + 1), f'{fb:.4f}',
-            f'{float(other.damping[column]) * 100:.3f}',
-            delta, f'{mac:.3f}',
-            '—' if ratios[index] is None else f'{ratios[index]:.2f}'])
-    if not rows:
-        return None
-    a_name, b_name = bound.first, bound.second
+    headers, rows = table_of(bound, objects=objects)
     return {'kind': 'table', 'caption': block.get('caption', ''),
-            'headers': [f'{a_name} Mode', 'Freq [Hz]',
-                        'Damping [%]', f'{b_name} Mode',
-                        'Freq [Hz]', 'Damping [%]', 'Δf [%]', 'MAC',
-                        f'{b_name}/{a_name}'],
-            'rows': rows}
+            'headers': headers, 'rows': rows}
 
 
 def _photo_block(block, photos):
@@ -1893,12 +1864,7 @@ def _overlay_block(block, objects, us, object_groups=None):
     mass unit or a normalization convention worth knowing about."""
     from ..core.geometry import Geometry
     from ..core.matches import MatchedModes
-    from ..core.shapes import (
-        ShapeSet,
-        aligned_mode,
-        alignment_factor,
-        apply_alignment,
-    )
+    from ..core.shapes import ShapeSet, paired_mode
     from ..deform import ShapeDeflection
 
     matched = objects.get(block.get('source'))
@@ -1926,19 +1892,16 @@ def _overlay_block(block, objects, us, object_groups=None):
         return None
     first_color, second_color = '#4c92d9', '#ff8c2b'
     # The basis is the one being looked *at*; the other is drawn through
-    # it, at the same quarter opacity the comparison screen uses. Which
-    # of the pair that is depends on the project rather than on the
-    # order they were matched in, so ask the links — the same question
-    # the window asks. Without this the report drew both solid and the
+    # it, at the same quarter opacity the comparison screen uses — the
+    # one rule (`overlay_alphas`), asked of the links, not the order the
+    # pair was matched in. Without it the report drew both solid and the
     # near mesh simply hid the far one.
     def role_of(name: str) -> str | None:
         return next((group.get('role') for group in (object_groups or [])
                      if name in group['members']), None)
 
-    basis_is_second = (role_of(matched.second) == 'Basis'
-                       and role_of(matched.first) != 'Basis')
-    first_alpha, second_alpha = ((OVERLAY_ALPHA, 1.0) if basis_is_second
-                                 else (1.0, OVERLAY_ALPHA))
+    first_alpha, second_alpha = overlay_alphas(role_of(matched.first),
+                                               role_of(matched.second))
     pa, _na, la, fa = _scene_geometry(geo_a, us)
     pb, _nb, lb, fb = _scene_geometry(geo_b, us)
     offset = len(pa)
@@ -1967,12 +1930,7 @@ def _overlay_block(block, objects, us, object_groups=None):
     for (r, c), mac in zip(matched.pairs, matched.macs):
         if not (0 <= r < a.num_shapes and 0 <= c < b.num_shapes):
             continue
-        if projected is None:
-            second_shape = aligned_mode(a, r, b, c)
-        else:
-            second_shape = apply_alignment(
-                b.shape_matrix[c],
-                alignment_factor(a, r, projected, c))
+        second_shape = paired_mode(a, r, b, c, projected)
         real = np.zeros_like(points)
         imag = np.zeros_like(points)
         for geometry, dofs, shape, shift in (

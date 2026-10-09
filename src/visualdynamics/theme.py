@@ -118,6 +118,17 @@ DARK = {
 #: the difference was invisible until the two were put side by side.
 OVERLAY_ALPHA = 0.25
 
+
+def overlay_alphas(first_role: str | None,
+                   second_role: str | None) -> tuple[float, float]:
+    """(first, second) opacity for an overlaid pair: the Basis is the
+    one being looked *at*, the other drawn through it. Which that is
+    depends on the object groups, not on the order the pair was picked
+    in; with no Basis among them the first leads."""
+    if second_role == 'Basis' and first_role != 'Basis':
+        return OVERLAY_ALPHA, 1.0
+    return 1.0, OVERLAY_ALPHA
+
 THEMES = {'light': LIGHT, 'dark': DARK}
 
 DEFAULT = 'light'

@@ -1279,3 +1279,28 @@ def test_what_the_progress_raises_stops_the_extraction():
 
     with pytest.raises(Stop):
         extract_sine(history, spec, workers=1, progress=cancel)
+
+
+def test_the_sine_stage_with_its_levels_is_a_call(tmp_path, monkeypatch):
+    """The app's 3-D sine comparison — targets and measured levels on
+    one stage — had no call; `plot_sine_specification` draws the
+    specification alone (found 2026-10-09). `plot_sine_stage` takes
+    the level set itself, narrowed by tone and DOF as the bar and the
+    tree narrow it."""
+    from visualdynamics.viz import sinespec
+
+    spec = _spec()
+    levels = extract_sine(_recording(spec), spec)
+    path = tmp_path / 'sine.png'
+    sinespec.plot_sine_stage(spec, levels, tones=['Up'], dofs=['101Z+'],
+                             screenshot=str(path))
+    assert path.stat().st_size > 2000
+    seen = {}
+    real = sinespec.add_sine_stage
+    monkeypatch.setattr(sinespec, 'add_sine_stage',
+                        lambda plotter, **kw: (seen.update(kw),
+                                               real(plotter, **kw))[1])
+    sinespec.plot_sine_stage(spec, levels, tones=['Up'],
+                             screenshot=str(tmp_path / 'again.png'))
+    assert seen['levels'] == list(levels.levels), 'the set, as its levels'
+    assert seen['tones'] == ['Up'] and seen['specification'] is spec

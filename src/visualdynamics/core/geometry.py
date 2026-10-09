@@ -950,6 +950,49 @@ class Geometry:
         self.cs_matrix = np.concatenate([self.cs_matrix, matrix[np.newaxis]])
         return cs_id
 
+    def place_coordinate_system(self, cs_id: int, *,
+                                origin: ArrayLike | None = None,
+                                angles: ArrayLike | None = None,
+                                rotation: ArrayLike | None = None) -> None:
+        """Turn a coordinate system, move it, or both — what the 3-D
+        view's rings and arrows do to one, as a call.
+
+        Parameters
+        ----------
+        cs_id : int
+            Which coordinate system.
+        origin : array_like, optional
+            Where it sits, in the geometry's stored length unit (meters
+            once its units are declared). Kept when omitted.
+        angles : array_like, optional
+            Its turn as degrees about the geometry's fixed X, then Y,
+            then Z axes (`rotate.frame_from_angles`) — the angles the
+            view's angle box and the box panel speak. (0, 0, 0) undoes
+            any turn. Kept when omitted.
+        rotation : array_like, optional
+            Its turn as a 3x3 matrix whose rows are its axes, instead
+            of `angles`.
+
+        Returns
+        -------
+        None
+        """
+        from ..rotate import frame_from_angles
+
+        rows = np.flatnonzero(self.cs_id == int(cs_id))
+        if not len(rows):
+            raise KeyError(f'no coordinate system {int(cs_id)}')
+        if angles is not None and rotation is not None:
+            raise ValueError('give the turn as angles or as a rotation, '
+                             'not both')
+        row = int(rows[0])
+        if angles is not None:
+            self.cs_matrix[row, :3] = frame_from_angles(angles)[:3]
+        elif rotation is not None:
+            self.cs_matrix[row, :3] = np.asarray(rotation, dtype=np.float64)
+        if origin is not None:
+            self.cs_matrix[row, 3] = np.asarray(origin, dtype=np.float64)
+
     def add_beams(self, node_ids: Ids, group: int | None = None,
                   color: int = 1, elem_type: int = 21) -> int:
         """A chain of two-node line elements through the given nodes, in

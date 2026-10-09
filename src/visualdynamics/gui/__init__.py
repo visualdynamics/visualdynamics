@@ -161,6 +161,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     QApplication.setApplicationName('Visual Dynamics')
     QApplication.setApplicationDisplayName('Visual Dynamics')
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    if '--check-movie' in argv:
+        # the packaged build's self-check, no window: can this install
+        # save an animation? (gui.movie.check — 0 yes, 2 no H.264 here)
+        from .movie import check
+
+        where = argv[argv.index('--check-movie') + 1:][:1] or ['check.mp4']
+        code, message = check(where[0])
+        print(message, flush=True)
+        return code
     from .icons import app_icon
 
     app.setWindowIcon(app_icon())

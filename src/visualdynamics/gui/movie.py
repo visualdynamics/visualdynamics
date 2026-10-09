@@ -61,19 +61,38 @@ def _application():
 def _mp4_codecs() -> list:
     """The video codecs this machine can encode into an MP4 — asked
     once, since the window asks on every selection whether to offer
-    the save."""
+    the save. Names, not enum members, so a machine whose Qt
+    Multimedia cannot load answers too (`_unloadable`)."""
     from PySide6.QtMultimedia import QMediaFormat
 
     _application()
-    return list(QMediaFormat(QMediaFormat.FileFormat.MPEG4)
-                .supportedVideoCodecs(QMediaFormat.ConversionMode.Encode))
+    return [codec.name for codec in
+            QMediaFormat(QMediaFormat.FileFormat.MPEG4)
+            .supportedVideoCodecs(QMediaFormat.ConversionMode.Encode)]
+
+
+@cache
+def _unloadable() -> str | None:
+    """Why Qt Multimedia will not load here, or None. Its Linux build
+    links PulseAudio, and a machine without `libpulse.so.0` — GitHub's
+    Ubuntu runner, a minimal desktop — fails the import (PySide6 6.12,
+    2026-10-09). Asked once: a failed import is not cached by Python,
+    and the window asks on every selection."""
+    try:
+        import PySide6.QtMultimedia  # noqa: F401
+    except ImportError as error:
+        return str(error)
+    return None
 
 
 def unavailable_reason() -> str | None:
     """Why no movie can be saved here, or None when one can."""
-    from PySide6.QtMultimedia import QMediaFormat
-
-    if QMediaFormat.VideoCodec.H264 in _mp4_codecs():
+    failure = _unloadable()
+    if failure is not None:
+        return (f'Qt Multimedia does not load on this computer '
+                f'({failure}), so an animation cannot be saved as a '
+                'video here')
+    if 'H264' in _mp4_codecs():
         return None
     return ('This computer has no H.264 video encoder that Qt can use '
             '(on Linux it needs a working VAAPI or NVENC GPU encoder), '
@@ -108,6 +127,11 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     MovieUnavailable
         When the machine has no H.264 encoder; nothing is written.
     """
+    # asked before Qt Multimedia is imported: where it cannot load, the
+    # reason is the answer, not an ImportError
+    reason = unavailable_reason()
+    if reason is not None:
+        raise MovieUnavailable(reason)
     from PySide6.QtCore import QEventLoop, QSize, QTimer, QUrl
     from PySide6.QtGui import QImage
     from PySide6.QtMultimedia import (
@@ -119,9 +143,6 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
         QVideoFrameInput,
     )
 
-    reason = unavailable_reason()
-    if reason is not None:
-        raise MovieUnavailable(reason)
     source_frames = iter(frames)
     first = next(source_frames, None)
     if first is None:

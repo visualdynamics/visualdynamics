@@ -563,3 +563,67 @@ def pytest_runtest_logstart(nodeid, location):
     if os.environ.get('CI'):
         sys.stderr.write(f'>> {nodeid}\n')
         sys.stderr.flush()
+
+
+# A mode shape and a time history, each animating on the plate: the
+# speed buttons and Save Animation both read playback from these.
+def _plate_geometry():
+    import visualdynamics
+
+    geometry = visualdynamics.import_file(fixture_path('plate', 'geometry.npz'))
+    geometry.define_units('m')
+    return geometry
+
+
+@pytest.fixture
+def shaking(window, pump):
+    """A mode shape animating on its geometry."""
+    import visualdynamics
+
+    geometry = _plate_geometry()
+    window.add_object('Geometry', geometry)
+    window.add_object('Shapes',
+                      visualdynamics.import_file(fixture_path('plate',
+                                                     'shapes.npy')))
+    window.tree.clearSelection()
+    for name in ('Geometry', 'Shapes'):
+        window._item_for_object(name).setSelected(True)
+    window.render_current()
+    pump()
+    return window
+
+
+@pytest.fixture
+def playing(window, pump):
+    """A time history animating on its geometry."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+
+    geometry = _plate_geometry()
+    window.add_object('Geometry', geometry)
+    dofs = [f'{int(node)}Z+' for node in geometry.node_id[:20]]
+    t = np.arange(2048) / 512.0
+    window.add_object('Time', TimeHistory(
+        t, np.sin(2 * np.pi * 3 * t)[None, :].repeat(len(dofs), 0),
+        response_dof=dofs, ordinate_dim='acceleration',
+        ordinate_unit='m/s**2'))
+    window.tree.clearSelection()
+    for name in ('Geometry', 'Time'):
+        window._item_for_object(name).setSelected(True)
+    window.render_current()
+    pump()
+    return window
+
+
+@pytest.fixture
+def h264(qt_app):
+    """Skip where this machine cannot encode H.264 (a Linux runner with
+    no GPU encoder) — asked once the session's application exists,
+    never at import: an application made during collection is the one
+    Qt keeps, made without the attributes `qt_app` gives it. Where it
+    skips, the refusal is what is tested (tests/test_movie.py)."""
+    from visualdynamics.gui import movie
+
+    if movie.unavailable_reason() is not None:
+        pytest.skip('no H.264 encoder on this machine')

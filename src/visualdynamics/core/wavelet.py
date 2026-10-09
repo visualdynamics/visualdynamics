@@ -113,6 +113,8 @@ influence are Torrence and Compo's.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from numpy.typing import ArrayLike
 
@@ -504,3 +506,42 @@ def default_range(sample_rate: float, duration: float) -> tuple[float, float]:
     low = (8.0 / float(duration)) if duration else high / 100.0
     low = min(max(low, nyquist / 1000.0), high / 2.0)
     return low, high
+
+
+def reading(history: Any, channel: int = 0, *, low: float | None = None,
+            high: float | None = None, per_octave: int | None = None,
+            omega0: float | None = None
+            ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """One channel's scalogram as the app draws it, flat or in 3-D:
+    (clock, magnitude, frequencies, omega0).
+
+    Settings left out take the defaults the panel opens on
+    (`default_range`, `PER_OCTAVE`, `OMEGA0`); lines at or over Nyquist
+    are dropped, since the record cannot carry them. Time is held to
+    `COLUMNS` columns by peak-hold (`scalogram_peaks`), so a long
+    record reads in bounded memory and a transient's ridge is not
+    strided past. The clock is the record's own.
+
+    One implementation for the window, `plot.plot_scalogram` and
+    `viz.scalogram.plot_scalogram_stage`.
+
+    Raises
+    ------
+    ValueError
+        When fewer than two lines of the range lie under Nyquist.
+    """
+    rate = float(history.sample_rate)
+    values = np.real(np.asarray(history.ordinate)[channel])
+    duration = len(history.abscissa) / rate
+    default_low, default_high = default_range(rate, duration)
+    frequencies = log_frequencies(
+        default_low if low is None else low,
+        default_high if high is None else high,
+        PER_OCTAVE if per_octave is None else per_octave)
+    frequencies = frequencies[frequencies < rate / 2.0]
+    if frequencies.size < 2:
+        raise ValueError('no frequencies this record can carry in that '
+                         f'range; it reaches {rate / 2.0:g} Hz')
+    width = OMEGA0 if omega0 is None else float(omega0)
+    clock, magnitude = scalogram_peaks(values, rate, frequencies, width)
+    return clock + float(history.abscissa[0]), magnitude, frequencies, width

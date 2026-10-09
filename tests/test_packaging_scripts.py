@@ -74,3 +74,20 @@ def test_the_windows_smoke_test_fails_on_a_traceback_and_the_release_runs_it():
               encoding='utf-8') as handle:
         workflow = handle.read()
     assert 'packaging\\smoke_windows.ps1' in workflow
+
+
+def test_both_packaged_builds_check_they_can_save_an_animation():
+    """The bundle carrying QtMultimedia proves nothing about the encoder
+    answering; each packaged build writes and reads back a movie."""
+    with open(os.path.join(ROOT, 'packaging', 'smoke_windows.ps1'),
+              encoding='utf-8') as handle:
+        smoke = handle.read()
+    assert "'--check-movie'" in smoke and 'throw "the movie check failed' in smoke
+    assert smoke.index('--check-movie') < smoke.index('# 2. A small real project')
+    with open(os.path.join(ROOT, 'packaging', 'build_macos.sh'),
+              encoding='utf-8') as handle:
+        build = handle.read()
+    line = next(line for line in build.splitlines() if '--check-movie' in line)
+    assert line.startswith('"$APP/Contents/MacOS/Visual Dynamics"')
+    assert build.index('--check-movie') < build.index('if [[ -n $SIGN ]]'), \
+        'checked before it is signed and shipped'

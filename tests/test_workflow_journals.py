@@ -186,3 +186,63 @@ def test_the_sine_workflow_replays(window, pump):
     window.generate_report('sine')
     pump()
     _replay(window)
+
+
+def test_a_fit_of_picked_records_weighted_by_coherence_replays(window,
+                                                               pump):
+    """The fitting screen fits the records picked in the tree and weights
+    them by the project's coherence; the journal said neither until
+    2026-10-09, so the replay fitted every record unweighted — another
+    fit under the same name. A coherence that distrusts one response
+    badly is what makes the weighting visible in the numbers."""
+    window.import_paths([fixture_path('plate', 'modal_spectra.nc4')])
+    pump()
+    coherence = window.objects['Multiple Coherence']
+    distrusted = coherence.response_dof.index('107Z+')
+    coherence.ordinate[distrusted] = 0.2
+    item = window._item_for_object('FRF')
+    window.tree.clearSelection()
+    item.setExpanded(True)
+    pump()
+    picked = list(range(16))
+    window.record_grids['FRF'].select_records(picked)
+    item.setSelected(True)
+    pump()
+    window.start_modal_fit()
+    pump()
+    assert window._fit_coherence_name == 'Multiple Coherence'
+    # enough modes, refined twice, for the weighting to move the shapes
+    for _ in range(8):
+        window.confirm_mode_button.click()
+        pump()
+    for _ in range(2):
+        window.refine_all_modes()
+        pump()
+    window.stop_fitting()
+    pump()
+    line = next(entry for entry in window.project.journal
+                if entry.startswith("project.fit_modes('FRF'"))
+    assert f'records={picked!r}' in line
+    assert "coherence='Multiple Coherence'" in line
+    # the line alone, on a fresh project holding the same FRF and the
+    # same distrustful coherence (that edit was a raw write the journal
+    # cannot see), must be this fit
+    import visualdynamics
+
+    def replayed(text):
+        fresh = visualdynamics.Project('Replay')
+        fresh.import_file(fixture_path('plate', 'modal_spectra.nc4'))
+        fresh['Multiple Coherence'].ordinate[distrusted] = 0.2
+        exec(text, {'project': fresh})                   # noqa: S102
+        return fresh['FRF Modes']
+
+    ours, theirs = window.objects['FRF Modes'], replayed(line)
+    assert np.allclose(ours.frequency, theirs.frequency)
+    assert np.allclose(ours.shape_matrix, theirs.shape_matrix)
+    # and the test can tell: the same line without either is another fit
+    for dropped in (f', records={picked!r}',
+                    ", coherence='Multiple Coherence'"):
+        other = replayed(line.replace(dropped, ''))
+        assert (other.shape_matrix.shape != ours.shape_matrix.shape
+                or not np.allclose(other.shape_matrix, ours.shape_matrix)), \
+            f'dropping {dropped!r} changed nothing: the test cannot bite'

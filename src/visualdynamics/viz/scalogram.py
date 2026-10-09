@@ -200,3 +200,42 @@ def _label_frequencies(plotter, frequencies, rows, colors, sy, f0, f1) -> None:
             actor.UseBoundsOff()
         except AttributeError:                       # pragma: no cover
             pass
+
+
+def plot_scalogram_stage(history: Any, channel: int = 0, *,
+                         low: float | None = None,
+                         high: float | None = None,
+                         per_octave: int | None = None,
+                         omega0: float | None = None,
+                         unit_system: Any = None,
+                         screenshot: str | None = None,
+                         theme: Any = None, show: bool = True) -> Any:
+    """One channel's scalogram as a surface — the reading the app's
+    wavelet view opens in — shown interactively or rendered to
+    `screenshot`. The settings are `plot.plot_scalogram`'s, read the
+    same way (`core.wavelet.reading`).
+
+        from visualdynamics.viz.scalogram import plot_scalogram_stage
+        plot_scalogram_stage(history, screenshot='scalogram-3d.png')
+    """
+    import pyvista as pv
+
+    from ..units import DEFAULT_SYSTEM
+    from .waterfall import finish_scene, place_camera
+
+    clock, magnitude, frequencies, width = wavelet.reading(
+        history, channel, low=low, high=high, per_octave=per_octave,
+        omega0=omega0)
+    us = unit_system or DEFAULT_SYSTEM
+    units = history.ordinate_unit[channel] or ''
+    colors = resolve_theme(theme)
+    plotter = pv.Plotter(off_screen=screenshot is not None or not show)
+    plotter.set_background(colors['scene_background'],
+                           top=colors['scene_background_top'])
+    add_scalogram(plotter, magnitude, clock, frequencies, theme=theme,
+                  omega0=width,
+                  time_label=f'time [{us.label_html("time")}]',
+                  level_label=f'{history.ordinate_dim[channel]}'
+                              + (f' [{units}]' if units else ''))
+    place_camera(plotter)
+    return finish_scene(plotter, screenshot, show)

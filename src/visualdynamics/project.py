@@ -2501,10 +2501,142 @@ class Project(dict):
         return self._derive(source, shapes, name or f'{source} Modes',
                             recipe=('solve_modes', params))
 
+    def scale_family(self, measured: Any) -> list[str]:
+        """The measured PSDs that share one comparison scale: the object
+        and every non-specification PSD in its object group — its
+        source, or the octave bands made from it. One family, one
+        number, because an octave PSD is the same measurement on another
+        grid and two scales for one run is a contradiction.
+
+        Parameters
+        ----------
+        measured : str or Psd
+            A measured PSD.
+
+        Returns
+        -------
+        list of str
+            The family's names, `measured` among them.
+        """
+        from .core.data import Psd, Specification
+
+        name = self.name_of(measured)
+        group = self.object_group_of(name) or [name]
+        if name not in group:
+            group = [name, *group]
+        return [n for n in group
+                if isinstance(self.get(n), Psd)
+                and not isinstance(self.get(n), Specification)]
+
+    def comparison_scale(self, specification: Any, measured: Any) -> int:
+        """The decibels a measured PSD is scaled by to be compared with
+        a specification — what the comparison's plot, bars and report
+        all read. A value held anywhere in the family wins
+        (`set_comparison_scale` keeps the family equal); otherwise it is
+        detected on the family's narrowband member, so the same data
+        banded onto octaves cannot round to a different decibel than
+        the lines it came from.
+
+        Parameters
+        ----------
+        specification : str or Specification
+            What is compared against.
+        measured : str or Psd
+            The measurement.
+
+        Returns
+        -------
+        int
+            Whole decibels.
+        """
+        from .core.compliance import comparison_scale_db
+
+        # an object as itself: the window hands over a specification it
+        # may have banded for the plot, which is in no project
+        spec = (self[specification] if isinstance(specification, str)
+                else specification)
+        name = self.name_of(measured)
+        family = self.scale_family(name)
+        held = [self[n].scale_db for n in family
+                if self[n].scale_db is not None]
+        if held:
+            return int(held[0])
+        roots = [n for n in family
+                 if getattr(self[n], 'bandwidth', None) is None]
+        return int(comparison_scale_db(spec, self[roots[0]] if roots
+                                       else self[name]))
+
+    def set_comparison_scale(self, measured: Any,
+                             db: int | None) -> list[str]:
+        """Hold a comparison scale on a measured PSD and its whole
+        family (`scale_family`) — or, with None, return them to
+        detecting it from the data. Held on the objects, not a view,
+        so the report compares exactly what the screen does and a saved
+        project remembers the judgment. The data is never changed.
+
+        Parameters
+        ----------
+        measured : str or Psd
+            A measured PSD.
+        db : int or None
+            Whole decibels, or None for automatic.
+
+        Returns
+        -------
+        list of str
+            The PSDs now holding it.
+        """
+        if db is not None:
+            if isinstance(db, float) and not db.is_integer():
+                raise ValueError('a comparison scale is whole decibels')
+            db = int(db)
+        family = self.scale_family(measured)
+        for name in family:
+            self[name].scale_db = db
+        return family
+
+    def fit_coherence(self, source: Any,
+                      records: Sequence[int] | None = None) -> str | None:
+        """The coherence the fitting screen weights a fit of `source`
+        by: the one covering the most of the fit's response DOFs, one
+        in the FRF's own object group winning a tie. None when no
+        coherence covers any of them.
+
+        Parameters
+        ----------
+        source : str or Frf
+            The FRF set being fitted.
+        records : sequence of int, optional
+            The records fitted; every record when omitted.
+
+        Returns
+        -------
+        str or None
+            The coherence's name, for `fit_modes(coherence=...)`.
+        """
+        from .core.data import _CoherenceBase
+
+        source = self.name_of(source)
+        frf = self[source]
+        rows = range(frf.num_records) if records is None else records
+        wanted = {frf.response_dof[int(i)] for i in rows}
+        linked = set(self.object_group_of(source) or ())
+        best, best_key = None, (0, False)
+        for name in self.ordered_names():
+            obj = self[name]
+            if not isinstance(obj, _CoherenceBase):
+                continue
+            covered = len(set(obj.response_dof) & wanted)
+            key = (covered, name in linked)
+            if covered and key > best_key:
+                best, best_key = name, key
+        return best
+
     def fit_modes(self, source: str, *, bounds: tuple[float, float] | None
                   = None, limit: int = 30, name: str | None = None,
                   at: Sequence[tuple[float, float]] | None = None,
-                  refine: int = 0) -> str:
+                  refine: int = 0, records: Sequence[int] | None = None,
+                  coherence: Any = None) -> str:
         """Fit a modal model to an FRF set (the fitting screen).
 
         The screen's loop, scripted: confirm the suggestion, take the
@@ -2545,6 +2677,14 @@ class Project(dict):
         refine : int, default 0
             Times to run the joint residue refinement after the
             confirms — the screen's Refine All, counted.
+        records : sequence of int, optional
+            Fit these records only — the screen fits the records picked
+            in the tree. Every record when omitted.
+        coherence : str or Coherence, optional
+            Weight each response's least squares by this coherence's
+            trust in it, line by line — the screen weights by
+            `fit_coherence(source, records)` when the project has one.
+            Unweighted when omitted.
 
         Returns
         -------
@@ -2555,7 +2695,9 @@ class Project(dict):
         from .core.modal_fit import ModalFitSession
 
         source = self.name_of(source)
-        session = ModalFitSession(self[source])
+        if isinstance(coherence, str):
+            coherence = self[self.name_of(coherence)]
+        session = ModalFitSession(self[source], records, coherence)
         if at is not None:
             for pick in at:
                 frequency, damping, *described = pick
@@ -3113,7 +3255,8 @@ class Project(dict):
         """(headers, rows) for an object that reads as a table.
 
         The instrumentation of a channel table, the identified
-        parameters of a shape set — the same rows the report prints,
+        parameters of a shape set, the pairs of a matched-modes object
+        beside both sets' parameters — the same rows the report prints,
         so a script and a report cannot disagree about what is in one.
 
         Parameters
@@ -3129,7 +3272,7 @@ class Project(dict):
         from .core.tables import table_of
 
         name = self.name_of(name)
-        built = table_of(self[name])
+        built = table_of(self[name], objects=self)
         if built is None:
             raise ValueError(f'{name} is a {type(self[name]).__name__}, '
                              'which does not read as a table')
@@ -3186,6 +3329,44 @@ class Project(dict):
         # spectra pick a line by `frequency=`, not a mode number, and a
         # positional 0 must not read as 0 Hz
         return target.animate(home[1], **kwargs)
+
+    def animate_pair(self, first: Any, mode: int, second: Any,
+                     other_mode: int, **kwargs: Any) -> Any:
+        """Two shape sets' modes overlaid on their geometries, as the
+        window animates a picked cell of their cross-MAC.
+
+        Each set is drawn on the geometry it answers to
+        (`geometry_for`); the Basis is the one looked at and the other
+        drawn through it (`theme.overlay_alphas`), whichever order they
+        are named in; the caption names both by their names here.
+
+        Parameters
+        ----------
+        first, second : str or ShapeSet
+            The two sets.
+        mode, other_mode : int
+            Their modes, by index.
+        **kwargs
+            Passed through to `ShapeSet.animate_pair`: `on_basis`,
+            `screenshot=`, `movie=`, `scale`, `colors`.
+
+        Returns
+        -------
+        object
+            The plotter, the still, or the movie's path.
+        """
+        from .theme import overlay_alphas
+
+        first, second = self.name_of(first), self.name_of(second)
+        homes = [self.geometry_for(name) for name in (first, second)]
+        if homes[0] is None:
+            raise ValueError(f'{first!r} has no geometry — link one')
+        roles = [(self._group(name) or {}).get('role')
+                 for name in (first, second)]
+        kwargs.setdefault('alphas', overlay_alphas(*roles))
+        return self[first].animate_pair(
+            homes[0][1], mode, self[second], other_mode,
+            (homes[1] or homes[0])[1], names=(first, second), **kwargs)
 
     @property
     def names(self) -> list[str]:
@@ -3680,6 +3861,8 @@ class Project(dict):
         ('SpecificationDraft(',
          'from visualdynamics.core.author import SpecificationDraft'),
         ('np.array(', 'import numpy as np'),
+        ('visualdynamics.viz.scalogram.',
+         'import visualdynamics.viz.scalogram'),
         ('GroupProperties(',
          ('from visualdynamics.core.fem import RIGID, GroupProperties, '
           'Material, Section')),
@@ -3958,7 +4141,7 @@ _JOURNALED_VERBS = (
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'merge_coincident_nodes', 'new_geometry', 'add_plane', 'add_block',
     'tie_elements',
-    'merge_groups', 'set_view',
+    'merge_groups', 'set_view', 'set_comparison_scale',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',

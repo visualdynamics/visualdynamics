@@ -91,7 +91,8 @@ def test_a_time_history_carries_its_own_reading(random_run, tmp_path, marks):
 
 
 def test_marks_that_are_not_a_reading_say_so(random_run, tmp_path):
-    with pytest.raises(ValueError, match="'averaging' or 'shocks'"):
+    with pytest.raises(ValueError, match="not a reading of a plot: "
+                                         "'averaging', 'shocks'"):
         random_run.time_history.save_plot(tmp_path / 'x.png', marks='frames')
     with pytest.raises(TypeError, match='time history'):
         random_run.specification.save_plot(tmp_path / 'x.png',
@@ -287,11 +288,12 @@ def test_the_inventory_covers_what_the_window_renders():
 
     reached = {
         '_render_series': 'plot_data / plot_series / plot_comparison',
-        '_render_waterfall': 'plot_waterfall',
+        '_render_waterfall': 'plot_waterfall(marks=)',
         '_render_bars': 'plot_bars',
         '_render_levels': 'plot_bars.level_chart / compliance.specification_rms',
         '_render_kurtosis': 'plot_kurtosis',
-        '_render_wavelet': 'plot_scalogram',
+        '_render_wavelet': ('plot_scalogram / '
+                            'viz.scalogram.plot_scalogram_stage'),
         '_render_replication': 'plot_replication',
         '_render_srs': "plot_bars(mode='srs')",
         '_render_banded': 'viz.banded.plot_banded_stage',
@@ -299,16 +301,18 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_snr': 'plot.plot_snr',
         '_render_pair_stage': 'viz.paired.plot_paired_stage',
         '_render_sine': ('core.sine.extract_sine + compliance.sine_errors'
-                         ' / viz.sinespec.plot_sine_specification'),
+                         ' / viz.sinespec.plot_sine_specification'
+                         ' / viz.sinespec.plot_sine_stage'),
         '_render_events': "plot_replication(mode='overlay')",
         '_render_replication_bars': 'plot_replication',
         '_render_geometries': 'Geometry.plot / Geometry.plot_dofs',
-        '_render_animation': 'Project.animate / ShapeSet.animate',
+        '_render_animation': ('Project.animate / ShapeSet.animate / '
+                              'TimeHistory.animate (screenshot=, movie=)'),
         '_render_photos': 'plot_photos',
         '_render_table': 'Project.table',
         '_render_shape_table': 'Project.table',
-        '_render_matches': 'Report block: kind=pairs',
-        '_render_cross_mac': 'plot_mac',
+        '_render_matches': 'Project.table (core.tables.matched_rows)',
+        '_render_cross_mac': 'plot_mac / Project.animate_pair',
         '_render_report_builder': 'Project.export_report',
         '_render_specifications': 'compliance.specification_rms',
         '_render_fit': 'Project.fit_modes',
@@ -377,3 +381,48 @@ def test_the_entry_module_launches_only_as_main(monkeypatch):
     with pytest.raises(SystemExit):
         runpy.run_module('visualdynamics.__main__', run_name='__main__')
     assert len(launches) == 1
+
+
+def test_matched_modes_read_as_a_table_three_ways_alike(qt_app):
+    """The window's matched table, the report's and `Project.table` are
+    one set of rows (`core.tables.matched_rows`): a script could not
+    tabulate a MatchedModes at all until 2026-10-09, and the window and
+    the report each built their own — differently worded, and the
+    report quietly dropped a pair whose mode was gone."""
+    from conftest import plate_geometry_and_shapes
+
+    from visualdynamics.core.matches import MatchedModes
+    from visualdynamics.core.shapes import ShapeSet
+    from visualdynamics.report import _pairs_block
+
+    _geometry, truth = plate_geometry_and_shapes()
+    double = ShapeSet(truth.frequency * 1.01, truth.damping,
+                      truth.coordinate, 2 * truth.shape_matrix)
+    project = visualdynamics.Project('Matched')
+    project.add('FEM', truth)
+    project.add('Test', double)
+    project.add('Pairs', MatchedModes('FEM', 'Test', [(0, 0), (8, 8),
+                                                      (8, 99)],
+                                      [0.99, 0.95, 0.5]))
+    headers, rows = project.table('Pairs')
+    assert headers == ['FEM Mode', 'Frequency [Hz]', 'Damping [%]',
+                       'Test Mode', 'Frequency [Hz]', 'Damping [%]',
+                       'Δf [%]', 'MAC', 'Test/FEM']
+    assert rows[1][0] == '9' and rows[1][3] == '9'
+    assert rows[1][1] == f'{float(truth.frequency[8]):.4f}'
+    assert rows[1][6] == '+1.00' and rows[1][7] == '0.950'
+    assert rows[1][8] == '2.00', 'the size the overlay cannot show'
+    assert rows[2][4] == '—' and rows[2][6] == '—', \
+        'a mode past the end is a dash, not a dropped row'
+    built = _pairs_block({'source': 'Pairs', 'caption': ''}, project)
+    assert (built['headers'], built['rows']) == (headers, rows)
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.gui.object_tables import matched_modes_model
+
+    model = matched_modes_model(project['Pairs'], project)
+    shown = [[model.data(model.index(r, c)) for c in range(len(headers))]
+             for r in range(model.rowCount())]
+    assert shown == rows
+    assert [model.headerData(c, Qt.Orientation.Horizontal)
+            for c in range(len(headers))] == headers

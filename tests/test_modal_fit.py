@@ -2517,3 +2517,31 @@ def test_no_modes_means_no_curve():
     frfs = visualdynamics.import_file(fixture_path('plate', 'frfs.npz'))
     session = ModalFitSession(frfs)
     assert session.synthesis_singular_values() is None
+
+
+def test_the_fit_weights_by_the_coherence_covering_most_linked_first():
+    """`Project.fit_coherence` is the fitting screen's rule, so a script
+    asks the same question: the coherence covering most of the fit's
+    responses, one in the FRF's own group winning a tie."""
+    from conftest import fixture_path
+
+    import visualdynamics
+
+    project = visualdynamics.Project('Weights')
+    project.import_file(fixture_path('plate', 'modal_spectra.nc4'))
+    assert project.fit_coherence('FRF') == 'Multiple Coherence'
+    project.unlink('Multiple Coherence')     # the import linked the run
+    twin, = project.duplicate('Multiple Coherence')
+    assert project.fit_coherence('FRF') == 'Multiple Coherence', \
+        'a tie with neither linked keeps the first'
+    project.link('FRF', twin)
+    assert project.fit_coherence('FRF') == twin, 'the linked one wins a tie'
+    frf = project['FRF']
+    only = frf.response_dof[0]
+    project[twin].delete_records(
+        [i for i, dof in enumerate(project[twin].response_dof)
+         if dof != only])
+    assert project.fit_coherence('FRF') == 'Multiple Coherence', \
+        'coverage outranks the link'
+    assert project.fit_coherence('FRF', records=[0]) == twin, \
+        'judged over the fitted records only'

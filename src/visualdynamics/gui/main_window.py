@@ -103,7 +103,6 @@ from ..core.report import (
 )
 from ..core.shapes import (
     ShapeSet,
-    aligned_mode,
     cross_mac,
     mac_matrix,
     synthesize_overlay,
@@ -1139,6 +1138,7 @@ class MainWindow(QMainWindow):
         self._fit_parabola = None
         self._fit_damping_label = None
         self._fit_coherence_name = None
+        self._fit_records = None
         #: what the plot's top and bottom edges mean as damping, kept
         #: across fits — an article's plausible range rarely changes
         #: between two of its own FRF sets
@@ -3149,7 +3149,91 @@ class MainWindow(QMainWindow):
             acts = acts + [copy_act(self.data_pane, 'plot') if plot_up
                            else copy_act(self.scene, '3-D view')]
         self.data_pane.show_acts(acts if plot_up else [])
-        self.scene.show_acts([] if plot_up else acts)
+        self.scene.show_acts(([] if plot_up else acts) + self._movie_acts())
+
+    def _movie_acts(self):
+        """Save Animation on the 3-D view's bar while something there is
+        moving — the scene's own act, so it rides that bar even when the
+        plot beside it holds Copy — and only where this machine can
+        encode H.264 (PLAN.md, "Saving an animation"): elsewhere the
+        save would refuse every time, so it is not offered."""
+        from .movie import unavailable_reason
+
+        if (self.fit is not None or self.animator is None
+                or not (self._shape_mode or self._cursor is not None)
+                or unavailable_reason() is not None):
+            return []
+        return [('movie', 'Save Animation', 'movie', self.save_animation,
+                 ('Save the animation as an MP4 video, at the speed and '
+                  'from the view it is playing in'))]
+
+    def save_animation(self, path: str | None = None) -> str | None:
+        """The 3-D view's animation, saved as an MP4 the way it plays:
+        this camera, scale and speed. A swept phase is whole cycles to
+        six seconds, a record or a sweep of lines is once through
+        (`viz.animate.cycle_parameters` / `sweep_parameters`, the rule a
+        script's `movie=` uses too).
+
+        Frames go through the window's own path — `_draw_frame` for a
+        phase, the plot cursor for a record — so the caption an envelope
+        rewrites per line is in every frame; then playback is put back
+        where it was. `path` skips the dialog (scripts, tests).
+        """
+        from ..viz.animate import cycle_parameters, sweep_parameters
+        from .movie import MOVIE_FPS, write_movie
+
+        if self.animator is None or self.scene.plotter is None:
+            return None
+        if path is None:
+            item = self.object_item()
+            name = item.text(0) if item is not None else 'Animation'
+            path, _ = QFileDialog.getSaveFileName(
+                self, 'Save Animation', f'{name}.mp4', 'MP4 video (*.mp4)')
+            if not path:
+                return None
+            if not path.lower().endswith('.mp4'):
+                path += '.mp4'
+        playing = self._playing
+        self.set_playing(False)
+        phase = self.phase_slider.value()
+        held = self._cursor.value() if self._cursor is not None else None
+        if self._shape_mode:
+            parameters = cycle_parameters(SECONDS_PER_CYCLE / self.speed,
+                                          MOVIE_FPS)
+        else:
+            parameters = sweep_parameters(len(self._cursor_abscissa),
+                                          SECONDS_PER_RECORD / self.speed,
+                                          MOVIE_FPS)
+
+        def frames():
+            for parameter in parameters:
+                if self._shape_mode:
+                    self._draw_frame(parameter)
+                else:
+                    self._cursor.setValue(
+                        float(self._cursor_abscissa[parameter]))
+                yield self.scene.plotter.screenshot(return_img=True)
+
+        # seconds on a large model or a Retina screen, with input held
+        # off: say so, rather than look hung
+        self._show_status(f'Saving {os.path.basename(path)}…')
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            count = write_movie(path, frames(), fps=MOVIE_FPS)
+        except RuntimeError as error:      # MovieUnavailable among them
+            self._show_status(str(error))
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+            if held is not None:
+                self._cursor.setValue(held)
+            if self._shape_mode:
+                self._draw_frame(phase / PHASE_STEPS * 2 * np.pi)
+            self.set_playing(playing)
+        self._show_status(
+            f'Saved {os.path.basename(path)} — {count / MOVIE_FPS:.3g} s, '
+            f'{os.path.getsize(path) / 1e6:.2g} MB')
+        return path
 
     def refresh_selected(self) -> None:
         """Recompute the selected stale object — the bar's Recompute,
@@ -5267,8 +5351,35 @@ class MainWindow(QMainWindow):
         name = self.editing[0]
         row = self._sliding['row']
         self._sliding = None
+        self._place_frame(row, origin=True)
         self.table.model().refresh_row(row)
         self._show_status(f'Moved coordinate system in {name}')
+
+    def _place_frame(self, row, origin=False, angles=False):
+        """A gesture on a coordinate system is over: the frame it left
+        goes through `Geometry.place_coordinate_system` and is journaled
+        as that call, so a session's turns and slides replay. The drag
+        itself writes the frame directly — that is the preview, a write
+        a tick — and this is the one act it amounts to. Nudging the same
+        frame the same way again settles the last line rather than
+        stacking one per nudge."""
+        geometry = self.objects[self.editing[0]]
+        matrix = geometry.cs_matrix[row]
+        said = {}
+        if angles:
+            said['angles'] = angles_of(matrix)
+        if origin:
+            said['origin'] = tuple(float(v) for v in matrix[3])
+        cs_id = int(geometry.cs_id[row])
+        geometry.place_coordinate_system(cs_id, **said)
+        journal = self.project.journal
+        before = len(journal)
+        self.project.record_call(geometry, 'place_coordinate_system', cs_id,
+                                 **said)
+        if len(journal) > before > 0:
+            stem = journal[-1].split('=', 1)[0]
+            if journal[-2].split('=', 1)[0] == stem:
+                journal[-2:] = journal[-1:]
 
     def _cursor_on_ring(self, matrix, axis, position):
         """Where the cursor's ray meets the plane the ring lies in."""
@@ -5388,6 +5499,7 @@ class MainWindow(QMainWindow):
         name = self.editing[0]
         row = self._rotating['row']
         self._rotating = None
+        self._place_frame(row, angles=True)
         # one row, not a whole model reset: a reset would drop the table
         # selection, and the selection is what the rings belong to
         self.table.model().refresh_row(row)
@@ -5406,6 +5518,7 @@ class MainWindow(QMainWindow):
                           'from': 0.0}
         self._apply_rotation(np.radians(float(degrees)))
         self._rotating = None
+        self._place_frame(row, angles=True)
         self.table.model().refresh_row(row)
 
     def reset_rotation(self) -> None:
@@ -5415,6 +5528,7 @@ class MainWindow(QMainWindow):
             return
         geometry = self.objects[self.editing[0]]
         geometry.cs_matrix[row] = identity_frame(matrix)
+        self._place_frame(row, angles=True)
         self.angle_box.blockSignals(True)
         self.angle_box.setValue(0.0)
         self.angle_box.blockSignals(False)
@@ -8188,12 +8302,15 @@ class MainWindow(QMainWindow):
         own linked geometry — basis shapes on the basis mesh, the
         other set on its own — with the second phase-aligned to the
         first so they move together, drawn in one flat color each to
-        stay tellable apart. When the geometries differ the alignment
-        is measured through the projection (the sets themselves share
-        no DOFs) and applied to the raw second set. `fallback` hosts a
-        set with no linked geometry of its own. Returns None, or why
-        the animation cannot happen."""
-        from ..core.shapes import alignment_factor, apply_alignment
+        stay tellable apart. The pairing, the caption and the opacities
+        are `Project.animate_pair`'s own rules (`pair_deflections`,
+        `pair_caption`, `overlay_alphas`); what is the window's is the
+        colors — each mesh wears its bracket's — and Project onto
+        Basis. `fallback` hosts a set with no linked geometry of its
+        own. Returns None, or why the animation cannot happen."""
+        from ..core.shapes import pair_caption
+        from ..theme import overlay_alphas
+        from ..viz.animate import pair_deflections
 
         a_home = self.linked_geometry(a_name) or fallback
         b_home = self.linked_geometry(b_name) or a_home
@@ -8202,30 +8319,14 @@ class MainWindow(QMainWindow):
         if self._fit_note(a_geometry, a.coordinate) is None:
             return 'no animation: DOFs are not on the geometry'
         projected = self._compare.get('projected')
-        if a_geometry is b_geometry or projected is None:
-            if self._fit_note(b_geometry, b.coordinate) is None:
-                return 'no animation: DOFs are not on the geometry'
-            aligned = aligned_mode(a, row, b, column)
-            second = (b_geometry,
-                      ShapeDeflection(b_geometry, b.coordinate,
-                                      aligned))
-            showing = (a_geo_name, b_geo_name)
-        elif self.project_action.isChecked():
-            # the projection lives at the basis DOFs: both sets on
-            # the basis mesh, sampled apples to apples
-            aligned = aligned_mode(a, row, projected, column)
-            second = (a_geometry,
-                      ShapeDeflection(a_geometry, projected.coordinate,
-                                      aligned))
-            showing = (a_geo_name, 'projected')
-        else:
-            aligned = apply_alignment(
-                b.shape_matrix[column],
-                alignment_factor(a, row, projected, column))
-            second = (b_geometry,
-                      ShapeDeflection(b_geometry, b.coordinate,
-                                      aligned))
-            showing = (a_geo_name, b_geo_name)
+        on_basis = (a_geometry is not b_geometry and projected is not None
+                    and self.project_action.isChecked())
+        if ((a_geometry is b_geometry or projected is None)
+                and self._fit_note(b_geometry, b.coordinate) is None):
+            return 'no animation: DOFs are not on the geometry'
+        first, second = pair_deflections(a, row, b, column, a_geometry,
+                                         b_geometry, projected, on_basis)
+        showing = (a_geo_name, 'projected' if on_basis else b_geo_name)
         # each mesh wears its own bracket's color, so the scene reads
         # straight off the project tree; unlinked sets keep the old
         # natural-vs-orange contrast
@@ -8235,38 +8336,14 @@ class MainWindow(QMainWindow):
             color_b = next(c for c in ('#ff8c2b', '#3fb950')
                            if c != color_a)
         self._compare['colors'] = (color_a, color_b)
-        # The basis is the one being looked *at*; the other is drawn
-        # through it. Which of the pair that is depends on the project,
-        # not on the order they were selected in — so ask the links.
-        basis_is_second = (self.link_role(b_name) == 'Basis'
-                           and self.link_role(a_name) != 'Basis')
-        alphas = ((OVERLAY_ALPHA, 1.0) if basis_is_second
-                  else (1.0, OVERLAY_ALPHA))
+        alphas = overlay_alphas(self.link_role(a_name),
+                                self.link_role(b_name))
         self._compare['alphas'] = alphas
         self._shape_mode = True
         self._shape_source = None
-
-        def described(name: str, shape_set: Any, mode: int) -> str:
-            description = str(shape_set.description[mode]).strip()
-            return (f'{name}  mode {mode + 1}'
-                    + (f'  {description}' if description else '')
-                    + f'  {float(shape_set.frequency[mode]):.4f} Hz'
-                    f'  {float(shape_set.damping[mode]) * 100:.3f} %')
-
-        # each copy is drawn to its own peak, so the scene compares
-        # shape and says nothing about level — and the one number that
-        # says what the scaling did goes on its own line
-        caption = (described(a_name, a, row) + '\n'
-                   + described(b_name, b, column))
-        scaling = self._scale_note(a_name, a, b_name, b, row, column)
-        if scaling:
-            caption += '\n' + scaling
         self._build_comparison_animator(
-            (a_geometry,
-             ShapeDeflection(a_geometry, a.coordinate,
-                             a.shape_matrix[row])),
-            second,
-            caption=caption,
+            first, second,
+            caption=pair_caption(a_name, a, b_name, b, row, column),
             showing=showing, colors=(color_a, color_b), alphas=alphas)
         # the phase carries over: stepping through MAC cells mid-swing
         # must not snap the model straight every time
@@ -8277,52 +8354,14 @@ class MainWindow(QMainWindow):
         self.play_action.setEnabled(True)
         return None
 
-    def _scale_note(self, a_name, a, b_name, b, row, column):
-        """One line: how big this pair's second shape is against its first.
-
-        Overlaying scales each shape to its own peak, which is what
-        makes a sparse test set and a dense model comparable — and also
-        what hides one set being thirty times the other. So the number
-        the overlay cannot show is written above it.
-
-        **For the pair on screen, not for the sets.** A constant factor
-        across every mode is a unit or a normalization convention; a
-        factor that is 1.00 everywhere and 3.4 on one mode is that mode
-        fitted badly, and a figure averaged over the set hides exactly
-        that. The MAC cell picks one pair, so this answers about the one
-        pair. `ScaleComparison.message` is the other reading — over a
-        whole set, at length — and the report still uses it.
-
-        Named by the objects rather than by their roles: 'basis' and
-        'other' are a property of the object groups, and a reader looking
-        at two animations wants to know which of the two things in front
-        of them is the bigger.
-        """
-        from ..core.shapes import compare_scaling
-
-        try:
-            ratios = compare_scaling(a, b, [(row, column)]).ratios
-        except (ValueError, IndexError):
-            return None
-        if not ratios.size or not np.isfinite(ratios[0]):
-            return None
-        # an unscaled fit has no drive point pinning its size, so the
-        # ratio is arithmetic rather than physics — said in a word,
-        # because the number is about to be read as if it meant one
-        unscaled = [name for name, shapes in ((a_name, a), (b_name, b))
-                    if getattr(shapes, 'unscaled', False)]
-        note = f'{b_name}/{a_name} = {float(ratios[0]):.2f}'
-        return note + (f'  ({", ".join(unscaled)} unscaled)'
-                       if unscaled else '')
-
     def _build_comparison_animator(self, first_pair, second_pair,
                                    caption, showing,
                                    colors=(None, '#ff8c2b'),
                                    alphas=(1.0, OVERLAY_ALPHA)):
         """Like _build_animator, twice: two moving copies in one
-        scene, each (geometry, deflection) pair on its own mesh, in
-        its own color and at its own opacity."""
-        from ..viz.animate import GeometryAnimator, PairedAnimator
+        scene (`viz.animate.build_pair`), each (geometry, deflection)
+        pair on its own mesh, in its own color and at its own opacity."""
+        from ..viz.animate import build_pair
 
         theme = resolve_theme(self.theme_name)
         reframe = showing is not None and tuple(showing) != self._framed
@@ -8332,15 +8371,10 @@ class MainWindow(QMainWindow):
         self.scene.plotter.clear()
         self.scene.plotter.set_background(theme['scene_background'],
                                     top=theme['scene_background_top'])
-        first = GeometryAnimator(
-            self.scene.plotter, first_pair[0], first_pair[1],
-            unit_system=self.unit_system, text_color=theme['scene_text'],
-            color_override=colors[0], opacity=alphas[0])
-        second = GeometryAnimator(
-            self.scene.plotter, second_pair[0], second_pair[1],
-            unit_system=self.unit_system, text_color=theme['scene_text'],
-            color_override=colors[1], opacity=alphas[1])
-        self.animator = PairedAnimator(first, second)
+        self.animator = build_pair(
+            self.scene.plotter, first_pair, second_pair, colors=colors,
+            alphas=alphas, unit_system=self.unit_system,
+            text_color=theme['scene_text'])
         self.animator.set_scale(self.scale_box.value())
         self.scene.axis_unit = self.animator.axis_unit
         annotate_scene(self.scene.plotter, self.scene.axis_unit, theme,
@@ -9771,41 +9805,20 @@ class MainWindow(QMainWindow):
         other channel over it said the selection one thing and the
         plot another (Brandon, 2026-08-30).
         """
-        import pyqtgraph as pg
-
-        from ..plot import step_outline
+        from ..plot import octave_preview
 
         self._clear_octave()
         panel = self.data_pane.octave_panel
         try:
+            self.octave_previews = octave_preview(
+                self.data_pane.graphics.ci.items, psd, panel.per_octave(),
+                self.unit_system, resolve_theme(self.theme_name), records)
             banded = psd.to_octave(panel.per_octave())
         except ValueError as refusal:
             panel.show_bands(None)
             panel.show()
             self._show_status(f'No octave preview: {refusal}')
             return
-        colors = resolve_theme(self.theme_name)
-        x, rows = step_outline(banded.abscissa,
-                               banded.display_ordinate(self.unit_system),
-                               banded.bin_edges())
-        rows = np.atleast_2d(rows)
-        wanted = (range(rows.shape[0]) if records is None
-                  else [int(i) for i in records])
-        pen = pg.mkPen(colors['filter_preview'], width=2)
-        for item in self.data_pane.graphics.ci.items:
-            if not isinstance(item, pg.PlotItem):
-                continue
-            key = getattr(item, 'series_key', None)
-            for k in wanted:
-                if key is not None and (banded.ordinate_dim[k],
-                                        banded.dimension_hint[k]) \
-                        != (key[1], key[2]):
-                    continue
-                curve = pg.PlotDataItem(x, np.abs(rows[k]), pen=pen)
-                curve.setZValue(20)
-                curve.is_zone_edge = True     # a preview, not data
-                item.addItem(curve, ignoreBounds=True)
-                self.octave_previews.append((item, curve))
         panel.show_bands(len(banded.abscissa))
         panel.show()
         self._journal_octave_view(psd, panel.per_octave())
@@ -10739,9 +10752,7 @@ class MainWindow(QMainWindow):
         `viz.marks.add_filter_preview`. Same records, same page, same
         budget, so twin and original stand at the same stations.
         """
-        from ..core.filters import filtered as apply_filter
-        from ..viz.marks import add_filter_preview
-        from ..viz.waterfall import waterfall_arrays
+        from ..viz.marks import stage_filter_preview
 
         pane = self.data_pane
         filtering = data.filtering or data.suggest_filtering()
@@ -10751,17 +10762,13 @@ class MainWindow(QMainWindow):
 
         def draw(proposed):
             try:
-                filtered = apply_filter(data, proposed)
+                stage_filter_preview(plotter, data, proposed, info,
+                                     self.unit_system, self.theme_name)
             except ValueError as refusal:
                 # a corner that has wandered past Nyquist mid-edit:
                 # nothing to draw rather than a scene that throws
                 self._show_status(f'No preview: {refusal}')
                 return
-            twin = waterfall_arrays(
-                filtered, info['drawn'], self.unit_system,
-                page=0)
-            add_filter_preview(plotter, twin, info['extents'],
-                               info['stations'], theme=self.theme_name)
             plotter.render()
 
         draw(filtering)
@@ -10777,26 +10784,17 @@ class MainWindow(QMainWindow):
         transforms the stage it lands on: log10 of the frequency axis
         and of the level where those axes are logarithmic.
         """
-        from ..plot import step_outline
-        from ..viz.marks import add_octave_preview
+        from ..viz.marks import add_octave_preview, octave_steps
 
         panel = self.data_pane.octave_panel
         try:
-            banded = psd.to_octave(panel.per_octave())
+            banded, x, rows = octave_steps(psd, panel.per_octave(),
+                                           self.unit_system, stage=True)
         except ValueError as refusal:
             panel.show_bands(None)
             panel.show()
             self._show_status(f'No octave preview: {refusal}')
             return
-        x, rows = step_outline(banded.abscissa,
-                               banded.display_ordinate(self.unit_system),
-                               banded.bin_edges())
-        rows = np.abs(np.atleast_2d(rows))
-        if getattr(banded, 'log_abscissa', False):
-            x = np.log10(np.where(x > 0, x, np.nan))
-        if banded.log_scaled():
-            rows = np.where(rows > 0, rows, np.nan)
-            rows = np.log10(rows)
         curves = [(x, rows[k]) for k in info['drawn']]
         add_octave_preview(plotter, curves, info['extents'],
                            info['stations'], theme=self.theme_name)
@@ -12290,19 +12288,21 @@ class MainWindow(QMainWindow):
                           if n == name and k == 'record'}) or None
         self.stop_editing()
         self.close_units_panel()
-        self.fit = ModalFitSession(obj, records)
         # the measurement's own statement of which channel to believe
         # where: with a coherence in the project covering these
         # responses, Refine All weights its solve and its judgment by
         # it — a channel the coherence distrusts cannot vote noise into
-        # every mode's residues
-        self._fit_coherence_name = None
-        coherence = self._fit_coherence(name, self.fit.responses)
-        if coherence is not None:
-            self.fit.weights = self.fit._coherence_weights(
-                self.objects[coherence])
-            if self.fit.weights is not None:
-                self._fit_coherence_name = coherence
+        # every mode's residues. Chosen by the project's rule, and
+        # journaled with the records, so the fit_modes line replays
+        # this fit and not another (it did not, until 2026-10-09)
+        self._fit_records = None if records is None else [
+            int(i) for i in records]
+        coherence = self.project.fit_coherence(name, records)
+        self.fit = ModalFitSession(
+            obj, records,
+            None if coherence is None else self.objects[coherence])
+        self._fit_coherence_name = (coherence if self.fit.weights is not None
+                                    else None)
         self.fit_name = name
         self.fit_object_name = None
         if len(shape_sets) == 1:
@@ -12687,24 +12687,6 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'Cursor damping span: {proposed[0] * 100.0:g} % at the top '
             f'of the plot to {proposed[1] * 100.0:g} % at the bottom')
-
-    def _fit_coherence(self, frf_name, responses):
-        """The name of the coherence to weight this fit by, or None —
-        the one covering the most of the fit's response DOFs, a linked
-        one winning ties."""
-        from ..core.data import _CoherenceBase
-
-        linked = set(self.linked_group(frf_name) or ())
-        wanted = set(responses)
-        best, best_key = None, (0, False)
-        for name, obj in self.objects.items():
-            if not isinstance(obj, _CoherenceBase):
-                continue
-            covered = len(set(obj.response_dof) & wanted)
-            key = (covered, name in linked)
-            if covered and key > best_key:
-                best, best_key = name, key
-        return best
 
     def refine_all_modes(self) -> None:
         """Re-fit every confirmed mode's residues together, poles held —
@@ -13236,6 +13218,10 @@ class MainWindow(QMainWindow):
                 f'at={picks!r}'
                 + (f', refine={self.fit.refined}' if self.fit.refined
                    else '')
+                + (f', records={self._fit_records!r}'
+                   if self._fit_records is not None else '')
+                + (f', coherence={self._fit_coherence_name!r}'
+                   if self._fit_coherence_name else '')
                 + f', name={self.fit_object_name!r})')
         journal = self.project.journal
         if journal and journal[-1].startswith(prefix):
@@ -13276,38 +13262,10 @@ class MainWindow(QMainWindow):
                 and not isinstance(data, Specification)
                 and name in self.objects}
 
-    def _scale_family(self, name):
-        """The measured PSDs that share one comparison scale: the
-        object and every non-specification Psd linked with it — its
-        source, or the octave bands made from it. One family, one
-        number, because an octave PSD is the same measurement on
-        another grid and two scales for one run is a contradiction."""
-        from ..core.data import Psd, Specification
-
-        group = self.project.object_group_of(name) or [name]
-        if name not in group:
-            group = [name, *group]
-        return [n for n in group
-                if isinstance(self.objects.get(n), Psd)
-                and not isinstance(self.objects.get(n), Specification)]
-
     def _family_scale_db(self, spec, name):
-        """The comparison scale for `name`, resolved the way the report
-        resolves it: a value held anywhere in the family wins (edits
-        keep the family equal), and detection happens on the narrowband
-        member — the same data banded onto octaves must not round to a
-        different decibel than the lines it came from."""
-        from ..core.compliance import comparison_scale_db
-
-        family = self._scale_family(name)
-        held = [self.objects[n].scale_db for n in family
-                if self.objects[n].scale_db is not None]
-        if held:
-            return int(held[0])
-        roots = [n for n in family
-                 if getattr(self.objects[n], 'bandwidth', None) is None]
-        return comparison_scale_db(
-            spec, self.objects[roots[0]] if roots else self.objects[name])
+        """The comparison scale for `name`, by the project's rule
+        (`Project.comparison_scale`), which the report reads too."""
+        return self.project.comparison_scale(spec, name)
 
     def _show_comparison_scaling(self, series):
         """Put the comparison's scaling on the bar, or take it away.
@@ -13368,10 +13326,10 @@ class MainWindow(QMainWindow):
         # the whole family: a PSD and the octave bands made from it are
         # one measurement and get one scale, so editing either sets
         # both — the report reads the narrowband, and a value held on
-        # only the octave object never reached it
-        family = self._scale_family(measured_name)
-        for other in family:
-            self.objects[other].scale_db = value
+        # only the octave object never reached it. The project's verb,
+        # so the session journals it (it wrote silently until
+        # 2026-10-09)
+        family = self.project.set_comparison_scale(measured_name, value)
         self.render_current()
         held = (measured_name if len(family) == 1
                 else f'{measured_name} and {len(family) - 1} linked '
@@ -13610,25 +13568,22 @@ class MainWindow(QMainWindow):
                 item.setExpanded(True)
             self._select_records(name, [channel])
         rate = history.sample_rate
-        values = np.real(np.asarray(history.ordinate)[channel])
         if not 0.0 < settings['low'] < settings['high']:
             return ('no frequencies this record can carry in that range '
                     f'— it reaches {rate / 2.0:.4g} Hz')
-        frequencies = wavelet_math.log_frequencies(
-            settings['low'], settings['high'], settings['per_octave'])
         # the panel clamps to Nyquist, but a record swapped underneath a
         # sticky setting has its own; refuse to draw rather than to
-        # transform something the record cannot carry
-        frequencies = frequencies[frequencies < rate / 2.0]
-        if frequencies.size < 2:
+        # transform something the record cannot carry. The picture-sized
+        # reading, never the whole transform: a long record's
+        # coefficients are gigabytes and its surface was what crashed
+        # the app (Brandon, 2026-09-15) — `wavelet.reading`, the one a
+        # script's flat and 3-D calls make too.
+        try:
+            clock, magnitude, frequencies, _width = wavelet_math.reading(
+                history, channel, low=settings['low'], high=settings['high'],
+                per_octave=settings['per_octave'], omega0=settings['omega0'])
+        except ValueError:
             return 'no frequencies this record can carry in that range'
-        # the picture-sized reading, never the whole transform: a long
-        # record's coefficients are gigabytes and its surface was what
-        # crashed the app (Brandon, 2026-09-15). Each column is its
-        # slice's peak, so a transient's ridge is not strided past.
-        clock, magnitude = wavelet_math.scalogram_peaks(
-            values, rate, frequencies, settings['omega0'])
-        clock = clock + float(history.abscissa[0])
 
         colors = resolve_theme(self.theme_name)
         us = self.unit_system
@@ -13671,13 +13626,21 @@ class MainWindow(QMainWindow):
                 time_label=f'time [{us.label_html("time")}]')
 
         if name is not None:
+            # the reading on screen, as the call that draws it: the
+            # surface when the stage is up, the flat picture otherwise
+            call = ('visualdynamics.viz.scalogram.plot_scalogram_stage'
+                    if self.data_pane.showing_waterfall
+                    else 'visualdynamics.plot.plot_scalogram')
+            out = ("screenshot='scalogram-3d.png'"
+                   if self.data_pane.showing_waterfall
+                   else "path='scalogram.png'")
             self._journal_view(
-                f"visualdynamics.plot.plot_scalogram(project[{name!r}]",
-                f"visualdynamics.plot.plot_scalogram(project[{name!r}], "
+                f"{call}(project[{name!r}]",
+                f"{call}(project[{name!r}], "
                 f"channel={channel}, low={settings['low']!r}, "
                 f"high={settings['high']!r}, "
                 f"per_octave={settings['per_octave']}, "
-                f"omega0={settings['omega0']!r}, path='scalogram.png')")
+                f"omega0={settings['omega0']!r}, {out})")
         cone = float(wavelet_math.cone_of_influence(
             [frequencies[0]], rate, settings['omega0'])[0])
         return (f'{history.record_label(channel)}: '

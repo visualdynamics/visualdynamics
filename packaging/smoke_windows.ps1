@@ -60,6 +60,27 @@ Copy-Item (Join-Path $mesaDir 'x64\*.dll') $target -Force
 if (-not (Test-Path (Join-Path $target 'opengl32.dll'))) { throw 'Mesa did not land beside the exe' }
 Write-Host "Mesa $mesaVersion (llvmpipe) placed beside the exe: the runner has no GPU"
 
+# 1c. Can the installed build save an animation? Its files being there
+# says nothing about whether the encoder inside them answers, so the
+# frozen app writes and reads back a second of H.264 (gui.movie.check;
+# no window). Exit 2 is "no H.264 on this machine": Windows Server can
+# lack Media Foundation where a desktop never does, so that is a loud
+# warning and the logs, not a failed build; anything else is a failure.
+$movieLog = 'dist\smoke\movie.log'
+$movieErr = 'dist\smoke\movie-stderr.log'
+$check = Start-Process -FilePath $exe -Wait -PassThru `
+    -ArgumentList '--check-movie', "`"$(Join-Path $work 'check.mp4')`"" `
+    -RedirectStandardOutput $movieLog -RedirectStandardError $movieErr
+Get-Content $movieLog
+switch ($check.ExitCode) {
+    0 { Write-Host 'saves an animation as H.264' }
+    2 { Write-Warning 'no H.264 encoder on this runner: Save Animation is not offered here' }
+    default {
+        Get-Content $movieErr | Select-Object -Last 40
+        throw "the movie check failed (exit $($check.ExitCode))"
+    }
+}
+
 # 2. A small real project for it to open — made by the *source* tree's
 # python, read by the *installed* build, which is exactly the round
 # trip a colleague's machine performs on a file made on this one.

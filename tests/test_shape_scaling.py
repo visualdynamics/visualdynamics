@@ -20,7 +20,7 @@ from conftest import fixture_path
 
 import visualdynamics
 from visualdynamics.core.matches import MatchedModes
-from visualdynamics.core.shapes import SCALE_SPREAD, compare_scaling
+from visualdynamics.core.shapes import SCALE_SPREAD, compare_scaling, pair_scale_note
 
 
 @pytest.fixture(scope='module')
@@ -188,8 +188,8 @@ def test_the_scene_caption_names_both_sets_and_their_ratio(window, pump):
     """
     window = _compared(window, pump, 31.6227766)
     assert window._compare is not None, 'the comparison screen is up'
-    note = window._scale_note('Test Modes', window.objects['Test Modes'],
-                              'FEM Modes', window.objects['FEM Modes'], 0, 0)
+    note = pair_scale_note('Test Modes', window.objects['Test Modes'],
+                           'FEM Modes', window.objects['FEM Modes'], 0, 0)
     assert note == 'FEM Modes/Test Modes = 31.62', note
     assert '\n' not in note, 'one line, not a paragraph'
 
@@ -203,7 +203,7 @@ def test_sets_that_agree_read_one(window, pump):
     checked.
     """
     window = _compared(window, pump, 1.0)
-    assert window._scale_note(
+    assert pair_scale_note(
         'Test Modes', window.objects['Test Modes'],
         'FEM Modes', window.objects['FEM Modes'], 0, 0
     ) == 'FEM Modes/Test Modes = 1.00'
@@ -222,8 +222,8 @@ def test_the_note_is_about_the_pair_on_screen_not_the_whole_set(window, pump):
     fem = window.objects['FEM Modes']
     fem.shape_matrix[2] = fem.shape_matrix[2] * 5.0
     args = ('Test Modes', window.objects['Test Modes'], 'FEM Modes', fem)
-    assert window._scale_note(*args, 0, 0) == 'FEM Modes/Test Modes = 1.00'
-    assert window._scale_note(*args, 2, 2) == 'FEM Modes/Test Modes = 5.00'
+    assert pair_scale_note(*args, 0, 0) == 'FEM Modes/Test Modes = 1.00'
+    assert pair_scale_note(*args, 2, 2) == 'FEM Modes/Test Modes = 5.00'
     assert np.isfinite(fem.shape_matrix).all()
 
 

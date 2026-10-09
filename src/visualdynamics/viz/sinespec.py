@@ -410,3 +410,37 @@ def plot_sine_specification(specification: Any, channel: int = 0, *,
         specification, channel, unit_system,
         off_screen=off_screen, theme=theme)
     return finish_scene(plotter, screenshot, show)
+
+
+def plot_sine_stage(specification: Any = None, levels: Any = None, *,
+                    dofs: Sequence[str] | None = None,
+                    tones: Any = None,
+                    unit_system: UnitSystem | None = None,
+                    theme: Any = None, screenshot: str | None = None,
+                    show: bool = True) -> Any:
+    """The sine stage with measured levels on it — the app's 3-D sine
+    comparison: a specification's tones and the levels extracted
+    against it (a `SineLevelSet` or a list of `SineLevel`), either or
+    both, shown interactively or rendered to `screenshot`.
+    `plot_sine_specification` is the specification alone.
+
+        from visualdynamics.viz.sinespec import plot_sine_stage
+        plot_sine_stage(spec, project['Sine Levels'], tones=['Up'],
+                        dofs=['101Z+'], screenshot='sine.png')
+
+    `dofs` and `tones` narrow it the way picking rows in the tree and
+    the tone on the bar do; everything is drawn when they are left out.
+    """
+    import pyvista as pv
+
+    colors = resolve_theme(theme)
+    if levels is not None and hasattr(levels, 'levels'):
+        levels = list(levels.levels)
+    plotter = pv.Plotter(off_screen=screenshot is not None or not show)
+    plotter.set_background(colors['scene_background'],
+                           top=colors['scene_background_top'])
+    add_sine_stage(plotter, specification=specification, levels=levels,
+                   dofs=dofs, unit_system=unit_system, theme=theme,
+                   tones=tones)
+    place_camera(plotter)
+    return finish_scene(plotter, screenshot, show)

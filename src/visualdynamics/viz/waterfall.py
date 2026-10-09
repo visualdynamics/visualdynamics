@@ -606,13 +606,17 @@ def waterfall_scene(data: DataArray,
                     plotter: Any = None, off_screen: bool = False,
                     theme: Any = None, component: str = 'magnitude',
                     budget: int = POINT_BUDGET,
-                    quantity: tuple[str, str | None] | None = None) -> Any:
+                    quantity: tuple[str, str | None] | None = None,
+                    marks: str | None = None,
+                    per_octave: int | None = None) -> Any:
     """Build (or add to) a PyVista plotter showing the waterfall.
 
     Same shape as `geometry_scene`: `theme` is 'light', 'dark' or a
     colors dict; returns the plotter — `.show()` it, or `.screenshot()`
     if off_screen. The camera is placed once, here: from the front-left
     and above, abscissa reading left to right, records receding.
+    `marks` draws one of the record's readings over the stage
+    (`viz.marks.add_stage_reading`).
     """
     import pyvista as pv
 
@@ -620,8 +624,13 @@ def waterfall_scene(data: DataArray,
     if plotter is None:
         plotter = pv.Plotter(off_screen=off_screen)
     plotter.set_background(colors['scene_background'])
-    add_waterfall(plotter, data, records, unit_system, colors, component,
-                  budget, quantity)
+    info = add_waterfall(plotter, data, records, unit_system, colors,
+                         component, budget, quantity)
+    if marks is not None:
+        from .marks import add_stage_reading
+
+        add_stage_reading(plotter, data, info, marks, per_octave=per_octave,
+                          unit_system=unit_system, theme=colors)
     place_camera(plotter)
     return plotter
 
@@ -704,18 +713,27 @@ def plot_waterfall(data: DataArray,
                    unit_system: UnitSystem | None = None,
                    theme: Any = None, component: str = 'magnitude',
                    show: bool = True,
-                   quantity: tuple[str, str | None] | None = None) -> Any:
+                   quantity: tuple[str, str | None] | None = None,
+                   marks: str | None = None,
+                   per_octave: int | None = None) -> Any:
     """Show the waterfall interactively, or render it to `screenshot`.
 
     The scriptable face of the plot bar's 3-D reading, like
     `plot_geometry` for the geometry scene. Returns the pane (its
     `.plotter` is the PyVista one), or the image array when rendering
     to a file.
+
+    `marks` puts one of the record's readings on the stage, as the
+    plot bar's toggles do in 3-D: 'averaging', 'shocks', 'truncation'
+    and 'filter' over a time history — each read from the history, or
+    what its detector would suggest — and 'octave' over a PSD, banded
+    `per_octave`.
     """
     if screenshot is not None:
         plotter = waterfall_scene(data, records, unit_system,
                                   off_screen=True, theme=theme,
-                                  component=component, quantity=quantity)
+                                  component=component, quantity=quantity,
+                                  marks=marks, per_octave=per_octave)
         img = plotter.screenshot(screenshot)
         plotter.close()
         return img
@@ -725,5 +743,6 @@ def plot_waterfall(data: DataArray,
         lambda plotter: waterfall_scene(data, records, unit_system,
                                         plotter=plotter, theme=theme,
                                         component=component,
-                                        quantity=quantity),
+                                        quantity=quantity, marks=marks,
+                                        per_octave=per_octave),
         theme=theme, axis_unit='', title='Waterfall', show=show)

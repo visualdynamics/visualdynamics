@@ -689,3 +689,115 @@ def add_octave_preview(plotter: Any, curves: Sequence[tuple[Any, Any]],
          name='marks-octave')
     _repin_axes(plotter, extents)
     return {'runs': len(lines), 'points': total}
+
+
+# ---- the readings, for a script as the window draws them -----------------
+
+#: what `add_stage_reading` (and `plot_waterfall(marks=...)`) can put on
+#: a stage, and what each reads
+STAGE_READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
+
+
+def octave_steps(psd: Any, per_octave: int | None = None,
+                 unit_system: Any = None, *, stage: bool = False
+                 ) -> tuple[Any, np.ndarray, np.ndarray]:
+    """The banded conversion as step outlines over the narrowband it
+    integrates: (banded, x, rows), the rows in display units and
+    magnitude. `stage` transforms them the way `waterfall_arrays`
+    transforms the stage they land on — log10 of the frequency and of
+    the level where those axes are logarithmic. The window's flat and
+    3-D previews and a script's draw these same steps.
+
+    Raises
+    ------
+    ValueError
+        When the spectrum cannot be banded (`Psd.to_octave`'s refusal).
+    """
+    from ..plot import step_outline
+
+    banded = psd.to_octave(per_octave)
+    x, rows = step_outline(banded.abscissa,
+                           banded.display_ordinate(unit_system),
+                           banded.bin_edges())
+    rows = np.abs(np.atleast_2d(rows))
+    if stage:
+        if getattr(banded, 'log_abscissa', False):
+            x = np.log10(np.where(x > 0, x, np.nan))
+        if banded.log_scaled():
+            rows = np.log10(np.where(rows > 0, rows, np.nan))
+    return banded, x, rows
+
+
+def stage_filter_preview(plotter: Any, data: Any, filtering: Any,
+                         info: dict[str, Any], unit_system: Any = None,
+                         theme: Any = None) -> None:
+    """The filtered twin of a staged record, drawn against the raw
+    stage's extents at the same records' stations (`add_filter_preview`)
+    — the window's 3-D filter view, and `plot_waterfall(marks='filter')`.
+
+    Raises
+    ------
+    ValueError
+        When the filter cannot run on this record (a corner past
+        Nyquist).
+    """
+    from ..core.filters import filtered
+    from .waterfall import waterfall_arrays
+
+    twin = waterfall_arrays(filtered(data, filtering), info['drawn'],
+                            unit_system, page=0)
+    add_filter_preview(plotter, twin, info['extents'], info['stations'],
+                       theme=theme)
+
+
+def add_stage_reading(plotter: Any, data: Any, info: dict[str, Any],
+                      reading: str, *, per_octave: int | None = None,
+                      unit_system: Any = None, theme: Any = None) -> None:
+    """One reading of a staged record drawn over its stage, as the
+    window's toggles draw it — read from the object, whatever it
+    carries, or what its detector would suggest; nothing here can be
+    dragged. `info` is what `add_waterfall` returned for the stage.
+
+    'averaging', 'shocks', 'truncation' and 'filter' read a time
+    history; 'octave' reads a PSD, banded `per_octave`.
+    """
+    from ..core.data import Psd, TimeHistory
+
+    if reading not in STAGE_READINGS:
+        raise ValueError(f'{reading!r} is not a reading of a stage: '
+                         + ', '.join(repr(r) for r in STAGE_READINGS))
+    if reading == 'octave':
+        if not isinstance(data, Psd):
+            raise TypeError('octave bands read a PSD, not '
+                            f'{type(data).__name__}')
+        _banded, x, rows = octave_steps(data, per_octave, unit_system,
+                                        stage=True)
+        add_octave_preview(plotter, [(x, rows[k]) for k in info['drawn']],
+                           info['extents'], info['stations'], theme=theme)
+        return
+    if not isinstance(data, TimeHistory):
+        raise TypeError(f'{reading} marks belong on a time history, not '
+                        f'on {type(data).__name__}')
+    extents = info['extents']
+    origin = float(data.abscissa[0])
+    if reading == 'filter':
+        stage_filter_preview(plotter, data,
+                             data.filtering or data.suggest_filtering(),
+                             info, unit_system, theme)
+    elif reading == 'truncation':
+        abscissa = np.asarray(data.abscissa, dtype=float)
+        add_truncation_marks(plotter,
+                             data.truncation or data.suggest_truncation(),
+                             float(abscissa[0]), float(abscissa[-1]),
+                             extents, theme=theme)
+    elif reading == 'averaging':
+        averaging = data.averaging or Averaging.for_records(
+            len(data.abscissa))
+        add_averaging_marks(plotter, averaging, data.sample_rate, extents,
+                            theme=theme, origin=origin)
+    else:
+        from ..core.shocks import suggest
+
+        add_shock_marks(plotter, tuple(data.shocks or suggest(data)),
+                        extents, theme=theme,
+                        locked=bool(data.split_into_frames), origin=origin)

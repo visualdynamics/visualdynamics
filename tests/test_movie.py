@@ -78,6 +78,7 @@ def test_an_existing_file_is_replaced_not_renamed_around(h264, tmp_path):
 def test_no_h264_refuses_and_writes_nothing(qt_app, tmp_path, monkeypatch):
     """Without H.264 the recorder would quietly write MPEG-4 Part 2,
     a file browsers and Keynote will not play. Refused instead."""
+    monkeypatch.setattr(movie, '_unloadable', lambda: None)
     monkeypatch.setattr(movie, '_mp4_codecs', list)
     assert 'H.264' in movie.unavailable_reason()
     path = tmp_path / 'never.mp4'
@@ -254,3 +255,19 @@ def test_an_encoder_that_stops_answering_fails_the_movie(h264, tmp_path,
     monkeypatch.setattr(movie, 'STALL_MS', 300)
     with pytest.raises(RuntimeError, match='stopped taking frames'):
         movie.write_movie(tmp_path / 'stuck.mp4', frames(5))
+
+
+def test_a_qt_multimedia_that_will_not_load_refuses_the_movie(qt_app,
+                                                             tmp_path,
+                                                             monkeypatch):
+    """PySide6 6.12's Linux Qt Multimedia links PulseAudio; without
+    `libpulse.so.0` the import fails, and it failed every animated
+    selection on the public CI (2026-10-09). It is a reason now, like
+    a missing encoder."""
+    monkeypatch.setattr(movie, '_unloadable', lambda: (
+        'libpulse.so.0: cannot open shared object file'))
+    reason = movie.unavailable_reason()
+    assert 'Qt Multimedia does not load' in reason and 'libpulse' in reason
+    with pytest.raises(movie.MovieUnavailable, match='libpulse'):
+        movie.write_movie(tmp_path / 'never.mp4', frames(3))
+    assert movie.check(tmp_path / 'never.mp4') == (2, reason)

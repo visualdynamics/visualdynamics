@@ -117,3 +117,23 @@ def test_a_records_frames_go_through_the_cursor(h264, playing, tmp_path):
     playing._cursor.sigPositionChanged.connect(lambda *_: moves.append(1))
     playing.save_animation(str(tmp_path / 'record.mp4'))
     assert len(moves) >= 300, 'one cursor move a frame, 10 s at 30 fps'
+
+
+def test_no_qt_multimedia_offers_no_movie_and_breaks_nothing(shaking,
+                                                            monkeypatch):
+    """The window asks on every animated selection; an import that
+    fails must hide the button, not the animation."""
+    import sys
+
+    # the import itself fails, as it does where libpulse is missing
+    monkeypatch.setitem(sys.modules, 'PySide6.QtMultimedia', None)
+    movie._unloadable.cache_clear()
+    movie._mp4_codecs.cache_clear()
+    try:
+        shaking.render_current()
+        assert 'Save Animation' not in _bar(shaking.scene)
+        assert shaking.animator is not None, 'it still animates'
+        assert 'does not load' in movie.unavailable_reason()
+    finally:
+        movie._unloadable.cache_clear()
+        movie._mp4_codecs.cache_clear()

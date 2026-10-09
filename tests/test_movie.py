@@ -16,6 +16,34 @@ from visualdynamics.gui.movie import mp4_reading
 from visualdynamics.viz.animate import cycle_parameters, sweep_parameters
 
 
+def _box(kind, body):
+    import struct
+
+    return struct.pack('>I4s', 8 + len(body), kind) + body
+
+
+def _mp4(codec, count, frames=b''):
+    """The boxes an MP4's reading comes from: the frames' data, then
+    the index Qt 6.12 writes after them."""
+    sizes = _box(b'stsz', bytes(8) + count.to_bytes(4, 'big'))
+    described = _box(b'stsd', bytes(4) + (1).to_bytes(4, 'big')
+                     + _box(codec, bytes(8)))
+    index = _box(b'moov', _box(b'trak', _box(b'mdia', _box(
+        b'minf', _box(b'stbl', described + sizes)))))
+    return _box(b'mdat', frames) + index
+
+
+def test_the_reading_walks_boxes_rather_than_searching_bytes(tmp_path):
+    """Encoded frames hold any four bytes. With the index after them, a
+    search for 'stsz' found one inside a frame and counted 10 frames of
+    a 180-frame movie (Qt 6.12, 2026-10-09)."""
+    path = tmp_path / 'boxes.mp4'
+    path.write_bytes(_mp4(b'avc1', 180,
+                          frames=b'..stsz' + bytes(8)
+                          + (10).to_bytes(4, 'big') + b'mp4v..'))
+    assert mp4_reading(path) == (b'avc1', 180)
+
+
 def frames(count, height=120, width=160, channels=3):
     yy, xx = np.mgrid[0:height, 0:width]
     for i in range(count):
@@ -187,8 +215,7 @@ def test_the_self_check_refuses_a_wrong_file(qt_app, tmp_path,
     """A file that is not H.264 with every frame fails the check, so a
     build whose Qt quietly wrote Part 2 cannot pass it."""
     monkeypatch.setattr(movie, 'unavailable_reason', lambda: None)
-    part2 = (b'....stsz' + bytes(4) + bytes(4)
-             + (30).to_bytes(4, 'big') + b'mp4v')
+    part2 = _mp4(b'mp4v', 30)
     monkeypatch.setattr(movie, 'write_movie', lambda path, frames, fps=30:
                         (list(frames), path.write_bytes(part2)))
     code, message = movie.check(tmp_path / 'part2.mp4')
@@ -205,3 +232,25 @@ def test_the_flag_runs_the_check_without_a_window(qt_app, tmp_path,
     monkeypatch.setattr(movie, 'check', lambda path: (2, f'asked {path}'))
     assert gui.main(['--check-movie', str(tmp_path / 'x.mp4')]) == 2
     assert capsys.readouterr().out.strip() == f'asked {tmp_path / "x.mp4"}'
+
+
+def test_a_second_movie_keeps_every_frame(h264, tmp_path):
+    """Qt 6.12 takes every frame offered while its encoder is still
+    starting and keeps ten; the second recording in a process starts
+    slowly enough to lose the rest. Paced by what reached the file,
+    a movie after a movie is whole (2026-10-09)."""
+    geometry, shapes = plate_geometry_and_shapes()
+    movie.write_movie(tmp_path / 'first.mp4', frames(45))
+    path = tmp_path / 'second.mp4'
+    shapes.animate(geometry, 8, movie=str(path))
+    assert mp4_reading(path) == (b'avc1', 180)
+
+
+def test_an_encoder_that_stops_answering_fails_the_movie(h264, tmp_path,
+                                                        monkeypatch):
+    """Nothing back from the encoder ends the movie with the reason,
+    rather than a window waiting on it for ever."""
+    monkeypatch.setattr(movie, 'AHEAD', 0)          # never sends a frame
+    monkeypatch.setattr(movie, 'STALL_MS', 300)
+    with pytest.raises(RuntimeError, match='stopped taking frames'):
+        movie.write_movie(tmp_path / 'stuck.mp4', frames(5))

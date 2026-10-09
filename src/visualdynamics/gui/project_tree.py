@@ -152,8 +152,9 @@ def trace_drag(who: str, what: str, mime: QMimeData | None = None,
             formats = ','.join(mime.formats()[:6])
             detail = (f' urls={len(mime.urls())}'
                       f' formats=[{formats}]')
-        stamp = datetime.datetime.now(  # noqa: DTZ005 — local
-            ).strftime('%H:%M:%S.%f')[:-3]  # wall-clock is the point
+        # local wall-clock time is the point: the log is read against
+        # what the person saw happen
+        stamp = datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]
         with open(TRACE, 'a', encoding='utf-8') as log:
             log.write(f'{stamp} {who}: {what}{detail}\n')
     except OSError:

@@ -30,6 +30,15 @@ import numpy as np
 #: frames a second in a saved animation — the window's own rate
 MOVIE_FPS = 30
 
+#: frames sent ahead of what the file holds. The encoder answers after
+#: two or three (measured, VideoToolbox, Qt 6.12), so four never waits
+#: on a frame it has not been given, and Qt 6.12 keeps ten of a burst
+#: sent before it has started.
+AHEAD = 4
+
+#: milliseconds without a word from the encoder before the movie fails
+STALL_MS = 10_000
+
 
 class MovieUnavailable(RuntimeError):
     """This machine cannot encode H.264, so no movie is written."""
@@ -99,7 +108,7 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     MovieUnavailable
         When the machine has no H.264 encoder; nothing is written.
     """
-    from PySide6.QtCore import QEventLoop, QSize, QUrl
+    from PySide6.QtCore import QEventLoop, QSize, QTimer, QUrl
     from PySide6.QtGui import QImage
     from PySide6.QtMultimedia import (
         QMediaCaptureSession,
@@ -142,9 +151,25 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     state = {'frames': source_frames, 'pending': first, 'sent': 0,
              'ended': False, 'error': None, 'finished': False}
     loop = QEventLoop()
+    # nothing heard from the encoder for this long ends the movie with
+    # an error, rather than a window waiting on it for ever
+    watchdog = QTimer()
+    watchdog.setSingleShot(True)
+    watchdog.setInterval(STALL_MS)
+
+    def muxed() -> int:
+        """Frames the file holds so far, by its duration."""
+        return round(recorder.duration() * fps / 1000)
 
     def send() -> None:
+        watchdog.start()
         while not state['ended']:
+            if state['sent'] - muxed() >= AHEAD:
+                # paced by what reached the file, not by what the input
+                # took: Qt 6.12 takes every frame while its encoder is
+                # still starting and keeps ten (2026-10-09). The next
+                # durationChanged sends on.
+                return
             frame = state['pending']
             if frame is None:
                 frame = next(state['frames'], None)
@@ -186,28 +211,81 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
         state['finished'] = True
         loop.quit()
 
+    def stalled() -> None:
+        if state['ended']:
+            return          # every frame is in; the file is being closed
+        state['error'] = (f'the encoder stopped taking frames after '
+                          f'{muxed()} of them')
+        state['frames'], state['pending'] = iter(()), None
+        recorder.stop()
+
+    watchdog.timeout.connect(stalled)
     source.readyToSendVideoFrame.connect(send)
+    recorder.durationChanged.connect(lambda _duration: send())
     recorder.recorderStateChanged.connect(changed)
     recorder.errorOccurred.connect(failed)
     recorder.record()
     if not state['finished']:
         loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+    watchdog.stop()
     if state['error']:
         raise RuntimeError(f'The movie could not be written: '
                            f'{state["error"]}')
     return state['sent']
 
 
+def _boxes(data: bytes, start: int, end: int):
+    """(type, body start, body end) of each MP4 box in data[start:end]."""
+    at = start
+    while at + 8 <= end:
+        size, kind = struct.unpack('>I4s', data[at:at + 8])
+        head = 8
+        if size == 1:                       # a 64-bit size follows
+            size = struct.unpack('>Q', data[at + 8:at + 16])[0]
+            head = 16
+        elif size == 0:                     # to the end of its parent
+            size = end - at
+        if size < head:
+            return
+        yield kind, at + head, min(at + size, end)
+        at += size
+
+
+def _box(data: bytes, path: tuple[bytes, ...], start: int = 0,
+         end: int | None = None) -> tuple[int, int] | None:
+    """The body of the box at `path` (moov, trak, ...), or None."""
+    end = len(data) if end is None else end
+    for kind, body, stop in _boxes(data, start, end):
+        if kind == path[0]:
+            return ((body, stop) if len(path) == 1
+                    else _box(data, path[1:], body, stop))
+    return None
+
+
 def mp4_reading(path: str | Path) -> tuple[bytes | None, int]:
     """(codec four-cc, frame count) read from an MP4's own boxes: the
-    sample entry says what the frames were encoded as, the sample-size
-    table how many there are. `b'avc1'` is H.264; `b'mp4v'` is the
-    Part 2 file Qt writes when it has no H.264 to give."""
+    sample description says what the frames were encoded as, the
+    sample-size table how many there are. `b'avc1'` is H.264; `b'mp4v'`
+    is the Part 2 file Qt writes when it has no H.264 to give.
+
+    Walked as boxes, never searched as bytes: the encoded frames can
+    hold any four bytes, and once the index followed the frames (Qt
+    6.12 writes it last) a search for 'stsz' found one inside a frame
+    and read its count as 10 (2026-10-09).
+    """
     data = Path(path).read_bytes()
-    codec = next((cc for cc in (b'avc1', b'mp4v', b'hvc1', b'hev1')
-                  if cc in data), None)
-    at = data.find(b'stsz')
-    count = struct.unpack('>I', data[at + 12:at + 16])[0] if at >= 0 else 0
+    table = _box(data, (b'moov', b'trak', b'mdia', b'minf', b'stbl'))
+    if table is None:
+        return None, 0
+    sizes = _box(data, (b'stsz',), *table)
+    count = (struct.unpack('>I', data[sizes[0] + 8:sizes[0] + 12])[0]
+             if sizes else 0)
+    described = _box(data, (b'stsd',), *table)
+    codec = None
+    if described:
+        # version/flags and an entry count, then the first entry's box
+        entry = described[0] + 8
+        codec = bytes(data[entry + 4:entry + 8])
     return codec, count
 
 

@@ -161,7 +161,7 @@ def _parse_date(text: str) -> str:
     value = value.split(' ')[0]        # a spreadsheet's midnight timestamp
     for form in _DATE_FORMATS:
         try:
-            return _datetime.datetime.strptime(  # noqa: DTZ007
+            return _datetime.datetime.strptime(
                 value, form).date().isoformat()
         except ValueError:
             continue

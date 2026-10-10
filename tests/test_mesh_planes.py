@@ -152,7 +152,7 @@ def test_the_act_asks_a_tolerance_in_display_units(window, pump, monkeypatch):
     window.add_object('Geometry', merge([floor, wall]))
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     select_objects(window, pump, 'Geometry')
-    from test_acts import _bar
+    from conftest import bar_acts as _bar
 
     assert 'Merge Coincident Nodes' in _bar(window.data_pane) + _bar(window.scene)
     asked = []

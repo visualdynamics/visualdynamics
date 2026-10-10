@@ -14,6 +14,7 @@ one rule replaces them).
 from __future__ import annotations
 
 import numpy as np
+from conftest import bar_acts
 from conftest import select_objects as _select
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QToolButton
@@ -53,18 +54,11 @@ def _populate(window, pump):
     return run
 
 
-def _bar(pane):
-    """The act buttons showing on a pane's bar, by label."""
-    actions = pane.__dict__.get('_acts', {}).get('actions', {}).values()
-    return [a.text() for a in pane.toolbar.actions()
-            if a in actions and a.isVisible()]
-
-
-def test_a_lone_object_offers_its_own_acts_on_the_plots_bar(window, pump):
+def test_a_lone_object_offers_its_own_acts_on_the_plotsbar_acts(window, pump):
     _populate(window, pump)
     _select(window, pump, 'Run')
-    assert _bar(window.data_pane) == ['Integrate', 'Copy']
-    assert _bar(window.scene) == []
+    assert bar_acts(window.data_pane) == ['Integrate', 'Copy']
+    assert bar_acts(window.scene) == []
     assert window._item_for_object('Run').icon(1).isNull(), \
         'no calculator in the tree'
     button = window.data_pane.toolbar.widgetForAction(
@@ -78,20 +72,20 @@ def test_a_lone_object_offers_its_own_acts_on_the_plots_bar(window, pump):
     _select(window, pump, 'Modes')
     # no verb applies to a shape set alone, but what is drawn copies —
     # on whichever bar is up
-    assert _bar(window.data_pane) + _bar(window.scene) == ['Copy']
+    assert bar_acts(window.data_pane) + bar_acts(window.scene) == ['Copy']
 
 
 def test_a_combination_offers_only_what_it_can_take_together(window, pump):
     _populate(window, pump)
     _select(window, pump, 'Run', 'Modes')
-    assert _bar(window.data_pane) == ['Transform to Modal Responses', 'Copy'], \
+    assert bar_acts(window.data_pane) == ['Transform to Modal Responses', 'Copy'], \
         'not Integrate: that applies to one member alone'
     window.data_pane._acts['actions']['transform'].trigger()
     pump()
     assert 'Run Modal Responses' in window.project, \
         'the button runs the same verb the API has'
     _select(window, pump, 'Run Modal Responses', 'Modes')
-    assert _bar(window.data_pane) == ['Expand to Physical Responses', 'Copy']
+    assert bar_acts(window.data_pane) == ['Expand to Physical Responses', 'Copy']
 
 
 def test_siblings_of_one_type_offer_merge(window, pump):
@@ -101,7 +95,7 @@ def test_siblings_of_one_type_offer_merge(window, pump):
         ordinate_dim='acceleration')
     window.add_object('Run 2', other)
     _select(window, pump, 'Run', 'Run 2')
-    assert _bar(window.data_pane) == ['Merge into One', 'Copy']
+    assert bar_acts(window.data_pane) == ['Merge into One', 'Copy']
     window.merge_selected()
     pump()
     assert 'Run' not in window.project and 'Run 2' not in window.project
@@ -113,7 +107,7 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     window.test_item.setSelected(True)
     window.tree.setCurrentItem(window.test_item)
     pump()
-    assert 'Generate Report' in _bar(window.data_pane) + _bar(window.scene)
+    assert 'Generate Report' in bar_acts(window.data_pane) + bar_acts(window.scene)
     assert window.test_item.icon(1).isNull(), 'the column carries no act'
     # the row alone shows nothing on the right: the act was landing a
     # third of the way down the window on the time data's bar under
@@ -121,7 +115,7 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     assert not window.data_pane.isVisibleTo(window), 'no plot for the project row'
     assert not window.table.isVisibleTo(window)
     # and the project's **+**, somewhere to build a model (2026-09-26)
-    assert _bar(window.scene) == ['Generate Report', 'New Geometry'], \
+    assert bar_acts(window.scene) == ['Generate Report', 'New Geometry'], \
         "the 3-D view's bar, holding the space"
     assert window.scene.isVisibleTo(window)
     assert 'Generate Report is on the bar' in window.statusBar().currentMessage()
@@ -152,14 +146,14 @@ def test_a_stale_object_offers_recompute_first(window, pump):
     run.averaging = replace(run.averaging, frames=max(1, run.averaging.frames - 1))
     window._refresh_stale_badges()
     _select(window, pump, name)
-    assert _bar(window.data_pane)[0] == 'Recompute'
+    assert bar_acts(window.data_pane)[0] == 'Recompute'
     assert not window._item_for_object(name).icon(1).isNull(), \
         'the badge stays in the tree: it is status, and the tree is '\
         'where the objects are'
     window.data_pane._acts['actions']['refresh'].trigger()
     pump()
     assert window._stale == {}
-    assert 'Recompute' not in _bar(window.data_pane)
+    assert 'Recompute' not in bar_acts(window.data_pane)
 
 
 def test_the_right_click_carries_no_act(window, pump, qt_app):

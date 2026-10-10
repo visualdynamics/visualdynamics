@@ -3032,6 +3032,9 @@ class Psd(_Bands, DataArray):
         """
         spec = _recast(self, Specification)
         spec.limits = {}
+        # a requirement is not scaled to be compared: the test level
+        # belongs to the measurement
+        spec.__dict__.pop('scale_db', None)
         spec.interpolation = ('bin' if self.bandwidth is not None
                               else Specification.reading_of(self.abscissa))
         return spec

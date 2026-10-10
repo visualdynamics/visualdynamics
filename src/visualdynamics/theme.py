@@ -119,6 +119,12 @@ DARK = {
 OVERLAY_ALPHA = 0.25
 
 
+#: an overlaid pair's two flat colors when nothing else chooses them —
+#: blue, the Basis bracket's own, and orange: the report's overlay, a
+#: script's, and the window's for a set no group colors
+PAIR_COLORS = ('#4c92d9', '#ff8c2b')
+
+
 def overlay_alphas(first_role: str | None,
                    second_role: str | None) -> tuple[float, float]:
     """(first, second) opacity for an overlaid pair: the Basis is the

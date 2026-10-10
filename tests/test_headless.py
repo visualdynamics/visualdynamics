@@ -91,7 +91,7 @@ def test_a_time_history_carries_its_own_reading(random_run, tmp_path, marks):
 
 
 def test_marks_that_are_not_a_reading_say_so(random_run, tmp_path):
-    with pytest.raises(ValueError, match="not a reading of a plot: "
+    with pytest.raises(ValueError, match="not a reading: "
                                          "'averaging', 'shocks'"):
         random_run.time_history.save_plot(tmp_path / 'x.png', marks='frames')
     with pytest.raises(TypeError, match='time history'):

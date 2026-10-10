@@ -77,11 +77,6 @@ def paired_arrays(loud: Any, quiet: Any,
             'page': arrays_loud['page'], 'pages': arrays_loud['pages']}
 
 
-def _extent(values, fallback):
-    finite = [v for v in values if np.isfinite(v)]
-    return (min(finite), max(finite)) if finite else fallback
-
-
 def paired_stage_curves(loud: Any, quiet: Any,
                         loud_records: Sequence[int] | None = None,
                         quiet_records: Sequence[int] | None = None,
@@ -146,15 +141,11 @@ def paired_stage_curves(loud: Any, quiet: Any,
     n = len(stations)
     # where something is drawn, not every line a curve is carried on
     # (`waterfall.drawn_span`)
-    spans = [drawn_span([c[which]]) for c in stations
-             for which in ('loud', 'quiet')
-             if len(c[which][0]) and np.isfinite(c[which][1]).any()]
-    xs = [low for low, _high in spans]
-    xe = [high for _low, high in spans]
+    x0, x1 = drawn_span([c[which] for c in stations
+                         for which in ('loud', 'quiet')])
     zs = np.concatenate(
         [c[which][1][np.isfinite(c[which][1])] for c in stations
          for which in ('loud', 'quiet')]) if stations else np.array([0.0, 1.0])
-    x0, x1 = _extent(xs, (0.0,) * 2)[0], _extent(xe, (1.0,) * 2)[1]
     z0, z1 = float(zs.min()), float(zs.max())
     xspan, zspan = (x1 - x0) or 1.0, (z1 - z0) or 1.0
     for k, station_curves in enumerate(stations):

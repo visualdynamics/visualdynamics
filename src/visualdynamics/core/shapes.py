@@ -893,6 +893,7 @@ class ShapeSet:
                      other: ShapeSet, other_mode: int,
                      other_geometry: Geometry | None = None, *,
                      on_basis: bool = False,
+                     projected: ShapeSet | None = None,
                      names: tuple[str, str] = ('first', 'second'),
                      **kwargs: Any) -> Any:
         """This mode and another set's overlaid, swinging together, as
@@ -920,6 +921,10 @@ class ShapeSet:
             The other set's geometry; this one's when omitted.
         on_basis : bool, default False
             Draw the other set's projection on this geometry instead.
+        projected : ShapeSet, optional
+            The other set already carried onto this one's DOFs
+            (`correlate.project_shapes`), for a script animating many
+            pairs of the same two sets: made here when omitted.
         names : tuple of str
             What the caption calls the two sets.
         **kwargs
@@ -934,8 +939,7 @@ class ShapeSet:
         from ..viz.animate import animate_pair, pair_deflections
 
         other_geometry = other_geometry or geometry
-        projected = None
-        if other_geometry is not geometry:
+        if other_geometry is not geometry and projected is None:
             from .correlate import project_shapes
             projected, _report = project_shapes(other, other_geometry,
                                                 self, geometry)

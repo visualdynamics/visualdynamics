@@ -24,11 +24,12 @@ import struct
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-#: frames a second in a saved animation — the window's own rate
-MOVIE_FPS = 30
+from ..plot import _application
+from ..viz.animate import MOVIE_FPS
 
 #: frames sent ahead of what the file holds. The encoder answers after
 #: two or three (measured, VideoToolbox, Qt 6.12), so four never waits
@@ -42,19 +43,6 @@ STALL_MS = 10_000
 
 class MovieUnavailable(RuntimeError):
     """This machine cannot encode H.264, so no movie is written."""
-
-
-def _application():
-    """A Qt application, made if a script has none — the recorder
-    needs one, and a headless script has no window to have made it.
-
-    A widgets application, not a QGuiApplication: Qt keeps the first
-    one made for the life of the process, and a script that later
-    opens a window would abort on its first widget.
-    """
-    from PySide6.QtWidgets import QApplication
-
-    return QApplication.instance() or QApplication([])
 
 
 @cache
@@ -99,12 +87,21 @@ def unavailable_reason() -> str | None:
             'so an animation cannot be saved as a video here')
 
 
-def _rgba(frame: np.ndarray) -> np.ndarray:
-    """A screenshot as the RGBA the frame input is declared to take."""
-    frame = np.asarray(frame, dtype=np.uint8)
-    if frame.shape[2] == 3:
-        frame = np.dstack([frame, np.full(frame.shape[:2], 255, np.uint8)])
-    return np.ascontiguousarray(frame)
+def _image(frame: np.ndarray) -> Any:
+    """A screenshot as an RGBA QImage that owns its pixels — the encoder
+    reads a frame on its own thread, after the array may be gone. An
+    RGB screenshot is converted by Qt rather than padded in numpy: 0.07
+    against 3.5 ms a frame at 1024 × 768 (measured 2026-10-10)."""
+    from PySide6.QtGui import QImage
+
+    frame = np.ascontiguousarray(frame, dtype=np.uint8)
+    height, width, depth = frame.shape
+    if depth == 3:
+        return QImage(frame.data, width, height, 3 * width,
+                      QImage.Format.Format_RGB888).convertToFormat(
+                          QImage.Format.Format_RGBA8888)
+    return QImage(frame.data, width, height, 4 * width,
+                  QImage.Format.Format_RGBA8888).copy()
 
 
 def write_movie(path: str | Path, frames: Iterable[np.ndarray],
@@ -133,7 +130,6 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     if reason is not None:
         raise MovieUnavailable(reason)
     from PySide6.QtCore import QEventLoop, QSize, QTimer, QUrl
-    from PySide6.QtGui import QImage
     from PySide6.QtMultimedia import (
         QMediaCaptureSession,
         QMediaFormat,
@@ -147,8 +143,8 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     first = next(source_frames, None)
     if first is None:
         raise ValueError('an animation needs at least one frame')
-    first = _rgba(first)
-    height, width = first.shape[:2]
+    first = _image(first)
+    width, height = first.width(), first.height()
 
     path = Path(path).resolve()
 
@@ -191,8 +187,8 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
                 # still starting and keeps ten (2026-10-09). The next
                 # durationChanged sends on.
                 return
-            frame = state['pending']
-            if frame is None:
+            image = state['pending']
+            if image is None:
                 frame = next(state['frames'], None)
                 if frame is None:
                     # the end marker queues like a frame: refused when
@@ -200,22 +196,18 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
                     # stops — sent again on the next ready signal
                     state['ended'] = source.sendVideoFrame(QVideoFrame())
                     return
-                frame = _rgba(frame)
-                if frame.shape[:2] != (height, width):
+                image = _image(frame)
+                if (image.width(), image.height()) != (width, height):
                     # raised here it would vanish into Qt's slot call
                     state['error'] = 'the frames changed size mid-movie'
                     state['frames'] = iter(())
                     continue
-            # copied: the encoder reads the frame on its own thread,
-            # after this array may be gone
-            image = QImage(frame.data, width, height, 4 * width,
-                           QImage.Format.Format_RGBA8888).copy()
             video = QVideoFrame(image)
             video.setStartTime(state['sent'] * 1_000_000 // fps)
             video.setEndTime((state['sent'] + 1) * 1_000_000 // fps)
             if not source.sendVideoFrame(video):
                 # the encoder is full: keep this one for when it asks
-                state['pending'] = frame
+                state['pending'] = image
                 return
             state['pending'] = None
             state['sent'] += 1
@@ -240,18 +232,33 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
         state['frames'], state['pending'] = iter(()), None
         recorder.stop()
 
-    watchdog.timeout.connect(stalled)
-    source.readyToSendVideoFrame.connect(send)
-    recorder.durationChanged.connect(lambda _duration: send())
-    recorder.recorderStateChanged.connect(changed)
-    recorder.errorOccurred.connect(failed)
+    connected = ((watchdog.timeout, stalled),
+                 (source.readyToSendVideoFrame, send),
+                 (recorder.durationChanged, lambda _duration: send()),
+                 (recorder.recorderStateChanged, changed),
+                 (recorder.errorOccurred, failed))
+    for signal, slot in connected:
+        signal.connect(slot)
     recorder.record()
     if not state['finished']:
         loop.exec(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
     watchdog.stop()
+    # the slots hold the recorder, the input and the timer they are
+    # connected to — a cycle Python cannot see through Qt — so a save
+    # kept all of it alive for the life of the process until let go
+    for signal, slot in connected:
+        signal.disconnect(slot)
     if state['error']:
         raise RuntimeError(f'The movie could not be written: '
                            f'{state["error"]}')
+    # read back, not trusted: the pacing above leans on how one Qt
+    # buffers frames, and a Qt that buffers otherwise would write a
+    # short movie without a word (Principle 12 takes each Qt as it comes)
+    codec, kept = mp4_reading(path)
+    if codec != b'avc1' or kept != state['sent']:
+        raise RuntimeError(
+            f'The movie came out wrong: {kept} of {state["sent"]} frames '
+            f'as {(codec or b"nothing").decode(errors="replace")}')
     return state['sent']
 
 

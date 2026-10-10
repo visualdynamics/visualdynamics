@@ -123,15 +123,19 @@ def test_the_project_draws_the_basis_solid_whichever_is_named_first(
     assert seen['second'][0] is copy_geometry, 'each on its own group\'s'
 
 
-def test_a_pair_saves_a_still_and_a_movie(h264, plate, tmp_path):
+def test_a_pair_saves_a_still_and_a_movie(h264, plate, tmp_path,
+                                          monkeypatch):
     geometry, truth, flipped, _sparse, _test = plate
     still = tmp_path / 'pair.png'
     truth.animate_pair(geometry, 8, flipped, 8, screenshot=str(still))
     assert still.stat().st_size > 2000
+    # how many frames a cycle makes is cycle_parameters' own test
+    monkeypatch.setattr(animate, 'cycle_parameters',
+                        lambda *a, **k: np.linspace(0.0, 6.0, 10))
     movie = tmp_path / 'pair.mp4'
     assert truth.animate_pair(geometry, 8, flipped, 8,
                               movie=str(movie)) == str(movie)
-    assert mp4_reading(movie) == (b'avc1', 180)
+    assert mp4_reading(movie) == (b'avc1', 10)
 
 
 def test_sets_sharing_no_dofs_align_only_through_the_projection():

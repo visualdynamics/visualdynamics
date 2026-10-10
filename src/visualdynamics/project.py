@@ -477,6 +477,9 @@ class Project(dict):
         self.journal: list[str] = [
             f'project = visualdynamics.Project({str(name)!r})']
         self._journal_depth: int = 0
+        #: (what the last settling call was, the line it wrote): a
+        #: settling `record_call` of the same call replaces that line
+        self._settling: tuple[tuple, str] | None = None
 
     def __repr__(self) -> str:
         """The project tree, as the GUI shows it.
@@ -3408,9 +3411,8 @@ class Project(dict):
         homes = [self.geometry_for(name) for name in (first, second)]
         if homes[0] is None:
             raise ValueError(f'{first!r} has no geometry — link one')
-        roles = [(self._group(name) or {}).get('role')
-                 for name in (first, second)]
-        kwargs.setdefault('alphas', overlay_alphas(*roles))
+        kwargs.setdefault('alphas', overlay_alphas(self.role_of(first),
+                                                   self.role_of(second)))
         return self[first].animate_pair(
             homes[0][1], mode, self[second], other_mode,
             (homes[1] or homes[0])[1], names=(first, second), **kwargs)
@@ -3859,7 +3861,7 @@ class Project(dict):
             self.journal.append(line)
 
     def record_call(self, target: Any, method: str, *args: Any,
-                    **kwargs: Any) -> None:
+                    settle: bool = False, **kwargs: Any) -> None:
         """A method call on an object, journaled as a script makes it.
 
         The front ends' funnel for object verbs that are not Project
@@ -3875,6 +3877,12 @@ class Project(dict):
             The method a script would call.
         *args : Any
             The call's arguments; their reprs must rebuild them.
+        settle : bool, default False
+            Replace the last line when it was this same call — the same
+            object, method, positional arguments and keyword names,
+            only the keyword values differing — so a gesture nudged
+            again settles to the one call that stands rather than
+            stacking a line per nudge.
         **kwargs : Any
             Keyword arguments, same rule.
 
@@ -3887,10 +3895,17 @@ class Project(dict):
         except (KeyError, ValueError):
             return
         shown = [self._journal_arg(a) for a in args]
-        shown += [f'{key}={self._journal_arg(value)}'
-                  for key, value in kwargs.items()]
-        self.journal.append(
-            f'project[{name!r}].{method}({", ".join(shown)})')
+        key = (name, method, tuple(shown), tuple(kwargs))
+        shown += [f'{word}={self._journal_arg(value)}'
+                  for word, value in kwargs.items()]
+        line = f'project[{name!r}].{method}({", ".join(shown)})'
+        last = self._settling
+        if (settle and last is not None and last[0] == key
+                and self.journal and self.journal[-1] == last[1]):
+            self.journal[-1] = line
+        else:
+            self.journal.append(line)
+        self._settling = (key, line) if settle else None
 
     #: what a settings repr needs in scope, added to `session_script`
     #: only when a journal line uses it

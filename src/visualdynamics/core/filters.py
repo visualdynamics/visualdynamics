@@ -54,6 +54,7 @@ double integration invents are set out.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import cache
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -94,11 +95,27 @@ def threaded_sosfiltfilt(sos: Any, rows: Any, axis: int = -1) -> np.ndarray:
     if rows.ndim < 2 or axis not in (-1, rows.ndim - 1) or rows.shape[0] < 2 \
             or rows.size < 1_000_000:
         return sosfiltfilt(sos, rows, axis=axis)
+    return np.stack(list(_filter_pool().map(
+        lambda row: sosfiltfilt(sos, row), rows)))
+
+
+@cache
+def _filter_pool() -> Any:
+    """The threads `threaded_sosfiltfilt` shares, made once and kept.
+
+    A pool per call started up to eight threads every time the filter
+    preview redrew. One gate run stalled for an hour inside exactly
+    that: the main thread in `Thread.start`, waiting on a new worker
+    that never said it had begun, from a render of the filter view
+    (2026-10-09; CPython 3.13.2, not reproduced in 1 200 calls). A kept
+    pool starts its threads once a session, so no redraw waits on a
+    thread being born — and skips the start-up besides.
+    """
     import os
     from concurrent.futures import ThreadPoolExecutor
 
-    with ThreadPoolExecutor(min(8, os.cpu_count() or 1)) as pool:
-        return np.stack(list(pool.map(lambda row: sosfiltfilt(sos, row), rows)))
+    return ThreadPoolExecutor(min(8, os.cpu_count() or 1),
+                              thread_name_prefix='visualdynamics-filter')
 
 
 @dataclass(frozen=True, kw_only=True)

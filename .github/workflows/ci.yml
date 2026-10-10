@@ -13,13 +13,26 @@ name: tests
 # caught, and how PyYAML missing from the dev extra and a STEP reader
 # written against one OCP binding were caught (2026-09-13). The local
 # suite and lint pass is still the gate; this is the second opinion,
-# taken on every push now that it is free. Still no schedule: a run
-# with nothing new to test answers nothing.
+# taken on every push now that it is free.
+#
+# And once a week whether or not anything was pushed (Brandon,
+# 2026-10-09). The dependencies are unpinned on purpose (Principle 12),
+# so a new NumPy, Qt or VTK release *is* something new to test: until
+# this, PySide6 6.12 and ruff 0.17 were found only when 0.1.0a41 went
+# through, while anyone installing a40 from PyPI already had them.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '0 13 * * 1'          # Mondays, 07:00 Mountain
   pull_request:
   workflow_dispatch:
+    inputs:
+      runner:
+        # the image the suite runs on, for trying the next one before
+        # ubuntu-latest moves to it (Ubuntu 26.04, from 2026-10-19)
+        description: 'Runner image for the test job'
+        default: 'ubuntu-latest'
 
 # A pull request pushed to twice, or *Run workflow* pressed twice,
 # leaves a superseded run burning minutes for an answer nobody reads.
@@ -29,7 +42,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     # 60: a green run at four workers took 12 minutes on a four-core
     # Linux box once the windows died at teardown (2026-09-13); the cap
     # exists to stop a hung run burning minutes, not to race the suite.
@@ -43,9 +56,9 @@ jobs:
         python-version: ['3.12', '3.13']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -147,7 +160,7 @@ jobs:
 
       - name: Keep the coverage report
         if: matrix.python-version == '3.13'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-html
           path: htmlcov/
@@ -191,9 +204,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
           cache: pip
@@ -207,7 +220,7 @@ jobs:
         run: properdocs build --strict --site-dir site
 
       - name: Keep the site
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docs-site
           path: site/

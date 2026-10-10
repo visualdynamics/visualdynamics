@@ -165,6 +165,30 @@ written lines only, on both sides.
 the comparison resuming on either
 side](images/compliance-hole.png)
 
+## The test level
+
+A run is often recorded below the level the specification states, at
+-6 dB or -3 dB on the way up to full level, and it is judged after the
+measurement is scaled up by that amount. The data itself is never
+changed; the scale is applied where the comparison is drawn and scored.
+When nothing has been typed, the level is detected: both spectra are
+banded to sixth octaves, each band gives the decibels it would need,
+snapped to the 3 dB steps a controller is set in, and the most common
+step is used if most bands agree on it and the total power agrees too.
+Otherwise the comparison is shown as measured, at 0 dB. The Scaling
+field on the plot bar shows the level being used and takes a typed one
+in whole decibels, or blank to go back to detection.
+
+The level belongs to the measurement and to the octave PSDs made from
+it, all of them at once, so the narrowband and banded comparisons, and
+the report, use the same number. From a script:
+
+```python
+project.comparison_scale('Specification', 'Time History PSDs')
+project.set_comparison_scale('Time History PSDs', -6)    # hold it
+project.set_comparison_scale('Time History PSDs', None)  # detect again
+```
+
 ## Checking it
 
 ```python

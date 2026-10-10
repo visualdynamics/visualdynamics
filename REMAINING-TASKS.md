@@ -130,6 +130,11 @@ was brought current and the ownership question closed). Nothing here
 is public until step 6, steps 1 to 5 are all reversible, and step 7
 happens on its own once 6 is done.
 
+0. Level the environments: `tools/level_venv.sh` upgrades both venvs
+   to the latest of everything, as CI and PyPI installs get, and runs
+   the gate. Fix what it finds before anything else (2026-10-09: a41
+   took three syncs to find what this finds first, and the macOS pair
+   is built from these venvs).
 1. Pick the version and set `__version__` in `src/visualdynamics/__init__.py`;
    `pyproject.toml` reads it from there.
 2. Rebuild all four packages from that version

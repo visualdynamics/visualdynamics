@@ -305,6 +305,11 @@ learned on real data:
   estimate goes as (1 − γ²)/γ², so its inverse weights the solve, the
   shape extraction, and the judging alike — a channel the measurement
   itself distrusts cannot vote noise into every mode's residues.
+  Scripted, `project.fit_coherence('FRF', records)` names the coherence
+  the screen would use, and `fit_modes(coherence=...)` uses it; a fit of
+  records picked in the tree is `fit_modes(records=[...])`. The session
+  script records both, so a replayed session fits the same records with
+  the same weights.
 
 ## What this is not
 

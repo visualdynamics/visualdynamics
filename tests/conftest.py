@@ -30,6 +30,26 @@ os.environ['VISUALDYNAMICS_SETTINGS'] = os.path.join(SETTINGS_STORE,
                                                      'preferences.ini')
 
 
+def release_modifiers(widget):
+    """Let go of any keyboard modifier Qt believes is held, and return
+    the ones that were. A `QTest.mouseClick` or chord with a modifier
+    leaves it held for the rest of the process on the offscreen
+    platform; only a key release clears it."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    held = QApplication.keyboardModifiers()
+    for modifier, key in (
+            (Qt.KeyboardModifier.ControlModifier, Qt.Key.Key_Control),
+            (Qt.KeyboardModifier.ShiftModifier, Qt.Key.Key_Shift),
+            (Qt.KeyboardModifier.AltModifier, Qt.Key.Key_Alt),
+            (Qt.KeyboardModifier.MetaModifier, Qt.Key.Key_Meta)):
+        if held & modifier:
+            QTest.keyRelease(widget, key)
+    return [] if held == Qt.KeyboardModifier.NoModifier else [held]
+
+
 def fixture_path(*parts):
     """A path into testdata/. Not named test* — pytest would collect it."""
     return os.path.join(TESTDATA, *parts)
@@ -337,9 +357,18 @@ def window(qt_app, no_swallowed_errors):
     # process — detach the report editor's page before the window goes
     if getattr(window, 'report_editor', None) is not None:
         window.report_editor.view.setPage(None)
+    # a modifier a test left held is held for every window after it:
+    # Qt keeps it process-wide, and the next window's tree reads a plain
+    # select as a Ctrl-toggle — fifteen tests in four files failed ten
+    # files after a Ctrl-click that never let go (2026-10-09). Cleared
+    # whatever happens, and the test that left it is the one that fails.
+    held = release_modifiers(window)
     destroy_window(window, qt_app)
     for kind, door in doors.items():
         setattr(QMessageBox, kind, door)
+    assert not held, (
+        f'the test left {held} held — let go of it (QTest.keyRelease, or '
+        'conftest.release_modifiers) after a modified click or chord')
 
 
 @pytest.fixture

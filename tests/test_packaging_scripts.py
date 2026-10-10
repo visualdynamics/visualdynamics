@@ -91,3 +91,23 @@ def test_both_packaged_builds_check_they_can_save_an_animation():
     assert line.startswith('"$APP/Contents/MacOS/Visual Dynamics"')
     assert build.index('--check-movie') < build.index('if [[ -n $SIGN ]]'), \
         'checked before it is signed and shipped'
+
+
+def test_the_venvs_are_levelled_eagerly_and_gated_by_pytest_s_own_code():
+    """`tools/level_venv.sh` is step 0 of a release. A plain `pip install
+    -U` upgrades the package and keeps every dependency it has, which is
+    how this desk drifted behind CI (2026-10-09); and the gate is judged
+    by pytest's exit code, never through a pipe."""
+    with open(os.path.join(ROOT, 'tools', 'level_venv.sh'),
+              encoding='utf-8') as handle:
+        script = handle.read()
+    assert 'pip install -q -U --upgrade-strategy eager' in script
+    assert "level .venv -e '.[dev,step,docs,app]'" in script
+    assert "level .venv-x86_64 '.[step,app]'" in script
+    gate = next(line for line in script.splitlines()
+                if '-m pytest tests' in line)
+    assert '|' not in gate and gate.rstrip().endswith('\\')
+    assert 'exit $code' in script
+    with open(os.path.join(ROOT, 'REMAINING-TASKS.md'),
+              encoding='utf-8') as handle:
+        assert 'tools/level_venv.sh' in handle.read()

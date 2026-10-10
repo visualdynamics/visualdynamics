@@ -18,6 +18,13 @@ project.plot_mac('Test', 'FEM')         # cross-MAC across two geometries,
                                         # projected the way the app shows it
 shapes.animate(geometry, mode=2)        # the deflection animation
 shapes.animate(geometry, 2, screenshot='mode3.png')
+shapes.animate(geometry, 2, movie='mode3.mp4')   # whole cycles, as a video
+shapes.animate_pair(geometry, 2, fem_shapes, 3, fem_geometry)
+                                        # two modes overlaid, as a MAC
+                                        # cell animates them
+
+history.animate(geometry)               # time records on the geometry
+history.animate(geometry, movie='run.mp4', seconds=10.0)
 
 frf.animate(geometry)                   # the operating deflection shape,
                                         # at the strongest line
@@ -26,6 +33,7 @@ frf.animate(geometry, frequency=647.0)  # or at a chosen frequency
 psd.animate(geometry)                   # the envelope: two copies at
                                         # +/- sqrt(PSD), no phase claimed
 psd.animate(geometry, frequency=1000.0, quantity='acceleration')
+psd.animate(geometry, movie='envelope.mp4')   # every line, once through
 ```
 
 An FRF (or a complex spectrum) selected beside a geometry in the app
@@ -68,7 +76,22 @@ drawn at a picture's width whatever the record's length — the
 [wavelet guide](wavelet.md) says how), `plot_kurtosis(history)`, and
 for a specification comparison `plot_bars(measured, specification)`,
 `plot_comparison(...)`, `plot_ratio(...)`, `plot_snr(...)` and `plot_replication(...)`
-— each the figure the app shows, each taking `path=`.
+— each the figure the app shows, each taking `path=`. The 3-D forms
+are in `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)`
+is the surface the wavelet reading opens in, and
+`sinespec.plot_sine_stage(specification, levels)` puts measured sine
+levels on the specification's stage; both take `screenshot=`.
+
+The toggles that draw a reading over the data are an argument:
+
+```python
+history.plot(marks='filter')        # also 'averaging', 'shocks', 'truncation'
+psd.plot(marks='octave', per_octave=3)   # the bands it would integrate to
+psd.plot_waterfall(marks='octave', screenshot='bands.png')   # on the stage
+```
+
+Each is read from the object as the app reads it, from the settings it
+holds or the ones its detector would suggest.
 
 ## Copying what is shown
 
@@ -81,6 +104,29 @@ its top-right corner while the pointer is over it; a table copies whole,
 headers and all, as cells for a spreadsheet and as a table for a
 document or a mail. The report's figures, tables and photographs have
 the same button ([Reports](reports.md#copying-a-figure-a-table-or-a-photo)).
+
+## Saving an animation
+
+While the 3-D view is animating something (a mode shape, an operating
+deflection shape, a pair of modes picked on the MAC, a time history or
+a PSD envelope on its geometry), its bar has a second button after
+Copy, a strip of film, that saves the animation as an MP4 video. The
+video is what the view is playing: the same camera, deflection scale
+and speed. A mode shape is saved as whole cycles, at least six seconds
+of them, and the last frame stops one step short of the first so a
+player set to loop shows no jump. A time history or an envelope is
+saved once through, at the speed it is playing.
+
+The video is H.264, which plays without anything installed on macOS,
+Windows, Linux, phones and in a browser, and is small for this kind of
+picture: six seconds of a plate mode at 1024 × 768 was 1.4 MB. It is
+encoded by the operating system's own H.264 encoder through Qt. Every
+Mac and Windows computer has one; a Linux computer has one only when
+its graphics driver provides it (VAAPI or NVENC), and where there is
+none the button is not offered. From a script the same condition is
+reported by `visualdynamics.gui.movie.unavailable_reason()`, and an
+installed copy can be checked with `visualdynamics --check-movie
+out.mp4`, which writes one second of video and reads it back.
 
 ## A plot from a script is the app's own pane
 
@@ -112,6 +158,10 @@ enough to export the image.
 ```python
 project.plot('FRF')                     # dispatches on what it is
 project.animate('Experimental Modes', mode=0)   # finds its geometry
+project.animate_pair('Test Modes', 0, 'FEM Modes', 0, movie='pair.mp4')
+                                        # each set on its own geometry, the
+                                        # Basis solid and the other drawn
+                                        # through it
 ```
 
 ## What is drawn, and why

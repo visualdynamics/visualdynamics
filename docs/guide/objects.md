@@ -30,7 +30,11 @@ and an origin per system), one connectivity array per element, and
 the element group each element belongs to with its name. `nodes`,
 `coordinate_systems`, `elements` and `groups` are row **views** onto
 those arrays — what a script usually reaches; writing through a row
-writes the array.
+writes the array. A coordinate system is turned or moved with
+`geometry.place_coordinate_system(cs_id, angles=(x, y, z),
+origin=...)`, the angles in degrees about the fixed X, then Y, then Z
+axes; it is the call the 3-D view's rings and arrows make when a turn
+or a slide ends.
 
 There are no tracelines. A line drawn through nodes is an **element
 group of two-node beam elements with no properties** — `add_beams`

@@ -49,8 +49,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # The same list packaging/build_linux.sh reads, so a runner and a
       # container install the same thing. A hand-copied list here is
@@ -74,7 +74,7 @@ jobs:
           chmod +x appimagetool-x86_64.AppImage
           sudo mv appimagetool-x86_64.AppImage /usr/local/bin/appimagetool
           packaging/build_linux.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: linux, path: dist/*.AppImage, retention-days: 1}
 
   windows:
@@ -82,8 +82,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
@@ -98,10 +98,10 @@ jobs:
       # maintainer has.
       - name: Smoke-test the installed application
         run: powershell -ExecutionPolicy Bypass -File packaging\smoke_windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with: {name: windows-smoke, path: dist/smoke/*, retention-days: 7}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: windows, path: dist/*setup.exe, retention-days: 1}
 
   macos:
@@ -109,15 +109,15 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
       - run: pip install -e '.[step,app]' pyinstaller pillow
       - run: packaging/build_macos.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: {name: macos, path: dist/*.dmg, retention-days: 1}
 
   publish:
@@ -150,7 +150,7 @@ jobs:
       # are artifacts too, and taking every artifact attached them to
       # the release and tripped over an empty stdout.log, which GitHub
       # refuses as an asset (the first tag, 2026-09-14)
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: {path: builds, merge-multiple: true, pattern: '{linux,windows,macos}'}
       # SHA256SUMS beside the builds, in sha256sum's own format so
       # `shasum -a 256 -c SHA256SUMS` verifies a download — the
@@ -164,7 +164,7 @@ jobs:
       # exhaust on the first release. Release assets are a separate,
       # effectively unlimited store — which is why the jobs above keep
       # theirs for a single day, just long enough to be collected here.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: builds/*
           draft: true          # look at it before the world does
@@ -193,8 +193,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       - run: pip install -e '.[docs]'
       - name: Build the documentation into the site
@@ -257,7 +257,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13'}
       - name: Build the placeholder
         run: |
@@ -309,8 +309,8 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.13'}
       - run: pip install -q build
       - run: python -m build

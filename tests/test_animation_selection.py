@@ -13,7 +13,7 @@ import os
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import fixture_path, release_modifiers
 
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.gui.main_window import animation_records
@@ -496,6 +496,10 @@ def _click_record(window, name, row, modifier=None):
     QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton,
                      modifier or Qt.KeyboardModifier.NoModifier,
                      rect.center())
+    if modifier:
+        # the click held it down and nothing lets go of it: every later
+        # window's tree read a plain select as a toggle (2026-10-09)
+        release_modifiers(grid.viewport())
 
 
 def test_a_grid_that_gives_way_clears_its_rows(window, pump):

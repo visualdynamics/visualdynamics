@@ -409,3 +409,30 @@ def test_a_long_record_is_filtered_a_channel_per_core(monkeypatch):
     short = rng.standard_normal((4, 1000))
     threaded_sosfiltfilt(sos, short)
     assert calls == [2], 'a short record in one call'
+
+
+def test_a_redraw_of_the_filter_starts_no_threads(monkeypatch):
+    """The threads are made once and kept. A pool per call started
+    eight every time the filter preview redrew, and one run stalled an
+    hour in `Thread.start` from that redraw (2026-10-09). Warm, a long
+    record's filter starts nothing — and reads the same numbers."""
+    import threading
+
+    import scipy.signal
+
+    from visualdynamics.core.filters import threaded_sosfiltfilt
+
+    sos = scipy.signal.butter(4, 0.1, output='sos')
+    rows = np.random.default_rng(5).standard_normal((16, 100_000))
+    for _ in range(3):                     # every worker born, then kept
+        threaded_sosfiltfilt(sos, rows)
+    started = []
+    real_start = threading.Thread.start
+    monkeypatch.setattr(threading.Thread, 'start',
+                        lambda self: (started.append(self.name),
+                                      real_start(self))[1])
+    for _ in range(5):
+        filtered = threaded_sosfiltfilt(sos, rows)
+    assert started == [], f'threads started on a warm call: {started}'
+    assert np.array_equal(filtered,
+                          scipy.signal.sosfiltfilt(sos, rows, axis=-1))

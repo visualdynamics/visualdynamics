@@ -197,8 +197,10 @@ def test_the_staging_parser_agrees_with_the_update_check():
 def test_ci_runs_on_every_push_to_main_and_both_pythons():
     """The repository is public and its runners are free (2026-09-14),
     so the suite runs on every push to main, on pull requests and on
-    demand, on both Pythons the package promises — and on no schedule,
-    which a run with nothing new to test would only waste."""
+    demand, on both Pythons the package promises — and weekly, because
+    unpinned dependencies make an upstream release something new to
+    test even when nothing here moved (2026-10-09; it was "no schedule"
+    until PySide6 6.12 waited for a release to be found)."""
     import yaml
 
     root = os.path.join(os.path.dirname(__file__), '..')
@@ -208,7 +210,7 @@ def test_ci_runs_on_every_push_to_main_and_both_pythons():
     on = workflow[True]
     assert on['push'] == {'branches': ['main']}
     assert 'pull_request' in on and 'workflow_dispatch' in on
-    assert 'schedule' not in on
+    assert on['schedule'] == [{'cron': '0 13 * * 1'}], 'weekly'
     matrix = workflow['jobs']['test']['strategy']['matrix']
     assert matrix['python-version'] == ['3.12', '3.13']
 

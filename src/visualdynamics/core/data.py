@@ -229,6 +229,18 @@ class _LogAbscissa:
         return cls._log_abscissa_default
 
 
+def _recast(obj: Any, cls: type) -> Any:
+    """`obj` as an instance of `cls`, every field copied — what reading
+    a PSD as a specification, or back, changes is the kind and nothing
+    else, so nothing is rebuilt through a constructor that might not
+    know a field (a declared-later unit, a dimension hint, a band)."""
+    import copy
+
+    out = cls.__new__(cls)
+    out.__dict__.update(copy.deepcopy(obj.__dict__))
+    return out
+
+
 class DataArray:
     """Base class; use a concrete subclass (TimeHistory, Spectrum, Frf, Psd).
 
@@ -3000,6 +3012,30 @@ class Psd(_Bands, DataArray):
             self.ordinate: np.ndarray = np.ascontiguousarray(self.ordinate.real)
         self._take_bandwidth(bandwidth)
 
+    def as_specification(self) -> Specification:
+        """This PSD read as a specification: the same numbers, records,
+        units and bands, held as the requirement a measurement is judged
+        against, with no limits.
+
+        Nothing in a file says a PSD is a requirement when the format
+        has no word for one — ESCDF's data types do not, and a target
+        written by another program arrives as a PSD with only its name
+        to tell — so the person who knows says so (Brandon,
+        2026-10-09). A banded PSD steps, as a banded specification does;
+        otherwise its frequencies decide whether it reads as a
+        controller's lines or as breakpoints (`Specification.reading_of`).
+
+        Returns
+        -------
+        Specification
+            A copy; this PSD is unchanged.
+        """
+        spec = _recast(self, Specification)
+        spec.limits = {}
+        spec.interpolation = ('bin' if self.bandwidth is not None
+                              else Specification.reading_of(self.abscissa))
+        return spec
+
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,
                   high: float | None = None) -> Psd:
@@ -3432,6 +3468,31 @@ class Specification(Bounded, Psd):
         magnitude = np.abs(values) if np.iscomplexobj(values) else np.real(values)
         with np.errstate(invalid='ignore'):
             return (np.isfinite(magnitude) & (magnitude > 0.0)).any(axis=0)
+
+    def as_psd(self) -> Psd:
+        """This specification read as a plain PSD — `Psd.as_specification`
+        undone, for a PSD read as a requirement by mistake. Its reading
+        of its own points is kept.
+
+        Returns
+        -------
+        Psd
+            A copy; this specification is unchanged.
+
+        Raises
+        ------
+        ValueError
+            When it has limits: a PSD has nowhere to keep them, and
+            dropping them unasked would lose what the file said.
+            `limit(name)` hands one out as a PSD of its own.
+        """
+        if self.limits:
+            raise ValueError(
+                'it carries warning or abort limits, which a PSD cannot '
+                'hold; take one out with limit(name) instead')
+        plain = _recast(self, Psd)
+        plain.__dict__.pop('limits', None)
+        return plain
 
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,

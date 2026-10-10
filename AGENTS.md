@@ -28,7 +28,8 @@ change that keeps those rules.
 Three names, on purpose: **Visual Dynamics** is what a person reads
 (window title, app bundle, file dialogs, report headings),
 `visualdynamics` is the package and the import, `.vdyn` is the
-project file — provisional for the alpha, as the README says.
+project file — its format may still change during the alpha, as the
+README says.
 
 ## Hard rules
 

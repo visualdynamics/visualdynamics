@@ -578,3 +578,21 @@ def test_the_drawn_time_labels_stand_where_they_claim(window, pump):
     for text, at in zip(drawn, positions):
         assert float(text) == pytest.approx(at, rel=5e-4), \
             f'label {text!r} is drawn at {at:.6g} and must say so'
+
+
+def test_the_stage_spans_what_is_drawn_not_every_line():
+    """A PSD written as a controller writes a specification — every
+    line to Nyquist, zero outside its band — draws only over the band,
+    and the stage spanned all its lines: 20 to 400 Hz stood as a sliver
+    of a 0 to 2048 Hz floor (Brandon, 2026-10-09)."""
+    from visualdynamics.core.data import Psd
+    from visualdynamics.viz.waterfall import stage_curves, waterfall_arrays
+
+    lines = np.arange(0.0, 2048.0 + 1, 2.0)
+    level = np.where((lines >= 20.0) & (lines <= 400.0), 0.04, 0.0)
+    psd = Psd(lines, np.vstack([level, 2 * level]),
+              response_dof=['101Z+', '102Z+'],
+              ordinate_dim='acceleration**2/frequency',
+              ordinate_unit='(m/s**2)**2/Hz')
+    x0, x1, _z0, _z1 = stage_curves(waterfall_arrays(psd))['extents']
+    assert 15.0 <= x0 <= 20.0 and 400.0 <= x1 <= 410.0, (x0, x1)

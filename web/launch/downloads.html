@@ -36,12 +36,13 @@
     against known cases, not yet against a broad set of tests; numbers
     it produces are to be verified by independent means before anything
     depends on them. The application says so when it opens, and asks
-    for that to be acknowledged every time. The project file,
-    <code>.vdyn</code>, is provisional: the next alpha will save projects
-    in the Engineering Sciences Common Data Format (<code>.h5</code>),
-    a public standard, and will still open <code>.vdyn</code> files; the
-    first release that is not an alpha will not. Open each
-    <code>.vdyn</code> once in that alpha and save it again.
+    for that to be acknowledged every time. Projects are saved as
+    <code>.vdyn</code> files, and Engineering Sciences Common Data
+    Format (<code>.h5</code>) files are imported and exported for
+    exchanging data with other tools. While Visual Dynamics is an alpha
+    the <code>.vdyn</code> format may still change; the promise that a
+    later version opens every earlier file starts with the first
+    release that is not an alpha.
   </p>
 
   <h2>Compiled packages</h2>
@@ -133,8 +134,8 @@
     checked against the
     <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">wiki's</a>
     measured frequencies and shared models.
-    Unzip, then File → Open. They are <code>.vdyn</code> files, and are re-cut
-    when the project file moves to ESCDF <code>.h5</code>.
+    Unzip, then File → Open. They are <code>.vdyn</code> files, re-cut
+    whenever a release changes the format.
   </p>
 
   <h2 id="python">Python installation</h2>

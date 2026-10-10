@@ -87,7 +87,9 @@ def test_apply_makes_exactly_the_previewed_banding(window, pump):
 
 def test_no_act_offers_it_beside_the_reading(window, pump):
     psds, _pane = _psds(window, pump)
-    assert window.acts_for([window.project.name_of(psds)]) == [], \
+    verbs = [verb for verb, *_rest
+             in window.acts_for([window.project.name_of(psds)])]
+    assert 'compute_octave' not in verbs, \
         'the act lives on the reading\'s pane (Brandon, 2026-08-29)'
 
 

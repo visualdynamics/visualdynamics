@@ -113,16 +113,23 @@ EXPORT_PAGE = pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'export.md'
 ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
-def test_the_provisional_project_file_is_said_everywhere_a_user_reads():
-    """`.vdyn` is alpha-only with a dated end (2026-09-13): the next
-    alpha writes ESCDF (`.h5`, 2026-10-03) and still reads `.vdyn`, the first non-alpha
-    does not. The disclaimer says so (test_disclaimer); so must the
-    downloads page, the README and the guide, in the same terms."""
+def test_the_project_file_is_said_the_same_everywhere_a_user_reads():
+    """`.vdyn` is the project file and stays it, ESCDF `.h5` is imported
+    and exported beside it, and the promise to open every earlier file
+    starts with the first release that is not an alpha (Brandon,
+    2026-10-09; until then the pages announced a switch to ESCDF that
+    is not the plan). The disclaimer says so (test_disclaimer); so must
+    the downloads page, the README, the guide and the format page, in
+    the same terms — and none may announce the switch again."""
     for page in ('web/launch/downloads.html', 'README.md',
                  'docs/guide/README.md', 'docs/vdyn-format.md'):
         text = (ROOT_DIR / page).read_text(encoding='utf-8')
-        for phrase in ('.vdyn', 'provisional', '.h5', 'save it again'):
-            assert phrase in text, f'{page} does not say {phrase!r}'
+        flat = ' '.join(text.split())
+        for phrase in ('.vdyn', '.h5', 'may still change', 'not an alpha'):
+            assert phrase in flat, f'{page} does not say {phrase!r}'
+        for stale in ('next alpha', 'save it again', 'provisional',
+                      'moves to ESCDF'):
+            assert stale not in flat, f'{page} still says {stale!r}'
 
 
 def test_the_export_page_names_every_format():

@@ -3076,6 +3076,9 @@ class MainWindow(QMainWindow):
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
         ('add_block', 'Add Block', 'block', 'add_block_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
+        ('read_as_specification', 'Read as Specification',
+         'as_specification', 'read_as_specification_act'),
+        ('read_as_psd', 'Read as PSD', 'as_psd', 'read_as_psd_act'),
     )
 
     def acts_for(self, names=None):
@@ -11806,6 +11809,38 @@ class MainWindow(QMainWindow):
         self._show_status(
             f'{added}: {shapes.num_shapes} modes to {top:g} Hz, {rigid} '
             f'rigid, {percent:g}% damping — linked to {name}')
+
+    def read_as_specification_act(self) -> None:
+        """The bar's Read as Specification: the selected PSD becomes the
+        requirement it is, in place (`Project.read_as_specification`)."""
+        self._read_as(Psd, 'Select a PSD to read as a specification',
+                      self.project.read_as_specification,
+                      'read as a specification — compare a measurement '
+                      'against it by selecting both')
+
+    def read_as_psd_act(self) -> None:
+        """The bar's Read as PSD: the selected specification is plain
+        data again, in place (`Project.read_as_psd`)."""
+        self._read_as(Specification, 'Select a specification to read as a PSD',
+                      self.project.read_as_psd, 'read as a PSD')
+
+    def _read_as(self, kind, refusal, verb, said) -> None:
+        """Swap the selected object for its other reading, under the
+        same name: the tree row, its grid and the view follow, the way a
+        recompute's in-place swap does."""
+        acted = self._act_on(kind, refusal, verb)
+        if acted is None:
+            return
+        name = acted[0]
+        obj = self.objects[name]
+        item = self._item_for_object(name)
+        if item is not None:
+            self._refresh_item(item, obj)
+            item.setToolTip(0, self._object_tooltip(name, obj))
+            self._build_children(item, obj, name)
+        self._report_content_changed()
+        self.render_current()
+        self._show_status(f'{name} {said}')
 
     def integrate_history(self) -> None:
         """One integration of the selected time history — acceleration

@@ -16,11 +16,12 @@ file.
 
 **This is an alpha.** Every launch opens with a disclaimer to
 acknowledge: the software is offered as is, and its numbers are the
-user's to check against a tool they already trust. The project file,
-`.vdyn`, is provisional: the next alpha will save projects in the
-Engineering Sciences Common Data Format (`.h5`), a public standard,
-and will still open `.vdyn` files; the first release that is not an
-alpha will not. Open each `.vdyn` once in that alpha and save it again.
+user's to check against a tool they already trust. Projects are
+saved as `.vdyn` files, and Engineering Sciences Common Data Format
+(`.h5`) files are imported and exported for exchanging data with
+other tools. While Visual Dynamics is an alpha the `.vdyn` format may
+still change; the promise that a later version opens every earlier
+file starts with the first release that is not an alpha.
 
 **[Core principles](PRINCIPLES.md)** — thirteen principles
 that shape every part of it: data you can see and handle, a workflow

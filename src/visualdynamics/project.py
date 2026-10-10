@@ -2501,6 +2501,53 @@ class Project(dict):
         return self._derive(source, shapes, name or f'{source} Modes',
                             recipe=('solve_modes', params))
 
+    def read_as_specification(self, name: Any) -> str:
+        """Read this PSD as a specification — the requirement it is
+        judged against — under its own name, its object group and every
+        reference to it kept.
+
+        A file whose format has no word for a requirement (ESCDF's data
+        types do not) can only say so by its name, and a name is no
+        evidence; the person who knows says so instead.
+
+        Parameters
+        ----------
+        name : str or Psd
+            The PSD.
+
+        Returns
+        -------
+        str
+            Its name.
+        """
+        name = self.name_of(name)
+        obj = self[name]
+        if not isinstance(obj, Psd) or isinstance(obj, Specification):
+            raise TypeError(f'{name} is not a PSD read as data')
+        self[name] = obj.as_specification()
+        return name
+
+    def read_as_psd(self, name: Any) -> str:
+        """Read this specification as a plain PSD again, under its own
+        name — `read_as_specification` undone.
+
+        Parameters
+        ----------
+        name : str or Specification
+            The specification.
+
+        Returns
+        -------
+        str
+            Its name.
+        """
+        name = self.name_of(name)
+        obj = self[name]
+        if not isinstance(obj, Specification):
+            raise TypeError(f'{name} is not a specification')
+        self[name] = obj.as_psd()
+        return name
+
     def scale_family(self, measured: Any) -> list[str]:
         """The measured PSDs that share one comparison scale: the object
         and every non-specification PSD in its object group — its
@@ -4039,6 +4086,12 @@ _VERB_APPLIES: tuple = (
         for other in p.values()))),
     # a specification bands too, limits and all (Brandon, 2026-09-18)
     ('compute_octave', lambda p, o: isinstance(o, Psd)),
+    # what a file could not say: a PSD that is a requirement, and back
+    # — but not a specification with limits, which a PSD cannot hold
+    ('read_as_specification', lambda p, o: (
+        isinstance(o, Psd) and not isinstance(o, Specification))),
+    ('read_as_psd', lambda p, o: (isinstance(o, Specification)
+                                  and not o.has_limits)),
     ('fit_modes', lambda p, o: isinstance(o, Frf)),
     ('transform', lambda p, o: _reads_as(p, o, 'physical')),
     ('expand', lambda p, o: _reads_as(p, o, 'modal')),
@@ -4142,6 +4195,7 @@ _JOURNALED_VERBS = (
     'merge_coincident_nodes', 'new_geometry', 'add_plane', 'add_block',
     'tie_elements',
     'merge_groups', 'set_view', 'set_comparison_scale',
+    'read_as_specification', 'read_as_psd',
     'author_specification',
     'transform', 'expand', 'project_onto_basis', 'match_modes',
     'extract_sine', 'refresh', 'refresh_stale', 'work_up',

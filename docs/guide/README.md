@@ -7,11 +7,12 @@ cases, not yet against a broad set of tests; numbers it produces are
 to be verified by independent means before anything depends on them.
 The application says so when it opens, and asks for that to be
 acknowledged every time. Anything that looks wrong is worth
-reporting to contact@visualdynamics.org. The project file, `.vdyn`,
-is provisional: the next alpha will save projects in the Engineering
-Sciences Common Data Format (`.h5`), a public standard, and will
-still open `.vdyn` files; the first release that is not an alpha will
-not. Open each `.vdyn` once in that alpha and save it again.
+reporting to contact@visualdynamics.org. Projects are saved as
+`.vdyn` files, and Engineering Sciences Common Data Format (`.h5`)
+files are imported and exported for exchanging data with other tools.
+While Visual Dynamics is an alpha the `.vdyn` format may still change;
+the promise that a later version opens every earlier file starts with
+the first release that is not an alpha.
 
 - [Projects, links, and the Basis](projects.md) — the structure
   everything else reads

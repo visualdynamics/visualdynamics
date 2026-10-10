@@ -14,8 +14,8 @@ and four drone projects go up as two zips on a GitHub release of
 their own, which the downloads page links. A release rather than the
 site because Cloudflare Pages refuses a file over 25 MB; a release of
 its own rather than the application's because the examples are cut
-again whenever the project format moves — the `.vdyn` they hold is
-provisional, and the next alpha's `.escdf` re-cuts them without
+again whenever the project format moves — the `.vdyn` format may
+still change during the alpha, and a change re-cuts them without
 touching an application tag. `modal_hard` stays out: 5 GB exists to
 stress the fitter, not to be downloaded.
 
@@ -130,10 +130,9 @@ README = """Visual Dynamics example projects — {title}
 Open a project with File > Open, or with
 visualdynamics.Project.open('...vdyn') from Python.
 
-These are .vdyn files. The project file is provisional: the next alpha
-saves projects in the Engineering Sciences Common Data Format (.escdf)
-and still opens .vdyn; the first release that is not an alpha will not.
-This set is re-cut when that happens.
+These are .vdyn files, the Visual Dynamics project file. While Visual
+Dynamics is an alpha the .vdyn format may still change, and this set
+is re-cut whenever a release changes it.
 
 https://visualdynamics.org/downloads
 """

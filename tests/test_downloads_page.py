@@ -97,7 +97,7 @@ def test_the_site_job_deploys_the_directory_the_docs_build_into():
         f'mkdocs builds into {docs["site_dir"]}, the job deploys {deployed}')
     manifest = [step for step in site['steps'] if 'latest.json' in step.get('run', '')]
     assert manifest and f"{deployed}/latest.json" in manifest[0]['run']
-    for name in ('linux', 'windows'):
+    for name in ('linux', 'windows', 'macos'):
         assert "github.event_name != 'release'" in workflow['jobs'][name]['if'], (
             f'{name} would rebuild on every publish')
 
@@ -151,7 +151,7 @@ def test_the_pypi_jobs_publish_by_identity_and_only_when_meant():
                                   "startsWith(github.event.release.tag_name, 'v')"), \
         'PyPI publishes for a version release only (2026-09-14)'
     assert 'inputs.reserve' in jobs['reserve']['if']
-    for name in ('linux', 'windows'):
+    for name in ('linux', 'windows', 'macos'):
         assert '!inputs.reserve' in jobs[name]['if'], (
             f'{name} would build on a reserve run')
     assert workflow[True]['workflow_dispatch']['inputs']['reserve']['default'] is False
@@ -159,9 +159,10 @@ def test_the_pypi_jobs_publish_by_identity_and_only_when_meant():
 
 def test_the_release_publishes_checksums_for_every_asset():
     """The downloads page promises notes and checksums (2026-09-11): the
-    publish job writes SHA256SUMS over the runner builds before the
-    draft opens, and the day-of script that attaches the two desk-built
-    macOS images adds their lines to the same file."""
+    publish job writes SHA256SUMS over every build before the draft
+    opens — the macOS pair among them since it builds on the runners
+    (2026-10-10) — and the desk's fallback script that attaches
+    hand-built macOS images adds their lines to the same file."""
     import pathlib
 
     import yaml
@@ -215,14 +216,13 @@ def test_ci_runs_on_every_push_to_main_and_both_pythons():
     assert matrix['python-version'] == ['3.12', '3.13']
 
 
-def test_the_publish_job_waits_for_every_build_and_survives_a_skipped_macos():
-    """Two fixes live in the publish job's gate, and both came back
-    silently once. `needs` names all three builds (2026-08-25: it did
-    not wait for macOS); its `if` keeps `!cancelled()` and accepts a
-    *skipped* macOS build (2026-09-03: GitHub skips a job whose needs
-    include a skipped job, so a tag never published at all). And it
-    downloads the three build artifacts by name — every artifact took
-    the smoke test's empty stdout.log too, which GitHub refuses as an
+def test_the_publish_job_waits_for_every_build():
+    """`needs` names all three builds (2026-08-25: it did not wait for
+    macOS), and since the macOS pair builds on the runners (2026-10-10)
+    the gate requires all three to have succeeded: a draft without its
+    Mac images is the half-release the job exists to prevent. It
+    downloads the build artifacts by name — every artifact took the
+    smoke test's empty stdout.log too, which GitHub refuses as an
     asset (the first tag, 2026-09-14)."""
     import pathlib
 
@@ -237,11 +237,70 @@ def test_the_publish_job_waits_for_every_build_and_survives_a_skipped_macos():
     assert gate.startswith('!cancelled()')
     assert "needs.linux.result == 'success'" in gate
     assert "needs.windows.result == 'success'" in gate
-    assert "needs.macos.result != 'failure'" in gate, 'skipped is fine, failed is not'
-    assert "needs.macos.result == 'success'" not in gate
+    assert "needs.macos.result == 'success'" in gate, 'the Mac pair is required'
     download = next(s for s in publish['steps']
                     if 'download-artifact' in s.get('uses', ''))
-    assert download['with']['pattern'] == '{linux,windows,macos}'
+    assert download['with']['pattern'] == '{linux,windows,macos-*}'
+
+
+def test_the_macos_pair_builds_signed_on_a_runner_of_each_architecture():
+    """The macOS images build on GitHub's runners (2026-10-10), one per
+    architecture on a runner of that architecture, signed from the
+    certificate secret and notarized from the Apple ID secrets, and on
+    a tag the build refuses to finish unsigned or unnotarized. Each
+    uploads its image and its update zip under its own name."""
+    import pathlib
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    workflow = yaml.safe_load(
+        (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
+    job = workflow['jobs']['macos']
+    assert '!inputs.reserve' in job['if'] and '!inputs.site' in job['if']
+    assert "github.event_name != 'release'" in job['if']
+    assert 'macos' not in workflow[True]['workflow_dispatch']['inputs'], (
+        'no longer off by default')
+    matrix = job['strategy']['matrix']['include']
+    assert {entry['arch'] for entry in matrix} == {'arm64', 'x86_64'}
+    assert any('intel' in entry['runner'] for entry in matrix
+               if entry['arch'] == 'x86_64')
+    steps = job['steps']
+    signing = next(s for s in steps if 'ci_signing.sh' in s.get('run', ''))
+    assert set(signing['env']) == {'MACOS_CERTIFICATE', 'MACOS_CERTIFICATE_PASSWORD'}
+    build = next(s for s in steps if 'build_macos.sh' in s.get('run', ''))
+    assert build['env']['PYTHON'] == 'python', 'the runner has no .venv'
+    assert {'NOTARY_APPLE_ID', 'NOTARY_PASSWORD'} <= set(build['env'])
+    assert "startsWith(github.ref, 'refs/tags/v')" in build['env']['VD_REQUIRE_NOTARIZED']
+    assert steps.index(signing) < steps.index(build)
+    sparkle = next(s for s in steps if 'fetch_sparkle.sh' in s.get('run', ''))
+    assert 'SPARKLE=' in sparkle['run'] and steps.index(sparkle) < steps.index(build)
+    upload = next(s for s in steps if 'upload-artifact' in s.get('uses', ''))
+    assert upload['with']['name'] == 'macos-${{ matrix.arch }}'
+    assert 'dist/*.dmg' in upload['with']['path'] and 'dist/*.zip' in upload['with']['path']
+
+
+def test_the_updates_are_signed_on_a_runner_after_the_draft_opens():
+    """Sparkle's feeds go onto the draft after `publish` has written it
+    (its notes are what Sparkle shows), from the EdDSA key secret
+    written to a file only the job can read and removed after, with
+    the two releases before this one fetched for the deltas."""
+    import pathlib
+
+    import yaml
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    workflow = yaml.safe_load(
+        (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
+    job = workflow['jobs']['updates']
+    assert job['needs'] == 'publish' and job['if'] == "github.event_name == 'push'"
+    assert job['runs-on'].startswith('macos')
+    run = '\n'.join(s.get('run', '') for s in job['steps'])
+    assert 'head -2' in run and '--exclude-drafts' in run
+    sign = next(s for s in job['steps'] if 'release_updates.sh' in s.get('run', ''))
+    assert set(sign['env']) == {'SPARKLE_ED_KEY'}
+    assert 'umask 077' in sign['run'] and 'SPARKLE_ED_KEY_FILE=' in sign['run']
+    assert sign['run'].rstrip().endswith('rm -f "$RUNNER_TEMP/ed.key"')
 
 
 def test_ci_keeps_its_measured_worker_count_and_ceiling():
@@ -304,5 +363,5 @@ def test_the_site_can_be_redeployed_on_demand_between_releases():
     assert 'GH_TOKEN' in manifest['env']
     # and a site-only dispatch builds nothing: the first one rebuilt
     # Linux and Windows for a page change (2026-09-16)
-    for job in ('linux', 'windows'):
+    for job in ('linux', 'windows', 'macos'):
         assert '!inputs.site' in workflow['jobs'][job]['if'], job

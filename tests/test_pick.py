@@ -106,7 +106,7 @@ def test_tolerance_is_respected():
 def test_beam_picking_is_accurate_where_unambiguous():
     """Every drawn-line segment whose midpoint is not shared with
     another (the survey's lines are element groups of beams, 2026-09-30)."""
-    from visualdynamics.viz.pick import EntityPicker, _segment_distances
+    from visualdynamics.viz.pick import EntityPicker, segment_distances
 
     # the survey's drawn lines on their own: its faces' edges lie on
     # the same pixels and would make every segment ambiguous
@@ -125,7 +125,7 @@ def test_beam_picking_is_accurate_where_unambiguous():
     for index in range(len(geometry.elem_conn)):
         rows = [lookup[int(n)] for n in geometry.elem_conn[index]]
         midpoint = screen[rows].mean(axis=0)
-        distances = _segment_distances(midpoint, screen[starts], screen[ends])
+        distances = segment_distances(midpoint, screen[starts], screen[ends])
         others = distances[picker.owner != index]
         if others.size and others.min() <= 2.0:
             continue          # another segment lies on the same pixels

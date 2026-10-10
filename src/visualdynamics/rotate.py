@@ -93,16 +93,29 @@ def ring_under_cursor(rings: Sequence[tuple[int, np.ndarray]],
                       tolerance: float = 14.0) -> int | None:
     """Which ring a pixel is over, or None.
 
-    `rings` is a list of (axis, screen points). The nearest ring within the
+    `rings` is a list of (axis, screen points), each a polyline — a ring's
+    closed back on its first point. The nearest ring within the
     tolerance wins; the rings cross each other, so ties go to whichever is
     genuinely closer rather than to whichever was drawn first.
+
+    Distance is to the line, not to its points. It was to the points
+    until 2026-10-10, and a ring 400 pixels across drawn from 96 of them
+    has 26 pixels between neighbours — so a click on the ring itself,
+    midway between two, could miss a 14-pixel tolerance.
     """
+    from .viz.pick import segment_distances
+
     cursor = np.asarray(cursor, dtype=np.float64)
     best, best_distance = None, tolerance
     for axis, points in rings:
+        points = np.asarray(points, dtype=np.float64)
         if not len(points):
             continue
-        distance = float(np.linalg.norm(points - cursor, axis=1).min())
+        if len(points) == 1:
+            distance = float(np.linalg.norm(points[0] - cursor))
+        else:
+            distance = float(segment_distances(cursor, points[:-1],
+                                               points[1:]).min())
         if distance < best_distance:
             best, best_distance = axis, distance
     return best

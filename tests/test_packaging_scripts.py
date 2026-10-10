@@ -27,7 +27,7 @@ ROOT = os.path.join(os.path.dirname(__file__), '..')
 SCRIPT = os.path.join(ROOT, 'packaging', 'build_macos.sh')
 
 
-def notary_args(tmp_path, security: str) -> list[str]:
+def notary_args(tmp_path, security: str, **env) -> list[str]:
     with open(SCRIPT, encoding='utf-8') as handle:
         text = handle.read()
     start = text.index('NOTARY_PROFILE=')
@@ -40,7 +40,7 @@ def notary_args(tmp_path, security: str) -> list[str]:
         ['bash', '-c', function + '\nnotary_args > /dev/null; '
          'printf "%s\\n" "${NOTARY[@]}"'],
         capture_output=True, text=True, check=True,
-        env={**os.environ, 'PATH': f'{tmp_path}:{os.environ["PATH"]}'})
+        env={**os.environ, 'PATH': f'{tmp_path}:{os.environ["PATH"]}', **env})
     return out.stdout.split('\n')[:-1]
 
 
@@ -59,6 +59,49 @@ def test_a_keychain_item_with_a_password_notarizes_as_its_account(tmp_path):
     assert notary_args(tmp_path, security) == [
         '--apple-id', 'someone@example.com', '--team-id', '2542NQ9D95',
         '--password', 's3cret']
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='a bash function')
+def test_a_runner_notarizes_from_its_secrets_ahead_of_the_keychain(tmp_path):
+    """The release workflow hands the Apple ID and its app-specific
+    password in through the environment (2026-10-10); they win over a
+    keychain item, which a runner has not got anyway."""
+    security = ('case " $* " in *" -w "*) echo "s3cret";; '
+                '*) echo \'    "acct"<blob>="someone@example.com"\';; esac\n')
+    assert notary_args(tmp_path, security, NOTARY_APPLE_ID='ci@example.com',
+                       NOTARY_PASSWORD='from-a-secret') == [
+        '--apple-id', 'ci@example.com', '--team-id', '2542NQ9D95',
+        '--password', 'from-a-secret']
+    assert notary_args(tmp_path, security, NOTARY_APPLE_ID='ci@example.com',
+                       NOTARY_PASSWORD='')[:2] == [
+        '--apple-id', 'someone@example.com'], 'half a secret is none'
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='a bash function')
+def test_a_release_build_that_cannot_notarize_stops_before_building(tmp_path):
+    """On a tag the workflow sets VD_REQUIRE_NOTARIZED, and a build with
+    no identity or no working credentials stops before PyInstaller runs
+    rather than shipping an image Gatekeeper refuses; unset, the same
+    build goes on to make its ad-hoc image."""
+    with open(SCRIPT, encoding='utf-8') as handle:
+        text = handle.read()
+    start = text.index('NOTARY_PROFILE=')
+    end = text.index('rm -rf build dist')
+    stub = tmp_path / 'security'
+    stub.write_text('#!/bin/bash\nexit 44\n')
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+
+    def run(**env):
+        return subprocess.run(
+            ['bash', '-c', 'SIGN=\n' + text[start:end] + '\necho went-on'],
+            check=False, capture_output=True, text=True,
+            env={**os.environ, 'PATH': f'{tmp_path}:{os.environ["PATH"]}', **env})
+
+    refused = run(VD_REQUIRE_NOTARIZED='1')
+    assert refused.returncode == 1 and 'went-on' not in refused.stdout
+    assert 'must be signed and notarized' in refused.stderr
+    allowed = run(VD_REQUIRE_NOTARIZED='')
+    assert allowed.returncode == 0 and 'went-on' in allowed.stdout
 
 
 def test_the_windows_smoke_test_fails_on_a_traceback_and_the_release_runs_it():

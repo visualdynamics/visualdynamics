@@ -15,7 +15,9 @@
 #
 # The store (UPDATE_STORE) is kept on this machine, not in the
 # repository: the deltas are computed against the previous releases'
-# own archives, so it holds the last three of each. The signing key is
+# own archives, so it holds the last three of each. A runner starts
+# with none, and the release workflow fills it from the two releases
+# before this one, whose update zips are their own assets. The signing key is
 # the login-keychain item generate_keys made (account `visualdynamics`),
 # read without a prompt while Brandon is logged in.
 #
@@ -51,11 +53,19 @@ fi
 # keychain prompt and sat waiting on it for sixteen minutes of the
 # unattended 0.1.0a15 release (2026-09-28). generate_keys writes only to
 # a path that does not exist yet, so not to a pipe.
+#
+# On a runner there is no keychain item: the release workflow writes the
+# SPARKLE_ED_KEY secret to a file only its job can read and names it in
+# SPARKLE_ED_KEY_FILE (2026-10-10).
 keydir=$(mktemp -d)
 chmod 700 "$keydir"
 trap 'rm -rf "$keydir"' EXIT
-"$tools/generate_keys" --account visualdynamics -x "$keydir/key" > /dev/null
-[[ -s $keydir/key ]] || { echo "the signing key could not be read from the keychain" >&2; exit 1; }
+if [[ -n ${SPARKLE_ED_KEY_FILE:-} ]]; then
+    cp "$SPARKLE_ED_KEY_FILE" "$keydir/key"
+else
+    "$tools/generate_keys" --account visualdynamics -x "$keydir/key" > /dev/null
+fi
+[[ -s $keydir/key ]] || { echo "the signing key could not be read" >&2; exit 1; }
 
 uploads=()
 # VD_ARCHES narrows it to one architecture, for a test

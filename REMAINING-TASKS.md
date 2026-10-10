@@ -129,20 +129,17 @@ happens on its own once 6 is done.
 0. Level the environments: `tools/level_venv.sh` upgrades both venvs
    to the latest of everything, as CI and PyPI installs get, and runs
    the gate. Fix what it finds before anything else (2026-10-09: a41
-   took three syncs to find what this finds first, and the macOS pair
-   is built from these venvs).
+   took three syncs to find what this finds first; the runners install
+   the latest too, so a break this finds is one the release would hit).
 1. Pick the version and set `__version__` in `src/visualdynamics/__init__.py`;
    `pyproject.toml` reads it from there.
-2. Rebuild all four packages from that version
-   (`packaging/refresh_builds.sh`) and open each one once. The two
-   macOS images come out signed and notarized when the Developer ID
-   certificate and the `vd-notary` profile are in the keychain
-   (packaging/README.md, "Signing") — do those two one-time steps
-   before this one, and check the build printed "notarized and
-   stapled" twice. Unattended, the build reads the app-specific
-   password from the login-keychain item `vd-notary-password`
-   (packaging/README.md; the command that makes it ends in `-w`),
-   so nobody needs to be at the Mac.
+2. Optionally, a preview: `packaging/refresh_builds.sh` builds all
+   four here from the working tree, to open each once before
+   tagging. The release does not use them — since 2026-10-10 every
+   package the release ships is built by the release workflow on
+   GitHub's runners, the macOS pair signed and notarized there from
+   the repository's secrets (packaging/README.md, "Signing on the
+   runners").
 3. Swap the grant (the copyleft license with a CLA — decided
    2026-09-03, PLAN.md "Open source, revisited"; **done — merged
    into `main` 2026-09-13**; *superseded 2026-09-28: the tree is MIT
@@ -169,13 +166,22 @@ happens on its own once 6 is done.
    `~/visualdynamics-shared` at `origin/main`, then push the tag: a
    bare `git tag` there stops at "no tag message?" and creates
    nothing (2026-09-16). The release workflow
-   builds Linux and Windows there and opens a **draft** release with
-   them and a `SHA256SUMS` attached; then `packaging/attach_macos.sh
-   v<version>` uploads the two macOS images built here and adds their
-   lines to that file, `packaging/release_updates.sh v<version>` adds
-   the Sparkle updates (the two update zips, their deltas and the two
-   appcasts; since 2026-09-28), and read the Windows smoke-test
-   screenshots before going further.
+   builds all four there — Linux, Windows, and the macOS pair on an
+   Apple-silicon and an Intel runner, each signed, notarized and
+   stapled — opens a **draft** release with them and a `SHA256SUMS`
+   over every asset, and then its `updates` job adds the Sparkle
+   updates to the draft (the two update zips, their deltas against
+   the two releases before, the two appcasts, signed with the
+   `SPARKLE_ED_KEY` secret). Read the Windows smoke-test screenshot
+   and check both macOS build logs say "notarized and stapled" before
+   going further. **If the runners cannot** (an expired certificate,
+   Apple's service down), the desk route still works end to end:
+   `build_macos.sh` and `build_macos_intel.sh` here, then
+   `packaging/attach_macos.sh v<version>` and
+   `packaging/release_updates.sh v<version>` onto a draft — which
+   means drafting it by hand, since `publish` waits for the macOS
+   jobs (`gh release create v<version> --draft` with the Linux and
+   Windows artifacts).
 6. Publish the draft release. This is the step that cannot be walked
    back. (The first release also made the repository public and put
    branch protection on `main` — a pull request with its checks

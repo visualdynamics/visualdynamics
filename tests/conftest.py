@@ -100,6 +100,13 @@ def plate_geometry_and_shapes():
             visualdynamics.import_file(fixture_path('plate', 'shapes.npy')))
 
 
+def bar_acts(pane):
+    """The act buttons showing on a pane's bar, by label."""
+    actions = pane.__dict__.get('_acts', {}).get('actions', {}).values()
+    return [a.text() for a in pane.toolbar.actions()
+            if a in actions and a.isVisible()]
+
+
 def select_objects(window, pump, *names):
     """Select these tree rows, the first one current. Current first:
     `setCurrentItem` clears a multi-selection."""
@@ -596,20 +603,13 @@ def pytest_runtest_logstart(nodeid, location):
 
 # A mode shape and a time history, each animating on the plate: the
 # speed buttons and Save Animation both read playback from these.
-def _plate_geometry():
-    import visualdynamics
-
-    geometry = visualdynamics.import_file(fixture_path('plate', 'geometry.npz'))
-    geometry.define_units('m')
-    return geometry
-
 
 @pytest.fixture
 def shaking(window, pump):
     """A mode shape animating on its geometry."""
     import visualdynamics
 
-    geometry = _plate_geometry()
+    geometry = plate_geometry_and_shapes()[0]
     window.add_object('Geometry', geometry)
     window.add_object('Shapes',
                       visualdynamics.import_file(fixture_path('plate',
@@ -629,7 +629,7 @@ def playing(window, pump):
 
     from visualdynamics.core.data import TimeHistory
 
-    geometry = _plate_geometry()
+    geometry = plate_geometry_and_shapes()[0]
     window.add_object('Geometry', geometry)
     dofs = [f'{int(node)}Z+' for node in geometry.node_id[:20]]
     t = np.arange(2048) / 512.0

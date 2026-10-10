@@ -424,9 +424,7 @@ def drawn_span(curves: Any, default: tuple[float, float] = (0.0, 1.0)
     lows, highs = [], []
     for cx, cz in curves:
         cx, cz = np.asarray(cx, dtype=float), np.asarray(cz, dtype=float)
-        if cx.size != cz.size:
-            cx = cx[:cz.size]
-        shown = cx[np.isfinite(cz) & np.isfinite(cx)] if cz.size else cx[:0]
+        shown = cx[np.isfinite(cz) & np.isfinite(cx)]
         if shown.size:
             lows.append(float(shown.min()))
             highs.append(float(shown.max()))

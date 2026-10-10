@@ -6,7 +6,7 @@ chat's code blocks do). The report's are in `test_report_copy.py`.
 from __future__ import annotations
 
 import numpy as np
-from test_acts import _bar
+from conftest import bar_acts as _bar
 from test_table_machinery import Sheet, sheet_model
 
 import visualdynamics

@@ -11,31 +11,36 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import fixture_path
+from conftest import bar_acts, fixture_path
 
 import visualdynamics
 from visualdynamics.core.data import Psd, Specification
 
 
-def _bar(pane):
-    actions = pane.__dict__.get('_acts', {}).get('actions', {}).values()
-    return [a.text() for a in pane.toolbar.actions()
-            if a in actions and a.isVisible()]
+@pytest.fixture(scope='module')
+def imported():
+    """The random run, read once: its import computes PSDs, octave
+    bands and coherence, over a second each time."""
+    return visualdynamics.random_vibration_run(fixture_path('plate',
+                                                            'random.nc4'))
 
 
 @pytest.fixture
-def run():
-    """A random run: a measurement, and its target imported as the
-    specification it is — read back as a plain PSD, the way a file
-    from a format with no specification type arrives."""
-    project = visualdynamics.random_vibration_run(fixture_path('plate',
-                                                               'random.nc4'))
-    target = project['Specification']
-    project['Target'] = Psd(target.abscissa, target.ordinate,
-                            response_dof=target.response_dof,
-                            reference_dof=target.reference_dof,
-                            ordinate_dim=target.ordinate_dim,
-                            ordinate_unit=target.ordinate_unit)
+def run(imported):
+    """A measurement and its target imported as the specification it
+    is — and again as a plain PSD, the way a file from a format with no
+    specification type delivers it — in a project of its own per test,
+    since the tests swap objects in it."""
+    project = visualdynamics.Project('Read as')
+    for name in ('Time History', 'Specification', 'Time History PSDs'):
+        project.add(name, imported[name])
+    target = imported['Specification']
+    project.add('Target', Psd(target.abscissa, target.ordinate,
+                              response_dof=target.response_dof,
+                              reference_dof=target.reference_dof,
+                              ordinate_dim=target.ordinate_dim,
+                              ordinate_unit=target.ordinate_unit))
+    project.journal.clear()
     return project
 
 
@@ -81,12 +86,12 @@ def test_the_bar_offers_it_and_the_comparison_follows(window, pump, run):
     window.tree.setCurrentItem(item)
     window.render_current()
     pump()
-    assert 'Read as Specification' in _bar(window.data_pane)
+    assert 'Read as Specification' in bar_acts(window.data_pane)
     window.data_pane._acts['actions']['read_as_specification'].trigger()
     pump()
     assert isinstance(window.objects['Target'], Specification)
     assert 'read as a specification' in window.statusBar().currentMessage()
-    assert 'Read as PSD' in _bar(window.data_pane)
+    assert 'Read as PSD' in bar_acts(window.data_pane)
     window.tree.clearSelection()
     for name in ('Target', 'PSDs'):
         window._item_for_object(name).setSelected(True)

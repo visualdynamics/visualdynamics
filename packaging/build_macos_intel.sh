@@ -16,8 +16,19 @@ cd "$(dirname "$0")/.."
 
 BASE="$HOME/.python-x86_64"
 VENV=".venv-x86_64"
-PBS=https://github.com/astral-sh/python-build-standalone/releases/download/20260825/cpython-3.13.15%2B20260825-x86_64-apple-darwin-install_only.tar.gz
+# the interpreter, kept level with the arm64 venv's pyenv build: moving
+# it is this line and nothing else — a different version on disk is
+# replaced, and the venv built on it with it (2026-10-10, 3.13.15 ->
+# 3.13.16, when the arm64 side left 3.13.2)
+PY_VERSION=3.13.16
+PBS_TAG=20261009
+PBS=https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/cpython-$PY_VERSION%2B$PBS_TAG-x86_64-apple-darwin-install_only.tar.gz
 
+if [[ -x "$BASE/python/bin/python3.13" ]] && [[ "$("$BASE/python/bin/python3.13" \
+        -c 'import platform; print(platform.python_version())')" != "$PY_VERSION" ]]; then
+    echo "== replacing the x86_64 CPython with $PY_VERSION"
+    rm -rf "$BASE" "$VENV"
+fi
 if [[ ! -x "$BASE/python/bin/python3.13" ]]; then
     echo '== x86_64 CPython (python-build-standalone; no installer)'
     work=$(mktemp -d)

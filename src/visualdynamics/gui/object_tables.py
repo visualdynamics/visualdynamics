@@ -9,6 +9,7 @@ beside them is not.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -78,11 +79,10 @@ def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],
     from ..core.tables import MATCHED_DECIMALS, cell_text, matched_rows
 
     headers, rows = matched_rows(matched, objects)
-    columns = [
-        Column(title, lambda s, r, i=i: s[r][i],
-               **({} if decimals is None else
-                  {'format': lambda v, d=decimals: cell_text(v, d)}))
-        for i, (title, decimals) in enumerate(zip(headers, MATCHED_DECIMALS))]
+    columns = [Column(title, lambda s, r, i=i: s[r][i],
+                      format=partial(cell_text, decimals=decimals))
+               for i, (title, decimals)
+               in enumerate(zip(headers, MATCHED_DECIMALS))]
     return TableModel(rows, columns, len, parent)
 
 

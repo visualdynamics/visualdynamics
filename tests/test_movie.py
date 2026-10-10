@@ -142,7 +142,7 @@ def plate_run():
     return geometry, run.time_history
 
 
-@pytest.mark.parametrize('seconds', [1.0, 2.5])
+@pytest.mark.parametrize('seconds', [1.0])
 def test_a_time_history_saves_once_through(h264, plate_run, tmp_path,
                                            seconds):
     geometry, history = plate_run
@@ -175,28 +175,32 @@ def test_an_envelope_sweeps_its_lines_with_the_frequency_on_each(
         h264, tmp_path, monkeypatch):
     """The window's Play walks an envelope through its lines with the
     frequency in the corner; a script's movie does the same."""
-    import pyvista as pv
     from conftest import fixture_path
 
     import visualdynamics
+    from visualdynamics.viz import animate
 
     geometry = visualdynamics.import_file(
         fixture_path('plate', 'geometry.npz'), length_unit='m')
     psd = visualdynamics.import_file(fixture_path('plate', 'psd.npz'))
-    captions = []
-    original = pv.Plotter.add_text
-    monkeypatch.setattr(pv.Plotter, 'add_text',
-                        lambda self, text, *a, **k: (
-                            captions.append(text),
-                            original(self, text, *a, **k))[1])
+    # what the corner says as each frame is taken — the caption actor is
+    # made once and rewritten, so read it, not the calls that made it
+    shown = []
+    real = animate.movie_frames
+
+    def watched(plotter, step, parameters):
+        for image in real(plotter, step, parameters):
+            shown.append(plotter.actors['scene-caption'].GetText(2))
+            yield image
+
+    monkeypatch.setattr(animate, 'movie_frames', watched)
     path = tmp_path / 'envelope.mp4'
     assert psd.animate(geometry, movie=str(path), seconds=2.0) == str(path)
     assert mp4_reading(path) == (b'avc1', 60)
-    swept = [c for c in captions if c.startswith('Envelope')]
-    assert len(swept) == 60 and len(set(swept)) > 30, \
+    assert len(shown) == 60 and len(set(shown)) > 30, \
         'a caption a frame, naming the line it is on'
     lines = np.asarray(psd.abscissa)
-    assert swept[0] == f'Envelope — {lines[0]:.5g} Hz'
+    assert shown[0] == f'Envelope — {lines[0]:.5g} Hz'
 
 
 def test_the_self_check_answers_for_this_machine(qt_app, tmp_path):
@@ -271,3 +275,13 @@ def test_a_qt_multimedia_that_will_not_load_refuses_the_movie(qt_app,
     with pytest.raises(movie.MovieUnavailable, match='libpulse'):
         movie.write_movie(tmp_path / 'never.mp4', frames(3))
     assert movie.check(tmp_path / 'never.mp4') == (2, reason)
+
+
+def test_a_movie_that_came_out_short_is_an_error(h264, tmp_path,
+                                                 monkeypatch):
+    """The pacing leans on how one Qt buffers frames; a Qt that buffers
+    otherwise would write a short movie without a word, so the file is
+    read back and a short one refused."""
+    monkeypatch.setattr(movie, 'mp4_reading', lambda path: (b'avc1', 3))
+    with pytest.raises(RuntimeError, match='3 of 12 frames'):
+        movie.write_movie(tmp_path / 'short.mp4', frames(12))

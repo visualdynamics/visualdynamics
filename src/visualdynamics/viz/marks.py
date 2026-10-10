@@ -693,9 +693,46 @@ def add_octave_preview(plotter: Any, curves: Sequence[tuple[Any, Any]],
 
 # ---- the readings, for a script as the window draws them -----------------
 
-#: what `add_stage_reading` (and `plot_waterfall(marks=...)`) can put on
-#: a stage, and what each reads
-STAGE_READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
+#: the readings a plot's toggles draw over the data — flat
+#: (`plot_data(marks=...)`) and on the stage (`plot_waterfall(marks=...)`)
+READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
+
+
+def held_reading(data: Any, reading: str) -> Any:
+    """What `reading` draws for `data`, the way the window opens on it:
+    the setting the object carries, or what its detector would suggest
+    — the frames (`TimeHistory.default_averaging`), the shock windows,
+    the cut, the filter. 'octave' reads a PSD and has no setting here.
+
+    Raises
+    ------
+    ValueError
+        For a reading that is not one.
+    TypeError
+        For a reading of the wrong kind of object.
+    """
+    from ..core.data import Psd, TimeHistory
+
+    if reading not in READINGS:
+        raise ValueError(f'{reading!r} is not a reading: '
+                         + ', '.join(repr(r) for r in READINGS))
+    if reading == 'octave':
+        if not isinstance(data, Psd):
+            raise TypeError('octave bands read a PSD, not '
+                            f'{type(data).__name__}')
+        return None
+    if not isinstance(data, TimeHistory):
+        raise TypeError(f'{reading} marks belong on a time history, not '
+                        f'on {type(data).__name__}')
+    if reading == 'averaging':
+        return data.default_averaging()
+    if reading == 'shocks':
+        from ..core.shocks import suggest
+
+        return tuple(data.shocks or suggest(data))
+    if reading == 'truncation':
+        return data.truncation or data.suggest_truncation()
+    return data.filtering or data.suggest_filtering()
 
 
 def octave_steps(psd: Any, per_octave: int | None = None,
@@ -754,50 +791,27 @@ def add_stage_reading(plotter: Any, data: Any, info: dict[str, Any],
                       reading: str, *, per_octave: int | None = None,
                       unit_system: Any = None, theme: Any = None) -> None:
     """One reading of a staged record drawn over its stage, as the
-    window's toggles draw it — read from the object, whatever it
-    carries, or what its detector would suggest; nothing here can be
+    window's toggles draw it (`held_reading`); nothing here can be
     dragged. `info` is what `add_waterfall` returned for the stage.
-
-    'averaging', 'shocks', 'truncation' and 'filter' read a time
-    history; 'octave' reads a PSD, banded `per_octave`.
+    'octave' is banded `per_octave`.
     """
-    from ..core.data import Psd, TimeHistory
-
-    if reading not in STAGE_READINGS:
-        raise ValueError(f'{reading!r} is not a reading of a stage: '
-                         + ', '.join(repr(r) for r in STAGE_READINGS))
+    held = held_reading(data, reading)
+    extents = info['extents']
     if reading == 'octave':
-        if not isinstance(data, Psd):
-            raise TypeError('octave bands read a PSD, not '
-                            f'{type(data).__name__}')
         _banded, x, rows = octave_steps(data, per_octave, unit_system,
                                         stage=True)
         add_octave_preview(plotter, [(x, rows[k]) for k in info['drawn']],
-                           info['extents'], info['stations'], theme=theme)
-        return
-    if not isinstance(data, TimeHistory):
-        raise TypeError(f'{reading} marks belong on a time history, not '
-                        f'on {type(data).__name__}')
-    extents = info['extents']
-    origin = float(data.abscissa[0])
-    if reading == 'filter':
-        stage_filter_preview(plotter, data,
-                             data.filtering or data.suggest_filtering(),
-                             info, unit_system, theme)
+                           extents, info['stations'], theme=theme)
+    elif reading == 'filter':
+        stage_filter_preview(plotter, data, held, info, unit_system, theme)
     elif reading == 'truncation':
         abscissa = np.asarray(data.abscissa, dtype=float)
-        add_truncation_marks(plotter,
-                             data.truncation or data.suggest_truncation(),
-                             float(abscissa[0]), float(abscissa[-1]),
-                             extents, theme=theme)
+        add_truncation_marks(plotter, held, float(abscissa[0]),
+                             float(abscissa[-1]), extents, theme=theme)
     elif reading == 'averaging':
-        averaging = data.averaging or Averaging.for_records(
-            len(data.abscissa))
-        add_averaging_marks(plotter, averaging, data.sample_rate, extents,
-                            theme=theme, origin=origin)
+        add_averaging_marks(plotter, held, data.sample_rate, extents,
+                            theme=theme, origin=float(data.abscissa[0]))
     else:
-        from ..core.shocks import suggest
-
-        add_shock_marks(plotter, tuple(data.shocks or suggest(data)),
-                        extents, theme=theme,
-                        locked=bool(data.split_into_frames), origin=origin)
+        add_shock_marks(plotter, held, extents, theme=theme,
+                        locked=bool(data.split_into_frames),
+                        origin=float(data.abscissa[0]))

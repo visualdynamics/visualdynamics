@@ -50,13 +50,20 @@ PY
 level .venv -e '.[dev,step,docs,app]' pyinstaller pillow || exit 1
 level .venv-x86_64 '.[step,app]' pyinstaller pillow || exit 1
 
-# the two builds ship together, so the libraries they freeze must agree
+# the two builds ship together, so the interpreter and the libraries
+# they freeze must agree — one interpreter start per venv, the Intel
+# one under Rosetta being the slow one
+frozen='import importlib.metadata as m, platform
+print("CPython", platform.python_version())
+for name in ("PySide6", "numpy", "scipy", "vtk", "pyvista"):
+    print(name, m.version(name))'
 if [[ -x .venv-x86_64/bin/python ]]; then
-  for name in PySide6 numpy scipy vtk pyvista; do
-    a=$(.venv/bin/python -c "import importlib.metadata as m; print(m.version('$name'))")
-    b=$(.venv-x86_64/bin/python -c "import importlib.metadata as m; print(m.version('$name'))")
-    [[ $a == "$b" ]] || echo "warning: $name is $a in .venv and $b in .venv-x86_64" >&2
-  done
+  diff <(.venv/bin/python -c "$frozen") <(.venv-x86_64/bin/python -c "$frozen") \
+      >/dev/null || {
+    echo "warning: .venv and .venv-x86_64 differ:" >&2
+    diff <(.venv/bin/python -c "$frozen") <(.venv-x86_64/bin/python -c "$frozen") \
+        | grep '^[<>]' >&2
+  }
 fi
 
 (( gate )) || exit 0

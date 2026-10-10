@@ -16,9 +16,9 @@ import math
 
 import numpy as np
 import pytest
+from conftest import bar_acts as _bar
 from conftest import edit_category, edit_element_group, select_objects
 from PySide6.QtCore import Qt
-from test_acts import _bar
 from test_fem import ALUMINUM, square_plate
 
 import visualdynamics

@@ -549,7 +549,7 @@ def test_the_two_copies_are_drawn_one_through_the_other(comparing, pump):
     """A finite element model has a skin where a test set has a
     wireframe, and an opaque one hides the thing it is being compared
     against."""
-    from visualdynamics.gui.main_window import OVERLAY_ALPHA
+    from visualdynamics.theme import OVERLAY_ALPHA
 
     window = comparing
     assert window._compare['alphas'] == (1.0, OVERLAY_ALPHA)

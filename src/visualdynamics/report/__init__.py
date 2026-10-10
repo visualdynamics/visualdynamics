@@ -36,7 +36,7 @@ from ..plot import (
     bin_edges,
     drawing_shape,
 )
-from ..theme import overlay_alphas
+from ..theme import PAIR_COLORS, overlay_alphas
 from ..units import DEFAULT_SYSTEM
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -1890,7 +1890,7 @@ def _overlay_block(block, objects, us, object_groups=None):
             and isinstance(geo_a, Geometry)
             and isinstance(geo_b, Geometry)):
         return None
-    first_color, second_color = '#4c92d9', '#ff8c2b'
+    first_color, second_color = PAIR_COLORS
     # The basis is the one being looked *at*; the other is drawn through
     # it, at the same quarter opacity the comparison screen uses — the
     # one rule (`overlay_alphas`), asked of the links, not the order the

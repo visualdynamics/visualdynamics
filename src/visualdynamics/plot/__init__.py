@@ -1977,17 +1977,19 @@ def _beyond(values, up):
 
 
 def _application():
+    """A Qt application, made if a script has none — a plot rendered to a
+    file, and a movie being encoded, both need one.
+
+    A widgets application, not a QGuiApplication: Qt keeps the first
+    one made for the life of the process, and a script that later opens
+    a window would abort on its first widget.
+    """
     from PySide6.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])
 
 
-#: the readings `plot_data(marks=...)` puts over a trace
-FLAT_READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
-
-
-def octave_preview(items: Iterable[Any], psd: Any,
-                   per_octave: int | None, unit_system: Any,
+def octave_preview(items: Iterable[Any], steps: tuple[Any, Any, Any],
                    colors: Mapping[str, str],
                    records: Sequence[int] | None = None
                    ) -> list[tuple[Any, Any]]:
@@ -1998,16 +2000,12 @@ def octave_preview(items: Iterable[Any], psd: Any,
     window's octave view and `plot_data(marks='octave')`; returns the
     (plot, curve) pairs drawn.
 
-    Raises
-    ------
-    ValueError
-        When the spectrum cannot be banded.
+    `steps` is `viz.marks.octave_steps`' answer, banded once by the
+    caller, which reads the band count off the same banding.
     """
     import pyqtgraph as pg
 
-    from ..viz.marks import octave_steps
-
-    banded, x, rows = octave_steps(psd, per_octave, unit_system)
+    banded, x, rows = steps
     wanted = (range(rows.shape[0]) if records is None
               else [int(i) for i in records])
     pen = pg.mkPen(colors['filter_preview'], width=2)
@@ -2032,7 +2030,8 @@ def octave_preview(items: Iterable[Any], psd: Any,
 def _mark(layout, data, marks, theme=None, per_octave=None,
           unit_system=None):
     """A reading over every plot in `layout` — the frames, the shocks,
-    the cut, the filter's preview or the octave steps.
+    the cut, the filter's preview or the octave steps — as the window's
+    toggles draw it (`viz.marks.held_reading`).
 
     Locked, because a mark you can drag is a mark that reports the drag
     to somebody, and in a standalone plot there is nobody. Returns the
@@ -2040,51 +2039,37 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
     """
     import pyqtgraph as pg
 
-    from ..core.averaging import Averaging
-    from ..core.data import Psd, TimeHistory
+    from ..viz.marks import held_reading, octave_steps
 
     if marks is None:
         return []
-    if marks not in FLAT_READINGS:
-        raise ValueError(f'{marks!r} is not a reading of a plot: '
-                         + ', '.join(repr(r) for r in FLAT_READINGS))
+    held = held_reading(data, marks)
     colors = resolve_theme(theme)
     plots = [item for item in layout.ci.items if isinstance(item, pg.PlotItem)]
     if marks == 'octave':
-        if not isinstance(data, Psd):
-            raise TypeError('octave bands read a PSD, not '
-                            f'{type(data).__name__}')
-        return octave_preview(plots, data, per_octave, unit_system, colors)
-    if not isinstance(data, TimeHistory):
-        raise TypeError(f'{marks} marks belong on a time history, not on '
-                        f'{type(data).__name__}')
+        return octave_preview(
+            plots, octave_steps(data, per_octave, unit_system), colors)
     if marks == 'shocks':
-        from ..core.shocks import suggest
         from .shocks import ShockOverlay
 
-        found = tuple(data.shocks or suggest(data))
-        return [ShockOverlay(plot, found, colors, locked=True)
+        return [ShockOverlay(plot, held, colors, locked=True)
                 for plot in plots]
     if marks == 'filter':
         from .filtering import FilterOverlay
 
-        filtering = data.filtering or data.suggest_filtering()
-        return [FilterOverlay(plot, filtering, data.sample_rate, colors)
+        return [FilterOverlay(plot, held, data.sample_rate, colors)
                 for plot in plots]
     if marks == 'truncation':
         from .truncation import TruncationOverlay
 
         abscissa = np.asarray(data.abscissa, dtype=float)
-        truncation = data.truncation or data.suggest_truncation()
-        return [TruncationOverlay(plot, truncation, float(abscissa[0]),
+        return [TruncationOverlay(plot, held, float(abscissa[0]),
                                   float(abscissa[-1]), colors)
                 for plot in plots]
     from .averaging import AveragingOverlay
 
-    samples = len(data.abscissa)
-    averaging = data.averaging or Averaging.for_records(samples)
-    return [AveragingOverlay(plot, averaging, data.sample_rate, samples,
-                             colors, locked=True)
+    return [AveragingOverlay(plot, held, data.sample_rate,
+                             len(data.abscissa), colors, locked=True)
             for plot in plots]
 
 

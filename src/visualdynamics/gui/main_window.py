@@ -151,9 +151,14 @@ from ..rotate import (
     snapped,
     wrapped,
 )
-from ..theme import OVERLAY_ALPHA
+from ..theme import PAIR_COLORS
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM, SYSTEMS, UnitSystem
+
+# the playback clock is the viz layer's, so a saved movie and a script's
+# `movie=` play at the window's own rate by construction
+from ..viz.animate import MOVIE_FPS as FRAMES_PER_SECOND
+from ..viz.animate import SECONDS_PER_CYCLE, SECONDS_PER_RECORD
 from ..viz.geometry import (
     AXIS_COLORS,
     ENTITY_LABEL_LIMIT,
@@ -222,10 +227,7 @@ COMBO_CELL_PADDING = 44
 #: a dragged turn snaps to whole degrees of this; a typed angle does not
 ANGLE_STEP = 1.0
 
-FRAMES_PER_SECOND = 30
 PHASE_STEPS = 120            # frames in one mode-shape cycle
-SECONDS_PER_CYCLE = 2.0      # every mode animates at this rate, whatever its Hz
-SECONDS_PER_RECORD = 10.0    # a time record plays in about this long
 
 # What Faster and Slower step through. Doublings, because that is how a
 # speed reads — half as fast, twice as fast — and a ladder rather than a
@@ -1138,7 +1140,6 @@ class MainWindow(QMainWindow):
         self._fit_parabola = None
         self._fit_damping_label = None
         self._fit_coherence_name = None
-        self._fit_records = None
         #: what the plot's top and bottom edges mean as damping, kept
         #: across fits — an article's plausible range rarely changes
         #: between two of its own FRF sets
@@ -3182,8 +3183,12 @@ class MainWindow(QMainWindow):
         rewrites per line is in every frame; then playback is put back
         where it was. `path` skips the dialog (scripts, tests).
         """
-        from ..viz.animate import cycle_parameters, sweep_parameters
-        from .movie import MOVIE_FPS, write_movie
+        from ..viz.animate import (
+            cycle_parameters,
+            movie_frames,
+            sweep_parameters,
+        )
+        from .movie import write_movie
 
         if self.animator is None or self.scene.plotter is None:
             return None
@@ -3201,28 +3206,24 @@ class MainWindow(QMainWindow):
         phase = self.phase_slider.value()
         held = self._cursor.value() if self._cursor is not None else None
         if self._shape_mode:
-            parameters = cycle_parameters(SECONDS_PER_CYCLE / self.speed,
-                                          MOVIE_FPS)
+            parameters = cycle_parameters(SECONDS_PER_CYCLE / self.speed)
+            step = self.animator.set_parameter
         else:
             parameters = sweep_parameters(len(self._cursor_abscissa),
-                                          SECONDS_PER_RECORD / self.speed,
-                                          MOVIE_FPS)
+                                          SECONDS_PER_RECORD / self.speed)
 
-        def frames():
-            for parameter in parameters:
-                if self._shape_mode:
-                    self._draw_frame(parameter)
-                else:
-                    self._cursor.setValue(
-                        float(self._cursor_abscissa[parameter]))
-                yield self.scene.plotter.screenshot(return_img=True)
+            def step(index):
+                # the cursor, not the animator: it is where an envelope
+                # rewrites its caption, so every frame carries its line
+                self._cursor.setValue(float(self._cursor_abscissa[index]))
 
         # seconds on a large model or a Retina screen, with input held
         # off: say so, rather than look hung
         self._show_status(f'Saving {os.path.basename(path)}…')
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            count = write_movie(path, frames(), fps=MOVIE_FPS)
+            count = write_movie(path, movie_frames(self.scene.plotter, step,
+                                                   parameters))
         except RuntimeError as error:      # MovieUnavailable among them
             self._show_status(str(error))
             return None
@@ -3234,7 +3235,7 @@ class MainWindow(QMainWindow):
                 self._draw_frame(phase / PHASE_STEPS * 2 * np.pi)
             self.set_playing(playing)
         self._show_status(
-            f'Saved {os.path.basename(path)} — {count / MOVIE_FPS:.3g} s, '
+            f'Saved {os.path.basename(path)} — {count / FRAMES_PER_SECOND:.3g} s, '
             f'{os.path.getsize(path) / 1e6:.2g} MB')
         return path
 
@@ -3774,7 +3775,7 @@ class MainWindow(QMainWindow):
 
     # the Basis keeps the comparison overlay's baseline blue; other
     # groups cycle the curve palette
-    LINK_ROLE_COLORS: ClassVar[dict] = {'Basis': '#4c92d9'}
+    LINK_ROLE_COLORS: ClassVar[dict] = {'Basis': PAIR_COLORS[0]}
 
     def _role_holder(self, role):
         """The real object group holding the type's `role`.
@@ -5375,14 +5376,8 @@ class MainWindow(QMainWindow):
             said['origin'] = tuple(float(v) for v in matrix[3])
         cs_id = int(geometry.cs_id[row])
         geometry.place_coordinate_system(cs_id, **said)
-        journal = self.project.journal
-        before = len(journal)
         self.project.record_call(geometry, 'place_coordinate_system', cs_id,
-                                 **said)
-        if len(journal) > before > 0:
-            stem = journal[-1].split('=', 1)[0]
-            if journal[-2].split('=', 1)[0] == stem:
-                journal[-2:] = journal[-1:]
+                                 settle=True, **said)
 
     def _cursor_on_ring(self, matrix, axis, position):
         """Where the cursor's ray meets the plane the ring lies in."""
@@ -8336,7 +8331,7 @@ class MainWindow(QMainWindow):
         color_a = self._link_color(a_name)
         color_b = self._link_color(b_name)
         if color_b is None or color_b == color_a:
-            color_b = next(c for c in ('#ff8c2b', '#3fb950')
+            color_b = next(c for c in (PAIR_COLORS[1], '#3fb950')
                            if c != color_a)
         self._compare['colors'] = (color_a, color_b)
         alphas = overlay_alphas(self.link_role(a_name),
@@ -8358,9 +8353,7 @@ class MainWindow(QMainWindow):
         return None
 
     def _build_comparison_animator(self, first_pair, second_pair,
-                                   caption, showing,
-                                   colors=(None, '#ff8c2b'),
-                                   alphas=(1.0, OVERLAY_ALPHA)):
+                                   caption, showing, colors, alphas):
         """Like _build_animator, twice: two moving copies in one
         scene (`viz.animate.build_pair`), each (geometry, deflection)
         pair on its own mesh, in its own color and at its own opacity."""
@@ -9809,20 +9802,21 @@ class MainWindow(QMainWindow):
         plot another (Brandon, 2026-08-30).
         """
         from ..plot import octave_preview
+        from ..viz.marks import octave_steps
 
         self._clear_octave()
         panel = self.data_pane.octave_panel
         try:
-            self.octave_previews = octave_preview(
-                self.data_pane.graphics.ci.items, psd, panel.per_octave(),
-                self.unit_system, resolve_theme(self.theme_name), records)
-            banded = psd.to_octave(panel.per_octave())
+            steps = octave_steps(psd, panel.per_octave(), self.unit_system)
         except ValueError as refusal:
             panel.show_bands(None)
             panel.show()
             self._show_status(f'No octave preview: {refusal}')
             return
-        panel.show_bands(len(banded.abscissa))
+        self.octave_previews = octave_preview(
+            self.data_pane.graphics.ci.items, steps,
+            resolve_theme(self.theme_name), records)
+        panel.show_bands(len(steps[0].abscissa))
         panel.show()
         self._journal_octave_view(psd, panel.per_octave())
 
@@ -10320,7 +10314,7 @@ class MainWindow(QMainWindow):
                 return self._render_banded(
                     spec_name, spec, spec_records, m_data, m_name,
                     m_records,
-                    scale_db=self._family_scale_db(spec, m_name))
+                    scale_db=self.project.comparison_scale(spec, m_name))
         # a specification bounds autospectra; drawn beside a full CPSD its 30
         # cross terms have no limit near them and bury the six that do —
         # and the window resolves each measured entry's comparison scale
@@ -11813,7 +11807,8 @@ class MainWindow(QMainWindow):
     def read_as_specification_act(self) -> None:
         """The bar's Read as Specification: the selected PSD becomes the
         requirement it is, in place (`Project.read_as_specification`)."""
-        self._read_as(Psd, 'Select a PSD to read as a specification',
+        self._read_as('read_as_specification',
+                      'Select a PSD to read as a specification',
                       self.project.read_as_specification,
                       'read as a specification — compare a measurement '
                       'against it by selecting both')
@@ -11821,23 +11816,26 @@ class MainWindow(QMainWindow):
     def read_as_psd_act(self) -> None:
         """The bar's Read as PSD: the selected specification is plain
         data again, in place (`Project.read_as_psd`)."""
-        self._read_as(Specification, 'Select a specification to read as a PSD',
+        self._read_as('read_as_psd',
+                      'Select a specification without limits to read as a PSD',
                       self.project.read_as_psd, 'read as a PSD')
 
-    def _read_as(self, kind, refusal, verb, said) -> None:
+    def _read_as(self, verb_name, refusal, verb, said) -> None:
         """Swap the selected object for its other reading, under the
         same name: the tree row, its grid and the view follow, the way a
-        recompute's in-place swap does."""
-        acted = self._act_on(kind, refusal, verb)
+        recompute's in-place swap does. Whether it applies is the
+        project's own answer (`Project.verbs`), the one the bar asked."""
+        def applies(obj):
+            return obj is not None and verb_name in dict(
+                self.project.verbs(self.project.name_of(obj)))
+
+        acted = self._act_on(applies, refusal, verb)
         if acted is None:
             return
         name = acted[0]
-        obj = self.objects[name]
         item = self._item_for_object(name)
         if item is not None:
-            self._refresh_item(item, obj)
-            item.setToolTip(0, self._object_tooltip(name, obj))
-            self._build_children(item, obj, name)
+            self._refresh_item(item, self.objects[name])
         self._report_content_changed()
         self.render_current()
         self._show_status(f'{name} {said}')
@@ -12330,8 +12328,6 @@ class MainWindow(QMainWindow):
         # every mode's residues. Chosen by the project's rule, and
         # journaled with the records, so the fit_modes line replays
         # this fit and not another (it did not, until 2026-10-09)
-        self._fit_records = None if records is None else [
-            int(i) for i in records]
         coherence = self.project.fit_coherence(name, records)
         self.fit = ModalFitSession(
             obj, records,
@@ -13253,8 +13249,10 @@ class MainWindow(QMainWindow):
                 f'at={picks!r}'
                 + (f', refine={self.fit.refined}' if self.fit.refined
                    else '')
-                + (f', records={self._fit_records!r}'
-                   if self._fit_records is not None else '')
+                # the session's own rows: every record is the default
+                + (f', records={self.fit.rows!r}'
+                   if self.fit.rows != list(range(self.fit.frf.num_records))
+                   else '')
                 + (f', coherence={self._fit_coherence_name!r}'
                    if self._fit_coherence_name else '')
                 + f', name={self.fit_object_name!r})')
@@ -13291,16 +13289,11 @@ class MainWindow(QMainWindow):
                  if isinstance(data, Specification)]
         if len(specs) != 1:
             return None
-        return {name: self._family_scale_db(specs[0], name)
+        return {name: self.project.comparison_scale(specs[0], name)
                 for name, data, _r in series
                 if isinstance(data, Psd)
                 and not isinstance(data, Specification)
                 and name in self.objects}
-
-    def _family_scale_db(self, spec, name):
-        """The comparison scale for `name`, by the project's rule
-        (`Project.comparison_scale`), which the report reads too."""
-        return self.project.comparison_scale(spec, name)
 
     def _show_comparison_scaling(self, series):
         """Put the comparison's scaling on the bar, or take it away.
@@ -13325,7 +13318,7 @@ class MainWindow(QMainWindow):
             self.data_pane.show_scaling(None)
             return
         self._scaling_pair = (specs[0][0], measured[0][0])
-        db = self._family_scale_db(specs[0][1], measured[0][0])
+        db = self.project.comparison_scale(specs[0][1], measured[0][0])
         self.data_pane.show_scaling(f'{db:+d} dB' if db else '0 dB')
 
     def _comparison_scale_edited(self, text):
@@ -13370,7 +13363,7 @@ class MainWindow(QMainWindow):
                 else f'{measured_name} and {len(family) - 1} linked '
                      f'PSD{"s" * (len(family) > 2)}')
         if value is None:
-            detected = self._family_scale_db(spec, measured_name)
+            detected = self.project.comparison_scale(spec, measured_name)
             self._show_status('Scaling returned to automatic — detected '
                               f'{detected:+d} dB from the data')
         else:
@@ -13399,7 +13392,7 @@ class MainWindow(QMainWindow):
             return None
         name, data, records = measured[0]
         rows = compare_all(specs[0][0], data, specs[0][1], records,
-                           scale_db=self._family_scale_db(specs[0][0], name))
+                           scale_db=self.project.comparison_scale(specs[0][0], name))
         if not rows:
             return None
         # a pair that is not compared says why, on the status line the

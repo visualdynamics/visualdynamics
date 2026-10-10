@@ -47,12 +47,13 @@ def test_the_octave_steps_draw_flat_one_per_record(qt_app, psd):
 
     layout = pg.GraphicsLayoutWidget()
     build_plot(layout, psd)
-    drawn = octave_preview(layout.ci.items, psd, 3, None, theme('light'))
+    steps = stage_marks.octave_steps(psd, 3)
+    drawn = octave_preview(layout.ci.items, steps, theme('light'))
     assert len(drawn) == psd.num_records
-    drawn = octave_preview(layout.ci.items, psd, 3, None, theme('light'),
+    drawn = octave_preview(layout.ci.items, steps, theme('light'),
                            records=[1])
     assert len(drawn) == 1, 'the steps say what the plot says'
-    _banded, _x, rows = stage_marks.octave_steps(psd, 3)
+    _banded, _x, rows = steps
     # a log plot hands back the data as it maps it
     assert np.allclose(drawn[0][1].getData()[1], np.log10(rows[1]))
 

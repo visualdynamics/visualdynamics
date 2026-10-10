@@ -6,8 +6,8 @@ last is what deploys the site and publishes to PyPI).
 
 | platform | script | artifact | verified |
 | --- | --- | --- | --- |
-| macOS, Apple silicon | `build_macos.sh` | `.dmg` around a `.app`, signed and notarized | **yes** — 486 MB, launched from the mounted image |
-| macOS, Intel | `build_macos_intel.sh` | the same, built under Rosetta | **yes** — 539 MB, notarized |
+| macOS, Apple silicon | `build_macos.sh` | `.dmg` around a `.app`, signed and notarized | **yes** — 486 MB, launched from the mounted image; a release builds it on a `macos-latest` runner |
+| macOS, Intel | `build_macos.sh` on an Intel runner; `build_macos_intel.sh` here | the same | **yes** — 539 MB, notarized; a release builds it on a `macos-26-intel` runner, the desk under Rosetta |
 | Linux | `build_linux.sh` | `.AppImage` | **yes** — 476 MB, x86_64, launched under Xvfb |
 | Windows | `build_windows.ps1` | Inno Setup `.exe` installer | **yes** — installed and launched on a `windows-latest` runner by the release workflow's smoke test (2026-09-01); `build_windows_wine.sh` is the local loop |
 
@@ -143,26 +143,20 @@ dylibs/DLLs/.so files and satisfies that; `--onefile` does not. This is
 the one packaging decision that cannot be revisited cheaply, so it is
 made once, in the spec, with a comment.
 
-## The minutes arithmetic
+## Where each package is built
 
-GitHub bills runner minutes by a multiplier, and macOS is the whole
-story:
+Every package a release ships is built by the release workflow on
+GitHub's runners (2026-10-10): Linux, Windows, and the macOS pair on
+an Apple-silicon and an Intel runner, signed and notarized there. The
+repository is public, so its runner minutes are free — macOS included,
+whose 10x multiplier is what kept those builds on the desk while the
+repository was private and metered. A tag needs no Mac at all.
 
-| runner | multiplier | build | **quota cost** |
-| --- | --- | --- | --- |
-| Linux | 1x | ~15 min | 15 |
-| Windows | 2x | ~20 min | 40 |
-| macOS | **10x** | ~20 min | **200** |
-
-So the release workflow builds Linux and Windows there, and **leaves
-macOS off by default** — `build_macos.sh` produces the same artifact on
-the maintainer's own machine in about two minutes for nothing. A release
-therefore costs ~55 minutes rather than ~255 — which mattered while
-the repository was private and metered; public repositories' runner
-minutes are free, and the habit is kept because the desk build is
-also the notarized one.
-`workflow_dispatch` has a `macos` checkbox for a release where that
-machine is not to hand.
+The desk route stays whole as the fallback and the preview:
+`refresh_builds.sh` builds all four here, and `build_macos.sh`,
+`build_macos_intel.sh`, `attach_macos.sh` and `release_updates.sh`
+still make and attach a notarized pair from the keychain if the
+runners cannot.
 
 Builds are attached to a **GitHub Release**, never left as Actions
 artifacts: artifacts count against a 500 MB storage quota that three
@@ -185,9 +179,11 @@ world sees it.
 Signed and notarized on macOS; unsigned on Windows and Linux. What
 that means for whoever you hand a build to:
 
-- **macOS** — **signed and notarized from this desk** (Brandon joined
-  the Apple Developer Program 2026-09-02, both one-time steps below
-  were done the same evening, and `build_macos.sh` does the rest
+- **macOS** — **signed and notarized**, on the release workflow's
+  runners for a release since 2026-10-10 ("Signing on the runners",
+  below) and from this desk for a preview or a fallback (Brandon
+  joined the Apple Developer Program 2026-09-02, both one-time steps
+  below were done the same evening, and `build_macos.sh` does the rest
   unasked, on both the arm64 and the Intel image). The two steps, for
   a new machine:
   1. **The certificate.** Xcode → Settings → Accounts → the Apple ID →
@@ -248,6 +244,36 @@ that means for whoever you hand a build to:
   the images signed: notarize those by hand rather than rebuilding —
   `xcrun notarytool submit … --wait` then `xcrun stapler staple`. Notarization takes a few
   minutes per submission, twice per image.
+- **Signing on the runners** (2026-10-10). The `macos` jobs sign and
+  notarize with the same `build_macos.sh`, from five repository
+  secrets on the public repository, set once by Brandon — no agent
+  handles them:
+  - `MACOS_CERTIFICATE` and `MACOS_CERTIFICATE_PASSWORD`: the
+    *Developer ID Application* certificate **with its private key**,
+    exported from Keychain Access (My Certificates → the certificate →
+    Export → .p12, with a password), base64'd —
+    `base64 -i DeveloperID.p12 | gh secret set MACOS_CERTIFICATE
+    --repo visualdynamics/visualdynamics`, then `gh secret set
+    MACOS_CERTIFICATE_PASSWORD --repo visualdynamics/visualdynamics`,
+    which prompts. Delete the .p12 afterwards.
+    `ci_signing.sh` puts it in a keychain of the job's own with Apple's
+    Developer ID intermediate beside it.
+  - `NOTARY_APPLE_ID` (the Apple ID) and `NOTARY_PASSWORD`: an
+    app-specific password made for the runners alone at
+    account.apple.com, so it can be revoked without touching the
+    desk's. The team is `NOTARY_TEAM`'s default, 2542NQ9D95.
+  - `SPARKLE_ED_KEY`: the updates' EdDSA private key —
+    `generate_keys --account visualdynamics -x key.txt` (from
+    `~/Library/Application Support/visualdynamics-release/sparkle/bin`),
+    `gh secret set SPARKLE_ED_KEY --repo visualdynamics/visualdynamics
+    < key.txt`, then delete key.txt.
+
+  With them absent a dispatched build still runs and makes an ad-hoc
+  image, which is how the runners were first tried; on a tag the build
+  refuses to finish unsigned (`VD_REQUIRE_NOTARIZED`), and refuses
+  before PyInstaller runs rather than after. Sparkle itself is fetched
+  by `fetch_sparkle.sh`: the newest release, checked against the
+  sha256 GitHub records for it.
 - **Windows** — SmartScreen warns until the signature earns
   reputation. **SignPath Foundation** was applied for on 2026-09-28,
   the day the project went MIT with no commercial terms (Brandon,
@@ -379,15 +405,19 @@ What the updater needs on this machine, all under
   Sparkle, and everyone downloads a dmg once more.
 
 Publishing a new version therefore means: sync the public tree
-(`tools/sync_public.sh`), tag `v<version>` there, let the draft
-release build, build and notarize the macOS pair here
-(`build_macos.sh`, `build_macos_intel.sh`, unattended from the
-keychain item above — each writes a `.dmg` and a `.zip`, and each
-starts by clearing `dist/`, so move the first pair out before the
-second build and back after), attach the images with
-`packaging/attach_macos.sh v<version>`, add the updates with
-`packaging/release_updates.sh v<version>`, read the Windows smoke
-screenshot, and publish. The
+(`tools/sync_public.sh`), tag `v<version>` there, and let the release
+workflow draft the release — all four packages built, the macOS pair
+signed and notarized, and its `updates` job adding the update zips,
+their deltas (against the two releases before, fetched from their own
+assets — the runner keeps no store) and the appcasts, signed from the
+`SPARKLE_ED_KEY` secret. Read the Windows smoke screenshot, and
+publish. (By hand, from the desk: build and notarize the pair with
+`build_macos.sh` and `build_macos_intel.sh` — each writes a `.dmg` and
+a `.zip`, and each starts by clearing `dist/`, so move the first pair
+out before the second build and back after — then
+`packaging/attach_macos.sh v<version>` and
+`packaging/release_updates.sh v<version>`, which reads the key from
+the keychain item and keeps its store in Application Support.) The
 order in full is REMAINING-TASKS.md "Release". The release
 workflow's `site` job writes
 `web/launch/latest.json` from the published release and redeploys the

@@ -773,6 +773,7 @@ class MainWindow(QMainWindow):
         self._gizmo_reading = None  # the drag's number, while it lasts
         self._sliding = None       # the arrow gesture in progress (2026-10-02)
         self._rotate_observers = []
+        self._gizmo_hovered = None  # ('ring' or 'arrow', axis) under the cursor
         self._last_axis = 2        # the ring a typed angle turns about
         self._pick_observers = []
         self._cursor = None
@@ -5122,6 +5123,7 @@ class MainWindow(QMainWindow):
         self._rotate_observers = []
         self._rotating = None
         self._sliding = None
+        self._gizmo_hovered = None
         if self.scene.plotter is not None:
             for axis in range(3):
                 for kind in ('ring', 'arrow', 'head'):
@@ -5138,7 +5140,7 @@ class MainWindow(QMainWindow):
         span = np.ptp(_points, axis=0).max() if len(_points) > 1 else 1.0
         return 0.12 * (span or 1.0) * 1.15
 
-    def _draw_rings(self):
+    def _draw_rings(self, render=True):
         """Three rings, one about each of the frame's own axes."""
         import pyvista as pv
 
@@ -5153,18 +5155,22 @@ class MainWindow(QMainWindow):
             self.scene.plotter.add_mesh(
                 pv.lines_from_points(loop).tube(radius=radius * 0.03,
                                                 n_sides=12),
-                color=AXIS_COLORS[axis], name=f'rotate-ring-{axis}')
+                color=self._gizmo_color('ring', axis),
+                name=f'rotate-ring-{axis}')
             # and an arrow along each axis, for sliding (2026-10-02)
             shaft = arrow_points(matrix, axis, self._arrow_length(), steps=2)
             self.scene.plotter.add_mesh(
                 pv.lines_from_points(shaft).tube(radius=radius * 0.03,
                                                  n_sides=12),
-                color=AXIS_COLORS[axis], name=f'rotate-arrow-{axis}')
+                color=self._gizmo_color('arrow', axis),
+                name=f'rotate-arrow-{axis}')
             self.scene.plotter.add_mesh(
                 pv.Cone(center=shaft[-1], direction=matrix[axis],
                         height=radius * 0.3, radius=radius * 0.1),
-                color=AXIS_COLORS[axis], name=f'rotate-head-{axis}')
-        self.scene.plotter.render()
+                color=self._gizmo_color('arrow', axis),
+                name=f'rotate-head-{axis}')
+        if render:
+            self.scene.plotter.render()
 
     def _arrow_length(self):
         """An arrow reaches past the rings, so its head is clear of
@@ -5208,10 +5214,63 @@ class MainWindow(QMainWindow):
         radius = self._ring_radius()
         rings = []
         for axis in range(3):
+            points = ring_points(matrix, axis, radius)
+            # closed, as drawn, so the last stretch of ring is a line too
             projector = ScreenProjector(self.scene.plotter.renderer,
-                                        ring_points(matrix, axis, radius))
+                                        np.vstack([points, points[:1]]))
             rings.append((axis, projector.screen()[0]))
         return rings
+
+    def _gizmo_under_cursor(self, position):
+        """('arrow' or 'ring', axis) — what a press at `position` takes,
+        or None. One answer for the press and the hover, so what lights
+        up is what a press would grab. An arrow first: the arrows cross
+        the rings, and a press there is a slide, the gesture that needs
+        the origin."""
+        reach = self._gizmo_reach()
+        axis = ring_under_cursor(self._arrow_screen_points(), position, reach)
+        if axis is not None:
+            return 'arrow', axis
+        axis = ring_under_cursor(self._ring_screen_points(), position, reach)
+        return None if axis is None else ('ring', axis)
+
+    def _gizmo_color(self, kind, axis):
+        """An axis's own color, or the scene's highlight — the color a
+        hovered node takes — while that ring or arrow is under the
+        cursor (2026-10-10)."""
+        if self._gizmo_hovered == (kind, axis):
+            return resolve_theme(self.theme_name)['scene_highlight']
+        return AXIS_COLORS[axis]
+
+    def _hover_gizmo(self):
+        """Light the ring or arrow under the cursor, so a press lands
+        knowing what it will take. Not while a button is down: an orbit
+        sweeps the rings past the cursor, and nothing there is on
+        offer."""
+        position = self._cursor_position()
+        if position is None or self.scene.plotter is None:
+            return
+        part = None
+        if QApplication.mouseButtons() == Qt.MouseButton.NoButton:
+            part = self._gizmo_under_cursor(position)
+        if part == self._gizmo_hovered:
+            return                      # nothing changed, so nothing to redraw
+        self._gizmo_hovered = part
+        actors = self.scene.plotter.renderer.actors
+        for axis in range(3):
+            for kind, name in (('ring', 'ring'), ('arrow', 'arrow'),
+                               ('arrow', 'head')):
+                actor = actors.get(f'rotate-{name}-{axis}')
+                if actor is not None:
+                    actor.prop.color = self._gizmo_color(kind, axis)
+        self.scene.plotter.render()
+
+    def _gizmo_reach(self):
+        """How near a ring or an arrow a press must land: 14 points,
+        counted in the device pixels VTK reports the cursor and projects
+        the rings in. Counted in pixels until 2026-10-10, which on a
+        Retina screen — two pixels to the point — was a 7-point target."""
+        return 14.0 * self.devicePixelRatioF()
 
     def _abort(self, caller, observer):
         """Stop VTK passing this event on to the camera."""
@@ -5222,10 +5281,11 @@ class MainWindow(QMainWindow):
         position = self._cursor_position()
         if position is None:
             return
-        # an arrow first: the arrows cross the rings at the origin, and
-        # a press there is a slide, the gesture that needs the origin
-        axis = ring_under_cursor(self._arrow_screen_points(), position)
-        if axis is not None:
+        part = self._gizmo_under_cursor(position)
+        if part is None:
+            return                      # not on the gizmo: let the camera have it
+        kind, axis = part
+        if kind == 'arrow':
             row, matrix = self._rotating_frame()
             world = self._cursor_on_axis(matrix, axis, position)
             if world is None:
@@ -5236,9 +5296,6 @@ class MainWindow(QMainWindow):
                 'from': distance_along(self._display_frame(matrix), axis, world)}
             self._abort(caller, self._rotate_observers[0])
             return
-        axis = ring_under_cursor(self._ring_screen_points(), position)
-        if axis is None:
-            return                      # not on a ring: let the camera have it
         row, matrix = self._rotating_frame()
         world = self._cursor_on_ring(matrix, axis, position)
         if world is None:
@@ -5266,6 +5323,7 @@ class MainWindow(QMainWindow):
             self._abort(caller, self._rotate_observers[1])
             return
         if self._rotating is None:
+            self._hover_gizmo()
             return
         position = self._cursor_position()
         if position is None:
@@ -6002,6 +6060,12 @@ class MainWindow(QMainWindow):
         # scene, and a rebuilt scene would otherwise re-frame itself
         self.scene.set_home_view(geometry.opening_view, geometry)
         self.scene.plotter.camera_position = camera
+        if self._rotate_observers:
+            # the clear above took the rings with it, and every committed
+            # drag comes through here (its row refresh is an edit): until
+            # 2026-10-10 they vanished after the first turn while still
+            # answering clicks where they had been
+            self._draw_rings(render=False)
         self.scene.plotter.render()
 
     def _add_hover_mesh(self, geometry, colors):

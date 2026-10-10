@@ -47,13 +47,21 @@ fi
 #    answered "No Keychain password item found" for hours at a time and
 #    came back the moment Brandon touched it from his own Terminal
 #    (2026-09-12 to 09-15), which is why the item above exists.
+#
+# Ahead of both, on a runner: NOTARY_APPLE_ID and NOTARY_PASSWORD from
+# the environment, which the release workflow fills from its secrets
+# (2026-10-10, the macOS builds moved to GitHub's runners).
 NOTARY_PROFILE=${NOTARY_PROFILE:-vd-notary}
 NOTARY_ITEM=${NOTARY_ITEM:-vd-notary-password}
 NOTARY_TEAM=${NOTARY_TEAM:-2542NQ9D95}
 NOTARY=()
 notary_args() {
   local account password
-  if password=$(security find-generic-password -s "$NOTARY_ITEM" -w 2>/dev/null) \
+  if [[ -n ${NOTARY_APPLE_ID:-} && -n ${NOTARY_PASSWORD:-} ]]; then
+    NOTARY=(--apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM"
+            --password "$NOTARY_PASSWORD")
+    echo "notarizing as the release workflow's Apple ID"
+  elif password=$(security find-generic-password -s "$NOTARY_ITEM" -w 2>/dev/null) \
       && [[ -n $password ]]; then
     account=$(security find-generic-password -s "$NOTARY_ITEM" 2>/dev/null |
               sed -n 's/.*"acct"<blob>="\(.*\)"/\1/p')
@@ -70,6 +78,19 @@ notary_ready() {
   notary_args
   xcrun notarytool history "${NOTARY[@]}" >/dev/null 2>&1
 }
+
+# A release must not go out with an image Gatekeeper refuses: with
+# VD_REQUIRE_NOTARIZED set (the release workflow sets it for a tag), a
+# build that could not sign or notarize stops instead of warning. A
+# dispatched test build leaves it unset and makes the ad-hoc image.
+unshippable() {
+  if [[ -n ${VD_REQUIRE_NOTARIZED:-} ]]; then
+    echo "error: a release build must be signed and notarized" >&2
+    exit 1
+  fi
+}
+# and it says so before the twenty minutes of building, not after
+if [[ -n ${VD_REQUIRE_NOTARIZED:-} ]] && ! notary_ready; then unshippable; fi
 
 rm -rf build dist
 "$PYTHON" -m PyInstaller packaging/visualdynamics.spec --noconfirm \
@@ -141,8 +162,10 @@ if [[ -n $SIGN ]]; then
     echo "warning: signed but not notarized — neither the login-keychain" \
          "item '$NOTARY_ITEM' nor the notarytool profile '$NOTARY_PROFILE'" \
          "answers (packaging/README.md, Signing)" >&2
+    unshippable
   fi
 else
+  unshippable
   # An ad-hoc signature, which is not a real one: it makes the bundle
   # launchable on arm64, where an *unsigned* binary is refused outright
   # rather than merely warned about.

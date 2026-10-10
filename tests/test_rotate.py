@@ -104,6 +104,14 @@ def test_a_cursor_far_from_every_ring_picks_nothing():
     assert ring_under_cursor(rings, (300.0, 300.0)) is None
 
 
+def test_a_ring_is_picked_between_its_points():
+    """Distance is to the drawn line: a press on it midway between two
+    points 60 pixels apart is 2 pixels off it, not 30 (2026-10-10)."""
+    rings = [(1, np.array([[0.0, 0.0], [60.0, 0.0], [60.0, 60.0]]))]
+    assert ring_under_cursor(rings, (30.0, 2.0)) == 1
+    assert ring_under_cursor(rings, (30.0, 20.0)) is None
+
+
 def test_a_ray_meets_the_plane_it_crosses():
     hit = plane_hit(origin=(0, 0, 0), normal=(0, 0, 1),
                     eye=(0, 0, 5), direction=(0, 0, -1))

@@ -1,24 +1,21 @@
 name: release
 
-# **Tags and the button, never a push.** A build is 55 minutes of quota
-# on Linux and Windows and 200 more if macOS runs here, against 2 000 a
-# month — see packaging/README.md for the arithmetic. Nightly builds of
-# a project with one author would spend the year's allowance on
-# artifacts nobody downloads.
+# **Tags and the button, never a push.** Nightly builds of a project
+# with one author would make artifacts nobody downloads and version
+# numbers that mean nothing.
 #
-# The macos job is `if: inputs.macos` and defaults to **off**, because
-# GitHub bills macOS minutes at 10x and the maintainer's own Mac builds
-# the same artifact in two minutes for nothing. Turn it on for a release
-# where that machine is not to hand.
+# All four packages build here (2026-10-10): Linux, Windows, and the
+# macOS pair on GitHub's own Apple-silicon and Intel runners, signed
+# with the Developer ID certificate and notarized from the repository's
+# secrets, so a tag drafts the whole release with no Mac involved. The
+# macOS jobs were off by default while the repository's minutes were
+# metered at 10x for macOS; a public repository's are free. A dispatch
+# builds all four as a test and publishes nothing.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
-      macos:
-        description: 'Also build macOS here (10x minutes — usually build it locally)'
-        type: boolean
-        default: false
       reserve:
         description: 'Only reserve the name on PyPI with an empty placeholder (no builds)'
         type: boolean
@@ -104,10 +101,26 @@ jobs:
       - uses: actions/upload-artifact@v7
         with: {name: windows, path: dist/*setup.exe, retention-days: 1}
 
+  # One job per architecture, each on a runner of that architecture —
+  # the desk cross-built Intel under Rosetta, a runner needs no such
+  # trick. The secrets (packaging/README.md, "Signing on the runners"):
+  # MACOS_CERTIFICATE and MACOS_CERTIFICATE_PASSWORD, the Developer ID
+  # Application certificate exported as a .p12 and base64'd;
+  # NOTARY_APPLE_ID and NOTARY_PASSWORD, an app-specific password. On a
+  # tag the build refuses to finish unsigned or unnotarized
+  # (VD_REQUIRE_NOTARIZED); dispatched, it makes whatever it can.
   macos:
-    if: inputs.macos
-    runs-on: macos-latest
-    timeout-minutes: 40
+    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: macos-latest, arch: arm64}
+          - {runner: macos-26-intel, arch: x86_64}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -116,9 +129,36 @@ jobs:
       # collects OCP only if it is installed — without the extra the
       # runner's package silently lacked STEP/IGES import, 2026-09-03)
       - run: pip install -e '.[step,app]' pyinstaller pillow
-      - run: packaging/build_macos.sh
+      - name: Sparkle, the updater the app carries
+        run: |
+          packaging/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"
+          echo "SPARKLE=$RUNNER_TEMP/sparkle/Sparkle.framework" >> "$GITHUB_ENV"
+      - name: The signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ]; then
+            packaging/ci_signing.sh
+          else
+            echo "no MACOS_CERTIFICATE secret: the build is ad-hoc signed"
+          fi
+      - name: Build, sign and notarize
+        env:
+          PYTHON: python
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          VD_REQUIRE_NOTARIZED: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '' }}
+        run: packaging/build_macos.sh
+      # the image people download, and the zip Sparkle downloads (made
+      # only once the app is notarized and stapled)
       - uses: actions/upload-artifact@v7
-        with: {name: macos, path: dist/*.dmg, retention-days: 1}
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          retention-days: 1
 
   publish:
     # macos included, and it was not: the job built a .dmg, uploaded
@@ -129,20 +169,20 @@ jobs:
     # download section, where the empty macOS button would have been
     # the first anyone knew (2026-08-25).
     #
-    # The macos job is off by default (the Mac on the desk builds and
-    # notarizes both images), so on a tag it is *skipped* — and GitHub
-    # skips a job whose `needs` include a skipped job unless its `if`
-    # says otherwise. As first written, the tag path never published
-    # (2026-09-03). `!cancelled()` keeps the job eligible; the result
-    # checks require the two always-run builds and accept the macOS
-    # one as either built or skipped, never failed.
+    # While the macOS pair was built on the desk the macos job was
+    # skipped on a tag, and `!cancelled()` with per-job result checks is
+    # what let publish run beside a skipped need (2026-09-03). The pair
+    # builds here now, so all three are required: a release that drafts
+    # without its Mac images is the half-release this job exists to
+    # prevent. A failed build is rerun; nothing is drafted until it is
+    # green.
     needs: [linux, windows, macos]
     if: >-
       !cancelled()
       && startsWith(github.ref, 'refs/tags/v')
       && needs.linux.result == 'success'
       && needs.windows.result == 'success'
-      && needs.macos.result != 'failure'
+      && needs.macos.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -151,12 +191,12 @@ jobs:
       # the release and tripped over an empty stdout.log, which GitHub
       # refuses as an asset (the first tag, 2026-09-14)
       - uses: actions/download-artifact@v8
-        with: {path: builds, merge-multiple: true, pattern: '{linux,windows,macos}'}
+        with: {path: builds, merge-multiple: true, pattern: '{linux,windows,macos-*}'}
       # SHA256SUMS beside the builds, in sha256sum's own format so
       # `shasum -a 256 -c SHA256SUMS` verifies a download — the
       # downloads page promises "notes and checksums" (2026-09-11).
-      # The two macOS images are attached by hand afterwards, and
-      # packaging/attach_macos.sh adds their lines to this file.
+      # Every build is here, the macOS images and update zips with the
+      # rest; the updates job below adds nothing it does not also sum.
       - name: Checksums
         run: cd builds && sha256sum * > SHA256SUMS && cat SHA256SUMS
       # Release assets, **not** Actions artifacts: artifacts count
@@ -169,6 +209,52 @@ jobs:
           files: builds/*
           draft: true          # look at it before the world does
           generate_release_notes: true
+
+  # The macOS app's Sparkle updates, onto the draft once it exists —
+  # after publish, because Sparkle shows the release's own notes beside
+  # Install and those are written when the draft is. Each update zip is
+  # signed with the EdDSA key (the SPARKLE_ED_KEY secret, exported once
+  # with `generate_keys -x`), deltas are made against the two releases
+  # before this one, fetched from their own assets, and the per-arch
+  # appcasts go up beside them. Publishing the release publishes the
+  # feeds: every app reads releases/latest/download/appcast-<arch>.xml.
+  updates:
+    needs: publish
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with: {path: dist, merge-multiple: true, pattern: 'macos-*'}
+      - name: Sparkle's tools
+        run: packaging/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"
+      - name: The update zips of the two releases before this one
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 \
+              --json tagName -q '.[].tagName' |
+            grep '^v' | grep -vxF "$GITHUB_REF_NAME" | head -2 |
+            while read -r tag; do
+              for arch in arm64 x86_64; do
+                gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                  --pattern "VisualDynamics-*-macos-$arch.zip" \
+                  --dir "$RUNNER_TEMP/updates/$arch"
+              done
+            done
+          ls -R "$RUNNER_TEMP/updates"
+      - name: Sign the updates and write the feeds
+        env:
+          SPARKLE_ED_KEY: ${{ secrets.SPARKLE_ED_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$SPARKLE_ED_KEY" > "$RUNNER_TEMP/ed.key"
+          SPARKLE_ED_KEY_FILE="$RUNNER_TEMP/ed.key" \
+          SPARKLE_BIN="$RUNNER_TEMP/sparkle/bin" \
+          UPDATE_STORE="$RUNNER_TEMP/updates" \
+            packaging/release_updates.sh "$GITHUB_REF_NAME"
+          rm -f "$RUNNER_TEMP/ed.key"
 
   # Everything visualdynamics.org serves, from one directory: the launch
   # pages, the documentation properdocs builds into web/launch/documentation/,

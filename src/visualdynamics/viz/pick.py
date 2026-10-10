@@ -162,7 +162,7 @@ def _cross2(u, v):
     return u[..., 0] * v[..., 1] - u[..., 1] * v[..., 0]
 
 
-def _segment_distances(point, starts, ends):
+def segment_distances(point, starts, ends):
     """Distance from a 2D point to each of many 2D segments."""
     segment = ends - starts
     length2 = np.einsum('ij,ij->i', segment, segment)
@@ -273,7 +273,7 @@ class EntityPicker:
         starts, ends = self.segments
         if not len(starts):
             return None
-        distances = _segment_distances(cursor, screen[starts], screen[ends])
+        distances = segment_distances(cursor, screen[starts], screen[ends])
         midpoint_depth = 0.5 * (depth[starts] + depth[ends])
         nearest = _nearest_candidate(distances, midpoint_depth, tolerance)
         return None if nearest is None else int(self.owner[nearest])

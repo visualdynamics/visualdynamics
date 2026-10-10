@@ -169,6 +169,28 @@ def test_the_cursor_lights_the_node_it_is_over_not_an_element_of_that_id(
     assert list(window._hover_mesh.verts) == [1, 6]
 
 
+def test_the_hover_reaches_twelve_points_on_any_screen(plate, window, pump,
+                                                      monkeypatch):
+    """The cursor and the projected nodes are device pixels, so the
+    picker's reach is scaled by the window's pixel ratio: a node 18
+    device pixels off is in reach on a Retina screen (24 of them) and
+    out of it at 1x (12), where until 2026-10-10 it was out of reach on
+    both — a 6-point target on Retina (2026-10-10)."""
+    edit(window, pump, 'Nodes')
+    screen = screen_of(window)
+    # a corner node, pushed outward from the model, where no other node
+    # is near the spot
+    row = int(np.argmax(np.linalg.norm(screen - screen.mean(axis=0), axis=1)))
+    outward = screen[row] - screen.mean(axis=0)
+    spot = screen[row] + 18.0 * outward / np.linalg.norm(outward)
+    others = np.delete(screen, row, axis=0)
+    assert np.linalg.norm(others - spot, axis=1).min() > 24.0
+    monkeypatch.setattr(window, 'devicePixelRatioF', lambda: 1.0)
+    assert window.hover_at(*spot) is None
+    monkeypatch.setattr(window, 'devicePixelRatioF', lambda: 2.0)
+    assert window.hover_at(*spot) == int(plate.node_id[row])
+
+
 def test_leaving_add_mode_and_editing_puts_the_toolbar_back(plate, window,
                                                             pump):
     edit(window, pump, 'Nodes')

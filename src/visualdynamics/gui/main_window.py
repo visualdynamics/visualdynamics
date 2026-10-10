@@ -5852,7 +5852,7 @@ class MainWindow(QMainWindow):
 
     def hover_at(self, x: float, y: float) -> int | None:
         """Light up whatever is under this pixel; returns the entity."""
-        entity = self._picker.pick(x, y)
+        entity = self._picker.pick(x, y, pixel_ratio=self.devicePixelRatioF())
         if entity == self._hovered:
             return entity        # nothing changed, so nothing to redraw
         self._hovered = entity
@@ -8552,7 +8552,9 @@ class MainWindow(QMainWindow):
             if start is None:
                 return
             end = iren.interactor.GetEventPosition()
-            if abs(end[0] - start[0]) <= 3 and abs(end[1] - start[1]) <= 3:
+            # 3 points of slop, in the device pixels VTK reports
+            slop = 3 * self.devicePixelRatioF()
+            if abs(end[0] - start[0]) <= slop and abs(end[1] - start[1]) <= slop:
                 self._mac_bars_clicked(end)
 
         iren.add_observer('LeftButtonPressEvent', pressed)

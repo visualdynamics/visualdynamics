@@ -85,7 +85,7 @@ def test_screen_distance_beats_depth():
 
     distances = np.array([0.0, 4.0])
     depth = np.array([0.9, 0.1])         # the far-from-cursor one is in front
-    assert _nearest_candidate(distances, depth, tolerance=12.0) == 0
+    assert _nearest_candidate(distances, depth, tolerance=12.0, tie=2.0) == 0
 
 
 def test_depth_breaks_a_genuine_tie():
@@ -93,14 +93,30 @@ def test_depth_breaks_a_genuine_tie():
 
     distances = np.array([0.5, 0.4])     # both effectively under the cursor
     depth = np.array([0.9, 0.1])
-    assert _nearest_candidate(distances, depth, tolerance=12.0) == 1
+    assert _nearest_candidate(distances, depth, tolerance=12.0, tie=2.0) == 1
 
 
 def test_tolerance_is_respected():
     from visualdynamics.viz.pick import _nearest_candidate
 
     assert _nearest_candidate(np.array([20.0]), np.array([0.5]),
-                              tolerance=12.0) is None
+                              tolerance=12.0, tie=2.0) is None
+
+
+def test_the_tolerance_is_in_points():
+    """`tolerance` is points and `pixel_ratio` converts it to the device
+    pixels a cursor arrives in, the tie with it (2026-10-10)."""
+    from visualdynamics.viz.pick import EntityPicker
+
+    geometry, plotter, projector = scene('plate/geometry.exo')
+    screen, _ = projector.screen()
+    picker = EntityPicker(geometry, 'nodes', projector)
+    row = int(np.argmax(np.linalg.norm(screen - screen.mean(axis=0), axis=1)))
+    outward = screen[row] - screen.mean(axis=0)
+    spot = screen[row] + 18.0 * outward / np.linalg.norm(outward)
+    assert picker.pick(*spot) is None, '18 pixels is past 12 points at 1x'
+    assert picker.pick(*spot, pixel_ratio=2.0) == int(geometry.node_id[row])
+    plotter.close()
 
 
 def test_beam_picking_is_accurate_where_unambiguous():

@@ -141,7 +141,12 @@ class ScreenProjector:
         return world[:3] / world[3]
 
 
-def _nearest_candidate(distances, depth, tolerance, tie=2.0):
+#: how close, in points, two entities' distances must be for depth to
+#: decide between them
+TIE_POINTS = 2.0
+
+
+def _nearest_candidate(distances, depth, tolerance, tie):
     """Index of the entity under the cursor.
 
     Screen distance decides; depth only separates entities that are within
@@ -244,24 +249,31 @@ class EntityPicker:
                           if triangles else np.empty((0, 3), dtype=np.int64))
         self.triangle_owner = np.asarray(owners, dtype=np.int64)
 
-    def pick(self, x: float, y: float,
-             tolerance: float = 12.0) -> int | None:
-        """The entity under (x, y) in pixels, or None.
+    def pick(self, x: float, y: float, tolerance: float = 12.0,
+             pixel_ratio: float = 1.0) -> int | None:
+        """The entity under (x, y), or None.
 
-        Returns a node id, a coordinate system id, or an element
-        index, matching what the rest of the code uses to identify each kind.
+        `x`, `y` are in the device pixels VTK reports a cursor in and the
+        projector projects to; `tolerance` is in points, and
+        `pixel_ratio` is device pixels per point — 2 on a Retina screen.
+        Until 2026-10-10 the tolerance was pixels, which on Retina was a
+        6-point target. Returns a node id, a coordinate system id, or an
+        element index, matching what the rest of the code uses to
+        identify each kind.
         """
         screen, depth = self.projector.screen()
         cursor = np.array([float(x), float(y)])
+        tolerance = tolerance * pixel_ratio
+        tie = TIE_POINTS * pixel_ratio
 
         if self.kind == 'coordinate_systems':
-            return self._pick_origin(cursor, tolerance)
+            return self._pick_origin(cursor, tolerance, tie)
 
         if self.kind == 'nodes':
             if not len(screen):
                 return None
             distances = np.linalg.norm(screen - cursor, axis=1)
-            nearest = _nearest_candidate(distances, depth, tolerance)
+            nearest = _nearest_candidate(distances, depth, tolerance, tie)
             if nearest is None:
                 return None
             return int(self.geometry.node_id[nearest])
@@ -275,7 +287,7 @@ class EntityPicker:
             return None
         distances = segment_distances(cursor, screen[starts], screen[ends])
         midpoint_depth = 0.5 * (depth[starts] + depth[ends])
-        nearest = _nearest_candidate(distances, midpoint_depth, tolerance)
+        nearest = _nearest_candidate(distances, midpoint_depth, tolerance, tie)
         return None if nearest is None else int(self.owner[nearest])
 
     def _pick_face(self, cursor, screen, depth):
@@ -294,12 +306,12 @@ class EntityPicker:
         center_depth = depth[self.triangles[hits]].mean(axis=1)
         return int(self.triangle_owner[hits[np.argmin(center_depth)]])
 
-    def _pick_origin(self, cursor, tolerance):
+    def _pick_origin(self, cursor, tolerance, tie):
         origins = np.asarray(self.geometry.cs_matrix[:, 3, :], dtype=np.float64)
         projector = ScreenProjector(self.projector.renderer, origins)
         screen, depth = projector.screen()
         if not len(screen):
             return None
         distances = np.linalg.norm(screen - cursor, axis=1)
-        nearest = _nearest_candidate(distances, depth, tolerance)
+        nearest = _nearest_candidate(distances, depth, tolerance, tie)
         return None if nearest is None else int(self.geometry.cs_id[nearest])

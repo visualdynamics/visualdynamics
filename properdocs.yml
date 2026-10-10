@@ -26,6 +26,7 @@ docs_dir: docs
 # built site used to carry them and their bytecode (2026-09-30).
 exclude_docs: |
   gen_api.py
+  hooks.py
   api_layout.py
   __pycache__/
 # Nothing under docs/ is held back from the published tree: the one
@@ -85,6 +86,11 @@ theme:
       toggle:
         icon: material/weather-sunny
         name: Light mode
+
+# docs/hooks.py carries a compatibility shim between two documentation
+# tools; its docstring says when it can go.
+hooks:
+  - docs/hooks.py
 
 plugins:
   - search

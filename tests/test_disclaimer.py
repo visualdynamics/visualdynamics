@@ -23,13 +23,15 @@ def test_the_version_says_alpha():
     assert 'contact@visualdynamics.org' in TEXT
 
 
-def test_the_notice_says_the_project_file_is_provisional():
-    """Brandon, 2026-09-13: release today, with `.vdyn` explicitly
-    alpha-only and a dated end — the next alpha writes ESCDF `.h5` and
-    still reads `.vdyn`, the first non-alpha does not. Said where a
-    user reads: here, the downloads page, the README, the guide."""
-    assert '.vdyn' in TEXT and 'provisional' in TEXT
-    assert '.h5' in TEXT and 'save it again' in TEXT
+def test_the_notice_says_what_the_alpha_promises_about_project_files():
+    """Brandon, 2026-10-09: `.vdyn` is the project file and stays it;
+    ESCDF is imported and exported beside it, and the promise to open
+    every earlier file waits for the first release that is not an
+    alpha. The switch to ESCDF the notice used to announce is not the
+    plan, and is not said anywhere a user reads."""
+    assert '.vdyn' in TEXT and 'may still change' in TEXT
+    assert 'not an alpha' in TEXT
+    assert 'next alpha' not in TEXT and 'save it again' not in TEXT
 
 
 def test_continue_needs_the_acknowledgment(qt_app):

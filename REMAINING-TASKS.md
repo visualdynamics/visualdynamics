@@ -27,36 +27,32 @@ reason.
 Neither is hard; both are unstarted because nothing has needed them
 yet. When one is written, the exception comes out of principle 5.
 
-## The project file: `.escdf` in the next alpha
+## The project file: `.vdyn`, with ESCDF beside it
 
-Decided 2026-09-13, releasing with `.vdyn` explicitly alpha-only and a
-dated end (PLAN.md, "The project file is provisional"). The Engineering
-Sciences Common Data Format is public since 2026-09-30 (BSD-3-Clause;
-HDF5, a standard structure for the data types this project holds).
-**Import and export come first** (PLAN.md "ESCDF: import and export
-first", with the decisions), and whether `.escdf` replaces `.vdyn` is
-decided after they are solid.
+Decided 2026-10-09 (Brandon): `.vdyn` is the project file and stays
+it; the Engineering Sciences Common Data Format is imported and
+exported beside it, for exchanging data with other tools. The plan of
+2026-09-13 — save projects as `.escdf` in a later alpha and drop the
+`.vdyn` reader at the first non-alpha — is retired: ESCDF has no type
+for a specification, its limits, the analysis settings, object
+groups, provenance or reports, so a project written as ESCDF is
+`.vdyn` wrapped in it (each object whole in an attachment), and
+another reader sees only the standard's part (PLAN.md, "The project
+file stays .vdyn").
 
-1. **Done 2026-09-30**: read with and write from the specification,
-   on h5py (`io/escdf.py`, `io/escdf_objects.py`); the reference
-   package a test-only dependency, the agreement oracle both ways.
-2. **Done**: the extras — what the standard has no field for — live in
-   the `attachments` every group carries, each object whole in its own
-   layout; a report is attached rendered as well.
-3. Then, if decided: the next alpha saves projects as `.escdf` and still opens `.vdyn`.
-   The rename is broad and mechanical: `io/native.py`, the file
-   dialogs, the app's document type in the macOS and Windows packaging,
-   the website's format table and its test, the guide, the disclaimer
-   and this note, and the rulebook's "three names" line (two names and
-   a shared extension). Every `.escdf` file from any tool then opens
-   Visual Dynamics, and every project it saves opens in every other
-   tool that speaks the format.
-4. The `.vdyn` reader is removed at the first release that is not an
-   alpha. Until then the migration is: open the file in that alpha,
-   save it again. The four notes that promise this (the disclaimer,
-   the downloads page, the README, the guide) come out at the same
-   time, with `tests/test_disclaimer.py` and `tests/test_website.py`
-   pinning them until they do.
+1. **Done 2026-09-30**: ESCDF read and written from the specification
+   (`io/escdf.py`, `io/escdf_objects.py`), the reference package the
+   agreement oracle both ways; what the standard has no field for
+   rides in each group's attachments.
+2. **Done 2026-10-09**: the notices say `.vdyn` (disclaimer, README,
+   guide, format page, downloads page, examples), pinned by
+   `tests/test_disclaimer.py` and `tests/test_website.py`, which also
+   refuse the old announcement.
+3. **At the first release that is not an alpha**: promise that a later
+   version opens every earlier `.vdyn`. In practice it already does —
+   the frozen corpus (`test_vdyn_corpus.py`) checks every era on every
+   run — but during the alpha the format may still change and that is
+   not promised.
 
 ## The website
 

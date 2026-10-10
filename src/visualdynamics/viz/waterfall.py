@@ -412,6 +412,29 @@ def nice_axis(low: float, high: float,
     return float(wide_low), float(wide_high), intervals + 1
 
 
+def drawn_span(curves: Any, default: tuple[float, float] = (0.0, 1.0)
+               ) -> tuple[float, float]:
+    """(low, high) of the abscissa where something is drawn: points
+    whose level is finite, never the whole abscissa a curve is carried
+    on. A PSD written as a controller writes a specification — every
+    line to Nyquist, zero outside its band — draws only over the band
+    (zero is a gap on a log level), and a stage that spanned all its
+    lines drew 20 to 400 Hz as a sliver of a 0 to 2048 Hz floor
+    (Brandon, 2026-10-09)."""
+    lows, highs = [], []
+    for cx, cz in curves:
+        cx, cz = np.asarray(cx, dtype=float), np.asarray(cz, dtype=float)
+        if cx.size != cz.size:
+            cx = cx[:cz.size]
+        shown = cx[np.isfinite(cz) & np.isfinite(cx)] if cz.size else cx[:0]
+        if shown.size:
+            lows.append(float(shown.min()))
+            highs.append(float(shown.max()))
+    if not lows:
+        return default
+    return min(lows), max(highs)
+
+
 def stage_curves(arrays: dict[str, Any],
                  ordinate_limits: tuple[float, float] | None = None
                  ) -> dict[str, Any]:
@@ -432,10 +455,7 @@ def stage_curves(arrays: dict[str, Any],
     curves = arrays['curves']
     n = len(curves)
     sx, sy, sz = STAGE
-    x0 = min((float(np.nanmin(cx)) for cx, _cz in curves if len(cx)),
-             default=0.0)
-    x1 = max((float(np.nanmax(cx)) for cx, _cz in curves if len(cx)),
-             default=1.0)
+    x0, x1 = drawn_span(curves)
     # widened to round tick values where that is nearly free, before
     # anything is normalized against the range — the axis, the curves,
     # the marks and the report's canvas all read these extents, so the

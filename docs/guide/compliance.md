@@ -165,6 +165,20 @@ written lines only, on both sides.
 the comparison resuming on either
 side](images/compliance-hole.png)
 
+## A specification that arrives as a PSD
+
+A comparison needs to know which object is the requirement. A
+Rattlesnake file says so, and so does a project saved by Visual
+Dynamics, but some formats have no data type for a specification:
+ESCDF's types include power spectral density and nothing for a target,
+so a specification written by another program arrives as a PSD that
+only its name sets apart. The name is not read. Select the PSD and use
+*Read as Specification* on the plot bar (`project.read_as_specification(name)`
+from a script); it keeps its name, its group and everything that refers
+to it, and selected beside a measurement it is then compared with it.
+*Read as PSD* undoes it, for a specification that has no warning or
+abort limits.
+
 ## The test level
 
 A run is often recorded below the level the specification states, at

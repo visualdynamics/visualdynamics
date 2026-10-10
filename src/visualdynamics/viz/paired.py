@@ -29,6 +29,7 @@ from ._quiet import one_render
 from .waterfall import (
     POINT_BUDGET,
     STAGE,
+    drawn_span,
     finish_scene,
     place_camera,
     waterfall_arrays,
@@ -143,10 +144,13 @@ def paired_stage_curves(loud: Any, quiet: Any,
 
     stations = arrays['stations']
     n = len(stations)
-    xs = [float(np.nanmin(c[which][0])) for c in stations
-          for which in ('loud', 'quiet') if len(c[which][0])]
-    xe = [float(np.nanmax(c[which][0])) for c in stations
-          for which in ('loud', 'quiet') if len(c[which][0])]
+    # where something is drawn, not every line a curve is carried on
+    # (`waterfall.drawn_span`)
+    spans = [drawn_span([c[which]]) for c in stations
+             for which in ('loud', 'quiet')
+             if len(c[which][0]) and np.isfinite(c[which][1]).any()]
+    xs = [low for low, _high in spans]
+    xe = [high for _low, high in spans]
     zs = np.concatenate(
         [c[which][1][np.isfinite(c[which][1])] for c in stations
          for which in ('loud', 'quiet')]) if stations else np.array([0.0, 1.0])

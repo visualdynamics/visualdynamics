@@ -8,8 +8,8 @@ are other programs' outputs, and writing one would mean impersonating
 the program that makes them.
 
 **`.vdyn` (HDF5) is the native format**, and the only one that keeps
-everything — units included. Save and Load use it. It is provisional
-for the alpha (the next alpha saves ESCDF `.h5`; [its own
+everything — units included. Save and Load use it. While Visual
+Dynamics is an alpha its format may still change ([its own
 page](vdyn-format.md) says what that means for a file you have). It
 is standard, documented HDF5 — the layout is that page, and
 any HDF5 tool reads one without this package. The foreign formats

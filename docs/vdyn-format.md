@@ -31,13 +31,14 @@ Before the first public release the "keeps its past" half was a
 soft promise, and the format used it: pre-release eras were dropped
 (2026-08-23), so the reader holds exactly schema 1 with no fallbacks
 for earlier spellings. Since the first release (0.1.0a1, 2026-09-14)
-the contract is hard *for as long as the format lives* — and that is
-the caveat this page has to state: **`.vdyn` is provisional, an
-alpha-only format**. The next alpha saves projects in the Engineering
-Sciences Common Data Format (`.h5`), a public standard, and still
-opens `.vdyn`; the first release that is not an alpha will not. Open
-each `.vdyn` once in that alpha and save it again. Until then every
-`.vdyn` written by any alpha loads in every later alpha.
+every `.vdyn` written by any alpha has loaded in every later alpha,
+and the frozen corpus checks it on every run. While Visual Dynamics
+is an alpha that is a practice, not a promise: the `.vdyn` format may
+still change, and the promise that a later version opens every
+earlier file starts with the first release that is not an alpha.
+`.vdyn` is the project file, and it stays the project file; the
+Engineering Sciences Common Data Format (`.h5`) is imported and
+exported beside it, for exchanging data with other tools.
 
 ## Two shapes of file
 

@@ -295,6 +295,15 @@ def test_the_updates_are_signed_on_a_runner_after_the_draft_opens():
     job = workflow['jobs']['updates']
     assert job['needs'] == 'publish' and job['if'] == "github.event_name == 'push'"
     assert job['runs-on'].startswith('macos')
+    # one job per architecture, side by side (2026-10-10: one job doing
+    # both in turn was a quarter of the release), each taking only its
+    # own build and its own architecture's older zips
+    assert job['strategy']['matrix']['arch'] == ['arm64', 'x86_64']
+    assert job['env']['VD_ARCHES'] == '${{ matrix.arch }}'
+    download = next(s for s in job['steps'] if 'download-artifact' in s.get('uses', ''))
+    assert download['with']['pattern'] == 'macos-${{ matrix.arch }}'
+    fetch = next(s for s in job['steps'] if 'gh release download' in s.get('run', ''))
+    assert 'macos-$VD_ARCHES.zip' in fetch['run'] and 'for arch' not in fetch['run']
     run = '\n'.join(s.get('run', '') for s in job['steps'])
     assert 'head -2' in run and '--exclude-drafts' in run
     sign = next(s for s in job['steps'] if 'release_updates.sh' in s.get('run', ''))

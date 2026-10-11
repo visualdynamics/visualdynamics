@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QLabel,
     QPushButton,
     QWidget,
@@ -27,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from ..core.truncate import Truncation
 from .editors import DoubleSpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
@@ -77,14 +76,9 @@ class TruncatePanel(QWidget):
             box.setSuffix(' s')
 
         rows = (('Start', self.start_box), ('Stop', self.stop_box))
-        for row, (label, editor) in enumerate(rows, start=1):
-            grid.addWidget(QLabel(label), row, 0)
-            grid.addWidget(editor, row, 1)
+        add_settings(grid, rows)
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, len(rows) + 1, 0, 1, 2)
+        add_rule(grid, len(rows) + 1)
 
         # what follows from the two, shown so the cost of the cut is
         # visible while it is being made rather than after the record

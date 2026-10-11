@@ -1371,7 +1371,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                     continue
                 verdict = judge(spec_obj, meas_obj, si, mi, bound, over, scale)
                 raw = np.atleast_2d(spec_obj.limits[bound])[si]
-                verdict['level'] = verdict['level'] * _display_factor(
+                verdict['level'] = verdict['level'] * display_factor(
                     written[bound], raw)
                 verdicts[bound] = verdict
             # the extents are known by now: every curve is drawn, and
@@ -1429,10 +1429,11 @@ def _component_row(row, tag):
 EXCEED_ALPHA = 150
 
 
-def _display_factor(shown, raw):
+def display_factor(shown, raw):
     """What one curve's SI values are multiplied by to be the shown
     ones — a unit conversion is one factor, read off any written
-    point. One when nothing is written."""
+    point. One when nothing is written. The plot and the report's page
+    both scale a compliance verdict's level by it."""
     shown = np.asarray(np.real(shown), dtype=float)
     raw = np.asarray(np.real(raw), dtype=float)
     with np.errstate(invalid='ignore'):

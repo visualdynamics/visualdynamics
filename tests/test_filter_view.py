@@ -646,3 +646,18 @@ def test_the_panel_applies_the_filter_it_is_drawing(window, pump):
     provenance = window.project.provenance['Record Filtered']
     assert provenance['verb'] == 'filter_data'
     assert window.project['Record'].filtering.high == pytest.approx(200.0)
+
+
+def test_the_two_preview_plots_read_their_own_axes(window):
+    """One `PreviewPlot` builds both (2026-10-10); each says how it
+    differs: the filter's response is dB on a linear axis, the sine
+    extraction's readings are amplitudes on a log one."""
+    from visualdynamics.gui.filter_panel import FilterResponsePlot
+    from visualdynamics.gui.sine_panel import SamplePlot
+
+    response, samples = FilterResponsePlot(), SamplePlot()
+    assert response.plot.ctrl.logXCheck.isChecked()
+    assert not response.plot.ctrl.logYCheck.isChecked()
+    assert samples.plot.ctrl.logXCheck.isChecked()
+    assert samples.plot.ctrl.logYCheck.isChecked()
+    assert response.widget.height() == FilterResponsePlot.HEIGHT == 130

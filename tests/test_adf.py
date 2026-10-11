@@ -51,7 +51,7 @@ def test_a_truncated_file_is_refused():
         f.write(b'\xff\xff\xff\xff' + b'\x00' * 100)
         path = f.name
     try:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='is not an Associated Data File'):
             visualdynamics.import_file(path, format='adf')
     finally:
         os.unlink(path)

@@ -16,6 +16,9 @@ import base64
 import pathlib
 import platform
 import re
+import shutil
+
+import pytest
 
 from visualdynamics import update
 from visualdynamics.gui import updater
@@ -121,3 +124,81 @@ def test_signing_needs_nobody_at_the_mac():
     assert 'generate_keys" --account visualdynamics -x' in script
     assert "trap 'rm -rf \"$keydir\"' EXIT" in script
     assert 'chmod 700 "$keydir"' in script
+
+
+def _run_release_updates(tmp_path, drafted_sums: str):
+    """release_updates.sh for one architecture against stub `gh` and
+    Sparkle tools, in a copy of the tree under tmp_path. Returns (the
+    upload's arguments, the SHA256SUMS it would upload)."""
+    import shutil
+    import subprocess
+
+    tree = tmp_path / 'tree'
+    (tree / 'packaging').mkdir(parents=True)
+    shutil.copy(ROOT / 'packaging' / 'release_updates.sh', tree / 'packaging')
+    (tree / 'dist').mkdir()
+    archive = tree / 'dist' / 'VisualDynamics-9.9.9-macos-arm64.zip'
+    archive.write_bytes(b'the update zip')
+    tools = tmp_path / 'tools'
+    tools.mkdir()
+    (tools / 'generate_keys').write_text('#!/bin/sh\n')
+    (tools / 'generate_appcast').write_text(
+        '#!/bin/sh\nwhile [ "$1" != -o ]; do shift; done\n'
+        'echo "<item></item>" > "$2"\n')
+    record = tmp_path / 'uploaded'
+    stubs = tmp_path / 'bin'
+    stubs.mkdir()
+    (stubs / 'gh').write_text(
+        '#!/bin/sh\n'
+        'case "$1 $2" in\n'
+        '  "release download") while [ "$1" != --dir ]; do shift; done\n'
+        f'    cat > "$2/SHA256SUMS" <<"EOS"\n{drafted_sums}EOS\n    ;;\n'
+        '  "release view") echo "" ;;\n'
+        f'  "release upload") shift 2; for f in "$@"; do echo "$f" >> "{record}";'
+        f' case "$f" in */SHA256SUMS) cp "$f" "{tmp_path}/sums" ;; esac; done ;;\n'
+        'esac\n')
+    for stub in (*tools.iterdir(), stubs / 'gh'):
+        stub.chmod(0o755)
+    key = tmp_path / 'key'
+    key.write_text('a key')
+    subprocess.run(
+        ['zsh', str(tree / 'packaging' / 'release_updates.sh'), 'v9.9.9'],
+        check=True, capture_output=True, text=True,
+        env={'PATH': f'{stubs}:/usr/bin:/bin', 'HOME': str(tmp_path),
+             'SPARKLE_BIN': str(tools), 'UPDATE_STORE': str(tmp_path / 'store'),
+             'SPARKLE_ED_KEY_FILE': str(key), 'VD_ARCHES': 'arm64'})
+    sums = tmp_path / 'sums'
+    return (record.read_text().split(),
+            sums.read_text() if sums.exists() else None)
+
+
+def _zip_line():
+    import hashlib
+
+    return (hashlib.sha256(b'the update zip').hexdigest()
+            + '  VisualDynamics-9.9.9-macos-arm64.zip\n')
+
+
+@pytest.mark.skipif(shutil.which('zsh') is None, reason='the script is zsh')
+def test_the_sums_are_left_alone_when_the_draft_already_has_them(tmp_path):
+    """On the runners `publish` sums the update zips, and the two
+    architectures' jobs run at once: neither may replace SHA256SUMS,
+    or the slower one's copy wins a race (2026-10-10)."""
+    # the zip's line not last, as `publish` sums in name order: deleting
+    # and re-appending it would reorder the file and read as a change
+    drafted = _zip_line() + 'aaaa  VisualDynamics-9.9.9-windows-x64-setup.exe\n'
+    uploaded, sums = _run_release_updates(tmp_path, drafted)
+    assert sums is None
+    assert not any(name.endswith('SHA256SUMS') for name in uploaded)
+    assert any(name.endswith('VisualDynamics-9.9.9-macos-arm64.zip')
+               for name in uploaded)
+
+
+@pytest.mark.skipif(shutil.which('zsh') is None, reason='the script is zsh')
+def test_the_sums_gain_a_zip_the_draft_lacks(tmp_path):
+    """From the desk, attach_macos.sh sums the images alone, so the zip's
+    line is new here and the file goes up, its other lines kept."""
+    drafted = 'aaaa  VisualDynamics-9.9.9-linux-x86_64.AppImage\n'
+    uploaded, sums = _run_release_updates(tmp_path, drafted)
+    assert sums == drafted + _zip_line()
+    assert any(name.endswith('SHA256SUMS') for name in uploaded)

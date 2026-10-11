@@ -88,7 +88,8 @@ def test_the_arrows_still_report_immediately(panel):
     seen = []
     panel.changed.connect(lambda averaging: seen.append(averaging.overlap))
     panel.overlap_box.stepUp()
-    assert seen, 'a step is a whole edit and reports at once'
+    assert seen == [pytest.approx(0.01)], (
+        'one step, one report, at once: 1 % of overlap as a fraction')
 
 
 def test_leaving_the_field_reports_it_too(panel):

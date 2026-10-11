@@ -85,7 +85,7 @@ def test_this_launchs_statement_beats_the_remembered_choice(monkeypatch):
 
 
 def test_the_store_refuses_a_word_that_is_not_an_appearance():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='appearance is one of'):
         preferences.remember_appearance('sepia')
 
 

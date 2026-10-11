@@ -222,6 +222,57 @@ def test_the_pencil_on_the_tree_opens_the_table_and_closes_it(plate, window,
     assert not window.add_action.isVisible()
 
 
+def _drawn(icon):
+    """An icon's pixels, to tell the pencil on from the pencil off."""
+    image = icon.pixmap(64, 64).toImage()
+    return bytes(image.constBits())
+
+
+def _lit(window, item):
+    from visualdynamics.gui.icons import control_icon
+
+    drawn = _drawn(item.icon(1))
+    assert drawn in (_drawn(control_icon('edit_on')), _drawn(control_icon('edit')))
+    return drawn == _drawn(control_icon('edit_on'))
+
+
+def test_the_pencil_of_the_open_table_is_drawn_on(plate, window, pump):
+    """The pencil is a toggle, so it says when it is on: a shaded chip
+    behind it while its table is open, on that row alone, and gone when
+    the table closes (Brandon, 2026-10-11) — whether the table opened
+    from the pencil or from anywhere else, and through a rebuild of the
+    geometry's rows."""
+    item = window._item_for_object('Geometry')
+    item.setExpanded(True)
+    pump()
+    rows = {item.child(i).text(0).split(' (')[0]: item.child(i)
+            for i in range(item.childCount())}
+    nodes, quads = rows['Nodes'], rows['Quads']
+    quads.setExpanded(True)
+    pump()
+    group = quads.child(0)
+    assert not any(_lit(window, row) for row in (nodes, quads, group))
+    window._tree_item_clicked(nodes, 1)
+    pump()
+    assert [_lit(window, row) for row in (nodes, quads, group)] == [True, False, False]
+    window._tree_item_clicked(quads, 1)
+    pump()
+    assert [_lit(window, row) for row in (nodes, quads, group)] == [False, True, False]
+    window._tree_item_clicked(group, 1)
+    pump()
+    assert [_lit(window, row) for row in (nodes, quads, group)] == [False, False, True]
+    # a rebuild of the geometry's rows keeps it lit
+    window._refresh_item(item, window.objects['Geometry'])
+    pump()
+    item = window._item_for_object('Geometry')
+    quads = next(item.child(i) for i in range(item.childCount())
+                 if item.child(i).text(0).startswith('Quads'))
+    assert _lit(window, quads.child(0))
+    window.escape_action.trigger()
+    pump()
+    assert not _lit(window, quads.child(0)), 'Escape turns it off'
+
+
 def test_an_edit_that_would_break_the_model_is_refused_at_entry(plate, window,
                                                                pump):
     """Never written and complained about afterwards."""
@@ -293,7 +344,7 @@ def test_the_drop_down_offers_the_familys_blocks_and_a_new_one(plate,
 
     edit_element_group(window, pump, 1)
     assert window.editing == ('Geometry', 'groups')
-    assert window.editing_scope == ('group', 1)
+    assert window.editing_scope == ('group', (1,))
 
 
 def test_links_picked_one_after_another_share_the_new_block(plate, window,

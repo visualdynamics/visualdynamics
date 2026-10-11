@@ -830,3 +830,58 @@ def test_a_script_holds_and_reads_the_familys_scale():
     assert project.comparison_scale('Spec', octave) == detected
     with pytest.raises(ValueError, match='whole decibels'):
         project.set_comparison_scale('PSDs', 2.5)
+
+
+def test_a_pair_with_no_bands_to_read_is_never_scaled():
+    """An SRS against its shock specification has no octave reading to
+    detect a level from — a shock run is judged at the level it was
+    run — so a measurement 6 dB under reads zero, not +6 (mutation
+    testing, 2026-10-10: the branch was never reached)."""
+    from visualdynamics.core.data import ShockSpecification, Srs
+
+    f = np.geomspace(10.0, 2000.0, 30)
+    spec = ShockSpecification(f, np.full((1, 30), 50.0), response_dof=['101Z+'],
+                              ordinate_dim='acceleration', ordinate_unit='g')
+    srs = Srs(f, np.full((1, 30), 25.0), response_dof=['101Z+'],
+              ordinate_dim='acceleration', ordinate_unit='g')
+    assert detect_scale_db(spec, srs) == 0
+
+
+def test_a_measurement_with_no_power_is_not_a_level():
+    """Nothing measured is a dead channel, not a run at minus infinity
+    decibels — no rung, no scale."""
+    spec = _spec()
+    silent = _measured(spec, [0.0])
+    silent.ordinate[:] = 0.0
+    assert detect_scale_db(spec, silent) == 0
+
+
+def test_a_record_of_undeclared_units_pairs_only_when_nothing_matches_exactly():
+    """'unknown' has made no claim to contradict, so it pairs when it
+    is all there is — and loses to a record whose quantity matches,
+    wherever that is stored (mutation testing, 2026-10-10: neither
+    half was tested)."""
+    from visualdynamics.core.compliance import matched_records
+
+    spec = _spec(('101Z+',))
+    f = np.linspace(20.0, 2000.0, 40)
+    undeclared = Psd(f, np.ones((1, f.size)), response_dof=['101Z+'])
+    assert matched_records(spec, undeclared) == [('101Z+', 0, 0)]
+    both = Psd(f, np.ones((2, f.size)), response_dof=['101Z+', '101Z+'],
+               ordinate_dim=['unknown', 'acceleration**2/frequency'],
+               ordinate_unit=[None, 'm/s**2'])
+    assert matched_records(spec, both) == [('101Z+', 0, 1)]
+
+
+def test_a_cross_term_is_labelled_by_both_its_dofs():
+    from visualdynamics.core.compliance import matched_records
+
+    f = np.linspace(20.0, 2000.0, 40)
+
+    def cross(kind):
+        return kind(f, np.ones((2, f.size)), response_dof=['101Z+', '102Z+'],
+                    reference_dof=['101Z+', '101Z+'],
+                    ordinate_dim='acceleration**2/frequency')
+
+    rows = matched_records(cross(Specification), cross(Psd))
+    assert [label for label, _s, _m in rows] == ['101Z+', '102Z+/101Z+']

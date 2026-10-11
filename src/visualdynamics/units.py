@@ -369,8 +369,9 @@ def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]
             raise UnitError(f"Unknown dimension {dimension!r}")
         actual = ureg.Quantity(1.0, unit).dimensionality
         if actual != ureg.get_dimensionality(expected):
-            raise UnitError(
-                f"Unit {unit!r} is not a {dimension} unit (got {actual})")
+            article = 'an' if dimension[:1] in 'aeiou' else 'a'
+            raise UnitError(f"Unit {unit!r} is not {article} {dimension} unit "
+                            f"(got {actual})")
     return scale, zero
 
 

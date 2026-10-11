@@ -161,9 +161,17 @@ def test_clicking_the_owner_row_releases_its_grid_picks(window, pump):
 
 
 def test_grid_axes_speaks_for_every_kind(spectra):
-    for name in ('channel_table', 'Modal_frf', 'Modal_coherence'):
-        axes = grid_axes(spectra[name])
-        assert axes is not None, name
+    """Every record lands in exactly one cell: a channel table one row
+    per channel, an FRF a row per response and a column per reference,
+    a multiple coherence one column."""
+    rows, columns = grid_axes(spectra['channel_table'])
+    assert (len(rows), columns) == (spectra['channel_table'].num_channels, [''])
+    frf = spectra['Modal_frf']
+    rows, columns = grid_axes(frf)
+    assert columns == sorted(set(frf.reference_dof), key=frf.reference_dof.index)
+    assert len(rows) * len(columns) == frf.num_records
+    rows, columns = grid_axes(spectra['Modal_coherence'])
+    assert (len(rows), columns) == (spectra['Modal_coherence'].num_records, [''])
 
 
 def test_a_mixed_cpsd_grid_is_the_full_matrix():

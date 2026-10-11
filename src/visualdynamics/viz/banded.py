@@ -29,7 +29,7 @@ import numpy as np
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM, UnitSystem
 from ._quiet import one_render
-from .sinespec import _TONE_COLORS, EXCEED_OPACITY
+from .sinespec import _TONE_COLORS, EXCEED_OPACITY, ZONE_OPACITY, limit_zones
 from .waterfall import (
     POINT_BUDGET,
     STAGE,
@@ -38,9 +38,6 @@ from .waterfall import (
     ribbon,
     waterfall_arrays,
 )
-
-#: the translucent zone alpha, matching the sine stage's ribbons
-ZONE_OPACITY = 0.22
 
 
 def banded_stage_arrays(specification: Any, measured: Any = None,
@@ -297,17 +294,7 @@ def add_banded_stage(plotter: Any, specification: Any,
             values = nz(values)
             return values if np.isfinite(values).any() else None
 
-        zones = []
-        for warning, abort, edge, beyond in (
-                ('warning_upper', 'abort_upper', sz, 'exceed_over'),
-                ('warning_lower', 'abort_lower', 0.0, 'exceed_under')):
-            w, a = level(warning), level(abort)
-            if w is not None:
-                outer = a if a is not None else np.full(len(spec_xn),
-                                                        edge)
-                zones.append((w, outer, 'limit_warning'))
-            if a is not None:
-                zones.append((a, np.full(len(spec_xn), edge), beyond))
+        zones = limit_zones(level, len(spec_xn), sz)
         for j, (inner, outer, key) in enumerate(zones):
             good = np.isfinite(inner) & np.isfinite(outer)
             if good.sum() < 2:

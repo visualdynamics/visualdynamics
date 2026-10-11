@@ -36,7 +36,7 @@ frame.project().save('frame.vdyn')    # the five models this page builds
 | Step | Where | How |
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
-| Build it from blocks | the geometry's bar | *Add Block*, once per block |
+| Build it from blocks | the geometry's **Hexes** row | *Add Block*, once per block |
 | Cut the holes | a script | `mesh.block(..., holes=...)`, which the dialog does not type |
 | Tie the screwed parts | the geometry's Hexes | pick the wing's bricks under each washer, *Tie* to the frame |
 | Give each element group its material | the pencil on the element group's row | a material; nothing else for an element group of solids |
@@ -45,7 +45,7 @@ frame.project().save('frame.vdyn')    # the five models this page builds
 ## 1. Blocks
 
 Set the display units to inches (the unit menu on the toolbar). Start a
-geometry and press **Add Block**: a pane opens beside the 3-D view, and
+geometry, select its **Hexes** row and press **Add Block**: a pane opens beside the 3-D view, and
 each block is a center, three widths and an element size, in the
 display unit, drawn in the 3-D view as it is typed; the rings around
 the preview turn it about its center and the arrows slide it onto a

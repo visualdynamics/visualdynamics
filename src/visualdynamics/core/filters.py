@@ -255,12 +255,7 @@ def filtered(data: TimeHistory, filtering: Filtering) -> TimeHistory:
     sos = design(filtering, rate)
     result = TimeHistory(
         data.abscissa, threaded_sosfiltfilt(sos, np.real(data.ordinate)),
-        response_dof=list(data.response_dof),
-        ordinate_dim=list(data.ordinate_dim),
-        ordinate_unit=list(data.ordinate_unit),
-        dimension_hint=list(data.dimension_hint),
-        comment=list(data.comment),
-        block=None if data.block is None else list(data.block))
+        **data.record_fields())
     return carrying_marks(data, result)
 
 

@@ -48,7 +48,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
@@ -745,18 +744,4 @@ def sniff(path: str | os.PathLike) -> bool:
     except (OSError, ValueError):
         return False
 
-
-def datasets_of(file: File, kind: str) -> Iterable[tuple[str | None, Dataset]]:
-    """Every dataset in the file that is `kind` or extends it, with the
-    activity it belongs to (None for metadata), in file order."""
-    specs = specifications()
-    for dataset in file.metadata.values():
-        spec = specs.get(dataset.kind)
-        if spec is not None and spec.is_a(kind):
-            yield None, dataset
-    for activity in file.activities.values():
-        for dataset in activity.data.values():
-            spec = specs.get(dataset.kind)
-            if spec is not None and spec.is_a(kind):
-                yield activity.name, dataset
 

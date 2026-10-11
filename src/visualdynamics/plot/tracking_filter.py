@@ -207,7 +207,6 @@ class TrackingFilterView:
         self.corridor_pen: Any = pg.mkPen(colors['filter_preview'],
                                      width=CORRIDOR_WIDTH,
                                      style=Qt.PenStyle.DashLine)
-        self.halo_pen: Any = pg.mkPen(background, width=HALO_WIDTH)
         bounds = (float(waveform.time[0]), float(waveform.time[-1]))
 
         # the cursor on both time axes: the foreground on the record,

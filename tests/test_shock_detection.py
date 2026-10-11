@@ -524,3 +524,115 @@ def test_an_impulse_like_record_keeps_its_modest_windows():
             f'{window.duration:.3f} s for an event whose ringdown is '
             'over in tens of milliseconds')
 
+
+
+# ---- the editing rules, by value (a mutation pass, 2026-10-10, found
+# them reached only through drags in the window, or not at all) --------
+
+def _times(series):
+    return [(round(s.start, 9), round(s.duration, 9)) for s in series]
+
+
+def test_a_window_is_pulled_inside_its_record_and_holds_two_samples():
+    rate, samples = 100.0, 100
+    assert _times([Shock(0.9, 0.5).clipped(samples, rate)]) == [(0.9, 0.1)]
+    assert _times([Shock(2.0, 0.5).clipped(samples, rate)]) == [(0.98, 0.02)]
+    assert Shock(0.0, 0.001).samples(rate) == 2, 'one sample is not a transient'
+    assert Shock(0.5, 0.5).fits(samples, rate)
+    assert not Shock(0.5, 0.51).fits(samples, rate)
+
+
+def test_an_added_window_takes_the_median_length_in_the_widest_gap():
+    series = (Shock(1.0, 1.0), Shock(5.0, 3.0), Shock(9.0, 0.5))
+    # gaps: 0-1, 2-5 (the widest, 3 s), 8-9, 9.5-12; median length 1 s
+    assert _times(shocks.with_added(series, 12.0)) == [
+        (1.0, 1.0), (3.0, 1.0), (5.0, 3.0), (9.0, 0.5)]
+    # an even count takes the upper of the middle two
+    # (gaps 1-9 and 12-19: the first is the wider)
+    assert _times(shocks.with_added((Shock(0.0, 1.0), Shock(9.0, 3.0)), 19.0))[1] == (
+        3.5, 3.0)
+    # a gap tighter than the length shrinks it to nine tenths, centered
+    tight = shocks.with_added((Shock(0.0, 4.9), Shock(5.0, 5.0)), 10.0)
+    assert _times(tight)[1] == (4.905, 0.09)
+    # with nothing to copy, a tenth of the record, in the middle of it
+    assert _times(shocks.with_added((), 10.0)) == [(4.5, 1.0)]
+    # wall to wall, nothing fits
+    full = (Shock(0.0, 5.0), Shock(5.0, 5.0))
+    assert shocks.with_added(full, 10.0) == full
+
+
+def test_a_dragged_window_stops_at_its_neighbors_and_moves_no_one_else():
+    series = (Shock(0.0, 1.0), Shock(2.0, 1.0), Shock(4.0, 1.0))
+    pulled = (Shock(0.0, 1.0), Shock(0.5, 4.0), Shock(4.0, 1.0))
+    assert _times(shocks.held_apart(pulled, moved=1)) == [
+        (0.0, 1.0), (1.0, 3.0), (4.0, 1.0)]
+    # with no author, the earlier of an overlapping pair gives way
+    overlapping = (Shock(0.0, 3.0), Shock(2.0, 1.0), Shock(4.0, 1.0))
+    assert _times(shocks.held_apart(overlapping)) == [
+        (0.0, 2.0), (2.0, 1.0), (4.0, 1.0)]
+    assert shocks.held_apart(series) == series
+
+
+def test_one_length_for_all_is_capped_by_the_closest_pair_and_the_end():
+    series = (Shock(0.0, 1.0), Shock(2.0, 1.0), Shock(3.5, 1.0))
+    assert _times(shocks.same_length(series, 5.0)) == [
+        (0.0, 1.5), (2.0, 1.5), (3.5, 1.5)]
+    assert _times(shocks.same_length(series, 1.2, limit=4.5)) == [
+        (0.0, 1.0), (2.0, 1.0), (3.5, 1.0)]
+    assert shocks.same_length(series, 0.0) == series
+
+
+def test_a_drag_settles_into_a_move_a_shared_resize_or_nothing():
+    series = (Shock(0.0, 1.0), Shock(2.0, 1.0), Shock(4.0, 1.0))
+    # a move keeps the length and stops at the next window
+    moved = shocks.drag_settled(series, 1, 2.5, 3.5, common=True, limit=10.0)
+    assert _times(moved) == [(0.0, 1.0), (2.5, 1.0), (4.0, 1.0)]
+    # a resize under a shared length regrows every window
+    grown = shocks.drag_settled(series, 1, 2.0, 3.5, common=True, limit=10.0)
+    assert _times(grown) == [(0.0, 1.5), (2.0, 1.5), (4.0, 1.5)]
+    # not shared, only the dragged one changes, held apart
+    alone = shocks.drag_settled(series, 1, 2.0, 3.5, common=False, limit=10.0)
+    assert _times(alone) == [(0.0, 1.0), (2.0, 1.5), (4.0, 1.0)]
+    # nothing changed, out of range, or no width: no settlement
+    assert shocks.drag_settled(series, 1, 2.0, 3.0, common=True, limit=10.0) is None
+    assert shocks.drag_settled(series, 3, 2.0, 3.0, common=True, limit=10.0) is None
+    assert shocks.drag_settled(series, 1, 3.0, 3.0, common=True, limit=10.0) is None
+    # dragged before the record starts, it starts at zero
+    early = shocks.drag_settled((Shock(1.0, 1.0),), 0, -0.5, 1.0, common=False,
+                                limit=10.0)
+    assert _times(early) == [(0.0, 1.0)]
+
+
+def test_a_window_opens_ahead_and_follows_the_ringdown_until_it_settles():
+    """The window geometry, by hand, on a level series in dB over a
+    quiet of nothing: an 80 dB event over hops 100-120 ringing down a
+    decibel a hop opens 15 % of its run early (hop 97) and closes
+    where it is 30 dB under its own peak (hop 151); a 40 dB one over
+    300-310 settles against the same 30 dB (hop 341), the quiet line
+    six decibels up being lower. Nothing pinned these numbers before
+    (mutation testing, 2026-10-10: the lead, the follow and the
+    settle each survived having their arithmetic changed)."""
+    from visualdynamics.core.shocks import LEAD, SETTLED
+
+    assert (LEAD, SETTLED) == (0.15, 30.0)
+    loud = np.zeros(1000)
+    loud[100:120] = 80.0
+    loud[120:200] = np.maximum(80.0 - np.arange(80), 0.0)
+    loud[300:310] = 40.0
+    loud[310:360] = np.maximum(40.0 - np.arange(50), 0.0)
+    assert shocks._windowed([(100, 120), (300, 310)], 1000, loud, 1.0) == [
+        (97, 151), (298, 341)]
+    # still ringing when the next event rises: capped at its rise, and
+    # the next opens no earlier than this one closed
+    slow = np.zeros(1000)
+    slow[100:120] = 80.0
+    slow[120:400] = np.maximum(80.0 - 0.25 * np.arange(280), 0.0)
+    slow[150:160] = np.maximum(slow[150:160], 60.0)
+    windows = shocks._windowed([(100, 120), (150, 160)], 1000, slow, 1.0)
+    assert windows[0] == (97, 150) and windows[1][0] == 150
+    # followed at half the detection resolution, the settle hop is read
+    # in follow hops and handed back in detection hops
+    half = np.zeros(500)
+    half[50:60] = 80.0
+    half[60:140] = np.maximum(80.0 - np.arange(80), 0.0)
+    assert shocks._windowed([(100, 120)], 1000, half, 2.0) == [(97, 182)]

@@ -149,11 +149,11 @@ from typing import Any
 
 import numpy as np
 
+from .data import _even_steps
 from .sine import (
     SineLevel,
     SineSweepSpecification,
     _control_rows,
-    _even_steps,
     find_environment,
 )
 
@@ -683,7 +683,8 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     settings = list(settings)
     if not settings:
         raise ValueError('nothing to read: give at least one setting')
-    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float),
+                      'Tracking sine levels')
     rate = 1.0 / dt
     rows = _rows(history, specification, channels)
     chosen, onset = _tone_at(history, specification, rows, tone, onset, dt)
@@ -829,7 +830,8 @@ def track_waveform(history: Any, specification: SineSweepSpecification,
     if setting.kind == 'unfiltered':
         raise ValueError(f'{setting.describe()} has no band to pass the '
                          'record through')
-    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float),
+                      'Tracking sine levels')
     rate = 1.0 / dt
     rows = _rows(history, specification,
                  None if channel is None else [channel])[:1]

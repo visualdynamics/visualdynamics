@@ -46,7 +46,7 @@ def test_define_units_reinterprets():
 
 def test_define_units_rejects_a_non_mass_unit():
     shapes = visualdynamics.import_file(SHAPES)
-    with pytest.raises(visualdynamics.units.UnitError):
+    with pytest.raises(visualdynamics.units.UnitError, match='is not a mass unit'):
         shapes.define_units('m')
 
 
@@ -98,7 +98,7 @@ def test_round_trip_keeps_unit_less_state(tmp_path):
 
 
 def test_mismatched_shape_matrix_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='shape_matrix has 1 modes but frequency/damping have 2/2'):
         visualdynamics.ShapeSet(frequency=[1.0, 2.0], damping=[0.0, 0.0],
                       coordinate=['1Z+', '2Z+'],
                       shape_matrix=[[1.0, 2.0]])   # one mode, two declared

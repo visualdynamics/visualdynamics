@@ -460,13 +460,18 @@ def test_the_peak_reading_keeps_each_bins_largest_magnitude():
 
 
 def test_a_ragged_last_slice_is_kept_not_dropped():
-    record = np.zeros(1000)
-    record[995] = 1.0    # in the short final slice
+    # 1001 samples in slices of 4: 250 whole ones and a last of one
+    # sample, which is where the impulse is (1000 samples, as this test
+    # had until 2026-10-11, divide evenly and never reached the pad)
+    record = np.zeros(1001)
+    record[1000] = 1.0
     frequencies = grid_about(200.0, octaves=0.5, per_octave=12)
     full = np.abs(w.scalogram(record, RATE, frequencies))
-    _times, held = w.scalogram_peaks(record, RATE, frequencies, columns=300)
-    assert held.shape[1] == 250, '1000 samples in slices of 4'
-    np.testing.assert_allclose(held[:, -1], full[:, 996:].max(axis=1))
+    times, held = w.scalogram_peaks(record, RATE, frequencies, columns=300)
+    assert held.shape == (frequencies.size, 251)
+    np.testing.assert_allclose(held[:, -1], full[:, 1000])
+    assert times[-1] == pytest.approx(1000 / RATE), 'the short slice is centered on itself'
+    assert times[0] == pytest.approx(1.5 / RATE)
 
 
 def test_the_transform_never_holds_every_scale_at_once(monkeypatch):

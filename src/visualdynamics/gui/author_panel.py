@@ -202,7 +202,6 @@ class AuthorPanel(QWidget):
         super().__init__(parent)
         self._unit_system = None
         self._sheet: Sheet | None = None
-        self._origin_seen: str | None = None
         self._loading = False
 
         grid = QGridLayout(self)

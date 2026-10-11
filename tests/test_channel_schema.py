@@ -102,7 +102,7 @@ def test_sensitivity_and_range_are_positive_numbers_or_blank():
     table.set_cell('range', 0, '2')
     with pytest.raises(ValueError, match='whole number'):
         table.set_cell('range', 0, '2.5')       # volts, as an integer
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="'ten'"):
         table.set_cell('sensitivity', 0, 'ten')
     with pytest.raises(ValueError, match='positive'):
         table.set_cell('range', 0, '-5')
@@ -245,5 +245,5 @@ def test_a_file_is_read_leniently_where_an_edit_is_refused():
     assert list(table['direction']) == ['Z+', '']
     assert list(table['unit']) == ['g', '']
     assert list(table['expiration']) == ['2027-01-04', '']
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='direction is one of'):
         table.set_cell('direction', 1, 'sideways')

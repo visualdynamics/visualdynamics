@@ -58,7 +58,7 @@ def test_the_channel_moves_not_the_point():
         frf.rename_dof('102Z+', '1Z+', 'force')
     with pytest.raises(ValueError, match="no record at '999Z\\+'"):
         frf.rename_dof('999Z+', '1Z+')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='does not start with a node id'):
         frf.rename_dof('102Z+', 'not a dof')
     assert frf.rename_dof('102Z+', '102Z+', 'acceleration') == 0, \
         'the same name changes nothing'

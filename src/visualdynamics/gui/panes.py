@@ -40,6 +40,7 @@ from .averaging_panel import AveragingPanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
+from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .octave_panel import OctavePanel
 from .rigid_panel import RigidBodyPanel
@@ -313,7 +314,6 @@ class DataPane(QWidget):
         plot_row.addWidget(self.truncate_panel)
         plot_row.addWidget(self.octave_panel)
         plot_row.addWidget(self.wavelet_panel)
-        self._plot_row = plot_row
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1661,14 +1661,17 @@ class ScenePane(QWidget):
         #: a window of their own (2026-10-02)
         self.mesh_panel: MeshPanel = MeshPanel()
         self.mesh_panel.hide()
+        #: Merge Coincident Nodes' tolerance and its Merge (2026-10-11)
+        self.merge_panel: MergePanel = MergePanel()
+        self.merge_panel.hide()
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(self._page, 1)
         row.addWidget(self.rigid_panel)
         row.addWidget(self.mesh_panel)
+        row.addWidget(self.merge_panel)
         layout.addLayout(row)
-        self._layout = layout
         self._view_row = row
 
     def _build_toolbar(self) -> QToolBar:

@@ -60,6 +60,11 @@ def test_a_span_holding_less_than_two_samples_is_refused():
         truncate(data, Truncation(1.0 + 0.1 / RATE, 1.0 + 0.9 / RATE))
     with pytest.raises(ValueError, match='fewer than two samples'):
         truncate(data, Truncation(100.0, 200.0))    # off the record
+    with pytest.raises(ValueError, match='fewer than two samples'):
+        truncate(data, Truncation(1.0, 1.0 + 0.5 / RATE))   # one sample
+    # and two is enough — the boundary itself (mutation testing,
+    # 2026-10-10: `< 2` and `<= 2`, or `< 3`, passed before)
+    assert truncate(data, Truncation(1.0, 1.0 + 1.0 / RATE)).ordinate.shape[-1] == 2
 
 
 def test_the_settings_validate_at_entry():

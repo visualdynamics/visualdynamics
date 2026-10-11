@@ -26,16 +26,20 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFrame,
     QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from ..core.filters import Filtering
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import (
+    PreviewPlot,
+    add_derived,
+    add_keyed_settings,
+    add_rule,
+    panel_grid,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
@@ -50,7 +54,7 @@ KIND_LABELS = ('Low-pass', 'High-pass', 'Band-pass')
 EDGE_GAP = 0.1
 
 
-class FilterResponsePlot(QWidget):
+class FilterResponsePlot(PreviewPlot):
     """The filter's magnitude against frequency: a small log-log plot,
     whose corner lines are the corner controls.
 
@@ -75,6 +79,9 @@ class FilterResponsePlot(QWidget):
 
     #: how tall, in pixels. Enough for the knee to be a knee
     HEIGHT = 130
+    #: dB on a linear axis, against log frequency
+    LOG_Y = False
+    AXIS_WIDTH = 30
     #: the floor of the vertical axis, in dB. Below this a filter has
     #: stopped doing anything anyone can measure on real data
     FLOOR = -80.0
@@ -83,26 +90,7 @@ class FilterResponsePlot(QWidget):
         super().__init__(parent)
         import pyqtgraph as pg
 
-        from ..theme import theme as resolve_theme
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.colors: Mapping[str, str] = resolve_theme(None)
-        self.widget: Any = pg.PlotWidget()
-        self.widget.setFixedHeight(self.HEIGHT)
-        self.plot: Any = self.widget.getPlotItem()
-        self.plot.setLogMode(x=True, y=False)
-        self.plot.showGrid(x=True, y=True, alpha=0.3)
-        self.plot.setMouseEnabled(x=False, y=False)
-        self.plot.hideButtons()
-        self.plot.setMenuEnabled(False)
         self.plot.setYRange(self.FLOOR, 5.0, padding=0)
-        for edge in ('left', 'bottom'):
-            axis = self.plot.getAxis(edge)
-            axis.setStyle(tickTextOffset=2, tickLength=-3)
-            axis.setTextPen(self.colors['plot_foreground'])
-            axis.setPen(self.colors['plot_foreground'])
-        self.plot.getAxis('left').setWidth(30)
         self.curve: Any = self.plot.plot(
             [], [], pen=pg.mkPen(self.colors['filter_preview'], width=2))
         # The lines *are* the corner controls (Brandon, 2026-08-25) —
@@ -124,7 +112,6 @@ class FilterResponsePlot(QWidget):
                 lambda item, which=which: self._drag_finished(which, item))
             self.plot.addItem(line)
             self.lines[which] = line
-        layout.addWidget(self.widget)
 
     def _dragged(self, which: str, line: Any) -> None:
         """A line moved under the mouse: say which and where, in hertz.
@@ -149,17 +136,12 @@ class FilterResponsePlot(QWidget):
         """Follow a theme change, like every other drawing here."""
         import pyqtgraph as pg
 
-        self.colors = colors
-        self.widget.setBackground(colors['plot_background'])
+        super().apply_theme(colors)
         self.curve.setPen(pg.mkPen(colors['filter_preview'], width=2))
         for line in self.lines.values():
             line.setPen(pg.mkPen(colors['plot_foreground'], width=1,
                                  style=Qt.PenStyle.DashLine))
             line.setHoverPen(pg.mkPen(colors['filter_preview'], width=2))
-        for edge in ('left', 'bottom'):
-            axis = self.plot.getAxis(edge)
-            axis.setTextPen(colors['plot_foreground'])
-            axis.setPen(colors['plot_foreground'])
 
     def show_response(self, frequencies: Any, magnitude: Any,
                       low: float | None, high: float | None) -> None:
@@ -284,24 +266,14 @@ class FilterPanel(QWidget):
         # every row is built and the kind decides which are on screen
         # — show only what applies (principle 3): a low-pass with a
         # grayed pair of band edges would be a question, not a control
-        self._labels: dict[str, QLabel] = {}
-        self._editors: dict[str, QWidget] = {}
         rows = (('kind', 'Type', self.kind_box),
                 ('corner', 'Corner', self.corner_box),
                 ('from', 'From', self.from_box),
                 ('to', 'To', self.to_box),
                 ('order', 'Order', self.order_box))
-        for row, (key, label, editor) in enumerate(rows, start=1):
-            name = QLabel(label)
-            grid.addWidget(name, row, 0)
-            grid.addWidget(editor, row, 1)
-            self._labels[key] = name
-            self._editors[key] = editor
+        self._labels, self._editors = add_keyed_settings(grid, rows)
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, len(rows) + 1, 0, 1, 2)
+        add_rule(grid, len(rows) + 1)
 
         # what follows from the settings, shown so the trade is
         # visible while it is being made rather than after the

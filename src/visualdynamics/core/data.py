@@ -122,6 +122,12 @@ REAL_FLOOR = 1e-9
 def _even_steps(abscissa, what: str) -> float:
     """The sample step, or a refusal that says which way it is wrong.
 
+    `what` names the act that needs the step, as the subject of the
+    refusal: 'Computing spectra', 'A sample rate'. Every reader of a
+    time history's step comes here, the sine extraction included —
+    it kept a copy of its own that checked the spacing but not the
+    order (2026-10-10).
+
     An abscissa is stored as it arrived — uneven spacing and out-of-order
     samples are both real, and the storage refuses neither (see
     `DataArray.abscissa`). What cannot be done on such a record is
@@ -131,15 +137,17 @@ def _even_steps(abscissa, what: str) -> float:
     record was simply in the wrong order.
     """
     steps = np.diff(abscissa)
+    if not len(steps):
+        raise ValueError(f'{what} needs at least two time samples')
     if (steps <= 0).any():
         first = int(np.flatnonzero(steps <= 0)[0])
         raise ValueError(
-            f'{what} need time samples in order; sample {first + 1} is at '
+            f'{what} needs time samples in order; sample {first + 1} is at '
             f'{float(abscissa[first + 1]):g} s, after {float(abscissa[first]):g}')
     if not np.allclose(steps, steps[0], rtol=1e-6, atol=0):
         widest = float(np.abs(steps - steps[0]).max())
         raise ValueError(
-            f'{what} need evenly spaced time samples; the step varies by '
+            f'{what} needs evenly spaced time samples; the step varies by '
             f'{widest:g} s across the record')
     return float(steps[0])
 
@@ -439,6 +447,28 @@ class DataArray:
         if len(out) != n:
             raise ValueError(f'{name} has {len(out)} entries, expected {n}')
         return out
+
+    def record_fields(self) -> dict[str, Any]:
+        """Each record's description — DOFs, quantity, units, hint,
+        comment and block — as the keyword arguments a derived object of
+        the same records is made with, every list a copy.
+
+        A filter, a truncation and an octave banding keep their source's
+        records and change only the numbers; this is the one statement
+        of what "the same records" carries, where it was written out at
+        each (2026-10-10). Override `comment` where the derivation says
+        what it did.
+        """
+        return {
+            'response_dof': list(self.response_dof),
+            'reference_dof': (None if self.reference_dof is None
+                              else list(self.reference_dof)),
+            'ordinate_dim': list(self.ordinate_dim),
+            'ordinate_unit': list(self.ordinate_unit),
+            'reference_unit': list(self.reference_unit),
+            'dimension_hint': list(self.dimension_hint),
+            'comment': list(self.comment),
+            'block': None if self.block is None else list(self.block)}
 
     def rename_dof(self, old: str, new: str,
                    quantity: str | None = None) -> int:
@@ -1087,9 +1117,7 @@ class TimeHistory(DataArray):
         Spectrum with one record per channel, carrying the channel's
         own quantity and units.
         """
-        if len(self.abscissa) < 2:
-            raise ValueError('Spectra need at least two time samples')
-        step = _even_steps(self.abscissa, 'Spectra')
+        step = _even_steps(self.abscissa, 'Computing spectra')
         groups = {}
         for i, dof in enumerate(self.response_dof):
             key = (dof, self.ordinate_dim[i], self.ordinate_unit[i],
@@ -1113,9 +1141,7 @@ class TimeHistory(DataArray):
     @property
     def sample_rate(self) -> float:
         """Samples per second, from the abscissa — which must be even."""
-        if len(self.abscissa) < 2:
-            raise ValueError('a sample rate needs at least two time samples')
-        return 1.0 / _even_steps(self.abscissa, 'a sample rate')
+        return 1.0 / _even_steps(self.abscissa, 'A sample rate')
 
     def channel_key(self, i: int) -> tuple[str, str, str | None]:
         """What makes record `i` the same channel as another.
@@ -1280,9 +1306,7 @@ class TimeHistory(DataArray):
 
         if averaging is None:
             averaging = self.averaging
-        if len(self.abscissa) < 2:
-            raise ValueError('PSDs need at least two time samples')
-        step = _even_steps(self.abscissa, 'PSDs')
+        step = _even_steps(self.abscissa, 'Computing PSDs')
         fs = 1.0 / step
         samples = len(self.abscissa)
         if averaging is None:
@@ -3079,16 +3103,9 @@ class Psd(_Bands, DataArray):
         banded = resample(frequencies, self.ordinate, bounds, widths,
                           source=self.bin_bounds())
         out = Psd(centers, banded,
-                  response_dof=list(self.response_dof),
-                  reference_dof=(None if self.reference_dof is None
-                                 else list(self.reference_dof)),
-                  ordinate_dim=list(self.ordinate_dim),
-                  ordinate_unit=list(self.ordinate_unit),
-                  reference_unit=list(self.reference_unit),
-                  dimension_hint=list(self.dimension_hint),
-                  block=None if self.block is None else list(self.block),
-                  bandwidth=widths,
-                  comment=f'1/{per_octave} octave bands')
+                  **{**self.record_fields(),
+                     'comment': f'1/{per_octave} octave bands'},
+                  bandwidth=widths)
         # banding conserves the area and changes nothing about what the
         # object is — a held comparison scale included, so the report's
         # own banding compares what the narrowband comparison compared
@@ -3615,17 +3632,9 @@ class Specification(Bounded, Psd):
                 limits[name] = out
         out = Specification(
             centers, banded,
-            response_dof=list(self.response_dof),
-            reference_dof=(None if self.reference_dof is None
-                           else list(self.reference_dof)),
-            ordinate_dim=list(self.ordinate_dim),
-            ordinate_unit=list(self.ordinate_unit),
-            reference_unit=list(self.reference_unit),
-            dimension_hint=list(self.dimension_hint),
-            block=None if self.block is None else list(self.block),
-            bandwidth=widths,
-            comment=f'1/{per_octave} octave bands',
-            **limits)
+            **{**self.record_fields(),
+               'comment': f'1/{per_octave} octave bands'},
+            bandwidth=widths, **limits)
         out.interpolation = 'bin'
         out.scale_db = self.scale_db
         constraints = getattr(self, 'band_constraints', None)

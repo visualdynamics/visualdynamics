@@ -1624,3 +1624,111 @@ def test_the_curves_show_one_channel_all_events(window, pump, tmp_path):
     assert drawn >= 3 + 1, (
         f'{chosen}: all three events and the specification, '
         f'got {drawn} curves')
+
+
+# --- pinned where a mutation pass found nothing watching (2026-10-10) --
+
+def test_the_search_for_the_shift_reaches_two_percent_of_a_frame():
+    """Bounded on purpose: 2 % of the frame either side, 20 samples of
+    1024. A shift at the edge is found; one past it is not — searching
+    further was never tested, and neither was searching less."""
+    spec = _target()
+    assert lag_of(_measured(spec, repeats=3, lag=20), spec) == 20
+    assert lag_of(_measured(spec, repeats=3, lag=21), spec) != 21
+
+
+def test_a_shift_that_fits_with_nothing_to_spare_is_found():
+    """A record exactly one playing and its delay long: the delayed
+    playing ends on the last sample, and still counts."""
+    spec = _target()
+    once = _measured(spec, repeats=1, lag=3)
+    assert once.ordinate.shape[1] == FRAME + 3
+    assert lag_of(once, spec) == 3
+
+
+def test_nothing_to_align_against_is_no_shift():
+    spec = _target()
+    short = TimeHistory(np.arange(FRAME // 2) / RATE, spec.ordinate[:, :FRAME // 2],
+                        response_dof=list(spec.response_dof))
+    assert lag_of(short, spec) == 0
+    silent = _target(scales=(0.0, 0.0))
+    assert lag_of(_measured(_target(), repeats=2, lag=5), silent) == 0
+
+
+def test_a_delayed_record_still_reports_what_is_left_over():
+    """The leftover is counted from where the playings start, after the
+    delay — not from the first sample."""
+    spec = _target()
+    history = _measured(spec, repeats=3, extra=FRAME // 2, lag=100)
+    samples, share = rep_leftover(history, spec, lag=10)
+    assert samples == (history.ordinate.shape[1] - 10) % FRAME
+    assert share == pytest.approx(samples / FRAME)
+
+
+def test_a_playing_cut_off_by_the_end_of_the_record_is_not_a_playing():
+    spec = _target()
+    history = _measured(spec, repeats=3, lag=5)
+    cut = TimeHistory(history.abscissa[:-50], history.ordinate[:, :-50],
+                      response_dof=list(history.response_dof))
+    # three frames asked for — the record's own averaging, from before
+    # the cut — and only the two the cut record still holds are given
+    asked = averaging_for(history, spec)
+    assert asked.frames == 3
+    assert [p['frame'] for p in rep_playings(cut, spec, asked, lag=5)] == [0, 1]
+    # and one started before the record began is not one either
+    assert [p['frame'] for p in rep_playings(history, spec, lag=-1)] == [1, 2]
+
+
+def test_a_waveform_of_two_samples_is_the_shortest_that_frames():
+    two = TimeHistory(np.arange(2) / RATE, np.array([[0.0, 1.0]]),
+                      response_dof=['1Z+'])
+    record = TimeHistory(np.arange(4) / RATE, np.array([[0.0, 1.0, 0.0, 1.0]]),
+                         response_dof=['1Z+'])
+    assert averaging_for(record, two).frames == 2
+    one = TimeHistory(np.arange(1) / RATE, np.array([[1.0]]), response_dof=['1Z+'])
+    assert averaging_for(record, one) is None
+
+
+def test_the_srs_band_is_one_cycle_per_frame_to_a_fifth_of_the_rate():
+    """Low enough that the frame holds a cycle, high enough that the
+    filter still resolves it: rate/frame to rate/5, in the SRS's own
+    octave steps — and no band at all for a frame too short to have
+    one between."""
+    from visualdynamics.core.replication import _band_for
+
+    band = _band_for(FRAME, RATE)
+    assert band[0] == pytest.approx(RATE / FRAME)
+    assert band[-1] <= RATE / 5.0 * (1.0 + 1e-9)
+    assert band[-1] > RATE / 5.0 / 2.0 ** (1.0 / 12.0)
+    assert _band_for(5, RATE) is None, 'rate/5 is not above rate/5'
+
+
+def test_a_target_below_the_silence_floor_is_not_scored():
+    """The other side of the threshold: a control channel asked for
+    more than ZERO_TARGET_DB under the loudest is asking for nothing,
+    and is marked rather than scored."""
+    silent = 10.0 ** (-(ZERO_TARGET_DB + 20.0) / 20.0)
+    spec = _target(scales=(1.0, silent))
+    rows = compare(_measured(spec, repeats=2), spec)
+    assert {r['label']: r['zero_target'] for r in rows} == {'1Z+': False, '2Z+': True}
+
+
+def test_one_event_is_the_playing_asked_for_on_the_targets_clock():
+    from visualdynamics.core.replication import event_slice
+
+    spec = _target()
+    history = _measured(spec, repeats=3, lag=4)
+    history.ordinate[:, 4 + FRAME:4 + 2 * FRAME] *= 2.0     # the second, louder
+    second = event_slice(history, spec, 1)
+    assert second.comment == ['event 2', 'event 2']
+    assert np.allclose(second.ordinate, 2.0 * spec.ordinate)
+    assert second.abscissa[0] == 0.0
+    assert event_slice(history, spec, 7) is None
+    rows = compare(history, spec, frame=1)
+    assert {r['frame'] for r in rows} == {1}
+
+
+def test_an_unknown_reading_is_refused_by_name():
+    spec = _target()
+    with pytest.raises(ValueError, match="not a reading of a replication: .*'bogus'"):
+        compare(_measured(spec, repeats=2), spec, metrics=('waveform', 'bogus'))

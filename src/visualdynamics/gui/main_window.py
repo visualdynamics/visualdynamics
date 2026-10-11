@@ -220,6 +220,12 @@ from .tables import CopyPasteTableView
 ROLE_ORIGINAL_NAME = Qt.ItemDataRole.UserRole       # top-level, for renames
 ROLE_REFERENCE = Qt.ItemDataRole.UserRole + 1       # what an item points at
 ROLE_POPULATED = Qt.ItemDataRole.UserRole + 2       # lazy children built yet?
+ROLE_PENCIL_ON = Qt.ItemDataRole.UserRole + 3       # column 1: its table open?
+
+#: how opaque the picked element groups draw while Merge Coincident
+#: Nodes' pane is open: enough to read the parts, little enough to see
+#: the marks inside them
+MERGE_OPACITY = 0.3
 
 # room a unit cell needs beyond its text: the drop-down arrow and padding
 COMBO_CELL_PADDING = 44
@@ -324,6 +330,13 @@ def _group_element_rows(geometry, group_ids):
         np.isin(geometry.elem_group, wanted))]
 
 
+def _family_rows(geometry, families):
+    """The element rows of the given families (`element_family` names)."""
+    wanted = set(families)
+    return [row for row, code in enumerate(geometry.elem_type)
+            if element_family(int(code)) in wanted]
+
+
 def _drawable(geometry, components, entities):
     """The same selection, in what the renderer can draw.
 
@@ -331,10 +344,16 @@ def _drawable(geometry, components, entities):
     holds and picking the category draws all of them. Translating here
     rather than in the renderer keeps `add_geometry` knowing only about
     things that have coordinates — and means an empty element group correctly
-    highlights nothing rather than the whole model.
+    highlights nothing rather than the whole model. A family is its
+    elements the same way.
     """
     if components and 'groups' in components:
         components = {DRAWN_AS.get(c, c) for c in components}
+    if entities and entities.get('families'):
+        rows = _family_rows(geometry, entities['families'])
+        entities = {kind: values for kind, values in entities.items()
+                    if kind != 'families'}
+        entities['elements'] = sorted({*entities.get('elements', []), *rows})
     if entities and entities.get('groups'):
         rows = _group_element_rows(geometry, entities['groups'])
         entities = {kind: values for kind, values in entities.items()
@@ -355,13 +374,24 @@ def _label_kinds(geometry: Geometry, components: Any,
 
     A kind with more of it than `ENTITY_LABEL_LIMIT` is left out rather
     than drawn: see `_label_note`, which is what tells the user so.
+
+    A family is captioned by the element groups that hold its elements,
+    each with its name — the parts a family is made of, which is what a
+    person picking Hexes wants to read; its elements' ids were past the
+    caption limit on any model worth meshing in bricks, and said nothing
+    when they fit (Brandon, 2026-10-10).
     """
     wanted: dict[str, Any] = {}
     for kind in components or ():
         wanted[kind] = None
     for kind, chosen in (entities or {}).items():
-        if chosen:
+        if chosen and kind != 'families':
             wanted[kind] = list(chosen)
+    families = (entities or {}).get('families')
+    if families:
+        rows = _family_rows(geometry, families)
+        held = {int(group) for group in np.asarray(geometry.elem_group)[rows]}
+        wanted['groups'] = sorted(held.union(wanted.get('groups') or ()))
     return {kind: chosen for kind, chosen in wanted.items()
             if labels_fit(geometry, kind, chosen)}
 
@@ -749,7 +779,8 @@ class MainWindow(QMainWindow):
         #: clicking in the view creates things
         self.add_mode: bool = False
         #: what narrows the table being edited: ('family', name) or
-        #: ('group', id), None for a category (2026-09-30)
+        #: ('group', (id, ...)) — the element groups picked, one or
+        #: several (2026-10-10) — None for a category (2026-09-30)
         self.editing_scope: tuple | None = None
         self._picked_nodes = []       # nodes gathered for an element
         self._shape_source = None     # (geometry, shape set) while a mode plays
@@ -766,6 +797,14 @@ class MainWindow(QMainWindow):
         #: geometry has one, and the frame (basis rows and the center)
         #: the box is drawn in, in the display unit (2026-10-02)
         self._mesh: dict | None = None
+        #: Merge Coincident Nodes while its pane is open: the geometry,
+        #: its element groups, the tolerance in SI, the places found and
+        #: the kept node of each place left out (2026-10-11)
+        self._merging: dict | None = None
+        self._merge_observer = None
+        #: set while a merge rebuilds the tree and picks its groups again,
+        #: so the selection change does not put the pane away
+        self._merge_holding = False
         # Tie's first patch, while the second is being picked
         self._tie_patch: list[int] | None = None
         self._framed = ()          # what the camera was last framed for
@@ -885,6 +924,11 @@ class MainWindow(QMainWindow):
         self.scene.mesh_panel.add_asked.connect(self._mesh_add)
         self.scene.mesh_panel.close_asked.connect(self.close_mesh_pane)
         self.scene.mesh_panel.square_asked.connect(self._mesh_square_up)
+        self.scene.merge_panel.changed.connect(self._merge_refresh)
+        self.scene.merge_panel.all_asked.connect(self._merge_all)
+        self.scene.merge_panel.none_asked.connect(self._merge_none)
+        self.scene.merge_panel.merge_asked.connect(self._merge_apply)
+        self.scene.merge_panel.close_asked.connect(self.close_merge_pane)
         self.scene.rigid_panel.apply_asked.connect(
             self.generate_rigid_body_modes)
         self.data_pane.shock_panel.srs_asked.connect(self.compute_srs)
@@ -1783,7 +1827,7 @@ class MainWindow(QMainWindow):
         self.add_action.setCheckable(True)
         self.add_action.setToolTip('Add items by clicking in the view')
         self.add_action.toggled.connect(self.set_add_mode)
-        self._add_action_handle = toolbar.addAction(self.add_action)
+        toolbar.addAction(self.add_action)
         self.add_action.setVisible(False)
 
         # a bolted joint in one step (Brandon, 2026-09-26): the elements
@@ -2466,6 +2510,8 @@ class MainWindow(QMainWindow):
                         QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                 item.addChild(child)
             self._build_families(item, obj, name)
+            # rebuilt while its table is open: the pencil stays on
+            self._mark_pencils([item])
         elif isinstance(obj, (DataArray, ShapeSet, ChannelTable, Photos,
                               MatchedModes, SineSweepSpecification,
                               SineLevelSet)):
@@ -3083,6 +3129,17 @@ class MainWindow(QMainWindow):
         ('read_as_psd', 'Read as PSD', 'as_psd', 'read_as_psd_act'),
     )
 
+    #: the acts offered on a family's row rather than the geometry's: what
+    #: they add is elements of that family, a plane quads and a block
+    #: hexes, into an element group of them (Brandon, 2026-10-10)
+    FAMILY_ACTS: ClassVar[dict] = {'quads': 'add_plane', 'hexes': 'add_block'}
+
+    #: the acts offered on element groups picked in the tree rather than
+    #: the geometry's row: merging every coincident node of a whole model
+    #: ties parts that were meant to stay apart, so the merge is asked
+    #: of the groups it should tie (Brandon, 2026-10-11)
+    GROUP_ACTS: ClassVar[frozenset] = frozenset({'merge_coincident_nodes'})
+
     def acts_for(self, names=None):
         """[(verb, label, icon, handler, tooltip)] the selection can
         take, in the bar's order.
@@ -3099,13 +3156,28 @@ class MainWindow(QMainWindow):
             picked = self._selected_entities()
             if picked is not None and picked[1] == 'groups':
                 geometry = self.objects.get(picked[0])
+                acts = []
                 if (geometry is not None and len(picked[2]) > 1
                         and geometry.merge_refusal(picked[2]) is None):
-                    return [('merge_groups', 'Merge Element Groups', 'merge_groups',
-                             lambda: self.merge_groups_act(picked[0],
-                                                           picked[2]),
-                             ('Make the selected element groups one element group: the '
-                              'first keeps its name and properties'))]
+                    acts.append(
+                        ('merge_groups', 'Merge Element Groups', 'merge_groups',
+                         lambda: self.merge_groups_act(picked[0], picked[2]),
+                         ('Make the selected element groups one element '
+                          'group: the first keeps its name and properties')))
+                # only where there is something to tie: groups holding
+                # elements, as the geometry's own test asked of it
+                if geometry is not None and geometry.nodes_in(picked[2]):
+                    label = next(label for verb, label, _icon, _handler
+                                 in self.ACTS
+                                 if verb == 'merge_coincident_nodes')
+                    acts.append(
+                        ('merge_coincident_nodes', label, 'merge_nodes',
+                         lambda: self.merge_nodes_act(picked[0], picked[2]),
+                         ('Make the coincident nodes of the selected '
+                          'element groups one node — what ties parts '
+                          'meshed apart where they meet')))
+                if acts:
+                    return acts
             if self.test_item.isSelected():
                 return [('generate_report', 'Generate Report', 'report',
                          self.generate_report_act,
@@ -3118,6 +3190,16 @@ class MainWindow(QMainWindow):
                          self.new_geometry_act,
                          ('An empty geometry, in the display units, to '
                           'add planes to'))]
+            picked = self.selected_references()
+            if (len(picked) == 1 and picked[0][0] == 'family'
+                    and picked[0][3] in self.FAMILY_ACTS):
+                _kind, name, _obj, family = picked[0]
+                verb = self.FAMILY_ACTS[family]
+                applicable = dict(self.project.selection_verbs(name))
+                return [(verb, label, icon, getattr(self, handler),
+                         applicable[verb])
+                        for verb_, label, icon, handler in self.ACTS
+                        if verb_ == verb and verb in applicable]
             names = list(dict.fromkeys(
                 name for kind, name, _obj, _detail
                 in self.selected_references()
@@ -3126,10 +3208,11 @@ class MainWindow(QMainWindow):
         if not names:
             return []
         applicable = dict(self.project.selection_verbs(*names))
+        elsewhere = set(self.FAMILY_ACTS.values()) | self.GROUP_ACTS
         acts = [(verb, label, icon, getattr(self, handler),
                  applicable[verb])
                 for verb, label, icon, handler in self.ACTS
-                if verb in applicable]
+                if verb in applicable and verb not in elsewhere]
         if len(names) == 1 and names[0] in self._stale:
             acts.insert(0, ('refresh', 'Recompute', 'refresh',
                             self.refresh_selected,
@@ -3379,6 +3462,48 @@ class MainWindow(QMainWindow):
         self._report_settle.stop()
         self.report_editor.rebuild()
 
+    def _pencil_on(self, reference) -> bool:
+        """Whether this row's table is the one open — its pencil drawn on,
+        and a click on it a close. A category's when its whole table is
+        open; a family's when its elements are; an element group's when
+        it is among the groups being edited."""
+        if self.editing is None or reference is None:
+            return False
+        kind, name, detail = reference
+        if (kind not in ('component', 'family', 'group')
+                or self.editing != (name, self._component_of(reference))):
+            return False
+        scope = self.editing_scope
+        if kind == 'component':
+            return scope is None
+        if kind == 'family':
+            return scope == ('family', detail)
+        return (scope is not None and scope[0] == 'group'
+                and int(detail) in scope[1])
+
+    def _mark_pencils(self, items=None) -> None:
+        """Draw every geometry row's pencil on or off as its table is
+        open or not: the categories and families under each geometry,
+        and the element groups under each family. `items`, objects' rows,
+        keeps it to those; every top-level row when omitted."""
+        on, off = control_icon('edit_on'), control_icon('edit')
+        if items is None:
+            items = [self.test_item.child(i)
+                     for i in range(self.test_item.childCount())]
+        for item in items:
+            for j in range(item.childCount()):
+                row = item.child(j)
+                for each in [row] + [row.child(k)
+                                     for k in range(row.childCount())]:
+                    reference = each.data(0, ROLE_REFERENCE)
+                    if (reference is None or reference[0] not in
+                            ('component', 'family', 'group')):
+                        continue
+                    lit = self._pencil_on(reference)
+                    if each.data(1, ROLE_PENCIL_ON) != lit:
+                        each.setIcon(1, on if lit else off)
+                        each.setData(1, ROLE_PENCIL_ON, lit)
+
     def _tree_item_clicked(self, item, column):
         """The icon column: the pencil on a geometry's categories, and
         the refresh badge on a stale object. Nothing else lives here —
@@ -3388,10 +3513,9 @@ class MainWindow(QMainWindow):
         reference = item.data(0, ROLE_REFERENCE)
         if reference is not None and reference[0] in ('component', 'family',
                                                       'group'):
-            # the pencil is a toggle: editing this category closes it,
-            # anything else opens (or switches to) its table
-            if (self.editing == (reference[1], self._component_of(reference))
-                    and self.editing_scope == self._scope_of(reference)):
+            # the pencil is a toggle: one drawn on (`_pencil_on`) closes
+            # its table, anything else opens (or switches to) its own
+            if self._pencil_on(reference):
                 self.stop_editing()
                 return
             self.tree.setCurrentItem(item)
@@ -4208,6 +4332,7 @@ class MainWindow(QMainWindow):
         model.dataChanged.connect(self._edited_geometry)
         self.table.selectionModel().selectionChanged.connect(
             self._edit_selection_changed)
+        self._show_scope_rows(geometry)
         self._draw_edit_selection()
         self._begin_picking(geometry, self._picking_component())
 
@@ -4754,16 +4879,29 @@ class MainWindow(QMainWindow):
             return 'elements'
         return ENTITY_COMPONENT.get(kind)
 
-    @staticmethod
-    def _scope_of(reference):
+    def _scope_of(self, reference):
         """What narrows the editing: ('family', name) from a family row,
-        ('group', id) from an element group row, None from a category."""
-        kind, _name, detail = reference
+        ('group', ids) from element group rows — every element group of
+        that geometry picked in the tree, so several picked together are
+        edited together — None from a category."""
+        kind, name, detail = reference
         if kind == 'family':
             return ('family', detail)
         if kind == 'group':
-            return ('group', int(detail))
+            picked = self._picked_groups(name)
+            return ('group', picked if int(detail) in picked else (int(detail),))
         return None
+
+    def _picked_groups(self, name) -> tuple[int, ...]:
+        """The element groups of geometry `name` picked in the tree, in
+        the geometry's own order."""
+        picked = {int(ref[2]) for it in self.tree.selectedItems()
+                  if (ref := it.data(0, ROLE_REFERENCE)) is not None
+                  and ref[0] == 'group' and ref[1] == name}
+        geometry = self.objects.get(name)
+        if geometry is None:
+            return tuple(sorted(picked))
+        return tuple(int(g) for g in geometry.group_id if int(g) in picked)
 
     @property
     def editing_family(self) -> str | None:
@@ -4779,7 +4917,7 @@ class MainWindow(QMainWindow):
             return None
         if scope[0] == 'family':
             return scope[1]
-        rows = np.flatnonzero(geometry.elem_group == scope[1])
+        rows = np.flatnonzero(np.isin(geometry.elem_group, scope[1]))
         if len(rows):
             return element_family(int(geometry.elem_type[rows[0]]))
         return None
@@ -4788,7 +4926,9 @@ class MainWindow(QMainWindow):
         """Edit a geometry's nodes, coordinate systems, a family of its
         elements or one of its element groups in a table beside the model."""
         kind, obj, detail = self.current_reference()
-        reference = (kind, None, detail)
+        item = self.tree.currentItem()
+        reference = (kind, item.data(0, ROLE_REFERENCE)[1] if kind else None,
+                     detail)
         component = self._component_of(reference) if kind else None
         if not isinstance(obj, Geometry) or component not in ENTITY_TABLES:
             self._show_status(
@@ -4829,27 +4969,23 @@ class MainWindow(QMainWindow):
         if scope is not None and scope[0] == 'family':
             return 'the ' + FAMILY_LABELS[scope[1]].lower()
         if scope is not None and scope[0] == 'group':
-            return f'element group {scope[1]}'
+            ids = ', '.join(str(group) for group in scope[1])
+            return (f'element group {ids}' if len(scope[1]) == 1
+                    else f'element groups {ids}')
         return component.replace('_', ' ')
 
     def _select_scope_rows(self, geometry):
-        """Open the table on what was clicked: a family's rows of the
-        elements table, an element group's row of the Element Groups table. The table
-        holds every row — one row per element, one per element group — and the
-        scope says which are being looked at."""
+        """Open the table on what was clicked: the rows the scope holds
+        (`_show_scope_rows`), and of those, an element group's selected."""
         scope = self.editing_scope
         model = self.table.model()
+        rows = self._show_scope_rows(geometry)
         if scope is None or model is None:
             return
-        component = self.editing[1]
-        # a family's rows are most of the table, and a selection is a
-        # statement (Tie reads it): the family row opens the table on
-        # nothing selected, an element group row on its element group
-        if component == 'elements' and scope[0] == 'group':
-            rows = [int(r) for r in np.flatnonzero(geometry.elem_group == scope[1])]
-        elif component == 'groups' and scope[0] == 'group':
-            rows = [int(r) for r in np.flatnonzero(geometry.group_id == scope[1])]
-        else:
+        # a selection is a statement (Tie reads it): the family row opens
+        # its table on nothing selected, an element group row on its
+        # element group
+        if scope[0] != 'group':
             return
         selection = self.table.selectionModel()
         blocked = selection.blockSignals(True)
@@ -4861,6 +4997,31 @@ class MainWindow(QMainWindow):
         selection.blockSignals(blocked)
         if rows:
             self.table.scrollTo(model.index(rows[0], 0))
+
+    def _show_scope_rows(self, geometry) -> list[int]:
+        """A table opened from a narrower row holds what that row is and
+        nothing else (Brandon, 2026-10-10): the Element Groups table from
+        element group rows those element groups, the elements table from
+        a family row that family's elements (the pencil on Beams listed
+        every element of the geometry). Read from the scope, not from
+        rows, so a table rebuilt after an edit — rows renumbered by
+        something added or removed — holds the same things, an element
+        just added in the family among them. Returns their rows."""
+        scope = self.editing_scope
+        component = self.editing[1] if self.editing is not None else None
+        rows = None
+        if scope is not None and component == 'groups' and scope[0] == 'group':
+            rows = np.flatnonzero(np.isin(geometry.group_id, scope[1]))
+        elif scope is not None and component == 'elements':
+            rows = (np.asarray(_family_rows(geometry, [scope[1]]), dtype=int)
+                    if scope[0] == 'family'
+                    else np.flatnonzero(np.isin(geometry.elem_group, scope[1])))
+        if rows is None:
+            self.table.show_rows(None)
+            return []
+        rows = [int(r) for r in rows]
+        self.table.show_rows(rows)
+        return rows
 
     # ---- add mode -----------------------------------------------------------
 
@@ -4914,6 +5075,10 @@ class MainWindow(QMainWindow):
             return
         group_id = geometry.add_group()
         self.project.record_call(geometry, 'add_group')
+        scope = self.editing_scope
+        if scope is not None and scope[0] == 'group':
+            # a table of the picked element groups shows the one just added
+            self.editing_scope = ('group', (*scope[1], int(group_id)))
         self._after_geometry_change(name, geometry, f'Added element group {group_id}')
         model = self.table.model()
         if model is not None:
@@ -4932,6 +5097,7 @@ class MainWindow(QMainWindow):
         """Show only what the current selection can actually do."""
         if not hasattr(self, 'edit_toggle_action'):
             return                      # the toolbar is still being built
+        self._mark_pencils()
         editing = self.editing is not None
         if self.edit_toggle_action.isChecked() != editing:
             self.edit_toggle_action.setChecked(editing)
@@ -5655,7 +5821,7 @@ class MainWindow(QMainWindow):
         box.addItem(self.NEW_GROUP, None)
         scope = self.editing_scope
         if keep is None and scope is not None and scope[0] == 'group':
-            keep = scope[1]
+            keep = scope[1][0]
         if keep is not None and box.findData(keep) >= 0:
             box.setCurrentIndex(box.findData(keep))
         else:
@@ -7440,6 +7606,10 @@ class MainWindow(QMainWindow):
             current = self.tree.currentItem()
             if current is None or current.text(0) != self._mesh['name']:
                 self.close_mesh_pane()
+        # the places belong to the groups picked when the pane opened:
+        # picking anything else puts it away
+        if self._merging is not None and not self._merge_holding:
+            self.close_merge_pane(redraw=False)
         # Making the owner row current means "the whole object", so its
         # grid picks are released — a cell selected minutes ago must not
         # silently turn a later delete-the-object into delete-that-record.
@@ -7506,6 +7676,8 @@ class MainWindow(QMainWindow):
 
     def _units_changed(self, name):
         self.unit_system = SYSTEMS[name]
+        if self._merging is not None:
+            self._open_merge_panel()        # its tolerance, in the new unit
         self.render_current()
         # an open geometry edit table was built once, in the system of
         # its day: the nodes' coordinates and the element groups' properties
@@ -7687,10 +7859,11 @@ class MainWindow(QMainWindow):
                 if kind == 'component' and detail:
                     entry['components'].add(detail)
                 elif kind == 'family':
-                    # a family is its elements, as an element group is its own
-                    rows = [i for i, code in enumerate(obj.elem_type)
-                            if element_family(int(code)) == detail]
-                    entry['entities'].setdefault('elements', []).extend(rows)
+                    # a family is its elements, as an element group is its
+                    # own — kept as the family until it is drawn
+                    # (`_drawable`), so it can be captioned by its element
+                    # groups' names rather than its elements' ids
+                    entry['entities'].setdefault('families', []).append(detail)
                 elif kind in ENTITY_COMPONENT:
                     entry['entities'].setdefault(
                         ENTITY_COMPONENT[kind], []).append(detail)
@@ -9452,6 +9625,8 @@ class MainWindow(QMainWindow):
         else:
             # explicit: clearing a scene lets the next mesh reset the camera
             self.scene.plotter.camera_position = camera
+        # cleared with the rest: the merge's marks go back on
+        self._draw_merge_marks(render=False)
         self.scene.plotter.render()
         status = self._geometry_status(geometries, ignored)
         return f'{status}  |  {arrows_note}' if arrows_note else status
@@ -9475,11 +9650,15 @@ class MainWindow(QMainWindow):
                 color_override=colors['scene_highlight'], node_size=11.0,
                 line_width=4.0, text_color=colors['scene_text'])
         if entities:
+            # translucent while the merge's pane is open: its marks sit
+            # where parts meet, inside a solid more often than not, and
+            # an opaque block hid most of them (Brandon, 2026-10-11)
             axis_unit = add_geometry(
                 self.scene.plotter, geometry, unit_system=self.unit_system,
                 entities=entities, labels=wanted,
                 color_override=colors['scene_highlight'],
                 node_size=16.0, line_width=5.0,
+                opacity=MERGE_OPACITY if self._merging is not None else 1.0,
                 text_color=colors['scene_text'])
         return axis_unit
 
@@ -9525,7 +9704,11 @@ class MainWindow(QMainWindow):
                     f'({xyz[0]:.4g}, {xyz[1]:.4g}, {xyz[2]:.4g}) {unit}')
         parts = [f'{len(values)} {ENTITY_LABELS[kind]}'
                  f'{"s" * (len(values) != 1)}'
-                 for kind, values in entities.items() if values]
+                 for kind, values in entities.items()
+                 if values and kind != 'families']
+        for family in entities.get('families') or ():
+            parts.append(f'{len(_family_rows(geometry, [family]))} '
+                         f'{FAMILY_LABELS[family].lower()}')
         return 'Highlighting ' + ', '.join(parts)
 
     # ---- the averaging: the frames a PSD would be built from ------------
@@ -11489,55 +11672,340 @@ class MainWindow(QMainWindow):
             f'{added}: 6 modes {self._describe_rigid(obj, properties)}, '
             f'linked to {name}')
 
-    def merge_nodes_act(self) -> None:
-        """Make the selected geometry's coincident nodes one node — how
-        planes meshed apart are tied where they meet. The tolerance is
-        asked in the display unit."""
-        obj = self.current_object()
+    def merge_nodes_act(self, name: str, groups) -> None:
+        """Open Merge Coincident Nodes on geometry `name`'s element groups
+        `groups`: every place their nodes coincide marked in the view,
+        the tolerance in the pane, a click on a mark to leave that place
+        out or put it back, and Merge to make the marked places one node
+        each (Brandon, 2026-10-11: select, see, set, apply, so a joint
+        can be built a place at a time)."""
+        obj = self.objects.get(name)
         if not isinstance(obj, Geometry):
-            self._show_status('Select a geometry to merge its coincident '
-                              'nodes')
             return
-        low, high = obj.extent
-        default = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
-        defined = obj.units_defined
-        unit = self.unit_system.label_text('length') if defined else 'units'
-        shown = (float(self.unit_system.from_si(default, 'length'))
-                 if defined else default)
-        typed, ok = QInputDialog.getDouble(
-            self, 'Merge Coincident Nodes',
-            f'Nodes closer than this are one node [{unit}]:', shown, 0.0,
-            1e9, 9)
-        if not ok:
+        if self.editing is not None:
+            self.stop_editing()
+        if self._mesh is not None:
+            self.close_mesh_pane()
+        groups = sorted({int(g) for g in groups})
+        self._merging = {'name': name, 'groups': groups,
+                         'tolerance': self._merge_default(obj, groups),
+                         'spots': [], 'off': set(), 'refusal': None,
+                         'done': [], 'said': ''}
+        self._open_merge_panel()
+        self.scene.merge_panel.show()
+        self._merge_refresh()
+        self._begin_merge_clicks()
+        # drawn again, translucent, so the marks inside a solid show
+        self.render_current()
+
+    @staticmethod
+    def _merge_default(geometry, groups) -> float:
+        """The tolerance the pane opens on: a quarter of the groups'
+        finest mesh spacing (Brandon, 2026-10-11: a millionth of the
+        model's size missed parts meshed a hair apart), else a millionth
+        of the geometry's size where there is no spacing to read."""
+        spacing = geometry.node_spacing(groups)
+        if spacing:
+            return 0.25 * spacing
+        low, high = geometry.extent
+        return 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+
+    def _merge_unit(self, geometry) -> tuple[bool, str]:
+        """(whether lengths convert, the unit's label) for the pane."""
+        defined = geometry.units_defined
+        return defined, (self.unit_system.label_text('length') if defined
+                         else 'units')
+
+    def _open_merge_panel(self) -> None:
+        """Say the pane's tolerance in the display unit, and its groups."""
+        merging = self._merging
+        geometry = self.objects[merging['name']]
+        defined, unit = self._merge_unit(geometry)
+        shown = (float(self.unit_system.from_si(merging['tolerance'], 'length'))
+                 if defined else merging['tolerance'])
+        names = [geometry.group_name[list(geometry.group_id).index(g)].strip()
+                 or f'element group {g}' for g in merging['groups']]
+        self.scene.merge_panel.open_for(unit, shown, ', '.join(names))
+
+    def _merge_excluded(self) -> list[int]:
+        """The nodes of every place left out: what `exclude` names."""
+        merging = self._merging
+        return sorted(node for spot in merging['spots']
+                      if spot[0] in merging['off'] for node in spot)
+
+    def _merge_refresh(self) -> None:
+        """Find the places the tolerance makes one, keep the ones left
+        out that still exist, say what Merge would do, and mark them."""
+        merging = self._merging
+        if merging is None:
             return
-        tolerance = (float(self.unit_system.to_si(typed, 'length'))
-                     if defined else typed)
-        name = self.object_item().text(0)
+        geometry = self.objects.get(merging['name'])
+        if geometry is None:
+            self.close_merge_pane()
+            return
+        panel = self.scene.merge_panel
+        defined, unit = self._merge_unit(geometry)
+        typed = panel.value()
+        merging['tolerance'] = (float(self.unit_system.to_si(typed, 'length'))
+                                if defined else typed)
+        merging['spots'] = geometry.coincident_spots(merging['tolerance'],
+                                                     merging['groups'])
+        merging['off'] &= {spot[0] for spot in merging['spots']}
+        merging['refusal'] = geometry.merge_folds(
+            merging['tolerance'], merging['groups'], self._merge_excluded())
+        total = len(merging['spots'])
+        marked = total - len(merging['off'])
+        said = merging['said']
+        if merging['refusal'] is not None:
+            text = merging['refusal']
+            panel.show_reading(f'{said}{text[:1].upper()}{text[1:]}.', False)
+        elif not total:
+            panel.show_reading(f'{said}No two nodes are within {typed:g} '
+                               f'{unit} of each other here'
+                               f'{" now" if said else ""}.', False)
+        else:
+            going = sum(len(spot) - 1 for spot in merging['spots']
+                        if spot[0] not in merging['off'])
+            links = len(geometry.merge_collapses(
+                merging['tolerance'], merging['groups'], self._merge_excluded()))
+            # links across the gaps go with them (Brandon, 2026-10-11),
+            # and are said before, not found missing after
+            dropped = (f' {links} link{"s" * (links != 1)} joining them '
+                       f'{"go" if links != 1 else "goes"}.' if links else '')
+            panel.show_reading(
+                f'{said}{total} place{"s" * (total != 1)} where nodes '
+                f'{"still " if said else ""}coincide; '
+                f'{marked} marked, {going} node{"s" * (going != 1)} to merge.'
+                f'{dropped} Click a mark in the view to leave it out or put '
+                'it back.', marked > 0)
+        self._draw_merge_marks()
+
+    def _merge_points(self) -> np.ndarray:
+        """Where each place is drawn: its kept node, in the view's units."""
+        from ..viz.geometry import display_points
+
+        merging = self._merging
+        geometry = self.objects[merging['name']]
+        if not merging['spots']:
+            return np.empty((0, 3))
+        points, _ = display_points(geometry, self.unit_system)
+        rows = geometry.node_index([spot[0] for spot in merging['spots']])
+        return np.asarray(points, dtype=float)[rows]
+
+    def _merge_done_points(self) -> np.ndarray:
+        """Where the places merged while the pane has been open are
+        drawn: each one's surviving node, in the view's units."""
+        from ..viz.geometry import display_points
+
+        merging = self._merging
+        if merging is None or not merging['done']:
+            return np.empty((0, 3))
+        geometry = self.objects.get(merging['name'])
+        alive = [n for n in merging['done']
+                 if geometry is not None and n in set(geometry.node_id.tolist())]
+        if not alive:
+            return np.empty((0, 3))
+        points, _ = display_points(geometry, self.unit_system)
+        return np.asarray(points, dtype=float)[geometry.node_index(alive)]
+
+    def _draw_merge_marks(self, render: bool = True) -> None:
+        """The places, marked: the ones to merge large in the picked
+        color, the ones left out small in the text color — still there
+        to be clicked back."""
+        plotter = self.scene.plotter
+        if plotter is None:
+            return
+        for actor in ('merge-marked', 'merge-left-out', 'merge-done'):
+            plotter.remove_actor(actor, render=False)
+        merging = self._merging
+        done = self._merge_done_points()
+        if len(done):
+            # what this pane has merged so far: squares in their own
+            # color, not clickable — the places that are one node now
+            plotter.add_points(
+                done, color=resolve_theme(self.theme_name)['scene_merged'],
+                point_size=12.0, render_points_as_spheres=False,
+                name='merge-done', pickable=False, reset_camera=False,
+                render=False)
+        if merging is not None and merging['spots']:
+            colors = resolve_theme(self.theme_name)
+            points = self._merge_points()
+            off = np.array([spot[0] in merging['off']
+                            for spot in merging['spots']])
+            for actor, rows, color, size in (
+                    ('merge-marked', ~off, colors['scene_picked'], 16.0),
+                    ('merge-left-out', off, colors['scene_text'], 12.0)):
+                if rows.any():
+                    plotter.add_points(
+                        points[rows], color=color, point_size=size,
+                        render_points_as_spheres=True, name=actor,
+                        pickable=False, reset_camera=False, render=False)
+        if render:
+            plotter.render()
+
+    def toggle_merge_place(self, index: int) -> None:
+        """Leave the `index`th place out of the merge, or put it back —
+        what a click on its mark does."""
+        merging = self._merging
+        if merging is None or not 0 <= index < len(merging['spots']):
+            return
+        kept = merging['spots'][index][0]
+        merging['off'] ^= {kept}
+        self._merge_refresh()
+
+    def merge_place_at(self, x: float, y: float) -> int | None:
+        """The place whose mark is under this pixel, or None."""
+        from ..viz.pick import ScreenProjector, _nearest_candidate
+
+        if self._merging is None or not self._merging['spots']:
+            return None
+        projector = ScreenProjector(self.scene.plotter.renderer,
+                                    self._merge_points())
+        screen, depth = projector.screen()
+        ratio = self.devicePixelRatioF()
+        distances = np.linalg.norm(screen - np.array([x, y]), axis=1)
+        return _nearest_candidate(distances, depth, 12.0 * ratio, 2.0 * ratio)
+
+    def _begin_merge_clicks(self) -> None:
+        """Watch clicks ahead of the camera: one on a mark toggles it,
+        anywhere else turns the view as usual."""
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        if interactor is None or self._merge_observer is not None:
+            return
+        self._merge_observer = interactor.interactor.AddObserver(
+            'LeftButtonPressEvent', self._on_merge_press, 10.0)
+
+    def _on_merge_press(self, caller, _event) -> None:
+        position = self._cursor_position()
+        if position is None:
+            return
+        index = self.merge_place_at(*position)
+        if index is None:
+            return                      # not on a mark: the camera's
+        self.toggle_merge_place(index)
+        self._abort(caller, self._merge_observer)
+
+    def _merge_all(self) -> None:
+        if self._merging is not None:
+            self._merging['off'] = set()
+            self._merge_refresh()
+
+    def _merge_none(self) -> None:
+        if self._merging is not None:
+            self._merging['off'] = {spot[0] for spot in self._merging['spots']}
+            self._merge_refresh()
+
+    def _merge_apply(self) -> None:
+        """Merge the marked places: the project's verb, the ones left out
+        as its `exclude`. The pane stays open on the same groups (Brandon,
+        2026-10-11: closing it, and the tree's selection with it, left
+        nothing to show the merge had happened): the places merged drop
+        out of the marks and are drawn as done, the ones left out are
+        marked again for the next Merge, and the reading says what this
+        one did."""
+        merging = self._merging
+        if merging is None:
+            return
+        name = merging['name']
+        obj = self.objects.get(name)
+        excluded = self._merge_excluded()
+        kept = [spot[0] for spot in merging['spots']
+                if spot[0] not in merging['off']]
         try:
-            found = self.project.merge_coincident_nodes(name, tolerance)
+            found = self.project.merge_coincident_nodes(
+                name, merging['tolerance'], groups=merging['groups'],
+                **({'exclude': excluded} if excluded else {}))
         except (ValueError, TypeError) as refusal:
+            # said in the pane too, at the top of its reading: on the
+            # status line alone, a refused Merge looked like a Merge that
+            # did nothing (Brandon, 2026-10-11, mode shapes linked to
+            # the geometry naming nodes it would remove)
+            text = str(refusal)
+            merging['said'] = f'Not merged: {text[:1].lower()}{text[1:]}. '
+            self._merge_refresh()
             self._show_status(f'{name}: {refusal}')
             return
-        self._refresh_item(self.object_item(), obj)
+        merging['done'].extend(kept)
+        merging['off'] = set()
+        links = found.get('links', 0)
+        merging['said'] = (
+            f'Merged {found["merged"]} node{"s" * (found["merged"] != 1)} '
+            f'into {found["into"]}'
+            + (f', {links} link{"s" * (links != 1)} removed' if links else '')
+            + ' — drawn as squares. ')
+        # the rows are rebuilt, which drops the selection the scene and
+        # the pane stand on: rebuilt and picked again with the pane held
+        # open — a selection change otherwise puts it away (blocking the
+        # tree's signals does not: the selection model reports too)
+        self._merge_holding = True
+        try:
+            self._refresh_item(self._item_for_object(name), obj)
+            self._select_group_rows(name, merging['groups'])
+        finally:
+            self._merge_holding = False
+        self.refresh_compatibility()
+        self._merge_refresh()
         self.render_current()
         doubled = found.get('duplicates', 0)
         made_one = (f'; {doubled} element{"s" * (doubled != 1)} filling a cell '
                     'another already filled made one' if doubled else '')
+        links = found.get('links', 0)
+        dropped = (f'; {links} link{"s" * (links != 1)} joining them removed'
+                   if links else '')
         self._show_status(
             f'{name}: merged {found["merged"]} node'
             f'{"s" * (found["merged"] != 1)} into {found["into"]} — '
-            f'{obj.num_nodes} nodes remain{made_one}' if found['merged'] else
-            f'{name}: no two nodes are within {typed:g} {unit} of each '
-            f'other{made_one}')
+            f'{obj.num_nodes} nodes remain{made_one}{dropped}')
+
+    def _select_group_rows(self, name: str, groups) -> None:
+        """Pick geometry `name`'s element group rows `groups` in the tree
+        again, their families opened, the first current."""
+        item = self._item_for_object(name)
+        if item is None:
+            return
+        self.tree.clearSelection()
+        wanted = {int(g) for g in groups}
+        first = None
+        for i in range(item.childCount()):
+            family = item.child(i)
+            for j in range(family.childCount()):
+                row = family.child(j)
+                reference = row.data(0, ROLE_REFERENCE)
+                if (reference is not None and reference[0] == 'group'
+                        and int(reference[2]) in wanted):
+                    family.setExpanded(True)
+                    row.setSelected(True)
+                    first = first or row
+        if first is not None:
+            self.tree.setCurrentItem(first, 0,
+                                     QItemSelectionModel.SelectionFlag.NoUpdate)
+
+    def close_merge_pane(self, redraw: bool = True) -> None:
+        """Put the pane away, with its marks and its watch on clicks;
+        `redraw` draws the groups opaque again, which a caller about to
+        render anyway leaves to itself."""
+        self.scene.merge_panel.hide()
+        if self._merging is None:
+            return
+        self._merging = None
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        if interactor is not None and self._merge_observer is not None:
+            with contextlib.suppress(Exception):
+                interactor.interactor.RemoveObserver(self._merge_observer)
+        self._merge_observer = None
+        if redraw:
+            self.render_current()
+        else:
+            self._draw_merge_marks()
 
     def new_geometry_act(self) -> None:
         """An empty geometry in the project, in the display length unit,
-        selected so its bar offers Add Plane."""
+        selected, its Quads row the one that offers Add Plane."""
         unit = self.unit_system.unit('length')
         name = self.project.new_geometry('Geometry', unit=unit)
         self.show_object(name)
         self._show_status(f'{name}: an empty geometry, lengths in {unit} — '
-                          'Add Plane on its bar puts plates in it')
+                          'select its Quads to Add Plane, its Hexes to Add Block')
 
     def add_plane_act(self) -> None:
         """Plates typed into the selected geometry, in the pane beside
@@ -11668,7 +12136,8 @@ class MainWindow(QMainWindow):
 
         return ('add_block' if kind == 'block' else 'add_plane',
                 {'corner': tidy(corner), 'edges': [tidy(e) for e in edges],
-                 'size': values['size'], 'group': values['group']})
+                 'size': values['size'], 'group': values['group'],
+                 'apart': values['apart']})
 
     def _mesh_part(self):
         from ..core import mesh
@@ -11701,7 +12170,10 @@ class MainWindow(QMainWindow):
             panel.show_reading(f'{refusal[:1].upper()}{refusal[1:]}.', False)
             return
         self._draw_plane_preview(part)
-        on, _rows = mesh.landing(obj, part)
+        # kept apart applies only once there is something to keep it from
+        panel.apart.setVisible(bool(obj.num_nodes))
+        apart = bool(obj.num_nodes) and panel.values()['apart']
+        on, _rows = mesh.landing(obj, part, apart=apart)
         first = part.node_xyz[part.node_index(part.elem_conn[0])]
         if self._mesh['defined']:
             first = self.unit_system.from_si(first, 'length')
@@ -11722,7 +12194,7 @@ class MainWindow(QMainWindow):
                  f'a new element group {group!r}' if group else
                  'an unnamed element group of its own')
         shared = int(on.sum())
-        doubled = mesh.already_there(obj, part)
+        doubled = mesh.already_there(obj, part, apart=apart)
         overlap = (f' {doubled} of the elements are already there where it '
                    'overlaps, and are left out.' if doubled else '')
         panel.show_reading(
@@ -11742,9 +12214,11 @@ class MainWindow(QMainWindow):
             return
         name = self._mesh['name']
         obj = self.objects[name]
+        # the keyword only when used, so a journal line reads as before
+        apart = {'apart': True} if call['apart'] and obj.num_nodes else {}
         found = getattr(self.project, verb)(
             name, call['corner'], *call['edges'], call['size'], call['group'],
-            unit=self._mesh['unit'])
+            unit=self._mesh['unit'], **apart)
         self._refresh_item(self._item_for_object(name), obj)
         self.render_current()
         noun = 'bricks' if verb == 'add_block' else 'plates'

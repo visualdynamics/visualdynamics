@@ -128,7 +128,7 @@ the history that justifies it. No restating of the signature.
 
 ## Tests
 
-The suite is the specification. About 3 300 tests run headless in
+The suite is the specification. About 4 300 tests run headless in
 three minutes on four workers, most of them through a real
 `MainWindow` built off screen. The conventions:
 
@@ -145,6 +145,13 @@ three minutes on four workers, most of them through a real
   the named test fail; a test that passes with the fix reverted is
   testing nothing. Clear `__pycache__` between the break and the
   restore, or the interpreter keeps running the broken bytecode.
+- **A numeric module is falsified whole.** `tools/mutate.py MODULE
+  TESTS…` makes one small change at a time — a comparison flipped,
+  an operator swapped, a constant moved — runs the named tests
+  against each in a private copy of `src/`, and prints every change
+  they did not notice. Each survivor is a gap or a change that cannot
+  alter behavior; reading which is the work, and a gap gets a test
+  pinned by value.
 - **GUI behavior is pinned by a named headless test, not a script.**
   `tests/conftest.py` gives `window` (a `MainWindow` with an offscreen
   3-D view), `pump` (drain the event loop), `fixture_path`, `project`

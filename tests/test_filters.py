@@ -97,18 +97,18 @@ def test_a_corner_at_or_above_nyquist_is_refused():
 
 
 def test_the_settings_validate_at_entry():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='the high edge must be above zero'):
         Filtering(high=0.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='at least first order'):
         Filtering(high=100.0, order=0)
 
 
 def test_uneven_sampling_is_refused():
     data = _history([_sine(50.0)])
     data.abscissa = data.abscissa ** 1.01
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='A sample rate needs evenly spaced time samples'):
         filtered(data, Filtering(high=400.0))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='evenly spaced time samples'):
         integrate(data)
 
 
@@ -337,7 +337,7 @@ def test_the_kind_is_derived_from_which_edges_exist():
         Filtering()
     with pytest.raises(ValueError, match='runs upward'):
         Filtering(low=500.0, high=5.0)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match='positional argument'):
         # keyword-only on purpose: the first field was `corner` until
         # 2026-08-28, and a bare Filtering(200.0) quietly flipping
         # from low-pass to high-pass must not survive a call site

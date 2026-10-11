@@ -795,3 +795,162 @@ def test_a_banded_comparison_is_judged_on_its_bins_own_edges():
                     centers, lower, over=False, reading='bin',
                     spec_widths=banded.bandwidth, widths=measured.bandwidth)
     assert not plain.any()
+
+
+# ---- pinned by value: what a mutation pass found unguarded (2026-10-10) --
+
+
+@pytest.mark.parametrize('values, whole, half', [
+    # -3 dB/octave, power proportional to 1/f — the log form, the most
+    # common sloped segment a random specification is written with
+    ((0.1, 0.01), np.log(10.0), 0.5 * np.log(10.0)),
+    # flat
+    ((1.0, 1.0), 90.0, np.sqrt(1000.0) - 10.0),
+    # +3 dB/octave, power proportional to f: (f2^2 - f1^2) / 20
+    ((1.0, 10.0), (100.0 ** 2 - 10.0 ** 2) / 20.0,
+     (1000.0 - 100.0) / 20.0),
+])
+def test_the_power_law_area_is_the_closed_form(values, whole, half):
+    """The area under a power law between two breakpoints, against the
+    integral done by hand, over the whole segment and over a part of
+    it. The slope of -1 has a form of its own (a logarithm) and
+    nothing checked it before — swapping its product for a quotient
+    passed every test."""
+    f = (10.0, 100.0)
+    lows, highs = np.array([10.0, 10.0]), np.array([100.0, np.sqrt(1000.0)])
+    got = compliance.log_log_areas(f, values, lows, highs)
+    assert got == pytest.approx([whole, half], rel=1e-12)
+    assert compliance.log_log_area(f, values) == pytest.approx(whole, rel=1e-12)
+    # a band backwards or empty has no area
+    assert compliance.log_log_areas(f, values, [50.0], [50.0]) == pytest.approx([0.0])
+    # and with a segment before the one read, the whole of that segment
+    # is summed in its own form — a two-point curve never reaches it
+    longer = compliance.log_log_areas((10.0, 100.0, 1000.0),
+                                      (*values, values[1]), [10.0], [1000.0])
+    assert longer == pytest.approx([whole + values[1] * 900.0], rel=1e-12)
+
+
+def test_the_signed_rms_deviation_by_hand():
+    """20 log10 of the ratio, line by line; the RMS of those; the sign
+    of their mean. The SRS and the sine readings both report this
+    number, and its one test compared it with itself."""
+    # a target that is not one, or got/wanted and got*wanted agree
+    wanted = np.array([3.0, 7.0])
+    six = 20.0 * np.log10(2.0)
+    assert compliance.signed_rms_db(2.0 * wanted, wanted) == pytest.approx(six)
+    assert compliance.signed_rms_db(0.5 * wanted, wanted) == pytest.approx(-six)
+    mixed = np.array([4.0, 0.5])            # +12.04 and -6.02 dB
+    rms = np.sqrt(((2.0 * six) ** 2 + six ** 2) / 2.0)
+    assert compliance.signed_rms_db(mixed * wanted, wanted) == pytest.approx(rms)
+    assert compliance.signed_rms_db(wanted / mixed, wanted) == pytest.approx(-rms)
+
+
+def test_the_share_outside_counts_its_edges_one_way():
+    """One-sided, reaching the threshold is outside (the lines-out
+    chart's ceiling); two-sided, only past either limit is. Not a
+    number is not a line."""
+    assert compliance.outside_fraction([1.0, 2.0, 3.0, 4.0], 3.0) == 50.0
+    assert compliance.outside_fraction([1.0, 2.0, 3.0, 4.0], 2.0, 3.0) == 50.0
+    assert compliance.outside_fraction([2.0, 3.0], 2.0, 3.0) == 0.0
+    assert compliance.outside_fraction([1.0, np.nan, 5.0], 2.0, 3.0) == 100.0
+    assert compliance.outside_fraction([np.nan], 2.0) == 0.0
+
+
+def test_two_binned_curves_are_judged_on_the_coarser_grid():
+    """A target written per 2 Hz bin against a measurement every half
+    hertz is judged per 2 Hz bin — a requirement on a bin's power,
+    not on every line under it — and the other way round as well:
+    whichever is coarser sets the cells. The choice compares the
+    median bin widths, and taking the sum of a bin's edges for its
+    width passed every test before (mutation testing, 2026-10-10)."""
+    coarse, fine = np.arange(10.0, 101.0, 2.0), np.arange(10.0, 101.0, 0.5)
+
+    def curve(kind, f):
+        out = kind(f, np.ones((1, f.size)), response_dof=['1X+'],
+                   ordinate_dim='acceleration**2/frequency')
+        out.interpolation = 'bin'
+        return out
+
+    for spec_f, meas_f in ((coarse, fine), (fine, coarse)):
+        found = compliance.cells(curve(Specification, spec_f), curve(Psd, meas_f))
+        assert len(found) == coarse.size
+        assert {round(cell['span'], 9) for cell in found} == {2.0}
+
+
+def test_six_bands_out_are_the_same_share_at_the_bottom_and_the_top():
+    """Proportional bands grow geometrically in hertz, so a share of
+    hertz read six sixth-octave bands out as 0.45 % at the bottom and
+    44.7 % at the top (Brandon, 2026-09-21). The share counts cells,
+    each weighted by how much of itself was judged — the same six
+    read the same anywhere. Weighting by width times span instead of
+    width over span passed every test before, since on narrowband
+    lines every span is equal (mutation testing, 2026-10-10)."""
+    f = np.linspace(0.0, 2000.0, 4001)[1:]
+    flat = np.ones((1, f.size))
+    spec = Specification(f, flat, response_dof=['1X+'],
+                         ordinate_dim='acceleration**2/frequency',
+                         abort_upper=2.0 * flat, abort_lower=0.5 * flat).to_octave(6)
+    bands = Psd(f, flat, response_dof=['1X+'],
+                ordinate_dim='acceleration**2/frequency').to_octave(6)
+    centers = bands.abscissa
+    low, high = int(np.searchsorted(centers, 20.0)), int(np.searchsorted(centers, 1600.0))
+    read = []
+    for out in (np.arange(low, low + 6), np.arange(high - 6, high)):
+        measured = Psd(centers, bands.ordinate.copy(), response_dof=['1X+'],
+                       ordinate_dim='acceleration**2/frequency',
+                       bandwidth=bands.bandwidth)
+        measured.ordinate[0, out] *= 4.0
+        read.append(compliance.compare(spec, measured, scale_db=0))
+    bottom, top = read
+    assert bottom['abort_lines'] == top['abort_lines']
+    assert bottom['abort_percent'] == pytest.approx(top['abort_percent'], rel=1e-9)
+    assert bottom['abort_percent'] == pytest.approx(
+        100.0 * bottom['abort_lines'] / bottom['lines'], rel=1e-9)
+
+
+def test_the_srs_reading_scores_only_what_the_specification_names():
+    """A DOF the specification does not name is not scored, a line
+    outside the specification's band is not scored, and each score
+    carries its event's block."""
+    from visualdynamics.core.data import ShockSpecification, Srs
+
+    f = np.geomspace(10.0, 2000.0, 30)
+    spec = ShockSpecification(f, np.full((1, 30), 50.0), response_dof=['101Z+'],
+                              ordinate_dim='acceleration', ordinate_unit='m/s**2')
+    wide = np.geomspace(1.0, 2000.0, 40)        # starts a decade below the spec
+    measured = Srs(wide, np.vstack([np.full(40, 100.0), np.full(40, 100.0)]),
+                   response_dof=['101Z+', '999Z+'], ordinate_dim='acceleration',
+                   ordinate_unit='m/s**2', block=['shock 1', 'shock 1'])
+    measured.ordinate[0, :5] = 1e6              # below 10 Hz: unscored
+    scores = compliance.srs_errors(spec, measured)
+    assert [(dof, block) for dof, block, _db in scores] == [('101Z+', 'shock 1')]
+    assert scores[0][2] == pytest.approx(20.0 * np.log10(2.0))
+
+
+def test_a_scale_given_is_the_scale_used():
+    """A run 6 dB under its specification reads -6 dB against the
+    scale it is given (zero) and 0 dB when the scale is left to be
+    detected (+6) — the given one is never second-guessed (mutation
+    testing, 2026-10-10: a comparison that always detected passed)."""
+    f = np.linspace(20.0, 2000.0, 400)
+    spec = Specification(f, np.ones((1, f.size)), response_dof=['1X+'],
+                         ordinate_dim='acceleration**2/frequency')
+    low = Psd(f, np.full((1, f.size), 10.0 ** -0.6), response_dof=['1X+'],
+              ordinate_dim='acceleration**2/frequency')
+    given = compliance.compare(spec, low, scale_db=0)
+    assert given['scale_db'] == 0.0
+    assert given['difference_db'] == pytest.approx(-6.0, abs=1e-9)
+    detected = compliance.compare(spec, low)
+    assert detected['scale_db'] == 6.0
+    assert detected['difference_db'] == pytest.approx(0.0, abs=1e-9)
+    # and the lines the plot marks follow the same rule: 6 dB under,
+    # past a lower abort limit 3 dB down, at the given scale every line
+    # is out; at the detected one none is
+    limited = Specification(f, np.ones((1, f.size)), response_dof=['1X+'],
+                            ordinate_dim='acceleration**2/frequency',
+                            abort_lower=np.full((1, f.size), 0.5),
+                            abort_upper=np.full((1, f.size), 2.0))
+    _over, under = compliance.exceedances(limited, low, scale_db=0)
+    assert under.all()
+    _over, under = compliance.exceedances(limited, low)
+    assert not under.any()

@@ -128,7 +128,7 @@ def test_set_view_is_a_journaled_verb():
     project.set_view('Plate', None)
     assert project['Plate'].view is None
     assert 'set_view' in dict(project.selection_verbs('Plate'))
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match='view must be a View'):
         project.set_view('Plate', ((1, 0, 0), (0, 0, 1)))
 
 

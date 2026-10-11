@@ -56,7 +56,7 @@ def test_an_object_argument_records_as_its_name():
 def test_a_refusal_records_nothing():
     project = visualdynamics.Project('R')
     before = list(project.journal)
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match='nothing here'):
         project.compute_psds('nothing here')
     assert project.journal == before, 'a verb that raised changed nothing'
 

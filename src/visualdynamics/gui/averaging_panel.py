@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFrame,
     QLabel,
     QPushButton,
     QWidget,
@@ -34,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from ..core.averaging import DETRENDS, WINDOW_PARAMETERS, WINDOWS, Averaging
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
@@ -136,17 +135,11 @@ class AveragingPanel(QWidget):
                 ('Alpha', self.parameter_box),
                 ('Detrend', self.detrend_box),
                 ('Frames', self.frames_box))
-        for row, (label, editor) in enumerate(rows, start=1):
-            name = QLabel(label)
-            grid.addWidget(name, row, 0)
-            grid.addWidget(editor, row, 1)
-            if editor is self.parameter_box:
-                self._parameter_label = name
+        names = add_settings(grid, rows)
+        self._parameter_label = names[[editor for _label, editor in rows]
+                                      .index(self.parameter_box)]
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, len(rows) + 1, 0, 1, 2)
+        add_rule(grid, len(rows) + 1)
 
         # what follows from the five, shown so the trade is visible while
         # it is being made rather than after the PSD comes out

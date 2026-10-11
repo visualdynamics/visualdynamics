@@ -268,13 +268,12 @@ class ReportEditor(QWidget):
             'Insert', 'add',
             'Insert a block after the selected one — Markdown text, a '
             'result the project can give, a photo, a table')
-        self.insert_action: QAction = toolbar.addWidget(self.insert_button)
+        toolbar.addWidget(self.insert_button)
         self.reference_button, self.reference_menu = menu_button(
             'Reference', 'link',
             'Insert a reference to a figure or table at the cursor — '
             'renumbered with the document')
-        self.reference_action: QAction = toolbar.addWidget(
-            self.reference_button)
+        toolbar.addWidget(self.reference_button)
         self.up_action: QAction = QAction(control_icon('up'), 'Move Up', self)
         self.up_action.setToolTip('Move Up — the selected block, one place')
         self.up_action.triggered.connect(lambda: self._move(-1))

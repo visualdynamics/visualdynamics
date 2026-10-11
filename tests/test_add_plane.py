@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import select_objects
+from conftest import bar_acts, select_objects
 
 import visualdynamics
 from visualdynamics import mesh
@@ -60,6 +60,38 @@ def test_landing_says_what_joining_would_share_without_joining():
     assert on.sum() == 5 and floor.num_nodes == 15
     assert np.allclose(floor.node_xyz[rows[on]], wall.node_xyz[on])
     assert not mesh.landing(_empty(), wall)[0].any()
+
+
+def test_a_part_kept_apart_joins_only_its_own_group():
+    """Kept apart (2026-10-11), a plane lands only on the nodes of the
+    element group it joins by name: a second floor plane still shares
+    the first's edge, a foot laid on the floor keeps nodes of its own
+    over it, coincident and unjoined, for a merge to join at the bolts."""
+    floor = mesh.plane((0, 0, 0), (4, 0, 0), (0, 2, 0), 1, 'floor')
+    foot = mesh.plane((1, 0, 0), (2, 0, 0), (0, 1, 0), 1, 'foot')
+    on, _rows = mesh.landing(floor, foot, apart=True)
+    assert not on.any() and mesh.landing(floor, foot)[0].sum() == 6
+    found = mesh.join(floor, foot, apart=True)
+    assert found['shared'] == 0 and found['added'] == 6
+    assert len(floor.coincident_spots(0.1)) == 6, 'each over a floor node'
+    more = mesh.plane((4, 0, 0), (1, 0, 0), (0, 2, 0), 1, 'floor')
+    assert mesh.join(floor, more, apart=True)['shared'] == 3, \
+        'the floor still joins the floor'
+    assert mesh.landing(floor, mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 1),
+                        apart=True)[0].sum() == 0, 'an unnamed group joins none'
+
+
+def test_assembling_apart_keeps_each_group_whole_and_the_groups_unjoined():
+    walls = [mesh.plane((0, 0, 0), (2, 0, 0), (0, 1, 0), 1, 'box'),
+             mesh.plane((2, 0, 0), (2, 0, 0), (0, 1, 0), 1, 'box'),
+             mesh.plane((1, 0, 0), (2, 0, 0), (0, 1, 0), 1, 'lid')]
+    joined = mesh.assemble(*walls)
+    apart = mesh.assemble(*walls, apart=True)
+    assert joined.num_nodes == 10 and apart.num_nodes == 16
+    lid = set(apart.elem_conn[4]) | set(apart.elem_conn[5])
+    spots = apart.coincident_spots(0.1)
+    assert len(spots) == 6 and all(b > 10 and b in lid and a <= 10
+                                   for a, b in spots), spots
 
 
 def test_coordinates_that_mean_different_things_do_not_join():
@@ -115,7 +147,10 @@ def test_a_geometry_without_units_takes_the_numbers_as_given():
 
 def test_the_project_offers_a_new_geometry(window, pump):
     """The **+** on the project's bar: an empty geometry in the display
-    length unit, shown and selected so its bar offers Add Plane."""
+    length unit, shown and selected; its Quads row offers Add Plane and
+    its Hexes row Add Block — what they add is quads and hexes, into an
+    element group of them, so they live on those rows and not on the
+    geometry's (Brandon, 2026-10-10)."""
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     window.tree.clearSelection()
     window.test_item.setSelected(True)
@@ -127,8 +162,38 @@ def test_the_project_offers_a_new_geometry(window, pump):
     pump()
     geometry = window.objects['Geometry']
     assert geometry.num_nodes == 0 and geometry.length_unit == 'in'
-    assert [act[0] for act in window.acts_for()] == ['add_plane', 'add_block',
-                                                    'set_view']
+    assert [act[0] for act in window.acts_for()] == ['set_view'], (
+        'not on the geometry itself')
+    item = window._item_for_object('Geometry')
+    item.setExpanded(True)
+
+    def pick(label):
+        row = next(item.child(i) for i in range(item.childCount())
+                   if item.child(i).text(0).startswith(label))
+        window.tree.clearSelection()
+        window.tree.setCurrentItem(row)
+        pump()
+        return row
+
+    pick('Quads')
+    assert [act[0] for act in window.acts_for()] == ['add_plane']
+    assert bar_acts(window.scene)[:1] == ['Add Plane'], 'on the 3-D bar'
+    pick('Hexes')
+    assert [act[0] for act in window.acts_for()] == ['add_block']
+    pick('Beams')
+    assert window.acts_for() == []
+    # opened from the Quads row, the pane stays open through an Add,
+    # which rebuilds the geometry's rows under it
+    pick('Quads')
+    window.add_plane_act()
+    pump()
+    panel = window.scene.mesh_panel
+    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
+    pump()
+    panel.add_button.click()
+    pump()
+    assert window.objects['Geometry'].num_nodes == 15
+    assert panel.isVisibleTo(window), 'still open for the next plane'
 
 
 def test_add_plane_types_planes_in_display_units(window, pump):
@@ -186,6 +251,40 @@ def test_add_plane_types_planes_in_display_units(window, pump):
     assert 'plane-preview' not in window.scene.plotter.actors, \
         'closing takes the preview away'
     assert not any('rotate-' in name for name in window.scene.plotter.actors)
+
+
+def test_keep_apart_is_offered_once_there_is_something_to_keep_apart_from(
+        window, pump):
+    """The pane's Keep apart (2026-10-11) is shown once the geometry
+    holds nodes, says in the reading that nothing lands, and is
+    recorded as the verb's keyword — left out of the journal line
+    when unused, which then reads as before."""
+    window.project.new_geometry('Box', unit='in')
+    window.show_object('Box')
+    select_objects(window, pump, 'Box')
+    window.add_plane_act()
+    pump()
+    panel = window.scene.mesh_panel
+    assert panel.apart.isHidden(), 'nothing yet to keep it apart from'
+    panel.set_values(group='floor', center=(2, 1, 0), widths=(4, 2, 0), size=1)
+    panel.add_button.click()
+    pump()
+    assert 'apart' not in window.project.journal[-1]
+    assert not panel.apart.isHidden()
+    panel.set_values(group='foot', center=(2, 1, 0), widths=(2, 2, 0))
+    pump()
+    assert panel.reading_label.text().endswith(
+        '0 nodes to add, 9 on nodes already there.')
+    panel.set_values(apart=True)
+    pump()
+    assert panel.reading_label.text().endswith(
+        '9 nodes to add, 0 on nodes already there.')
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1].endswith(", 'foot', unit='in', apart=True)")
+    box = window.objects['Box']
+    assert box.num_nodes == 24
+    assert len(box.coincident_spots(0.1 * INCH)) == 9
 
 
 def test_the_gizmo_turns_the_box_about_its_center_and_slides_it_onto_the_grid(

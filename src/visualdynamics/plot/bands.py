@@ -119,7 +119,6 @@ def _handle_base():
         def __init__(self, x, y, kind, side, segments, log_y, value_db,
                      on_release, on_menu, **kwargs):
             super().__init__(x, y, clickable=True, **kwargs)
-            self.band_handle: bool = True
             self.kind: str = kind
             self.side: str = side
             self.segments: list[int] = segments

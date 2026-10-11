@@ -129,6 +129,10 @@ Before saying anything is done:
   named test fail. A test that passes with the fix reverted is
   testing nothing. Pin the thing that differs (a label, a unit, a
   count), not merely "something was built".
+- **The same, a module at a time: `tools/mutate.py MODULE TESTS…`**
+  makes one small change to the code at a time and prints every
+  change the named tests do not notice. Each is a gap in the tests
+  or a change that cannot alter behavior; reading which is the work.
 - **A falsification that prints nothing is not a pass.** Assert on
   the summary line.
 - **Clear `__pycache__` after restoring a broken file** — a break and

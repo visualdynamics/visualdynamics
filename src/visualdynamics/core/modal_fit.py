@@ -408,6 +408,20 @@ class ModalFitSession:
     #: looks like.
     RIDGE_FRACTION = 0.1
 
+    #: how much of the measurement a residual peak must hold to be a
+    #: mode of its own. Shape alone stopped being enough once a fit came
+    #: out nearly exact (four search passes, 2026-10-11): a confirmed
+    #: mode subtracted almost perfectly leaves at its own line only the
+    #: tails of everything else, whose shape is nobody's confirmed mode
+    #: — and log prominence makes a remainder that small look as tall
+    #: as anything. The cruel cluster's 20 Hz mode then left 2.5 % of
+    #: its line, offered as a second mode and fit at z = 0.26 on top of
+    #: the first. A genuine neighbor is a mode, not a remainder: the
+    #: second tooth of a repeated pair held 0.42 of the measurement on
+    #: the synthetic pair and 0.39 on the plate's 1142 Hz pair, four
+    #: times this floor, as the remainder is four times under it.
+    NEIGHBOR_FLOOR = 0.1
+
     def _another_mode_at(self, index: int) -> bool:
         """Whether the residual at this line belongs to a mode not yet
         confirmed, judged by shape.
@@ -417,7 +431,7 @@ class ModalFitSession:
         covering the line, not each shape one at a time: the ridge left
         in a worked-over cluster is a blend of the modes taken from it,
         and a blend can sit below any per-mode MAC threshold while
-        lying entirely in their span. One SVD of one line, on a Find
+        lying entirely in their span. Two SVDs of one line, on a Find
         Mode click — never on the drag path.
         """
         covering = [mode['shape'][:len(self.responses)]
@@ -430,9 +444,13 @@ class ModalFitSession:
             # adopted modes with no shape on these DOFs: nothing to
             # compare, so the frequency exclusion stands
             return False
-        u = np.linalg.svd(self.residual_matrix()[index])[0][:, 0]
+        u, s, _vh = np.linalg.svd(self.residual_matrix()[index])
+        measured = float(np.linalg.svd(self.matrix[index],
+                                       compute_uv=False)[0])
+        if not s[0] >= self.NEIGHBOR_FLOOR * measured:
+            return False
         q, _ = np.linalg.qr(basis)
-        return float(np.linalg.norm(q.conj().T @ u) ** 2) \
+        return float(np.linalg.norm(q.conj().T @ u[:, 0]) ** 2) \
             < self.RIDGE_FRACTION
 
     def move_to(self, frequency: float, damping: bool = True) -> None:
@@ -789,9 +807,15 @@ class ModalFitSession:
         # column has presence across every higher cluster's lines, and
         # the global joint solve inflated a 64 Hz fundamental fivefold
         # to shim milli-errors across a 1400 Hz cluster's hundreds of
-        # lines. Clustered by band overlap, distant modes decouple
-        # exactly — which is also what the sequential fit assumed of
-        # them, correctly.
+        # lines. Clustered by band overlap, distant modes are not
+        # solved for together — but their tails are still in each
+        # cluster's lines, so each cluster is solved on the measurement
+        # less the other modes at their sequential residues, the same
+        # fixed background its ladder judges against. Solved on the
+        # measurement as it stood, a 50/53 Hz pair that refits exactly
+        # alone came back 1.2 % and 4.0 % off beside a 75 Hz mode
+        # (2026-10-11): the pair's residues absorbed the third mode's
+        # tail.
         bands = []
         for mode in self.modes:
             index = int(np.argmin(np.abs(self.frequencies
@@ -827,9 +851,15 @@ class ModalFitSession:
                 basis_c = np.stack(columns_c, axis=1)
                 n = len(members)
                 sub_prior = prior[members]
+                others = [r for r in range(count) if r not in members]
+                target = self.matrix[lines]
+                if others:
+                    held = basis[np.isin(chosen, lines)][:, others]
+                    target = target - (held @ prior[others]).reshape(
+                        len(lines), responses, references)
                 if self.weights is None:
                     stacked_c = np.vstack([basis_c.real, basis_c.imag])
-                    block = self.matrix[lines].reshape(len(lines), -1)
+                    block = target.reshape(len(lines), -1)
                     rhs = np.vstack([block.real, block.imag])
                     g = stacked_c.T @ stacked_c
                     u = float(np.trace(g)) / n
@@ -846,7 +876,7 @@ class ModalFitSession:
                     root = np.sqrt(self.weights[lines, j])
                     weighted = np.vstack([basis_c.real * root[:, None],
                                           basis_c.imag * root[:, None]])
-                    block = self.matrix[lines][:, j, :]
+                    block = target[:, j, :]
                     rhs = np.vstack([block.real * root[:, None],
                                      block.imag * root[:, None]])
                     g = weighted.T @ weighted
@@ -1039,7 +1069,7 @@ class ModalFitSession:
         return float(np.clip(0.5 * (low - high) / curvature, -0.5, 0.5))
 
     def search_damping(self, frequency: float, seed: float | None = None,
-                       refine: int = 2, steps: int = 5) -> float:
+                       refine: int = 4, steps: int = 5) -> float:
         """The damping that leaves the least behind *at this frequency*.
 
         The one-dimensional half of `search`, for a cursor being
@@ -1070,16 +1100,19 @@ class ModalFitSession:
         return best
 
     def search(self, index: int, damping: float | None = None,
-               refine: int = 2, steps: int = 5) -> tuple[float, float]:
+               refine: int = 4, steps: int = 5) -> tuple[float, float]:
         """The (frequency, damping) that leave the least behind.
 
         Coarse to fine: a small grid over half a line either side and a
         wide span of damping, then the same grid again around the
-        winner at a fifth the span, then a parabola through the best
-        and its neighbors in each direction. Fifty cheap evaluations
-        reach what a twenty-five-by-twenty-five grid would, and the
-        parabola lands between grid points, where the surface really is
-        quadratic and interpolating it is unbiased.
+        winner at a fifth the span, each pass ending on a parabola
+        through the best and its neighbors in each direction. Four
+        passes: the cost is not quite a parabola at a pass's spacing,
+        so the vertex lands a little off the minimum, and two passes
+        read the damping of exact data 0.46 % high in every case tried
+        (2026-10-11). Each pass shrinks that about twenty-five times —
+        three left 0.02 %, four 0.001 % — for under a millisecond more
+        a search, against a residual whose SVD costs far more.
 
         This replaces reading the damping off two half-power crossings.
         Those are two points on a curve, they assume the peak is one

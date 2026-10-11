@@ -125,6 +125,72 @@ def solid_faces(node_count: int) -> tuple[tuple[int, ...], ...]:
     return ()
 
 
+def element_cells(geometry: Geometry,
+                  indices: Sequence[int] | None = None
+                  ) -> tuple[dict[int, list[list[int]]],
+                             dict[int, list[list[int]]], dict[int, list[int]]]:
+    """How the elements draw: (faces, lines, points), each keyed by
+    element color, every entry node *rows* (positions in `node_id`).
+
+    A face element is its corners (`face_corners`: a quad8's midside
+    nodes are not a boundary to trace); a solid is the skin of its color
+    — each cell's faces (`solid_faces`), less every face two cells
+    share — since a polyline through a brick's eight nodes is not a
+    brick; a line element is its first two nodes, a point element its
+    nodes. One rule for the 3-D view and for the report's and the HTML
+    export's scenes: the HTML once drew a brick as one eight-sided
+    polygon in node order, which folds it into a bow tie (Brandon,
+    2026-10-11, the website's brick examples).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry.
+    indices : sequence of int, optional
+        Which elements, by row; every element when omitted.
+
+    Returns
+    -------
+    tuple of dict
+        Faces and lines as lists of row lists, points as a row list,
+        each by element color.
+    """
+    id_to_row = {int(i): r for r, i in enumerate(geometry.node_id)}
+
+    def rows(node_ids):
+        return [id_to_row[int(i)] for i in node_ids]
+
+    faces: dict[int, list[list[int]]] = {}
+    lines: dict[int, list[list[int]]] = {}
+    points: dict[int, list[int]] = {}
+    skins: dict[int, dict[tuple[int, ...], list[int]]] = {}
+    for i in (range(len(geometry.elem_conn)) if indices is None else indices):
+        code, color = int(geometry.elem_type[i]), int(geometry.elem_color[i])
+        conn = geometry.elem_conn[i]
+        _name, _nnodes, render = ELEMENT_TYPES[code]
+        if render == 'face':
+            faces.setdefault(color, []).append(rows(conn[:face_corners(code)]))
+        elif render == 'volume':
+            # a solid draws as its skin: the faces of its cells that no
+            # other cell of the color shares (2026-09-30; a polyline
+            # through every corner drew the mesh's insides as a tangle)
+            skin = skins.setdefault(color, {})
+            for face in solid_faces(len(conn)):
+                corners = rows([conn[k] for k in face])
+                key = tuple(sorted(corners))
+                if key in skin:
+                    del skin[key]
+                else:
+                    skin[key] = corners
+        elif render == 'line':
+            lines.setdefault(color, []).append(rows(conn[:2]))
+        elif render == 'point':
+            points.setdefault(color, []).extend(rows(conn))
+    for color, skin in skins.items():
+        faces.setdefault(color, []).extend(skin.values())
+    return faces, lines, points
+
+
 def _cells(index_lists: Sequence[Sequence[int]]) -> np.ndarray:
     """Flat VTK cell array: [n, i0..in-1, n, i0..in-1, ...]"""
     return np.concatenate([[len(ix), *ix] for ix in index_lists])
@@ -750,37 +816,11 @@ def add_geometry(plotter: Any, geometry: Geometry,
     # Elements, split by render class and grouped by color (a drawn
     # line is an element group of two-node line elements since 2026-09-30, and
     # draws as its line elements do: direct color per group)
-    faces, lines, cell_points = {}, {}, {}
     wanted_elements = picked.get('elements')
-    element_indices = (list(wanted_elements) if wanted_elements is not None
-                       else range(len(geometry.elem_conn)))
-    elements = ([(geometry.elem_type[i], geometry.elem_color[i],
-                  geometry.elem_conn[i]) for i in element_indices]
-                if 'elements' in draw else [])
-    skins: dict[int, dict[tuple[int, ...], list[int]]] = {}
-    for code, color, conn in elements:
-        _name, _nnodes, render = ELEMENT_TYPES[int(code)]
-        if render == 'face':
-            faces.setdefault(int(color), []).append(
-                rows(conn[:face_corners(int(code))]))
-        elif render == 'volume':
-            # a solid draws as its skin: the faces of its cells that no
-            # other cell of the color shares (2026-09-30; a polyline
-            # through every corner drew the mesh's insides as a tangle)
-            skin = skins.setdefault(int(color), {})
-            for face in solid_faces(len(conn)):
-                corners = rows([conn[i] for i in face])
-                key = tuple(sorted(corners))
-                if key in skin:
-                    del skin[key]
-                else:
-                    skin[key] = corners
-        elif render == 'line':
-            lines.setdefault(int(color), []).append(rows(conn[:2]))
-        elif render == 'point':
-            cell_points.setdefault(int(color), []).extend(rows(conn))
-    for color, skin in skins.items():
-        faces.setdefault(color, []).extend(skin.values())
+    faces, lines, cell_points = (
+        element_cells(geometry, None if wanted_elements is None
+                      else list(wanted_elements))
+        if 'elements' in draw else ({}, {}, {}))
     for color, polys in faces.items():
         mesh = new_mesh()
         mesh.faces = _cells(polys)

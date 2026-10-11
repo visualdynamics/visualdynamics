@@ -64,7 +64,7 @@ def test_a_block_no_element_belongs_to_is_refused(two_blocks):
     """An element in element group 3 with no element group 3 declared is a file saying
     two things that cannot both be true, and it is refused where it is
     written rather than found later by whatever reads it."""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='element groups the geometry does not have'):
         Geometry(node_id=[1, 2, 3],
                  node_xyz=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
                  elem_conn=[[1, 2, 3]], elem_type=[41],
@@ -515,8 +515,10 @@ def test_two_blocks_of_one_kind_offer_merge_from_the_tree(two_blocks, window,
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
     acts = window.acts_for()
+    # and Merge Coincident Nodes beside it, which element groups carry
+    # rather than the geometry (2026-10-11)
     assert [(verb, icon) for verb, _label, icon, _h, _t in acts] == [
-        ('merge_groups', 'merge_groups')]
+        ('merge_groups', 'merge_groups'), ('merge_coincident_nodes', 'merge_nodes')]
     acts[0][3]()
     pump()
     assert list(two_blocks.group_id) == [7]
@@ -534,16 +536,20 @@ def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
                                    9: fem.GroupProperties(aluminum, 0.02)}
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
-    assert window.acts_for() == []
+    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes']
     _pick_blocks(window, pump, item, [0])
-    assert window.acts_for() == [], 'one element group has nothing to merge with'
+    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes'], (
+        'one element group has nothing to merge with')
 
 
 def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
     from PySide6.QtCore import QItemSelectionModel
 
     _show_geometry(window, pump, two_blocks)
+    # the table holds the element groups picked (2026-10-10), so the two
+    # to merge are picked together in the tree and edited together
     window.tree.setCurrentItem(group_row(window, 7))
+    group_row(window, 9).setSelected(True)
     window.edit_entities()
     pump()
     window.table.selectRow(0)
@@ -558,3 +564,114 @@ def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
     window.merge_groups_action.trigger()
     pump()
     assert list(two_blocks.group_id) == [7] and len(two_blocks.elem_id) == 2
+
+
+def test_picking_a_family_names_its_element_groups(two_blocks, window, pump,
+                                                   monkeypatch):
+    """A family row picked in the tree captions the element groups that
+    hold its elements, by name — not its elements by id, which were past
+    the caption limit on the BARC in bricks (9 440 hexes) and say little
+    when they fit (Brandon, 2026-10-10)."""
+    from visualdynamics.viz import geometry as drawing
+
+    captioned = []
+    real = drawing.label_spots
+
+    def spy(geometry, points, kind, chosen=None):
+        spots, texts = real(geometry, points, kind, chosen)
+        captioned.append((kind, list(texts)))
+        return spots, texts
+
+    monkeypatch.setattr(drawing, 'label_spots', spy)
+    item = _show_geometry(window, pump, two_blocks)
+    captioned.clear()
+    window.tree.setCurrentItem(_category(item, 'Quads'))
+    pump()
+    # every draw of the pick captions the same way (a tree pick draws
+    # the scene once per signal it raises)
+    assert captioned and set(map(str, captioned)) == {
+        str(('groups', ['wing', 'tail']))}
+    assert window.statusBar().currentMessage() == 'Highlighting 2 quads'
+
+
+def test_the_pencil_on_element_groups_tables_those_and_no_others(
+        two_blocks, window, pump):
+    """The Element Groups table opened from element group rows holds the
+    ones picked — one, or several picked together — and the others are
+    out of it: not shown, not selectable, not copied (Brandon,
+    2026-10-10: the pencil on one opened every one)."""
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(group_row(window, 9))
+    window.edit_entities()
+    pump()
+    table = window.table
+    shown = [r for r in range(table.model().rowCount()) if not table.isRowHidden(r)]
+    assert shown == [1], 'tail alone'
+    assert window._editing_words() == 'element group 9'
+    table.selectAll()
+    pump()
+    assert {i.row() for i in table.selectionModel().selectedIndexes()} == {1}, (
+        'Select All reaches only what is shown')
+    assert table.copy(whole_table=True).splitlines()[0].split('\t')[1] == 'tail'
+    assert len(table.copy(whole_table=True).splitlines()) == 1
+    # an element group added rebuilds the table: wing stays out of it
+    window.add_action.trigger()
+    pump()
+    assert table.isRowHidden(0) and not table.isRowHidden(1)
+    assert not table.isRowHidden(table.model().rowCount() - 1), 'the new one in'
+    window.stop_editing()
+    pump()
+    # both picked together, then Edit from the context menu (a right-click
+    # keeps a multi-selection, where a click on a pencil re-picks its row)
+    window.tree.setCurrentItem(group_row(window, 7))
+    group_row(window, 9).setSelected(True)
+    window.edit_action.trigger()
+    pump()
+    assert window.editing == ('Geometry', 'groups')
+    assert window.editing_scope == ('group', (7, 9))
+    assert [table.isRowHidden(r) for r in range(table.model().rowCount())] == [
+        False, False, True], 'wing and tail; the one added before is not picked'
+    # an element group added there joins the table, and stays after the rebuild
+    window.add_action.trigger()
+    pump()
+    added = int(two_blocks.group_id[-1])
+    assert window.editing_scope[1][:2] == (7, 9) and added in window.editing_scope[1]
+    assert not table.isRowHidden(table.model().rowCount() - 1)
+
+
+def test_the_pencil_on_a_family_tables_its_elements_and_no_others(window, pump):
+    """The elements table opened from a family row holds that family's
+    elements — the pencil on Beams listed every element of the geometry
+    (Brandon, 2026-10-10) — and still does after the rebuild an edit
+    makes."""
+    mixed = Geometry(
+        node_id=[1, 2, 3, 4, 5, 6],
+        node_xyz=[[0, 0, 0], [1, 0, 0], [2, 0, 0],
+                  [0, 1, 0], [1, 1, 0], [2, 1, 0]],
+        elem_id=[10, 11, 12],
+        elem_conn=[[1, 2, 5, 4], [2, 3, 6, 5], [1, 4]],
+        elem_type=[44, 44, 21],
+        elem_group=[7, 7, 9],
+        group_id=[7, 9],
+        group_name=['plate', 'rail'])
+    item = _show_geometry(window, pump, mixed)
+    table = window.table
+
+    def shown():
+        return [r for r in range(table.model().rowCount())
+                if not table.isRowHidden(r)]
+
+    window.tree.setCurrentItem(_category(item, 'Beams'))
+    window.edit_entities()
+    pump()
+    assert window.editing == ('Geometry', 'elements')
+    assert shown() == [2], 'the beam alone'
+    window._reload_edit_table()
+    pump()
+    assert shown() == [2], 'and after a rebuild'
+    window.stop_editing()
+    pump()
+    window.tree.setCurrentItem(_category(item, 'Quads'))
+    window.edit_entities()
+    pump()
+    assert shown() == [0, 1]

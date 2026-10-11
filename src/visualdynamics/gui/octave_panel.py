@@ -17,14 +17,13 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFrame,
     QLabel,
     QPushButton,
     QWidget,
 )
 
 from ..core.octave import CHOICES, PER_OCTAVE
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 
 class OctavePanel(QWidget):
@@ -51,13 +50,9 @@ class OctavePanel(QWidget):
             'a third and a whole octave are both ordinary. Each band '
             'takes the mean-square content that falls in it, so the '
             'RMS carried is unchanged whatever the spacing')
-        grid.addWidget(QLabel('Spacing'), 1, 0)
-        grid.addWidget(self.per_box, 1, 1)
+        add_settings(grid, [('Spacing', self.per_box)])
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, 2, 0, 1, 2)
+        add_rule(grid, 2)
 
         # what follows from the one, shown so the trade is visible
         # while it is being made

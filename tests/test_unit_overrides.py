@@ -11,7 +11,7 @@ def test_with_units_override():
 
 
 def test_with_units_validates_dimension():
-    with pytest.raises(visualdynamics.units.UnitError):
+    with pytest.raises(visualdynamics.units.UnitError, match='is not an acceleration unit'):
         visualdynamics.SI.with_units(acceleration='in')  # not an acceleration unit
 
 

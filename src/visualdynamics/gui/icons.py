@@ -1035,6 +1035,38 @@ def _draw_edit(painter, color):
     painter.drawLine(QPointF(15, 38), QPointF(26, 49))
 
 
+def _draw_edit_on(painter, color):
+    """The pencil of a table that is open, drawn as a pressed button:
+    a filled rounded chip of the pencil's color and the pencil in white
+    on it, so the row reads as a toggle that is on and that a click turns
+    off (Brandon, 2026-10-11). In the glyph rather than behind it, because
+    the tree paints a selected row's highlight over a cell's background
+    — and the row being edited is the selected one. Opaque, because a
+    translucent chip all but vanished into that blue highlight."""
+    _draw_edit_chip(painter, color, '#ffffff')
+
+
+def _draw_edit_chip(painter, chip, pencil):
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(chip)))
+    painter.drawRoundedRect(QRectF(2, 2, 60, 60), 13, 13)
+    _draw_edit(painter, pencil)
+
+
+def _edit_on_selected() -> QPixmap:
+    """The open table's pencil on a selected row, inverted — a white
+    chip, the pencil in its own gray — because the gray chip sank into
+    the selection's blue (seen 2026-10-11), and the row being edited is
+    the selected one."""
+    pixmap = QPixmap(SIZE, SIZE)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    _draw_edit_chip(painter, '#ffffff', CONTROL_COLOR)
+    painter.end()
+    return pixmap
+
+
 def _draw_trash(painter, color):
     painter.setPen(_pen(color, 5))
     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -1718,7 +1750,7 @@ def control_icon(name: str) -> QIcon:
      'up': _draw_up, 'down': _draw_down,
      'add': _draw_add,
      'beam': _draw_beam, 'tri': _draw_tri, 'quad': _draw_quad,
-     'edit': _draw_edit, 'trash': _draw_trash,
+     'edit': _draw_edit, 'edit_on': _draw_edit_on, 'trash': _draw_trash,
      'colormap': _draw_colormap,
      'curves': _draw_curves, 'map': _draw_map,
      'waterfall': _draw_waterfall,
@@ -1752,7 +1784,10 @@ def control_icon(name: str) -> QIcon:
      'as_psd': _draw_as_psd}.get(
          name, _draw_default)(painter, CONTROL_COLOR)
     painter.end()
-    return QIcon(pixmap)
+    icon = QIcon(pixmap)
+    if name == 'edit_on':
+        icon.addPixmap(_edit_on_selected(), QIcon.Mode.Selected)
+    return icon
 
 
 _CHILD_DRAW = {

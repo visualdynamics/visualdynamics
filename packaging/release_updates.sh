@@ -45,6 +45,7 @@ if [[ -z ${VD_DRY_RUN:-} ]]; then
 else
     touch "$work/SHA256SUMS"
 fi
+cp "$work/SHA256SUMS" "$work/SHA256SUMS.drafted"
 
 # The signing key, exported for the length of this script into a folder
 # only this user can open, and deleted on the way out whatever happens.
@@ -68,7 +69,8 @@ fi
 [[ -s $keydir/key ]] || { echo "the signing key could not be read" >&2; exit 1; }
 
 uploads=()
-# VD_ARCHES narrows it to one architecture, for a test
+# VD_ARCHES narrows it to one architecture — for a test, and for the
+# release workflow, which runs one job per architecture side by side
 for arch in ${=VD_ARCHES:-arm64 x86_64}; do
     archive=dist/VisualDynamics-${version}-macos-${arch}.zip
     [[ -f $archive ]] || { echo "no $archive — build_macos.sh writes it once the app is stapled" >&2; exit 1; }
@@ -100,8 +102,11 @@ for arch in ${=VD_ARCHES:-arm64 x86_64}; do
     done
     uploads+=("$archive" "$dir/appcast-${arch}.xml")
     name=${archive:t}
-    grep -q "  $name\$" "$work/SHA256SUMS" && sed -i '' "/  $name\$/d" "$work/SHA256SUMS"
-    shasum -a 256 "$archive" | sed "s|  .*|  $name|" >> "$work/SHA256SUMS"
+    line=$(shasum -a 256 "$archive" | sed "s|  .*|  $name|")
+    if ! grep -qxF "$line" "$work/SHA256SUMS"; then
+        grep -q "  $name\$" "$work/SHA256SUMS" && sed -i '' "/  $name\$/d" "$work/SHA256SUMS"
+        print -r -- "$line" >> "$work/SHA256SUMS"
+    fi
     echo "$arch: $(grep -c '<item>' "$dir/appcast-${arch}.xml") item, $(grep -c 'sparkle:deltaFrom' "$dir/appcast-${arch}.xml") deltas"
 done
 # generate_appcast unpacks every archive it diffs into a cache of its
@@ -111,7 +116,14 @@ rm -rf ~/Library/Caches/Sparkle_generate_appcast
 if [[ -n ${VD_DRY_RUN:-} ]]; then
     echo "dry run — would upload to $tag:"
 else
-    gh release upload "$tag" --repo "$repo" --clobber "${uploads[@]}" "$work/SHA256SUMS"
+    # SHA256SUMS only when this run changed it. On the runners `publish`
+    # has already summed the update zips, so the file is unchanged and
+    # the two architectures' jobs, running at once, never race to
+    # replace it (2026-10-10); from the desk, attach_macos.sh summed the
+    # images alone and the zips' lines are new here.
+    sums=()
+    cmp -s "$work/SHA256SUMS" "$work/SHA256SUMS.drafted" || sums=("$work/SHA256SUMS")
+    gh release upload "$tag" --repo "$repo" --clobber "${uploads[@]}" "${sums[@]}"
     echo "uploaded to $tag:"
 fi
 printf '  %s\n' "${uploads[@]:t}"

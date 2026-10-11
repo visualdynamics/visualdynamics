@@ -85,6 +85,34 @@ def test_damping_and_q_are_each_others_inverse():
 def test_critical_damping_is_refused():
     with pytest.raises(ValueError, match='under critical'):
         srs.ramp_invariant(np.array([100.0]), RATE, 1.0)
+    with pytest.raises(ValueError, match='under critical'):
+        srs.ramp_invariant(np.array([100.0]), RATE, 0.0)
+
+
+def test_the_filter_is_exactly_ramp_invariant():
+    """Ramp-invariant means exact for an input that is linear between
+    samples: the filter's output then *is* the continuous oscillator's
+    absolute acceleration, (2 zeta wn s + wn^2) / (s^2 + 2 zeta wn s +
+    wn^2), and scipy's `lsim` with linear interpolation computes that
+    response independently. Agreement to rounding on a random base
+    acceleration sampled at only five times the natural frequency is
+    the coefficients themselves checked — the scipy comparison above
+    runs these same coefficients, and the DC gain is one whatever the
+    damped frequency is, so a damped frequency of wn*sqrt(1 + zeta^2)
+    or a sinc divided rather than multiplied passed every test before
+    (mutation testing, 2026-10-10); they are 5 % and 82 % out here."""
+    from scipy.signal import lfilter, lsim
+
+    natural, zeta, rate = 100.0, 0.05, 500.0
+    t = np.arange(200) / rate
+    base = np.random.default_rng(3).normal(size=t.size)
+    base[0] = 0.0
+    b, a = srs.ramp_invariant(np.array([natural]), rate, zeta)
+    wn = 2.0 * np.pi * natural
+    _t, exact, _x = lsim(([2.0 * zeta * wn, wn ** 2],
+                          [1.0, 2.0 * zeta * wn, wn ** 2]), base, t, interp=True)
+    response = lfilter(b[0], a[0], base)
+    assert np.abs(response - exact).max() < 1e-12 * np.abs(exact).max()
 
 
 # ---- the curve ----------------------------------------------------------
@@ -143,6 +171,10 @@ def test_the_octave_grid_is_geometric():
 def test_a_band_that_is_not_a_band_is_refused():
     with pytest.raises(ValueError, match='not a band'):
         srs.octave_frequencies(100.0, 10.0)
+    with pytest.raises(ValueError, match='not a band'):
+        srs.octave_frequencies(10.0, 10.0)
+    with pytest.raises(ValueError, match='not a band'):
+        srs.octave_frequencies(0.0, 10.0)
 
 
 # ---- the object ---------------------------------------------------------

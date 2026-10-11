@@ -26,16 +26,20 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFrame,
     QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from ..core.sine import CYCLES_LADDER, SineExtraction
 from .editors import DoubleSpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import (
+    PreviewPlot,
+    add_derived,
+    add_keyed_settings,
+    add_rule,
+    panel_grid,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
@@ -46,7 +50,7 @@ MODES = ('automatic', 'set')
 MODE_LABELS = ('Automatic', 'Set')
 
 
-class SamplePlot(QWidget):
+class SamplePlot(PreviewPlot):
     """The sampled readings against frequency: dots per control
     channel at the smoothing shown, the noise floor beside each as a
     hollow ring where the tone sits under it.
@@ -56,41 +60,9 @@ class SamplePlot(QWidget):
     extracted levels answer the rest.
     """
 
-    HEIGHT = 150
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        import pyqtgraph as pg
-
-        from ..theme import theme as resolve_theme
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.colors: Mapping[str, str] = resolve_theme(None)
-        self.widget: Any = pg.PlotWidget()
-        self.widget.setFixedHeight(self.HEIGHT)
-        self.plot: Any = self.widget.getPlotItem()
-        self.plot.setLogMode(x=True, y=True)
-        self.plot.showGrid(x=True, y=True, alpha=0.3)
-        self.plot.setMouseEnabled(x=False, y=False)
-        self.plot.hideButtons()
-        self.plot.setMenuEnabled(False)
-        for edge in ('left', 'bottom'):
-            axis = self.plot.getAxis(edge)
-            axis.setStyle(tickTextOffset=2, tickLength=-3)
-            axis.setTextPen(self.colors['plot_foreground'])
-            axis.setPen(self.colors['plot_foreground'])
-        self.plot.getAxis('left').setWidth(34)
         self.items: list[Any] = []
-        layout.addWidget(self.widget)
-
-    def apply_theme(self, colors: Mapping[str, str]) -> None:
-        self.colors = colors
-        self.widget.setBackground(colors['plot_background'])
-        for edge in ('left', 'bottom'):
-            axis = self.plot.getAxis(edge)
-            axis.setTextPen(colors['plot_foreground'])
-            axis.setPen(colors['plot_foreground'])
 
     def show_samples(self, sampled: list[dict[str, Any]]) -> None:
         """Draw the sampled readings: one color per tone, a dot per
@@ -178,22 +150,12 @@ class SinePanel(QWidget):
             'the recorded sweep drifted from the one commanded — a long '
             'run whose rate was not quite the specification’s would '
             'otherwise read low toward its end')
-        self._labels: dict[str, QLabel] = {}
-        self._editors: dict[str, QWidget] = {}
         rows = (('mode', 'Smoothing', self.mode_box),
                 ('cycles', 'Cycles', self.cycles_box),
                 ('target', 'Scatter under', self.target_box),
                 ('refine', 'Follow the clock', self.refine_box))
-        for row, (key, label, editor) in enumerate(rows, start=1):
-            name = QLabel(label)
-            grid.addWidget(name, row, 0)
-            grid.addWidget(editor, row, 1)
-            self._labels[key] = name
-            self._editors[key] = editor
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, len(rows) + 1, 0, 1, 2)
+        self._labels, self._editors = add_keyed_settings(grid, rows)
+        add_rule(grid, len(rows) + 1)
         # what follows from the settings, read where they are set
         self.derived: dict[str, QLabel] = {}
         self.derived_names: dict[str, QLabel] = {}

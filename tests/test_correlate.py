@@ -342,3 +342,69 @@ def test_sensors_on_a_plates_surface_are_found_on_its_mid_surface():
                                         sensors)
     assert report['matched'] == report['total'] == 4
     assert not report['dropped']
+
+
+def test_the_match_limit_is_the_tolerance_of_the_test_geometrys_radius():
+    """The limit is a fraction of the test geometry's radius about its
+    centroid — the farthest test node from the middle — so it scales
+    with the article and not with the units it is drawn in. Pinned by
+    value: any other measure of size passed every test before
+    (mutation testing, 2026-10-10)."""
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    points = np.asarray(test_geometry.node_xyz, dtype=float)
+    radius = np.linalg.norm(points - points.mean(axis=0), axis=1).max()
+    _projected, report = project_shapes(fem_shapes, fem_geometry,
+                                        test_shapes, test_geometry)
+    assert report['limit'] == pytest.approx(0.02 * radius, rel=1e-12)
+    _projected, report = project_shapes(fem_shapes, fem_geometry,
+                                        test_shapes, test_geometry,
+                                        tolerance=0.5)
+    assert report['limit'] == pytest.approx(0.5 * radius, rel=1e-12)
+
+
+def test_the_surface_allowance_is_half_the_thickest_plate():
+    """Half the thickness, not the whole of it: a sensor a full
+    thickness off the mid-surface is off the plate."""
+    from visualdynamics import fem, mesh
+    from visualdynamics.core.geometry import Geometry
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.25, 'plate')
+    plate.group_properties = {1: fem.GroupProperties(
+        fem.material('6061-T6'), 0.1)}
+    dofs = [f'{n}Z+' for n in plate.node_id]
+    fem_shapes = ShapeSet([10.0], [0.0], dofs, np.ones((1, len(dofs))))
+    corners = np.array([[0.0, 0.0, 0.05], [1.0, 0.0, 0.05],
+                        [0.0, 1.0, 0.05], [1.0, 1.0, 0.05]])
+    sensors = Geometry(node_id=[1, 2, 3, 4], node_xyz=corners,
+                       length_unit='m')
+    test_shapes = ShapeSet([10.0], [0.0], ['1Z+', '2Z+', '3Z+', '4Z+'],
+                           np.ones((1, 4)))
+    radius = np.linalg.norm(corners - corners.mean(axis=0), axis=1).max()
+    _projected, report = project_shapes(fem_shapes, plate, test_shapes,
+                                        sensors)
+    assert report['limit'] == pytest.approx(0.02 * radius + 0.05, rel=1e-12)
+
+
+def test_a_geometry_without_nodes_is_refused():
+    fem_geometry, fem_shapes = _fem()
+    _test_geometry, test_shapes = _test_model()
+    empty = visualdynamics.Geometry(node_id=[], node_xyz=np.empty((0, 3)))
+    with pytest.raises(ValueError, match='both geometries need nodes'):
+        project_shapes(fem_shapes, fem_geometry, test_shapes, empty)
+    with pytest.raises(ValueError, match='both geometries need nodes'):
+        project_shapes(fem_shapes, empty, test_shapes, _test_model()[0])
+
+
+def test_complex_shapes_keep_their_phase_through_the_projection():
+    """A complex FEM set — a damped model's modes — projects with its
+    imaginary part; only a real set is read as real."""
+    fem_geometry, fem_shapes = _fem()
+    test_geometry, test_shapes = _test_model()
+    twisted = ShapeSet(fem_shapes.frequency, fem_shapes.damping,
+                       fem_shapes.coordinate,
+                       fem_shapes.shape_matrix * (1.0 + 1.0j))
+    projected, _report = project_shapes(twisted, fem_geometry,
+                                        test_shapes, test_geometry)
+    assert projected.shape_matrix[0] == pytest.approx(
+        np.array([10.0, 21.0]) * (1.0 + 1.0j))

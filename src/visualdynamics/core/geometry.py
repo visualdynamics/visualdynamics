@@ -1203,6 +1203,32 @@ class Geometry:
         return [int(self.elem_id[i])
                 for i in np.flatnonzero(self.elem_group == int(group))]
 
+    def nodes_in(self, groups: Ids) -> list[int]:
+        """The ids of the nodes the elements of these element groups
+        use, ascending — what a merge scoped to them may touch.
+
+        Parameters
+        ----------
+        groups : sequence of int
+            Element groups, by identifier.
+
+        Returns
+        -------
+        list of int
+            The node identifiers.
+
+        Raises
+        ------
+        ValueError
+            When a group is not in the geometry.
+        """
+        groups = [int(g) for g in groups]
+        missing = [g for g in groups if g not in self.group_id.tolist()]
+        if missing:
+            raise ValueError(f'no element group {missing[0]}')
+        return sorted({int(n) for k in np.flatnonzero(
+            np.isin(self.elem_group, groups)) for n in self.elem_conn[k]})
+
     def add_group(self, name: str = '', group_id: int | None = None) -> int:
         """Declare an element group. Returns its id.
 
@@ -1466,7 +1492,8 @@ class Geometry:
         self.validate()
         return {'nodes': removed_nodes, 'elements': len(orphan_elements)}
 
-    def coincident_nodes(self, tolerance: float) -> dict[int, int]:
+    def coincident_nodes(self, tolerance: float,
+                         nodes: Ids | None = None) -> dict[int, int]:
         """{node: the node it coincides with}: every node within
         `tolerance` of another, mapped to the lowest id among those it is
         joined to — the one a merge keeps. Chains join: a within tolerance
@@ -1477,6 +1504,10 @@ class Geometry:
         tolerance : float
             How close two nodes must be to be one point, as the
             coordinates are held: meters once units are defined.
+        nodes : sequence of int, optional
+            Only these nodes are candidates, by id: a node outside them
+            is not merged, nor merged into, however close. Every node
+            when omitted.
 
         Returns
         -------
@@ -1485,10 +1516,13 @@ class Geometry:
         """
         from scipy.spatial import cKDTree
 
-        if len(self.node_id) < 2:
+        rows = (np.arange(len(self.node_id)) if nodes is None
+                else np.flatnonzero(np.isin(self.node_id,
+                                            [int(n) for n in nodes])))
+        if len(rows) < 2:
             return {}
-        pairs = cKDTree(self.node_xyz).query_pairs(float(tolerance))
-        parent = list(range(len(self.node_id)))
+        pairs = cKDTree(self.node_xyz[rows]).query_pairs(float(tolerance))
+        parent = list(range(len(rows)))
 
         def root(i: int) -> int:
             while parent[i] != i:
@@ -1501,18 +1535,18 @@ class Geometry:
             if a != b:
                 parent[max(a, b)] = min(a, b)
         groups: dict[int, list[int]] = {}
-        for i in range(len(self.node_id)):
+        for i in range(len(rows)):
             groups.setdefault(root(i), []).append(i)
         out = {}
         for members in groups.values():
             if len(members) < 2:
                 continue
-            ids = sorted(int(self.node_id[i]) for i in members)
+            ids = sorted(int(self.node_id[rows[i]]) for i in members)
             for other in ids[1:]:
                 out[other] = ids[0]
         return out
 
-    def duplicate_elements(self) -> dict[int, int]:
+    def duplicate_elements(self, groups: Ids | None = None) -> dict[int, int]:
         """{element id: the element it is} for every solid element on
         exactly the nodes of an earlier one, of the same type — two
         bricks filling one cell. The lowest id is the one that stays.
@@ -1526,11 +1560,26 @@ class Geometry:
         overlap: the region counted twice, its stiffness and mass
         doubled, and every face of each pair drawn as interior, so the
         middle of the X vanished from the view (Brandon, 2026-10-02).
+
+        Parameters
+        ----------
+        groups : sequence of int, optional
+            Keeps the search to these element groups' elements, by id;
+            every element when omitted.
+
+        Returns
+        -------
+        dict of int to int
+            Each element that fills a cell another already fills, to the
+            element it is.
         """
+        wanted = None if groups is None else {int(g) for g in groups}
         first: dict[tuple, int] = {}
         out: dict[int, int] = {}
         for k, conn in enumerate(self.elem_conn):
             if element_family(int(self.elem_type[k])) not in SOLID_FAMILIES:
+                continue
+            if wanted is not None and int(self.elem_group[k]) not in wanted:
                 continue
             key = (int(self.elem_type[k]), tuple(sorted(int(n) for n in conn)))
             eid = int(self.elem_id[k])
@@ -1540,16 +1589,180 @@ class Geometry:
                 first[key] = eid
         return out
 
-    def merge_duplicate_elements(self) -> int:
+    def merge_duplicate_elements(self, groups: Ids | None = None) -> int:
         """Make elements that are one cell one element (`duplicate_elements`):
         the later of each pair is removed, the earlier — and its element group —
-        stays. Returns how many were removed."""
-        going = self.duplicate_elements()
+        stays.
+
+        Parameters
+        ----------
+        groups : sequence of int, optional
+            Keeps it to these element groups' elements, by id; every
+            element when omitted.
+
+        Returns
+        -------
+        int
+            How many elements were removed.
+        """
+        going = self.duplicate_elements(groups)
         if going:
             self.delete_elements(list(going))
         return len(going)
 
-    def merge_coincident_nodes(self, tolerance: float) -> dict[str, int]:
+    def _merge_candidates(self, groups: Ids | None,
+                          exclude: Ids | None) -> list[int] | None:
+        """The node ids a merge may touch: those of `groups`' elements
+        (every node when None), less `exclude`; None for every node."""
+        nodes = None if groups is None else self.nodes_in(groups)
+        if not exclude:
+            return nodes
+        left_out = {int(n) for n in exclude}
+        base = self.node_id.tolist() if nodes is None else nodes
+        return [int(n) for n in base if int(n) not in left_out]
+
+    def node_spacing(self, groups: Ids | None = None) -> float | None:
+        """The mesh's finest spacing: the shortest distance between two
+        nodes of one element, zero-length elements passed over — a
+        brick's shortest edge, a quad8's half edge. What Merge Coincident
+        Nodes sizes its default tolerance from (a quarter of it, Brandon,
+        2026-10-11): parts meshed apart sit well inside it, and no two
+        nodes of one element do.
+
+        Parameters
+        ----------
+        groups : sequence of int, optional
+            Only these element groups' elements, by id; every element
+            when omitted.
+
+        Returns
+        -------
+        float or None
+            The spacing, as the coordinates are held; None when there is
+            no element with two distinct nodes.
+        """
+        rows = (range(len(self.elem_conn)) if groups is None
+                else np.flatnonzero(np.isin(self.elem_group,
+                                            [int(g) for g in groups])))
+        by_count: dict[int, list[np.ndarray]] = {}
+        for k in rows:
+            conn = self.elem_conn[k]
+            if len(conn) > 1:
+                by_count.setdefault(len(conn), []).append(conn)
+        finest = np.inf
+        for count, conns in by_count.items():
+            xyz = self.node_xyz[self.node_index(np.concatenate(conns))]
+            xyz = xyz.reshape(len(conns), count, 3)
+            first, second = np.triu_indices(count, 1)
+            gaps = np.linalg.norm(xyz[:, first] - xyz[:, second], axis=-1)
+            gaps = gaps[gaps > 0.0]
+            if gaps.size:
+                finest = min(finest, float(gaps.min()))
+        return None if not np.isfinite(finest) else finest
+
+    def coincident_spots(self, tolerance: float, groups: Ids | None = None,
+                         exclude: Ids | None = None) -> list[list[int]]:
+        """The places a merge would make one node: each a list of the
+        node ids that coincide there, ascending, so the first is the one
+        that stays. What Merge Coincident Nodes marks in the view before
+        anything is merged, a place at a time, for a person to leave some
+        out (Brandon, 2026-10-11).
+
+        Parameters
+        ----------
+        tolerance : float
+            How close two nodes must be to be one, as the coordinates are
+            held: meters once units are defined.
+        groups : sequence of int, optional
+            Only the nodes these element groups' elements use, by id;
+            every node when omitted.
+        exclude : sequence of int, optional
+            Nodes left out, by id: neither merged nor merged into.
+
+        Returns
+        -------
+        list of list of int
+            One list per place, in the order of the node each keeps.
+        """
+        mapping = self.coincident_nodes(
+            tolerance, self._merge_candidates(groups, exclude))
+        spots: dict[int, list[int]] = {}
+        for going, kept in mapping.items():
+            spots.setdefault(int(kept), [int(kept)]).append(int(going))
+        return [sorted(nodes) for _kept, nodes in sorted(spots.items())]
+
+    def merge_folds(self, tolerance: float, groups: Ids | None = None,
+                    exclude: Ids | None = None) -> str | None:
+        """Why this merge would be refused, or None: the sentence
+        `merge_coincident_nodes` raises when the tolerance would fold an
+        element onto itself — asked ahead, so a pane can say it before
+        its button is pressed.
+
+        Parameters
+        ----------
+        tolerance : float
+            As `merge_coincident_nodes`.
+        groups : sequence of int, optional
+            As `merge_coincident_nodes`.
+        exclude : sequence of int, optional
+            As `merge_coincident_nodes`.
+
+        Returns
+        -------
+        str or None
+        """
+        return self._folding(self.coincident_nodes(
+            tolerance, self._merge_candidates(groups, exclude)), tolerance)
+
+    def merge_collapses(self, tolerance: float, groups: Ids | None = None,
+                        exclude: Ids | None = None) -> list[int]:
+        """The links this merge would remove, by element id: the line
+        elements — a rigid link, a spring, a beam — whose nodes all become
+        one node, which then join nothing. A joint built with rigid
+        links and then merged takes them out, where the merge used to be
+        refused for folding them (Brandon, 2026-10-11).
+
+        Parameters
+        ----------
+        tolerance : float
+            As `merge_coincident_nodes`.
+        groups : sequence of int, optional
+            As `merge_coincident_nodes`.
+        exclude : sequence of int, optional
+            As `merge_coincident_nodes`.
+
+        Returns
+        -------
+        list of int
+        """
+        return self._collapsed(self.coincident_nodes(
+            tolerance, self._merge_candidates(groups, exclude)))
+
+    def _collapsed(self, mapping: dict[int, int]) -> list[int]:
+        if not mapping:
+            return []
+        out = []
+        for i, conn in enumerate(self.elem_conn):
+            if (len(conn) > 1 and ELEMENT_TYPES[int(self.elem_type[i])][2] == 'line'
+                    and len({mapping.get(int(n), int(n)) for n in conn}) == 1):
+                out.append(int(self.elem_id[i]))
+        return out
+
+    def _folding(self, mapping: dict[int, int], tolerance: float) -> str | None:
+        gone = set(self._collapsed(mapping))
+        for i, conn in enumerate(self.elem_conn):
+            if int(self.elem_id[i]) in gone:
+                continue
+            renamed = [mapping.get(int(n), int(n)) for n in conn]
+            if len(set(renamed)) < len(renamed):
+                return (f'a tolerance of {tolerance:g} folds element '
+                        f'{int(self.elem_id[i])} onto itself — two of its own '
+                        'nodes are within it; use a smaller tolerance')
+        return None
+
+    def merge_coincident_nodes(self, tolerance: float,
+                               groups: Ids | None = None,
+                               exclude: Ids | None = None) -> dict[str, int]:
         """Make nodes that are one point one node: every element and
         element naming a node within `tolerance` of another is renamed
         to the lowest id among them, and the rest are removed. Plates
@@ -1558,34 +1771,53 @@ class Geometry:
 
         Refused, with the element named, when the tolerance would fold an
         element onto itself — two of its own corners within it — since
-        that is a tolerance larger than the mesh, not a coincidence.
+        that is a tolerance larger than the mesh, not a coincidence. A
+        line element whose nodes all become one — a rigid link across
+        the gap the merge closes — is removed instead
+        (`merge_collapses`).
         Elements the merge leaves on exactly the same nodes are one cell
         filled twice, and are made one (`merge_duplicate_elements`).
+
+        With `groups`, only what those element groups hold: the nodes
+        their elements use are the candidates, so two groups picked
+        together are tied to each other and to nothing else, and only
+        their elements are made one where they fill a cell twice. A merge
+        over a whole geometry ties every part to every part it touches,
+        which is further than a person usually means (Brandon,
+        2026-10-11: the app offers the merge on element groups only).
 
         Parameters
         ----------
         tolerance : float
             How close two nodes must be to be one, as the coordinates are
             held: meters once units are defined.
+        groups : sequence of int, optional
+            The element groups whose nodes are merged, by id. Every node
+            of the geometry when omitted.
+        exclude : sequence of int, optional
+            Nodes left out of the merge, by id: neither merged nor merged
+            into — the places a person unpicked in the app
+            (`coincident_spots`).
 
         Returns
         -------
         dict of str to int
             'merged', the nodes removed, 'into', the nodes they became,
-            and 'duplicates', the elements removed for filling a cell
-            another already filled.
+            'duplicates', the elements removed for filling a cell another
+            already filled, and 'links', the line elements removed for
+            joining nodes that became one.
         """
-        mapping = self.coincident_nodes(tolerance)
+        mapping = self.coincident_nodes(
+            tolerance, self._merge_candidates(groups, exclude))
         if not mapping:
-            duplicates = self.merge_duplicate_elements()
-            return {'merged': 0, 'into': 0, 'duplicates': duplicates}
-        for i, conn in enumerate(self.elem_conn):
-            renamed = [mapping.get(int(n), int(n)) for n in conn]
-            if len(set(renamed)) < len(renamed):
-                raise ValueError(
-                    f'a tolerance of {tolerance:g} folds element '
-                    f'{int(self.elem_id[i])} onto itself — two of its own '
-                    'nodes are within it; use a smaller tolerance')
+            duplicates = self.merge_duplicate_elements(groups)
+            return {'merged': 0, 'into': 0, 'duplicates': duplicates,
+                    'links': 0}
+        refusal = self._folding(mapping, tolerance)
+        if refusal is not None:
+            raise ValueError(refusal)
+        links = self._collapsed(mapping)
+        self.delete_elements(links)
         self.elem_conn = [np.asarray([mapping.get(int(n), int(n))
                                       for n in conn], dtype=np.int64)
                           for conn in self.elem_conn]
@@ -1593,10 +1825,10 @@ class Geometry:
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
         self.node_xyz = self.node_xyz[keep]
-        duplicates = self.merge_duplicate_elements()
+        duplicates = self.merge_duplicate_elements(groups)
         self.validate()
         return {'merged': len(mapping), 'into': len(set(mapping.values())),
-                'duplicates': duplicates}
+                'duplicates': duplicates, 'links': len(links)}
 
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
         """Remove coordinate systems, reassigning any node that used them.

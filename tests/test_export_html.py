@@ -68,6 +68,49 @@ def test_a_scene_takes_its_shapes(tmp_path):
     assert data['theme'] is None, 'unset, it follows the reader'
 
 
+def test_a_brick_is_drawn_as_its_six_faces_and_a_block_as_its_skin(tmp_path):
+    """The HTML scene draws an element as the 3-D view does. It drew
+    every element of three nodes or more as one polygon in node order,
+    and a brick's eight nodes in that order fold into a bow tie: the
+    website's brick examples drew no cubes at all (Brandon, 2026-10-11).
+    One brick is six square faces of a unit cube; two bricks sharing a
+    face are the ten faces of their skin, the shared one gone."""
+    from visualdynamics import mesh
+
+    brick = mesh.block((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1), 1, unit=None)
+    _text, data = _payload(visualdynamics.export_html(tmp_path / 'b.html',
+                                                      geometry=brick))
+    [block] = data['blocks']
+    points = np.asarray(block['points'], dtype=float)
+    faces = [points[face['nodes']] for face in block['faces']]
+    assert len(faces) == 6 and all(len(face) == 4 for face in faces)
+    for face in faces:
+        # four corners of the cube, all on one side of it, going round
+        flat = [axis for axis in range(3) if np.ptp(face[:, axis]) == 0]
+        assert len(flat) == 1 and face[0, flat[0]] in (0.0, 1.0)
+        sides = np.linalg.norm(np.roll(face, -1, axis=0) - face, axis=1)
+        assert np.allclose(sides, 1.0), 'edges, not diagonals'
+    two = mesh.block((0, 0, 0), (2, 0, 0), (0, 1, 0), (0, 0, 1), 1, unit=None)
+    _text, data = _payload(visualdynamics.export_html(tmp_path / 't.html',
+                                                      geometry=two))
+    assert len(data['blocks'][0]['faces']) == 10
+
+
+def test_a_higher_order_element_is_drawn_by_its_corners(tmp_path):
+    """A quad8 is its four corners, not an eight-sided polygon through its
+    midside nodes; a three-node beam is a line, not a triangle."""
+    geometry = visualdynamics.Geometry(
+        np.arange(1, 12),
+        [[0, 0, 0], [2, 0, 0], [2, 2, 0], [0, 2, 0], [1, 0, 0], [2, 1, 0],
+         [1, 2, 0], [0, 1, 0], [5, 0, 0], [7, 0, 0], [6, 0, 0]])
+    geometry.add_elements([list(range(1, 9)), [9, 10, 11]], [95, 23], [1, 2])
+    _text, data = _payload(visualdynamics.export_html(tmp_path / 'q.html',
+                                                      geometry=geometry))
+    [block] = data['blocks']
+    assert [face['nodes'] for face in block['faces']] == [[0, 1, 2, 3]]
+    assert [line[:2] for line in block['lines']] == [[8, 9]]
+
+
 def test_nothing_to_draw_is_refused(tmp_path):
     with pytest.raises(ValueError, match='data to plot or a geometry'):
         visualdynamics.export_html(tmp_path / 'x.html')

@@ -98,7 +98,7 @@ def test_native_import_dispatch(tmp_path):
 
 
 def test_validation_rejects_bad_connectivity():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='unknown node ids'):
         visualdynamics.Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]],
                       elem_conn=[np.array([1, 99])])
 
@@ -256,7 +256,7 @@ def test_delete_coordinate_system_reassigns_its_nodes():
 
 def test_the_last_coordinate_system_cannot_be_deleted():
     geo = visualdynamics.import_file(PLATE_NPZ, length_unit='m')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='at least one coordinate system'):
         geo.delete_coordinate_systems(geo.cs_id.tolist())
 
 
@@ -285,22 +285,22 @@ def test_element_type_follows_the_node_count():
                             ([101, 102, 103, 104], 44)]:
         geo.add_element(nodes)
         assert int(geo.elem_type[-1]) == expected
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='no default element type for 5 nodes'):
         geo.add_element([101, 102, 103, 104, 105])   # no default for five
     geo.validate()
 
 
 def test_added_entities_must_reference_real_nodes():
     geo = visualdynamics.import_file(PLATE_EXO, length_unit='m')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='unknown nodes'):
         geo.add_beams([101, 999999])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='unknown nodes'):
         geo.add_element([101, 999999, 103])
 
 
 def test_a_line_needs_two_nodes():
     geo = visualdynamics.import_file(PLATE_EXO, length_unit='m')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='a line needs at least two nodes'):
         geo.add_beams([101])
 
 

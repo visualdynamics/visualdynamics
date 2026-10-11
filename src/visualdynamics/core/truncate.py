@@ -86,11 +86,5 @@ def truncate(data: TimeHistory, truncation: Truncation) -> TimeHistory:
             f'the span {truncation.start:g} to {truncation.stop:g} s '
             'holds fewer than two samples — nothing downstream can '
             'read a record that short')
-    return TimeHistory(
-        abscissa[keep], np.asarray(data.ordinate)[..., keep],
-        response_dof=list(data.response_dof),
-        ordinate_dim=list(data.ordinate_dim),
-        ordinate_unit=list(data.ordinate_unit),
-        dimension_hint=list(data.dimension_hint),
-        comment=list(data.comment),
-        block=None if data.block is None else list(data.block))
+    return TimeHistory(abscissa[keep], np.asarray(data.ordinate)[..., keep],
+                       **data.record_fields())

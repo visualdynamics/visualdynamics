@@ -89,7 +89,9 @@
     Focus Group wiki</a>. Here it is built the way a simple plate model
     is built in Visual Dynamics: each part as the planes it is made of,
     each given its material and thickness, each bolt a rigid tie from
-    the elements its washer covers to the part below, and Solve Modes.
+    the elements it clamps to the part below (four bolts join each
+    channel to the box and four join the beam to each channel), and
+    Solve Modes.
   </p>
   <div class="figure">
     <iframe src="examples/barc.html" loading="lazy" scrolling="no"
@@ -108,11 +110,12 @@
   <h2>The BARC again, from bricks</h2>
   <p>
     The same structure built from solid bricks, the higher-fidelity
-    model: each part as the boxes it is made of, the channels' feet
-    joined to the box over their whole footprint, the beam resting on
-    the channels and tied to them over each washer, and each bolt a
-    point mass at its head. The removable component, the two channels
-    and the beam, is a model of its own beside it.
+    model: each part as the boxes it is made of, meshed apart where the
+    parts touch, and each bolt made by merging the nodes it clamps into
+    one with Merge Coincident Nodes, under a washer at the feet and at
+    four corners through the beam. Each bolt is a point mass at its
+    head. The removable component, the two channels and the beam, is a
+    model of its own beside it.
   </p>
   <div class="figure">
     <iframe src="examples/barc-bricks.html" loading="lazy" scrolling="no"
@@ -120,12 +123,13 @@
   </div>
   <p class="caption">
     The first eight elastic modes of the assembly, drawn from a
-    quarter-inch mesh of 3,198 nodes. Choose one from the list and it
+    quarter-inch mesh of 3,170 nodes. Choose one from the list and it
     animates; drag to turn it. Meshed at an eighth of an inch, its first
-    ten elastic modes land 1 to 4 percent above the ones measured on the
-    BARC and shared on the <a href="https://wiki.sem.org/wiki/BARC">wiki</a>,
-    and its mode shapes follow the shared finite element model's in order.
-    <a href="documentation/guide/workflows/fem-workflow/#the-barc-from-bricks">How
+    ten elastic modes land within 3.4 percent of the model checked
+    against the modes measured on the BARC and shared on the
+    <a href="https://wiki.sem.org/wiki/BARC">wiki</a>, its mode shapes
+    in the same order.
+    <a href="documentation/guide/workflows/fem-workflow/#the-barc-from-bricks-bolted-by-merging-nodes">How
     it is built</a>, and
     <a href="downloads.html#examples">both models</a>, solved, to open in
     the app.

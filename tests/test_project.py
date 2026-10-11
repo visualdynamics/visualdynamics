@@ -63,7 +63,7 @@ def test_linking_merges_groups_and_refuses_a_second_geometry():
     project.add('Other Geometry', _geometry(900))
     with pytest.raises(ValueError, match='one geometry'):
         project.link('Geometry', 'Other Geometry')
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="no object named 'Nothing'"):
         project.link('Geometry', 'Nothing')
 
 
@@ -621,7 +621,7 @@ def test_the_view_is_never_a_snapshot(survey):
     project.add('FRF', frfs)
     assert project.frf is frfs
     project.remove('Truth')
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match='no shapes in project'):
         _ = project.shapes
 
 

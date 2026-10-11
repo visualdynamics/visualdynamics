@@ -239,7 +239,9 @@ def test_a_reader_without_a_progress_hook_is_not_handed_one():
     keyword it does not take."""
     loaded = visualdynamics.import_file(fixture_path('plate', 'geometry.unv'),
                                         progress=lambda d, t: None)
-    assert loaded is not None
+    plain = visualdynamics.import_file(fixture_path('plate', 'geometry.unv'))
+    assert isinstance(loaded, visualdynamics.Geometry)
+    assert loaded.num_nodes == plain.num_nodes == 169, 'read whole, as without it'
 
 
 def test_a_lone_nc4_import_moves_the_bar(window, pump, monkeypatch):

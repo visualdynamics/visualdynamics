@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import html
 import pathlib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QItemSelectionModel,
     QMimeData,
     QModelIndex,
     QObject,
@@ -578,6 +579,61 @@ class CopyPasteTableView(QTableView):
         self._copy_button.clicked.connect(self.copy_table)
         self._copy_button.hide()
 
+    # ---- a subset of the rows -----------------------------------------------
+
+    def show_rows(self, rows: Iterable[int] | None) -> None:
+        """Show only these rows of the model; None shows them all.
+
+        The rest are out of the table, not merely out of sight: they
+        cannot be selected (`selectionChanged` lets them go, so Select
+        All and a drag across the gap reach only what is shown, and the
+        owner's selection-driven acts — a highlight, Delete — never act
+        on a row nobody can see), and copy, paste and the fill handle
+        pass over them. Rows keep their model indices, so whoever reads
+        the selection still reads the model's own rows (2026-10-10: the
+        pencil on an element group opened every element group).
+        """
+        self._shown_rows = None if rows is None else {int(r) for r in rows}
+        model = self.model()
+        count = model.rowCount() if model is not None else 0
+        for row in range(count):
+            self.setRowHidden(row, not self.row_shown(row))
+        selection = self.selectionModel()
+        if selection is not None and self._shown_rows is not None:
+            self._drop_hidden(selection.selection())
+
+    def row_shown(self, row: int) -> bool:
+        shown = getattr(self, '_shown_rows', None)
+        return shown is None or row in shown
+
+    def setModel(self, model: Any) -> None:
+        # a new model is a new table: every row of it is shown until its
+        # owner says otherwise
+        self._shown_rows = None
+        super().setModel(model)
+        if model is not None:
+            for row in range(model.rowCount()):
+                self.setRowHidden(row, False)
+
+    def selectionChanged(self, selected: Any, deselected: Any) -> None:
+        super().selectionChanged(selected, deselected)
+        if getattr(self, '_shown_rows', None) is not None:
+            self._drop_hidden(selected)
+
+    def _drop_hidden(self, selection: Any) -> None:
+        hidden = sorted({index.row() for index in selection.indexes()
+                         if not self.row_shown(index.row())})
+        if not hidden:
+            return
+        model, chosen = self.model(), self.selectionModel()
+        for row in hidden:
+            chosen.select(model.index(row, 0),
+                          QItemSelectionModel.SelectionFlag.Deselect
+                          | QItemSelectionModel.SelectionFlag.Rows)
+
+    def _shown(self, rows: Iterable[int]) -> list[int]:
+        return [row for row in rows if self.row_shown(row)]
+
     # ---- clipboard ----------------------------------------------------------
 
     def selected_block(self) -> tuple[list[int], list[int]]:
@@ -594,7 +650,7 @@ class CopyPasteTableView(QTableView):
         if model is None:
             return ''
         if whole_table:
-            rows = range(model.rowCount())
+            rows = self._shown(range(model.rowCount()))
             columns = range(model.columnCount())
         else:
             rows, columns = self.selected_block()
@@ -628,7 +684,7 @@ class CopyPasteTableView(QTableView):
                    for c in columns]
         rows = [[str(model.data(model.index(r, c), Qt.ItemDataRole.EditRole)
                      or '') for c in columns]
-                for r in range(model.rowCount())]
+                for r in self._shown(range(model.rowCount()))]
         return headers, rows
 
     def copy_table(self) -> bool:
@@ -697,15 +753,18 @@ class CopyPasteTableView(QTableView):
         rows, columns = self.selected_block()
         top = rows[0] if rows else 0
         left = columns[0] if columns else 0
+        # line by line onto the rows that are shown, from the top one down
+        landing = self._shown(range(top, model.rowCount()))
 
         applied = rejected = 0
         for row_offset, line in enumerate(text.split('\n')):
             if not line.strip() and row_offset == len(text.split('\n')) - 1:
                 continue          # trailing newline from the spreadsheet
             for column_offset, cell in enumerate(line.split('\t')):
-                row, column = top + row_offset, left + column_offset
-                if row >= model.rowCount() or column >= model.columnCount():
+                column = left + column_offset
+                if row_offset >= len(landing) or column >= model.columnCount():
                     continue      # pasting past the edge stops, not wraps
+                row = landing[row_offset]
                 index = model.index(row, column)
                 if not (model.flags(index) & Qt.ItemFlag.ItemIsEditable):
                     rejected += 1
@@ -841,6 +900,7 @@ class CopyPasteTableView(QTableView):
             targets = range(max(through, 0), rows[0])
         else:
             return 0, 0
+        targets = self._shown(targets)
         cells = []
         for target in targets:
             # step through the block in order, wrapping, measured from its top

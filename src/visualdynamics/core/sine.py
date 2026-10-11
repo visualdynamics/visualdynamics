@@ -47,7 +47,7 @@ from typing import Any
 
 import numpy as np
 
-from .data import NAMED_CLASSES, Bounded, Spectrum
+from .data import NAMED_CLASSES, Bounded, Spectrum, _even_steps
 from .progress import Ticker
 
 LINEAR = 0
@@ -726,21 +726,6 @@ def find_environment(records: np.ndarray, dt: float,
     return float(int(np.argmax(joint)) * dt)
 
 
-def _smooth(values: np.ndarray, half_windows: np.ndarray) -> np.ndarray:
-    """Centered moving average whose window varies per sample.
-
-    The window follows the instantaneous frequency, so a sweep is
-    averaged over a fixed number of *cycles* everywhere rather than a
-    fixed number of seconds. Cumulative-sum implementation, one pass.
-    Used for the noise estimate beside the Vold-Kalman envelope.
-    """
-    n = len(values)
-    sums = np.concatenate(([0.0 + 0.0j], np.cumsum(values)))
-    lo = np.clip(np.arange(n) - half_windows, 0, n).astype(np.int64)
-    hi = np.clip(np.arange(n) + half_windows + 1, 0, n).astype(np.int64)
-    return (sums[hi] - sums[lo]) / np.maximum(hi - lo, 1)
-
-
 #: the -3 dB bandwidth of a centered average over L samples is 0.443 fs/L;
 #: the Vold-Kalman penalty is tuned to the same bandwidth for the same
 #: `cycles`, so the setting means what it meant under the moving average
@@ -1141,14 +1126,6 @@ def _vold_kalman_whole(signal: np.ndarray, arguments: Sequence[np.ndarray],
 # drift is accumulated as per-chunk phase slopes. What stays is the
 # record itself (read as views, cast one chunk at a time) and the
 # readings.
-
-
-def _even_steps(abscissa, dt):
-    steps = np.diff(abscissa)
-    if len(steps) < 1 or not np.allclose(steps, steps[0], rtol=1e-6):
-        raise ValueError('extract_sine needs an evenly sampled time '
-                         'history')
-    return float(steps[0])
 
 
 def _control_rows(history, specification):
@@ -1725,7 +1702,8 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
     smoothing, from the floor against the amplitude; infinite where
     the tone is under the floor), and 'cycles'.
     """
-    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float),
+                      'Extracting sine levels')
     rows = _control_rows(history, specification)
     signals = [history.ordinate[row] for row in rows]
     wanted = (specification.tones if tones is None
@@ -1924,7 +1902,8 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
     before a tone does yields the lines it reached — the coverage the
     comparison reports.
     """
-    dt = _even_steps(np.asarray(history.abscissa, dtype=float), None)
+    dt = _even_steps(np.asarray(history.abscissa, dtype=float),
+                      'Extracting sine levels')
     rows = _control_rows(history, specification)
     signals = [history.ordinate[row] for row in rows]
     ticker = Ticker(progress)

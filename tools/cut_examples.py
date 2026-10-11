@@ -110,7 +110,8 @@ SETS = {
         ('The BARC: a finite element model built from planes and solved '
          "— the documentation's finite element workflow, already carried "
          'out — and the BARC and its removable component built from '
-         'bricks, with the bolts as point masses, solved.'),
+         'bricks, each bolt made by merging the nodes it clamps and '
+         'given its mass as a point mass, solved.'),
         ('The models are visualdynamics.demo.barc, rebuilt with\n'
          'barc.project(solved=True) and barc.solid_project(solved=True).\n'
          'They were checked against the finite element models and the\n'

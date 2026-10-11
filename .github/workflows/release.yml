@@ -218,17 +218,27 @@ jobs:
   # before this one, fetched from their own assets, and the per-arch
   # appcasts go up beside them. Publishing the release publishes the
   # feeds: every app reads releases/latest/download/appcast-<arch>.xml.
+  #
+  # One job per architecture, side by side: the feeds share nothing, and
+  # one job doing both in turn was 22 of the release's 84 minutes
+  # (0.1.0a44, 2026-10-10). Both run on Apple silicon — making a delta
+  # reads the zips, it does not run them.
   updates:
     needs: publish
     if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     runs-on: macos-latest
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      VD_ARCHES: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
-        with: {path: dist, merge-multiple: true, pattern: 'macos-*'}
+        with: {path: dist, merge-multiple: true, pattern: 'macos-${{ matrix.arch }}'}
       - name: Sparkle's tools
         run: packaging/fetch_sparkle.sh "$RUNNER_TEMP/sparkle"
       - name: The update zips of the two releases before this one
@@ -237,11 +247,9 @@ jobs:
               --json tagName -q '.[].tagName' |
             grep '^v' | grep -vxF "$GITHUB_REF_NAME" | head -2 |
             while read -r tag; do
-              for arch in arm64 x86_64; do
-                gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
-                  --pattern "VisualDynamics-*-macos-$arch.zip" \
-                  --dir "$RUNNER_TEMP/updates/$arch"
-              done
+              gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                --pattern "VisualDynamics-*-macos-$VD_ARCHES.zip" \
+                --dir "$RUNNER_TEMP/updates/$VD_ARCHES"
             done
           ls -R "$RUNNER_TEMP/updates"
       - name: Sign the updates and write the feeds

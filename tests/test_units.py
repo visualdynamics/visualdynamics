@@ -12,7 +12,7 @@ def test_si_factor_length():
 
 def test_si_factor_dimension_check():
     assert units.si_factor('in', 'length') == pytest.approx(0.0254)
-    with pytest.raises(units.UnitError):
+    with pytest.raises(units.UnitError, match='is not a length unit'):
         units.si_factor('kg', 'length')
 
 
@@ -112,7 +112,7 @@ def test_gn_still_reads_as_gravity():
 
 
 def test_g_is_rejected_where_a_mass_is_wanted():
-    with pytest.raises(units.UnitError):
+    with pytest.raises(units.UnitError, match='is not a mass unit'):
         units.si_transform('g', 'mass')
 
 
@@ -214,7 +214,7 @@ def test_a_dimensionless_value_can_be_shown():
     assert units.si_transform('dimensionless', 'dimensionless') == (1.0, 0.0)
     assert units.IN_LBF_S.from_si(2.5, 'dimensionless') == pytest.approx(2.5)
     assert units.si_transform('', 'strain') == (1.0, 0.0), 'strain too'
-    with pytest.raises(units.UnitError):
+    with pytest.raises(units.UnitError, match='is not a dimensionless unit'):
         units.si_transform('m', 'dimensionless')
 
 
@@ -264,3 +264,45 @@ def test_every_offered_unit_folds_back_to_itself_from_upper_case():
         upper = unit.upper()
         assert units.dimension_of(upper) == units.dimension_of(unit), unit
         assert units.fold_unit_case(upper) == their_own.get(unit, unit), unit
+
+
+def test_a_spelling_that_already_means_something_is_never_folded():
+    """The fold trades up and never sideways: `G` (gauss, as written)
+    becomes `g`, but `MV` is megavolts and `mV` millivolts as they
+    stand — folding either would silently change a reading by a
+    factor of a billion. And anything that is not a string comes
+    back as it came (mutation testing, 2026-10-10: neither was
+    tested)."""
+    assert units.fold_unit_case('G') == 'g'
+    assert units.fold_unit_case('LBF/IN') == 'lbf/in'
+    assert units.fold_unit_case('MV') == 'MV'
+    assert units.fold_unit_case('mV') == 'mV'
+    assert units.fold_unit_case(None) is None
+    # a respelling that rescues nothing is not made: the caller must
+    # still be able to tell "unknown" from "known"
+    assert units.fold_unit_case('G per fortnight') == 'G per fortnight'
+
+
+def test_a_compound_is_anything_with_a_slash_a_star_or_a_middle_dot():
+    assert units.is_compound_unit('m/s')
+    assert units.is_compound_unit('N*m')
+    assert units.is_compound_unit('N·m'), 'the shown spelling of N*m'
+    assert not units.is_compound_unit('N')
+
+
+def test_a_compound_unit_is_bracketed_before_it_is_raised():
+    """`(in/s)**2/Hz`, never `in/s**2/Hz`, which is an acceleration per
+    hertz — a bracket dropped is a different quantity."""
+    system = units.SYSTEMS['in-slinch-lbf-s']
+    assert system.unit('velocity**2/frequency') == '(in/s)**2/Hz'
+    bare = units.UnitSystem('bare', {'length': 'in', 'mass': 'lbf*s**2/in'})
+    assert bare.unit('mass*length') == '(lbf*s**2/in)*in'
+
+
+def test_a_systems_temperature_is_converted_with_its_offset():
+    """The display system's degF goes to kelvin through its offset both
+    ways — a scale alone puts freezing at 17.8 K."""
+    system = units.SYSTEMS['in-slinch-lbf-s']
+    assert system.to_si(32.0, 'temperature') == pytest.approx(273.15)
+    assert system.from_si(273.15, 'temperature') == pytest.approx(32.0)
+    assert system.to_si(212.0, 'temperature') == pytest.approx(373.15)

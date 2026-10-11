@@ -96,7 +96,14 @@ def test_add_block_types_blocks_in_display_units(window, pump):
     window.project.new_geometry('Frame', unit='in')
     window.show_object('Frame')
     select_objects(window, pump, 'Frame')
-    assert 'add_block' in [act[0] for act in window.acts_for(['Frame'])]
+    item = window._item_for_object('Frame')
+    item.setExpanded(True)
+    hexes = next(item.child(i) for i in range(item.childCount())
+                 if item.child(i).text(0).startswith('Hexes'))
+    window.tree.setCurrentItem(hexes)
+    pump()
+    assert [act[0] for act in window.acts_for()] == ['add_block'], (
+        "on the Hexes row (Brandon, 2026-10-10)")
     window.add_block_act()
     pump()
     panel = window.scene.mesh_panel

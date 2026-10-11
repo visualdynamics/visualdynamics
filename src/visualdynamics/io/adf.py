@@ -117,6 +117,13 @@ def _directory(raw):
     return entries
 
 
+def _extremes(values):
+    """(max, min) of a record's values, NaN passed over; (0, 0) when
+    nothing is left."""
+    kept = values[~np.isnan(values)]
+    return (float(kept.max()), float(kept.min())) if kept.size else (0.0, 0.0)
+
+
 def _char_field(raw, base, offset, length):
     text = raw[base + offset: base + offset + length]
     return text.decode('latin1').rstrip('\x00 ')
@@ -550,12 +557,14 @@ def _function_record(data_obj, index, record_number):
         else:
             payload = np.column_stack([abscissa, values.real]).ravel()
 
-    real32 = values.real.astype('<f4')
-    imag32 = values.imag.astype('<f4') if is_complex else np.zeros(1, '<f4')
-    floats[100] = real32.max(initial=0.0)
-    floats[101] = imag32.max(initial=0.0)
-    floats[102] = real32.min(initial=0.0)
-    floats[103] = imag32.min(initial=0.0)
+    # the extremes of each part as the reference tooling writes them:
+    # NaN passed over, an infinity kept, nothing at all as zero.
+    # Clamped to zero until 2026-10-11, which wrote an all-positive
+    # record's minimum as 0 and an all-negative record's maximum as 0
+    # (the corpus files say otherwise)
+    floats[100], floats[102] = _extremes(values.real.astype('<f4'))
+    floats[101], floats[103] = (_extremes(values.imag.astype('<f4'))
+                                if is_complex else (0.0, 0.0))
     floats[106] = 1.0
     floats[107] = 1.0
 

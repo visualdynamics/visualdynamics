@@ -27,24 +27,29 @@ element models shared on the wiki while this was built: a single rigid
 link at each bolt came out soft, and softer at every mesh refinement (a
 point tie on a plate is a local singularity, not a joint), and each foot
 tied over its whole area came out stiff. What is built ties each bolt
-over the elements its washer covers (`washer_patch`), to the part below
-with `mesh.tie` — what the app's Tie does with the same elements picked
+over the elements it clamps (`bolt_patch`), to the part below with
+`mesh.tie` — what the app's Tie does with the same elements picked
 (2026-09-26) — so the model a person builds in the app by the
 documentation's steps is this one, node for node and link for link.
+Four bolts join each channel to the box, each over the elements its
+washer covers, and four join the beam to each channel, each over the
+element it passes through (Brandon, 2026-10-11; the beam had one bolt
+at each end).
 
 **And from bricks** (2026-10-07): the same structure as solid
 eight-node bricks (`mesh.block`), the higher-fidelity model, and the
 removable component on its own — the two channels and the beam, the
-part the BARC is named for (`solid_geometry`, `solid_project`). The
-joints follow the finite element model shared on the wiki: the feet
-are joined to the box over their whole footprint (the bricks share
-nodes there), the beam rests 0.001 in over the channels so it joins
-them only where it is bolted, tied over each washer with `mesh.tie`,
-and the bolts are point masses, an element group of point elements given a mass
-(`fem.GroupProperties(mass=...)`). Without the bolt masses the
-assembly reads 1 to 8 % stiffer. Checked against the wiki's models and
-test: the assembly's first ten elastic modes 1 to 4 % above the
-measured ones, its shapes matching the shared model's in order.
+part the BARC is named for (`solid_geometry`, `solid_project`). Bricks
+touch where the parts do, so their bolts are built the other way
+(Brandon, 2026-10-11): each part meshed apart (`mesh.assemble` with
+`apart`), its nodes coincident with the next part's where the two
+touch and joined to none of them, and each bolt made by merging the
+places it clamps (`bolt_places`, Merge Coincident Nodes with the rest
+left out) — at a foot the corners of the brick under the bolt and the
+eight around it, the washer's area, and at the beam the four corners
+of the brick the bolt passes through. The bolts' masses are point
+masses, an element group of point elements given a mass
+(`fem.GroupProperties(mass=...)`).
 
 Run it directly to print the models and their first modes:
 
@@ -75,14 +80,26 @@ THICKNESS = {'box': 0.25, 'right channel': 0.125, 'left channel': 0.125,
              'beam': 0.125}                  #: inches
 MATERIAL = fem.material('6061-T6')
 
+#: where the bolts pass through a part, (x, z): four at each channel's
+#: foot and, above them, four through the beam into each channel's top
+#: (Brandon, 2026-10-11: the beam was held by one bolt at each end)
+BOLT_AXES = [(x, z) for x in (-2.1875, -1.8125, 1.8125, 2.1875)
+             for z in (1.3125, 1.6875)]
 #: the bolts: (x, z) on the part, the two mid-surfaces they join, and
-#: the washer's radius — #8 screws with 0.375 in washers at the feet,
-#: 1/4 in screws with 0.5 in washers at the beam
-WASHER_RADIUS = {'foot': 0.1875, 'top': 0.25}
-BOLTS = ([((x, z), BOX_MID, FOOT_Y, WASHER_RADIUS['foot'])
-          for x in (-2.1875, -1.8125, 1.8125, 2.1875) for z in (1.3125, 1.6875)]
-         + [((x, 1.5), TOP_Y, BEAM_Y, WASHER_RADIUS['top'])
-            for x in (-2.0, 2.0)])
+#: the kind, a foot's or the beam's
+BOLTS = ([(axis, BOX_MID, FOOT_Y, 'foot') for axis in BOLT_AXES]
+         + [(axis, TOP_Y, BEAM_Y, 'top') for axis in BOLT_AXES])
+#: how many elements across the patch a bolt clamps, centered on the
+#: element it passes through: at a foot the three its #8 screw's 0.375
+#: in washer covers, and at the beam the one element — its four corners,
+#: as Brandon proposed (2026-10-11). Measured against the builds checked
+#: against the wiki's models, which held the beam by one bolt at each
+#: end: the planes within 0.2 % over the first ten elastic modes, MAC
+#: 0.999 and up, where the washer's three at the beam too moved modes
+#: six, seven, nine and ten (MAC 0.46 to 0.84); the bricks within 3.5 %,
+#: MAC 0.97 and up, where four places at a foot read up to 10 % soft
+#: and lost the ninth mode's shape (MAC 0.65).
+CLAMPED = {'foot': 3, 'top': 1}
 
 #: where the BARC is shared: its solid model, test data and models
 WIKI = 'https://wiki.sem.org/wiki/BARC'
@@ -137,8 +154,8 @@ def geometry(size: float = SIZE) -> Any:
     -------
     Geometry
         Element groups 'box', 'right channel', 'left channel', 'beam' (6061-T6
-        plates) and 'bolts' (rigid links over the elements each washer
-        covers, `washer_patch`), opening on `VIEW`.
+        plates) and 'bolts' (rigid links over the elements each bolt
+        clamps, `bolt_patch`), opening on `VIEW`.
     """
     whole = mesh.assemble(*_planes(size))
     whole.view = VIEW
@@ -147,19 +164,18 @@ def geometry(size: float = SIZE) -> Any:
             MATERIAL, THICKNESS[whole.group_name[i]] * INCH)
         for i, group in enumerate(whole.group_id)}
     for bolt in BOLTS:
-        patch, below = washer_patch(whole, bolt)
+        patch, below = bolt_patch(whole, bolt)
         mesh.tie(whole, patch, below, group='bolts')
     return whole
 
 
-def washer_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
-    """The elements a bolt's washer covers, and the element group it bolts them to:
-    the elements of the part on top whose centers lie within the washer's
-    radius of the bolt along both edges — at `SIZE`, the element the bolt
-    passes through and the eight around it under a foot, the 4 × 4 around
-    the node it passes through on the beam. A square rather than the
-    washer's circle because it is what a person picks: whole rows of
-    elements, countable in the view.
+def bolt_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
+    """The elements a bolt clamps, and the element group it bolts them to:
+    the `CLAMPED` elements across of the part on top, centered on the
+    element the bolt passes through — at a foot that element and the
+    eight around it, the washer's area, and at the beam the element
+    alone. Whole elements rather than the washer's circle because they
+    are what a person picks: whole rows, countable in the view.
 
     Parameters
     ----------
@@ -173,18 +189,33 @@ def washer_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
     (list of int, str)
         The element ids, and the name of the element group below.
     """
-    (bx, bz), _lower, upper, radius = bolt
-    side = 'left channel' if bx < 0 else 'right channel'
-    top, below = ('beam', side) if upper == BEAM_Y else (side, 'box')
+    axis, _lower, upper, kind = bolt
+    side = 'left channel' if axis[0] < 0 else 'right channel'
+    top, below = ('beam', side) if kind == 'top' else (side, 'box')
     xyz = geometry.node_xyz / INCH
-    patch = []
+    on_face = {}
     for element in geometry.elements_in(top):
         row = int(np.flatnonzero(geometry.elem_id == element)[0])
-        center = xyz[geometry.node_index(geometry.elem_conn[row])].mean(axis=0)
-        if (abs(center[1] - upper) < 1e-6 and abs(center[0] - bx) <= radius
-                and abs(center[2] - bz) <= radius):
-            patch.append(element)
-    return patch, below
+        at = xyz[geometry.node_index(geometry.elem_conn[row])]
+        if np.all(np.abs(at[:, 1] - upper) < 1e-6):
+            on_face[element] = at
+    return _clamped(on_face, axis, CLAMPED[kind]), below
+
+
+def _clamped(corners: dict, axis: tuple, across: int) -> list[int]:
+    """Of elements given as {id: their corners' (x, y, z), inches} on
+    one face, the `across` × `across` centered on the one whose center
+    is nearest the bolt's (x, z) — the rule both models' bolts are
+    picked by."""
+    centers = {e: at.mean(axis=0) for e, at in corners.items()}
+    under = min(centers, key=lambda e: np.hypot(centers[e][0] - axis[0],
+                                                centers[e][2] - axis[1]))
+    middle = centers[under]
+    # half a pitch past the last element counted, along each edge
+    reach = (across // 2 + 0.5) * np.ptp(corners[under], axis=0)
+    return [e for e, center in centers.items()
+            if abs(center[0] - middle[0]) < reach[0]
+            and abs(center[2] - middle[2]) < reach[2]]
 
 
 def build(size: float = SIZE) -> fem.Model:
@@ -240,21 +271,20 @@ def project(size: float = SIZE, solved: bool = False) -> Any:
 #: the models `solid_geometry` builds: the whole BARC, and the removable
 #: component — the two channels and the beam — on its own
 PARTS = ('BARC', 'removable component')
-#: how far the beam rests over the channels' tops, inches: far enough
-#: that assembling does not fuse it to them, which made the beam a
-#: flange of each channel and read stiff
-BEAM_GAP = 0.001
-#: how far around a beam bolt the beam is tied to its channel, inches:
-#: the washer's radius, as `WASHER_RADIUS['top']`
-TIE_RADIUS = 0.25
-#: each bolt's mass, pounds, as the shared model lumps them: #8 screws
-#: at the feet, 1/4 in at the beam
-BOLT_MASS = {'foot': 0.00744, 'top': 0.0125}
-#: the bolts: (x, z), the face its head sits on (y, inches), its kind
-SOLID_BOLTS = ([((x, z), 3.125, 'foot')
-                for x in (-2.1875, -1.8125, 1.8125, 2.1875)
-                for z in (1.3125, 1.6875)]
-               + [((x, 1.5), 5.125 + BEAM_GAP, 'top') for x in (-2.0, 2.0)])
+#: each bolt's mass, pounds, as the shared model lumps them: a #8 screw
+#: at a foot, and at the beam the shared model's one 1/4 in screw per
+#: channel, 0.0125 lb, shared by the four bolts here — the removable
+#: component's modes read up to 6 % low with a #8 screw's mass at each
+BOLT_MASS = {'foot': 0.00744, 'top': 0.0125 / 4}
+#: where the parts touch, y in inches: a channel's foot on the box's top
+#: wall, the beam on a channel's top
+JOINT_Y = {'foot': 3.0, 'top': 5.0}
+#: the face each bolt's head sits on, y in inches: a foot's top and the
+#: beam's
+HEAD_Y = {'foot': 3.125, 'top': 5.125}
+#: the bolts: (x, z) and the kind, foot or top
+SOLID_BOLTS = ([(axis, 'foot') for axis in BOLT_AXES]
+               + [(axis, 'top') for axis in BOLT_AXES])
 POUND = 0.45359237
 #: how far the solved removable component solves, Hz: its seventh
 #: elastic mode is just past `SOLVE_TO`
@@ -280,7 +310,7 @@ def _boxes(part: str) -> list:
         ((-2.5, 3.0, 1), (1, t, 1), 'left channel'),
         ((-2.5, 4.875, 1), (1, t, 1), 'left channel'),
         ((-2.5, 3.125, 1), (1, 1.75, t), 'left channel'),
-        ((-2.5, 5.0 + BEAM_GAP, 1), (5, t, 1), 'beam'),
+        ((-2.5, 5.0, 1), (5, t, 1), 'beam'),
     ]
     whole = [(*b, 'box') for b in box] + component
     return whole if part == 'BARC' else component
@@ -319,9 +349,9 @@ def _bricks(size: float, part: str) -> list:
 
 
 def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
-    """The BARC, or its removable component, as a geometry of bricks,
-    rigid ties and point masses, every element group given what it is made of —
-    ready for `fem.Model.from_geometry`, or for the app's Solve Modes.
+    """The BARC, or its removable component, as a geometry of bricks
+    and point masses, every element group given what it is made of — ready
+    for `fem.Model.from_geometry`, or for the app's Solve Modes.
 
     Parameters
     ----------
@@ -335,39 +365,39 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     -------
     Geometry
         Element groups 'box' (the assembly only), 'right channel', 'left
-        channel', 'beam' (6061-T6 bricks), 'bolt ties' (rigid links
-        from the beam over each washer to its channel) and the bolts'
-        masses, 'foot bolts' (the assembly only) and 'top bolts',
-        opening on `VIEW`.
+        channel', 'beam' (6061-T6 bricks, joined only at the bolts,
+        `bolt_places`) and the bolts' masses, 'foot bolts' (the assembly
+        only) and 'top bolts', opening on `VIEW`.
     """
     if part not in PARTS:
         raise ValueError(f'{part!r} is not one of {PARTS}')
-    whole = mesh.assemble(*_bricks(size, part))
+    whole = mesh.assemble(*_bricks(size, part), apart=True)
     whole.view = VIEW
     whole.group_properties = {int(group): fem.GroupProperties(MATERIAL)
                               for group in whole.group_id}
-    xyz = whole.node_xyz / INCH
-    for (bx, bz), _face, kind in SOLID_BOLTS:
-        if kind != 'top':
-            continue
-        patch = []
-        for element in whole.elements_in('beam'):
-            row = int(np.flatnonzero(whole.elem_id == element)[0])
-            center = xyz[whole.node_index(whole.elem_conn[row])].mean(axis=0)
-            if (abs(center[0] - bx) <= TIE_RADIUS
-                    and abs(center[2] - bz) <= TIE_RADIUS):
-                patch.append(element)
-        mesh.tie(whole, patch, 'left channel' if bx < 0 else 'right channel',
-                 group='bolt ties')
+    ids = dict(zip(whole.group_name, whole.group_id.tolist()))
+    kinds = ('foot', 'top') if part == 'BARC' else ('top',)
+    for kind in kinds:
+        for side in ('right channel', 'left channel'):
+            below, above = ('box', side) if kind == 'foot' else (side, 'beam')
+            groups = [ids[below], ids[above]]
+            places = {node for (bx, bz), k in SOLID_BOLTS if k == kind
+                      and (bx > 0) == (side == 'right channel')
+                      for node in bolt_places(whole, (bx, bz), kind)}
+            # the pane's own tolerance, a quarter of the finest spacing;
+            # every coincidence not under a bolt left out, as unpicking it
+            tolerance = 0.25 * whole.node_spacing(groups)
+            left_out = [node for spot in whole.coincident_spots(
+                tolerance, groups) if places.isdisjoint(spot) for node in spot]
+            whole.merge_coincident_nodes(tolerance, groups, left_out)
     # each bolt's mass at the node of its head face nearest its axis
     xyz = whole.node_xyz / INCH
-    for kind in ('foot', 'top'):
-        heads = [(axis, face) for axis, face, k in SOLID_BOLTS if k == kind]
-        if kind == 'foot' and part != 'BARC':
-            continue
+    for kind in kinds:
         nodes = []
-        for (bx, bz), face in heads:
-            on_face = np.flatnonzero(np.abs(xyz[:, 1] - face) < 1e-6)
+        for (bx, bz), k in SOLID_BOLTS:
+            if k != kind:
+                continue
+            on_face = np.flatnonzero(np.abs(xyz[:, 1] - HEAD_Y[kind]) < 1e-6)
             nearest = on_face[np.argmin(np.hypot(xyz[on_face, 0] - bx,
                                                  xyz[on_face, 2] - bz))]
             nodes.append([int(whole.node_id[nearest])])
@@ -376,6 +406,44 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
         whole.group_properties[group] = fem.GroupProperties(
             mass=BOLT_MASS[kind] * POUND)
     return whole
+
+
+def bolt_places(geometry: Any, axis: tuple, kind: str) -> set[int]:
+    """The places a bolt clamps, as the ids of the nodes of the part on
+    top that a merge joins there: the corners, on the face where the
+    parts touch, of the bricks it clamps (`CLAMPED`, the rule the planes'
+    bolts are picked by) — the washer's 4 × 4 places at a foot, the four
+    corners of the brick the bolt passes through at the beam. What the
+    app's merge pane marks, and a person clicks.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The BARC's bricks, assembled apart.
+    axis : tuple
+        The bolt's (x, z), inches.
+    kind : str
+        'foot' or 'top'.
+
+    Returns
+    -------
+    set of int
+        Node ids of the part on top.
+    """
+    side = 'right channel' if axis[0] > 0 else 'left channel'
+    top = side if kind == 'foot' else 'beam'
+    xyz = geometry.node_xyz / INCH
+    faces = {}
+    for element in geometry.elements_in(top):
+        row = int(np.flatnonzero(geometry.elem_id == element)[0])
+        conn = geometry.elem_conn[row]
+        touching = np.abs(xyz[geometry.node_index(conn), 1]
+                          - JOINT_Y[kind]) < 1e-6
+        if touching.sum() == 4:
+            faces[element] = conn[touching]
+    patch = _clamped({e: xyz[geometry.node_index(nodes)]
+                      for e, nodes in faces.items()}, axis, CLAMPED[kind])
+    return {int(node) for e in patch for node in faces[e]}
 
 
 def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
@@ -445,8 +513,8 @@ def describe(size: float = SIZE, modes: int = 10) -> None:
         model = solid_build(part, size)
         shapes = model.eigensolution(maximum_frequency=top)
         print(f'{PART_NAMES[part]} from bricks: {model.num_nodes} nodes, '
-              f'{len(model.solids)} bricks, {len(model.rigid_links)} rigid '
-              f'links, {model.total_mass:.3f} kg with the bolts')
+              f'{len(model.solids)} bricks, {model.total_mass:.3f} kg with '
+              'the bolts')
         elastic = [f for f in shapes.frequency if f > 1.0][:modes]
         print('  elastic modes (Hz): '
               + ', '.join(f'{f:.1f}' for f in elastic))

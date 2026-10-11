@@ -121,8 +121,8 @@ go into the geometry's rigid element group, made the first time
 (`project.tie_elements`, `mesh.tie`). Plates themselves connect only
 where they share nodes: a structure built from planes is tied along the
 lines where its planes meet. **+** *New Geometry* on the project row's
-bar starts an empty geometry, and *Add Plane* on a geometry's bar meshes
-one rectangle at its mid-thickness — a center, widths with one left at
+bar starts an empty geometry, and *Add Plane* on the bar of its
+**Quads** row meshes one rectangle at its mid-thickness — a center, widths with one left at
 zero to name the plane it lies in, and an element size, in the display
 unit, typed in a pane beside the 3-D view and drawn there as it is
 typed, turned by angles about X, Y and Z or by the rings around the
@@ -130,12 +130,34 @@ preview, a degree at a time, and slid onto the grid by its arrows —
 into the element group named, its nodes that fall on nodes
 already there becoming them (`project.new_geometry`, `project.add_plane`; in
 [`mesh`](../api/visualdynamics.core.mesh.md), `mesh.plane`, `mesh.join`
-and `mesh.assemble`). *Add Block* is the same pane with all three widths: a box
+and `mesh.assemble`). *Add Block*, on the **Hexes** row's bar, is the same pane with all three widths: a box
 meshed into eight-node solid bricks, for a part that is neither a beam
 nor a plate (`project.add_block`, `mesh.block`, which also cuts
-cylindrical holes). *Merge Coincident Nodes* on a geometry's bar ties
-any geometry the same way after the fact, the tolerance asked in the
-display unit; `project.merge_coincident_nodes` from a script. All of it is
+cylindrical holes). Ticking *Keep apart from other groups* in the pane
+joins a plane or a block only to the nodes of its own element group, so
+two parts that touch, a channel's foot on the box it is bolted to, keep
+nodes of their own there for the bolts to be merged at
+(`apart=True`). *Merge Coincident Nodes* ties parts meshed apart
+after the fact: pick the element groups to tie in the tree, one or
+several, and it is on their bar. It opens a pane beside the view and
+marks every place their nodes coincide, all of them to begin with; a
+click on a mark leaves that place out, a second click puts it back,
+*All* and *None* mark everything or nothing, and the tolerance is typed
+in the display unit with the marks following it, opening at a quarter
+of the groups' finest mesh spacing. The picked groups draw see-through
+while the pane is open, so a mark inside a solid shows. *Merge* makes
+the marked places one node each; a rigid link, spring or beam whose
+nodes all become one joins nothing after that and goes with them, as
+the pane says before it is pressed. The pane stays open on the same
+groups afterwards: the places merged are drawn as blue squares and
+are no longer marks, the places left out are marked again for the next
+*Merge*, and the pane says what the last one did, until *Close*. Only the nodes those groups' elements use
+are candidates, so a part left out stays apart even where it touches;
+the geometry's own row does not offer it. From a script,
+`project.merge_coincident_nodes(name, tolerance, groups=[...],
+exclude=[...])`, `exclude` naming the nodes of the places left out
+(`Geometry.coincident_spots` lists the places); without `groups` it
+merges the whole geometry. All of it is
 shown and typed in the
 current display unit system (psi and in⁴ in the inch system, MPa and mm⁴
 in millimeters), the unit in the column's header, and held in SI; the
@@ -412,7 +434,7 @@ named and linked to its source in one call:
 | on | verbs |
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has drive channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
-| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `add_block`, a meshed box of solid bricks, likewise; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements; `merge_groups`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block, a material alone for a block of solids), which builds the finite element model and solves it |
+| a geometry | `generate_rigid_body_modes`; `add_plane`, a meshed rectangle of plates tied to what is there; `add_block`, a meshed box of solid bricks, likewise; `tie_elements`, a patch of elements tied rigidly to a block or a second patch; `merge_coincident_nodes` once it has elements, of the whole geometry or of the element groups named by `groups=`; `merge_groups`, blocks of one element type and one material and thickness made one; `solve_modes` once its blocks carry their properties (the Blocks table: a material and a thickness or a section per block, a material alone for a block of solids), which builds the finite element model and solves it |
 | the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
 | a PSD, CPSD or specification | `compute_octave` — a specification's warning and abort limits band with it |
 | an FRF | `fit_modes` |

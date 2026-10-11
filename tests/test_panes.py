@@ -195,8 +195,15 @@ def test_anyone_placing_it_can_add_to_its_bar(scene):
 
 
 def test_clearing_leaves_a_themed_empty_view(scene):
+    from visualdynamics.theme import theme
+
+    # dressed wrongly first: a plotter's own clear keeps whatever
+    # background it had, so only the pane's clear can put the theme back
+    scene.plotter.set_background('red')
     scene.clear()
-    assert scene.plotter is not None
+    assert len(scene.plotter.renderer.actors) == 0, 'empty'
+    assert scene.plotter.background_color.hex_rgb == theme('light')['scene_background'], (
+        'and wearing its theme, not the plotter default')
 
 
 # ---- a pane in a window of its own --------------------------------------

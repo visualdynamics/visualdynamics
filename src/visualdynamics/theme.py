@@ -33,6 +33,7 @@ LIGHT = {
     'scene_muted': '#b8b8bd',       # context geometry behind a selection
     'scene_highlight': '#ff8c2b',   # the selected entity, or the one hovered
     'scene_picked': '#1f9d55',      # nodes gathered so far for a new element
+    'scene_merged': '#2f6fd0',      # places Merge Coincident Nodes has joined
     'row_error': '#c02a1f',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so
@@ -80,6 +81,7 @@ DARK = {
     'scene_muted': '#4a4a55',       # context geometry behind a selection
     'scene_highlight': '#ffb020',   # the selected entity, or the one hovered
     'scene_picked': '#3ddc84',      # nodes gathered so far for a new element
+    'scene_merged': '#5b9bff',      # places Merge Coincident Nodes has joined
     'row_error': '#ff6b61',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so

@@ -35,6 +35,34 @@ _TONE_COLORS = ('#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
 #: how solid an exceedance stripe is — the 2-D's EXCEED_ALPHA (150 of
 #: 255), stronger than the zone shading it sits inside
 EXCEED_OPACITY = 150 / 255
+#: the translucent zone between warning and abort, and past abort
+ZONE_OPACITY = 0.22
+
+
+def limit_zones(level: Any, length: int,
+                ceiling: float) -> list[tuple[np.ndarray, np.ndarray, str]]:
+    """The zones a requirement's limits shade on a stage, exactly as the
+    2-D comparison shades them: yellow between warning and abort, and
+    past abort *which way* — red above to the stage's `ceiling`, blue
+    below to its floor (zero), the same over/under colors every other
+    mark uses. A warning with no abort beside it runs to the edge.
+
+    `level(name)` gives a limit's heights on the stage, or None where
+    it was not written; `length` is how many points each has. Returns
+    (inner, outer, color key) for each zone. The banded and the sine
+    stage both draw from it.
+    """
+    zones = []
+    for warning, abort, edge, beyond in (
+            ('warning_upper', 'abort_upper', ceiling, 'exceed_over'),
+            ('warning_lower', 'abort_lower', 0.0, 'exceed_under')):
+        w, a = level(warning), level(abort)
+        if w is not None:
+            outer = a if a is not None else np.full(length, edge)
+            zones.append((w, outer, 'limit_warning'))
+        if a is not None:
+            zones.append((a, np.full(length, edge), beyond))
+    return zones
 
 #: how many points each tone's curves get — a straight sweep needs few,
 #: a log sweep bends, and 400 draws either without weight
@@ -241,24 +269,10 @@ def add_sine_stage(plotter: Any, specification: Any = None,
                 return None
             return (values - z0) / zspan * sz
 
-        # the zones, exactly as the 2-D comparison shades them:
-        # yellow between warning and abort, and past abort *which
-        # way* — red above, blue below, the same over/under colors
-        # every other mark uses
-        zones = []
-        for warning, abort, edge, beyond in (
-                ('warning_upper', 'abort_upper', sz, 'exceed_over'),
-                ('warning_lower', 'abort_lower', 0.0, 'exceed_under')):
-            w, a = level(warning), level(abort)
-            if w is not None:
-                outer = a if a is not None else np.full(len(xn), edge)
-                zones.append((w, outer, 'limit_warning'))
-            if a is not None:
-                zones.append((a, np.full(len(xn), edge), beyond))
-        for j, (inner, outer, key) in enumerate(zones):
+        for j, (inner, outer, key) in enumerate(limit_zones(level, len(xn), sz)):
             plotter.add_mesh(
                 ribbon(xn, yn, inner, outer), color=colors[key],
-                opacity=0.22, name=f'sine-{k}-zone-{j}')
+                opacity=ZONE_OPACITY, name=f'sine-{k}-zone-{j}')
 
         for name, values in curves.items():
             good = np.isfinite(values)

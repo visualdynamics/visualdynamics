@@ -2460,25 +2460,6 @@ def prune_unbound(report: Report, objects: Mapping[str, Any],
     return report
 
 
-def _per_channel(token: str, caption: str, objects: Mapping[str, Any],
-                 object_groups: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
-    """A specification's own figures, one per control channel — no
-    drop-down anywhere in the random report (Brandon, 2026-09-18);
-    one figure that picks when nothing binds yet."""
-    labels = control_channel_labels(objects, object_groups, token)
-    if not labels:
-        return [{'kind': 'plot', 'source': token, 'mode': 'curves',
-                 'caption': caption}]
-    if len(labels) > GRID_ABOVE:
-        # many channels read as a grid, a row per node and a column per
-        # direction, one figure (Brandon, 2026-09-19)
-        return [{'kind': 'plot', 'source': token, 'mode': 'curves',
-                 'grid': True, 'caption': caption}]
-    return [{'kind': 'plot', 'source': token, 'mode': 'curves',
-             'channel': label, 'caption': f'{caption} — {label}'}
-            for label in labels]
-
-
 def _comparisons(psd_token: str, spec_token: str, caption: str,
                  objects: Mapping[str, Any],
                  object_groups: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:

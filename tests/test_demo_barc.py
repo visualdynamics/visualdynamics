@@ -54,9 +54,13 @@ def test_it_weighs_what_the_solid_model_does(solved):
 
 
 #: the first ten elastic modes of the model as built at `barc.SIZE`, Hz —
-#: the build that was checked against the wiki's models
-CHECKED = (194.5, 212.5, 265.3, 461.8, 494.9, 581.0, 593.5, 681.4,
-           1128.1, 1170.9)
+#: four bolts at each end of the beam since 2026-10-11, each tying the
+#: element it passes through, within 0.2 % (MAC 0.999 and up) of the
+#: build with one bolt there that was checked against the wiki's models
+#: (194.5, 212.5, 265.3, 461.8, 494.9, 581.0, 593.5, 681.4, 1128.1,
+#: 1170.9)
+CHECKED = (194.4, 212.4, 264.8, 461.6, 494.4, 580.3, 593.4, 681.1,
+           1125.6, 1168.8)
 
 
 def test_the_modes_stay_where_they_were_checked(solved):
@@ -70,21 +74,28 @@ def test_the_modes_stay_where_they_were_checked(solved):
     assert np.allclose(elastic, CHECKED, rtol=0.005), np.round(elastic, 1)
 
 
-def test_each_bolt_ties_the_elements_its_washer_covers():
+def test_each_bolt_ties_the_elements_it_clamps():
     """The rule the docs give a person to click: under a foot bolt the
-    element it passes through and the eight around it, under a beam bolt
-    the 4 x 4 around its node — each tied to the part below, every
-    patch node that part does not share linked once."""
+    element it passes through and the eight around it, the washer's
+    area, and through the beam the element it passes through alone (four
+    bolts at each end since 2026-10-11) — each tied to the part below,
+    every patch node that part does not share linked once."""
     from visualdynamics import mesh
 
     planes = mesh.assemble(*barc._planes(barc.SIZE))
-    patches = [barc.washer_patch(planes, bolt) for bolt in barc.BOLTS]
-    assert [len(patch) for patch, _below in patches] == [9] * 8 + [16] * 2
+    patches = [barc.bolt_patch(planes, bolt) for bolt in barc.BOLTS]
+    assert [len(patch) for patch, _below in patches] == [9] * 8 + [1] * 8
     assert [below for _patch, below in patches] == (
-        ['box'] * 8 + ['left channel', 'right channel'])
+        ['box'] * 8 + ['left channel'] * 4 + ['right channel'] * 4)
+    # the beam bolt's element is the one it passes through
+    xyz = planes.node_xyz / 0.0254
+    for (patch, _below), bolt in zip(patches[8:], barc.BOLTS[8:]):
+        row = int(np.flatnonzero(planes.elem_id == patch[0])[0])
+        corners = xyz[planes.node_index(planes.elem_conn[row])]
+        assert np.allclose(corners.mean(axis=0)[[0, 2]], bolt[0])
     geometry = barc.geometry()
     links = geometry.elements_in('bolts')
-    assert len(links) == 8 * 16 + 2 * 25
+    assert len(links) == 8 * 16 + 8 * 4
 
 
 def test_the_project_is_the_app_workflow(tmp_path):
@@ -230,32 +241,37 @@ def test_the_downloadable_projects_open_solved(tmp_path):
 # ---- the BARC from bricks (2026-10-07) -----------------------------------
 
 #: the first ten elastic modes of the assembly of bricks at `barc.SIZE`,
-#: Hz — the build checked against the wiki's model and test: 1 to 4 %
-#: above the measured modes, the shapes in the shared model's order
-SOLID_CHECKED = (191.8, 213.1, 271.6, 457.9, 490.7, 581.5, 603.1, 696.7,
-                 1150.0, 1226.0)
-#: the removable component's first seven, checked against the shared
-#: model of it: 6 % under for the first two, within 2 % above after
-PART_CHECKED = (280.0, 435.6, 596.3, 1320.8, 1633.8, 1954.8, 2025.9)
+#: Hz — its bolts merged nodes since 2026-10-11, 0.3 to 3.4 % under the
+#: build checked against the wiki's model and test (MAC 0.97 and up, in
+#: order), which joined each foot over its whole footprint and read 1 to
+#: 4 % above the measured modes: (191.8, 213.1, 271.6, 457.9, 490.7,
+#: 581.5, 603.1, 696.7, 1150.0, 1226.0)
+SOLID_CHECKED = (191.2, 210.7, 263.3, 442.4, 485.8, 570.1, 598.5, 689.6,
+                 1124.3, 1197.6)
+#: the removable component's first seven, 0.3 to 1.2 % under the build
+#: checked against the shared model of it (MAC 0.999 and up), which was
+#: 6 % under it for the first two and within 2 % above after: (280.0,
+#: 435.6, 596.3, 1320.8, 1633.8, 1954.8, 2025.9)
+PART_CHECKED = (278.6, 432.9, 592.2, 1305.0, 1627.8, 1949.3, 2014.7)
 
 
 def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
     """The bricks' volume is the solid model's without its bolt holes
     (the box 16.9 in³ as a tube with its slot, the channels and beam
     as drawn); the bolts are point masses at their heads, eight #8 at
-    the feet and two 1/4 in at the beam, and the beam rests over the
-    channels, tied at its bolts only."""
-    from visualdynamics.core.fem import RIGID, Model
+    the feet and eight at the beam carrying the shared model's two 1/4
+    in screws between them, and nothing is rigid: the parts are joined
+    by the nodes their bolts merged."""
+    from visualdynamics.core.fem import Model
 
     geometry = barc.solid_geometry()
     assert list(geometry.group_name) == ['box', 'right channel',
-                                         'left channel', 'beam', 'bolt ties',
+                                         'left channel', 'beam',
                                          'foot bolts', 'top bolts']
-    ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
-    assert geometry.group_properties[ids['bolt ties']].material is RIGID
     assert len(geometry.elements_in('foot bolts')) == 8
-    assert len(geometry.elements_in('top bolts')) == 2
+    assert len(geometry.elements_in('top bolts')) == 8
     model = Model.from_geometry(geometry)
+    assert not model.rigid_links
     lb = 0.45359237
     assert sum(m.mass for m in model.masses) == pytest.approx(
         (8 * 0.00744 + 2 * 0.0125) * lb)
@@ -264,12 +280,106 @@ def test_the_bricks_are_the_solid_model_and_the_bolts_weigh_in():
     assert model.structural_mass == pytest.approx(
         bricks * INCH3 * barc.MATERIAL.density)
     assert len(model.pieces()) == 1
+
+
+def _shared(geometry, a, b):
+    ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
+    nodes = [set(np.concatenate([geometry.elem_conn[i] for i in np.flatnonzero(
+        geometry.elem_group == ids[name])]).tolist()) for name in (a, b)]
+    return nodes[0] & nodes[1]
+
+
+def test_each_bolt_merges_the_places_it_clamps_and_no_other():
+    """Meshed apart, each channel's foot is 9 x 9 places coincident with
+    the box and each channel's top 9 x 9 with the beam. A foot's four
+    bolts merge the washer's 4 x 4 places each, which share their middle
+    rows into one 7 x 7 square; a beam bolt merges the four corners of
+    the brick it passes through. The rest stay coincident and unjoined,
+    left out as a person unpicks them in the pane."""
+    geometry = barc.solid_geometry()
+    ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
+    for side in ('right channel', 'left channel'):
+        for below, above, merged in (('box', side, 49), (side, 'beam', 16)):
+            shared = _shared(geometry, below, above)
+            assert len(shared) == merged, (below, above)
+            groups = [ids[below], ids[above]]
+            left = geometry.coincident_spots(
+                0.25 * geometry.node_spacing(groups), groups)
+            assert len(left) == 81 - merged
     inch = geometry.node_xyz / 0.0254
-    beam = geometry.node_index(np.unique(np.concatenate(
-        [geometry.elem_conn[i] for i in np.flatnonzero(
-            geometry.elem_group == ids['beam'])])))
-    assert inch[beam, 1].min() == pytest.approx(5.0 + barc.BEAM_GAP), \
-        'the beam is not fused to the channels'
+    for (bx, bz), kind in barc.SOLID_BOLTS[8:]:
+        side = 'right channel' if bx > 0 else 'left channel'
+        places = barc.bolt_places(geometry, (bx, bz), kind)
+        assert places <= _shared(geometry, side, 'beam')
+        at = inch[geometry.node_index(sorted(places))]
+        assert np.allclose(at.mean(axis=0)[[0, 2]], (bx, bz))
+        assert np.allclose(np.ptp(at, axis=0), [0.125, 0.0, 0.125])
+    assert not _shared(geometry, 'box', 'beam')
+
+
+def test_the_docs_blocks_kept_apart_and_merged_are_the_demos_bricks():
+    """The page's bricks steps, as the project verbs the app records:
+    the blocks table typed into Add Block with Keep apart ticked, then
+    the four merges the page clicks — at each foot every place but the
+    outer ring of 32, at each end of the beam none but the 16 under its
+    bolts — must give the demo's bricks, node for node and brick for
+    brick, joined at the same 130 places (2026-10-11)."""
+    import pathlib
+
+    import visualdynamics
+
+    page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
+            / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
+    table = page.split('| Block | Element group | Center | Widths |')[1]
+    rows = [[cell.strip() for cell in line.strip('|').split('|')]
+            for line in table.split('\n\n')[0].splitlines()[2:]]
+
+    def vector(cell):
+        return np.array([float(v) for v in cell.replace('\u2212', '-')
+                         .strip('()').split(',')])
+
+    project = visualdynamics.Project('p')
+    name = project.new_geometry(unit='in')
+    for _block, group, center, widths in rows:
+        widths = vector(widths)
+        project.add_block(name, tuple(vector(center) - widths / 2),
+                          *(tuple(w * e) for w, e in zip(widths, np.eye(3))),
+                          barc.SIZE, group, unit='in', apart=True)
+    typed = project[name]
+    ids = dict(zip(typed.group_name, typed.group_id.tolist()))
+    inch = 0.0254
+    for side in ('right channel', 'left channel'):
+        for below, above in (('box', side), (side, 'beam')):
+            groups = [ids[below], ids[above]]
+            tolerance = 0.25 * typed.node_spacing(groups)
+            spots = typed.coincident_spots(tolerance, groups)
+            assert len(spots) == 81
+            at = typed.node_xyz[typed.node_index([s[0] for s in spots])] / inch
+            if below == 'box':
+                # the page: leave out the 32 around the foot's edge
+                x, z = at[:, 0], at[:, 2]
+                edge = ((np.isclose(x, x.min()) | np.isclose(x, x.max()))
+                        | (np.isclose(z, z.min()) | np.isclose(z, z.max())))
+            else:
+                # None, then the four corners of the brick under each bolt
+                axes = [a for a, k in barc.SOLID_BOLTS if k == 'top'
+                        and (a[0] > 0) == (side == 'right channel')]
+                edge = ~np.array([any(abs(p[0] - a[0]) < 0.07
+                                      and abs(p[2] - a[1]) < 0.07
+                                      for a in axes) for p in at])
+            left_out = [n for spot, out in zip(spots, edge) if out
+                        for n in spot]
+            assert len(spots) - int(edge.sum()) == (49 if below == 'box' else 16)
+            project.merge_coincident_nodes(name, tolerance, groups, left_out)
+    demo = barc.solid_geometry()
+    assert typed.num_nodes == demo.num_nodes
+    assert np.allclose(np.sort(typed.node_xyz, axis=0),
+                       np.sort(demo.node_xyz, axis=0))
+    for group in ('box', 'right channel', 'left channel', 'beam'):
+        assert len(typed.elements_in(group)) == len(demo.elements_in(group))
+    for side in ('right channel', 'left channel'):
+        for below, above, merged in (('box', side, 49), (side, 'beam', 16)):
+            assert len(_shared(typed, below, above)) == merged
 
 
 def test_the_removable_component_stays_where_it_was_checked():
@@ -298,10 +408,12 @@ def test_a_coarser_mesh_of_bricks_still_holds_together():
     """Every box is cut at every other's faces before it is meshed: at
     a quarter inch a channel's eighth-inch web met a flange with no line
     of nodes there, hung from one edge, and the BARC read 76 Hz for
-    192 (2026-10-07). Coarse now reads within a percent and a half of
-    the checked mesh."""
+    192 (2026-10-07). Coarse now reads 1 to 5 % above the checked mesh:
+    each foot bolt clamps three bricks across, which at a quarter inch
+    is the whole of a one-inch foot (the website's figure is drawn at
+    it)."""
     shapes = barc.solid_build('BARC', 0.25).eigensolution(
         maximum_frequency=1300.0)
     elastic = [f for f in shapes.frequency if f > 1.0][:8]
-    assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.015), \
+    assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.06), \
         np.round(elastic, 1)

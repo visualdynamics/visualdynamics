@@ -30,14 +30,13 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QLabel,
     QWidget,
 )
 
 from ..core import wavelet
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
@@ -105,14 +104,9 @@ class WaveletPanel(QWidget):
                 ('To', self.high_box),
                 ('Per octave', self.per_octave_box),
                 ('Cycles', self.omega_box))
-        for row, (label, editor) in enumerate(rows, start=1):
-            grid.addWidget(QLabel(label), row, 0)
-            grid.addWidget(editor, row, 1)
+        add_settings(grid, rows)
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, len(rows) + 1, 0, 1, 2)
+        add_rule(grid, len(rows) + 1)
 
         self.derived: dict[str, QLabel] = {}
         derived = (('cone', 'Cone at bottom'), ('resolves', 'Resolves'),

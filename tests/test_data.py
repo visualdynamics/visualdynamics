@@ -140,7 +140,7 @@ def test_data_save_load_round_trip(tmp_path):
 
 
 def test_frf_requires_reference():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='requires reference_dof'):
         visualdynamics.Frf(abscissa=[1.0, 2.0], ordinate=[[1j, 2j]],
                  response_dof=['1X+'])
 

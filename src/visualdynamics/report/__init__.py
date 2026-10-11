@@ -34,6 +34,7 @@ from ..plot import (
     STOOD_BACK_WIDTH,
     as_power_law,
     bin_edges,
+    display_factor,
     drawing_shape,
 )
 from ..theme import PAIR_COLORS, overlay_alphas
@@ -1749,21 +1750,21 @@ def _scene_geometry(geometry, us):
     """(points, node colors, lines, faces, axis unit) — one geometry
     as the scene payload draws it, the GUI's own palette entity for
     entity: the report is the GUI, emailed."""
-    from ..viz.geometry import color_rgb, display_points
+    from ..viz.geometry import color_rgb, display_points, element_cells
 
     # the unit the points came out in is no longer asked for:
     # a scene draws a shape, not a measurement
     points, _unit = display_points(geometry, us)
     points = np.asarray(points, dtype=float)
-    node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
-    lines, faces = [], []
-    for index, conn in enumerate(geometry.elem_conn):
-        chain = [node_row[int(n)] for n in conn if int(n) in node_row]
-        color = _hex(color_rgb(geometry.elem_color[index]))
-        if len(chain) >= 3:
-            faces.append({'nodes': chain, 'color': color})
-        elif len(chain) == 2:
-            lines.append(chain + [color])
+    # the 3-D view's own rule, element by element (`element_cells`): a
+    # brick its six faces, skinned, a quad8 its four corners — every
+    # polygon in node order drew bricks as bow ties (2026-10-11)
+    drawn_faces, drawn_lines, _points = element_cells(geometry)
+    faces = [{'nodes': corners, 'color': _hex(color_rgb(color))}
+             for color, polygons in drawn_faces.items()
+             for corners in polygons]
+    lines = [pair + [_hex(color_rgb(color))]
+             for color, pairs in drawn_lines.items() for pair in pairs]
     node_colors = [_hex(color_rgb(c)) for c in geometry.node_color]
     return points, node_colors, lines, faces
 
@@ -2444,7 +2445,7 @@ def _comparison_block(block, measured, specification, us, caption,
             # over its cell, in the page's units
             verdict = judge(specification, measured, record, measured_of[record],
                             name, key == 'over', scale_db)
-            factor = _display_factor(limits[name][record],
+            factor = display_factor(limits[name][record],
                                      specification.limits[name][record])
             channel[key] = mapped(verdict['level'] * factor)
         channel['key'] = _channel_key(channel, edges, target,
@@ -2554,20 +2555,6 @@ def _specified_band(specification, record, us):
         edges = specification.bin_edges()
         return [float(edges[first]), float(edges[last + 1])]
     return [float(x[first]), float(x[last])]
-
-
-def _display_factor(shown, raw):
-    """What one curve's SI values are multiplied by to be the shown
-    ones — a unit conversion is one factor, read off any written
-    point. One when nothing is written."""
-    shown = np.asarray(np.real(shown), dtype=float)
-    raw = np.asarray(np.real(raw), dtype=float)
-    with np.errstate(invalid='ignore'):
-        good = np.isfinite(shown) & np.isfinite(raw) & (raw > 0.0)
-    if not good.any():
-        return 1.0
-    k = int(np.flatnonzero(good)[0])
-    return float(shown[k] / raw[k])
 
 
 def _channel_label(data, record):

@@ -40,7 +40,7 @@ def test_photos_hold_the_file_bytes_verbatim(qt_app, tmp_path):
     assert photos.add_file(path) == 'front (2)', 'names dedupe'
     assert photos.formats == ['png', 'png']
     assert photos.images[0] == pathlib.Path(path).read_bytes()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='Not a photo'):
         photos.add_file(str(tmp_path / 'notes.txt'))
 
 

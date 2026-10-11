@@ -283,7 +283,8 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
 
 
 def landing(geometry: Geometry, part: Geometry,
-            tolerance: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+            tolerance: float | None = None,
+            apart: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """Which of `part`'s nodes fall on a node of `geometry`, and which one
     — what `join` does with them, asked without joining: Add Plane's
     reading says how many nodes a plane would share before it is added.
@@ -294,6 +295,9 @@ def landing(geometry: Geometry, part: Geometry,
         Where the part would go, and the part.
     tolerance : float, optional
         As `join`'s.
+    apart : bool, default False
+        As `join`'s: only the nodes of the element groups the part joins
+        are landed on.
 
     Returns
     -------
@@ -306,11 +310,27 @@ def landing(geometry: Geometry, part: Geometry,
     if tolerance is None:
         both = np.vstack([geometry.node_xyz, part.node_xyz])
         tolerance = 1e-6 * float(np.linalg.norm(np.ptp(both, axis=0)) or 1.0)
-    if not geometry.num_nodes:
+    rows = (np.arange(geometry.num_nodes) if not apart
+            else _own_group_rows(geometry, part))
+    if not len(rows):
         return (np.zeros(part.num_nodes, dtype=bool),
                 np.zeros(part.num_nodes, dtype=int))
-    distance, nearest = cKDTree(geometry.node_xyz).query(part.node_xyz)
-    return distance <= tolerance, nearest
+    distance, nearest = cKDTree(geometry.node_xyz[rows]).query(part.node_xyz)
+    return distance <= tolerance, rows[nearest]
+
+
+def _own_group_rows(geometry: Geometry, part: Geometry) -> np.ndarray:
+    """Rows of the geometry's nodes used by the element groups the part
+    joins by name — what a part kept apart may land on. An unnamed
+    group joins none, so a part of one lands on nothing."""
+    names = {name for name in part.group_name if name}
+    groups = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
+              if name in names]
+    rows = np.flatnonzero(np.isin(geometry.elem_group, groups))
+    if not len(rows):
+        return np.empty(0, dtype=int)
+    used = np.unique(np.concatenate([geometry.elem_conn[k] for k in rows]))
+    return np.sort(geometry.node_index(used))
 
 
 def group_families(geometry: Geometry, group_id: int) -> set[str]:
@@ -362,13 +382,13 @@ def _solid_cells(geometry: Geometry) -> set[tuple]:
 
 
 def already_there(geometry: Geometry, part: Geometry,
-                  tolerance: float | None = None) -> int:
+                  tolerance: float | None = None, apart: bool = False) -> int:
     """How many of `part`'s elements `join` would leave out for being
     elements already there — every corner on a node already there, the
     cell already filled — so a reading can say it before the Add."""
     import numpy as np
 
-    on, nearest = landing(geometry, part, tolerance)
+    on, nearest = landing(geometry, part, tolerance, apart)
     if not on.any():
         return 0
     ids = {int(part.node_id[k]): int(geometry.node_id[nearest[k]])
@@ -383,7 +403,7 @@ def already_there(geometry: Geometry, part: Geometry,
 
 
 def join(geometry: Geometry, part: Geometry,
-         tolerance: float | None = None) -> dict:
+         tolerance: float | None = None, apart: bool = False) -> dict:
     """Put `part` into `geometry`, in place: each of the part's nodes that
     falls on a node already there becomes that node, the rest are added
     after the highest id, and the part's elements follow them. The nodes
@@ -408,6 +428,13 @@ def join(geometry: Geometry, part: Geometry,
         How close a node must be to one already there to be it, in
         meters once units are defined. Defaults to a millionth of the
         size of the two together.
+    apart : bool, default False
+        Land only on the nodes of the element group the part joins by
+        name, so a part meshed against another — a channel's foot on
+        the box it is bolted to — keeps nodes of its own where the two
+        touch, coincident and unjoined, until Merge Coincident Nodes
+        joins the places picked (Brandon, 2026-10-11: the BARC's bolts).
+        A plane of the box still joins the box's other planes.
 
     Returns
     -------
@@ -425,7 +452,7 @@ def join(geometry: Geometry, part: Geometry,
     refusal = group_refusal(geometry, part)
     if refusal is not None:
         raise ValueError(refusal)
-    on, nearest = landing(geometry, part, tolerance)
+    on, nearest = landing(geometry, part, tolerance, apart)
     new_ids = geometry.add_nodes(part.node_xyz[~on])
     renumber = dict(zip(part.node_id[~on].tolist(), new_ids.tolist()))
     renumber.update(zip(part.node_id[on].tolist(),
@@ -465,7 +492,8 @@ def join(geometry: Geometry, part: Geometry,
             'groups': sorted(set(group_map.values()))}
 
 
-def assemble(*parts: Geometry, tolerance: float | None = None) -> Geometry:
+def assemble(*parts: Geometry, tolerance: float | None = None,
+             apart: bool = False) -> Geometry:
     """One geometry from several, joined in turn (`join`): nodes numbered
     from 1 in the order they arrive, a node falling on one already there
     becoming it — so planes meeting along a line are tied there — and
@@ -478,6 +506,9 @@ def assemble(*parts: Geometry, tolerance: float | None = None) -> Geometry:
     tolerance : float, optional
         How close nodes must be to be one, in meters (as the geometry
         holds them). Defaults to a millionth of the assembly's size.
+    apart : bool, default False
+        Join each piece only to its own element group's nodes (`join`):
+        the element groups touch without sharing a node.
 
     Returns
     -------
@@ -495,9 +526,13 @@ def assemble(*parts: Geometry, tolerance: float | None = None) -> Geometry:
     whole = Geometry(node_id=[], node_xyz=np.empty((0, 3)),
                      length_unit=parts[0].length_unit)
     for part in parts:
-        join(whole, part, tolerance)
+        join(whole, part, tolerance, apart)
     # a part's own coincident nodes, which joining it does not look for
-    whole.merge_coincident_nodes(tolerance)
+    if apart:
+        for group in whole.group_id:
+            whole.merge_coincident_nodes(tolerance, groups=[int(group)])
+    else:
+        whole.merge_coincident_nodes(tolerance)
     return whole
 
 

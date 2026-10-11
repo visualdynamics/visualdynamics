@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QGridLayout,
     QLabel,
     QPushButton,
@@ -29,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from ..core.rigid import INERTIA_TERMS, MassProperties, axis_name
 from .editors import DoubleSpinBox, commit_on_enter
-from .settings_panel import add_derived, panel_grid
+from .settings_panel import add_derived, add_rule, panel_grid
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
@@ -118,10 +117,7 @@ class RigidBodyPanel(QWidget):
         grid.addWidget(self.scale_panel, 7, 0, 1, 2)
         self.scale_panel.hide()
 
-        rule = QFrame()
-        rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setFrameShadow(QFrame.Shadow.Sunken)
-        grid.addWidget(rule, 8, 0, 1, 2)
+        add_rule(grid, 8)
 
         # what follows from the settings, shown so the set is known
         # before it is made

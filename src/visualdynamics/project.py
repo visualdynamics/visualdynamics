@@ -2158,12 +2158,21 @@ class Project(dict):
             recipe=('generate_rigid_body_modes', {}))
 
     def merge_coincident_nodes(self, source: Any,
-                               tolerance: float | None = None) -> dict:
+                               tolerance: float | None = None,
+                               groups: Sequence[int] | None = None,
+                               exclude: Sequence[int] | None = None) -> dict:
         """Make a geometry's coincident nodes one node (Merge Coincident
         Nodes): elements renamed to the lowest id at each
         point, the rest removed. Plates connect only where they share
         nodes, so this is what ties planes meshed apart at the lines where
         they meet.
+
+        With `groups`, only the nodes those element groups' elements use
+        are merged — the app's form, offered on element groups picked in
+        the tree and never on the whole geometry, because merging every
+        coincidence in a model ties parts that were meant to stay apart
+        (Brandon, 2026-10-11). Left out, the whole geometry, as scripts
+        and journals written before then expect.
 
         Refused while an object linked with the geometry names a node the
         merge would remove — its data would point at a node that is gone;
@@ -2177,12 +2186,20 @@ class Project(dict):
             How close two nodes must be to be one, in meters (as the
             geometry holds its coordinates). Defaults to a millionth of
             the geometry's size.
+        groups : sequence of int, optional
+            The element groups whose nodes are merged, by id; every node
+            of the geometry when omitted.
+        exclude : sequence of int, optional
+            Nodes left out of the merge, by id — the places unpicked in
+            the app's pane before Merge was pressed.
 
         Returns
         -------
         dict
-            'merged', the nodes removed, and 'into', the nodes they
-            became.
+            'merged', the nodes removed, 'into', the nodes they became,
+            'duplicates', the elements removed for filling a cell another
+            already filled, and 'links', the line elements removed for
+            joining nodes that became one (`Geometry.merge_collapses`).
         """
         name = self.name_of(source)
         geometry = self[name]
@@ -2191,7 +2208,8 @@ class Project(dict):
         if tolerance is None:
             low, high = geometry.extent
             tolerance = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
-        going = geometry.coincident_nodes(tolerance)
+        going = {node for spot in geometry.coincident_spots(
+            tolerance, groups, exclude) for node in spot[1:]}
         for other in self.object_group_of(name) or []:
             obj = self.get(other)
             dofs = [*(getattr(obj, 'response_dof', None) or []),
@@ -2207,7 +2225,7 @@ class Project(dict):
                     f'{other} names node {clash[0]}, which the merge would '
                     'remove — merge before measuring or solving, or unlink '
                     'it first')
-        return geometry.merge_coincident_nodes(tolerance)
+        return geometry.merge_coincident_nodes(tolerance, groups, exclude)
 
     def new_geometry(self, name: str = 'Geometry', *,
                      unit: str = 'm') -> str:
@@ -2270,7 +2288,7 @@ class Project(dict):
 
     def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
                   size: float, group: str = '', *, unit: str = 'm',
-                  tolerance: float | None = None) -> dict:
+                  tolerance: float | None = None, apart: bool = False) -> dict:
         """Add a meshed rectangle of plates to a geometry (Add Plane): a
         corner, two perpendicular edges and an element size, each edge
         divided evenly into the whole number of elements nearest that
@@ -2302,6 +2320,10 @@ class Project(dict):
             How close a node must be to one already there to be it, in
             meters. Defaults to a millionth of the size of the two
             together.
+        apart : bool, default False
+            Join only the element group's own nodes, so the plane keeps
+            nodes of its own where it touches another part, to be
+            merged at the places picked (`mesh.join`).
 
         Returns
         -------
@@ -2319,7 +2341,7 @@ class Project(dict):
         defined = geometry.units_defined or not geometry.num_nodes
         part = mesh.plane(corner, edge_a, edge_b, size, group,
                           unit=unit if defined else None)
-        return mesh.join(geometry, part, tolerance)
+        return mesh.join(geometry, part, tolerance, apart)
 
     def tie_elements(self, source: Any, elements: Any, to: Any,
                      group: str | None = None) -> dict:
@@ -2385,7 +2407,7 @@ class Project(dict):
                   edge_c: Any, size: float, group: str = '', *,
                   unit: str = 'm', holes: Any = (),
                   hole_group: str | None = None,
-                  tolerance: float | None = None) -> dict:
+                  tolerance: float | None = None, apart: bool = False) -> dict:
         """Add a meshed box of solid bricks to a geometry (Add Block):
         a corner, three perpendicular edges and an element size, each
         edge divided evenly into the whole number of elements nearest
@@ -2424,6 +2446,11 @@ class Project(dict):
             How close a node must be to one already there to be it, in
             meters. Defaults to a millionth of the size of the two
             together.
+        apart : bool, default False
+            Join only the element group's own nodes, so the box keeps
+            nodes of its own where it touches another part — a channel's
+            foot on the box it is bolted to — to be merged at the places
+            picked (`mesh.join`).
 
         Returns
         -------
@@ -2442,7 +2469,7 @@ class Project(dict):
         part = mesh.block(corner, edge_a, edge_b, edge_c, size, group,
                           unit=unit if defined else None, holes=holes,
                           hole_name=hole_group)
-        return mesh.join(geometry, part, tolerance)
+        return mesh.join(geometry, part, tolerance, apart)
 
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,

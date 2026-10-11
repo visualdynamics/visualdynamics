@@ -23,6 +23,12 @@ frame into the corner and edges the project's `add_block` and
 `add_plane` take, asks the core what they would make, and draws it;
 **Add** is the project verb, so the journal line is the call a script
 makes.
+
+**Keep apart** (Brandon, 2026-10-11) lands the box only on its own
+element group's nodes, so a part meshed against another — a channel's
+foot on the box it is bolted to — keeps nodes of its own where the two
+touch, for Merge Coincident Nodes to join at the bolts. Shown once the
+geometry holds something to be kept apart from.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from collections.abc import Sequence
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -126,21 +133,28 @@ class MeshPanel(QWidget):
         self.square_button.setToolTip(
             "Turn the box back to the geometry's axes, keeping its center")
         grid.addWidget(self.square_button, 15, 0, 1, 2)
+        self.apart: QCheckBox = QCheckBox('Keep apart from other groups')
+        self.apart.setToolTip(
+            'Join only nodes of its own element group: where it touches '
+            'another part it keeps nodes of its own, to be merged at the '
+            'places picked with Merge Coincident Nodes')
+        grid.addWidget(self.apart, 16, 0, 1, 2)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
-        grid.addWidget(self.reading_label, 16, 0, 1, 2)
+        grid.addWidget(self.reading_label, 17, 0, 1, 2)
         buttons = QHBoxLayout()
         self.add_button: QPushButton = QPushButton('Add')
         self.add_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.close_button)
-        grid.addLayout(buttons, 17, 0, 1, 2)
-        grid.setRowStretch(18, 1)
+        grid.addLayout(buttons, 18, 0, 1, 2)
+        grid.setRowStretch(19, 1)
         commit_on_enter(*self.center, *self.widths, *self.angles, self.size)
         for box in (*self.center, *self.widths, *self.angles, self.size):
             box.valueChanged.connect(lambda _value: self.changed.emit())
         self.group.currentTextChanged.connect(lambda _text: self.changed.emit())
+        self.apart.toggled.connect(lambda _on: self.changed.emit())
         self.add_button.clicked.connect(self.add_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
         self.square_button.clicked.connect(self.square_asked.emit)
@@ -165,7 +179,8 @@ class MeshPanel(QWidget):
         self.group.blockSignals(False)
         defaults = DEFAULTS[kind]
         self.set_values(center=defaults['center'], widths=defaults['widths'],
-                        angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE, quiet=True)
+                        angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE,
+                        apart=False, quiet=True)
 
     def values(self) -> dict:
         """The fields as typed, in the display unit."""
@@ -173,11 +188,12 @@ class MeshPanel(QWidget):
                 'widths': tuple(box.value() for box in self.widths),
                 'angles': tuple(box.value() for box in self.angles),
                 'size': self.size.value(),
-                'group': self.group.currentText().strip()}
+                'group': self.group.currentText().strip(),
+                'apart': self.apart.isChecked()}
 
     def set_values(self, quiet: bool = False, **values) -> None:
         """Fill fields by name — center=(x, y, z), widths=(x, y, z),
-        angles=(x, y, z) in degrees, size=..., group=...; how a test
+        angles=(x, y, z) in degrees, size=..., group=..., apart=...; how a test
         types, and how the gizmo writes the center and the angles back.
         `quiet` fills them without a `changed`."""
         boxes = [*self.center, *self.widths, *self.angles, self.size]
@@ -185,10 +201,13 @@ class MeshPanel(QWidget):
             for box in boxes:
                 box.blockSignals(True)
             self.group.blockSignals(True)
+            self.apart.blockSignals(True)
         try:
             for key, value in values.items():
                 if key == 'group':
                     self.group.setCurrentText(value)
+                elif key == 'apart':
+                    self.apart.setChecked(bool(value))
                 elif key == 'size':
                     self.size.setValue(value)
                 else:
@@ -199,6 +218,7 @@ class MeshPanel(QWidget):
                 for box in boxes:
                     box.blockSignals(False)
                 self.group.blockSignals(False)
+                self.apart.blockSignals(False)
         if not quiet:
             self.changed.emit()
 

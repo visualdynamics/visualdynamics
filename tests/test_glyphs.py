@@ -56,15 +56,15 @@ def test_the_shipped_chevron_is_one_closed_polygon():
     'M0 0 L 1 1',                      # two vertices
 ])
 def test_paths_outside_the_dialect_are_refused(data):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='is not drawn|at least three vertices'):
         polygon_of(f'<svg viewBox="0 0 16 16"><path d="{data}"/></svg>')
 
 
 def test_two_paths_or_an_oblong_box_are_refused(qt_app):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='one path expected'):
         polygon_of('<svg viewBox="0 0 16 16"><path d="M0 0 L1 0 L1 1 Z"/>'
                    '<path d="M0 0 L1 0 L1 1 Z"/></svg>')
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='square viewBox'):
         polygon_of('<svg viewBox="0 0 16 8"><path d="M0 0 L1 0 L1 1 Z"/></svg>')
 
 

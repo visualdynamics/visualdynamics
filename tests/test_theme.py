@@ -20,7 +20,7 @@ def test_theme_accepts_colors_dict():
 
 
 def test_unknown_theme_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unknown theme 'solarized'"):
         theme_module.theme('solarized')
 
 
@@ -170,5 +170,5 @@ def test_the_launcher_takes_a_theme_flag():
     assert theme_flag(['a.vdyn', '--theme', 'dark']) == (['a.vdyn'], 'dark')
     assert theme_flag(['--theme=Light', 'b.nc4']) == (['b.nc4'], 'light')
     assert theme_flag(['b.nc4']) == (['b.nc4'], None)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match='--theme takes dark or light'):
         theme_flag(['--theme', 'sepia'])

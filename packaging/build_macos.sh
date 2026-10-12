@@ -217,7 +217,19 @@ then :; else
 fi
 sync
 hdiutil detach "$MOUNT" -quiet || { sleep 2; hdiutil detach "$MOUNT" -force -quiet; }
-hdiutil convert "$RW" -format UDZO -o "$DMG" -quiet
+# the convert reads the image the detach has just let go of, and on the
+# Intel runner it failed with nothing said (a45 once, a46 twice — the
+# ERR trap named this line), a moment after a detach that reported
+# success: so it says why, and tries again once the image is free
+for attempt in 1 2 3 4 5; do
+  hdiutil convert "$RW" -format UDZO -o "$DMG" -ov && break
+  if (( attempt == 5 )); then
+    hdiutil info >&2
+    exit 1
+  fi
+  echo "convert failed (attempt $attempt): waiting for the image to be let go" >&2
+  sleep $((attempt * 5))
+done
 rm -f "$RW"
 if [[ -n $SIGN ]]; then
   # the image itself, then its own ticket: what Gatekeeper sees first

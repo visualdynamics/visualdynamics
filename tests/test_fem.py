@@ -16,6 +16,7 @@ undershoots is not a slightly coarse mesh, it is a bug.
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import pytest
@@ -831,6 +832,81 @@ def test_refining_the_plate_mesh_closes_on_the_classical_values():
     assert np.all(fine < coarse), 'convergence is from above'
     assert np.all(fine <= np.array(FREE_SQUARE_PLATE)
                   * (1.005, 1.01, 1.01, 1.01, 1.01, 1.03))
+
+
+def simply_supported_plate(nx, ny, a=1.5, b=1.0, thickness=0.01, material=ALUMINUM):
+    """A rectangular plate meshed `nx` x `ny`, its edges simply supported:
+    the model, the edge nodes' Z to fix, and each node's (x, y)."""
+    model = fem.Model('simply supported')
+    fixed, xy = [], {}
+    for j in range(ny + 1):
+        for i in range(nx + 1):
+            node = 1 + j * (nx + 1) + i
+            xy[node] = (i * a / nx, j * b / ny)
+            model.add_node(node, *xy[node], 0.0)
+            if i in (0, nx) or j in (0, ny):
+                fixed.append(f'{node}Z+')
+    for j in range(ny):
+        for i in range(nx):
+            n = 1 + j * (nx + 1) + i
+            model.add_plate((n, n + 1, n + nx + 2, n + nx + 1), material, thickness)
+    return model, fixed, xy
+
+
+#: the simply supported 1.5 by 1 plate's first six modes, by their
+#: half-waves along x and y, in order of frequency (Navier's solution:
+#: w = pi^2 (m^2/a^2 + n^2/b^2) sqrt(D / rho h))
+SIMPLY_SUPPORTED_MODES = [(1, 1), (2, 1), (1, 2), (3, 1), (2, 2), (3, 2)]
+
+
+def _navier(nx, ny, a=1.5, b=1.0, thickness=0.01, material=ALUMINUM):
+    """The elastic modes against Navier's: frequency ratios and MACs."""
+    model, fixed, xy = simply_supported_plate(nx, ny, a, b, thickness, material)
+    shapes = model.eigensolution(num_modes=12, fixed=fixed)
+    # the in-plane rigid modes (X, Y and the turn about Z) are not held
+    # by a simple support
+    elastic = np.flatnonzero(shapes.frequency > 1.0)
+    assert len(shapes.frequency) - len(elastic) == 3
+    d = (material.youngs_modulus * thickness ** 3
+         / (12.0 * (1.0 - material.poissons_ratio ** 2)))
+    rows = [i for i, dof in enumerate(shapes.coordinate)
+            if re.fullmatch(r'\d+Z\+', str(dof))]
+    nodes = [int(str(shapes.coordinate[i])[:-2]) for i in rows]
+    ratios, macs = [], []
+    for k, (m, n) in zip(elastic, SIMPLY_SUPPORTED_MODES):
+        exact = (math.pi * ((m / a) ** 2 + (n / b) ** 2) / 2.0
+                 * math.sqrt(d / (material.density * thickness)))
+        ratios.append(shapes.frequency[k] / exact)
+        phi = np.real(shapes.shape_matrix[k][rows])
+        sine = np.array([math.sin(m * math.pi * xy[node][0] / a)
+                         * math.sin(n * math.pi * xy[node][1] / b) for node in nodes])
+        macs.append((phi @ sine) ** 2 / ((phi @ phi) * (sine @ sine)))
+    return np.array(ratios), np.array(macs)
+
+
+def test_a_simply_supported_plate_has_naviers_modes():
+    """Frequencies and shapes against the closed form (Brandon,
+    2026-10-11: the free-plate table checks frequencies only). Each mode
+    is the sampled sin(m pi x / a) sin(n pi y / b), MAC 1 to round-off:
+    on a uniform grid with simply supported edges the sampled sine is an
+    exact eigenvector of the discrete problem, so what the MAC pins is
+    the order of the modes and which node each value belongs to; the
+    frequencies pin the stiffness. Measured at 18 x 12: 0.6/1.1/3.0/2.7/
+    2.5/2.9 percent above, the rectangle chosen 1.5 to 1 so no two of the
+    six coincide."""
+    ratios, macs = _navier(18, 12)
+    assert np.all(macs > 0.9999), macs
+    assert np.all(ratios >= 1.0), 'from above'
+    assert np.all(ratios <= (1.01, 1.015, 1.035, 1.035, 1.035, 1.035)), ratios
+
+
+def test_refining_the_simply_supported_plate_closes_on_navier():
+    """Second order: 12 x 8 to 18 x 12 shortens the side by 2/3, and the
+    error falls by about (3/2)^2 = 2.25 (measured 2.3 to 2.6)."""
+    coarse, _ = _navier(12, 8)
+    fine, _ = _navier(18, 12)
+    ratio = (coarse - 1.0) / (fine - 1.0)
+    assert np.all((ratio > 2.0) & (ratio < 2.8)), ratio
 
 
 def test_plate_frequencies_do_not_depend_on_orientation():

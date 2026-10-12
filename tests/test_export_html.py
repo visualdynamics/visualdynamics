@@ -203,3 +203,69 @@ def test_a_comparison_keys_its_shading_as_the_app_does(qt_app, tmp_path):
         web_close(view)
     assert names[-3:] == ['warning band (±3 dB)', 'above abort (+6 dB)',
                           'below abort (−6 dB)'], names
+
+
+def test_a_solids_insides_are_left_out_of_its_scene(tmp_path):
+    """A block of bricks draws as its skin, so the nodes inside it are
+    never drawn: the scene leaves them out with their share of each mode
+    (2026-10-11 — the Frame-Wing's figure was 12.8 MB of them). Every
+    node kept is on the skin, the faces point at the kept nodes, and a
+    mode's motion is still each node's own."""
+    from visualdynamics import mesh
+    from visualdynamics.core.shapes import ShapeSet
+
+    block = mesh.block((0, 0, 0), (2, 0, 0), (0, 2, 0), (0, 0, 2), 0.5, 'b', unit=None)
+    assert block.num_nodes == 125
+    xyz = block.node_xyz
+    dofs = [f'{int(n)}Z+' for n in block.node_id]
+    shapes = ShapeSet([10.0], [0.01], dofs, [xyz[:, 0] + 1.0])
+    _text, data = _payload(visualdynamics.export_html(tmp_path / 'b.html', geometry=block,
+                                                      shapes=shapes))
+    [scene] = data['blocks']
+    points = np.array(scene['points'], dtype=float)
+    assert len(points) == 125 - 27, 'the 3 x 3 x 3 inside left out'
+    on_skin = np.any((points == points.min(axis=0)) | (points == points.max(axis=0)), axis=1)
+    assert on_skin.all()
+    used = {n for face in scene['faces'] for n in face['nodes']}
+    assert used == set(range(len(points)))
+    motion = np.array(scene['modes'][0]['real'], dtype=float)[:, 2]
+    assert np.allclose(motion / motion.max(), (points[:, 0] + 1) / (points[:, 0].max() + 1))
+
+
+def test_a_real_mode_leaves_out_its_imaginary_part_and_still_moves(qt_app, tmp_path):
+    """Every normal mode of a model is real, and its imaginary zeros were
+    half a scene's mode data (2026-10-11): a real mode carries `real`
+    alone, a complex one both, and the page animates a mode without its
+    imaginary part — the figure is drawn differently from one moment to
+    the next."""
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+
+    from visualdynamics import mesh
+    from visualdynamics.core.shapes import ShapeSet
+
+    plate = mesh.plane((0, 0, 0), (1, 0, 0), (0, 1, 0), 0.5, unit=None)
+    dofs = [f'{n}Z+' for n in plate.node_id]
+    x = plate.node_xyz[:, 0]
+    shapes = ShapeSet([10.0, 20.0], [0.01, 0.01], dofs,
+                      np.array([x + 1.0, (x + 1.0) * (1 + 1j)]))
+    path = visualdynamics.export_html(tmp_path / 'm.html', geometry=plate, shapes=shapes)
+    _text, data = _payload(path)
+    real, complex_ = data['blocks'][0]['modes']
+    assert 'imag' not in real and 'imag' in complex_
+    view = web_view()
+    view.resize(600, 400)
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    probe = ("(() => { const c = document.querySelector('section canvas');"
+             "if (!c || !c.width) return null;"
+             "const now = c.toDataURL();"
+             "window.seen = (window.seen || 0) + 1;"
+             "if (!window.first) { window.first = now; return null; }"
+             "if (now !== window.first) return 'moved';"
+             "return window.seen > 40 ? 'still' : null; })()")
+    try:
+        got = web_read(view, probe)
+    finally:
+        web_close(view)
+    assert got == 'moved'

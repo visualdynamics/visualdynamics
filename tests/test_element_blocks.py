@@ -282,14 +282,15 @@ def test_the_tree_lists_blocks_under_their_family(two_blocks, window, pump):
     """A geometry lists its nodes, its coordinate systems and then one
     row per element family, the six always; under a family, one row
     per element group holding elements of it, and under an element group its elements
-    (Brandon, 2026-09-30). The pencil sits on a family and on an element group."""
+    (Brandon, 2026-09-30). The pencil sits on a family and on an element group.
+    The Solids row comes last, there before the first solid (2026-10-11)."""
     from conftest import group_row
 
     item = _show_geometry(window, pump, two_blocks)
     labels = [item.child(i).text(0) for i in range(item.childCount())]
     assert labels == ['Nodes (6)', 'Coordinate systems (1)', 'Beams (0)',
                       'Triangles (0)', 'Quads (2)', 'Tetras (0)',
-                      'Wedges (0)', 'Hexes (0)', 'Points (0)']
+                      'Wedges (0)', 'Hexes (0)', 'Points (0)', 'Solids (0)']
     quads = _category(item, 'Quads')
     assert not quads.icon(1).isNull(), 'the edit pencil, like every category'
     assert [quads.child(i).text(0) for i in range(quads.childCount())] == [
@@ -518,7 +519,8 @@ def test_two_blocks_of_one_kind_offer_merge_from_the_tree(two_blocks, window,
     # and Merge Coincident Nodes beside it, which element groups carry
     # rather than the geometry (2026-10-11)
     assert [(verb, icon) for verb, _label, icon, _h, _t in acts] == [
-        ('merge_groups', 'merge_groups'), ('merge_coincident_nodes', 'merge_nodes')]
+        ('merge_groups', 'merge_groups'), ('merge_coincident_nodes', 'merge_nodes'),
+        ('align_meshes', 'align_meshes')]
     acts[0][3]()
     pump()
     assert list(two_blocks.group_id) == [7]
@@ -536,9 +538,11 @@ def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
                                    9: fem.GroupProperties(aluminum, 0.02)}
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
-    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes']
+    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes',
+                                                    'align_meshes']
     _pick_blocks(window, pump, item, [0])
-    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes'], (
+    assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes',
+                                                    'align_meshes'], (
         'one element group has nothing to merge with')
 
 

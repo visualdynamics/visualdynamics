@@ -21,76 +21,18 @@ import os
 import numpy as np
 
 from ..core.geometry import Geometry
+from ..core.solids import shape_triangles  # one rule, shared with solids
 
 EXTENSIONS = ('.step', '.stp', '.iges', '.igs')
-
-#: how fine the kernel tessellates, as a fraction of the shape's size.
-#: Context geometry behind sensor points, not a render farm — coarse
-#: on purpose, matching the guidance on CAD export settings.
-DEFLECTION = 0.005
-
 
 def sniff(path: str | os.PathLike) -> bool:
     return str(path).lower().endswith(EXTENSIONS)
 
 
 def _require_kernel():
-    try:
-        import OCP
-    except ImportError:
-        raise ValueError(
-            'STEP/IGES need the OpenCASCADE kernel, which is not '
-            "installed — pip install 'visualdynamics[step]' (the "
-            'packaged application already carries it)') from None
-    return OCP
+    from ..core.solids import require_kernel
 
-
-def _shape_triangles(shape) -> np.ndarray:
-    """(n, 3, 3) corners from a tessellated shape's faces."""
-    from OCP.Bnd import Bnd_Box
-    from OCP.BRep import BRep_Tool
-    from OCP.BRepBndLib import BRepBndLib
-    from OCP.BRepMesh import BRepMesh_IncrementalMesh
-    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
-    from OCP.TopExp import TopExp_Explorer
-    from OCP.TopLoc import TopLoc_Location
-    from OCP.TopoDS import TopoDS
-
-    # the 7.9 binding suffixes a static that shares its name with a
-    # method; 8.0 drops the suffix for this one and keeps it for the
-    # rest (2026-09-13, Linux on 8.0.1 beside the Mac on 7.9.3)
-    _as_face = getattr(TopoDS, 'Face_s', None) or TopoDS.Face
-
-    box = Bnd_Box()
-    BRepBndLib.Add_s(shape, box)
-    size = max(box.CornerMax().XYZ().Subtracted(
-        box.CornerMin().XYZ()).Modulus(), 1e-9)
-    BRepMesh_IncrementalMesh(shape, size * DEFLECTION, False,
-                             0.5, True)
-    triangles: list[np.ndarray] = []
-    walker = TopExp_Explorer(shape, TopAbs_FACE)
-    while walker.More():
-        face = _as_face(walker.Current())
-        location = TopLoc_Location()
-        mesh = BRep_Tool.Triangulation_s(face, location)
-        if mesh is not None:
-            matrix = location.Transformation()
-            points = np.asarray(
-                [[mesh.Node(i + 1).X(), mesh.Node(i + 1).Y(),
-                  mesh.Node(i + 1).Z()] for i in range(mesh.NbNodes())])
-            rows = np.asarray(
-                [[matrix.Value(r, c) for c in (1, 2, 3, 4)]
-                 for r in (1, 2, 3)])
-            points = points @ rows[:, :3].T + rows[:, 3]
-            faces = np.asarray(
-                [mesh.Triangle(i + 1).Get() for i in
-                 range(mesh.NbTriangles())], dtype=np.int64) - 1
-            if face.Orientation() == TopAbs_REVERSED:
-                faces = faces[:, ::-1]
-            triangles.append(points[faces])
-        walker.Next()
-    return (np.concatenate(triangles) if triangles
-            else np.empty((0, 3, 3)))
+    return require_kernel()
 
 
 def _document(path: str):
@@ -168,7 +110,7 @@ def load(path: str | os.PathLike) -> Geometry:
         name = (name_holder.Get().ToExtString()
                 if label.FindAttribute(TDataStd_Name.GetID_s(),
                                        name_holder) else '')
-        corners = _shape_triangles(tool.GetShape_s(label))
+        corners = shape_triangles(tool.GetShape_s(label))
         if len(corners):
             parts.append((name or stem, corners))
     if not parts:

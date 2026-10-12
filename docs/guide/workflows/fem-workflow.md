@@ -5,8 +5,8 @@ tied where it is bolted, and solved, all of it in the app; and the same
 structure [built again from solid bricks](#the-barc-from-bricks-bolted-by-merging-nodes),
 its parts meshed apart and each bolt made by merging the nodes it
 clamps. (For a part too thick for plates, [the solid
-workflow](fem-solids.md) builds the four-unit frame from blocks of
-bricks.)
+workflow](fem-solids.md) builds the Frame-Wing from solid shapes and
+meshes them into bricks.)
 
 The structure is the **BARC** (Box Assembly with Removable Component),
 a small bolted aluminum article the structural dynamics community
@@ -217,10 +217,10 @@ print(shapes.frequency[6:16])                 # the first ten elastic modes
 ## The BARC from bricks, bolted by merging nodes
 
 The same structure is also built from solid bricks, the way the
-[four-unit frame](fem-solids.md) is: each part as the boxes it is made
-of, meshed into eight-node bricks. It is the higher-fidelity model, and
-it comes with the removable component (the two channels and the beam)
-as a model of its own.
+[Frame-Wing](fem-solids.md) is: each part made from solid shapes,
+blocks cut and joined, then meshed into eight-node bricks. It is the
+higher-fidelity model, and it comes with the removable component (the
+two channels and the beam) as a model of its own.
 
 ```python
 from visualdynamics.demo import barc
@@ -236,35 +236,48 @@ made by merging the nodes it clamps into one, a place at a time, with
 **Merge Coincident Nodes**. Everything else where two parts touch stays
 two nodes, free to separate, as the parts are between their bolts.
 
-### 1. The blocks, kept apart
+### 1. The parts, as solids
 
 Choose the inch system, start a geometry (**+** on the project's row),
-select its **Hexes** row and press **Add Block**. Tick **Keep apart from
-other groups** in the pane: a block then joins only the nodes of its
-own element group, so the box's five walls are one part and a channel's
-foot, web and top are another, and where a channel stands on the box
-the two keep nodes of their own. The pane's reading says how many
-nodes land on nodes already there; with the box ticked apart, a foot
-lands on none. Type each row with an element size of 0.125 in:
+and select its **Solids** row. Add each block below with *Add Solid
+Block*: the pane takes its center, its three widths and a name, and
+draws it as it is typed. Each part is the fewest blocks it can be: the
+box is one block less its inside and the slot in its top, a channel is
+one block less the inside of its C, and the beam is one block. These
+are the parts' true outlines, not their mid-surfaces: the box is 6 in
+square outside, a foot's underside is the box's top face at y = 3, and
+the beam's underside is the channels' top faces at y = 5.
 
-| Block | Element group | Center | Widths |
+| Block | Center | Widths | Name |
 |---|---|---|---|
-| box, bottom | box | (0, −2.875, 1.5) | (6, 0.25, 3) |
-| box, right side | box | (2.875, 0, 1.5) | (0.25, 5.5, 3) |
-| box, left side | box | (−2.875, 0, 1.5) | (0.25, 5.5, 3) |
-| box, top right of the slot | box | (1.625, 2.875, 1.5) | (2.75, 0.25, 3) |
-| box, top left of it | box | (−1.625, 2.875, 1.5) | (2.75, 0.25, 3) |
-| right channel, foot | right channel | (2, 3.0625, 1.5) | (1, 0.125, 1) |
-| right channel, top | right channel | (2, 4.9375, 1.5) | (1, 0.125, 1) |
-| right channel, web | right channel | (2.4375, 4, 1.5) | (0.125, 1.75, 1) |
-| left channel, foot | left channel | (−2, 3.0625, 1.5) | (1, 0.125, 1) |
-| left channel, top | left channel | (−2, 4.9375, 1.5) | (1, 0.125, 1) |
-| left channel, web | left channel | (−2, 4, 1.0625) | (1, 1.75, 0.125) |
-| beam | beam | (0, 5.0625, 1.5) | (5, 0.125, 1) |
+| the box | (0, 0, 1.5) | 6 × 6 × 3 | box |
+| its inside | (0, 0, 1.5) | 5.5 × 5.5 × 4 | |
+| the slot in its top | (0, 2.8125, 1.5) | 0.5 × 0.625 × 4 | |
+| right channel | (2, 4, 1.5) | 1 × 2 × 1 | right channel |
+| its inside | (1.8125, 4, 1.5) | 1.125 × 1.75 × 1.5 | |
+| left channel | (−2, 4, 1.5) | 1 × 2 × 1 | left channel |
+| its inside | (−2, 4, 1.6875) | 1.5 × 1.75 × 1.125 | |
+| beam | (0, 5.0625, 1.5) | 5 × 0.125 × 1 | beam |
 
-These are the parts' true outlines, not their mid-surfaces: the box is
-6 in square outside, a foot's underside is the box's top face at
-y = 3, and the beam's underside is the channels' top faces at y = 5.
+Each inside reaches past its part's open faces so it cuts clean
+through: the box's through its front and back, the right channel's
+through its inboard side, where its web is not, and the left
+channel's, turned a quarter turn with its web at the back, through its
+front. Pick the box's three blocks and press *Subtract*: the inside and
+the slot are taken from the box, the first in the tree, and the part
+keeps its name, *box*. Pick each channel's two blocks and press
+*Subtract*: one part each, *right channel* and *left channel*. The
+pencil on any block opens it again to change it, and its part changes
+with it.
+
+Then mesh them. Pick the four parts, press *Mesh Solids*, type 0.125
+for the element size, tick **Keep the parts apart from each other**,
+and press **Mesh**. The four are meshed on one grid, cut at every
+part's faces, so where two parts touch their nodes lie on each other's
+at any element size; and each keeps its own there, a channel's foot
+joined to the box's top face at none of them, for the bolts to merge.
+(Meshed one at a time, each on its own grid, a channel's foot and the
+box's top shared no nodes at a quarter inch.)
 
 ### 2. The bolts, merged
 

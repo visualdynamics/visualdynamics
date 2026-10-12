@@ -2210,6 +2210,14 @@ class Project(dict):
             tolerance = 1e-6 * float(np.linalg.norm(high - low) or 1.0)
         going = {node for spot in geometry.coincident_spots(
             tolerance, groups, exclude) for node in spot[1:]}
+        self._refuse_linked(name, going, 'the merge would remove — merge')
+        return geometry.merge_coincident_nodes(tolerance, groups, exclude)
+
+    def _refuse_linked(self, name: str, nodes, what: str) -> None:
+        """Refuse a change to geometry `name`'s `nodes` while an object
+        linked with it names one: its data would point at a node that is
+        gone, or somewhere it was not measured or solved. `what` finishes
+        the sentence: what the change does to it, and what to do first."""
         for other in self.object_group_of(name) or []:
             obj = self.get(other)
             dofs = [*(getattr(obj, 'response_dof', None) or []),
@@ -2219,13 +2227,56 @@ class Project(dict):
                 continue
             named = {int(''.join(ch for ch in str(dof) if ch.isdigit()) or -1)
                      for dof in dofs}
-            clash = sorted(named & set(going))
+            clash = sorted(named & set(nodes))
             if clash:
                 raise ValueError(
-                    f'{other} names node {clash[0]}, which the merge would '
-                    'remove — merge before measuring or solving, or unlink '
-                    'it first')
-        return geometry.merge_coincident_nodes(tolerance, groups, exclude)
+                    f'{other} names node {clash[0]}, which {what} before '
+                    'measuring or solving, or unlink it first')
+
+    def align_meshes(self, source: Any, reach: float | None = None,
+                     groups: Sequence[int] | None = None,
+                     exclude: Sequence[int] | None = None) -> dict:
+        """Move the coarser mesh's nodes onto the finer's where parts
+        meshed apart meet or overlap (Align Meshes): each node of the
+        coarser piece within `reach` of the finer piece's surface moved
+        onto its nearest node there, so Merge Coincident Nodes can join
+        them next (`Geometry.align_moves`; Brandon, 2026-10-11).
+
+        Offered in the app on element groups picked in the tree, as the
+        merge is. Refused while an object linked with the geometry names
+        a node that would move — its data was measured or solved where
+        the node was.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        reach : float, optional
+            How far a node may move, in meters (as the geometry holds its
+            coordinates). Defaults to half the coarsest piece's spacing
+            (`Geometry.align_reach`).
+        groups : sequence of int, optional
+            The element groups whose pieces are aligned, by id; every
+            element of the geometry when omitted.
+        exclude : sequence of int, optional
+            Nodes left out, by id — the moves unpicked in the app's pane
+            before Align was pressed, both nodes of each.
+
+        Returns
+        -------
+        dict
+            'moved', how many nodes moved; 'farthest', the longest move,
+            in meters.
+        """
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        if reach is None:
+            reach = geometry.align_reach(groups) or 0.0
+        moving = {a for a, _b in geometry.align_moves(reach, groups, exclude)}
+        self._refuse_linked(name, moving, 'aligning would move — align')
+        return geometry.align_meshes(reach, groups, exclude)
 
     def new_geometry(self, name: str = 'Geometry', *,
                      unit: str = 'm') -> str:
@@ -2470,6 +2521,328 @@ class Project(dict):
                           unit=unit if defined else None, holes=holes,
                           hole_name=hole_group)
         return mesh.join(geometry, part, tolerance, apart)
+
+    def _solid_geometry(self, source: Any) -> tuple[str, Geometry]:
+        name = self.name_of(source)
+        geometry = self[name]
+        if not isinstance(geometry, Geometry):
+            raise TypeError(f'{name!r} is not a geometry')
+        return name, geometry
+
+    @staticmethod
+    def _solid_scale(geometry: Geometry, unit: str) -> float:
+        """What turns lengths typed in `unit` into the geometry's own:
+        meters once its units are defined, as given before."""
+        from .units import si_transform
+
+        return (si_transform(unit, 'length')[0]
+                if geometry.length_unit is not None else 1.0)
+
+    def add_solid_block(self, source: Any, center: Any, widths: Any,
+                        angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
+                        corner: float = 0.0, unit: str = 'm') -> int:
+        """Add a block to a geometry's solids (`core.solids`): a shape to
+        build a part from and mesh later, not elements — `widths` across
+        along its own axes, its middle at `center`, turned by `angles`.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center, widths : array_like
+            Three numbers each, in `unit`.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        name : str, optional
+            What to call it.
+        corner : float, default 0
+            The radius its four edges along its own Z are rounded to, in
+            `unit`: a window cut with rounded corners leaves fillets.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_block(geometry, np.asarray(center, dtype=float) * scale,
+                                np.asarray(widths, dtype=float) * scale,
+                                angles, name, float(corner) * scale)
+
+    def add_solid_cylinder(self, source: Any, center: Any, radius: float,
+                           length: float, angles: Any = (0.0, 0.0, 0.0),
+                           name: str = '', *, unit: str = 'm') -> int:
+        """Add a cylinder to a geometry's solids (`core.solids`): `radius`
+        round its own axis and `length` along it, its middle at
+        `center`; with no `angles` its axis is the geometry's Z. A hole
+        is one subtracted from a part (`combine_solids`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Three numbers, in `unit`.
+        radius, length : float
+            In `unit`.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_cylinder(geometry,
+                                   np.asarray(center, dtype=float) * scale,
+                                   float(radius) * scale, float(length) * scale,
+                                   angles, name)
+
+    def edit_solid(self, source: Any, solid_id: int, *, center: Any = None,
+                   widths: Any = None, angles: Any = None, radius: Any = None,
+                   length: Any = None, corner: Any = None, counts: Any = None,
+                   spacing: Any = None, name: Any = None,
+                   unit: str = 'm') -> None:
+        """Change a solid after it is made (`core.solids.edit`): a block's
+        center, widths, angles and corner, a cylinder's center, radius,
+        length and angles, a pattern's counts and spacing, any solid's
+        name. What is not given is kept.
+        A boolean it is part of takes the change; a mesh made from it
+        does not, until Mesh Solids meshes it again.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        solid_id : int
+            Which solid.
+        center, widths, angles, radius, length, corner, name : optional
+            As `add_solid_block` and `add_solid_cylinder` take them,
+            lengths in `unit`.
+        counts, spacing : optional
+            As `pattern_solids` takes them.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        None
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        changes = {key: value for key, value in (
+            ('center', center), ('widths', widths), ('angles', angles),
+            ('radius', radius), ('length', length), ('corner', corner),
+            ('counts', counts), ('spacing', spacing),
+            ('name', name)) if value is not None}
+        for key in ('center', 'widths', 'spacing'):
+            if key in changes:
+                changes[key] = np.asarray(changes[key], dtype=float) * scale
+        for key in ('radius', 'length', 'corner'):
+            if key in changes:
+                changes[key] = float(changes[key]) * scale
+        solids.edit(geometry, int(solid_id), **changes)
+
+    def move_solids(self, source: Any, ids: Any, offset: Any = (0.0, 0.0, 0.0),
+                    turn: Any = (0.0, 0.0, 0.0), *, unit: str = 'm') -> int:
+        """Move solids whole (`core.solids.move`): a part with every solid
+        it is made of, turned by `turn` about the middle of their extent,
+        then slid by `offset`.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The solids, by id.
+        offset : array_like, default (0, 0, 0)
+            How far, in `unit`.
+        turn : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        unit : str, default 'm'
+            The unit the offset is in. A geometry whose units are not
+            defined takes it as given.
+
+        Returns
+        -------
+        int
+            How many blocks and cylinders moved.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.move(geometry, ids, np.asarray(offset, dtype=float) * scale,
+                           turn)
+
+    def combine_solids(self, source: Any, operation: str, ids: Any,
+                       name: str = '') -> int:
+        """Add a boolean of a geometry's solids: 'union', 'subtract' (the
+        rest taken from the first) or 'intersect'. The solids combined
+        become the new one's, and only it stands as a part.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        operation : str
+            'union', 'subtract' or 'intersect'.
+        ids : sequence of int
+            Two solids or more, by id, the first first.
+        name : str, optional
+            What to call it.
+
+        Returns
+        -------
+        int
+            The new solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        return solids.combine(geometry, operation, ids, name)
+
+    def pattern_solids(self, source: Any, ids: Any, counts: Any, spacing: Any,
+                       *, unit: str = 'm') -> int:
+        """Pattern a geometry's solids in rows, columns and layers
+        (Pattern): `counts` along X, Y and Z, the originals included,
+        `spacing` apart — one solid made of the originals, so changing
+        one changes every copy, and the pattern's counts and spacing are
+        changed with `edit_solid` (`core.solids.pattern`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The solids to copy, by id.
+        counts : sequence of int
+            How many along X, Y and Z.
+        spacing : sequence of float
+            How far apart along X, Y and Z, in `unit`.
+        unit : str, default 'm'
+            The unit the spacing is in. A geometry whose units are not
+            defined takes it as given.
+
+        Returns
+        -------
+        int
+            The pattern's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.pattern(geometry, ids, counts,
+                              np.asarray(spacing, dtype=float) * scale)
+
+    def mesh_solids(self, source: Any, ids: Any, size: float | None = None, *,
+                    unit: str = 'm', apart: bool = False,
+                    parts_apart: bool = False) -> dict:
+        """Mesh a geometry's solids into bricks (Mesh Solids): the parts,
+        extrusions along X, Y or Z, on one grid cut at every flat face,
+        their holes rounded, each part an element group named for it,
+        parts meshed together sharing nodes where they touch
+        (`core.solids.extrusion_mesh`). The solids stay, to mesh again.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The parts, by id: solids nothing else uses.
+        size : float, optional
+            The element size aimed at, in `unit`. Defaults to half the
+            thinnest feature (`core.solids.mesh_size`).
+        unit : str, default 'm'
+            The unit the size is in. A geometry whose units are not
+            defined takes it as given.
+        apart : bool, default False
+            Land the bricks only on nodes of their own element groups
+            (`mesh.join`), so a part meshed beside another keeps nodes of
+            its own where they touch.
+        parts_apart : bool, default False
+            The parts meshed here keep their own nodes where they touch
+            each other, on one grid, so their nodes lie on each other's
+            for bolts to be merged at.
+
+        Returns
+        -------
+        dict
+            'bricks', 'nodes', 'axis', 'rounded', 'shortest' as
+            `extrusion_mesh` says them, and 'added', 'shared' and
+            'groups' as `mesh.join` does.
+        """
+        from .core import mesh, solids
+
+        _name, geometry = self._solid_geometry(source)
+        ids = [int(i) for i in ids]
+        held = (solids.mesh_size(geometry, ids) if size is None
+                else float(size) * self._solid_scale(geometry, unit))
+        part, made = solids.extrusion_mesh(geometry, ids, held, parts_apart)
+        found = mesh.join(geometry, part, apart=apart)
+        return {**made, 'added': found['added'], 'shared': found['shared'],
+                'groups': found['groups']}
+
+    def delete_solids(self, source: Any, ids: Any) -> int:
+        """Delete a geometry's solids, each with everything it is made of
+        (`core.solids.delete`); one a boolean still uses is refused.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The solids, by id.
+
+        Returns
+        -------
+        int
+            How many solids went.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        return solids.delete(geometry, ids)
+
+    def separate_solids(self, source: Any, ids: Any) -> int:
+        """Take a geometry's booleans apart (Take Apart): each goes, its
+        operands parts again (`core.solids.separate`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The booleans, by id.
+
+        Returns
+        -------
+        int
+            How many solids stand again.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        return solids.separate(geometry, ids)
 
     def solve_modes(self, source: Any, *,
                     maximum_frequency: float | None = None,
@@ -4145,9 +4518,15 @@ _VERB_APPLIES: tuple = (
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
                                              and len(o.elem_conn) > 0)),
+    # where parts meshed apart meet, the step before the merge
+    ('align_meshes', lambda p, o: (isinstance(o, Geometry)
+                                   and len(o.elem_conn) > 0)),
     # a plane or a block goes into any geometry, an empty one above all
     ('add_plane', lambda p, o: isinstance(o, Geometry)),
     ('add_block', lambda p, o: isinstance(o, Geometry)),
+    # solids go into any geometry too (2026-10-11)
+    ('add_solid_block', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_cylinder', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
@@ -4234,7 +4613,10 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
-    'merge_coincident_nodes', 'new_geometry', 'add_plane', 'add_block',
+    'merge_coincident_nodes', 'align_meshes', 'new_geometry', 'add_plane',
+    'add_block', 'add_solid_block', 'add_solid_cylinder', 'combine_solids',
+    'delete_solids', 'separate_solids', 'mesh_solids', 'pattern_solids',
+    'edit_solid', 'move_solids',
     'tie_elements',
     'merge_groups', 'set_view', 'set_comparison_scale',
     'read_as_specification', 'read_as_psd',

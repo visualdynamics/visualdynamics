@@ -37,13 +37,18 @@ element it passes through (Brandon, 2026-10-11; the beam had one bolt
 at each end).
 
 **And from bricks** (2026-10-07): the same structure as solid
-eight-node bricks (`mesh.block`), the higher-fidelity model, and the
-removable component on its own — the two channels and the beam, the
-part the BARC is named for (`solid_geometry`, `solid_project`). Bricks
-touch where the parts do, so their bolts are built the other way
-(Brandon, 2026-10-11): each part meshed apart (`mesh.assemble` with
-`apart`), its nodes coincident with the next part's where the two
-touch and joined to none of them, and each bolt made by merging the
+eight-node bricks, the higher-fidelity model, and the removable
+component on its own — the two channels and the beam, the part the
+BARC is named for (`solid_geometry`, `solid_project`). Since
+2026-10-11 its parts are solids, the fewest blocks each can be (the
+box a block less its inside and its slot, a channel a block less the
+inside of its C, the beam a block; `BOX_SOLIDS`, `CHANNEL_SOLIDS`,
+`BEAM_SOLID`), meshed by Mesh Solids — the documentation's steps, node
+for node the boxes they replaced. Bricks touch where the parts do, so
+their bolts are built the other way (Brandon, 2026-10-11): the parts
+meshed on one grid each with its own nodes (`parts_apart`), coincident
+with the next part's where the two touch and joined to none of them,
+and each bolt made by merging the
 places it clamps (`bolt_places`, Merge Coincident Nodes with the rest
 left out) — at a foot the corners of the brick under the bolt and the
 eight around it, the washer's area, and at the beam the four corners
@@ -291,61 +296,44 @@ POUND = 0.45359237
 PART_SOLVE_TO = 2600.0
 
 
-def _boxes(part: str) -> list:
-    """The parts as boxes, inches: (corner, extent, element group)."""
-    t = 0.125
-    box = [
-        ((-3, -3, 0), (6, 0.25, BOX_DEPTH)),                    # bottom
-        ((2.75, -2.75, 0), (0.25, 5.5, BOX_DEPTH)),             # right
-        ((-3, -2.75, 0), (0.25, 5.5, BOX_DEPTH)),               # left
-        ((SLOT_HALF, 2.75, 0), (3 - SLOT_HALF, 0.25, BOX_DEPTH)),
-        ((-3, 2.75, 0), (3 - SLOT_HALF, 0.25, BOX_DEPTH)),
-    ]
-    component = [
-        # the right channel: foot and top flange inboard, web outboard
-        ((1.5, 3.0, 1), (1, t, 1), 'right channel'),
-        ((1.5, 4.875, 1), (1, t, 1), 'right channel'),
-        ((2.375, 3.125, 1), (t, 1.75, 1), 'right channel'),
-        # the left channel turned a quarter turn: its web at the back
-        ((-2.5, 3.0, 1), (1, t, 1), 'left channel'),
-        ((-2.5, 4.875, 1), (1, t, 1), 'left channel'),
-        ((-2.5, 3.125, 1), (1, 1.75, t), 'left channel'),
-        ((-2.5, 5.0, 1), (5, t, 1), 'beam'),
-    ]
-    whole = [(*b, 'box') for b in box] + component
-    return whole if part == 'BARC' else component
+#: the BARC's parts as the solid blocks a person adds, inches: (center,
+#: widths, name) — the fewest blocks and operations each part can be
+#: (Brandon, 2026-10-11). The box is a block less its inside and the
+#: slot in its top; a channel is a block less the inside of its C; the
+#: beam is one. A cut reaches past the part's faces so it goes clean
+#: through, its far faces on grid lines the mesh has anyway. These are
+#: the parts' true outlines, not their mid-surfaces: a foot's underside
+#: is the box's top face at y = 3, the beam's the channels' tops at y = 5.
+BOX_SOLIDS = [((0.0, 0.0, 1.5), (6.0, 6.0, 3.0), 'box'),
+              ((0.0, 0.0, 1.5), (5.5, 5.5, 4.0), ''),
+              ((0.0, 2.8125, 1.5), (2 * SLOT_HALF, 0.625, 4.0), '')]
+CHANNEL_SOLIDS = {
+    # the right channel: its web outboard, open inboard
+    'right channel': [((2.0, 4.0, 1.5), (1.0, 2.0, 1.0)),
+                      ((1.8125, 4.0, 1.5), (1.125, 1.75, 1.5))],
+    # the left channel turned a quarter turn: its web at the back, open
+    # to the front
+    'left channel': [((-2.0, 4.0, 1.5), (1.0, 2.0, 1.0)),
+                     ((-2.0, 4.0, 1.6875), (1.5, 1.75, 1.125))]}
+BEAM_SOLID = ((0.0, 5.0625, 1.5), (5.0, 0.125, 1.0))
 
 
-def _bricks(size: float, part: str) -> list:
-    """The parts as boxes meshed into bricks, each in the element group of
-    its own name.
-
-    Every box is cut at every other box's faces before it is meshed, so
-    two boxes that meet share their face's nodes at any size. Meshed
-    whole, a channel's 0.125 in web met its flange where the flange,
-    divided at a quarter inch, had no line of nodes: the web hung from
-    one edge, and the BARC read 76 Hz for 192 (2026-10-07). At an
-    eighth of an inch every cut falls on a line of nodes already, and
-    the mesh is the same as uncut.
-    """
-    import itertools
-
-    boxes = _boxes(part)
-    cuts = [sorted({round(corner[k] + d, 9) for corner, extent, _name in boxes
-                    for d in (0.0, extent[k])}) for k in range(3)]
-    out = []
-    for corner, extent, name in boxes:
-        spans = []
-        for k in range(3):
-            low, high = corner[k], corner[k] + extent[k]
-            at = [low, *(v for v in cuts[k] if low + 1e-9 < v < high - 1e-9),
-                  high]
-            spans.append(list(itertools.pairwise(at)))
-        for (x0, x1), (y0, y1), (z0, z1) in itertools.product(*spans):
-            out.append(mesh.block((x0, y0, z0), (x1 - x0, 0, 0),
-                                  (0, y1 - y0, 0), (0, 0, z1 - z0), size,
-                                  name, unit='in'))
-    return out
+def _parts(project: Any, name: str, part: str) -> list[int]:
+    """The parts as solids, the way a person makes them in the app (Add
+    Solid Block, then Subtract), in the order they are meshed: the box,
+    the right channel, the left channel, the beam."""
+    parts = []
+    if part == 'BARC':
+        box = [project.add_solid_block(name, center, widths, name=label, unit='in')
+               for center, widths, label in BOX_SOLIDS]
+        parts.append(project.combine_solids(name, 'subtract', box))
+    for side, blocks in CHANNEL_SOLIDS.items():
+        made = [project.add_solid_block(name, center, widths,
+                                        name=side if k == 0 else '', unit='in')
+                for k, (center, widths) in enumerate(blocks)]
+        parts.append(project.combine_solids(name, 'subtract', made))
+    parts.append(project.add_solid_block(name, *BEAM_SOLID, name='beam', unit='in'))
+    return parts
 
 
 def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
@@ -369,9 +357,20 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
         `bolt_places`) and the bolts' masses, 'foot bolts' (the assembly
         only) and 'top bolts', opening on `VIEW`.
     """
+    from visualdynamics.project import Project
+
     if part not in PARTS:
         raise ValueError(f'{part!r} is not one of {PARTS}')
-    whole = mesh.assemble(*_bricks(size, part), apart=True)
+    # the parts meshed together on one grid, cut at every part's faces,
+    # each keeping its own nodes: where two touch their nodes lie on
+    # each other's, joined to none, for the bolts to merge. Meshed one
+    # at a time, each on its own grid, a channel's foot met the box's
+    # top with no nodes in common at a quarter inch (2026-10-11)
+    project = Project('BARC')
+    name = project.new_geometry('BARC', unit='in')
+    project.mesh_solids(name, _parts(project, name, part), size, unit='in',
+                        parts_apart=True)
+    whole = project[name]
     whole.view = VIEW
     whole.group_properties = {int(group): fem.GroupProperties(MATERIAL)
                               for group in whole.group_id}
@@ -398,8 +397,13 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
             if k != kind:
                 continue
             on_face = np.flatnonzero(np.abs(xyz[:, 1] - HEAD_Y[kind]) < 1e-6)
-            nearest = on_face[np.argmin(np.hypot(xyz[on_face, 0] - bx,
-                                                 xyz[on_face, 2] - bz))]
+            far = np.hypot(xyz[on_face, 0] - bx, xyz[on_face, 2] - bz)
+            # the axis runs through a brick's middle, so its four corners
+            # tie: the one at the lowest x, then z, whatever the nodes'
+            # numbering (Mesh Solids numbers them otherwise than the old
+            # boxes did, and moved the masses a brick, 2026-10-11)
+            tied = on_face[far <= far.min() + 1e-9]
+            nearest = tied[np.lexsort((xyz[tied, 2], xyz[tied, 0]))[0]]
             nodes.append([int(whole.node_id[nearest])])
         group = whole.add_group(f'{kind} bolts')
         whole.add_elements(nodes, [161] * len(nodes), [group] * len(nodes))

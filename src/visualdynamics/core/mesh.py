@@ -105,7 +105,7 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     """A rectangular block meshed into eight-node bricks, in one element
     group.
 
-    `plane` one dimension up (2026-09-30, for the four-unit frame
+    `plane` one dimension up (2026-09-30, for the Frame-Wing
     example): a corner and three perpendicular edges, each divided
     evenly into the whole number of elements nearest `size`, so the
     bricks come out close to cubes. Blocks that meet over a face divide
@@ -123,16 +123,21 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     no fifth item takes `hole_name`. Holes apply in order, a later one
     over an earlier: a through hole, then an insert named to the same
     radius part way down, then a void of the insert's bore, is a
-    threaded insert in a drilled hole. The nodes on a hole's rim — the
-    ones its bricks share with the bricks beside them — are then moved
-    radially onto the circle, a node on the block's own face sliding
-    along that face to where the circle meets it, so a hole is round to
-    within the polygon its rim nodes make rather than stair-stepped
-    (a hole centered on the block's edge is a round-over and keeps its
-    steps; its corner brick cannot follow an arc): a
-    stair-stepped hole in a member six bricks wide was anywhere from
-    three to four bricks across as its center fell, and the frame's
-    modes wandered by ten percent with it (2026-09-30).
+    threaded insert in a drilled hole. Every hole runs along the same
+    edge; one along another is refused, since the bricks are a grid
+    swept along it.
+
+    A hole is round, not stair-stepped — a stair-stepped hole in a
+    member six bricks wide was anywhere from three to four bricks across
+    as its center fell, and the frame's modes wandered by ten percent
+    with it (2026-09-30). Mesh Solids' mesher does it (`solids._mesh_grid`,
+    one rule for both, 2026-10-11): about a hole with room the grid is
+    replaced by a ring mesh, the circle's nodes on it and evenly spaced,
+    a core where an insert fills it; a hole without room has the grid's
+    nodes on its rim pulled onto the circle, sliding along the block's
+    face where it breaks out. A hole centered on the block's edge is a
+    round-over and keeps its steps: its corner brick cannot follow an
+    arc, and its area is within a few percent of the fillet's already.
 
     Parameters
     ----------
@@ -160,6 +165,7 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
         name the holes put bricks in.
     """
     from ..units import si_transform
+    from .solids import _mesh_grid
 
     scale = 1.0 if unit is None else si_transform(unit, 'length')[0]
     corner = np.asarray(corner, dtype=float)
@@ -178,104 +184,55 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     counts = [max(1, round(length / size)) + 1 for length in lengths]
     grids = [np.linspace(0.0, length, count)
              for length, count in zip(lengths, counts)]
-    na, nb, _nc = counts
-    local = np.array([(a, b, c) for c in grids[2] for b in grids[1]
-                      for a in grids[0]])
-    xyz = corner + local @ np.array(axes)
-    node = np.arange(1, len(xyz) + 1)
-    conn, centers = [], []
-    for k in range(counts[2] - 1):
-        for j in range(nb - 1):
-            for i in range(na - 1):
-                first = k * na * nb + j * na + i
-                cell = [first, first + 1, first + na + 1, first + na]
-                conn.append(node[cell + [c + na * nb for c in cell]])
-                centers.append(local[cell].mean(axis=0)
-                               + 0.5 * (grids[2][k + 1] - grids[2][k])
-                               * np.array([0.0, 0.0, 1.0]))
-    centers = np.array(centers)
-    # 1 is the element group, 0 a brick removed, 2 and up the named element groups
-    groups = np.ones(len(conn), dtype=int)
+    along_axis = {int(hole[2]) for hole in holes}
+    if len(along_axis) > 1:
+        raise ValueError(f'{name or "a block"}: every hole must run along '
+                         'the same edge')
+    w = along_axis.pop() if along_axis else 2
+    order = [(w + 1) % 3, (w + 2) % 3, w]
+    # the holes in the block's own frame, the corner at the origin, each
+    # with the element group its bricks go to (0 for none)
     names = [name]
-    rims: list[tuple[np.ndarray, np.ndarray, float, int]] = []
-    conn_array = np.array(conn) - 1 if conn else np.empty((0, 8), int)
+    cut = []
     for hole in holes:
-        center, radius, axis = hole[0], float(hole[1]), int(hole[2])
+        center = np.asarray(hole[0], dtype=float) - corner
+        center = np.array([float(center @ unit_axis) for unit_axis in axes])
         depth = float(hole[3]) if len(hole) > 3 and hole[3] is not None else None
         target = hole[4] if len(hole) > 4 else hole_name
-        along = np.asarray(center, dtype=float) - corner
-        along = np.array([float(along @ unit_axis) for unit_axis in axes])
-        across = [d for d in range(3) if d != axis]
-        distance = np.linalg.norm(centers[:, across] - along[across], axis=1)
-        inside = distance <= radius
-        if depth is not None:
+        if target is not None and target not in names:
+            names.append(target)
+        group = 0 if target is None else names.index(target) + 1
+        if depth is None:
+            low, high = 0.0, lengths[w]
+        elif center[w] > lengths[w] / 2.0:
             # blind from the face the axis enters at: the corner's own
             # face when the center sits on it, the far face otherwise
-            far = along[axis] > lengths[axis] / 2.0
-            reach = (lengths[axis] - centers[:, axis] if far
-                     else centers[:, axis])
-            inside &= reach <= depth
-        # a hole whose axis lies inside the block gets a round rim; one
-        # centered on the block's own edge or corner is a round-over,
-        # and its rim stays stair-stepped: the corner brick a fillet
-        # keeps cannot be pulled onto the arc without folding, and its
-        # area is within a few percent of the fillet's already
-        within = all(0.0 < along[d] < lengths[d]
-                     for d in range(3) if d != axis)
-        beyond = distance > radius
-        if within and inside.any() and beyond.any():
-            # the rim: nodes the hole's bricks share with bricks beyond
-            # its radius — not with the bricks under a blind hole's
-            # floor, which lie inside the circle and must stay put
-            rim = np.intersect1d(np.unique(conn_array[inside]),
-                                 np.unique(conn_array[beyond]))
-            rims.append((rim, along, radius, axis))
-        if target is None:
-            groups[inside] = 0
+            low, high = lengths[w] - depth, lengths[w]
         else:
-            if target not in names:
-                names.append(target)
-            groups[inside] = names.index(target) + 1
-    for rim, along, radius, axis in rims:
-        across = [d for d in range(3) if d != axis]
-        for row in rim:
-            offset = local[row, across] - along[across]
-            distance = float(np.linalg.norm(offset))
-            if distance == 0.0:
-                continue
-            target = along[across] + offset * (radius / distance)
-            # a node on the block's face keeps to the face: it slides to
-            # where the circle meets it, or stays if the circle does not
-            on_face = [k for k, d in enumerate(across)
-                       if local[row, d] <= 1e-12 * lengths[d]
-                       or local[row, d] >= lengths[d] * (1 - 1e-12)]
-            if len(on_face) == 2:
-                continue
-            if on_face:
-                held, other = on_face[0], 1 - on_face[0]
-                reach = radius ** 2 - offset[held] ** 2
-                if reach < 0.0:
-                    continue
-                target = target.copy()
-                target[held] = local[row, across[held]]
-                target[other] = along[across[other]] + (
-                    np.sign(offset[other]) or 1.0) * np.sqrt(reach)
-            local[row, across] = target
-        xyz = corner + local @ np.array(axes)
-    if not (groups > 0).all():
-        keep = groups > 0
-        conn = [c for c, k in zip(conn, keep) if k]
-        groups = groups[keep]
-        used = np.unique(np.concatenate(conn)) if conn else np.array([], int)
-        renumber = {int(old): new for new, old in enumerate(used, 1)}
-        xyz = xyz[used - 1]
-        conn = [np.array([renumber[int(n)] for n in c]) for c in conn]
-        node = np.arange(1, len(xyz) + 1)
-    if not conn:
+            low, high = 0.0, depth
+        cut.append((center, float(hole[1]), low, high, group))
+    across = order[:2]
+
+    def held(points):
+        group = np.ones(len(points), dtype=int)
+        for center, radius, low, high, to in cut:
+            inside = ((np.linalg.norm(points[:, across] - center[across], axis=1)
+                       <= radius) & (points[:, w] >= low) & (points[:, w] <= high))
+            group[inside] = to
+        return group
+
+    # a hole centered on the block's edge or corner is a round-over and
+    # keeps its steps: no circle for it
+    circles = [(center, radius, low, high, True) for center, radius, low, high, _to in cut
+               if all(0.0 < center[d] < lengths[d] for d in across)]
+    local, conn, groups, _made = _mesh_grid([grids[k] for k in order], order, size,
+                                            held, circles)
+    if not len(conn):
         raise ValueError(f'{name or "a block"}: the holes leave nothing')
+    xyz = corner + local @ np.array(axes)
     present = [k for k in range(1, len(names) + 1) if (groups == k).any()]
-    return Geometry(node_id=node, node_xyz=xyz * scale, elem_conn=conn,
-                    elem_type=[115] * len(conn),
+    return Geometry(node_id=np.arange(1, len(xyz) + 1), node_xyz=xyz * scale,
+                    elem_conn=list(conn), elem_type=[115] * len(conn),
                     elem_group=[int(b) for b in groups],
                     group_id=present,
                     group_name=[names[k - 1] for k in present],

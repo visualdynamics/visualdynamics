@@ -1,5 +1,5 @@
 """Add Block: a meshed box of bricks typed into a geometry, the project
-verb and the app's dialog (2026-09-30, for the four-unit frame example).
+verb and the app's dialog (2026-09-30, for the Frame-Wing example).
 """
 
 from __future__ import annotations
@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from conftest import select_objects
+from test_mesh_rules import _volume
 
 import visualdynamics
 from visualdynamics.core import mesh
@@ -54,7 +55,8 @@ def test_holes_leave_the_block_or_go_to_an_insert_block():
                                              ((0.3, 0.05, 0.02), 0.02, 2, 0.012)],
                          hole_name='inserts')
     assert list(inserts.group_name) == ['bar', 'inserts']
-    assert len(inserts.elem_conn) == whole, 'nothing removed, only moved'
+    assert _volume(inserts) == pytest.approx(0.4 * 0.1 * 0.02), 'nothing removed'
+    assert (inserts.elem_group == 2).any()
     insert_rows = np.flatnonzero(inserts.elem_group == 2)
     depths = centers_z = np.array([inserts.node_xyz[inserts.node_index(
         inserts.elem_conn[r])].mean(axis=0) for r in insert_rows])

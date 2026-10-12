@@ -42,7 +42,9 @@ from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
+from .mesh_solids_panel import MeshSolidsPanel
 from .octave_panel import OctavePanel
+from .pattern_panel import PatternPanel
 from .rigid_panel import RigidBodyPanel
 from .shock_panel import ShockPanel
 from .sine_panel import SinePanel
@@ -1664,6 +1666,10 @@ class ScenePane(QWidget):
         #: Merge Coincident Nodes' tolerance and its Merge (2026-10-11)
         self.merge_panel: MergePanel = MergePanel()
         self.merge_panel.hide()
+        self.mesh_solids_panel: MeshSolidsPanel = MeshSolidsPanel()
+        self.mesh_solids_panel.hide()
+        self.pattern_panel: PatternPanel = PatternPanel()
+        self.pattern_panel.hide()
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
@@ -1671,6 +1677,8 @@ class ScenePane(QWidget):
         row.addWidget(self.rigid_panel)
         row.addWidget(self.mesh_panel)
         row.addWidget(self.merge_panel)
+        row.addWidget(self.mesh_solids_panel)
+        row.addWidget(self.pattern_panel)
         layout.addLayout(row)
         self._view_row = row
 

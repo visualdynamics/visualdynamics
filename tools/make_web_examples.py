@@ -292,37 +292,42 @@ def build_barc_bricks(size: float = BARC_BRICKS_WEB_SIZE,
     return size_kb
 
 
-#: the four-unit frame figure's element size, inches: the website draws
-#: the frame with its thick wing a third of an inch coarse — 3,400 nodes
-#: and a two-megabyte page — where the example solves at a twelfth
-#: (the demonstration's own mesh made a 28 MB page, 2026-09-30)
-FRAME_WEB_SIZE = 1.0 / 3.0
+#: the Frame-Wing figure's element sizes, inches: the frame a sixth of an
+#: inch coarse where the example's is a twelfth, the wing a quarter where
+#: the example's is an eighth. A coarser frame bolts badly — at a quarter
+#: inch the first mode read 102 Hz for 125, at a fifth the fourth and
+#: fifth 3 % stiff (2026-10-11, the holes ring-meshed). The wing can go
+#: coarser: at a quarter the first five modes are within 2 % of the
+#: example's, the page 4.4 MB where an eighth made it 9.5
+FRAME_WEB_SIZE = 1.0 / 6.0
+FRAME_WEB_WING_SIZE = 1.0 / 4.0
 FRAME_MODES = 8
 
 
-def build_frame(size: float = FRAME_WEB_SIZE, write: bool = True) -> int:
-    """The four-unit frame's finite element modes, animated: the frame
-    with the thick wing screwed across it, built from blocks of bricks
-    (`visualdynamics.demo.frame`), its first elastic modes."""
+def build_frame(size: float = FRAME_WEB_SIZE,
+                wing_size: float = FRAME_WEB_WING_SIZE, write: bool = True) -> int:
+    """The Frame-Wing's finite element modes, animated: the frame
+    with the thick wing bolted across it, built from solids
+    (`visualdynamics.demo.frame_wing`), its first elastic modes."""
     import visualdynamics
     import visualdynamics.report as report_module
     from visualdynamics.core.report import Report
-    from visualdynamics.demo import frame
+    from visualdynamics.demo import frame_wing
 
-    model = frame.build('thick wing', size, size)
+    geometry = frame_wing.geometry('thick wing', size, wing_size)
+    model = visualdynamics.fem.Model.from_geometry(geometry)
     shapes = model.eigensolution(maximum_frequency=1000.0)
     elastic = [i for i, f in enumerate(shapes.frequency) if f > 1.0][:FRAME_MODES]
     shapes.delete_modes([i for i in range(shapes.num_shapes)
                          if i not in elastic])
-    geometry = frame.geometry('thick wing', size, size)
     demo = visualdynamics.Project('Examples')
     demo.add('Frame', geometry)
     demo.add('Modes', shapes)
     demo.link('Frame', 'Modes')
     report = Report('', [{
         'kind': 'scene', 'geometry': 'Frame', 'shapes': 'Modes',
-        'caption': 'Finite element modes of the four-unit frame with its '
-                   'thick wing, built from blocks of bricks — pick one '
+        'caption': 'Finite element modes of the Frame-Wing, the frame '
+                   'with its thick wing, built from solids — pick one '
                    'from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
@@ -331,8 +336,8 @@ def build_frame(size: float = FRAME_WEB_SIZE, write: bool = True) -> int:
     size_kb = len(html.encode('utf-8')) // 1024
     if write:
         OUT.mkdir(parents=True, exist_ok=True)
-        (OUT / 'frame.html').write_text(html, encoding='utf-8')
-    print(f'  frame.html     {size_kb:5d} KB  ({model.num_nodes} nodes)')
+        (OUT / 'frame-wing.html').write_text(html, encoding='utf-8')
+    print(f'  frame-wing.html     {size_kb:5d} KB  ({model.num_nodes} nodes)')
     return size_kb
 
 

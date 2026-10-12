@@ -341,6 +341,83 @@ def face_corners(code: int) -> int:
     return 3 if name.startswith('tri') else 4
 
 
+#: the faces of a solid cell by its node count, as corner positions in
+#: the cell's own node order: the hexahedron's six, the wedge's two
+#: triangles and three quads, the tetrahedron's four. Bottom face then
+#: top, the same way round, as UFF 2412 and Nastran number them.
+_SOLID_FACES = {
+    8: ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5),
+        (2, 3, 7, 6), (3, 0, 4, 7)),
+    6: ((0, 2, 1), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5)),
+    4: ((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+}
+
+
+def solid_faces(node_count: int) -> tuple[tuple[int, ...], ...]:
+    """The faces of a solid cell of this many corners, each as
+    positions into the cell's node list; a higher-order cell draws by
+    its corners, which come first.
+
+    Parameters
+    ----------
+    node_count : int
+        How many nodes the cell names.
+
+    Returns
+    -------
+    tuple of tuple of int
+    """
+    if node_count in (8, 20, 27):
+        return _SOLID_FACES[8]
+    if node_count in (6, 15, 24):
+        return _SOLID_FACES[6]
+    if node_count in (4, 10):
+        return _SOLID_FACES[4]
+    if node_count in (5, 13):                 # a pyramid: a quad and four
+        return ((0, 3, 2, 1), (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4))
+    return ()
+
+
+#: per corner of a solid, three corners it shares an edge with: the
+#: three edges whose triple product is that corner's share of the volume,
+#: whose sign says whether the cell is still the right way out
+_CORNER_EDGES = {
+    8: ((1, 3, 4), (2, 0, 5), (3, 1, 6), (0, 2, 7),
+        (7, 5, 0), (4, 6, 1), (5, 7, 2), (6, 4, 3)),
+    6: ((1, 2, 3), (2, 0, 4), (0, 1, 5), (5, 4, 0), (3, 5, 1), (4, 3, 2)),
+    4: ((1, 2, 3),),
+    5: ((1, 3, 4), (2, 0, 4), (3, 1, 4), (0, 2, 4)),
+}
+
+
+def _turned(code: int, before: NDArray, after: NDArray) -> bool:
+    """Whether moving an element's nodes from `before` to `after` turns
+    it inside out: a solid's corner volume, or a face's normal at a
+    corner, changing sign. A line has no inside: one drawn to nothing is
+    a link across the gap the move closes — the Frame-Wing's screw ties,
+    2026-10-11 — which the merge that follows removes
+    (`merge_collapses`)."""
+    family = element_family(code)
+    if family in SOLID_FAMILIES:
+        count = {'hexes': 8, 'wedges': 6, 'tetras': 4, 'pyramids': 5}[family]
+        for corner, (a, b, c) in enumerate(_CORNER_EDGES[count]):
+            then = np.linalg.det(before[[a, b, c]] - before[corner])
+            now = np.linalg.det(after[[a, b, c]] - after[corner])
+            if then * now <= 0.0:
+                return True
+        return False
+    if family in ('quads', 'triangles'):
+        corners = face_corners(code)
+        for i in range(corners):
+            j, k = (i + 1) % corners, (i - 1) % corners
+            then = np.cross(before[j] - before[i], before[k] - before[i])
+            now = np.cross(after[j] - after[i], after[k] - after[i])
+            if float(np.dot(then, now)) <= 0.0:
+                return True
+        return False
+    return False
+
+
 class View:
     """The way a geometry opens in 3-D: where the eye is, seen from the
     model's center, and which way is up on screen.
@@ -574,6 +651,10 @@ class Geometry:
         self.mass_properties: MassProperties | None = None
         #: how it opens in 3-D (`View`); None opens on `DEFAULT_VIEW`
         self.view: View | None = None
+        #: the shapes its parts are made of before they are meshed — blocks,
+        #: cylinders and booleans of them (`core.solids`, 2026-10-11); not
+        #: elements, and read by nothing that solves or draws a mesh
+        self.solids: list = []
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -779,6 +860,10 @@ class Geometry:
         raw_origins = (origins if self.length_unit is None
                        else from_si(origins, self.length_unit, 'length'))
         self.cs_matrix[:, 3, :] = raw_origins * scale
+        # the solids' lengths follow the coordinates (their angles do not)
+        raw_scale = (1.0 if self.length_unit is None
+                     else 1.0 / si_transform(self.length_unit, 'length')[0])
+        self.solids = [s.scaled(raw_scale * scale) for s in self.solids]
         self.length_unit = length_unit
         return self
 
@@ -789,6 +874,8 @@ class Geometry:
         self.node_xyz = from_si(self.node_xyz, self.length_unit, 'length')
         self.cs_matrix[:, 3, :] = from_si(self.cs_matrix[:, 3, :],
                                           self.length_unit, 'length')
+        self.solids = [s.scaled(1.0 / si_transform(self.length_unit, 'length')[0])
+                       for s in self.solids]
         self.length_unit = None
         return self
 
@@ -1644,6 +1731,10 @@ class Geometry:
         rows = (range(len(self.elem_conn)) if groups is None
                 else np.flatnonzero(np.isin(self.elem_group,
                                             [int(g) for g in groups])))
+        return self._spacing(rows)
+
+    def _spacing(self, rows) -> float | None:
+        """`node_spacing` over these element rows."""
         by_count: dict[int, list[np.ndarray]] = {}
         for k in rows:
             conn = self.elem_conn[k]
@@ -1829,6 +1920,302 @@ class Geometry:
         self.validate()
         return {'merged': len(mapping), 'into': len(set(mapping.values())),
                 'duplicates': duplicates, 'links': len(links)}
+
+    # ---- Align Meshes (Brandon, 2026-10-11) -----------------------------
+
+    def _parts(self, groups: Ids | None) -> list[np.ndarray]:
+        """The element rows of `groups` (every element when None) as the
+        pieces their shared nodes join them into: two parts meshed apart
+        are two pieces whichever element groups they are in, and one
+        element group holding two loose pieces is two."""
+        rows = (np.arange(len(self.elem_conn)) if groups is None
+                else np.flatnonzero(np.isin(self.elem_group,
+                                            [int(g) for g in groups])))
+        parent: dict[int, int] = {}
+
+        def root(node: int) -> int:
+            while parent.setdefault(node, node) != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        for k in rows:
+            nodes = [int(n) for n in self.elem_conn[k]]
+            for node in nodes[1:]:
+                parent[root(node)] = root(nodes[0])
+        pieces: dict[int, list[int]] = {}
+        for k in rows:
+            pieces.setdefault(root(int(self.elem_conn[k][0])), []).append(int(k))
+        return [np.asarray(piece) for piece in pieces.values()]
+
+    def _skin(self, rows) -> set[int]:
+        """The nodes of these element rows that lie on their outside:
+        every node of a plate, a line or a point, and of a solid the
+        nodes of the faces no second solid among them shares."""
+        faces: dict[tuple[int, ...], tuple[int, ...]] = {}
+        skin: set[int] = set()
+        for k in rows:
+            conn = [int(n) for n in self.elem_conn[k]]
+            if element_family(int(self.elem_type[k])) not in SOLID_FAMILIES:
+                skin.update(conn)
+                continue
+            for face in solid_faces(len(conn)):
+                corners = tuple(conn[i] for i in face)
+                key = tuple(sorted(corners))
+                if key in faces:
+                    del faces[key]
+                else:
+                    faces[key] = corners
+        for corners in faces.values():
+            skin.update(corners)
+        return skin
+
+    def _typical_spacing(self, rows) -> float | None:
+        """A piece's mesh size, as Align Meshes reads it: the median over
+        its elements of a brick's middle edge — its size across, for a
+        layer one brick thin — and of any other element's shortest. Not
+        the finest edge anywhere (`node_spacing`): the bricks bent onto a
+        hole's circle have edges a fraction of the mesh's, and the
+        Frame-Wing's wing, meshed at an eighth of an inch, read finer
+        than its frame at a twelfth; and not a brick's shortest edge: the
+        washers under the wing, 0.028 in thick on an eighth-inch grid,
+        read finer than the frame and the frame moved onto them
+        (2026-10-11)."""
+        shortest = []
+        by_count: dict[int, list[np.ndarray]] = {}
+        for k in rows:
+            conn = self.elem_conn[k]
+            if len(conn) > 1:
+                by_count.setdefault(len(conn), []).append(conn)
+        for count, conns in by_count.items():
+            xyz = self.node_xyz[self.node_index(np.concatenate(conns))]
+            xyz = xyz.reshape(len(conns), count, 3)
+            if count == 8:
+                # a brick's three edges from its first corner, the middle
+                edges = np.linalg.norm(xyz[:, [1, 3, 4]] - xyz[:, [0]], axis=-1)
+                shortest.extend(np.sort(edges, axis=1)[:, 1].tolist())
+                continue
+            first, second = np.triu_indices(count, 1)
+            gaps = np.linalg.norm(xyz[:, first] - xyz[:, second], axis=-1)
+            gaps[gaps <= 0.0] = np.inf
+            shortest.extend(gaps.min(axis=1).tolist())
+        shortest = [g for g in shortest if np.isfinite(g) and g > 0.0]
+        return float(np.median(shortest)) if shortest else None
+
+    def align_reach(self, groups: Ids | None = None) -> float | None:
+        """How far Align Meshes reaches unless told: half the coarsest
+        piece's mesh size (`_typical_spacing`), so no node moves further
+        than half an element of the mesh it belongs to. Parts with a gap
+        between them want more: the gap as well.
+
+        Parameters
+        ----------
+        groups : sequence of int, optional
+            The element groups, by id; every element when omitted.
+
+        Returns
+        -------
+        float or None
+            As the coordinates are held; None with no spacing to read.
+        """
+        spacings = [self._typical_spacing(rows) for rows in self._parts(groups)]
+        spacings = [s for s in spacings if s]
+        return 0.5 * max(spacings) if spacings else None
+
+    def align_moves(self, reach: float, groups: Ids | None = None,
+                    exclude: Ids | None = None) -> list[list[int]]:
+        """The moves Align Meshes would make: each [node, onto], a node of
+        a coarser piece and the node of a finer piece it would move onto,
+        so the two are one point, ready for Merge Coincident Nodes.
+
+        Two pieces meshed at different sizes cannot be made to match
+        node for node, since their counts differ, but the coarser one's
+        nodes can each be put on the finer one's nearest: none moves more
+        than half the finer spacing in-plane, plus whatever gap lies
+        between them, and each becomes a place to merge (Brandon,
+        2026-10-11, for the Frame-Wing, whose wing is meshed at an eighth
+        of an inch on a frame meshed at a twelfth). Only nodes on the
+        pieces' outsides move or are moved onto, a node moves once and
+        onto a node no other takes, a node already on another is a place
+        to merge rather than a move, and the nearest pairs are taken
+        first — so a washer's underside goes onto the frame under it, and
+        its top, whose nearest frame node is the underside's, stays.
+        Pieces of equal spacing: the later piece moves.
+
+        Parameters
+        ----------
+        reach : float
+            How far a node may move, as the coordinates are held.
+        groups : sequence of int, optional
+            The element groups whose pieces are aligned, by id; every
+            element when omitted.
+        exclude : sequence of int, optional
+            Nodes left out, by id: neither moved nor moved onto — the
+            moves a person unpicked in the app.
+
+        Returns
+        -------
+        list of [int, int]
+            In the order of the node moved.
+        """
+        from scipy.spatial import cKDTree
+
+        parts = self._parts(groups)
+        if len(parts) < 2:
+            return []
+        left_out = {int(n) for n in exclude or ()}
+        skins = [sorted(self._skin(rows) - left_out) for rows in parts]
+        spacing = [self._typical_spacing(rows) or 0.0 for rows in parts]
+        low, high = self.extent if self.num_nodes else (np.zeros(3), np.zeros(3))
+        # already one point: a place to merge, not a move
+        touching = 1e-9 * float(np.linalg.norm(high - low) or 1.0)
+        found = []
+        for a, movers in enumerate(skins):
+            for b, targets in enumerate(skins):
+                finer = spacing[b] < spacing[a] or (spacing[b] == spacing[a]
+                                                    and b < a)
+                if a == b or not finer or not movers or not targets:
+                    continue
+                tree = cKDTree(self.node_xyz[self.node_index(targets)])
+                distance, nearest = tree.query(
+                    self.node_xyz[self.node_index(movers)],
+                    distance_upper_bound=float(reach))
+                for mover, d, j in zip(movers, distance, nearest):
+                    if touching < d <= reach:
+                        found.append((float(d), mover, targets[int(j)]))
+        moves, moving, onto = [], set(), set()
+        for _d, mover, target in sorted(found):
+            if (mover in moving or mover in onto or target in onto
+                    or target in moving):
+                continue
+            moves.append([mover, target])
+            moving.add(mover)
+            onto.add(target)
+        return sorted(self._unfolded(moves))
+
+    def _unfolded(self, moves: list[list[int]]) -> list[list[int]]:
+        """The moves, nearest first, each tried against those before it
+        and left out when it turns an element inside out — the rule Mesh
+        Solids rounds a hole by. A washer's rim, rounded onto its circle,
+        has bricks one move would fold (the Frame-Wing, 2026-10-11), and
+        a refusal of the whole Align over one of forty moves left a
+        person nothing to do but unpick it by hand."""
+        if not moves:
+            return moves
+        movers = [a for a, _b in moves]
+        touching: dict[int, list[int]] = {}
+        wanted = set(movers)
+        for k, conn in enumerate(self.elem_conn):
+            for n in conn:
+                if int(n) in wanted:
+                    touching.setdefault(int(n), []).append(k)
+        rows = dict(zip(movers, self.node_index(movers)))
+        targets = dict(zip(movers, self.node_index([b for _a, b in moves])))
+        grid = self.node_xyz.copy()
+        after = self.node_xyz.copy()
+        order = sorted(moves, key=lambda m: float(np.linalg.norm(
+            grid[targets[m[0]]] - grid[rows[m[0]]])))
+        kept = []
+        for mover, target in order:
+            after[rows[mover]] = grid[targets[mover]]
+            elements = touching.get(mover, [])
+            if any(_turned(int(self.elem_type[k]),
+                           grid[self.node_index(self.elem_conn[k])],
+                           after[self.node_index(self.elem_conn[k])])
+                   for k in elements):
+                after[rows[mover]] = grid[rows[mover]]
+            else:
+                kept.append([mover, target])
+        return kept
+
+    def align_folds(self, moves) -> str | None:
+        """Why these moves would be refused, or None: the sentence
+        `align_meshes` raises when one would turn an element inside out
+        — a solid's corner volume or a plate's facing changing sign —
+        asked ahead, so a pane can say it before its button is pressed.
+
+        Parameters
+        ----------
+        moves : sequence of [int, int]
+            As `align_moves` gives them.
+
+        Returns
+        -------
+        str or None
+        """
+        if not moves:
+            return None
+        moved = {int(a): int(b) for a, b in moves}
+        after = self.node_xyz.copy()
+        rows = self.node_index(list(moved))
+        after[rows] = self.node_xyz[self.node_index(list(moved.values()))]
+        # the elements a move touches, found a node count at a time: a
+        # loop over every element took a third of a second on the
+        # Frame-Wing, on every click in the pane
+        touched = []
+        by_count: dict[int, list[int]] = {}
+        for k, conn in enumerate(self.elem_conn):
+            by_count.setdefault(len(conn), []).append(k)
+        names = np.fromiter(moved, dtype=np.int64)
+        for count, ks in by_count.items():
+            conns = np.asarray([self.elem_conn[k] for k in ks]).reshape(len(ks), count)
+            hit = np.isin(conns, names).any(axis=1)
+            touched.extend(np.asarray(ks)[hit].tolist())
+        touched.sort()
+        # their rows in one lookup: `node_index` sorts every id each call
+        flat = self.node_index(np.concatenate(
+            [self.elem_conn[k] for k in touched])) if touched else []
+        starts = np.cumsum([0] + [len(self.elem_conn[k]) for k in touched])
+        for i, k in enumerate(touched):
+            conn = self.elem_conn[k]
+            index = flat[starts[i]:starts[i + 1]]
+            if _turned(int(self.elem_type[k]), self.node_xyz[index],
+                       after[index]):
+                return (f'moving node {next(int(n) for n in conn if int(n) in moved)}'
+                        f' turns element {int(self.elem_id[k])} inside out; '
+                        'leave that move out or use a smaller reach')
+        return None
+
+    def align_meshes(self, reach: float, groups: Ids | None = None,
+                     exclude: Ids | None = None) -> dict[str, float]:
+        """Move the coarser piece's nodes onto the finer's where they
+        meet (`align_moves`), so Merge Coincident Nodes can join them:
+        parts meshed apart at sizes that do not match, made coincident at
+        their mating faces or where they overlap. Nothing is merged, and
+        no node is removed. A move that would turn an element inside out
+        is not among the moves; refused, with the element named, only
+        when the moves a person left out make one of the rest fold
+        (`align_folds`).
+
+        Parameters
+        ----------
+        reach : float
+            How far a node may move, as the coordinates are held:
+            meters once units are defined.
+        groups : sequence of int, optional
+            The element groups whose pieces are aligned, by id; every
+            element of the geometry when omitted.
+        exclude : sequence of int, optional
+            Nodes left out, by id: neither moved nor moved onto.
+
+        Returns
+        -------
+        dict
+            'moved', how many nodes moved; 'farthest', the longest move,
+            as the coordinates are held.
+        """
+        moves = self.align_moves(reach, groups, exclude)
+        if not moves:
+            return {'moved': 0, 'farthest': 0.0}
+        refusal = self.align_folds(moves)
+        if refusal is not None:
+            raise ValueError(refusal)
+        rows = self.node_index([a for a, _b in moves])
+        targets = self.node_xyz[self.node_index([b for _a, b in moves])]
+        farthest = float(np.linalg.norm(targets - self.node_xyz[rows],
+                                        axis=1).max())
+        self.node_xyz[rows] = targets
+        return {'moved': len(moves), 'farthest': farthest}
 
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
         """Remove coordinate systems, reassigning any node that used them.

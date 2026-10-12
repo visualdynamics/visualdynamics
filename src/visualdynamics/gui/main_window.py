@@ -272,6 +272,17 @@ FAMILY_ADD_TYPES = {'beams': (21, 2), 'triangles': (41, 3), 'quads': (44, 4),
 # what is drawn for a category, where that is not the category itself
 DRAWN_AS = {'groups': 'elements'}
 
+#: a solid's row: what it is called when it has no name, and its icon
+#: (`core.solids`, 2026-10-11)
+SOLID_LABELS = {'block': 'Block', 'cylinder': 'Cylinder', 'union': 'Union',
+                'subtract': 'Subtraction', 'intersect': 'Intersection',
+                'pattern': 'Pattern'}
+SOLID_ICONS = {'block': 'solid_block', 'cylinder': 'solid_cylinder',
+               'union': 'solid_union', 'subtract': 'solid_subtract',
+               'intersect': 'solid_intersect', 'pattern': 'solid_pattern'}
+#: how see-through a solid is drawn, and one picked in the tree
+SOLID_OPACITY, SOLID_PICKED_OPACITY = 0.35, 0.6
+
 
 def _coincident_nodes(geometry, node):
     """Every node in the same place as `node`, by id, `node` first —
@@ -925,6 +936,15 @@ class MainWindow(QMainWindow):
         self.scene.mesh_panel.close_asked.connect(self.close_mesh_pane)
         self.scene.mesh_panel.square_asked.connect(self._mesh_square_up)
         self.scene.merge_panel.changed.connect(self._merge_refresh)
+        self._meshing: dict | None = None
+        self.scene.mesh_solids_panel.changed.connect(self._mesh_solids_refresh)
+        self.scene.mesh_solids_panel.mesh_asked.connect(self._mesh_solids_apply)
+        self.scene.mesh_solids_panel.close_asked.connect(
+            self.close_mesh_solids_pane)
+        self._patterning: dict | None = None
+        self.scene.pattern_panel.changed.connect(self._pattern_refresh)
+        self.scene.pattern_panel.pattern_asked.connect(self._pattern_apply)
+        self.scene.pattern_panel.close_asked.connect(self.close_pattern_pane)
         self.scene.merge_panel.all_asked.connect(self._merge_all)
         self.scene.merge_panel.none_asked.connect(self._merge_none)
         self.scene.merge_panel.merge_asked.connect(self._merge_apply)
@@ -2510,6 +2530,7 @@ class MainWindow(QMainWindow):
                         QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                 item.addChild(child)
             self._build_families(item, obj, name)
+            self._build_solids(item, obj, name)
             # rebuilt while its table is open: the pencil stays on
             self._mark_pencils([item])
         elif isinstance(obj, (DataArray, ShapeSet, ChannelTable, Photos,
@@ -2570,6 +2591,437 @@ class MainWindow(QMainWindow):
                     QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
                 child.addChild(grand)
             item.addChild(child)
+
+    def _build_solids(self, item, geometry, name):
+        """The Solids row under a geometry, always there so the first one
+        can be added, and under it a row per part — the solids nothing
+        else uses — each boolean's operands under its own row
+        (`core.solids`, 2026-10-11)."""
+        from ..core import solids
+
+        parts = solids.top_level(geometry)
+        holder = QTreeWidgetItem([f'Solids ({len(parts)})'])
+        holder.setIcon(0, control_icon('solid_block'))
+        holder.setData(0, ROLE_REFERENCE, ('solids', name, None))
+        holder.setData(0, ROLE_POPULATED, True)
+        holder.setFlags(holder.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        holder.setToolTip(0, 'Shapes to build parts from — blocks, '
+                             'cylinders and booleans of them — before '
+                             'they are meshed')
+
+        def row(parent, solid):
+            label = solid.name.strip() or f'{SOLID_LABELS[solid.kind]} {solid.id}'
+            child = QTreeWidgetItem([label])
+            child.setIcon(0, control_icon(SOLID_ICONS[solid.kind]))
+            child.setData(0, ROLE_REFERENCE, ('solid', name, solid.id))
+            child.setData(0, ROLE_POPULATED, True)
+            child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            # the pencil: the pane opened on it, to change it (2026-10-11)
+            child.setIcon(1, control_icon('edit'))
+            child.setToolTip(1, 'Move it, turn it or change its size'
+                                if solid.kind in solids.PRIMITIVES else
+                                'Change how many copies and how far apart; the '
+                                'pencil on what it copies changes every copy'
+                                if solid.kind == solids.PATTERN else
+                                'Move or turn it whole, every solid it is made '
+                                'of with it')
+            for operand in solid.operands:
+                row(child, solids.solid(geometry, operand))
+            parent.addChild(child)
+
+        for solid in parts:
+            row(holder, solid)
+        item.addChild(holder)
+
+    def _selected_solids(self) -> tuple[str, list[int]] | None:
+        """(geometry name, solid ids) when the tree selection is solid rows
+        of one geometry, in the table's order, else None."""
+        picked = self.selected_references()
+        if not picked or any(kind != 'solid' for kind, *_rest in picked):
+            return None
+        names = {name for _kind, name, _obj, _detail in picked}
+        if len(names) != 1:
+            return None
+        name = names.pop()
+        ids = {int(detail) for _kind, _name, _obj, detail in picked}
+        order = [s.id for s in self.objects[name].solids]
+        return name, [i for i in order if i in ids]
+
+    def _solid_acts(self):
+        """The acts a Solids row or picked solid rows take, or None when
+        the selection is neither: Add Solid Block and Add Cylinder on the
+        row; the booleans on two parts or more, Take Apart on booleans."""
+        picked = self.selected_references()
+        if len(picked) == 1 and picked[0][0] == 'solids':
+            name = picked[0][1]
+            applicable = dict(self.project.selection_verbs(name))
+            return [(verb, label, icon, getattr(self, handler), applicable[verb])
+                    for verb, label, icon, handler in self.ACTS
+                    if verb in self.SOLID_ACTS and verb in applicable]
+        chosen = self._selected_solids()
+        if chosen is None:
+            return None
+        from ..core import solids
+
+        name, ids = chosen
+        geometry = self.objects[name]
+        used = solids.used_by(geometry)
+        acts = []
+        if len(ids) > 1 and not any(i in used for i in ids):
+            first = solids.solid(geometry, ids[0])
+            body = first.name.strip() or f'{SOLID_LABELS[first.kind]} {first.id}'
+            acts += [
+                ('union_solids', 'Union', 'solid_union',
+                 lambda: self.combine_solids_act('union'),
+                 'Make the selected solids one'),
+                ('subtract_solids', 'Subtract', 'solid_subtract',
+                 lambda: self.combine_solids_act('subtract'),
+                 f"Take the others from {body}, the first in the tree"),
+                ('intersect_solids', 'Intersect', 'solid_intersect',
+                 lambda: self.combine_solids_act('intersect'),
+                 'Keep only what the selected solids share')]
+        if not any(i in used for i in ids):
+            acts.append(('pattern_solids', 'Pattern', 'solid_pattern',
+                         self.pattern_solids_act,
+                         ('Pattern the selected solids in rows, columns and '
+                          'layers along X, Y and Z: one solid, its copies '
+                          'following them')))
+            acts.append(('mesh_solids', 'Mesh Solids', 'solid_mesh',
+                         self.mesh_solids_act,
+                         ('Mesh the selected solids into bricks, each an '
+                          'element group, sharing nodes where they touch')))
+        booleans = [i for i in ids if solids.solid(geometry, i).kind
+                    in (*solids.OPERATIONS, solids.PATTERN) and i not in used]
+        if booleans and len(booleans) == len(ids):
+            acts.append(('separate_solids', 'Take Apart', 'solid_separate',
+                         self.separate_solids_act,
+                         ('Undo the boolean or the pattern: the solids it was '
+                          'made of stand on their own again')))
+        return acts
+
+    def add_solid_block_act(self) -> None:
+        """A solid block typed into the selected geometry's solids, in the
+        add pane: a center, three widths, three angles, a name; each Add
+        the project's `add_solid_block`."""
+        self._open_mesh_pane('solid_block')
+
+    def add_solid_cylinder_act(self) -> None:
+        """A cylinder typed into the selected geometry's solids: a center,
+        a radius, a length along its own Z, three angles, a name; each Add
+        the project's `add_solid_cylinder`."""
+        self._open_mesh_pane('solid_cylinder')
+
+    def _solids_changed(self, name: str, pick=()) -> None:
+        """The tree and the view after the solids changed, `pick`'s rows
+        selected again — the rebuilt rows lose the selection."""
+        obj = self.objects[name]
+        self._refresh_item(self._item_for_object(name), obj)
+        if pick:
+            self._select_solid_rows(name, pick)
+        self.render_current()
+
+    def _select_solid_rows(self, name: str, ids) -> None:
+        item = self._item_for_object(name)
+        if item is None:
+            return
+        wanted = {int(i) for i in ids}
+        self.tree.clearSelection()
+        first = None
+        for i in range(item.childCount()):
+            holder = item.child(i)
+            if (holder.data(0, ROLE_REFERENCE) or (None,))[0] != 'solids':
+                continue
+            holder.setExpanded(True)
+            for j in range(holder.childCount()):
+                row = holder.child(j)
+                if row.data(0, ROLE_REFERENCE)[2] in wanted:
+                    row.setSelected(True)
+                    first = first or row
+        if first is not None:
+            self.tree.setCurrentItem(first, 0,
+                                     QItemSelectionModel.SelectionFlag.NoUpdate)
+
+    def combine_solids_act(self, operation: str) -> None:
+        """The picked parts made one by `operation`: the project's
+        `combine_solids`, the first in the tree first — the body a
+        subtraction cuts — and the new solid picked."""
+        chosen = self._selected_solids()
+        if chosen is None:
+            return
+        name, ids = chosen
+        try:
+            new = self.project.combine_solids(name, operation, ids)
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._solids_changed(name, [new])
+        self._show_status(f'{name}: {len(ids)} solids made one by '
+                          f'{SOLID_LABELS[operation].lower()}')
+
+    def separate_solids_act(self) -> None:
+        """The picked booleans taken apart: the project's
+        `separate_solids`, and the solids they freed picked."""
+        from ..core import solids
+
+        chosen = self._selected_solids()
+        if chosen is None:
+            return
+        name, ids = chosen
+        freed = [o for i in ids for o in solids.solid(self.objects[name], i).operands]
+        try:
+            self.project.separate_solids(name, ids)
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._solids_changed(name, freed)
+        self._show_status(f'{name}: taken apart into {len(freed)} solids')
+
+    def mesh_solids_act(self) -> None:
+        """Open Mesh Solids on the picked parts (Brandon, 2026-10-11):
+        the element size in a pane beside the view, opening on half the
+        thinnest feature, the bricks it makes drawn as it is typed, and
+        Mesh — the project's `mesh_solids`."""
+        from ..core import solids
+
+        chosen = self._selected_solids()
+        if chosen is None:
+            return
+        name, ids = chosen
+        geometry = self.objects[name]
+        if self._mesh is not None:
+            self.close_mesh_pane()
+        if self._merging is not None:
+            self.close_merge_pane(redraw=False)
+        defined = geometry.units_defined
+        unit = self.unit_system.label_text('length') if defined else 'units'
+        size = solids.mesh_size(geometry, ids)
+        shown = (float(self.unit_system.from_si(size, 'length')) if defined
+                 else size)
+        names = [(s.name.strip() or f'{SOLID_LABELS[s.kind]} {s.id}')
+                 for s in (solids.solid(geometry, i) for i in ids)]
+        self._meshing = {'name': name, 'ids': ids, 'defined': defined,
+                         'unit': unit}
+        panel = self.scene.mesh_solids_panel
+        panel.open_for(unit, shown, ', '.join(names), len(ids))
+        panel.show()
+        self._mesh_solids_refresh()
+
+    def _mesh_solids_size(self) -> float:
+        """The typed size, as the geometry holds its coordinates."""
+        typed = self.scene.mesh_solids_panel.size.value()
+        return (float(self.unit_system.to_si(typed, 'length'))
+                if self._meshing['defined'] else typed)
+
+    def _mesh_solids_refresh(self) -> None:
+        """Mesh the picked parts at the typed size: draw the bricks and say
+        what they are, or the reason there are none."""
+        from ..core import solids
+
+        meshing = self.__dict__.get('_meshing')
+        if meshing is None:
+            return
+        panel = self.scene.mesh_solids_panel
+        geometry = self.objects.get(meshing['name'])
+        try:
+            part, made = solids.extrusion_mesh(geometry, meshing['ids'],
+                                               self._mesh_solids_size(),
+                                               panel.parts_apart.isChecked())
+        except ValueError as refusal:
+            self._draw_plane_preview(None)
+            text = str(refusal)
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            return
+        self._draw_plane_preview(part)
+        shortest = (float(self.unit_system.from_si(made['shortest'], 'length'))
+                    if meshing['defined'] else made['shortest'])
+        rounded = (f' {made["rounded"]:,} nodes on circles.'
+                   if made['rounded'] else '')
+        panel.show_reading(
+            f'{made["bricks"]:,} bricks, {made["nodes"]:,} nodes, extruded '
+            f'along {"XYZ"[made["axis"]]}.{rounded} The shortest edge is '
+            f'{shortest:.4g} {meshing["unit"]}.', True)
+
+    def _mesh_solids_apply(self) -> None:
+        """Mesh: the project's `mesh_solids` at the typed size, and the pane
+        put away — the new element groups are in the tree under their
+        family."""
+        meshing = self.__dict__.get('_meshing')
+        if meshing is None:
+            return
+        panel = self.scene.mesh_solids_panel
+        name = meshing['name']
+        unit = (self.unit_system.unit('length') if meshing['defined'] else 'm')
+        try:
+            found = self.project.mesh_solids(
+                name, meshing['ids'], panel.size.value(), unit=unit,
+                **({'apart': True} if panel.apart.isChecked() else {}),
+                **({'parts_apart': True} if panel.parts_apart.isChecked() else {}))
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self.close_mesh_solids_pane(redraw=False)
+        obj = self.objects[name]
+        self._refresh_item(self._item_for_object(name), obj)
+        self.refresh_compatibility()
+        self.render_current()
+        self._show_status(
+            f'{name}: meshed into {found["bricks"]:,} bricks — '
+            f'{found["added"]:,} nodes added, {found["shared"]:,} shared with '
+            f'the geometry; {obj.num_nodes:,} nodes in all')
+
+    def close_mesh_solids_pane(self, redraw: bool = True) -> None:
+        """Put the pane away, with its preview."""
+        self.scene.mesh_solids_panel.hide()
+        if self.__dict__.get('_meshing') is None:
+            return
+        self._meshing = None
+        self._draw_plane_preview(None)
+        if redraw:
+            self.render_current()
+
+    def pattern_solids_act(self) -> None:
+        """Open Pattern on the picked solids: how many along X, Y and Z and
+        how far apart, the copies drawn as they are typed, and Pattern —
+        the project's `pattern_solids`, one solid made of them (Brandon,
+        2026-10-11)."""
+        chosen = self._selected_solids()
+        if chosen is None:
+            return
+        self._open_pattern_pane(*chosen)
+
+    def _open_pattern_pane(self, name: str, ids, editing=None) -> None:
+        """The Pattern pane on solids `ids`; `editing`, a pattern's id,
+        opens it on that pattern's counts and spacing, to change them
+        (its row's pencil)."""
+        from ..core import solids
+        from ..units import si_transform
+
+        geometry = self.objects[name]
+        for pane in ('_meshing', '_patterning'):
+            if self.__dict__.get(pane) is not None:
+                (self.close_mesh_solids_pane if pane == '_meshing'
+                 else self.close_pattern_pane)(redraw=False)
+        if self._mesh is not None:
+            self.close_mesh_pane()
+        defined = geometry.units_defined
+        unit = self.unit_system.label_text('length') if defined else 'units'
+        names = [(s.name.strip() or f'{SOLID_LABELS[s.kind]} {s.id}')
+                 for s in (solids.solid(geometry, i) for i in ids)]
+        self._patterning = {'name': name, 'ids': ids, 'defined': defined,
+                            'unit': unit, 'editing': editing, 'angles': (0.0, 0.0, 0.0)}
+        panel = self.scene.pattern_panel
+        panel.open_for(unit, ', '.join(names), editing=editing is not None)
+        if editing is not None:
+            item = solids.solid(geometry, editing)
+            scale = (si_transform(self.unit_system.unit('length'), 'length')[0]
+                     if defined else 1.0)
+            before = {'counts': tuple(item.counts),
+                      'spacing': tuple(float(w) / scale for w in item.widths)}
+            panel.set_values(quiet=True, **before)
+            self._patterning.update(before=before, angles=item.angles)
+        panel.show()
+        self._pattern_refresh()
+        if editing is not None:
+            self._mark_pencils([self._item_for_object(name)])
+
+    def _pattern_refresh(self) -> None:
+        """Draw the copies the counts and spacing make, and say them."""
+        from ..core import solids
+
+        patterning = self.__dict__.get('_patterning')
+        if patterning is None:
+            return
+        panel = self.scene.pattern_panel
+        values = panel.values()
+        counts, spacing = values['counts'], np.asarray(values['spacing'])
+        copies = counts[0] * counts[1] * counts[2] - 1
+        for axis in range(3):
+            if counts[axis] > 1 and spacing[axis] == 0.0:
+                self._draw_plane_preview(None)
+                panel.show_reading(f'More than one along {"XYZ"[axis]} needs a '
+                                   'spacing there.', False)
+                return
+        if not copies:
+            self._draw_plane_preview(None)
+            panel.show_reading('One of each along every axis: no copies yet.',
+                               False)
+            return
+        geometry = self.objects[patterning['name']]
+        # the copies, drawn as the originals' outlines moved by each
+        # offset — in the view's units, which the spacing is typed in;
+        # along a pattern's own axes, turned with the part it is in
+        shapes = [self._solid_triangles(geometry, i) for i in patterning['ids']]
+        probe = solids.Solid(0, '', solids.PATTERN, angles=patterning['angles'],
+                             widths=tuple(spacing), counts=tuple(counts))
+        drawn = [shape + offset for offset in solids._offsets(probe)[1:]
+                 for shape in shapes]
+        self._draw_plane_preview(np.concatenate(drawn))
+        total = len(patterning['ids']) * copies
+        said = (f'{total:,} cop{"ies" if total != 1 else "y"} — '
+                f'{copies:,} of each solid patterned.')
+        before = patterning.get('before')
+        if before is None:
+            panel.show_reading(said, True)
+            return
+        changed = (tuple(counts) != before['counts']
+                   or not np.allclose(spacing, before['spacing'], rtol=1e-9, atol=1e-12))
+        panel.show_reading(said + ('' if changed else ' As it is: change a count '
+                                   'or a spacing to apply.'), changed)
+
+    def _pattern_apply(self) -> None:
+        """Pattern: the project's `pattern_solids`, the pane put away, and
+        the pattern picked, to combine next. Opened on a pattern, its
+        `edit_solid` with what changed."""
+        patterning = self.__dict__.get('_patterning')
+        if patterning is None:
+            return
+        values = self.scene.pattern_panel.values()
+        name = patterning['name']
+        unit = self.unit_system.unit('length') if patterning['defined'] else 'm'
+        editing = patterning.get('editing')
+        try:
+            if editing is None:
+                made = self.project.pattern_solids(name, patterning['ids'],
+                                                   values['counts'], values['spacing'],
+                                                   unit=unit)
+            else:
+                before = patterning['before']
+                changes = {key: values[key] for key in ('counts', 'spacing')
+                           if not np.allclose(values[key], before[key],
+                                              rtol=1e-9, atol=1e-12)}
+                self.project.edit_solid(name, editing, **changes, unit=unit)
+                made = editing
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self.close_pattern_pane(redraw=False)
+        self._solids_changed(name, [made])
+        counts = values['counts']
+        copies = len(patterning['ids']) * (counts[0] * counts[1] * counts[2] - 1)
+        self._show_status(f'{name}: {"patterned" if editing is None else "changed the pattern"}'
+                          f' — {copies:,} copies, solid {made}')
+
+    def close_pattern_pane(self, redraw: bool = True) -> None:
+        """Put the pane away, with its preview."""
+        self.scene.pattern_panel.hide()
+        patterning = self.__dict__.get('_patterning')
+        if patterning is None:
+            return
+        self._patterning = None
+        self._draw_plane_preview(None)
+        if patterning.get('editing') is not None:
+            self._mark_pencils([self._item_for_object(patterning['name'])])
+        if redraw:
+            self.render_current()
+
+    def _delete_solids(self, name: str, ids) -> None:
+        try:
+            gone = self.project.delete_solids(name, ids)
+        except ValueError as refusal:
+            self._show_status(f'{name}: {refusal}')
+            return
+        self._solids_changed(name)
+        self._show_status(f'{name}: deleted {gone} solid{"s" * (gone != 1)}')
 
     def _populate_entities(self, item):
         """List a category's individual entities — or an element group's elements
@@ -2842,6 +3294,9 @@ class MainWindow(QMainWindow):
         rows are picked in the tree, whole objects otherwise."""
         if self.editing is not None:
             return self.delete_entity_rows()
+        chosen = self._selected_solids()
+        if chosen is not None:
+            return self._delete_solids(*chosen)
         entities = self._selected_entities()
         if entities:
             return self._delete_entities(*entities)
@@ -3121,8 +3576,13 @@ class MainWindow(QMainWindow):
         ('solve_modes', 'Solve Modes', 'solve_modes', 'solve_modes_act'),
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
+        ('align_meshes', 'Align Meshes', 'align_meshes', 'align_meshes_act'),
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
         ('add_block', 'Add Block', 'block', 'add_block_act'),
+        ('add_solid_block', 'Add Solid Block', 'solid_block',
+         'add_solid_block_act'),
+        ('add_solid_cylinder', 'Add Cylinder', 'solid_cylinder',
+         'add_solid_cylinder_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
         ('read_as_specification', 'Read as Specification',
          'as_specification', 'read_as_specification_act'),
@@ -3134,11 +3594,16 @@ class MainWindow(QMainWindow):
     #: hexes, into an element group of them (Brandon, 2026-10-10)
     FAMILY_ACTS: ClassVar[dict] = {'quads': 'add_plane', 'hexes': 'add_block'}
 
+    #: the acts offered on a geometry's Solids row: the shapes a part is
+    #: built from before it is meshed (Brandon, 2026-10-11)
+    SOLID_ACTS: ClassVar[tuple] = ('add_solid_block', 'add_solid_cylinder')
+
     #: the acts offered on element groups picked in the tree rather than
     #: the geometry's row: merging every coincident node of a whole model
     #: ties parts that were meant to stay apart, so the merge is asked
     #: of the groups it should tie (Brandon, 2026-10-11)
-    GROUP_ACTS: ClassVar[frozenset] = frozenset({'merge_coincident_nodes'})
+    GROUP_ACTS: ClassVar[frozenset] = frozenset({'merge_coincident_nodes',
+                                                 'align_meshes'})
 
     def acts_for(self, names=None):
         """[(verb, label, icon, handler, tooltip)] the selection can
@@ -3176,6 +3641,14 @@ class MainWindow(QMainWindow):
                          ('Make the coincident nodes of the selected '
                           'element groups one node — what ties parts '
                           'meshed apart where they meet')))
+                    # the step before the merge, where the parts' meshes
+                    # do not match (Brandon, 2026-10-11)
+                    acts.append(
+                        ('align_meshes', 'Align Meshes', 'align_meshes',
+                         lambda: self.align_meshes_act(picked[0], picked[2]),
+                         ("Move the coarser mesh's nodes onto the finer's "
+                          'where the selected element groups\' parts meet '
+                          'or overlap, so they can be merged')))
                 if acts:
                     return acts
             if self.test_item.isSelected():
@@ -3190,6 +3663,9 @@ class MainWindow(QMainWindow):
                          self.new_geometry_act,
                          ('An empty geometry, in the display units, to '
                           'add planes to'))]
+            solid_acts = self._solid_acts()
+            if solid_acts is not None:
+                return solid_acts
             picked = self.selected_references()
             if (len(picked) == 1 and picked[0][0] == 'family'
                     and picked[0][3] in self.FAMILY_ACTS):
@@ -3208,7 +3684,8 @@ class MainWindow(QMainWindow):
         if not names:
             return []
         applicable = dict(self.project.selection_verbs(*names))
-        elsewhere = set(self.FAMILY_ACTS.values()) | self.GROUP_ACTS
+        elsewhere = (set(self.FAMILY_ACTS.values()) | self.GROUP_ACTS
+                     | set(self.SOLID_ACTS))
         acts = [(verb, label, icon, getattr(self, handler),
                  applicable[verb])
                 for verb, label, icon, handler in self.ACTS
@@ -3467,6 +3944,12 @@ class MainWindow(QMainWindow):
         and a click on it a close. A category's when its whole table is
         open; a family's when its elements are; an element group's when
         it is among the groups being edited."""
+        if reference is not None and reference[0] == 'solid':
+            patterning = self.__dict__.get('_patterning')
+            return ((self._mesh is not None
+                     and self._mesh.get('editing') == (reference[1], reference[2]))
+                    or (patterning is not None and patterning.get('editing')
+                        == reference[2] and patterning['name'] == reference[1]))
         if self.editing is None or reference is None:
             return False
         kind, name, detail = reference
@@ -3496,13 +3979,26 @@ class MainWindow(QMainWindow):
                 for each in [row] + [row.child(k)
                                      for k in range(row.childCount())]:
                     reference = each.data(0, ROLE_REFERENCE)
-                    if (reference is None or reference[0] not in
+                    if reference is not None and reference[0] == 'solids':
+                        rows = list(self._solid_rows(each))
+                    elif (reference is None or reference[0] not in
                             ('component', 'family', 'group')):
                         continue
-                    lit = self._pencil_on(reference)
-                    if each.data(1, ROLE_PENCIL_ON) != lit:
-                        each.setIcon(1, on if lit else off)
-                        each.setData(1, ROLE_PENCIL_ON, lit)
+                    else:
+                        rows = [each]
+                    for one in rows:
+                        lit = self._pencil_on(one.data(0, ROLE_REFERENCE))
+                        if one.data(1, ROLE_PENCIL_ON) != lit:
+                            one.setIcon(1, on if lit else off)
+                            one.setData(1, ROLE_PENCIL_ON, lit)
+
+    @staticmethod
+    def _solid_rows(holder):
+        """Every solid's row under the Solids row, nested ones too."""
+        for k in range(holder.childCount()):
+            row = holder.child(k)
+            yield row
+            yield from MainWindow._solid_rows(row)
 
     def _tree_item_clicked(self, item, column):
         """The icon column: the pencil on a geometry's categories, and
@@ -3511,6 +4007,17 @@ class MainWindow(QMainWindow):
         if column != 1:
             return
         reference = item.data(0, ROLE_REFERENCE)
+        if reference is not None and reference[0] == 'solid':
+            # a toggle as the tables' pencils are: on, it puts the pane away
+            if self._pencil_on(reference):
+                self.close_mesh_pane()
+                self.close_pattern_pane()
+                return
+            self.tree.setCurrentItem(item)
+            self.tree.clearSelection()
+            item.setSelected(True)
+            self.edit_solid_pane(reference[1], reference[2])
+            return
         if reference is not None and reference[0] in ('component', 'family',
                                                       'group'):
             # the pencil is a toggle: one drawn on (`_pencil_on`) closes
@@ -7604,12 +8111,24 @@ class MainWindow(QMainWindow):
         # drawn over a different object
         if self._mesh is not None:
             current = self.tree.currentItem()
-            if current is None or current.text(0) != self._mesh['name']:
+            # a solid's own row, picked while its pane is open on it
+            editing = self._mesh.get('editing')
+            on_it = (current is not None and editing is not None
+                     and current.data(0, ROLE_REFERENCE) == ('solid', *editing))
+            # and held through the rows' rebuild an Apply makes
+            if (not on_it and not self._mesh.get('holding')
+                    and (current is None or current.text(0) != self._mesh['name'])):
                 self.close_mesh_pane()
         # the places belong to the groups picked when the pane opened:
         # picking anything else puts it away
         if self._merging is not None and not self._merge_holding:
             self.close_merge_pane(redraw=False)
+        # the bricks previewed belong to the solids picked when the pane
+        # opened, likewise
+        if self.__dict__.get('_meshing') is not None:
+            self.close_mesh_solids_pane(redraw=False)
+        if self.__dict__.get('_patterning') is not None:
+            self.close_pattern_pane(redraw=False)
         # Making the owner row current means "the whole object", so its
         # grid picks are released — a cell selected minutes ago must not
         # silently turn a later delete-the-object into delete-that-record.
@@ -7867,6 +8386,10 @@ class MainWindow(QMainWindow):
                 elif kind in ENTITY_COMPONENT:
                     entry['entities'].setdefault(
                         ENTITY_COMPONENT[kind], []).append(detail)
+                elif kind == 'solid':
+                    entry.setdefault('solids', []).append(detail)
+                elif kind == 'solids':
+                    entry['show_solids'] = True
             elif isinstance(obj, DataArray):
                 # one entry per object, not per record: ten cells picked in
                 # a grid are one time history restricted to ten records,
@@ -9609,6 +10132,12 @@ class MainWindow(QMainWindow):
                 axis_unit = add_geometry(
                     self.scene.plotter, geometry, unit_system=self.unit_system,
                     color_override=override, text_color=colors['scene_text'])
+            # the solids drawn where they are what is being worked on: a
+            # geometry with nothing meshed yet, or the Solids row or a
+            # solid picked — not over a mesh whose modes are animating
+            if (not geometry.elem_conn or entry.get('solids')
+                    or entry.get('show_solids')):
+                self._draw_solids(geometry, entry.get('solids') or (), colors)
         arrows_note = self._add_dof_arrows(
             entry['object'] for _name, entry in geometries)
         self.scene.axis_unit = axis_unit
@@ -9630,6 +10159,70 @@ class MainWindow(QMainWindow):
         self.scene.plotter.render()
         status = self._geometry_status(geometries, ignored)
         return f'{status}  |  {arrows_note}' if arrows_note else status
+
+    def _solid_triangles(self, geometry, solid_id: int) -> np.ndarray:
+        """A solid's surface in triangles, in the view's units — kept, so a
+        redraw does not ask the kernel again for a shape that has not
+        changed (the key is the solid's whole recipe)."""
+        from ..core import solids
+
+        def recipe(i):
+            item = solids.solid(geometry, i)
+            return (tuple(item.as_record().items()) if not item.operands else
+                    (item.kind, tuple(recipe(o) for o in item.operands)))
+
+        key = (geometry.length_unit, repr(recipe(solid_id)),
+               self.unit_system.label_text('length'))
+        cache = self.__dict__.setdefault('_solid_cache', {})
+        if key not in cache:
+            if len(cache) > 256:
+                cache.clear()
+            triangles = solids.shape_triangles(solids.shape(geometry, solid_id))
+            if geometry.units_defined:
+                triangles = np.asarray(self.unit_system.from_si(
+                    triangles, 'length'), dtype=float)
+            cache[key] = triangles
+        return cache[key]
+
+    def _draw_solids(self, geometry, picked, colors) -> None:
+        """The geometry's parts drawn see-through in their own color, the
+        ones picked in the tree stronger in the picked color, and a solid
+        picked inside a boolean — a hole's cylinder — drawn over it, so
+        what it is made of can be seen (2026-10-11)."""
+        import pyvista as pv
+
+        from ..core import solids
+
+        if not geometry.solids:
+            return
+        try:
+            solids.require_kernel()
+        except ValueError as refusal:
+            self._show_status(str(refusal))
+            return
+        picked = {int(i) for i in picked}
+        shown = [s.id for s in solids.top_level(geometry)]
+        shown += [i for i in sorted(picked) if i not in shown]
+        for solid_id in shown:
+            triangles = self._solid_triangles(geometry, solid_id)
+            if not len(triangles):
+                continue
+            count = len(triangles)
+            faces = np.column_stack([np.full(count, 3),
+                                     np.arange(3 * count).reshape(count, 3)])
+            surface = pv.PolyData(triangles.reshape(-1, 3), faces.ravel()).clean()
+            chosen = solid_id in picked
+            color = colors['scene_picked'] if chosen else colors['scene_solid']
+            self.scene.plotter.add_mesh(
+                surface, color=color,
+                opacity=SOLID_PICKED_OPACITY if chosen else SOLID_OPACITY,
+                name=f'solid-{solid_id}', pickable=False, reset_camera=False,
+                render=False)
+            self.scene.plotter.add_mesh(
+                surface.extract_feature_edges(30.0, boundary_edges=False,
+                                              non_manifold_edges=False),
+                color=color, line_width=1.5, name=f'solid-edges-{solid_id}',
+                pickable=False, reset_camera=False, render=False)
 
     def _add_with_context(self, geometry, components, entities, colors):
         """Draw the whole geometry muted, with the selection standing out.
@@ -11679,6 +12272,22 @@ class MainWindow(QMainWindow):
         out or put it back, and Merge to make the marked places one node
         each (Brandon, 2026-10-11: select, see, set, apply, so a joint
         can be built a place at a time)."""
+        self._open_places(name, groups, 'merge')
+
+    def align_meshes_act(self, name: str, groups) -> None:
+        """Open Align Meshes on geometry `name`'s element groups `groups`:
+        the same pane, a move marked at each node of the coarser mesh that
+        would go onto the finer's, with a line to where it goes, the
+        reach in the pane, a click to leave a move out, and Align
+        (Brandon, 2026-10-11: the step before the merge, where parts
+        meshed apart do not match)."""
+        self._open_places(name, groups, 'align')
+
+    def _open_places(self, name: str, groups, kind: str) -> None:
+        """The pane and its marks, for `kind`: 'merge', where each place
+        is the nodes that coincide there, or 'align', where each is a
+        move, [the node, the node it goes onto]. Either way a place is
+        known by its first node."""
         obj = self.objects.get(name)
         if not isinstance(obj, Geometry):
             return
@@ -11686,9 +12295,13 @@ class MainWindow(QMainWindow):
             self.stop_editing()
         if self._mesh is not None:
             self.close_mesh_pane()
+        if self._merging is not None:
+            self.close_merge_pane(redraw=False)
         groups = sorted({int(g) for g in groups})
-        self._merging = {'name': name, 'groups': groups,
-                         'tolerance': self._merge_default(obj, groups),
+        start = (self._merge_default(obj, groups) if kind == 'merge'
+                 else self._align_default(obj, groups))
+        self._merging = {'kind': kind, 'name': name, 'groups': groups,
+                         'tolerance': start,
                          'spots': [], 'off': set(), 'refusal': None,
                          'done': [], 'said': ''}
         self._open_merge_panel()
@@ -11710,6 +12323,17 @@ class MainWindow(QMainWindow):
         low, high = geometry.extent
         return 1e-6 * float(np.linalg.norm(high - low) or 1.0)
 
+    @staticmethod
+    def _align_default(geometry, groups) -> float:
+        """The reach the pane opens on: the geometry's own
+        (`Geometry.align_reach`, half the coarsest piece's spacing), else
+        a millionth of the geometry's size."""
+        reach = geometry.align_reach(groups)
+        if reach:
+            return reach
+        low, high = geometry.extent
+        return 1e-6 * float(np.linalg.norm(high - low) or 1.0)
+
     def _merge_unit(self, geometry) -> tuple[bool, str]:
         """(whether lengths convert, the unit's label) for the pane."""
         defined = geometry.units_defined
@@ -11725,7 +12349,8 @@ class MainWindow(QMainWindow):
                  if defined else merging['tolerance'])
         names = [geometry.group_name[list(geometry.group_id).index(g)].strip()
                  or f'element group {g}' for g in merging['groups']]
-        self.scene.merge_panel.open_for(unit, shown, ', '.join(names))
+        self.scene.merge_panel.open_for(unit, shown, ', '.join(names),
+                                        merging['kind'])
 
     def _merge_excluded(self) -> list[int]:
         """The nodes of every place left out: what `exclude` names."""
@@ -11748,6 +12373,9 @@ class MainWindow(QMainWindow):
         typed = panel.value()
         merging['tolerance'] = (float(self.unit_system.to_si(typed, 'length'))
                                 if defined else typed)
+        if merging['kind'] == 'align':
+            self._align_refresh(geometry, typed, unit)
+            return
         merging['spots'] = geometry.coincident_spots(merging['tolerance'],
                                                      merging['groups'])
         merging['off'] &= {spot[0] for spot in merging['spots']}
@@ -11780,8 +12408,56 @@ class MainWindow(QMainWindow):
                 'it back.', marked > 0)
         self._draw_merge_marks()
 
-    def _merge_points(self) -> np.ndarray:
-        """Where each place is drawn: its kept node, in the view's units."""
+    def _align_refresh(self, geometry, typed: float, unit: str) -> None:
+        """Align Meshes' half of `_merge_refresh`: the moves the reach
+        finds, the ones left out kept, what Align would do said, and the
+        moves marked."""
+        merging = self._merging
+        panel = self.scene.merge_panel
+        # the search is kept between clicks, found again only when the
+        # reach or the nodes change: half a second on the Frame-Wing, and
+        # a click on a mark only changes which moves are marked
+        key = (merging['tolerance'], geometry.num_nodes,
+               float(geometry.node_xyz.sum()))
+        if merging.get('searched') != key:
+            merging['spots'] = geometry.align_moves(merging['tolerance'],
+                                                    merging['groups'])
+            merging['searched'] = key
+        merging['off'] &= {spot[0] for spot in merging['spots']}
+        moves = [spot for spot in merging['spots']
+                 if spot[0] not in merging['off']]
+        merging['refusal'] = geometry.align_folds(moves)
+        total = len(merging['spots'])
+        marked = total - len(merging['off'])
+        said = merging['said']
+        if merging['refusal'] is not None:
+            text = merging['refusal']
+            panel.show_reading(f'{said}{text[:1].upper()}{text[1:]}.', False)
+        elif not total:
+            panel.show_reading(
+                f'{said}No node of a coarser mesh is within {typed:g} {unit} '
+                f'of a finer one here{" now" if said else ""}; the parts '
+                'meet node for node already, or are further apart.', False)
+        else:
+            rows = geometry.node_index([a for a, _b in moves])
+            targets = geometry.node_index([b for _a, b in moves])
+            farthest = (float(np.linalg.norm(geometry.node_xyz[targets]
+                                             - geometry.node_xyz[rows],
+                                             axis=1).max()) if moves else 0.0)
+            defined, _unit = self._merge_unit(geometry)
+            shown = (float(self.unit_system.from_si(farthest, 'length'))
+                     if defined else farthest)
+            panel.show_reading(
+                f'{said}{total} node{"s" * (total != 1)} of the coarser mesh '
+                'can move onto the finer; '
+                f'{marked} marked, the farthest {shown:.4g} {unit}. Click a '
+                'mark in the view to leave it out or put it back.',
+                marked > 0)
+        self._draw_merge_marks()
+
+    def _merge_points(self, which: int = 0) -> np.ndarray:
+        """Where each place is drawn: its kept node (a move's node), in
+        the view's units — or, `which` 1, where a move's node goes."""
         from ..viz.geometry import display_points
 
         merging = self._merging
@@ -11789,7 +12465,7 @@ class MainWindow(QMainWindow):
         if not merging['spots']:
             return np.empty((0, 3))
         points, _ = display_points(geometry, self.unit_system)
-        rows = geometry.node_index([spot[0] for spot in merging['spots']])
+        rows = geometry.node_index([spot[which] for spot in merging['spots']])
         return np.asarray(points, dtype=float)[rows]
 
     def _merge_done_points(self) -> np.ndarray:
@@ -11815,7 +12491,8 @@ class MainWindow(QMainWindow):
         plotter = self.scene.plotter
         if plotter is None:
             return
-        for actor in ('merge-marked', 'merge-left-out', 'merge-done'):
+        for actor in ('merge-marked', 'merge-left-out', 'merge-done',
+                      'align-moves'):
             plotter.remove_actor(actor, render=False)
         merging = self._merging
         done = self._merge_done_points()
@@ -11840,6 +12517,22 @@ class MainWindow(QMainWindow):
                         points[rows], color=color, point_size=size,
                         render_points_as_spheres=True, name=actor,
                         pickable=False, reset_camera=False, render=False)
+            if merging['kind'] == 'align' and (~off).any():
+                # each marked move, a line to where its node goes
+                import pyvista as pv
+
+                ends = self._merge_points(1)[~off]
+                starts = points[~off]
+                count = len(starts)
+                lines = np.column_stack([np.full(count, 2),
+                                         np.arange(0, 2 * count, 2),
+                                         np.arange(1, 2 * count, 2)])
+                plotter.add_mesh(
+                    pv.PolyData(np.vstack(np.stack([starts, ends], axis=1)),
+                                lines=lines.ravel()),
+                    color=colors['scene_picked'], line_width=3.0,
+                    name='align-moves', pickable=False, reset_camera=False,
+                    render=False)
         if render:
             plotter.render()
 
@@ -11906,6 +12599,9 @@ class MainWindow(QMainWindow):
         merging = self._merging
         if merging is None:
             return
+        if merging['kind'] == 'align':
+            self._align_apply()
+            return
         name = merging['name']
         obj = self.objects.get(name)
         excluded = self._merge_excluded()
@@ -11956,6 +12652,45 @@ class MainWindow(QMainWindow):
             f'{name}: merged {found["merged"]} node'
             f'{"s" * (found["merged"] != 1)} into {found["into"]} — '
             f'{obj.num_nodes} nodes remain{made_one}{dropped}')
+
+    def _align_apply(self) -> None:
+        """Align the marked moves: the project's verb, the ones left out
+        as its `exclude`. The pane stays open, as Merge's does: the nodes
+        moved are drawn as squares where they now sit on the finer mesh,
+        ready for Merge Coincident Nodes, and the reading says so."""
+        merging = self._merging
+        name = merging['name']
+        obj = self.objects.get(name)
+        excluded = self._merge_excluded()
+        onto = [spot[1] for spot in merging['spots']
+                if spot[0] not in merging['off']]
+        try:
+            found = self.project.align_meshes(
+                name, merging['tolerance'], groups=merging['groups'],
+                **({'exclude': excluded} if excluded else {}))
+        except (ValueError, TypeError) as refusal:
+            text = str(refusal)
+            merging['said'] = f'Not aligned: {text[:1].lower()}{text[1:]}. '
+            self._merge_refresh()
+            self._show_status(f'{name}: {refusal}')
+            return
+        merging['done'].extend(onto)
+        merging['off'] = set()
+        moved = found['moved']
+        merging['said'] = (
+            f'Moved {moved} node{"s" * (moved != 1)} onto the finer mesh — '
+            'drawn as squares; Merge Coincident Nodes joins them. ')
+        self._merge_holding = True
+        try:
+            self._refresh_item(self._item_for_object(name), obj)
+            self._select_group_rows(name, merging['groups'])
+        finally:
+            self._merge_holding = False
+        self.refresh_compatibility()
+        self._merge_refresh()
+        self.render_current()
+        self._show_status(f'{name}: moved {moved} node{"s" * (moved != 1)} '
+                          'onto the finer mesh, ready to merge')
 
     def _select_group_rows(self, name: str, groups) -> None:
         """Pick geometry `name`'s element group rows `groups` in the tree
@@ -12019,11 +12754,13 @@ class MainWindow(QMainWindow):
         `add_block`."""
         self._open_mesh_pane('block')
 
-    def _open_mesh_pane(self, kind: str) -> None:
+    def _open_mesh_pane(self, kind: str, editing=None) -> None:
         """Open the pane for the selected geometry, the box's preview in
         the view, and the rings and arrows around it — the coordinate
         system's gizmo, turning the box about its center and sliding the
-        center onto the grid (Brandon, 2026-10-02: no window at all)."""
+        center onto the grid (Brandon, 2026-10-02: no window at all).
+        `editing`, (geometry, solid id), opens it on that solid's
+        numbers, to change it (`edit_solid_pane`)."""
         obj = self.current_object()
         if not isinstance(obj, Geometry):
             noun = 'a block' if kind == 'block' else 'a plane'
@@ -12038,16 +12775,66 @@ class MainWindow(QMainWindow):
         label = self.unit_system.label_text('length') if defined else 'units'
         panel = self.scene.mesh_panel
         panel.open_for(kind, label, list(obj.group_name),
-                       default=self._mesh_default_group(obj, kind))
-        frame = np.zeros((4, 3))
-        frame[:3] = np.eye(3)
-        frame[3] = panel.values()['center']
+                       default=self._mesh_default_group(obj, kind),
+                       editing=editing is not None)
+        before = None
+        if editing is not None:
+            before = self._solid_values(obj, editing[1], unit or 'm')
+            panel.set_values(quiet=True, **before)
+        values = panel.values()
         self._mesh = {'kind': kind, 'name': self.object_item().text(0),
                       'unit': unit or 'm', 'defined': unit is not None,
-                      'label': label, 'frame': frame}
+                      'label': label,
+                      'frame': frame_from_angles(values['angles'], values['center']),
+                      'editing': editing, 'before': before}
         panel.show()
         self._mesh_refresh()
         self._begin_rotating()
+        if editing is not None:
+            self._mark_pencils([self._item_for_object(editing[0])])
+
+    def edit_solid_pane(self, name: str, solid_id: int) -> None:
+        """The add pane opened on a solid already made, by its row's
+        pencil (Brandon, 2026-10-11: move it, size it, reshape it): its
+        numbers in the fields, the gizmo on it to slide and turn it, its
+        preview drawn as it is typed, and Apply the project's
+        `edit_solid`. A boolean has no size of its own, so its pane moves
+        and turns it whole, every solid it is made of with it
+        (`move_solids`)."""
+        from ..core import solids
+
+        item = solids.solid(self.objects[name], solid_id)
+        if item.kind == solids.PATTERN:
+            # a pattern is its counts and spacing: Pattern's own pane
+            self._open_pattern_pane(name, list(item.operands), editing=solid_id)
+            return
+        kind = {'block': 'solid_block', 'cylinder': 'solid_cylinder'}.get(
+            item.kind, 'solid_part')
+        self._open_mesh_pane(kind, editing=(name, solid_id))
+
+    @staticmethod
+    def _solid_values(geometry, solid_id: int, unit: str) -> dict:
+        """A solid's numbers as the pane's fields hold them, in `unit`.
+        A boolean's center is the middle of its extent and its widths the
+        extent, which size the gizmo; its angles are the turn to give it,
+        none yet."""
+        from ..core import solids
+        from ..units import si_transform
+
+        scale = (si_transform(unit, 'length')[0]
+                 if geometry.length_unit is not None else 1.0)
+        item = solids.solid(geometry, solid_id)
+        if item.kind not in solids.PRIMITIVES:
+            low, high = solids._box(geometry, solid_id)
+            return {'center': tuple((low + high) / 2.0 / scale),
+                    'widths': tuple((high - low) / scale),
+                    'angles': (0.0, 0.0, 0.0), 'group': item.name}
+        return {'center': tuple(np.asarray(item.center) / scale),
+                'angles': tuple(item.angles),
+                'widths': (tuple(np.asarray(item.widths) / scale)
+                           if item.kind == 'block' else (1.0, 1.0, 1.0)),
+                'radius': item.radius / scale, 'length': item.length / scale,
+                'corner': item.corner / scale, 'group': item.name}
 
     def _mesh_default_group(self, geometry, kind: str) -> str:
         """The element group the pane opens on: the last of the geometry's
@@ -12075,9 +12862,12 @@ class MainWindow(QMainWindow):
             self.scene.mesh_panel.hide()
             return
         self._end_rotating()
+        editing = self._mesh.get('editing')
         self._mesh = None
         self.scene.mesh_panel.hide()
         self._draw_plane_preview(None)
+        if editing is not None:
+            self._mark_pencils([self._item_for_object(editing[0])])
         if self.scene.plotter is not None:
             self.scene.plotter.render()
 
@@ -12117,6 +12907,8 @@ class MainWindow(QMainWindow):
         values = self.scene.mesh_panel.values()
         frame, kind = self._mesh['frame'], self._mesh['kind']
         widths = np.asarray(values['widths'], dtype=float)
+        if kind in ('solid_block', 'solid_cylinder', 'solid_part'):
+            return self._solid_call(values, frame, kind)
         if kind == 'block':
             if np.any(widths <= 0.0):
                 raise ValueError('a block needs a width along all three axes')
@@ -12139,6 +12931,142 @@ class MainWindow(QMainWindow):
                  'size': values['size'], 'group': values['group'],
                  'apart': values['apart']})
 
+    @staticmethod
+    def _solid_call(values, frame, kind):
+        """(verb, the call's numbers) for a solid: its center and angles
+        from the frame the gizmo turns and slides, its widths or its
+        radius and length, its name — in the display unit."""
+        def tidy(vector):
+            return tuple(float(v) + 0.0 for v in np.round(vector, 12))
+
+        call = {'center': tidy(frame[3]), 'angles': tidy(angles_of(frame)),
+                'name': values['group']}
+        if kind == 'solid_part':
+            return 'move_solids', call
+        if kind == 'solid_block':
+            if min(values['widths']) <= 0.0:
+                raise ValueError('a block needs a width along all three axes')
+            if values['corner'] > min(values['widths'][:2]) / 2.0:
+                raise ValueError("a corner radius from zero to half the "
+                                 "block's narrower width across")
+            return 'add_solid_block', {**call, 'widths': tidy(values['widths']),
+                                       'corner': float(values['corner'])}
+        if values['radius'] <= 0.0 or values['length'] <= 0.0:
+            raise ValueError('a cylinder needs a radius and a length')
+        return 'add_solid_cylinder', {**call, 'radius': float(values['radius']),
+                                      'length': float(values['length'])}
+
+    def _solid_refresh(self) -> None:
+        """The solid the fields make: drawn see-through over the scene and
+        said, or the reason there is none. Opened on a solid already
+        made, Apply waits for a change."""
+        from ..core import solids
+        from ..core.geometry import Geometry as Shapes
+
+        panel = self.scene.mesh_panel
+        try:
+            verb, call = self._mesh_call()
+            solids.require_kernel()
+        except ValueError as refusal:
+            self._draw_plane_preview(None)
+            text = str(refusal)
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            return
+        label = self._mesh['label']
+        before = self._mesh['before']
+        if verb == 'move_solids':
+            self._part_refresh(call)
+            return
+        # built in the display unit as typed: the preview is drawn in it
+        scratch = Shapes(node_id=[], node_xyz=np.empty((0, 3)))
+        if verb == 'add_solid_block':
+            made = solids.add_block(scratch, call['center'], call['widths'],
+                                    call['angles'], corner=call['corner'])
+        else:
+            made = solids.add_cylinder(scratch, call['center'], call['radius'],
+                                       call['length'], call['angles'])
+        self._draw_plane_preview(
+            solids.shape_triangles(solids.shape(scratch, made)))
+        if verb == 'add_solid_block':
+            w = call['widths']
+            rounded = (f', its corners rounded to {call["corner"]:.4g} {label}'
+                       if call['corner'] else '')
+            what = (f'A solid block {w[0]:.4g} by {w[1]:.4g} by {w[2]:.4g} '
+                    f'{label}{rounded}')
+        else:
+            what = (f'A cylinder {2 * call["radius"]:.4g} {label} across and '
+                    f'{call["length"]:.4g} {label} long')
+        volume = solids.volume(scratch, made)
+        if before is None:
+            panel.show_reading(f'{what}, {volume:.4g} {label}³ — a shape, meshed '
+                               'later.', True)
+            return
+        changes = self._solid_changes(call)
+        panel.show_reading(f'{what}, {volume:.4g} {label}³.'
+                           + ('' if changes else ' As it is: change a number, '
+                              'or drag it, to apply.'), bool(changes))
+
+    def _solid_changes(self, call) -> dict:
+        """What the fields change of the solid the pane is on, as
+        `edit_solid` takes it: only the numbers that moved, so the
+        journal line says what was done."""
+        before = self._mesh['before']
+        # in the verb's own order, so the journal reads as its signature
+        block = self._mesh['kind'] == 'solid_block'
+        now = {'center': call['center'],
+               **({'widths': call['widths']} if block else {}),
+               'angles': call['angles'],
+               **({} if block else {'radius': call['radius'],
+                                    'length': call['length']}),
+               **({'corner': call['corner']} if block else {}),
+               'name': call['name']}
+        changes = {}
+        for key, value in now.items():
+            if key == 'name':
+                if value != before['group']:
+                    changes[key] = value
+            elif not np.allclose(value, before[key], rtol=1e-9, atol=1e-12):
+                changes[key] = value
+        return changes
+
+    def _part_refresh(self, call) -> None:
+        """A boolean moved and turned whole: drawn where it would go, and
+        said."""
+        from ..core import solids
+        from ..core.geometry import Geometry as Shapes
+        from ..units import si_transform
+
+        panel = self.scene.mesh_panel
+        name, solid_id = self._mesh['editing']
+        geometry = self.objects[name]
+        unit, label = self._mesh['unit'], self._mesh['label']
+        scale = (si_transform(unit, 'length')[0]
+                 if geometry.length_unit is not None else 1.0)
+        # the solids in the display unit, the part moved among them
+        scratch = Shapes(node_id=[], node_xyz=np.empty((0, 3)))
+        scratch.solids = [item.scaled(1.0 / scale) for item in geometry.solids]
+        offset = np.asarray(call['center']) - np.asarray(self._mesh['before']['center'])
+        solids.move(scratch, [solid_id], offset, call['angles'])
+        self._draw_plane_preview(
+            solids.shape_triangles(solids.shape(scratch, solid_id)))
+        moved = np.round(offset, 12) + 0.0
+        said = []
+        if moved.any():
+            said.append(f'moved ({moved[0]:.4g}, {moved[1]:.4g}, {moved[2]:.4g}) '
+                        f'{label}')
+        if any(call['angles']):
+            a = call['angles']
+            said.append(f'turned ({a[0]:.4g}, {a[1]:.4g}, {a[2]:.4g})°')
+        renamed = call['name'] != self._mesh['before']['group']
+        if renamed:
+            said.append(f'named {call["name"]!r}' if call['name'] else 'unnamed')
+        count = len(solids._leaves(geometry, solid_id))
+        panel.show_reading(
+            (f'{" and ".join(said)[:1].upper()}{" and ".join(said)[1:]}, the '
+             f'{count} solids it is made of with it.' if said else
+             f'As it is: drag it or type where it goes to move it, with the '
+             f'{count} solids it is made of.'), bool(said))
+
     def _mesh_part(self):
         from ..core import mesh
 
@@ -12155,6 +13083,9 @@ class MainWindow(QMainWindow):
 
         panel = self.scene.mesh_panel
         if self._mesh is None:
+            return
+        if self._mesh['kind'] in ('solid_block', 'solid_cylinder', 'solid_part'):
+            self._solid_refresh()
             return
         obj = self.objects.get(self._mesh['name'])
         try:
@@ -12214,6 +13145,32 @@ class MainWindow(QMainWindow):
             return
         name = self._mesh['name']
         obj = self.objects[name]
+        if self._mesh.get('editing') is not None:
+            self._apply_solid_edit(verb, call)
+            return
+        if verb in ('add_solid_block', 'add_solid_cylinder'):
+            extra = {k: v for k, v in call.items() if k not in ('center', 'name')}
+            if verb == 'add_solid_block':
+                # the keyword only when used, so a journal line reads plain
+                corner = ({'corner': extra['corner']} if extra['corner'] else {})
+                new = self.project.add_solid_block(
+                    name, call['center'], extra['widths'], call['angles'],
+                    call['name'], unit=self._mesh['unit'], **corner)
+            else:
+                new = self.project.add_solid_cylinder(
+                    name, call['center'], extra['radius'], extra['length'],
+                    call['angles'], call['name'], unit=self._mesh['unit'])
+            self._refresh_item(self._item_for_object(name), obj)
+            self.render_current()
+            from ..core import solids
+
+            added = solids.solid(obj, new)
+            self._show_status(
+                f'{name}: added {(added.name.strip() or SOLID_LABELS[added.kind]).lower()} '
+                f'— solid {new}, {len(solids.top_level(obj))} in all')
+            self._mesh_refresh()
+            self._draw_rings()
+            return
         # the keyword only when used, so a journal line reads as before
         apart = {'apart': True} if call['apart'] and obj.num_nodes else {}
         found = getattr(self.project, verb)(
@@ -12233,6 +13190,54 @@ class MainWindow(QMainWindow):
         self._mesh_refresh()
         self._draw_rings()
 
+    def _apply_solid_edit(self, verb, call) -> None:
+        """Apply the pane to the solid it is on: the project's
+        `edit_solid` with the numbers that moved, or for a boolean
+        `move_solids` (and `edit_solid` for a new name). The pane stays
+        on it, as Add's does, opened again on what it now is."""
+        from ..core import solids
+
+        name, solid_id = self._mesh['editing']
+        unit = self._mesh['unit']
+        before = self._mesh['before']
+        geometry = self.objects[name]
+        if verb == 'move_solids':
+            offset = tuple(float(v) + 0.0 for v in np.round(
+                np.asarray(call['center']) - np.asarray(before['center']), 12))
+            turn = {'turn': call['angles']} if any(call['angles']) else {}
+            if any(offset) or turn:
+                self.project.move_solids(name, [solid_id], offset, **turn, unit=unit)
+            if call['name'] != before['group']:
+                self.project.edit_solid(name, solid_id, name=call['name'])
+            done = 'moved'
+        else:
+            changes = self._solid_changes(call)
+            if not changes:
+                return
+            self.project.edit_solid(name, solid_id, **changes, unit=unit)
+            done = 'changed'
+        self._mesh['holding'] = True
+        try:
+            self._solids_changed(name, pick=[solid_id])
+        finally:
+            self._mesh['holding'] = False
+        item = solids.solid(geometry, solid_id)
+        # a mesh made from it stays as it was, and says so
+        again = '; Mesh Solids again to mesh the change' if geometry.num_nodes else ''
+        self._show_status(f'{name}: {done} '
+                          f'{item.name.strip() or SOLID_LABELS[item.kind]} — solid '
+                          f'{solid_id}{again}')
+        # opened again on what it now is: a part's turn is done, and its
+        # gizmo goes back square on its new extent
+        self._mesh['before'] = self._solid_values(geometry, solid_id, unit)
+        panel = self.scene.mesh_panel
+        panel.set_values(quiet=True, **self._mesh['before'])
+        values = panel.values()
+        self._mesh['frame'] = frame_from_angles(values['angles'], values['center'])
+        self._mesh_refresh()
+        self._draw_rings()
+        self._mark_pencils([self._item_for_object(name)])
+
     def _draw_plane_preview(self, part) -> None:
         """The plane Add Plane, or the block Add Block, would add, drawn
         over the scene in the highlight color — or taken away. Drawn
@@ -12244,6 +13249,25 @@ class MainWindow(QMainWindow):
 
         plotter = self.scene.plotter
         plotter.remove_actor('plane-preview', render=False)
+        if isinstance(part, np.ndarray):
+            # a solid, as triangles in the view's units: its edges, so it
+            # reads as the shape it is rather than a mesh
+            count = len(part)
+            faces = np.column_stack([np.full(count, 3),
+                                     np.arange(3 * count).reshape(count, 3)])
+            surface = pv.PolyData(part.reshape(-1, 3), faces.ravel()).clean()
+            plotter.add_mesh(
+                surface.extract_feature_edges(30.0, boundary_edges=False,
+                                              non_manifold_edges=False),
+                name='plane-preview', line_width=2.0,
+                color=resolve_theme(self.theme_name)['scene_highlight'],
+                pickable=False, reset_camera=False, render=False)
+            current = self.current_object()
+            if (isinstance(current, Geometry) and not current.num_nodes
+                    and not current.solids):
+                plotter.reset_camera(render=False)
+            plotter.render()
+            return
         if part is not None:
             points, _ = display_points(part, self.unit_system)
             polygons: dict[tuple[int, ...], list[int]] = {}

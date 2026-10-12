@@ -34,6 +34,7 @@ LIGHT = {
     'scene_highlight': '#ff8c2b',   # the selected entity, or the one hovered
     'scene_picked': '#1f9d55',      # nodes gathered so far for a new element
     'scene_merged': '#2f6fd0',      # places Merge Coincident Nodes has joined
+    'scene_solid': '#c08a3e',       # solids, before they are meshed
     'row_error': '#c02a1f',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so
@@ -82,6 +83,7 @@ DARK = {
     'scene_highlight': '#ffb020',   # the selected entity, or the one hovered
     'scene_picked': '#3ddc84',      # nodes gathered so far for a new element
     'scene_merged': '#5b9bff',      # places Merge Coincident Nodes has joined
+    'scene_solid': '#e0a85a',       # solids, before they are meshed
     'row_error': '#ff6b61',         # an object that does not fit the geometry
     # the zones a random-vibration response must not be in: between the
     # warning and abort limits, and beyond abort. Filled translucent, so

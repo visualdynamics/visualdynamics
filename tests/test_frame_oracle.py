@@ -1,4 +1,4 @@
-"""The shared four-unit frame mesh, solved here, against MSC Nastran.
+"""The shared Frame-Wing mesh, solved here, against MSC Nastran.
 
 The wiki's finite element models of the frame (Linderholt, Linnaeus
 University, 2024) come as Nastran decks with their eigenfrequencies in

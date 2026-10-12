@@ -19,10 +19,10 @@ still change during the alpha, and a change re-cuts them without
 touching an application tag. `modal_hard` stays out: 5 GB exists to
 stress the fitter, not to be downloaded.
 
-The BARC (2026-09-26, its bricks 2026-10-07) and the four-unit frame
+The BARC (2026-09-26, its bricks 2026-10-07) and the Frame-Wing
 (2026-09-30) are the exception to all of that: no runs, just models,
 so their projects are
-built and solved from `visualdynamics.demo.barc` and `.frame` as the
+built and solved from `visualdynamics.demo.barc` and `.frame_wing` as the
 zip is cut, need nothing from `stressdata/`, and are small. Name one
 zip to cut (and upload) only that one, leaving the others on the
 release as they are.
@@ -61,14 +61,15 @@ def _barc(out_dir: str) -> None:
         os.path.join(out_dir, 'barc-bricks.vdyn'))
 
 
-def _frame(out_dir: str) -> None:
-    """The four-unit frame likewise: five models — the frame, each
-    wing alone, the frame with each wing — built from blocks and solved,
+def _frame_wing(out_dir: str) -> None:
+    """The Frame-Wing likewise: five models — the frame, each
+    wing alone, the frame with each wing — built from solids, meshed and
+    solved,
     a few minutes on any machine."""
     sys.path.insert(0, os.path.join(ROOT, 'src'))
-    from visualdynamics.demo import frame
+    from visualdynamics.demo import frame_wing
 
-    frame.project(solved=True).save(os.path.join(out_dir, 'frame.vdyn'))
+    frame_wing.project(solved=True).save(os.path.join(out_dir, 'frame-wing.vdyn'))
 
 
 #: asset name -> (where the projects come from: a folder under
@@ -89,15 +90,16 @@ SETS = {
         ('The quadcopter: the same workflows on a model with the node '
          'count of a real test article.'),
         SYNTHETIC),
-    'VisualDynamics-examples-frame.zip': (
-        _frame,
-        ('frame',),
-        ('The four-unit frame: the frame, its two wings and the two '
-         'assemblies as solid finite element models built from blocks of '
-         'bricks and solved — a substructuring test article, checked '
-         'against its measured frequencies.'),
-        ('The models are visualdynamics.demo.frame, rebuilt with\n'
-         'frame.project(solved=True). The frame\'s dimensions and hole\n'
+    'VisualDynamics-examples-frame-wing.zip': (
+        _frame_wing,
+        ('frame-wing',),
+        ('The Frame-Wing: the frame, its two wings and the two '
+         'assemblies as finite element models of solid bricks, built '
+         'from solid shapes the way the solid workflow page builds them, '
+         'and solved: a substructuring test article, checked against its '
+         'measured frequencies.'),
+        ('The models are visualdynamics.demo.frame_wing, rebuilt with\n'
+         'frame_wing.project(solved=True). The frame\'s dimensions and hole\n'
          'pattern were read off the finite element models shared on the\n'
          'SEM Dynamic Substructuring Focus Group wiki,\n'
          'https://wiki.sem.org/wiki/Round_Robin_Frame_Structure, and the\n'
@@ -110,8 +112,8 @@ SETS = {
         ('The BARC: a finite element model built from planes and solved '
          "— the documentation's finite element workflow, already carried "
          'out — and the BARC and its removable component built from '
-         'bricks, each bolt made by merging the nodes it clamps and '
-         'given its mass as a point mass, solved.'),
+         'solids and meshed into bricks, each bolt made by merging the '
+         'nodes it clamps and given its mass as a point mass, solved.'),
         ('The models are visualdynamics.demo.barc, rebuilt with\n'
          'barc.project(solved=True) and barc.solid_project(solved=True).\n'
          'They were checked against the finite element models and the\n'

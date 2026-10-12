@@ -1174,6 +1174,25 @@ def _draw_merge_nodes(painter, color):
     painter.drawEllipse(QPointF(32, 48), 11, 11)
 
 
+def _draw_align_meshes(painter, color):
+    """A coarse row of nodes over a fine one, an arrow carrying a coarse
+    node onto the fine node nearest it: meshes made to meet where parts
+    touch, so their nodes can be merged next (Align Meshes, 2026-10-11)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawLine(QPointF(8, 12), QPointF(56, 12))
+    for x in (8, 32, 56):
+        painter.drawLine(QPointF(x, 5), QPointF(x, 19))
+    painter.drawLine(QPointF(8, 52), QPointF(56, 52))
+    for x in (8, 24, 40, 56):
+        painter.drawLine(QPointF(x, 45), QPointF(x, 59))
+    painter.setPen(_pen(color, 3))
+    painter.drawLine(QPointF(31, 23), QPointF(26, 35))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawPolygon([QPointF(19, 33), QPointF(24, 43), QPointF(31, 36)])
+
+
 def _draw_plane(painter, color):
     """A rectangle seen at an angle, divided into a grid: a plane meshed
     into plates (Add Plane). Slanted so it reads as a surface laid in
@@ -1214,6 +1233,127 @@ def _draw_block(painter, color):
     for face in (front, top, side):
         painter.drawLine(along(face[0], face[1], 0.5), along(face[3], face[2], 0.5))
         painter.drawLine(along(face[0], face[3], 0.5), along(face[1], face[2], 0.5))
+
+
+def _faded(color, alpha):
+    shade = QColor(color)
+    shade.setAlpha(alpha)
+    return QBrush(shade)
+
+
+def _draw_solid_block(painter, color):
+    """A box seen at an angle, its faces shaded and undivided: a block
+    as a solid shape, not yet meshed (Add Solid Block, 2026-10-11) —
+    Add Block's box without its grid."""
+    front = [QPointF(8, 24), QPointF(40, 24), QPointF(40, 56), QPointF(8, 56)]
+    top = [QPointF(8, 24), QPointF(24, 10), QPointF(56, 10), QPointF(40, 24)]
+    side = [QPointF(40, 24), QPointF(56, 10), QPointF(56, 42), QPointF(40, 56)]
+    painter.setPen(_pen(color, 5))
+    for face, alpha in ((front, 90), (top, 40), (side, 150)):
+        painter.setBrush(_faded(color, alpha))
+        painter.drawPolygon(face)
+
+
+def _draw_solid_mesh(painter, color):
+    """The solid block's shaded box with a grid drawn on its faces: a
+    solid meshed into bricks (Mesh Solids, 2026-10-11)."""
+    _draw_solid_block(painter, color)
+    front = [QPointF(8, 24), QPointF(40, 24), QPointF(40, 56), QPointF(8, 56)]
+    top = [QPointF(8, 24), QPointF(24, 10), QPointF(56, 10), QPointF(40, 24)]
+    side = [QPointF(40, 24), QPointF(56, 10), QPointF(56, 42), QPointF(40, 56)]
+
+    def along(a, b, t):
+        return QPointF(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()))
+
+    painter.setPen(_pen(color, 2))
+    for face in (front, top, side):
+        for t in (1 / 3, 2 / 3):
+            painter.drawLine(along(face[0], face[1], t), along(face[3], face[2], t))
+            painter.drawLine(along(face[0], face[3], t), along(face[1], face[2], t))
+
+
+def _draw_solid_pattern(painter, color):
+    """Six small shaded circles in two rows of three, the first stronger:
+    a solid copied in rows and columns (Pattern, 2026-10-11)."""
+    painter.setPen(_pen(color, 3))
+    for row, y in enumerate((20, 44)):
+        for col, x in enumerate((14, 32, 50)):
+            painter.setBrush(_faded(color, 200 if (row, col) == (0, 0) else 70))
+            painter.drawEllipse(QPointF(x, y), 7, 7)
+
+
+def _draw_solid_cylinder(painter, color):
+    """A cylinder standing on its axis, shaded: the solid a hole is cut
+    with (Add Cylinder, 2026-10-11)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(_faded(color, 90))
+    painter.drawRect(QRectF(14, 14, 36, 36))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(QRectF(14, 42, 36, 16))
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawArc(QRectF(14, 42, 36, 16), 180 * 16, 180 * 16)
+    painter.setBrush(_faded(color, 40))
+    painter.drawEllipse(QRectF(14, 6, 36, 16))
+
+
+def _two_circles():
+    return QRectF(6, 14, 34, 34), QRectF(24, 14, 34, 34)
+
+
+def _draw_solid_union(painter, color):
+    """Two overlapping circles, both filled: two solids made one."""
+    left, right = _two_circles()
+    one, two = QPainterPath(), QPainterPath()
+    one.addEllipse(left)
+    two.addEllipse(right)
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(_faded(color, 150))
+    painter.drawPath(one.united(two))
+
+
+def _draw_solid_subtract(painter, color):
+    """A filled circle with a bite taken by an outlined one: the second
+    solid taken from the first, as a hole is."""
+    left, right = _two_circles()
+    body, cutter = QPainterPath(), QPainterPath()
+    body.addEllipse(left)
+    cutter.addEllipse(right)
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(_faded(color, 150))
+    painter.drawPath(body.subtracted(cutter))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 2))
+    painter.drawEllipse(right)
+
+
+def _draw_solid_intersect(painter, color):
+    """Two outlined circles, only where they overlap filled: what two
+    solids share."""
+    left, right = _two_circles()
+    one, two = QPainterPath(), QPainterPath()
+    one.addEllipse(left)
+    two.addEllipse(right)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(_faded(color, 170))
+    painter.drawPath(one.intersected(two))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(_pen(color, 3))
+    painter.drawEllipse(left)
+    painter.drawEllipse(right)
+
+
+def _draw_solid_separate(painter, color):
+    """The two circles of the boolean icons drawn apart, a gap between
+    them: a boolean taken apart into the solids it was made of (Take
+    Apart, 2026-10-11)."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(_faded(color, 150))
+    painter.drawEllipse(QRectF(3, 19, 26, 26))
+    painter.setBrush(_faded(color, 60))
+    painter.drawEllipse(QRectF(35, 19, 26, 26))
+    painter.setPen(_pen(color, 3))
+    painter.drawLine(QPointF(32, 8), QPointF(32, 56))
 
 
 def _draw_tie(painter, color):
@@ -1774,6 +1914,13 @@ def control_icon(name: str) -> QIcon:
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
+     'align_meshes': _draw_align_meshes,
+     'solid_block': _draw_solid_block, 'solid_cylinder': _draw_solid_cylinder,
+     'solid_union': _draw_solid_union, 'solid_subtract': _draw_solid_subtract,
+     'solid_intersect': _draw_solid_intersect,
+     'solid_separate': _draw_solid_separate,
+     'solid_mesh': _draw_solid_mesh,
+     'solid_pattern': _draw_solid_pattern,
      'plane': _draw_plane, 'block': _draw_block, 'tie': _draw_tie,
      'merge_groups': _draw_merge_groups, 'solve_modes': _draw_solve_modes,
      'set_view': _draw_set_view, 'reset_view': _draw_reset_view,

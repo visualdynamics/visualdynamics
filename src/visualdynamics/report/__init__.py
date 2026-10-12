@@ -1769,6 +1769,29 @@ def _scene_geometry(geometry, us):
     return points, node_colors, lines, faces
 
 
+def _shown_rows(geometry, faces) -> np.ndarray:
+    """The node rows a scene draws: all of them but those only inside
+    solids — a node no face of a solid's skin uses and no other element
+    names. Those are never drawn, and are left out with their share of
+    every mode: a brick model's insides were most of its page (the
+    Frame-Wing's figure, 12.8 MB, 2026-10-11). A plate's or a beam's
+    midside nodes stay, drawn as points as the 3-D view draws them."""
+    from ..core.geometry import ELEMENT_TYPES
+
+    rows = {int(n): r for r, n in enumerate(geometry.node_id)}
+    inside = np.zeros(geometry.num_nodes, dtype=bool)
+    drawn = np.zeros(geometry.num_nodes, dtype=bool)
+    for code, conn in zip(geometry.elem_type, geometry.elem_conn):
+        at = [rows[int(n)] for n in conn]
+        if ELEMENT_TYPES[int(code)][2] == 'volume':
+            inside[at] = True
+        else:
+            drawn[at] = True
+    for face in faces:
+        drawn[face['nodes']] = True
+    return np.flatnonzero(drawn | ~inside)
+
+
 def _scene_home(geometry):
     """A scene's home view as the page's (right, up) basis: the
     geometry's own view, the one the app opens it on (`View.basis`).
@@ -1780,7 +1803,17 @@ def _scene_home(geometry):
 
 def _scene_block(block, geometry, shapes, us, objects):
     points, node_colors, lines, faces = _scene_geometry(geometry, us)
-    node_row = {int(n): i for i, n in enumerate(geometry.node_id)}
+    shown = _shown_rows(geometry, faces)
+    if len(shown) < len(points):
+        renumber = np.full(len(points), -1)
+        renumber[shown] = np.arange(len(shown))
+        points = points[shown]
+        node_colors = [node_colors[r] for r in shown]
+        faces = [{**face, 'nodes': [int(renumber[r]) for r in face['nodes']]}
+                 for face in faces]
+        lines = [[int(renumber[a]), int(renumber[b]), *rest]
+                 for a, b, *rest in lines]
+    node_row = {int(geometry.node_id[r]): i for i, r in enumerate(shown)}
     built = {'kind': 'scene', 'caption': block.get('caption', ''),
              'points': [[_compact(v) for v in p] for p in points],
              'node_colors': node_colors,
@@ -1832,10 +1865,11 @@ def _scene_block(block, geometry, shapes, us, objects):
         for m in range(shapes.num_shapes):
             deflection = ShapeDeflection(geometry, shapes.coordinate,
                                          shapes.shape_matrix[m])
-            real = np.zeros_like(points)
-            imag = np.zeros_like(points)
+            real = np.zeros((geometry.num_nodes, 3))
+            imag = np.zeros((geometry.num_nodes, 3))
             real[deflection.rows] = deflection._real
             imag[deflection.rows] = deflection._imag
+            real, imag = real[shown], imag[shown]
             built['modes'].append({
                 'label': shapes.mode_label(m),
                 # the corner table over the animation: what is moving
@@ -1845,9 +1879,19 @@ def _scene_block(block, geometry, shapes, us, objects):
                          'frequency': float(shapes.frequency[m]),
                          'damping': float(shapes.damping[m]) * 100.0},
                 'peak': float(deflection.peak_magnitude) or 1.0,
-                'real': [[_compact(v) for v in p] for p in real],
-                'imag': [[_compact(v) for v in p] for p in imag]})
+                **_motion(real, imag)})
     return built
+
+
+def _motion(real: np.ndarray, imag: np.ndarray) -> dict[str, Any]:
+    """A mode's motion per drawn node. A real mode leaves its imaginary
+    part out — every normal mode of a model is real, and its zeros were
+    half the Frame-Wing figure's mode data (2026-10-11); the page reads
+    a missing part as zero."""
+    motion = {'real': [[_compact(v) for v in p] for p in real]}
+    if np.any(imag):
+        motion['imag'] = [[_compact(v) for v in p] for p in imag]
+    return motion
 
 
 def _overlay_block(block, objects, us, object_groups=None):
@@ -1955,8 +1999,7 @@ def _overlay_block(block, objects, us, object_groups=None):
             'info': [info(matched.first, a, r),
                      info(matched.second, b, c)],
             'peak': 1.0,
-            'real': [[_compact(v) for v in p] for p in real],
-            'imag': [[_compact(v) for v in p] for p in imag]})
+            **_motion(real, imag)})
     if not modes:
         return None
     # each shape is drawn to its own peak just above, which is what makes

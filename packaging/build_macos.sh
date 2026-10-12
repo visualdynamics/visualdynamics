@@ -14,6 +14,10 @@
 # Apple Developer Program 2026-09-02; packaging/README.md has the two
 # one-time steps (the certificate, the stored credentials).
 set -euo pipefail
+# say where it stopped: the Intel runner's a45 build ended after
+# notarizing with exit 1 and no message, every disk-image step quiet
+# (2026-10-11)
+trap 'echo "build_macos.sh: stopped at line $LINENO (exit $?)" >&2' ERR
 cd "$(dirname "$0")/.."
 
 PYTHON=${PYTHON:-./.venv/bin/python}

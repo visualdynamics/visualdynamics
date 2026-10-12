@@ -317,36 +317,44 @@ def test_each_bolt_merges_the_places_it_clamps_and_no_other():
     assert not _shared(geometry, 'box', 'beam')
 
 
-def test_the_docs_blocks_kept_apart_and_merged_are_the_demos_bricks():
+def test_the_docs_solids_meshed_apart_and_merged_are_the_demos_bricks():
     """The page's bricks steps, as the project verbs the app records:
-    the blocks table typed into Add Block with Keep apart ticked, then
-    the four merges the page clicks — at each foot every place but the
-    outer ring of 32, at each end of the beam none but the 16 under its
-    bolts — must give the demo's bricks, node for node and brick for
-    brick, joined at the same 130 places (2026-10-11)."""
+    the blocks table typed into Add Solid Block, each part's blocks
+    subtracted from its first, the four parts meshed with Keep the parts
+    apart, then the four merges the page clicks — at each foot every
+    place but the outer ring of 32, at each end of the beam none but the
+    16 under its bolts — must give the demo's bricks, node for node and
+    brick for brick, joined at the same 130 places (2026-10-11)."""
     import pathlib
 
     import visualdynamics
 
     page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
             / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
-    table = page.split('| Block | Element group | Center | Widths |')[1]
+    table = page.split('| Block | Center | Widths | Name |')[1]
     rows = [[cell.strip() for cell in line.strip('|').split('|')]
-            for line in table.split('\n\n')[0].splitlines()[2:]]
+            for line in table.split('\n\n')[0].strip().splitlines()[1:]]
 
-    def vector(cell):
-        return np.array([float(v) for v in cell.replace('\u2212', '-')
-                         .strip('()').split(',')])
+    def numbers(cell):
+        return [float(v) for v in cell.replace('\u2212', '-').replace('×', ',')
+                .strip('()').split(',')]
 
     project = visualdynamics.Project('p')
     name = project.new_geometry(unit='in')
-    for _block, group, center, widths in rows:
-        widths = vector(widths)
-        project.add_block(name, tuple(vector(center) - widths / 2),
-                          *(tuple(w * e) for w, e in zip(widths, np.eye(3))),
-                          barc.SIZE, group, unit='in', apart=True)
+    parts, blocks = [], []
+    for _block, center, widths, label in rows:
+        if label and blocks:
+            parts.append(blocks)
+            blocks = []
+        blocks.append(project.add_solid_block(name, numbers(center), numbers(widths),
+                                              name=label, unit='in'))
+    parts.append(blocks)
+    made = [project.combine_solids(name, 'subtract', part) if len(part) > 1
+            else part[0] for part in parts]
+    project.mesh_solids(name, made, barc.SIZE, unit='in', parts_apart=True)
     typed = project[name]
     ids = dict(zip(typed.group_name, typed.group_id.tolist()))
+    assert list(ids) == ['box', 'right channel', 'left channel', 'beam']
     inch = 0.0254
     for side in ('right channel', 'left channel'):
         for below, above in (('box', side), (side, 'beam')):
@@ -417,3 +425,38 @@ def test_a_coarser_mesh_of_bricks_still_holds_together():
     elastic = [f for f in shapes.frequency if f > 1.0][:8]
     assert np.allclose(elastic, SOLID_CHECKED[:8], rtol=0.06), \
         np.round(elastic, 1)
+
+
+def test_the_guides_bricks_are_the_demos_steps():
+    """The finite element workflow page's BARC of bricks is built from
+    solids a student adds (2026-10-11): each block's row there is held
+    to the call the demonstration journals for it — its center, its
+    widths, its name — so the page cannot drift from the model the
+    tests check."""
+    import ast
+    import pathlib
+    import re
+
+    from visualdynamics.project import Project
+
+    project = Project('steps')
+    name = project.new_geometry('BARC', unit='in')
+    barc._parts(project, name, 'BARC')
+    calls = [ast.parse(line).body[0].value for line in project.journal
+             if line.startswith('project.add_solid_block(')]
+    page = (pathlib.Path(__file__).resolve().parents[1] / 'docs' / 'guide'
+            / 'workflows' / 'fem-workflow.md').read_text(encoding='utf-8')
+    table = page.split('| Block | Center | Widths | Name |')[1].split('\n\n')[0]
+    rows = [[cell.strip().replace('−', '-') for cell in line.strip('|').split('|')]
+            for line in table.strip().splitlines()[1:]]
+    assert len(rows) == len(calls) == 8
+
+    def numbers(cell):
+        return [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', cell)]
+
+    for (block, center, widths, label), call in zip(rows, calls):
+        args = [ast.literal_eval(a) for a in call.args]
+        keywords = {k.arg: ast.literal_eval(k.value) for k in call.keywords}
+        assert np.allclose(numbers(center), args[1]), block
+        assert np.allclose(numbers(widths), args[2]), block
+        assert label == keywords.get('name', ''), block

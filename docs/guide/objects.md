@@ -133,7 +133,8 @@ already there becoming them (`project.new_geometry`, `project.add_plane`; in
 and `mesh.assemble`). *Add Block*, on the **Hexes** row's bar, is the same pane with all three widths: a box
 meshed into eight-node solid bricks, for a part that is neither a beam
 nor a plate (`project.add_block`, `mesh.block`, which also cuts
-cylindrical holes). Ticking *Keep apart from other groups* in the pane
+cylindrical holes along one of its edges, meshed round as *Mesh Solids*
+meshes them). Ticking *Keep apart from other groups* in the pane
 joins a plane or a block only to the nodes of its own element group, so
 two parts that touch, a channel's foot on the box it is bolted to, keep
 nodes of their own there for the bolts to be merged at
@@ -157,7 +158,86 @@ the geometry's own row does not offer it. From a script,
 `project.merge_coincident_nodes(name, tolerance, groups=[...],
 exclude=[...])`, `exclude` naming the nodes of the places left out
 (`Geometry.coincident_spots` lists the places); without `groups` it
-merges the whole geometry. All of it is
+merges the whole geometry. *Align Meshes*, beside it on the same bar, is
+the step before a merge where parts meshed apart do not match: a wing
+meshed at an eighth of an inch on a frame meshed at a twelfth has no
+coincident nodes to merge. It moves each node of the coarser mesh that
+lies within its reach of the finer mesh's outside onto the finer
+mesh's nearest node there, so none moves more than about half an
+element plus whatever gap lies between the parts, and each moved node
+is then a place to merge. Its pane is the merge's, with a reach in
+place of the tolerance (opening at half the coarsest mesh's spacing),
+a mark and a line for each move, a click to leave one out, and
+*Align*; a move that would turn an element inside out is refused before
+the button is pressed, and the nodes moved are drawn as blue squares,
+ready for *Merge Coincident Nodes*. From a script,
+`project.align_meshes(name, reach, groups=[...], exclude=[...])`
+(`Geometry.align_moves` lists the moves, each a node and the node it
+goes onto).
+
+**Solids** (2026-10-11) are the shapes a part is built from before it
+is meshed, listed on a geometry's **Solids** row, which is there before
+the first one. *Add Solid Block* and *Add Cylinder* on that row open
+the add pane on a solid: a block is a center, three widths and three
+angles, a cylinder a center, a radius, a length along its own Z and
+three angles, and either one a name; the pane draws the shape as it is
+typed and the gizmo turns and slides it. Pick two parts or more in the
+tree and the bar offers *Union*, *Subtract* and *Intersect*: Subtract
+takes the others from the first one in the tree, which its tooltip
+names, so a plate with its holes is the plate added first, its
+cylinders after, all picked, and Subtract. A boolean lists the solids
+it is made of under its own row; one picked there is drawn over it, a
+hole's cylinder inside the plate. *Pattern*, on picked solids, makes
+a pattern of them: how many along X, Y and Z and how far apart, one
+solid with the originals under it, the copies following them; a
+pattern can be patterned again. *Take Apart* undoes a boolean or a
+pattern, and Delete removes a part whole, the solids inside it with
+it. The pencil
+on a solid's row opens the same pane on it, to change it after it is
+made: a block's or a cylinder's numbers typed, or the gizmo dragged,
+the change drawn as it is made and *Apply* making it. A hole changed
+this way is changed in the part it was subtracted from, and a
+patterned one in every copy; a pattern's pencil opens *Pattern* on its
+counts and spacing. A combined
+part has no size of its own, so its pencil moves and turns it whole,
+every solid it is made of with it. A mesh already made from the solids
+stays as it was until *Mesh Solids* meshes it again. The parts
+are drawn see-through in their own color, the picked ones in the
+picked color. A solid is not an element: nothing solves or exports it
+until it is meshed. They need the OpenCASCADE kernel, in every
+packaged build (`pip install 'visualdynamics[step]'` otherwise). From
+a script, `project.add_solid_block`, `add_solid_cylinder`,
+`combine_solids`, `pattern_solids`, `separate_solids`, `delete_solids`,
+`edit_solid` and `move_solids`; the shapes
+themselves, their volumes and their surfaces are `core.solids`.
+
+*Mesh Solids*, on the bar when parts are picked, meshes them into
+eight-node bricks, each part an element group named for it. It meshes
+extrusions: every block square to the geometry's axes and every
+cylinder along one of them, which is how plates, bars and their holes
+are built; a solid turned off the axes is refused by name. The grid
+is cut at every flat face of every block, so flat faces mesh exactly,
+and each span is divided into the whole number of bricks nearest the
+element size; a brick belongs to the picked part whose shape holds
+its center, the later one in the tree where parts overlap. Holes,
+bosses and inserts are round: about each circle with room around it
+the grid is replaced by a ring mesh, the circle's nodes evenly spaced
+on it and layers of bricks out to the grid, with a square core in the
+middle where the circle is filled; circles about one center, a washer
+about a hole, are one ring. Where there is no room (a hole close to
+another, or to a face) and at a rounded corner, the grid's nodes on
+the rim are pulled onto the circle instead, a pull that would turn a
+brick inside out left undone. Parts meshed together share nodes where they
+touch (a frame and the inserts in its holes), and *Keep apart from
+other groups* lands the bricks only on their own groups' nodes, as Add
+Block's does. With two parts or more picked, *Keep the parts apart from
+each other* meshes them on one grid, each keeping its own nodes where
+it touches another, so parts to be bolted lie node on node, ready for
+*Merge Coincident Nodes* (the BARC's box, channels and beam). The pane opens on half the thinnest feature, draws the
+bricks as the size is typed, and says how many there are and the
+shortest edge; *Mesh* adds them and puts the pane away. The solids
+stay, to be meshed again or deleted. From a script,
+`project.mesh_solids(name, ids, size, unit=..., apart=...)`. All of it is
 shown and typed in the
 current display unit system (psi and in⁴ in the inch system, MPa and mm⁴
 in millimeters), the unit in the column's header, and held in SI; the

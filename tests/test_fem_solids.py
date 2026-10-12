@@ -1,5 +1,5 @@
 """Solid elements: the hexahedron with incompatible modes, the wedge and
-the tetrahedron (2026-09-30, for the four-unit frame example — a
+the tetrahedron (2026-09-30, for the Frame-Wing example — a
 half-inch ladder frame that beams describe poorly and plates not at
 all).
 
@@ -134,8 +134,15 @@ def test_a_plate_of_bricks_vibrates_like_the_plate():
     the twisting pair where the plate element is already there."""
     from test_fem import square_plate
 
-    side, thickness, n = 1.0, 0.01, 16
-    plate = square_plate(n, side, thickness)   # the plate element's mesh
+    plate = square_plate(16)   # the plate element's mesh
+    reference = plate.eigensolution(num_modes=13).frequency[6:13]
+    found = _brick_plate(16).eigensolution(num_modes=13).frequency[6:13]
+    assert found == pytest.approx(reference, rel=0.015), (found, reference)
+
+
+def _brick_plate(n, side=1.0, thickness=0.01):
+    """A free square plate meshed `n` x `n` bricks, one through the
+    thickness."""
     bricks = Model()
     grid = np.linspace(0, side, n + 1)
     ids = {}
@@ -148,9 +155,28 @@ def test_a_plate_of_bricks_vibrates_like_the_plate():
             bricks.add_solid([ids[i, j, 0], ids[i + 1, j, 0], ids[i + 1, j + 1, 0],
                               ids[i, j + 1, 0], ids[i, j, 1], ids[i + 1, j, 1],
                               ids[i + 1, j + 1, 1], ids[i, j + 1, 1]], ALUMINUM)
-    reference = plate.eigensolution(num_modes=13).frequency[6:13]
-    found = bricks.eigensolution(num_modes=13).frequency[6:13]
-    assert found == pytest.approx(reference, rel=0.015), (found, reference)
+    return bricks
+
+
+def test_a_plate_of_bricks_matches_the_classical_values():
+    """The brick held to the published free-plate table directly, not
+    only to the plate element (Brandon, 2026-10-11): six rigid modes and
+    the elastic ones from above, closing on the table as the mesh is
+    refined. Measured: 0.4/0.5/0.8/1.8/1.8/2.3 percent at 16 x 16,
+    0.05/0.2/0.3/0.4/0.4/0.9 at 24 x 24."""
+    from test_fem import FREE_SQUARE_PLATE, plate_lambdas
+
+    coarse = _brick_plate(16).eigensolution(num_modes=12)
+    assert int(np.sum(coarse.frequency == 0.0)) == 6
+    coarse = plate_lambdas(coarse, 1.0, 0.01, ALUMINUM, 6)
+    for computed, exact, room in zip(coarse, FREE_SQUARE_PLATE,
+                                     (1.01, 1.01, 1.01, 1.025, 1.025, 1.03)):
+        assert exact <= computed <= exact * room, (
+            f'lambda^2 {computed:.3f} against the classical {exact}')
+    fine = plate_lambdas(_brick_plate(24).eigensolution(num_modes=12),
+                         1.0, 0.01, ALUMINUM, 6)
+    assert np.all((FREE_SQUARE_PLATE <= fine) & (fine < coarse)), fine
+    assert np.all(fine <= np.array(FREE_SQUARE_PLATE) * 1.01), fine
 
 
 def test_dense_and_sparse_agree_on_solids():

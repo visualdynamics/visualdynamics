@@ -70,7 +70,10 @@ clear, and the bar carries the project's two acts: *Generate Report*,
 and **+** *New Geometry*, an empty geometry in the display length unit
 to build a model in: its **Quads** row offers *Add Plane* and its
 **Hexes** row *Add Block*, since what each adds is elements of that
-family ([the finite element workflow](workflows/fem-workflow.md)).
+family ([the finite element workflow](workflows/fem-workflow.md)), and
+its **Solids** row *Add Solid Block* and *Add Cylinder*, shapes to cut,
+join, pattern and then mesh ([the solid
+workflow](workflows/fem-solids.md)).
 
 ![The project row selected: the panes clear, and Generate Report and New Geometry are on the bar](images/tree-project.png)
 

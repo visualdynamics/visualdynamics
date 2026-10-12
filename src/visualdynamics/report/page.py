@@ -1287,6 +1287,10 @@ function sceneBlock(block) {
   const controls = document.createElement('div');
   controls.className = 'controls'; s.appendChild(controls);
   let mode = -1, playing = false, phase = 0;
+  // a real mode comes without its imaginary part, all zeros
+  block.modes.forEach(m => {
+    if (!m.imag) m.imag = m.real.map(() => [0, 0, 0]);
+  });
   if (block.modes.length) {
     // the corner table over the animation: what is moving, by the
     // numbers — description text stays text, never markup

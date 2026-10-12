@@ -14,6 +14,13 @@ out (and again to put it back), and **Merge**, the project's
 The pane holds no rule of its own: the window asks the geometry
 (`coincident_spots`, `merge_folds`) what the settings would merge,
 marks it, and says it here.
+
+**Align Meshes** is the same pane (Brandon, 2026-10-11): parts meshed
+apart at sizes that do not match have no coincident nodes to merge, so
+the step before the merge moves the coarser mesh's nodes onto the
+finer's where they meet. A reach in place of the tolerance, a move per
+mark (the node, and a line to where it goes), **Align** in place of
+Merge (`align_moves`, `align_folds`, the project's `align_meshes`).
 """
 
 from __future__ import annotations
@@ -24,9 +31,22 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
+#: what the pane says for each kind: (title, the number's label, its
+#: tooltip, the button)
+KINDS = {
+    'merge': ('Merge Coincident Nodes', 'Tolerance',
+              'Nodes closer than this are one place, in the display unit',
+              'Merge'),
+    'align': ('Align Meshes', 'Reach',
+              ('How far a node of the coarser mesh may move onto the '
+               "finer mesh's nearest node, in the display unit"),
+              'Align'),
+}
+
 
 class MergePanel(QWidget):
-    """The tolerance, what it finds, and the Merge."""
+    """The tolerance, what it finds, and the Merge — or the reach, the
+    moves, and the Align."""
 
     #: the tolerance was edited: the window finds the places again
     changed = Signal()
@@ -79,10 +99,17 @@ class MergePanel(QWidget):
         self.merge_button.clicked.connect(self.merge_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
 
-    def open_for(self, unit: str, tolerance: float, groups: str) -> None:
-        """Set the pane up: the tolerance in the display unit `unit`,
-        and the element groups it merges, named."""
-        self.tolerance_label.setText(f'Tolerance [{unit}]')
+    def open_for(self, unit: str, tolerance: float, groups: str,
+                 kind: str = 'merge') -> None:
+        """Set the pane up for `kind`, 'merge' or 'align': the tolerance
+        (or the reach) in the display unit `unit`, and the element groups
+        it works on, named."""
+        title, label, tip, button = KINDS[kind]
+        self.title.setText(title)
+        self.tolerance_label.setText(f'{label} [{unit}]')
+        self.tolerance.setToolTip(tip)
+        self.merge_button.setText(button)
+        self.all_button.setToolTip(f'Mark every place to {button.lower()}')
         self.tolerance.blockSignals(True)
         # a step a tenth of the starting tolerance's order, so the
         # arrows move it by something that can matter

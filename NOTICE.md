@@ -13,7 +13,7 @@ here changes those terms.
 | pytest, pytest-cov, pytest-xdist, ruff, sdypy-sep005 (dev only) | MIT | test suite only; nothing ships |
 | escdf, the Engineering Sciences Common Data Format's reference implementation (dev only; not on PyPI, so CI installs it from its repository in a step of its own and it is not in the package metadata) | BSD-3-Clause | test suite only, as the format's agreement oracle; nothing of it ships. Its **specification files** do ship, vendored as `io/escdf_specifications/*.txt` with their `LICENSE` beside them, so the reader here knows the standard's types |
 | **PySide6 (Qt for Python)** | **LGPL-3.0** | see below |
-| **OpenCASCADE** (via cadquery-ocp/OCP, Apache-2.0 bindings) | **LGPL-2.1 with exception** | see below |
+| **OpenCASCADE** 8.0.1 (via cadquery-ocp/OCP, Apache-2.0 bindings), and the libraries its wheel carries | **LGPL-2.1 with the Open CASCADE exception**; the others as listed below | see below |
 | **libquadmath**, inside the numpy and scipy wheels | **LGPL-2.1-or-later** | see below |
 | **FFmpeg** (libavcodec, libavformat, libavutil, libswscale, libswresample), inside the PySide6 wheels for Qt Multimedia | **LGPL-2.1-or-later** — built without its GPL parts (no libx264), as the libraries report of themselves | the same as Qt's: shared libraries, shipped unmodified and replaceable; source at ffmpeg.org (n7.1.5) |
 | libgfortran / libgcc, inside those same wheels | GPL-3.0 **with the GCC Runtime Library Exception** | none — the exception exists to permit this |
@@ -38,7 +38,8 @@ tree for "GPL" will find them and should not have to work out why they
 are allowed.
 
 - **libgfortran and libgcc** are GPL-3.0 **with the GCC Runtime Library
-  Exception**. That exception exists for exactly this: it grants
+  Exception** (its text ships as
+  `licenses/GCC-runtime-library-exception-3.1.txt`). That exception exists for exactly this: it grants
   permission to combine the runtime with independent modules and
   convey the result under terms of your choosing, proprietary
   included, as long as the compilation was done with GCC. scipy's own
@@ -93,6 +94,63 @@ libraries in the package they received. The bindings (`OCP`, from the
 cadquery-ocp wheels) are Apache-2.0 and impose nothing further. The
 per-platform swap mechanics in `qt-replacement.md` apply to these
 libraries the same way — they live beside the Qt ones in the bundle.
+The LGPL-2.1 text ships as `licenses/LGPL-2.1.txt` (it covers
+libquadmath, FFmpeg and LibRaw too), the exception as
+`licenses/third-party/OpenCASCADE-LGPL-exception.txt`. The version is
+8.0.1; its source is at github.com/Open-Cascade-SAS/OCCT, tag `V8_0_1`,
+and the wheel's at github.com/CadQuery/OCP. The libraries are shipped
+unmodified.
+
+
+## OpenCASCADE, and what its wheel carries
+
+**Visual Dynamics makes use of facilities provided by the Open CASCADE
+Technology software** (OCCT, https://dev.opencascade.org). The bindings
+are compiled against OCCT's header files, so this is the notice the
+Open CASCADE exception asks for in return.
+
+The cadquery-ocp wheel carries shared libraries of its own beside
+OCCT's, and every package ships them. Each one's license text is in
+`licenses/third-party/`, the file named in the right column. Where a
+library offers a choice of licenses, the one chosen here is the one
+listed. Read off the macOS wheel (cadquery-ocp 8.0.1.1.0) and the
+Linux one, whose builds of some projects are older and which carries
+a few more (marked *Linux*); `tests/test_app_bundle.py` holds the list
+against whichever wheel is installed where it runs. The Windows wheel
+has not been read yet.
+
+| Library (as bundled) | Project | License | Text |
+| --- | --- | --- | --- |
+| libfreeimage | FreeImage 3.18 | FreeImage Public License 1.0 (chosen of FIPL, GPL-2.0, GPL-3.0) | `FreeImage-license-fi.txt` |
+| libfreetype | FreeType 2.12.1 | FreeType License (chosen of FTL, GPL-2.0) | `FreeType-FTL.txt` |
+| libraw | LibRaw | LGPL-2.1 (chosen of LGPL-2.1, CDDL-1.0); shipped as a replaceable shared library, source at github.com/LibRaw/LibRaw | `LibRaw-COPYRIGHT.txt`, `../LGPL-2.1.txt` |
+| libOpenEXR, libOpenEXRCore, libIex, libIlmThread | OpenEXR | BSD-3-Clause | `OpenEXR-LICENSE.md` |
+| libImath | Imath | BSD-3-Clause | `Imath-LICENSE.md` |
+| libIlmImf, libHalf, libIexMath (and Iex, IlmThread, Imath 2.2), *Linux* | OpenEXR 2.2 | BSD-3-Clause, Industrial Light & Magic | `OpenEXR-2.2-LICENSE.txt` |
+| libbz2, *Linux* | bzip2 | bzip2 License (BSD-like) | `bzip2-LICENSE.txt` |
+| libfontconfig, *Linux* | Fontconfig | MIT-like | `fontconfig-COPYING.txt` |
+| libjasper, *Linux* | JasPer | JasPer License 2.0 (MIT-like) | `JasPer-LICENSE.txt` |
+| libuuid, *Linux* | util-linux libuuid | BSD-3-Clause | `libuuid-COPYING.txt`, `util-linux-COPYING.BSD-3-Clause.txt` |
+| libgomp, *Linux* | GCC's OpenMP runtime | GPL-3.0 with the GCC Runtime Library Exception, as libgfortran above | `../GPL-3.0.txt`, `../GCC-runtime-library-exception-3.1.txt` |
+| libjpeg | libjpeg-turbo | IJG License and BSD-3-Clause | `libjpeg-turbo-LICENSE.md`, `libjpeg-turbo-README.ijg.txt` |
+| libjpegxr, libjxrglue | jxrlib | BSD-2-Clause | `jxrlib-LICENSE.txt` |
+| libopenjp2 | OpenJPEG | BSD-2-Clause | `OpenJPEG-LICENSE.txt` |
+| libopenjph | OpenJPH | BSD-2-Clause | `OpenJPH-LICENSE.txt` |
+| libpng16 | libpng | libpng License | `libpng-LICENSE.txt` |
+| libtiff | LibTIFF | LibTIFF License (BSD-like) | `libtiff-LICENSE.md` |
+| libwebp, libwebpmux, libsharpyuv | libwebp | BSD-3-Clause | `libwebp-COPYING.txt` |
+| libLerc | LERC | Apache-2.0 | `Lerc-LICENSE.txt` |
+| liblcms2 | Little CMS | MIT | `LittleCMS-LICENSE.txt` |
+| liblzma | XZ Utils | 0BSD | `xz-liblzma-COPYING.0BSD.txt` |
+| libz | zlib | zlib License | `zlib-LICENSE.txt` |
+| libzstd | Zstandard | BSD-3-Clause (chosen of BSD, GPL-2.0) | `zstd-LICENSE.txt` |
+| libdeflate | libdeflate | MIT | `libdeflate-COPYING.txt` |
+| libfmt | {fmt} | MIT | `fmt-LICENSE.txt` |
+| libc++ | LLVM libc++ | Apache-2.0 with LLVM Exceptions | `libcxx-LICENSE.txt` |
+
+The FreeType License asks for this credit in a product's
+documentation: Portions of this software are copyright © 2022 The
+FreeType Project (https://freetype.org). All rights reserved.
 
 The alternative is a commercial Qt license from the Qt Company, which
 removes the obligation and is priced accordingly. Worth pricing before

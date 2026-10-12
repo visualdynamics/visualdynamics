@@ -1,5 +1,5 @@
 """The example-project tiles' pictures: the plate, the quadcopter, the
-BARC, the four-unit frame.
+BARC, the Frame-Wing.
 
 The downloads page offers example bundles, and each tile wears a
 picture of the thing inside it rather than the application's mark
@@ -54,7 +54,7 @@ def barc():
 
 def frame():
     sys.path.insert(0, str(ROOT / 'src'))
-    from visualdynamics.demo import frame as article
+    from visualdynamics.demo import frame_wing as article
     return article.geometry('thick wing')
 
 
@@ -84,8 +84,8 @@ def main() -> int:
     render(plate(), SITE / 'plate.png', azimuth=30.0, elevation=25.0, zoom=1.0)
     render(drone(), SITE / 'drone.png', azimuth=45.0, elevation=50.0, zoom=1.2)
     render(barc(), SITE / 'barc.png', azimuth=30.0, elevation=0.0, zoom=1.0)
-    render(frame(), SITE / 'frame.png', azimuth=20.0, elevation=15.0, zoom=1.3)
-    for name in ('plate.png', 'drone.png', 'barc.png', 'frame.png'):
+    render(frame(), SITE / 'frame-wing.png', azimuth=20.0, elevation=15.0, zoom=1.3)
+    for name in ('plate.png', 'drone.png', 'barc.png', 'frame-wing.png'):
         print(f'wrote {SITE / name} ({(SITE / name).stat().st_size // 1024} KB)')
     return 0
 

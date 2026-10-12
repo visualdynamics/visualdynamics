@@ -300,3 +300,60 @@ def test_the_linux_package_ships_the_platform_theme_plugins():
             ).read_text(encoding='utf-8')
     assert "'platformthemes'" in spec and "prefix='PySide6/Qt/plugins/platformthemes'" in spec
     assert '*platform_themes,' in spec, 'built, but not handed to COLLECT'
+
+
+def _occt_section():
+    import pathlib
+
+    notice = (pathlib.Path(__file__).parent.parent / 'NOTICE.md'
+              ).read_text(encoding='utf-8')
+    return notice.split('## OpenCASCADE, and what its wheel carries')[1].split('\n## ')[0]
+
+
+def test_every_license_text_the_notice_names_ships():
+    """The OpenCASCADE wheel's table names a license text per library
+    (2026-10-11): every one is in `packaging/licenses/`, which every
+    package carries."""
+    import pathlib
+    import re
+
+    licenses = pathlib.Path(__file__).parent.parent / 'packaging' / 'licenses'
+    rows = [line for line in _occt_section().splitlines()
+            if line.startswith('| lib')]
+    assert len(rows) > 20
+    for row in rows:
+        named = re.findall(r'`([^`]+)`', row.split('|')[4])
+        assert named, row
+        for name in named:
+            assert (licenses / 'third-party' / name).resolve().exists(), name
+
+
+def test_every_library_the_opencascade_wheel_carries_has_its_notice():
+    """The cadquery-ocp wheel bundles shared libraries of its own beside
+    OpenCASCADE's — FreeImage, FreeType, LibRaw, two dozen more — and
+    every package ships them, so each needs its license in the notice.
+    None had one until 2026-10-11. Read off the wheel installed where
+    this runs (macOS here, Linux in CI): a new release that brings a
+    library fails here, by name, rather than shipping it unnoticed."""
+    import pathlib
+    import re
+
+    ocp = pytest.importorskip('OCP')
+    package = pathlib.Path(ocp.__file__).parent
+    folders = [package / '.dylibs', *package.parent.glob('cadquery_ocp*.libs')]
+    bundled = [f.name for folder in folders if folder.is_dir()
+               for f in folder.iterdir()]
+    if not bundled:
+        pytest.skip('this wheel keeps no bundled libraries apart')
+
+    def stem(name):
+        # libfreeimage-3-69ba4c2d.17.0.so, libpng16.16.dylib, libc++.1.0.dylib
+        name = name.removeprefix('lib')
+        return re.split(r'[-.]', name, maxsplit=1)[0]
+
+    listed = {stem(token) for line in _occt_section().splitlines()
+              if line.startswith('| lib')
+              for token in re.findall(r'lib[\w+]+', line.split('|')[1])}
+    missing = sorted({stem(name) for name in bundled
+                      if not stem(name).startswith('TK')} - listed)
+    assert not missing, f'bundled without a notice: {missing}'

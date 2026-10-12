@@ -18,7 +18,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..core.geometry import ELEMENT_TYPES, face_corners
+# the solid face table lives in core, where finding a part's skin
+# needs it too (Align Meshes, 2026-10-11)
+from ..core.geometry import ELEMENT_TYPES, face_corners, solid_faces
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM
 
@@ -86,43 +88,6 @@ def _display_length(values: ArrayLike, geometry: Geometry,
     if not geometry.units_defined:
         return np.asarray(values)
     return unit_system.from_si(np.asarray(values), 'length')
-
-
-#: the faces of a solid cell by its node count, as corner positions in
-#: the cell's own node order: the hexahedron's six, the wedge's two
-#: triangles and three quads, the tetrahedron's four. Bottom face then
-#: top, the same way round, as UFF 2412 and Nastran number them.
-_SOLID_FACES = {
-    8: ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5),
-        (2, 3, 7, 6), (3, 0, 4, 7)),
-    6: ((0, 2, 1), (3, 4, 5), (0, 1, 4, 3), (1, 2, 5, 4), (2, 0, 3, 5)),
-    4: ((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
-}
-
-
-def solid_faces(node_count: int) -> tuple[tuple[int, ...], ...]:
-    """The faces of a solid cell of this many corners, each as
-    positions into the cell's node list; a higher-order cell draws by
-    its corners, which come first.
-
-    Parameters
-    ----------
-    node_count : int
-        How many nodes the cell names.
-
-    Returns
-    -------
-    tuple of tuple of int
-    """
-    if node_count in (8, 20, 27):
-        return _SOLID_FACES[8]
-    if node_count in (6, 15, 24):
-        return _SOLID_FACES[6]
-    if node_count in (4, 10):
-        return _SOLID_FACES[4]
-    if node_count in (5, 13):                 # a pyramid: a quad and four
-        return ((0, 3, 2, 1), (0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4))
-    return ()
 
 
 def element_cells(geometry: Geometry,

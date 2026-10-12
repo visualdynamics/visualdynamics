@@ -93,6 +93,14 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
     if view is not None:
         group.attrs['view_eye'] = np.asarray(view.eye, dtype=np.float64)
         group.attrs['view_up'] = np.asarray(view.up, dtype=np.float64)
+    # the solids, as the numbers typed (2026-10-11): a recipe, so the file
+    # reopens editable without the geometry kernel; absent when there
+    # are none, so a file from before solids reads back the same
+    solids = getattr(geom, 'solids', None) or []
+    if solids:
+        import json
+
+        group.attrs['solids'] = json.dumps([s.as_record() for s in solids])
     # what each element group is made of, one subgroup per element group that has it:
     # the material's numbers, and a thickness or a section — the model
     # a geometry can build of itself (2026-09-25) — or, for an element group of
@@ -237,6 +245,13 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
         geometry.view = View(tuple(group.attrs['view_eye']),
                              tuple(group.attrs['view_up']))
+    if 'solids' in group.attrs:
+        import json
+
+        from ..core.solids import Solid
+
+        geometry.solids = [Solid.from_record(r)
+                           for r in json.loads(group.attrs['solids'])]
     return geometry
 
 

@@ -11256,6 +11256,32 @@ class MainWindow(QMainWindow):
                             f'over it: {info["drawn"]} '
                             f'channel{"s" * (info["drawn"] != 1)} on the '
                             f'stage, the synthesis in gray{note}')
+        # two measured FRFs — one survey measured twice, two system ID
+        # runs — are the same picture: matched channel by channel on the
+        # stage, the first in the tree colored by level and the other
+        # stood back in gray (Brandon, 2026-10-12). They went to the
+        # stack, which copies every record and stands down past
+        # STACK_LIMIT: twelve references by 132 responses is 1,584
+        # records a run, and the pair fell flat with nothing said.
+        measured_pair = (len(series) == 2 and all(
+            isinstance(data, Frf) and not getattr(data, 'synthesized', False)
+            for _name, data, _records in series))
+        if measured_pair:
+            self.data_pane.offer_waterfall(True)
+            if self.data_pane.showing_waterfall:
+                # the upper row colored, whichever was clicked first
+                def row(entry):
+                    item = self._item_for_object(entry[0])
+                    return item.parent().indexOfChild(item) if item else 0
+                first, second = sorted(series, key=row)
+                info = self._draw_pair_stage(first, second, 'overlay')
+                if info is not None:
+                    missed = info.get('unmatched', 0)
+                    note = (f' ({missed} unmatched)' if missed else '')
+                    return (f'{first[0]} with {second[0]} in gray: '
+                            f'{info["drawn"]} shared '
+                            f'channel{"s" * (info["drawn"] != 1)} on the '
+                            f'stage{note}')
         entry = series[0] if len(series) == 1 else None
         if entry is None and series and not pairs and not lone_fed \
                 and not any(getattr(data, 'synthesized', False)
@@ -11279,7 +11305,7 @@ class MainWindow(QMainWindow):
         # toggle standing down, and recomputing visibility here hid the
         # very button that brings the stage back (Brandon, 2026-08-22)
         self.data_pane.offer_waterfall(offered or banded_offered
-                                       or resynthesis)
+                                       or resynthesis or measured_pair)
         if offered and self.data_pane.showing_waterfall:
             return self._render_waterfall(entry, complex_series)
         self.data_pane.show_waterfall(False)

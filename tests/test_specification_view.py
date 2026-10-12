@@ -96,6 +96,16 @@ def test_the_axis_does_not_reach_for_zero(showing):
     assert high - low < 10.0, 'and not spanning ten decades to get there'
 
 
+def test_the_frequency_axis_stays_on_the_band(showing):
+    """Its zeros outside the band are not drawn on the log axis, and the
+    view does not span them either: the run's 50 to 1500 Hz band on lines
+    to 2048 Hz opened on the whole 2048 (Brandon, 2026-10-12, a 400 Hz
+    specification on lines to 8192)."""
+    window, _spec = showing
+    low, high = plot_of(window).getViewBox().viewRange()[0]
+    assert 0.0 < low < 50.0 and 1500.0 < high < 1600.0, (low, high)
+
+
 # ---- the table beneath --------------------------------------------------
 
 

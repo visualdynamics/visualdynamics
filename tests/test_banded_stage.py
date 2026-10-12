@@ -376,3 +376,27 @@ def test_a_specification_on_lines_stands_as_steps_too():
     arrays = banded_stage_arrays(spec)
     assert arrays['stations'][0]['target'].shape == (2 * len(freq),)
     assert arrays['stations'][0]['limits']['abort_upper'].shape == (2 * len(freq),)
+
+
+def test_the_stage_spans_the_band_not_every_line():
+    """A specification as a controller writes one — every line to
+    Nyquist, zero outside its band — on lines to 8192 Hz with a 20 to
+    400 Hz band: the stage drew the band as a sliver of an 8192 Hz floor
+    (Brandon, 2026-10-12). It spans where the target and its limits are
+    drawn, as the waterfall does."""
+    import pyvista as pv
+
+    from visualdynamics.viz.banded import add_banded_stage
+
+    lines = np.arange(0.0, 8192.0 + 8.0, 8.0)
+    inside = (lines >= 20.0) & (lines <= 400.0)
+    level = np.where(inside, 1e-2, 0.0)[None, :]
+    spec = Specification(
+        abscissa=lines, ordinate=level, response_dof=['101Z+'],
+        ordinate_dim=['acceleration**2/frequency'],
+        warning_lower=level * 10 ** (-3 / 10), warning_upper=level * 10 ** (3 / 10),
+        abort_lower=level * 10 ** (-6 / 10), abort_upper=level * 10 ** (6 / 10))
+    plotter = pv.Plotter(off_screen=True)
+    x0, x1, _z0, _z1 = add_banded_stage(plotter, spec)['extents']
+    plotter.close()
+    assert 10.0 <= x0 <= 24.0 and 396.0 <= x1 <= 410.0, (x0, x1)

@@ -249,3 +249,79 @@ def test_the_resynthesis_stage_stands_down_to_the_flat_overlay(
     assert 'synthesized from 22 modes' in \
         window.statusBar().currentMessage(), 'the flat reading is unchanged'
     assert pane.waterfall_action.isVisible(), 'the way back stays'
+
+
+def _survey(scale, references=12, responses=50, lines=64):
+    """A system ID's FRFs: every response against every reference."""
+    from visualdynamics.core.data import Frf
+
+    freq = np.linspace(1.0, 500.0, lines)
+    rows = references * responses
+    ordinate = scale * (1.0 + 1j) * np.ones((rows, lines))
+    return Frf(abscissa=freq, ordinate=ordinate,
+               response_dof=[f'{100 + r}Z+' for _ref in range(references)
+                             for r in range(responses)],
+               reference_dof=[f'{900 + k}Z+' for k in range(references)
+                              for _r in range(responses)],
+               ordinate_dim=['acceleration/force'] * rows)
+
+
+def test_two_frfs_overlay_on_the_stage_the_second_in_gray(window, pump):
+    """Two system ID runs (Brandon, 2026-10-12: twelve references by
+    132 responses): their FRFs went to the stack, which stands down
+    past 500 records, and fell flat with nothing said. Now they pair
+    on the stage, channel by channel — response and reference — the
+    first in the tree colored by level and the second in gray, at any
+    count the stage can draw; the toggle still stands down to flat."""
+    first, second = _survey(1.0), _survey(1.3)
+    assert first.num_records + second.num_records > window.STACK_LIMIT
+    window.add_object('Run A FRF', first)
+    window.add_object('Run B FRF', second)
+    window._item_for_object('Run A FRF').setSelected(True)
+    window._item_for_object('Run B FRF').setSelected(True)
+    pump()
+    pane = window.data_pane
+    assert pane._waterfall_page is not None and \
+        pane._waterfall_page.isVisible(), 'the pair comes up in 3-D'
+    actors = pane.waterfall_plotter.actors
+    assert 'paired-loud' in actors and 'paired-quiet' in actors
+    assert window.statusBar().currentMessage() == (
+        'Run A FRF with Run B FRF in gray: 600 shared channels on the stage')
+    # the gray one is the second: its levels are Run B's, 1.3 times Run A's
+    loud = np.asarray(actors['paired-loud'].mapper.dataset.point_data['level'])
+    assert np.allclose(loud, loud[0]), 'one level throughout, Run A’s'
+    pane.waterfall_action.setChecked(False)
+    window.render_current()
+    pump()
+    assert not pane._waterfall_page.isVisible()
+    assert pane.waterfall_action.isVisible(), 'the way back stays'
+
+
+def test_one_frf_picked_in_each_run_draws_at_one_station(window, pump,
+                                                         monkeypatch):
+    """The same response and reference picked in each run's grid
+    (Brandon, 2026-10-12): stacked, the two curves stood at two depths,
+    one behind the other; paired, they lie at one station, the upper
+    row's colored over the other's gray."""
+    first, second = _survey(1.0, references=2, responses=3), \
+        _survey(1.3, references=2, responses=3)
+    window.add_object('Run A FRF', first)
+    window.add_object('Run B FRF', second)
+    pump()
+    window.tree.clearSelection()
+    for name in ('Run A FRF', 'Run B FRF'):
+        window._item_for_object(name).setExpanded(True)
+    pump()
+    window.record_grids['Run A FRF'].select_records([4])
+    window.record_grids['Run A FRF'].selection_changed.emit()
+    monkeypatch.setattr(window, '_adding_to_selection', lambda: True)
+    window.record_grids['Run B FRF'].select_records([4])
+    window.record_grids['Run B FRF'].selection_changed.emit()
+    pump()
+    actors = window.data_pane.waterfall_plotter.actors
+    assert 'paired-loud' in actors and 'paired-quiet' in actors
+    assert window.statusBar().currentMessage() == (
+        'Run A FRF with Run B FRF in gray: 1 shared channel on the stage')
+    depths = {round(float(y), 9) for name in ('paired-loud', 'paired-quiet')
+              for y in actors[name].mapper.dataset.points[:, 1]}
+    assert len(depths) == 1, 'both curves at one station'

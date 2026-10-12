@@ -243,6 +243,16 @@ gives the definition and its sources. The overlay and the line-by-line
 reading honor the 2D/3D toggle, and a mixed pair offers a quantity box
 naming what to compare.
 
+## Two FRFs together
+
+Selecting two FRF objects, one survey measured twice or two system ID
+runs, pairs them on the same stage: matched channel by channel, by
+response and reference, the upper one in the tree colored by level and
+the other drawn behind it in gray. Picking the same record in each
+object's grid (click it in one, Cmd-click it in the other; Ctrl-click
+on Windows and Linux) puts just those two curves at one station. The
+2D/3D toggle hands back to the flat curves.
+
 ## A measurement and its resynthesis
 
 Picking modes from a shape set beside measured FRFs asks the modal

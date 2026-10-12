@@ -861,10 +861,26 @@ class _Extents:
             log_abscissa: bool = False) -> None:
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
-        finite_x = x[np.isfinite(x)]
-        finite_y = y[np.isfinite(y)]
+        # the abscissa where something is drawn, never every line a
+        # curve is carried on: a specification written as a controller
+        # writes one — every line to Nyquist, zero outside its band —
+        # drew 0 to 2048 Hz around a 50 to 1500 Hz band, the zeros
+        # invisible on the log axis but counted (Brandon, 2026-10-12;
+        # the waterfall's `drawn_span`, 2026-10-09). A step curve's x is
+        # its bins' edges, one more than its levels
+        drawable = np.isfinite(y)
         if log_ordinate:
-            finite_y = np.log10(finite_y[finite_y > 0])
+            drawable &= np.where(drawable, y, 0.0) > 0
+        if x.size == y.size + 1:
+            shown = np.concatenate([x[:-1][drawable], x[1:][drawable]])
+        elif x.size == y.size:
+            shown = x[drawable]
+        else:
+            shown = x
+        finite_x = shown[np.isfinite(shown)]
+        finite_y = y[drawable]
+        if log_ordinate:
+            finite_y = np.log10(finite_y)
         if log_abscissa:
             # same reason as the ordinate: a log-x ViewBox works in
             # log10 of the data, so the extents collect log10 there too

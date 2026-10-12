@@ -185,6 +185,14 @@ both sides have to agree — a record and a target that share no
 coordinate is not a comparison, and the status line says so rather
 than drawing one against the other.
 
+### Two FRFs
+
+Two FRF objects, two runs of one survey, read on one stage: each
+channel a station, matched by response and reference, the upper one in
+the tree colored by level and the other in gray behind it. One record
+picked in each object's grid draws those two at a single station
+([Plotting](plotting.md#two-frfs-together)).
+
 ### Everything else
 
 Photographs show beside any selection that draws no data; a report

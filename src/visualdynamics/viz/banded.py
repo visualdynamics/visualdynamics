@@ -33,6 +33,7 @@ from .sinespec import _TONE_COLORS, EXCEED_OPACITY, ZONE_OPACITY, limit_zones
 from .waterfall import (
     POINT_BUDGET,
     STAGE,
+    drawn_span,
     finish_scene,
     place_camera,
     ribbon,
@@ -254,15 +255,21 @@ def add_banded_stage(plotter: Any, specification: Any,
     # lines, or a banded specification's bin edges — while the
     # exceedances below are judged against `spec_x`
     drawn_x = arrays['spec_x_drawn']
-    xs = [spread(drawn_x)] + [c['x'] for s in stations for c in s['curves']]
     zs = ([s['target'] for s in stations]
           + [v for s in stations for v in s['limits'].values()]
           + [c['z'] for s in stations for c in s['curves']])
-    finite_x = [np.asarray(x)[np.isfinite(x)] for x in xs]
     finite_z = [np.asarray(z)[np.isfinite(z)] for z in zs]
     finite_z = [z for z in finite_z if len(z)]
-    x0 = min(float(x.min()) for x in finite_x if len(x))
-    x1 = max(float(x.max()) for x in finite_x if len(x))
+    # where something is drawn, as the waterfall spans (`drawn_span`):
+    # a target written to zero outside its band drew 50 to 1500 Hz as a
+    # sliver of a 0 to 2048 Hz floor (Brandon, 2026-10-12)
+    across = spread(drawn_x)
+    lines = across[np.isfinite(across)]
+    x0, x1 = drawn_span(
+        [(across, s['target']) for s in stations]
+        + [(across, v) for s in stations for v in s['limits'].values()]
+        + [(c['x'], c['z']) for s in stations for c in s['curves']],
+        default=(float(lines.min()), float(lines.max())))
     z0 = min((float(z.min()) for z in finite_z), default=0.0)
     z1 = max((float(z.max()) for z in finite_z), default=1.0)
     xspan = (x1 - x0) or 1.0

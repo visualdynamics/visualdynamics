@@ -35,6 +35,13 @@ center, three widths and three angles, a cylinder a center, a radius, a
 length and three angles — its axis the frame's Z — and either a name.
 No element size and no element group: a solid is a shape, meshed
 later (`core.solids`). The same gizmo turns and slides it.
+
+A **section** (2026-10-12) is a shape picked — I-beam, channel, tee,
+angle, rectangular or round tube — its dimensions, named as the beam
+element's sections name them, and a length along the frame's Z. A
+**hole** is a diameter, a depth or Through, and a counterbore when
+asked for one; its center is where it enters, and it runs down the
+frame's Z.
 """
 
 from __future__ import annotations
@@ -51,29 +58,46 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..core.solids import HOLE_DIMENSIONS, SECTIONS
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 #: what the fields open on, in the display unit: a box one unit on a side
 #: in X and Y and a tenth deep, sitting on the origin's corner, a tenth
-#: per element — the old dialog's defaults, said as a center
+#: per element — the old dialog's defaults, said as a center. A solid
+#: opens centered on the origin (Brandon, 2026-10-12): it is a shape to
+#: be placed, and its own middle is the point it is placed by
 DEFAULTS = {
     'block': {'center': (0.5, 0.5, 0.05), 'widths': (1.0, 1.0, 0.1)},
     'plane': {'center': (0.5, 0.5, 0.0), 'widths': (1.0, 1.0, 0.0)},
-    'solid_block': {'center': (0.5, 0.5, 0.5), 'widths': (1.0, 1.0, 1.0)},
-    'solid_cylinder': {'center': (0.0, 0.0, 0.5), 'widths': (0.5, 0.5, 1.0)},
+    'solid_block': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
+    'solid_cylinder': {'center': (0.0, 0.0, 0.0), 'widths': (0.5, 0.5, 1.0)},
     'solid_part': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
+    'solid_section': {'center': (0.0, 0.0, 0.0), 'widths': (0.5, 1.0, 4.0)},
+    'solid_hole': {'center': (0.0, 0.0, 0.0), 'widths': (0.25, 0.25, 0.5)},
 }
+#: a section's dimensions as it opens, in the display unit, in the order
+#: `SECTIONS` names them: a foot deep in inches, a beam's proportions
+SECTION_DEFAULTS = {'I-beam': (1.0, 0.5, 0.1, 0.1), 'channel': (1.0, 0.5, 0.1, 0.1),
+                    'tee': (1.0, 1.0, 0.1, 0.1), 'angle': (1.0, 1.0, 0.1),
+                    'rectangular tube': (1.0, 0.5, 0.1), 'round tube': (1.0, 0.1)}
+SECTION_LENGTH = 4.0
+#: a hole's: a quarter across, through, a counterbore twice as wide an
+#: eighth deep when one is asked for
+HOLE_DEFAULTS = (0.25, 0.5, 0.5, 0.125)
 #: each kind's title
 TITLES = {'block': 'Add Block', 'plane': 'Add Plane',
-          'solid_block': 'Add Solid Block', 'solid_cylinder': 'Add Cylinder'}
+          'solid_block': 'Add Solid Block', 'solid_cylinder': 'Add Cylinder',
+          'solid_section': 'Add Section', 'solid_hole': 'Add Hole'}
 #: and the title when a solid already made is opened to change it (its
 #: row's pencil, 2026-10-11): a boolean has no size of its own, so its
 #: pane moves and turns it whole
 EDIT_TITLES = {'solid_block': 'Edit Solid Block', 'solid_cylinder': 'Edit Cylinder',
-               'solid_part': 'Move Part'}
+               'solid_part': 'Move Part', 'solid_section': 'Edit Section',
+               'solid_hole': 'Edit Hole'}
 #: the kinds that are solids, typed without a mesh
-SOLID_KINDS = ('solid_block', 'solid_cylinder', 'solid_part')
+SOLID_KINDS = ('solid_block', 'solid_cylinder', 'solid_part', 'solid_section',
+               'solid_hole')
 DEFAULT_SIZE = 0.1
 
 
@@ -98,6 +122,8 @@ class MeshPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.kind: str = 'block'
+        self.editing: bool = False
+        self.unit: str = ''
         self.title: QLabel = QLabel('Add Block')
         grid = panel_grid(self, self.title)
         self.group: QComboBox = QComboBox()
@@ -142,13 +168,50 @@ class MeshPanel(QWidget):
         self.length.setToolTip("Along the frame's Z axis, centered")
         grid.addWidget(self.radius_label, 7, 0)
         grid.addWidget(self.radius, 7, 1)
-        grid.addWidget(self.length_label, 8, 0)
-        grid.addWidget(self.length, 8, 1)
+        # the length in the last of the rows a section's dimensions take,
+        # so it is a cylinder's second number and a section's last
+        grid.addWidget(self.length_label, 12, 0)
+        grid.addWidget(self.length, 12, 1)
+        # a section: its shape in the width label's row, its dimensions
+        # in the widths' rows and below
+        self.shape_label: QLabel = QLabel('Shape')
+        self.shape: QComboBox = QComboBox()
+        self.shape.addItems(list(SECTIONS))
+        self.shape.setToolTip('The section run along the frame\'s Z')
+        grid.addWidget(self.shape_label, 6, 0)
+        grid.addWidget(self.shape, 6, 1)
+        self.section_labels: list[QLabel] = []
+        self.section: list[DoubleSpinBox] = []
+        for row in range(7, 11):
+            label, box = QLabel(), _box(0.0, minimum=0.0)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(box, row, 1)
+            self.section_labels.append(label)
+            self.section.append(box)
+        # a hole: its diameter, Through or a depth, and a counterbore
+        # when one is asked for
+        self.hole_labels: list[QLabel] = []
+        self.hole: list[DoubleSpinBox] = []
+        for row in (7, 9, 11, 12):
+            label, box = QLabel(), _box(0.0, minimum=0.0)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(box, row, 1)
+            self.hole_labels.append(label)
+            self.hole.append(box)
+        self.hole[0].setToolTip('Across the hole')
+        self.hole[1].setToolTip('From where it enters, down the frame\'s Z')
+        self.through: QCheckBox = QCheckBox('Through')
+        self.through.setToolTip('Through the part it is cut from, however '
+                                'thick that part is made')
+        grid.addWidget(self.through, 8, 0, 1, 2)
+        self.counterbore: QCheckBox = QCheckBox('Counterbore')
+        self.counterbore.setToolTip('Wider at the entry, for a screw\'s head')
+        grid.addWidget(self.counterbore, 10, 0, 1, 2)
         self.angle_label: QLabel = QLabel('Rotation [\u00b0]')
         self.angle_label.setEnabled(False)
-        grid.addWidget(self.angle_label, 10, 0, 1, 2)
+        grid.addWidget(self.angle_label, 13, 0, 1, 2)
         self.angles: list[DoubleSpinBox] = []
-        for row, axis in enumerate('XYZ', start=11):
+        for row, axis in enumerate('XYZ', start=14):
             box = _box(0.0, minimum=-360.0)
             box.setMaximum(360.0)
             box.setDecimals(2)
@@ -162,42 +225,47 @@ class MeshPanel(QWidget):
         self.size: DoubleSpinBox = _box(DEFAULT_SIZE, minimum=0.0)
         self.size.setToolTip('Each edge is divided into the whole number of '
                              'elements nearest this size')
-        grid.addWidget(self.size_label, 14, 0)
-        grid.addWidget(self.size, 14, 1)
+        grid.addWidget(self.size_label, 17, 0)
+        grid.addWidget(self.size, 17, 1)
         # a solid block's corner radius, in the size's row: a solid has
         # no element size, and only a block has corners
         self.corner_label: QLabel = QLabel('Corner radius')
         self.corner: DoubleSpinBox = _box(0.0, minimum=0.0)
         self.corner.setToolTip("Round the block's four edges along its own "
                                'Z: a window cut with them leaves fillets')
-        grid.addWidget(self.corner_label, 14, 0)
-        grid.addWidget(self.corner, 14, 1)
+        grid.addWidget(self.corner_label, 17, 0)
+        grid.addWidget(self.corner, 17, 1)
         self.square_button: QPushButton = QPushButton('Square Up')
         self.square_button.setToolTip(
             "Turn the box back to the geometry's axes, keeping its center")
-        grid.addWidget(self.square_button, 15, 0, 1, 2)
+        grid.addWidget(self.square_button, 18, 0, 1, 2)
         self.apart: QCheckBox = QCheckBox('Keep apart from other groups')
         self.apart.setToolTip(
             'Join only nodes of its own element group: where it touches '
             'another part it keeps nodes of its own, to be merged at the '
             'places picked with Merge Coincident Nodes')
-        grid.addWidget(self.apart, 16, 0, 1, 2)
+        grid.addWidget(self.apart, 19, 0, 1, 2)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
-        grid.addWidget(self.reading_label, 17, 0, 1, 2)
+        grid.addWidget(self.reading_label, 20, 0, 1, 2)
         buttons = QHBoxLayout()
         self.add_button: QPushButton = QPushButton('Add')
         self.add_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.close_button)
-        grid.addLayout(buttons, 18, 0, 1, 2)
-        grid.setRowStretch(19, 1)
+        grid.addLayout(buttons, 21, 0, 1, 2)
+        grid.setRowStretch(22, 1)
         commit_on_enter(*self.center, *self.widths, *self.angles, self.size,
-                        self.radius, self.length, self.corner)
+                        self.radius, self.length, self.corner, *self.section,
+                        *self.hole)
         for box in (*self.center, *self.widths, *self.angles, self.size,
-                    self.radius, self.length, self.corner):
+                    self.radius, self.length, self.corner, *self.section,
+                    *self.hole):
             box.valueChanged.connect(lambda _value: self.changed.emit())
+        self.shape.currentTextChanged.connect(self._shape_picked)
+        self.through.toggled.connect(self._hole_toggled)
+        self.counterbore.toggled.connect(self._hole_toggled)
         self.group.currentTextChanged.connect(lambda _text: self.changed.emit())
         self.apart.toggled.connect(lambda _on: self.changed.emit())
         self.add_button.clicked.connect(self.add_asked.emit)
@@ -214,9 +282,12 @@ class MeshPanel(QWidget):
         it ('solid_part' a boolean, moved and turned whole): Apply, not
         Add."""
         self.kind = kind
+        self.editing = editing
+        self.unit = unit
         solid = kind in SOLID_KINDS
         cylinder = kind == 'solid_cylinder'
         part = kind == 'solid_part'
+        section, hole = kind == 'solid_section', kind == 'solid_hole'
         self.title.setText((EDIT_TITLES if editing else TITLES)[kind])
         self.add_button.setText('Apply' if editing else 'Add')
         self.center_label.setText(f'Center [{unit}]')
@@ -226,10 +297,19 @@ class MeshPanel(QWidget):
         self.size_label.setText(f'Element size [{unit}]')
         self.group_label.setText('Name' if solid else 'Element group')
         for widget in (self.width_label, *self.widths, *self.width_axes):
-            widget.setVisible(not cylinder and not part)
-        for widget in (self.radius_label, self.radius, self.length_label,
-                       self.length):
+            widget.setVisible(not (cylinder or part or section or hole))
+        for widget in (self.radius_label, self.radius):
             widget.setVisible(cylinder)
+        for widget in (self.length_label, self.length):
+            widget.setVisible(cylinder or section)
+        # a section's shape is what it is: picked when it is added
+        for widget in (self.shape_label, self.shape):
+            widget.setVisible(section and not editing)
+        for widget in (*self.section_labels, *self.section):
+            widget.setVisible(False)
+        for widget in (*self.hole_labels, *self.hole, self.through,
+                       self.counterbore):
+            widget.setVisible(False)
         for widget in (self.size_label, self.size):
             widget.setVisible(not solid)
         for widget in (self.corner_label, self.corner):
@@ -248,19 +328,85 @@ class MeshPanel(QWidget):
         defaults = DEFAULTS[kind]
         self.set_values(center=defaults['center'], widths=defaults['widths'],
                         angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE,
-                        radius=0.25, length=1.0, corner=0.0, apart=False,
-                        quiet=True)
+                        radius=0.25, length=SECTION_LENGTH if section else 1.0,
+                        corner=0.0, apart=False, quiet=True)
+        if section:
+            self.set_values(shape='I-beam', quiet=True)
+        if hole:
+            for label, named in zip(self.hole_labels, HOLE_DIMENSIONS):
+                label.setText(f'{named[:1].upper()}{named[1:]} [{unit}]')
+            self.set_values(dimensions=(HOLE_DEFAULTS[0], 0.0, 0.0, 0.0), quiet=True)
+            for box, value in zip(self.hole[1:], HOLE_DEFAULTS[1:]):
+                box.blockSignals(True)
+                box.setValue(value)
+                box.blockSignals(False)
+
+    def _shape_rows(self) -> None:
+        """A section's rows, labeled for its shape."""
+        named = SECTIONS[self.shape.currentText()]
+        for k, (label, box) in enumerate(zip(self.section_labels, self.section)):
+            shown = k < len(named)
+            label.setVisible(shown)
+            box.setVisible(shown)
+            if shown:
+                label.setText(f'{named[k][:1].upper()}{named[k][1:]} [{self.unit}]')
+        if self.editing:
+            shape = self.shape.currentText()
+            self.title.setText(f'Edit {shape[:1].upper()}{shape[1:]}')
+
+    def _shape_picked(self, shape: str) -> None:
+        """A shape picked: its rows, opened on its proportions."""
+        if self.kind != 'solid_section' or shape not in SECTIONS:
+            return
+        self.set_values(shape=shape, quiet=True)
+        self.changed.emit()
+
+    def _hole_toggled(self, _on: bool) -> None:
+        self._hole_rows()
+        self.changed.emit()
+
+    def _hole_rows(self) -> None:
+        """A hole's rows: its depth unless it goes through, its
+        counterbore's when it has one."""
+        if self.kind != 'solid_hole':
+            return
+        shown = [True, not self.through.isChecked(), self.counterbore.isChecked(),
+                 self.counterbore.isChecked()]
+        for label, box, on in zip(self.hole_labels, self.hole, shown):
+            label.setVisible(on)
+            box.setVisible(on)
+        self.through.setVisible(True)
+        self.counterbore.setVisible(True)
 
     def values(self) -> dict:
-        """The fields as typed, in the display unit."""
-        # a cylinder's widths are its box, two diameters and its length:
-        # what the gizmo sizes itself by
-        widths = (tuple(box.value() for box in self.widths)
-                  if self.kind != 'solid_cylinder' else
-                  (2 * self.radius.value(), 2 * self.radius.value(),
-                   self.length.value()))
+        """The fields as typed, in the display unit. A section's
+        `dimensions` are its shape's, in order; a hole's its diameter,
+        its depth (zero through) and its counterbore's two (zeros,
+        none), as `edit_solid` takes them."""
+        shape = self.shape.currentText()
+        section = tuple(box.value() for box in self.section[:len(SECTIONS[shape])])
+        through, bored = self.through.isChecked(), self.counterbore.isChecked()
+        hole = (self.hole[0].value(), 0.0 if through else self.hole[1].value(),
+                self.hole[2].value() if bored else 0.0,
+                self.hole[3].value() if bored else 0.0)
+        # what the gizmo sizes itself by: a cylinder's box, two diameters
+        # and its length, a section's, a hole's as wide as its widest
+        if self.kind == 'solid_cylinder':
+            widths = (2 * self.radius.value(), 2 * self.radius.value(),
+                      self.length.value())
+        elif self.kind == 'solid_section':
+            across = {'round tube': (section[0], section[0]),
+                      'angle': section[:2], 'rectangular tube': section[:2]}.get(
+                shape, (section[1], section[0]))
+            widths = (*across, self.length.value())
+        elif self.kind == 'solid_hole':
+            wide = max(hole[0], hole[2])
+            widths = (wide, wide, hole[1] or hole[0])
+        else:
+            widths = tuple(box.value() for box in self.widths)
         return {'center': tuple(box.value() for box in self.center),
-                'widths': widths,
+                'widths': widths, 'shape': shape,
+                'dimensions': hole if self.kind == 'solid_hole' else section,
                 'radius': self.radius.value(), 'length': self.length.value(),
                 'corner': self.corner.value(),
                 'angles': tuple(box.value() for box in self.angles),
@@ -271,11 +417,12 @@ class MeshPanel(QWidget):
     def set_values(self, quiet: bool = False, **values) -> None:
         """Fill fields by name — center=(x, y, z), widths=(x, y, z),
         angles=(x, y, z) in degrees, size=..., radius=..., length=...,
-        corner=..., group=..., apart=...; how a test
+        corner=..., shape=..., dimensions=(...), group=..., apart=...;
+        a hole's dimensions as `values` gives them; how a test
         types, and how the gizmo writes the center and the angles back.
         `quiet` fills them without a `changed`."""
         boxes = [*self.center, *self.widths, *self.angles, self.size,
-                 self.radius, self.length, self.corner]
+                 self.radius, self.length, self.corner, *self.section, *self.hole]
         if quiet:
             for box in boxes:
                 box.blockSignals(True)
@@ -283,7 +430,32 @@ class MeshPanel(QWidget):
             self.apart.blockSignals(True)
         try:
             for key, value in values.items():
-                if key == 'group':
+                if key == 'shape':
+                    self.shape.blockSignals(True)
+                    self.shape.setCurrentText(value)
+                    self.shape.blockSignals(False)
+                    if not self.editing:
+                        for box, number in zip(self.section, SECTION_DEFAULTS[value]):
+                            box.setValue(number)
+                    self._shape_rows()
+                elif key == 'dimensions' and self.kind == 'solid_hole':
+                    diameter, depth, wide, deep = value
+                    self.hole[0].setValue(diameter)
+                    if depth:
+                        self.hole[1].setValue(depth)
+                    if wide:
+                        self.hole[2].setValue(wide)
+                        self.hole[3].setValue(deep)
+                    for check, on in ((self.through, not depth),
+                                      (self.counterbore, bool(wide))):
+                        check.blockSignals(True)
+                        check.setChecked(on)
+                        check.blockSignals(False)
+                    self._hole_rows()
+                elif key == 'dimensions':
+                    for box, number in zip(self.section, value):
+                        box.setValue(number)
+                elif key == 'group':
                     self.group.setCurrentText(value)
                 elif key == 'apart':
                     self.apart.setChecked(bool(value))

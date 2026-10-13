@@ -117,7 +117,8 @@ def test_the_project_builds_a_model_from_nothing():
     assert project[name].num_nodes == 0 and project[name].length_unit == 'in'
     assert [verb for verb, _ in project.verbs(name)] == [
         'generate_rigid_body_modes', 'add_plane', 'add_block',
-        'add_solid_block', 'add_solid_cylinder', 'set_view'], \
+        'add_solid_block', 'add_solid_cylinder', 'add_solid_section', 'add_solid_hole',
+        'set_view'], \
         'an empty geometry has no elements to merge or element groups to solve'
     first = project.add_plane(name, (0, 0, 0), (4, 0, 0), (0, 2, 0), 1,
                               'box', unit='in')

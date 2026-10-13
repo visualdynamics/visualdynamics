@@ -190,3 +190,56 @@ def test_only_solids_on_one_set_of_nodes_are_one_cell():
     g.add_elements([list(range(1, 9)), list(range(8, 0, -1))], [115, 115], [1, 1])
     g.add_elements([[1, 2], [2, 1]], [21, 21], [2, 2])
     assert g.duplicate_elements() == {2: 1}
+
+
+def test_deleting_elements_with_their_nodes_keeps_shared_and_free_nodes():
+    """With `nodes`, the nodes only the deleted elements used go with them
+    — an element group's rule, now the app's for elements and families
+    too (Brandon, 2026-10-12: a part's bricks deleted from the Hexes row
+    left its nodes). A node another element uses stays; so does one no
+    element ever used, a measurement point."""
+    import numpy as np
+
+    from visualdynamics.core.geometry import Geometry
+
+    g = Geometry(np.arange(1, 6), np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0],
+                                            [3, 0, 0], [9, 9, 9]], dtype=float))
+    g.add_elements([[1, 2], [2, 3], [3, 4]], [21, 21, 21], [1, 1, 1])
+    import copy
+
+    first, second, _third = (int(e) for e in g.elem_id)
+    plain = copy.deepcopy(g)
+    report = g.delete_elements([first, second], nodes=True)
+    assert report == {'elements': 2, 'nodes': 2}
+    assert sorted(int(n) for n in g.node_id) == [3, 4, 5], \
+        '1 and 2 went; 3 stays for the third line, 5 for no element'
+    assert plain.delete_elements([first]) == {'elements': 1}
+    assert plain.num_nodes == 5, 'without it, every node stays'
+
+
+def test_the_project_keeps_the_nodes_its_data_is_measured_at():
+    """`Project.delete_elements` and `delete_element_groups` take the nodes
+    only the deleted elements used, but not one a data object names in
+    its DOFs: a test geometry's measurement points outlive its panels."""
+    import numpy as np
+
+    import visualdynamics
+    from visualdynamics.core.geometry import Geometry
+    from visualdynamics.core.shapes import ShapeSet
+
+    def project():
+        p = visualdynamics.Project('p')
+        g = Geometry(np.arange(1, 5), np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0],
+                                                [0, 1, 0]], dtype=float))
+        g.add_elements([[1, 2, 3, 4]], [44], [1])
+        p.add('Geometry', g)
+        p.add('Modes', ShapeSet([10.0], [0.01], ['1Z+', '3X+'], np.ones((1, 2))))
+        return p, g
+
+    p, g = project()
+    assert p.delete_elements('Geometry', [int(g.elem_id[0])]) == {'elements': 1, 'nodes': 2}
+    assert sorted(int(n) for n in g.node_id) == [1, 3], 'measured at, kept'
+    assert p.journal[-1] == "project.delete_elements('Geometry', [1])"
+    p, g = project()
+    report = p.delete_element_groups('Geometry', [int(g.group_id[0])])
+    assert report['nodes'] == 2 and sorted(int(n) for n in g.node_id) == [1, 3]

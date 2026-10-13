@@ -1297,6 +1297,30 @@ def _draw_solid_cylinder(painter, color):
     painter.drawEllipse(QRectF(14, 6, 36, 16))
 
 
+def _draw_solid_section(painter, color):
+    """An I-beam's cross-section, shaded: a section run along its axis
+    (Add Section, 2026-10-12)."""
+    outline = [QPointF(10, 8), QPointF(54, 8), QPointF(54, 18), QPointF(37, 18),
+               QPointF(37, 46), QPointF(54, 46), QPointF(54, 56), QPointF(10, 56),
+               QPointF(10, 46), QPointF(27, 46), QPointF(27, 18), QPointF(10, 18)]
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(_faded(color, 110))
+    painter.drawPolygon(outline)
+
+
+def _draw_solid_hole(painter, color):
+    """A counterbored hole cut in half through a plate: the plate shaded
+    either side, the step at its top (Add Hole, 2026-10-12)."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(_faded(color, 110))
+    left = [QPointF(4, 12), QPointF(18, 12), QPointF(18, 26), QPointF(26, 26),
+            QPointF(26, 56), QPointF(4, 56)]
+    right = [QPointF(60, 12), QPointF(46, 12), QPointF(46, 26), QPointF(38, 26),
+             QPointF(38, 56), QPointF(60, 56)]
+    painter.drawPolygon(left)
+    painter.drawPolygon(right)
+
+
 def _two_circles():
     return QRectF(6, 14, 34, 34), QRectF(24, 14, 34, 34)
 
@@ -1916,6 +1940,7 @@ def control_icon(name: str) -> QIcon:
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
      'align_meshes': _draw_align_meshes,
      'solid_block': _draw_solid_block, 'solid_cylinder': _draw_solid_cylinder,
+     'solid_section': _draw_solid_section, 'solid_hole': _draw_solid_hole,
      'solid_union': _draw_solid_union, 'solid_subtract': _draw_solid_subtract,
      'solid_intersect': _draw_solid_intersect,
      'solid_separate': _draw_solid_separate,

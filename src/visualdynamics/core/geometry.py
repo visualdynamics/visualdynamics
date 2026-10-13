@@ -2263,7 +2263,7 @@ class Geometry:
         return sorted((row for row, value in enumerate(id_array)
                        if int(value) in wanted), reverse=True)
 
-    def delete_groups(self, group_ids: Ids) -> dict[str, int]:
+    def delete_groups(self, group_ids: Ids, keep: Ids = ()) -> dict[str, int]:
         """Remove element groups with what they hold: their elements, and the
         nodes no element outside them uses.
 
@@ -2278,6 +2278,8 @@ class Geometry:
         ----------
         group_ids : int or sequence of int
             The identifiers, one or many.
+        keep : sequence of int, optional
+            Nodes that stay whatever uses them (`delete_elements`).
 
         Returns
         -------
@@ -2285,25 +2287,17 @@ class Geometry:
             How many element groups, elements and nodes went.
         """
         wanted = {int(group) for group in group_ids}
-        keep = ~np.isin(self.group_id, list(wanted))
-        removed = int((~keep).sum())
+        staying = ~np.isin(self.group_id, list(wanted))
+        removed = int((~staying).sum())
         if not removed:
             return {'groups': 0, 'elements': 0, 'nodes': 0}
-        inside, outside = set(), set()
-        doomed = []
-        for row, conn in enumerate(self.elem_conn):
-            nodes = {int(n) for n in conn}
-            if int(self.elem_group[row]) in wanted:
-                inside |= nodes
-                doomed.append(int(self.elem_id[row]))
-            else:
-                outside |= nodes
-        self.delete_elements(doomed)
-        gone = self.delete_nodes(sorted(inside - outside))
-        self.group_name = [name for name, k in zip(self.group_name, keep) if k]
+        doomed = [int(e) for e, group in zip(self.elem_id, self.elem_group)
+                  if int(group) in wanted]
+        gone = self.delete_elements(doomed, nodes=True, keep=keep)
+        self.group_name = [name for name, k in zip(self.group_name, staying) if k]
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
-        self.group_id = self.group_id[keep]
+        self.group_id = self.group_id[staying]
         return {'groups': removed, 'elements': len(doomed),
                 'nodes': gone['nodes']}
 
@@ -2370,13 +2364,29 @@ class Geometry:
         return {'into': into, 'groups': len(others),
                 'elements': int(moved.sum())}
 
-    def delete_elements(self, elem_ids: Ids) -> dict[str, int]:
+    def delete_elements(self, elem_ids: Ids, nodes: bool = False,
+                        keep: Ids = ()) -> dict[str, int]:
         """Remove elements by id. Ids that are not there are ignored.
+
+        With `nodes`, the nodes only these elements used go with them —
+        what deleting an element group does (`delete_groups`), and what
+        deleting elements in the app does: a part's bricks deleted from
+        the Hexes row left every node of the part standing (Brandon,
+        2026-10-12). A node another element uses stays, and so does one
+        in `keep`: the project keeps the nodes its data is measured or
+        solved at (`Project.delete_elements`), so a test geometry's
+        panels redrawn leave its measurement points. Off by default,
+        since the merge removes the links it collapses and remaps their
+        nodes after.
 
         Parameters
         ----------
         elem_ids : int or sequence of int
             The identifiers, one or many.
+        nodes : bool, default False
+            Also remove the nodes only these elements used.
+        keep : sequence of int, optional
+            Nodes never removed that way.
 
         Returns
         -------
@@ -2384,11 +2394,22 @@ class Geometry:
             How many of each kind were removed, including the
             dependents that went with them.
         """
+        if nodes:
+            doomed = {int(e) for e in np.atleast_1d(elem_ids)}
+            inside, outside = set(), set()
+            for element, conn in zip(self.elem_id, self.elem_conn):
+                (inside if int(element) in doomed else outside).update(
+                    int(n) for n in conn)
+            report = self.delete_elements(sorted(doomed))
+            spared = {int(n) for n in np.atleast_1d(keep)}
+            gone = self.delete_nodes(sorted(inside - outside - spared))
+            return {**report, 'nodes': gone['nodes']}
         rows = self._rows_for(elem_ids, self.elem_id)
-        for row in rows:
-            del self.elem_conn[row]
         keep = np.ones(len(self.elem_id), dtype=bool)
         keep[rows] = False
+        # rebuilt once: deleting row by row shifted every later row each
+        # time, quadratic, and meshing a part again deletes its whole mesh
+        self.elem_conn = [conn for conn, kept in zip(self.elem_conn, keep) if kept]
         self.elem_id = self.elem_id[keep]
         self.elem_type = self.elem_type[keep]
         self.elem_color = self.elem_color[keep]

@@ -34,7 +34,7 @@ THEORY = {
     'core.averaging': 'the averaged periodogram and its windows',
     'core.kurtosis': 'the fourth standardized moment',
     'core.correlate': 'the modal assurance criterion',
-    'core.fem': 'the beam element and its eigensolution',
+    'core.fem': 'the beam, plate and solid elements and their eigensolution',
     'core.modal_fit': 'the single-degree-of-freedom residue fit',
     'core.filters': 'filtering, integration and the drift it invents',
     'core.sine_tracking': 'the tracking filter: complex demodulation '

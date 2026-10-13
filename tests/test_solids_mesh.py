@@ -224,6 +224,19 @@ def test_the_pane_previews_the_bricks_and_meshes(window, pump):
     assert 'meshed into 3,840 bricks' in window.statusBar().currentMessage()
     assert window.project.journal[-1] == (
         "project.mesh_solids('Part', [3], 0.1, unit='in')")
+    # meshed again: the pane says what it replaces, and the status what it did
+    window.tree.clearSelection()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel.size.setValue(0.1)
+    pump()
+    assert panel.reading_label.text().endswith(
+        'It replaces the 3,840 bricks meshed before.')
+    panel.mesh_button.click()
+    pump()
+    assert 'replacing the 3,840 meshed before' in window.statusBar().currentMessage()
+    assert len(geometry.elem_conn) == 3840
 
 
 def test_a_circle_inside_one_material_draws_no_boundary():
@@ -390,13 +403,14 @@ def test_a_washer_about_a_hole_is_one_ring(size, between):
         (4 - np.pi * 0.01) * 0.25 + np.pi * (0.04 - 0.01) * 0.03, rel=0.005)
 
 
-@pytest.mark.parametrize('x, ring', [(0.8, True), (0.84, False)])
+@pytest.mark.parametrize('x, ring', [(0.8, True), (0.84, True), (0.9, False)])
 def test_a_ring_stops_at_the_parts_edge_with_room_for_a_layer(x, ring):
     """A hole near a plate's edge: the rectangle about it stops at the
-    edge, a ring if a seventh of the radius is left for a layer of
-    bricks (the Frame-Wing's screws, a quarter inch from its wing's
-    edge), else the rim pulled round from the grid — its spacing as
-    uneven as the staircase it came from, no brick inside out."""
+    edge, and the hole is a ring while it fits inside the plate — 0.05
+    in from the edge, or 0.01 (Brandon, 2026-10-12: a leg nearly flush
+    with a table's corner), the circle held a tenth of a brick in where
+    it comes closer. One breaking out through the edge is pulled round
+    from the grid, no brick inside out."""
     project, name, geometry = _project()
     plate = project.add_solid_block(name, (0, 0, 0.125), (2, 2, 0.25), unit='in')
     hole = project.add_solid_cylinder(name, (x, 0, 0.125), 0.15, 1.0, unit='in')
@@ -422,8 +436,10 @@ def test_holes_too_close_for_rings_are_pulled_round():
 def test_a_face_clipping_a_rings_rectangle_keeps_the_grid():
     """A window whose corner reaches into the rectangle a ring about a
     hole would take, outside the band the ring samples: the grid's own
-    bricks there are seen to be empty, so the hole is pulled round from
-    the grid and the window's faces stay on its lines, exact."""
+    bricks there are seen to be empty, so that rectangle is refused and
+    the ring takes one clear of the window (2026-10-12; it was pulled
+    round from the grid before) — and the window's faces stay on the
+    grid's lines, exact."""
     project, name, geometry = _project()
     plate = project.add_solid_block(name, (0, 0, 0.125), (2, 2, 0.25), unit='in')
     hole = project.add_solid_cylinder(name, (0, 0, 0.125), 0.3, 1.0, unit='in')
@@ -431,7 +447,7 @@ def test_a_face_clipping_a_rings_rectangle_keeps_the_grid():
                                      unit='in')
     part = project.combine_solids(name, 'subtract', [plate, hole, window], 'plate')
     mesh, made = solids.extrusion_mesh(geometry, [part], 0.1 * INCH)
-    assert made['rings'] == 0 and made['rounded'] > 0
+    assert made['rings'] == 1
     # no node inside the window, so its faces are the grid's lines
     xyz = mesh.node_xyz / INCH
     assert not ((xyz[:, 0] > 0.32 + 1e-9) & (xyz[:, 1] > 0.32 + 1e-9)).any()
@@ -544,3 +560,169 @@ def test_the_pane_keeps_two_parts_apart_when_asked(window, pump):
     pump()
     assert window.project.journal[-1] == (
         "project.mesh_solids('Part', [1, 2], 0.5, unit='in', parts_apart=True)")
+
+
+@pytest.mark.parametrize('radius', [4.0, 4.5])
+def test_a_large_hole_in_a_table_is_a_ring_short_of_its_legs(radius):
+    """Brandon's table (2026-10-12): a 12 in top on four 1 in legs at
+    its corners, a large hole through the top. The ring's rectangle a
+    quarter radius out reached the legs' columns — the grid's bricks
+    there are leg in the leg layers — and the hole was pulled round from
+    the grid, toothed. The largest rectangle short of the legs is taken
+    instead, half an inch of top left between hole and leg at 4.5 in."""
+    project, name, geometry = _project()
+    top = project.add_solid_block(name, (0, 0, 0), (12, 12, 0.5), name='table',
+                                  unit='in')
+    legs = [project.add_solid_block(name, (sx * 5.5, sy * 5.5, -3.25), (1, 1, 6),
+                                    unit='in')
+            for sx in (-1, 1) for sy in (-1, 1)]
+    hole = project.add_solid_cylinder(name, (0, 0, 0), radius, 1.0, unit='in')
+    table = project.combine_solids(name, 'subtract', [
+        project.combine_solids(name, 'union', [top, *legs]), hole])
+    mesh, made = solids.extrusion_mesh(geometry, [table], 0.25 * INCH)
+    assert made['rings'] == 1
+    _on, uneven, inside = _on_circle(mesh, (0, 0), radius, 0.25)
+    assert inside == 0 and uneven < 1.01
+    assert (_corner_volumes(mesh) > 0).all()
+
+
+def _table(project, name, legs=True):
+    top = project.add_solid_block(name, (0, 0, 0), (12, 12, 0.5), name='table', unit='in')
+    feet = [project.add_solid_block(name, (sx * 5.5, sy * 5.5, -3.25), (1, 1, 6), unit='in')
+            for sx in (-1, 1) for sy in (-1, 1)] if legs else []
+    hole = project.add_solid_cylinder(name, (0, 0, 0), 3.0, 1.0, unit='in')
+    whole = project.combine_solids(name, 'union', [top, *feet]) if feet else top
+    return project.combine_solids(name, 'subtract', [whole, hole]), top, feet, hole
+
+
+def test_meshing_a_part_again_replaces_its_earlier_mesh():
+    """Brandon's table (2026-10-12): meshed with its legs, the legs taken
+    off, meshed again — the new bricks that landed on old ones were left
+    out as already there, and the legs' bricks stayed. Now the part's
+    earlier bricks go first, with the nodes only they used: the table is
+    its top alone, its element group and material kept."""
+    from visualdynamics.core.fem import GroupProperties, material
+
+    project, name, geometry = _project()
+    table, top, feet, hole = _table(project, name)
+    first = project.mesh_solids(name, [table], 0.5, unit='in')
+    assert first['replaced'] == 0
+    group = int(geometry.group_id[0])
+    geometry.group_properties[group] = GroupProperties(material('6061-T6'))
+    project.separate_solids(name, [table])
+    project.separate_solids(name, [solids.used_by(geometry)[top]])
+    project.delete_solids(name, feet)
+    again = project.combine_solids(name, 'subtract', [top, hole])
+    found = project.mesh_solids(name, [again], 0.5, unit='in')
+    assert found['replaced'] == first['bricks']
+    assert len(geometry.elem_id) == found['bricks'] < first['bricks']
+    used = {int(n) for conn in geometry.elem_conn for n in conn}
+    assert used == {int(n) for n in geometry.node_id}, 'no node left from the legs'
+    assert (geometry.node_xyz[:, 2] / INCH).min() >= -0.25 - 1e-9, 'nothing below the top'
+    assert list(geometry.group_id) == [group] and \
+        geometry.group_properties[group].material.name == '6061-T6'
+
+
+def test_meshing_again_keeps_the_nodes_data_is_measured_at():
+    """The earlier mesh's nodes go unless data uses them — the rule
+    deleting elements follows (2026-10-12)."""
+    from visualdynamics.core.shapes import ShapeSet
+
+    project, name, geometry = _project()
+    table, top, feet, hole = _table(project, name)
+    project.mesh_solids(name, [table], 0.5, unit='in')
+    row = int(np.argmin(geometry.node_xyz[:, 2]))
+    lowest, where = int(geometry.node_id[row]), geometry.node_xyz[row].copy()
+    project.add('Modes', ShapeSet([10.0], [0.01], [f'{lowest}Z+'], np.ones((1, 1))))
+    project.separate_solids(name, [table])
+    project.separate_solids(name, [solids.used_by(geometry)[top]])
+    project.delete_solids(name, feet)
+    project.mesh_solids(name, [project.combine_solids(name, 'subtract', [top, hole])],
+                        0.5, unit='in')
+    # the same node, where it was: an id alone could be a new node's,
+    # numbered from one again once every old node had gone
+    rows = np.flatnonzero(geometry.node_id == lowest)
+    assert len(rows) == 1 and np.allclose(geometry.node_xyz[rows[0]], where), \
+        'measured at, kept'
+    assert (geometry.node_xyz[:, 2] < -0.25 * INCH - 1e-9).sum() == 1, 'and only it'
+
+
+@pytest.mark.parametrize('size', [0.25, 0.5])
+def test_a_hole_nearly_as_wide_as_the_table_steps_round_its_legs(size):
+    """An 11 in hole in the 12 in top (Brandon, 2026-10-12): every
+    rectangle round it took in the legs at its corners, and the hole was
+    pulled round from the grid, toothed. The ring's outline steps round
+    the legs instead — the grid's cells inside a disk clear of them — so
+    the hole is round, no brick inside out, and the legs keep their
+    square faces: their bricks are four 1 by 1 by 6 in posts exactly."""
+    project, name, geometry = _project()
+    top = project.add_solid_block(name, (0, 0, 0), (12, 12, 0.5), name='table', unit='in')
+    legs = [project.add_solid_block(name, (sx * 5.5, sy * 5.5, -3.25), (1, 1, 6),
+                                    unit='in')
+            for sx in (-1, 1) for sy in (-1, 1)]
+    hole = project.add_solid_cylinder(name, (0, 0, 0), 5.5, 1.0, unit='in')
+    table = project.combine_solids(name, 'subtract', [
+        project.combine_solids(name, 'union', [top, *legs]), hole])
+    mesh, made = solids.extrusion_mesh(geometry, [table], size * INCH)
+    assert made['rings'] == 1
+    _on, _uneven, inside = _on_circle(mesh, (0, 0), 5.5, 0.25)
+    assert inside == 0
+    assert (_corner_volumes(mesh) > 0).all()
+    points = _points(mesh)
+    below = points[:, :, 2].max(axis=1) <= -0.25 + 1e-9
+    posts = mesh.__class__(node_id=mesh.node_id, node_xyz=mesh.node_xyz,
+                           elem_conn=[mesh.elem_conn[i] for i in np.flatnonzero(below)],
+                           elem_type=[115] * int(below.sum()))
+    assert _volume(posts) == pytest.approx(4 * 6.0)
+
+
+def test_a_stepped_outline_leaves_a_tenth_of_a_brick():
+    """The stepped outline is not held in from what it comes near as a
+    rectangle is, so it needs that room: a hole 0.01 in short of the
+    table's edges would put bricks of a few thousandths there, and it
+    is pulled round from the grid instead, no brick edge under a tenth
+    of a brick (2026-10-12)."""
+    project, name, geometry = _project()
+    table, _top, _feet, hole = _table(project, name)
+    project.edit_solid(name, hole, radius=5.99, unit='in')
+    mesh, made = solids.extrusion_mesh(geometry, [table], 0.25 * INCH)
+    assert made['rings'] == 0
+    assert _edge_lengths(mesh)[:, :8].min() > 0.025
+
+
+@pytest.mark.parametrize('inset', [0.25, 0.05, 0.0])
+def test_round_legs_are_round_up_to_flush_with_the_tables_corners(inset):
+    """A 9 in hole in the 12 in top on four 1 in round legs (Brandon,
+    2026-10-12). A leg 0.05 in from the top's edges was refused its ring
+    for want of room, and a flush one, touching two edges, was pulled
+    round from the grid, faceted. Now each leg is a ring: exactly round
+    where it has a tenth of a brick of room, and held that far in from
+    an edge it touches, flattened by no more there — no node outside
+    its circle, the hole round past the legs, no brick inside out."""
+    project, name, geometry = _project()
+    at = 5.5 - inset
+    top = project.add_solid_block(name, (0, 0, 0), (12, 12, 0.5), name='table', unit='in')
+    legs = [project.add_solid_cylinder(name, (sx * at, sy * at, -3.25), 0.5, 6.0,
+                                       unit='in')
+            for sx in (-1, 1) for sy in (-1, 1)]
+    hole = project.add_solid_cylinder(name, (0, 0, 0), 4.5, 1.0, unit='in')
+    table = project.combine_solids(name, 'subtract', [
+        project.combine_solids(name, 'union', [top, *legs]), hole])
+    mesh, made = solids.extrusion_mesh(geometry, [table], 0.25 * INCH)
+    assert made['rings'] == 5
+    _on, _uneven, inside = _on_circle(mesh, (0, 0), 4.5, 0.25)
+    assert inside == 0
+    assert (_corner_volumes(mesh) > 0).all()
+    xyz = mesh.node_xyz / INCH
+    for z in (-1.0, -0.25, 0.25):
+        layer = xyz[np.isclose(xyz[:, 2], z)]
+        far = np.hypot(layer[:, 0] - at, layer[:, 1] - at)
+        if z < -0.25:
+            # below the top, the leg alone
+            assert far[far < 1.0].max() < 0.5 + 1e-9, 'no node outside the leg'
+        circle = far[(far > 0.45) & (far < 0.5 + 1e-9)]
+        if inset >= 0.05:
+            assert np.allclose(circle, 0.5, atol=1e-9), 'exactly round'
+        else:
+            assert circle.min() > 0.5 - 0.025 - 1e-9 and (np.abs(circle - 0.5) < 1e-9).sum() >= 12
+

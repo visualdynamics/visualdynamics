@@ -1,33 +1,46 @@
-"""A beam finite element model, and the eigensolution it gives.
+"""Beams, plates and solids, and the eigensolution they give.
 
 visualdynamics is an analysis toolset, so this is deliberately the smallest
 modeling capability that produces something worth analyzing: three-dimensional
-two-node beams, flat-shell plates — four-node rectangles (MITC4) and
-three-node triangles (MITC3) — and lumped masses, assembled into mass and
-stiffness matrices and solved for real normal modes. It exists because a demonstration needs a
+two-node beams; flat-shell plates — four-node rectangles (MITC4) and
+three-node triangles (MITC3); solids — eight-node hexahedra with incompatible
+modes, six-node wedges and four-node tetrahedra; and lumped masses, discrete
+springs, rigid links and grounds, assembled into mass and stiffness matrices
+and solved for real normal modes, dense for a small model and sparse past
+`SPARSE_ABOVE` degrees of freedom. It exists because a demonstration needs a
 *truth* model — a dense analytical answer the measured one can be compared
 against — and because building one should not require reaching for another
 package.
 
 There are three ways in. Build a structure member by member, as the
-example below does. Give a geometry's element groups their properties — a material
-and a thickness for an element group of plates, a material and a section for an
-element group of beams (`GroupProperties`) — and let `from_geometry` build every
-element as the element it is, which is how an exodus file means a
-structure and the way a user builds a model of a simple article. Or draw
-a shape as a surface mesh and let `from_geometry`, given one material and
-one section, put a member along every edge of it and share the mass over
-its nodes: the shorter road from any geometry to *some* set of modes, and
-how `visualdynamics.demo.drone` is built throughout.
+example below does. Give a geometry's element groups their properties
+(`GroupProperties`) — a material and a thickness for an element group of
+plates, a material and a section for one of beams, a material alone for one
+of solids, a mass for point masses, a stiffness for springs, the directions
+held for ground — and let `from_geometry` build every element as the element
+it is, which is how an exodus file means a structure and the way a user
+builds a model of a simple article. Or draw a shape as a surface mesh and
+let `from_geometry`, given one material and one section, put a member along
+every edge of it and share the mass over its nodes: the shorter road from
+any geometry to *some* set of modes, and how `visualdynamics.demo.drone` is
+built throughout.
 
-What it is not: a general finite element code. The plate is rectangular
-only — a skewed or warped quad is refused rather than solved badly — and
-there are no curved shells, no solids, no constraints beyond fixing degrees
-of freedom, and no static solution. Wiring a surface mesh's edges with
-`from_geometry` makes a grillage of beams, not plates, which is a real
-modeling choice with a known cost rather than an approximation hidden
-inside an element: it answers what order of mode density and what mode
-families a shape has, and it does not pretend to be shell theory.
+What it is not: a general finite element code. The quad plate is rectangular
+only — a skewed or warped quad is refused rather than solved badly, because
+the MITC4 tying assumes the element's natural axes run along its sides
+(`Plate`) — while the triangle takes any flat shape it is given. Every shell
+is flat, so a curved surface is a faceted one. A solid carries three
+translations per node and no rotations, and the linear wedge and tetrahedron
+lock in bending where the brick does not (`Solid`). The constraints are
+holding degrees of freedom (`fixed`, `add_ground`) and rigid links, which the
+eigensolution eliminates exactly rather than approximating with a stiff
+member (`constraint_transform`); there is no general multipoint constraint,
+and no static solution: modes are the one answer this gives. Wiring a
+surface mesh's edges with `from_geometry` makes a grillage of beams, not
+plates, which is a real modeling choice with a known cost rather than an
+approximation hidden inside an element: it answers what order of mode
+density and what mode families a shape has, and it does not pretend to be
+shell theory.
 
 Everything here is SI, because the mass and stiffness matrices are the one
 place in visualdynamics where several dimensions have to be consistent with each
@@ -48,7 +61,7 @@ conversion happens once, at the boundary, as it does everywhere else.
     shapes = model.eigensolution(maximum_frequency=2000,
                                  fixed=['100'], damping=0.01)
 
-The element formulation is Euler-Bernoulli with a consistent mass matrix:
+The beam is Euler-Bernoulli with a consistent mass matrix:
 no shear flexibility and no section rotary inertia, which is right while a
 member is slender (length more than about ten times its depth) and
 progressively optimistic when it is not. A drone arm at 180 mm long and
@@ -58,7 +71,9 @@ frequencies there read high.
 References
 ----------
 The Euler-Bernoulli beam element and its consistent mass matrix are
-textbook; these are where they are set out.
+textbook, and so is the eigenproblem; the first three are where they are
+set out. The plate and brick formulations each come from a paper, the
+last four.
 
 1. Przemieniecki, J. S. (1968). *Theory of Matrix Structural
    Analysis*. McGraw-Hill.
@@ -70,6 +85,22 @@ textbook; these are where they are set out.
 3. Craig, R. R., & Kurdila, A. J. (2006). *Fundamentals of Structural
    Dynamics*, 2nd ed. Wiley. The generalized symmetric eigenproblem
    this solves, and normalization to unit modal mass.
+4. Dvorkin, E. N., & Bathe, K.-J. (1984). A continuum mechanics based
+   four-node shell element for general non-linear analysis.
+   *Engineering Computations*. The MITC4 assumed transverse shear,
+   tied at the edge midpoints.
+5. Lee, P.-S., & Bathe, K.-J. (2004). Development of MITC isotropic
+   triangular shell finite elements. *Computers & Structures*. The
+   MITC3 triangle, tied along its edges.
+6. Wilson, E. L., Taylor, R. L., Doherty, W. P., & Ghaboussi, J.
+   (1973). Incompatible displacement models. In *Numerical and
+   Computer Methods in Structural Mechanics*. Academic Press.
+   The bubble modes that let a trilinear brick bend.
+7. Taylor, R. L., Beresford, P. J., & Wilson, E. L. (1976). A
+   non-conforming element for stress analysis. *International Journal
+   for Numerical Methods in Engineering*. Those
+   modes' strains from the centroid's Jacobian, so a distorted brick
+   still passes the patch test.
 """
 
 from __future__ import annotations

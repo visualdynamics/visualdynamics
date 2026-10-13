@@ -178,10 +178,17 @@ goes onto).
 **Solids** (2026-10-11) are the shapes a part is built from before it
 is meshed, listed on a geometry's **Solids** row, which is there before
 the first one. *Add Solid Block* and *Add Cylinder* on that row open
-the add pane on a solid: a block is a center, three widths and three
+the add pane on a solid centered on the origin: a block is a center, three widths and three
 angles, a cylinder a center, a radius, a length along its own Z and
 three angles, and either one a name; the pane draws the shape as it is
-typed and the gizmo turns and slides it. Pick two parts or more in the
+typed and the gizmo turns and slides it. *Add Section* adds an
+I-beam, a channel, a tee, an angle, a rectangular or a round tube, run a
+length along its own Z and sized by the dimensions the beam element's
+sections take; *Add Hole* adds a hole to subtract from a part, entered
+at its center and running down its own Z a depth, or through the part
+it is cut from however thick that is made, with a counterbore when one
+is asked for (2026-10-12). Each is one solid, its pencil changing its
+dimensions. Pick two parts or more in the
 tree and the bar offers *Union*, *Subtract* and *Intersect*: Subtract
 takes the others from the first one in the tree, which its tooltip
 names, so a plate with its holes is the plate added first, its
@@ -224,8 +231,11 @@ bosses and inserts are round: about each circle with room around it
 the grid is replaced by a ring mesh, the circle's nodes evenly spaced
 on it and layers of bricks out to the grid, with a square core in the
 middle where the circle is filled; circles about one center, a washer
-about a hole, are one ring. Where there is no room (a hole close to
-another, or to a face) and at a rounded corner, the grid's nodes on
+about a hole, are one ring. The ring's outline is a rectangle of the
+grid's cells where one fits, and steps round whatever is in the way
+where none does (a hole nearly as wide as a table's top, beside its
+legs). Where there is no room (a hole close to another, or to a face)
+and at a rounded corner, the grid's nodes on
 the rim are pulled onto the circle instead, a pull that would turn a
 brick inside out left undone. Parts meshed together share nodes where they
 touch (a frame and the inserts in its holes), and *Keep apart from
@@ -236,7 +246,11 @@ it touches another, so parts to be bolted lie node on node, ready for
 *Merge Coincident Nodes* (the BARC's box, channels and beam). The pane opens on half the thinnest feature, draws the
 bricks as the size is typed, and says how many there are and the
 shortest edge; *Mesh* adds them and puts the pane away. The solids
-stay, to be meshed again or deleted. From a script,
+stay, to be meshed again or deleted. Meshed again, a part replaces its
+earlier mesh: the bricks of the element group named for it go, with
+the nodes only they used (unless data is measured or solved there),
+and the group keeps its material. The pane says how many bricks it
+replaces before *Mesh* is pressed. From a script,
 `project.mesh_solids(name, ids, size, unit=..., apart=...)`. All of it is
 shown and typed in the
 current display unit system (psi and in⁴ in the inch system, MPa and mm⁴

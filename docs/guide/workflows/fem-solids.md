@@ -35,7 +35,7 @@ click.
 | Step | Where | How |
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
-| Add the shapes | the geometry's **Solids** row | *Add Solid Block*, *Add Cylinder* |
+| Add the shapes | the geometry's **Solids** row | *Add Solid Block*, *Add Cylinder*, *Add Section*, *Add Hole* |
 | Pattern them in rows | solids picked in the tree | *Pattern* |
 | Cut and join them | solids picked in the tree | *Subtract*, *Union* |
 | Mesh | parts picked in the tree | *Mesh Solids* |
@@ -216,6 +216,46 @@ steel.
 
 Select the geometry and press **Solve Modes**. The thick wing on the
 frame is 65,325 nodes and solves in about a minute.
+
+## Sections, tubes and holes
+
+The frame is a block with holes, but a fixture or a stand is more often
+built from rolled shapes. *Add Section* on the **Solids** row adds one
+as a single solid: pick the shape (I-beam, channel, tee, angle,
+rectangular tube or round tube), type its dimensions and a length, and
+it runs that length along its own Z, turned like any other solid. The
+dimensions are the ones the beam element's sections take, so a channel
+is its depth, flange width, flange thickness and web thickness:
+
+| Shape | Dimensions | Laid across its own axes |
+|---|---|---|
+| I-beam, tee | depth, flange width, flange thickness, web thickness | depth along Y, flange along X; a tee's flange at +Y |
+| channel | the same | the web at −X, the flanges running to +X |
+| angle | long leg, short leg, thickness | the heel at −X, −Y, the long leg along X |
+| rectangular tube | width, height, wall | width along X, height along Y |
+| round tube | outer diameter, wall | |
+
+Its center is the middle of the box it fills. Its pencil opens the pane
+on its dimensions, so a deeper beam is one number changed. A section meshes as the blocks it is made of would:
+its flat faces on grid lines, a round tube as a ring.
+
+*Add Hole* adds a hole to subtract from a part. Its center is where it
+enters, on the face it is drilled from, and it runs down its own Z:
+with **Through** ticked it goes out the far side of the part it is cut
+from, and stays through when that part is made thicker; unticked, it
+goes the depth typed. **Counterbore** adds a wider, shallower bore at
+the entry. Pick the part and the hole and press *Subtract*. A hole
+patterned and then subtracted goes through just the same. From a
+script:
+
+```python
+beam = project.add_solid_section('Stand', 'I-beam', (0, 0, 12), (4, 2, 0.25, 0.2),
+                                 24, unit='in')
+plate = project.add_solid_block('Stand', (0, 0, -0.25), (8, 8, 0.5), unit='in')
+hole = project.add_solid_hole('Stand', (3, 3, 0), 0.25, counterbore=(0.44, 0.19),
+                              unit='in')
+base = project.combine_solids('Stand', 'subtract', [plate, hole])
+```
 
 ## What was checked
 

@@ -71,7 +71,8 @@ and **+** *New Geometry*, an empty geometry in the display length unit
 to build a model in: its **Quads** row offers *Add Plane* and its
 **Hexes** row *Add Block*, since what each adds is elements of that
 family ([the finite element workflow](workflows/fem-workflow.md)), and
-its **Solids** row *Add Solid Block* and *Add Cylinder*, shapes to cut,
+its **Solids** row *Add Solid Block*, *Add Cylinder*, *Add Section* and
+*Add Hole*, shapes to cut,
 join, pattern and then mesh ([the solid
 workflow](workflows/fem-solids.md)).
 

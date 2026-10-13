@@ -62,8 +62,19 @@ def test_a_category_label_cannot_be_renamed_by_anything(geometry_item):
 def test_deleting_a_category_empties_it_and_leaves_it_there(geometry_item,
                                                             window, pump):
     """The category is what the geometry *has*, not what is in it: the
-    elements go, the nodes stay, and the row remains to add to."""
+    elements go and the row remains to add to. The nodes data is
+    measured at stay — a test geometry's panels deleted to be redrawn
+    leave its measurement points (Brandon, 2026-10-12: nodes only the
+    deleted elements used go, unless data uses them)."""
+    import numpy as np
+
+    from visualdynamics.core.shapes import ShapeSet
+
     geometry = window.objects['Geometry']
+    measured = [f'{int(n)}Z+' for n in geometry.node_id]
+    window.add_object('Modes', ShapeSet([10.0], [0.01], measured,
+                                        np.ones((1, len(measured)))))
+    pump()
     window.tree.clearSelection()
     elements = next(geometry_item.child(i)
                     for i in range(geometry_item.childCount())
@@ -75,7 +86,7 @@ def test_deleting_a_category_empties_it_and_leaves_it_there(geometry_item,
     window.delete_selected()
     pump()
     assert len(geometry.elem_conn) == 0, 'every element gone'
-    assert geometry.num_nodes > 0, 'the nodes are not the elements'
+    assert geometry.num_nodes == len(measured), 'the measurement points stay'
     assert window.objects.get('Geometry') is geometry, 'the geometry stays'
     assert geometry_item.childCount() == 10, 'and so do all its categories'
     assert any(geometry_item.child(i).text(0).startswith('Quads (0)')

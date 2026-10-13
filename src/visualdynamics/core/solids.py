@@ -32,9 +32,30 @@ from typing import Any
 
 import numpy as np
 
-#: the primitives, the booleans over them, and the pattern: copies of
-#: its solids in rows, columns and layers, made of them as a boolean is
-PRIMITIVES = ('block', 'cylinder')
+from .fem import SHAPES as BEAM_SHAPES
+
+#: the shapes a section is, along its own Z, and the dimensions each is
+#: typed by, in order (2026-10-12): the beam element's shapes, named and
+#: dimensioned as its sections are (`fem.SHAPES`), and a tee, an
+#: I-beam's dimensions
+SECTIONS: dict[str, tuple[str, ...]] = {
+    shape: BEAM_SHAPES['I-beam' if shape == 'tee' else shape][1]
+    for shape in ('I-beam', 'channel', 'tee', 'angle', 'rectangular tube',
+                  'round tube')}
+#: a hole, to subtract from a part: entered at its center, running along
+#: its own -Z, a depth of zero through the part it is cut from, a
+#: counterbore diameter of zero none
+HOLE = 'hole'
+HOLE_DIMENSIONS = ('diameter', 'depth', 'counterbore diameter', 'counterbore depth')
+#: the solids typed by their dimensions, each made of blocks and
+#: cylinders (`_pieces`)
+SHAPED = (*SECTIONS, HOLE)
+#: the primitives — the block and the cylinder, and the shapes made of
+#: them, each one row a person places, turns and sizes — the booleans
+#: over them, and the pattern: copies of its solids in rows, columns and
+#: layers, made of them as a boolean is
+BASIC = ('block', 'cylinder')
+PRIMITIVES = (*BASIC, *SHAPED)
 OPERATIONS = ('union', 'subtract', 'intersect')
 PATTERN = 'pattern'
 
@@ -55,7 +76,9 @@ class Solid:
     first — and its own numbers are unused. A pattern names its solids
     as a boolean does, and holds `counts` copies along its own axes,
     `widths` apart, turned by `angles` (Brandon, 2026-10-11: the copies
-    follow the original, and the pattern is changed as one).
+    follow the original, and the pattern is changed as one). A section
+    or a hole is typed by its `dimensions` (`SECTIONS`, `HOLE`), a
+    section `length` along its own Z (2026-10-12).
 
     Parameters
     ----------
@@ -82,6 +105,9 @@ class Solid:
         fillets a part has there.
     counts : tuple of int
         A pattern's copies along its own axes, the original counted.
+    dimensions : tuple of float
+        A section's or a hole's, in the order `SECTIONS` and
+        `HOLE_DIMENSIONS` name them.
     """
 
     id: int
@@ -95,6 +121,7 @@ class Solid:
     operands: tuple[int, ...] = ()
     corner: float = 0.0
     counts: tuple[int, int, int] = (1, 1, 1)
+    dimensions: tuple[float, ...] = ()
 
     def scaled(self, factor: float) -> Solid:
         """The same solid with every length multiplied by `factor`:
@@ -103,7 +130,8 @@ class Solid:
                        widths=tuple(float(w) * factor for w in self.widths),
                        radius=self.radius * factor,
                        length=self.length * factor,
-                       corner=self.corner * factor)
+                       corner=self.corner * factor,
+                       dimensions=tuple(float(d) * factor for d in self.dimensions))
 
     def as_record(self) -> dict:
         """The solid as plain numbers, for a file."""
@@ -111,7 +139,8 @@ class Solid:
                 'center': list(self.center), 'angles': list(self.angles),
                 'widths': list(self.widths), 'radius': self.radius,
                 'length': self.length, 'operands': list(self.operands),
-                'corner': self.corner, 'counts': list(self.counts)}
+                'corner': self.corner, 'counts': list(self.counts),
+                'dimensions': list(self.dimensions)}
 
     @classmethod
     def from_record(cls, record: dict) -> Solid:
@@ -123,7 +152,8 @@ class Solid:
                    float(record['radius']), float(record['length']),
                    tuple(int(v) for v in record['operands']),
                    float(record.get('corner', 0.0)),
-                   tuple(int(v) for v in record.get('counts', (1, 1, 1))))
+                   tuple(int(v) for v in record.get('counts', (1, 1, 1))),
+                   tuple(float(v) for v in record.get('dimensions', ())))
 
 
 def _next_id(geometry: Any) -> int:
@@ -218,18 +248,144 @@ def _cylinder(solid_id: int, name: str, center, radius, length, angles) -> Solid
                  length=float(length))
 
 
+def add_section(geometry: Any, shape: str, center, dimensions, length: float,
+                angles=(0.0, 0.0, 0.0), name: str = '') -> int:
+    """Add a section to `geometry`'s solids: an I-beam, a channel, a tee,
+    an angle or a tube, `length` along its own Z (2026-10-12) — one row,
+    sized by its own dimensions, where a union of blocks would be three
+    rows changed one by one. Its middle, the middle of the box it fills,
+    is at `center`; with no `angles` it runs along the geometry's Z.
+
+    Across, along its own axes: an I-beam's or a tee's `depth` runs
+    along Y, its flange `flange width` along X, a tee's at +Y; a
+    channel's flanges run along +X from its web; an angle's long leg
+    runs along +X and its short leg along +Y from the heel; a
+    rectangular tube is `width` along X and `height` along Y.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    shape : str
+        One of `SECTIONS`.
+    center : array_like
+        Three numbers, as the geometry holds its coordinates.
+    dimensions : sequence of float
+        In the order `SECTIONS[shape]` names them, likewise.
+    length : float
+        Likewise.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    if shape not in SECTIONS:
+        raise ValueError(f'{shape!r} is not one of {tuple(SECTIONS)}')
+    solid = _shaped(_next_id(geometry), name, shape, center, dimensions, length,
+                    angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def add_hole(geometry: Any, center, diameter: float, depth: float | None = None,
+             angles=(0.0, 0.0, 0.0), name: str = '',
+             counterbore=None) -> int:
+    """Add a hole to `geometry`'s solids, to subtract from a part
+    (2026-10-12): entered at `center`, on the face it is drilled from,
+    and running `depth` along its own -Z — down the geometry's Z with no
+    `angles` — or, with none, through the part it is cut from, however
+    thick that is made. A counterbore is wider at the entry.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Where it goes; changed in place.
+    center : array_like
+        Where it enters, three numbers as the geometry holds its
+        coordinates.
+    diameter : float
+        Likewise.
+    depth : float, optional
+        Likewise; None through.
+    angles : array_like, default (0, 0, 0)
+        Degrees about the fixed X, then Y, then Z axes.
+    name : str, optional
+        What to call it.
+    counterbore : (float, float), optional
+        Its diameter, wider than the hole's, and its depth, shallower.
+
+    Returns
+    -------
+    int
+        The new solid's id.
+    """
+    wide, deep = (0.0, 0.0) if counterbore is None else counterbore
+    solid = _shaped(_next_id(geometry), name, HOLE, center,
+                    (diameter, 0.0 if depth is None else depth, wide, deep), 0.0,
+                    angles)
+    geometry.solids.append(solid)
+    return solid.id
+
+
+def _shaped(solid_id: int, name: str, kind: str, center, dimensions, length,
+            angles) -> Solid:
+    """A section's or a hole's row, its numbers checked: what adding one
+    and changing one both refuse. The beam sections' rules are the beam
+    element's (`fem.Section.of_shape`), so a shape refused as a beam's
+    section is refused as a solid."""
+    from .fem import Section, with_article
+
+    named = SECTIONS.get(kind, HOLE_DIMENSIONS)
+    dims = _numbers(dimensions, len(named), f'{with_article(kind)}\'s dimensions')
+    length = float(length)
+    if kind == HOLE:
+        diameter, depth, wide, deep = dims
+        if diameter <= 0.0 or depth < 0.0:
+            raise ValueError('a hole needs a diameter, and a depth of zero or '
+                             'more — zero through')
+        if (wide or deep) and (wide <= diameter or deep <= 0.0
+                               or (depth and deep >= depth)):
+            raise ValueError('a counterbore wider than the hole and shallower '
+                             'than it')
+    else:
+        if not length > 0.0:
+            raise ValueError(f'{with_article(kind)} needs a length')
+        if kind == 'tee':
+            depth, flange, tf, tw = dims
+            if min(dims) <= 0.0 or depth - tf <= 0.0 or tw > flange:
+                raise ValueError('the tee: the flanges and web do not make a tee')
+        else:
+            Section.of_shape(f'the {kind}', kind, dims)
+        if kind == 'round tube' and 2.0 * dims[1] >= dims[0]:
+            # the beam's section takes a wall of the whole radius, a rod;
+            # a solid's bore would be a cylinder of no radius
+            raise ValueError('the round tube: a wall under half its diameter '
+                             '— a rod is a cylinder')
+    return Solid(solid_id, name, kind, _numbers(center, 3, 'a center'),
+                 _numbers(angles, 3, 'angles'), length=length, dimensions=dims)
+
+
 #: what each kind's numbers are, to be changed by `edit`
 EDITABLE = {'block': ('center', 'angles', 'widths', 'corner'),
             'cylinder': ('center', 'angles', 'radius', 'length'),
+            **{shape: ('center', 'angles', 'dimensions', 'length')
+               for shape in SECTIONS},
+            HOLE: ('center', 'angles', 'dimensions'),
             PATTERN: ('counts', 'spacing', 'angles')}
 
 
 def edit(geometry: Any, solid_id: int, **changes) -> None:
     """Change a solid after it is made, in place (Brandon, 2026-10-11:
     move it, size it, reshape it). A block's center, angles, widths and
-    corner, a cylinder's center, angles, radius and length, a pattern's
-    counts, spacing and angles, and any solid's name; the rest are
-    kept. It keeps its id, so a boolean it is
+    corner, a cylinder's center, angles, radius and length, a section's
+    center, angles, dimensions and length, a hole's center, angles and
+    dimensions, a pattern's counts, spacing and angles, and any solid's
+    name; the rest are kept. It keeps its id, so a boolean it is
     part of takes the change: a hole made larger is a larger hole in the
     plate it was subtracted from. A mesh already made from it is not
     changed; Mesh Solids again meshes the change.
@@ -241,8 +397,9 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
     solid_id : int
         Which.
     **changes
-        The numbers to change, as `add_block` and `add_cylinder` take
-        them, and `name`.
+        The numbers to change, as `add_block`, `add_cylinder` and
+        `add_section` take them — a hole's as its `HOLE_DIMENSIONS`, a
+        depth of zero through — and `name`.
 
     Raises
     ------
@@ -258,17 +415,22 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
         if item.kind in OPERATIONS:
             raise ValueError(f'solid {solid_id} is a {item.kind}: change the '
                              'solids it is made of, or move it whole')
-        raise ValueError(f'a {item.kind} has no {wrong[0]}')
+        from .fem import with_article
+
+        raise ValueError(f'{with_article(item.kind)} has no {wrong[0]}')
     now = {'name': item.name, 'center': item.center, 'angles': item.angles,
            'widths': item.widths, 'corner': item.corner, 'radius': item.radius,
            'length': item.length, 'counts': item.counts, 'spacing': item.widths,
-           **changes}
+           'dimensions': item.dimensions, **changes}
     if item.kind == 'block':
         changed = _block(item.id, now['name'], now['center'], now['widths'],
                          now['angles'], now['corner'])
     elif item.kind == 'cylinder':
         changed = _cylinder(item.id, now['name'], now['center'], now['radius'],
                             now['length'], now['angles'])
+    elif item.kind in SHAPED:
+        changed = _shaped(item.id, now['name'], item.kind, now['center'],
+                          now['dimensions'], now['length'], now['angles'])
     elif item.kind == PATTERN:
         changed = _pattern(item.id, now['name'], item.operands, now['counts'],
                            now['spacing'], now['angles'])
@@ -281,7 +443,7 @@ def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
          turn=(0.0, 0.0, 0.0)) -> int:
     """Move solids whole — a part with every solid it is made of — turned
     by `turn` about the middle of their extent, then slid by `offset`;
-    how many blocks and cylinders moved. A boolean has no place of its
+    how many primitives moved. A boolean has no place of its
     own to change, so its solids are moved, each center turned about
     that middle and each turned as much: the part is the same shape,
     elsewhere.
@@ -603,35 +765,24 @@ def shape(geometry: Any, solid_id: int):
         BRepAlgoAPI_Cut,
         BRepAlgoAPI_Fuse,
     )
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
-    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
 
     item = solid(geometry, solid_id)
-    if item.kind == 'block':
-        wx, wy, wz = item.widths
-        c = item.corner
-        if c <= 0.0:
-            built = BRepPrimAPI_MakeBox(gp_Pnt(-wx / 2, -wy / 2, -wz / 2),
-                                        wx, wy, wz).Shape()
-            return _placed(built, item)
-        # rounded: a box narrowed by the radius each way, and a cylinder
-        # at each corner, made one
-        pieces = [BRepPrimAPI_MakeBox(gp_Pnt(-a / 2, -b / 2, -wz / 2), a, b,
-                                      wz).Shape()
-                  for a, b in ((wx - 2 * c, wy), (wx, wy - 2 * c)) if a > 0 and b > 0]
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                axis = gp_Ax2(gp_Pnt(sx * (wx / 2 - c), sy * (wy / 2 - c), -wz / 2),
-                              gp_Dir(0.0, 0.0, 1.0))
-                pieces.append(BRepPrimAPI_MakeCylinder(axis, c, wz).Shape())
-        built = pieces[0]
-        for piece in pieces[1:]:
-            built = BRepAlgoAPI_Fuse(built, piece).Shape()
-        return _placed(built, item)
-    if item.kind == 'cylinder':
-        axis = gp_Ax2(gp_Pnt(0.0, 0.0, -item.length / 2), gp_Dir(0.0, 0.0, 1.0))
-        built = BRepPrimAPI_MakeCylinder(axis, item.radius, item.length).Shape()
-        return _placed(built, item)
+    if item.kind in BASIC:
+        return _basic_shape(item)
+    if item.kind in SHAPED:
+        # the uncut pieces made one, then the cut taken from them
+        pieces = _pieces(geometry, item)
+        kept = [_basic_shape(p) for cutting, p in pieces if not cutting]
+        cut = [_basic_shape(p) for cutting, p in pieces if cutting]
+        result = kept[0]
+        for operand, algorithm in ([(k, BRepAlgoAPI_Fuse) for k in kept[1:]]
+                                   + [(c, BRepAlgoAPI_Cut) for c in cut]):
+            step = algorithm(result, operand)
+            if not step.IsDone():
+                raise ValueError(f'the {item.kind} of solid {item.id} failed '
+                                 'in the kernel')
+            result = step.Shape()
+        return result
     if item.kind == PATTERN:
         from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
         from OCP.gp import gp_Trsf, gp_Vec
@@ -656,6 +807,38 @@ def shape(geometry: Any, solid_id: int):
                              'the kernel')
         result = step.Shape()
     return result
+
+
+def _basic_shape(item: Solid):
+    """A block or a cylinder as OpenCASCADE's shape, placed."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    if item.kind == 'cylinder':
+        axis = gp_Ax2(gp_Pnt(0.0, 0.0, -item.length / 2), gp_Dir(0.0, 0.0, 1.0))
+        built = BRepPrimAPI_MakeCylinder(axis, item.radius, item.length).Shape()
+        return _placed(built, item)
+    wx, wy, wz = item.widths
+    c = item.corner
+    if c <= 0.0:
+        built = BRepPrimAPI_MakeBox(gp_Pnt(-wx / 2, -wy / 2, -wz / 2),
+                                    wx, wy, wz).Shape()
+        return _placed(built, item)
+    # rounded: a box narrowed by the radius each way, and a cylinder at
+    # each corner, made one
+    pieces = [BRepPrimAPI_MakeBox(gp_Pnt(-a / 2, -b / 2, -wz / 2), a, b,
+                                  wz).Shape()
+              for a, b in ((wx - 2 * c, wy), (wx, wy - 2 * c)) if a > 0 and b > 0]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            axis = gp_Ax2(gp_Pnt(sx * (wx / 2 - c), sy * (wy / 2 - c), -wz / 2),
+                          gp_Dir(0.0, 0.0, 1.0))
+            pieces.append(BRepPrimAPI_MakeCylinder(axis, c, wz).Shape())
+    built = pieces[0]
+    for piece in pieces[1:]:
+        built = BRepAlgoAPI_Fuse(built, piece).Shape()
+    return _placed(built, item)
 
 
 def volume(geometry: Any, solid_id: int) -> float:
@@ -767,13 +950,86 @@ def _frame(item: Solid) -> np.ndarray:
     return frame_from_angles(item.angles)[:3]
 
 
+def _pieces(geometry: Any, item: Solid) -> list[tuple[bool, Solid]]:
+    """(cut, piece) for each block and cylinder a section or a hole is
+    made of, placed where it stands: its material the uncut pieces less
+    the cut ones — a tube's bore, a rectangular tube's inside. Each
+    piece carries the shape's id, so a refusal names the shape."""
+    rows = _frame(item)
+    middle = np.asarray(item.center)
+
+    def at(x, y, z):
+        return tuple(float(c) for c in middle + np.array([x, y, z]) @ rows)
+
+    def block(x, y, wx, wy):
+        return Solid(item.id, item.name, 'block', at(x, y, 0.0), item.angles,
+                     (float(wx), float(wy), float(item.length)))
+
+    def cylinder(radius, z=0.0, length=None):
+        return Solid(item.id, item.name, 'cylinder', at(0.0, 0.0, z), item.angles,
+                     radius=float(radius),
+                     length=float(item.length if length is None else length))
+
+    d = item.dimensions
+    if item.kind == HOLE:
+        diameter, depth, wide, deep = d
+        depth = depth or _through(geometry, item)
+        pieces = [(False, cylinder(diameter / 2.0, -depth / 2.0, depth))]
+        if wide:
+            pieces.append((False, cylinder(wide / 2.0, -deep / 2.0, deep)))
+        return pieces
+    if item.kind in ('I-beam', 'channel', 'tee'):
+        depth, flange, tf, tw = d
+        if item.kind == 'tee':
+            return [(False, block(0.0, (depth - tf) / 2.0, flange, tf)),
+                    (False, block(0.0, -tf / 2.0, tw, depth - tf))]
+        web_x = 0.0 if item.kind == 'I-beam' else -(flange - tw) / 2.0
+        return [(False, block(0.0, (depth - tf) / 2.0, flange, tf)),
+                (False, block(0.0, -(depth - tf) / 2.0, flange, tf)),
+                (False, block(web_x, 0.0, tw, depth - 2.0 * tf))]
+    if item.kind == 'angle':
+        long_leg, short_leg, t = d
+        return [(False, block(0.0, -(short_leg - t) / 2.0, long_leg, t)),
+                (False, block(-(long_leg - t) / 2.0, t / 2.0, t, short_leg - t))]
+    if item.kind == 'rectangular tube':
+        width, height, wall = d
+        return [(False, block(0.0, 0.0, width, height)),
+                (True, block(0.0, 0.0, width - 2.0 * wall, height - 2.0 * wall))]
+    outer, wall = d
+    return [(False, cylinder(outer / 2.0)), (True, cylinder(outer / 2.0 - wall))]
+
+
+def _through(geometry: Any, item: Solid) -> float:
+    """How deep a hole with no depth runs: from where it enters out past
+    the far side of the part it is cut from — the first solid of the
+    subtraction it is taken by, a pattern of it included — so a plate
+    made thicker keeps its hole through. Cut from nothing yet, it is
+    drawn a diameter deep."""
+    used = used_by(geometry)
+    current = item.id
+    while current in used:
+        parent = solid(geometry, used[current])
+        if parent.kind == 'subtract' and parent.operands[0] != current:
+            low, high = _box(geometry, parent.operands[0])
+            corners = np.array(np.meshgrid(*zip(low, high), indexing='ij')).reshape(3, -1).T
+            # along its own -Z, to the farthest corner, and a hundredth of
+            # the part past it, so the kernel meets no face on a face
+            reach = float(((np.asarray(item.center) - corners) @ _frame(item)[2]).max())
+            return max(reach, 0.0) + 0.01 * float(np.linalg.norm(high - low))
+        current = parent.id
+    return item.dimensions[0]
+
+
 def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
     """The blocks and cylinders a solid is made of, where they stand: a
-    pattern's copies each its own, moved — what meshing reads (its grid
-    cut at each copy's faces, a ring about each copy's circle)."""
+    section's or a hole's pieces, a pattern's copies each its own, moved
+    — what meshing reads (its grid cut at each copy's faces, a ring
+    about each copy's circle)."""
     item = solid(geometry, solid_id)
-    if item.kind in PRIMITIVES:
+    if item.kind in BASIC:
         return [item]
+    if item.kind in SHAPED:
+        return [piece for _cut, piece in _pieces(geometry, item)]
     leaves = [leaf for o in item.operands for leaf in _leaves(geometry, o)]
     if item.kind != PATTERN:
         return leaves
@@ -801,25 +1057,24 @@ def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
     """
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     item = solid(geometry, solid_id)
-    if item.kind in PRIMITIVES:
-        local = (points - np.asarray(item.center)) @ _frame(item).T
-        slack = 1e-9 * (max(item.widths) + item.radius + item.length)
-        if item.kind == 'block':
-            half = np.asarray(item.widths) / 2.0 + slack
-            inside = np.all(np.abs(local) <= half, axis=1)
-            if item.corner > 0.0:
-                # in a corner's square, only within its radius of the arc's
-                # center
-                arc = np.asarray(item.widths[:2]) / 2.0 - item.corner
-                beyond = np.abs(local[:, :2]) - arc
-                cornered = np.all(beyond > 0.0, axis=1)
-                inside &= ~cornered | (np.hypot(*beyond.T) <= item.corner + slack)
-            return inside
-        return ((np.hypot(local[:, 0], local[:, 1]) <= item.radius + slack)
-                & (np.abs(local[:, 2]) <= item.length / 2.0 + slack))
+    if item.kind in BASIC:
+        return _basic_contains(item, points)
+    if item.kind in SHAPED:
+        return _pieces_contain(_pieces(geometry, item), points)
     if item.kind == PATTERN:
-        return np.any([contains(geometry, o, points - offset)
-                       for offset in _offsets(item) for o in item.operands], axis=0)
+        # a section's or a hole's pieces worked out once, not once a copy:
+        # a through hole's depth is asked of the whole table (`_through`),
+        # and a pattern of 400 holes meshed three times slower than one of
+        # cylinders that way
+        tests = []
+        for o in item.operands:
+            if solid(geometry, o).kind in SHAPED:
+                pieces = _pieces(geometry, solid(geometry, o))
+                tests.append(lambda at, pieces=pieces: _pieces_contain(pieces, at))
+            else:
+                tests.append(lambda at, o=o: contains(geometry, o, at))
+        return np.any([test(points - offset) for offset in _offsets(item)
+                       for test in tests], axis=0)
     inside = [contains(geometry, o, points) for o in item.operands]
     if item.kind == 'union':
         return np.any(inside, axis=0)
@@ -828,19 +1083,56 @@ def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
     return inside[0] & ~np.any(inside[1:], axis=0)
 
 
+def _basic_contains(item: Solid, points: np.ndarray) -> np.ndarray:
+    """Which points lie inside a block or a cylinder, a face counted."""
+    local = (points - np.asarray(item.center)) @ _frame(item).T
+    slack = 1e-9 * (max(item.widths) + item.radius + item.length)
+    if item.kind == 'block':
+        half = np.asarray(item.widths) / 2.0 + slack
+        inside = np.all(np.abs(local) <= half, axis=1)
+        if item.corner > 0.0:
+            # in a corner's square, only within its radius of the arc's
+            # center
+            arc = np.asarray(item.widths[:2]) / 2.0 - item.corner
+            beyond = np.abs(local[:, :2]) - arc
+            cornered = np.all(beyond > 0.0, axis=1)
+            inside &= ~cornered | (np.hypot(*beyond.T) <= item.corner + slack)
+        return inside
+    return ((np.hypot(local[:, 0], local[:, 1]) <= item.radius + slack)
+            & (np.abs(local[:, 2]) <= item.length / 2.0 + slack))
+
+
+def _pieces_contain(pieces, points: np.ndarray) -> np.ndarray:
+    """Which points lie in a section's or a hole's material: in an uncut
+    piece and in no cut one."""
+    inside = np.any([_basic_contains(p, points) for cut, p in pieces if not cut], axis=0)
+    for cut, p in pieces:
+        if cut:
+            inside &= ~_basic_contains(p, points)
+    return inside
+
+
+def _basic_box(item: Solid) -> tuple[np.ndarray, np.ndarray]:
+    """A block's or a cylinder's extent along the geometry's axes."""
+    axes = _frame(item)
+    if item.kind == 'block':
+        half = np.abs(axes.T) @ (np.asarray(item.widths) / 2.0)
+    else:
+        along = np.abs(axes[2]) * item.length / 2.0
+        across = item.radius * np.sqrt(np.clip(1.0 - axes[2] ** 2, 0.0, 1.0))
+        half = along + across
+    center = np.asarray(item.center)
+    return center - half, center + half
+
+
 def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
     """The solid's extent along the geometry's axes, from its recipe."""
     item = solid(geometry, solid_id)
-    if item.kind in PRIMITIVES:
-        axes = _frame(item)
-        if item.kind == 'block':
-            half = np.abs(axes.T) @ (np.asarray(item.widths) / 2.0)
-        else:
-            along = np.abs(axes[2]) * item.length / 2.0
-            across = item.radius * np.sqrt(np.clip(1.0 - axes[2] ** 2, 0.0, 1.0))
-            half = along + across
-        center = np.asarray(item.center)
-        return center - half, center + half
+    if item.kind in BASIC:
+        return _basic_box(item)
+    if item.kind in SHAPED:
+        boxes = [_basic_box(p) for cut, p in _pieces(geometry, item) if not cut]
+        return np.min([b[0] for b in boxes], axis=0), np.max([b[1] for b in boxes], axis=0)
     boxes = [_box(geometry, o) for o in item.operands]
     if item.kind == PATTERN:
         offsets = _offsets(item)
@@ -1043,6 +1335,30 @@ def extrusion_mesh(geometry: Any, ids, size: float,
     return part, {'bricks': len(conn), 'nodes': len(xyz), 'axis': axis, **made}
 
 
+def meshed_bricks(geometry: Any, names) -> np.ndarray:
+    """The ids of the bricks in the element groups named `names`: what
+    meshing those parts again replaces (`Project.mesh_solids`, and the
+    pane's reading before Mesh is pressed).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose elements.
+    names : iterable of str
+        The element groups' names; an empty one names none.
+
+    Returns
+    -------
+    numpy.ndarray of int
+    """
+    names = {name for name in names if name}
+    wanted = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
+              if name in names]
+    mask = (np.isin(np.asarray(geometry.elem_group, dtype=int), wanted)
+            & (np.asarray(geometry.elem_type, dtype=int) == 115))
+    return np.asarray(geometry.elem_id, dtype=int)[mask]
+
+
 def _mesh_grid(lines, order, size, held, circles):
     """Bricks on a grid swept along w, rings laid about the circles:
     the one mesher behind Mesh Solids and Add Block's holes.
@@ -1091,8 +1407,6 @@ def _mesh_grid(lines, order, size, held, circles):
     if len(corners) > MESH_LIMIT:
         raise ValueError(f'{len(corners):,} bricks at that size: use a larger one')
     groups = known.ravel().copy()
-    fresh = groups < 0
-    groups[fresh] = held(xyz[corners[fresh]].mean(axis=1))
     rounded = 0
     if left:
         # a brick's center, its long diagonal's midpoint
@@ -1153,8 +1467,8 @@ def _plane(lines, order, size, owner, circles, held):
     quads : (m, 4)
         Node numbers, counterclockwise about w.
     known : (m, nw - 1)
-        The part each quad's brick in each layer belongs to, -1 where
-        it is to be found (the rings').
+        The part each quad's brick in each layer belongs to: the grid's
+        own, and a ring's by the band it lies in.
     on_circle : array
         The plane's nodes on a circle.
     left : list
@@ -1163,8 +1477,8 @@ def _plane(lines, order, size, owner, circles, held):
         How many rings were laid.
     """
     u, v, _w = order
-    lu, lv, lw = lines
-    nu, nv, nw = len(lu), len(lv), len(lw)
+    lu, lv, _lw = lines
+    nu, nv = len(lu), len(lv)
     gu, gv = np.meshgrid(lu, lv, indexing='ij')
     plane = [np.stack([gu.ravel(), gv.ravel()], axis=1)]
     count = nu * nv
@@ -1182,7 +1496,7 @@ def _plane(lines, order, size, owner, circles, held):
                 break
         else:
             centered.append((here, [circle]))
-    rings, on_circle = [], []
+    rings, ring_owners, on_circle = [], [], []
     for center, members in centered:
         radii = []
         for r in sorted(m[1] for m in members):
@@ -1198,20 +1512,20 @@ def _plane(lines, order, size, owner, circles, held):
         if made is None:
             left.extend(members)
         elif made:
-            (i0, i1, j0, j1), positions, quads, circle_nodes = made
-            alive[i0:i1, j0:j1] = False
+            (i0, i1, j0, j1, mask), positions, quads, held_by, circle_nodes = made
+            alive[i0:i1, j0:j1] &= ~mask
             plane.append(positions)
             count += len(positions)
             rings.append(quads)
+            ring_owners.append(held_by)
             on_circle.append(circle_nodes)
     ci, cj = np.nonzero(alive)
     grid = np.stack([ci * nv + cj, (ci + 1) * nv + cj, (ci + 1) * nv + cj + 1,
                      ci * nv + cj + 1], axis=1)
     known = owner[ci, cj]
     if rings:
-        quads = np.concatenate(rings)
-        grid = np.concatenate([grid, quads])
-        known = np.concatenate([known, np.full((len(quads), nw - 1), -1)])
+        grid = np.concatenate([grid, *rings])
+        known = np.concatenate([known, *ring_owners])
     on_circle = np.concatenate(on_circle) if on_circle else np.zeros(0, dtype=int)
     return np.concatenate(plane), grid, known, on_circle, left, len(rings)
 
@@ -1230,11 +1544,24 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
     circles' boundaries: no ring already there, and in every layer one
     material across each band between circles — sampled at a point,
     and held to the grid's own bricks there, so a face crossing the
-    rectangle is seen, as is another circle in it. Where the rectangle runs past the
-    grid it stops at the grid's edge: allowed if a seventh of the
-    radius is left between the circle and it for a layer of bricks (a
-    screw a quarter inch from a wing's edge), or if nothing lies
-    outside the circles (a lone cylinder).
+    rectangle is seen, as is another circle in it. Where the rectangle
+    runs past the grid it stops at the grid's edge, and where it holds
+    more than the circles (a table's legs under a large hole) the
+    largest one inside it that does is taken, a grid line in on every
+    side at a time — so long as the circle fits inside it, touching
+    it included. A circle nearer the rectangle's edge than a tenth of a
+    brick (a leg flush with a table's corner touches two edges) is held
+    that far in there, so no layer of bricks has no thickness: exactly
+    round elsewhere, flattened by that much where it comes closer.
+    Where no rectangle holds with that room, the ring's outline steps:
+    the grid's cells inside a disk clear of what is in the way, an 11 in
+    hole in a 12 in table's top stepping round its legs (`staircase`),
+    a tenth of a brick of room left; a rectangle the circle would be
+    held in from is taken only when no outline steps. Each brick of the ring takes its band's part,
+    layer by layer — beyond the outer circle, between two, or inside
+    the inner — not the part its center lies in: where the circle is
+    held in, a thin brick's center can lie inside the true circle, and
+    a flush leg grew out to the table's edge that way.
 
     Each circle gets as many nodes as the rectangle's edge has, spaced
     evenly between the angles of the rectangle's corners, and layers of
@@ -1252,18 +1579,14 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
     j0 = int(np.searchsorted(lv, center[1] - reach + tol, 'right')) - 1
     j1 = int(np.searchsorted(lv, center[1] + reach - tol, 'left'))
     i0, j0, i1, j1 = max(i0, 0), max(j0, 0), min(i1, nu - 1), min(j1, nv - 1)
-    a, b = i1 - i0, j1 - j0
-    low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
-    room = float(min((center - low).min(), (high - center).min())) - outer
-    if a < 2 or b < 2 or not alive[i0:i1, j0:j1].all() or room < -tol:
-        return None
-    # the rectangle's edge, counterclockwise about w from (i0, j0)
-    edge = ([(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)]
-            + [(i, j1) for i in range(i1, i0, -1)] + [(i0, j) for j in range(j1, j0, -1)])
-    edge_nodes = np.array([i * nv + j for i, j in edge])
-    q = np.array([(lu[i], lv[j]) for i, j in edge])
-    count = len(q)
     middles = (lw[:-1] + lw[1:]) / 2.0
+    # a rectangle's circle comes no nearer its edge than a tenth of a
+    # brick: a leg flush with a table's corner touches its two edges,
+    # and the layer there would have no thickness, so the circle is held
+    # that far in where it comes closer — flattened there by that much,
+    # and exactly round everywhere else; a stepped outline must leave
+    # that much room (Brandon, 2026-10-12)
+    clear = 0.1 * size
 
     def layered(points):
         """(points, layers): the part at each point in each layer."""
@@ -1273,46 +1596,172 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
         found[:, w] = np.tile(middles, len(points))
         return held(found).reshape(len(points), nw - 1)
 
-    # each band's part, layer by layer, at one point: the middle, each
-    # annulus's mid radius, and halfway from the outer circle to the
-    # rectangle's farthest corner, where there is room even when the
-    # rectangle touches the circle
-    corner = np.where(center - low > high - center, low, high) - center
-    reach_out = float(np.hypot(*corner))
-    across = [0.0] + [(r0 + r1) / 2.0 for r0, r1 in pairwise(radii)]
-    across.append((outer + reach_out) / 2.0)
-    bands = layered(center + np.outer(across, corner / reach_out))
-    # the grid's bricks there: each in a band holds that band's part, one
-    # across a circle that of a band it touches
-    du, dv = np.meshgrid(lu[i0:i1 + 1] - center[0], lv[j0:j1 + 1] - center[1],
-                         indexing='ij')
-    far = np.hypot(du, dv)
-    corners = np.stack([far[:-1, :-1], far[1:, :-1], far[1:, 1:], far[:-1, 1:]])
-    inner = np.searchsorted(radii, corners.min(axis=0) + tol)
-    outmost = np.searchsorted(radii, corners.max(axis=0) - tol)
-    cells = owner[i0:i1, j0:j1]
-    agree = np.zeros(cells.shape, dtype=bool)
-    for t, band in enumerate(bands):
-        agree |= (((inner <= t) & (t <= outmost))[:, :, None]
-                  & (cells == band[None, None, :]))
-    if not agree.all() or (bands[-1].any() and room < outer / 7.0):
+    def agreement(i0, i1, j0, j1, bands):
+        """(corners, agree): each grid cell's four corners' distances
+        from the center, and, layer by layer, whether the grid's brick
+        there holds the part of the band it lies in — one across a
+        circle that of a band it touches."""
+        du, dv = np.meshgrid(lu[i0:i1 + 1] - center[0], lv[j0:j1 + 1] - center[1],
+                             indexing='ij')
+        far = np.hypot(du, dv)
+        corners = np.stack([far[:-1, :-1], far[1:, :-1], far[1:, 1:], far[:-1, 1:]])
+        inner = np.searchsorted(radii, corners.min(axis=0) + tol)
+        outmost = np.searchsorted(radii, corners.max(axis=0) - tol)
+        cells = owner[i0:i1, j0:j1]
+        agree = np.zeros(cells.shape, dtype=bool)
+        for t, band in enumerate(bands):
+            agree |= (((inner <= t) & (t <= outmost))[:, :, None]
+                      & (cells == band[None, None, :]))
+        return corners, agree
+
+    def fits(i0, i1, j0, j1):
+        """The bands' parts in this rectangle, or None where it holds
+        more than these circles' boundaries."""
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        # each band's part, layer by layer, at one point: the middle,
+        # each annulus's mid radius, and halfway from the outer circle
+        # to the rectangle's farthest corner, where there is room even
+        # when the rectangle touches the circle
+        corner = np.where(center - low > high - center, low, high) - center
+        reach_out = float(np.hypot(*corner))
+        across = [0.0] + [(r0 + r1) / 2.0 for r0, r1 in pairwise(radii)]
+        across.append((outer + reach_out) / 2.0)
+        bands = layered(center + np.outer(across, corner / reach_out))
+        _corners, agree = agreement(i0, i1, j0, j1, bands)
+        return bands if agree.all() else None
+
+    def staircase(i0, i1, j0, j1):
+        """The cells of this rectangle inside a disk about the center wide
+        enough for the circles and clear of every cell that holds more
+        than them, with their outline; None where even that will not
+        hold a ring. Where the rectangle cannot, a stepped outline about
+        the hole can: a hole nearly as wide as a table's top, whose every
+        rectangle took in the legs at its corners, steps round them
+        (Brandon, 2026-10-12)."""
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        # the band beyond the circles sampled toward the side with the
+        # most room, clear of a corner's leg
+        gaps = np.array([center[0] - low[0], high[0] - center[0],
+                         center[1] - low[1], high[1] - center[1]])
+        side = int(np.argmax(gaps))
+        toward = np.array([(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)][side])
+        across = [0.0] + [(r0 + r1) / 2.0 for r0, r1 in pairwise(radii)]
+        across.append((outer + gaps[side]) / 2.0)
+        bands = layered(center + np.outer(across, toward))
+        corners, agree = agreement(i0, i1, j0, j1, bands)
+        bad = ~agree.all(axis=2) | ~alive[i0:i1, j0:j1]
+        if not bad.any():
+            return None
+        # every cell wholly inside the nearest bad cell's nearest corner:
+        # a bad cell reaches past that radius, so none is taken
+        cap = float(corners.min(axis=0)[bad].min())
+        inside = (corners.max(axis=0) <= cap + tol) & ~bad
+        path = _outline(inside)
+        if path is None:
+            return None
+        nodes = [(i0 + ci, j0 + cj) for ci, cj in path]
+        q = np.array([(lu[i], lv[j]) for i, j in nodes])
+        following = np.roll(q, -1, axis=0) - q
+        t = np.clip(((center - q) * following).sum(axis=1)
+                    / (following * following).sum(axis=1), 0.0, 1.0)
+        room = float(np.hypot(*(q + t[:, None] * following - center).T).min()) - outer
+        if room < -tol or (bands[-1].any() and room < clear):
+            return None
+        # star-shaped about the center, or a ring drawn to it would fold;
+        # begun at its bottom left, as a rectangle's edge is
+        turn = np.arctan2(q[:, 1] - center[1], q[:, 0] - center[0])
+        first = int(np.argmin(np.abs(np.angle(np.exp(1j * (turn + 0.75 * np.pi))))))
+        nodes, q = nodes[first:] + nodes[:first], np.roll(q, -first, axis=0)
+        theta = np.unwrap(np.roll(turn, -first))
+        if (np.diff(theta) <= 0).any() or theta[-1] - theta[0] >= 2.0 * np.pi:
+            return None
+        return bands, inside, nodes, q, theta
+
+    # the rectangle a quarter radius out, else the largest inside it that
+    # holds nothing but these circles, a grid line in on every side at a
+    # time: a hole of 4.5 in in a table's top reached its legs' columns,
+    # 5 in out, and was pulled round from the grid instead (Brandon,
+    # 2026-10-12) — while a layer of bricks still fits between
+    bands = stepped = touching = None
+    preferred = (i0, i1, j0, j1)
+    while i1 - i0 >= 2 and j1 - j0 >= 2:
+        low, high = np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]])
+        room = float(min((center - low).min(), (high - center).min())) - outer
+        if room < -tol:
+            break
+        if alive[i0:i1, j0:j1].all():
+            bands = fits(i0, i1, j0, j1)
+            if bands is not None and room < clear and bands[-1].any():
+                # one the circle would be held in from: kept for last,
+                # since a stepped outline may hold it round — round legs
+                # set in a quarter inch left a 9 in hole's rectangle
+                # touching it, flattened four times (2026-10-12)
+                touching, bands = (bands, i0, i1, j0, j1), None
+                break
+            if bands is not None:
+                break
+        i0, i1, j0, j1 = i0 + 1, i1 - 1, j0 + 1, j1 - 1
+    if bands is None and preferred[1] - preferred[0] >= 2 \
+            and preferred[3] - preferred[2] >= 2:
+        # no rectangle holds it with room: the stepped outline, since a
+        # rectangle's circle nodes are evenly spaced and its outline's
+        # follow the steps
+        stepped = staircase(*preferred)
+        if stepped is not None:
+            bands = stepped[0]
+    if bands is None and touching is not None:
+        bands, i0, i1, j0, j1 = touching
+    if bands is None:
         return None
     kept = [r for t, r in enumerate(radii) if (bands[t] != bands[t + 1]).any()]
     if not kept:
         return False
-    # the circles' nodes: evenly spaced between the corners' angles
-    marks = [0, a, a + b, 2 * a + b, count]
-    angles = np.arctan2(*(q[marks[:4]] - center).T[::-1])
-    angles = np.append(angles[0] + np.mod(angles - angles[0], 2.0 * np.pi),
-                       angles[0] + 2.0 * np.pi)
-    theta = np.empty(count)
-    for side in range(4):
-        first, last = marks[side], marks[side + 1]
-        along = (np.linalg.norm(q[first:last] - q[first], axis=1)
-                 / np.linalg.norm(q[last % count] - q[first]))
-        theta[first:last] = angles[side] + along * (angles[side + 1] - angles[side])
+    if stepped is not None:
+        # the stepped outline: each circle node at its outline node's own
+        # angle, the radial lines straight; a core of half the count a
+        # side, as near square as the count allows
+        _bands, mask, edge, q, theta = stepped
+        i0, i1, j0, j1 = preferred
+        count = len(q)
+        a = count // 4
+        b = count // 2 - a
+    else:
+        mask = np.ones((i1 - i0, j1 - j0), dtype=bool)
+        a, b = i1 - i0, j1 - j0
+        # the rectangle's edge, counterclockwise about w from (i0, j0)
+        edge = ([(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)]
+                + [(i, j1) for i in range(i1, i0, -1)]
+                + [(i0, j) for j in range(j1, j0, -1)])
+        q = np.array([(lu[i], lv[j]) for i, j in edge])
+        count = len(q)
+        # the circles' nodes: evenly spaced between the corners' angles
+        marks = [0, a, a + b, 2 * a + b, count]
+        angles = np.arctan2(*(q[marks[:4]] - center).T[::-1])
+        angles = np.append(angles[0] + np.mod(angles - angles[0], 2.0 * np.pi),
+                           angles[0] + 2.0 * np.pi)
+        theta = np.empty(count)
+        for side in range(4):
+            first, last = marks[side], marks[side + 1]
+            along = (np.linalg.norm(q[first:last] - q[first], axis=1)
+                     / np.linalg.norm(q[last % count] - q[first]))
+            theta[first:last] = angles[side] + along * (angles[side + 1] - angles[side])
+    edge_nodes = np.array([i * nv + j for i, j in edge])
     unit = np.stack([np.cos(theta), np.sin(theta)], axis=1)
+    # held in only where there is material beyond the circle: a lone
+    # cylinder touches its own grid's edge, and beyond it is nothing
+    if stepped is None and bands[-1].any():
+        inward = (np.array([lu[i0], lv[j0]]) + clear, np.array([lu[i1], lv[j1]]) - clear)
+    else:
+        inward = None
+
+    def placed(radius):
+        """A circle's nodes, held `clear` inside a rectangle's edge."""
+        points = center + radius * unit
+        return points if inward is None else np.clip(points, *inward)
     positions, rings, on_circle = [], [edge_nodes], []
+    # the band each pair of rings bounds: `len(radii)` beyond the outer
+    # circle, `t` between radii[t - 1] and radii[t], 0 inside
+    between: list[int] = []
     made = start
 
     def ring_at(points):
@@ -1321,17 +1770,20 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
         made += len(points)
         return np.arange(made - len(points), made)
 
-    rim = center + kept[-1] * unit
+    rim = placed(kept[-1])
     layers = 1 if not bands[-1].any() else max(1, round(float(np.median(
         np.linalg.norm(rim - q, axis=1))) / size))
     for step in range(1, layers + 1):
         rings.append(ring_at(q + step / layers * (rim - q)))
+        between.append(len(radii))
     on_circle.append(rings[-1])
     reached = kept[-1]
     for r in reversed(kept[:-1]):
         layers = max(1, round((reached - r) / size))
+        band = int(np.searchsorted(radii, (reached + r) / 2.0))
         for step in range(1, layers + 1):
-            rings.append(ring_at(center + (reached - step / layers * (reached - r)) * unit))
+            rings.append(ring_at(placed(reached - step / layers * (reached - r))))
+            between.append(band)
         on_circle.append(rings[-1])
         reached = r
     quads = []
@@ -1343,7 +1795,7 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
         cv = center[1] + half * (2 * np.arange(b + 1) - b)
         gu, gv = np.meshgrid(cu, cv, indexing='ij')
         core = ring_at(np.stack([gu.ravel(), gv.ravel()], axis=1)).reshape(a + 1, b + 1)
-        rim = center + reached * unit
+        rim = placed(reached)
         core_edge = np.array([core[k, 0] for k in range(a)] + [core[a, j] for j in range(b)]
                              + [core[k, b] for k in range(a, 0, -1)]
                              + [core[0, j] for j in range(b, 0, -1)])
@@ -1352,16 +1804,54 @@ def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
                               / size))
         for step in range(layers - 1, 0, -1):
             rings.append(ring_at(edge_xy + step / layers * (rim - edge_xy)))
+            between.append(0)
         rings.append(core_edge)
+        between.append(0)
         quads.append(np.stack([core[:-1, :-1].ravel(), core[1:, :-1].ravel(),
                                core[1:, 1:].ravel(), core[:-1, 1:].ravel()], axis=1))
     k = np.arange(count)
     following = (k + 1) % count
+    owners = [np.repeat(bands[band][None, :], count, axis=0) for band in between]
+    if quads:
+        owners.append(np.repeat(bands[0][None, :], len(quads[0]), axis=0))
     quads = [np.stack([outer_ring[k], outer_ring[following], inner_ring[following],
                        inner_ring[k]], axis=1)
              for outer_ring, inner_ring in pairwise(rings)] + quads
-    return ((i0, i1, j0, j1), np.concatenate(positions), np.concatenate(quads),
-            np.concatenate(on_circle))
+    return ((i0, i1, j0, j1, mask), np.concatenate(positions), np.concatenate(quads),
+            np.concatenate(owners), np.concatenate(on_circle))
+
+
+def _outline(inside: np.ndarray) -> list[tuple[int, int]] | None:
+    """The outline of a set of grid cells, counterclockwise, as the
+    (i, j) of its corners in order — every grid node along it, as a
+    rectangle's edge has — or None where it is not one simple loop (two
+    cells meeting at a corner only, or a hole in the set)."""
+    a, b = inside.shape
+
+    def cell(i, j):
+        return 0 <= i < a and 0 <= j < b and bool(inside[i, j])
+
+    step: dict[tuple[int, int], tuple[int, int]] = {}
+    for i, j in zip(*np.nonzero(inside)):
+        i, j = int(i), int(j)
+        for start, end, beyond in (((i, j), (i + 1, j), (i, j - 1)),
+                                   ((i + 1, j), (i + 1, j + 1), (i + 1, j)),
+                                   ((i + 1, j + 1), (i, j + 1), (i, j + 1)),
+                                   ((i, j + 1), (i, j), (i - 1, j))):
+            if not cell(*beyond):
+                if start in step:
+                    return None
+                step[start] = end
+    if not step:
+        return None
+    first = min(step)
+    path, at = [first], step[first]
+    while at != first:
+        path.append(at)
+        at = step.get(at)
+        if at is None or len(path) > len(step):
+            return None
+    return path if len(path) == len(step) else None
 
 
 def _circles(geometry, ids, w: int) -> list[tuple[np.ndarray, float, float, float, bool]]:

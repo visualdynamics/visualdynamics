@@ -71,7 +71,8 @@ def test_the_solids_row_adds_blocks_and_cylinders_in_the_pane(window, pump):
     (holder,) = _rows(window, 'solids')
     assert holder.text(0) == 'Solids (0)', 'there before the first solid'
     _pick(window, pump, [holder])
-    assert list(_acts(window)) == ['add_solid_block', 'add_solid_cylinder']
+    assert list(_acts(window)) == ['add_solid_block', 'add_solid_cylinder',
+                                   'add_solid_section', 'add_solid_hole']
     panel = _add(window, pump, 'add_solid_block', center=(0, 0, -0.25),
                  widths=(4, 4, 0.5), group='plate')
     assert panel.title.text() == 'Add Solid Block'
@@ -367,3 +368,158 @@ def test_a_parts_pencil_moves_and_turns_it_whole(window, pump):
     assert np.allclose(centers, [(10, 0, -0.25), (10, -1, -0.25), (10, 1, -0.25)],
                        atol=1e-9)
     assert panel.values()['angles'] == pytest.approx((0, 0, 0)), 'the turn is done'
+
+
+def test_deleting_the_hexes_row_takes_the_parts_nodes_with_it(window, pump):
+    """A part meshed, then its bricks deleted from the Hexes row: the
+    element group's own delete took the nodes, the family's left every
+    one standing (Brandon, 2026-10-12). Now both do, through the
+    project's verb, which the journal records."""
+    geometry = _part(window, pump)
+    block = window.project.add_solid_block('Part', (0, 0, 0), (2, 2, 0.5), name='plate',
+                                           unit='in')
+    window.project.mesh_solids('Part', [block], 0.5, unit='in')
+    window._solids_changed('Part')
+    pump()
+    assert geometry.num_nodes == 5 * 5 * 2
+    (hexes,) = [row for row in _rows(window, 'family')
+                if row.data(0, 257)[2] == 'hexes']
+    _pick(window, pump, [hexes])
+    window.delete_selected()
+    pump()
+    assert len(geometry.elem_id) == 0 and geometry.num_nodes == 0
+    assert window.project.journal[-1].startswith("project.delete_elements('Part', [1, ")
+
+
+@pytest.mark.parametrize('verb', ['add_solid_block', 'add_solid_cylinder',
+                                  'add_solid_section', 'add_solid_hole'])
+def test_a_solid_opens_centered_on_the_origin(window, pump, verb):
+    """Brandon (2026-10-12): a solid always starts at (0, 0, 0) — its own
+    middle on the origin, wherever the last one was typed."""
+    _part(window, pump)
+    _add(window, pump, verb, center=(3, 2, 1))
+    window.close_mesh_pane()
+    pump()
+    panel = _add(window, pump, verb)
+    assert panel.values()['center'] == pytest.approx((0, 0, 0))
+    assert window._mesh['frame'][3] == pytest.approx((0, 0, 0)), 'and the gizmo with it'
+
+
+def _shown(widget):
+    return not widget.isHidden()
+
+
+def test_a_section_is_picked_sized_and_added_in_the_pane(window, pump):
+    """Add Section (2026-10-12): the shape picked, its dimensions named
+    as the beam element names them, its proportions loaded; a shape that
+    is not one refused in the reading; Add the project's verb."""
+    geometry = _part(window, pump)
+    panel = _add(window, pump, 'add_solid_section')
+    assert panel.title.text() == 'Add Section' and _shown(panel.shape)
+    assert [label.text() for label in panel.section_labels] == [
+        'Depth [in]', 'Flange width [in]', 'Flange thickness [in]', 'Web thickness [in]']
+    assert _shown(panel.length) and not _shown(panel.radius)
+    assert not _shown(panel.widths[0]) and not _shown(panel.hole[0])
+    panel.shape.setCurrentText('round tube')
+    pump()
+    assert [_shown(box) for box in panel.section] == [True, True, False, False]
+    assert panel.section_labels[0].text() == 'Outer diameter [in]'
+    assert panel.values()['dimensions'] == pytest.approx((1.0, 0.1))
+    panel.shape.setCurrentText('channel')
+    pump()
+    panel.set_values(dimensions=(4, 2, 0.25, 2.5), length=10)
+    pump()
+    assert panel.reading_label.text() == (
+        'The channel: the flanges and web do not make a channel.')
+    assert not panel.add_button.isEnabled()
+    panel.set_values(dimensions=(4, 2, 0.25, 0.2))
+    pump()
+    assert panel.reading_label.text().startswith(
+        'A channel 10 in long — depth 4, flange width 2, flange thickness 0.25, '
+        'web thickness 0.2 in, 17 in³')
+    assert 'plane-preview' in window.scene.plotter.actors
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1] == (
+        "project.add_solid_section('Part', 'channel', (0.0, 0.0, 0.0), "
+        "(4.0, 2.0, 0.25, 0.2), 10.0, (0.0, 0.0, 0.0), '', unit='in')")
+    (channel,) = geometry.solids
+    assert channel.kind == 'channel' and channel.length == pytest.approx(10 * INCH)
+    (row,) = _rows(window, 'solid')
+    assert row.text(0) == 'Channel 1'
+
+
+def test_a_hole_goes_through_or_its_depth_with_a_counterbore_asked_for(window, pump):
+    """Add Hole: Through at first, so no depth; unticked, the depth; a
+    counterbore's two numbers only once one is asked for."""
+    geometry = _part(window, pump)
+    panel = _add(window, pump, 'add_solid_hole')
+    assert panel.title.text() == 'Add Hole'
+    assert panel.through.isChecked() and not panel.counterbore.isChecked()
+    assert [_shown(box) for box in panel.hole] == [True, False, False, False]
+    assert not _shown(panel.length) and not _shown(panel.shape)
+    assert panel.reading_label.text() == (
+        'A hole 0.25 in across, through the part it is cut from — subtract it '
+        'from a part.')
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1] == (
+        "project.add_solid_hole('Part', (0.0, 0.0, 0.0), 0.25, None, (0.0, 0.0, 0.0), "
+        "'', unit='in')")
+    panel.through.setChecked(False)
+    panel.counterbore.setChecked(True)
+    pump()
+    assert [_shown(box) for box in panel.hole] == [True, True, True, True]
+    assert panel.reading_label.text().startswith(
+        'A hole 0.25 in across, 0.5 in deep, counterbored 0.5 in across and '
+        '0.125 in deep')
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1] == (
+        "project.add_solid_hole('Part', (0.0, 0.0, 0.0), 0.25, 0.5, (0.0, 0.0, 0.0), "
+        "'', unit='in', counterbore=(0.5, 0.125))")
+    assert geometry.solids[1].dimensions == pytest.approx(
+        tuple(np.array([0.25, 0.5, 0.5, 0.125]) * INCH))
+    panel.set_values(dimensions=(0.25, 0.5, 0.2, 0.125))
+    pump()
+    assert panel.reading_label.text().startswith('A counterbore wider than the hole')
+    assert not panel.add_button.isEnabled()
+
+
+def test_a_sections_pencil_changes_its_dimensions_not_its_shape(window, pump):
+    geometry = _part(window, pump)
+    window.project.add_solid_section('Part', 'I-beam', (0, 0, 0), (4, 2, 0.25, 0.2), 5.0,
+                                     unit='in')
+    window._solids_changed('Part')
+    pump()
+    _pencil(window, pump, _rows(window, 'solid')[0])
+    panel = window.scene.mesh_panel
+    assert panel.title.text() == 'Edit I-beam' and not _shown(panel.shape)
+    assert panel.values()['dimensions'] == pytest.approx((4, 2, 0.25, 0.2))
+    assert not panel.add_button.isEnabled(), 'nothing to apply yet'
+    panel.set_values(dimensions=(4, 3, 0.25, 0.2))
+    pump()
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1] == (
+        "project.edit_solid('Part', 1, dimensions=(4.0, 3.0, 0.25, 0.2), unit='in')")
+    assert geometry.solids[0].dimensions[1] == pytest.approx(3 * INCH)
+
+
+def test_a_holes_pencil_opens_on_through_and_gives_it_a_depth(window, pump):
+    geometry = _part(window, pump)
+    window.project.add_solid_hole('Part', (0, 0, 0.5), 0.25, unit='in')
+    window._solids_changed('Part')
+    pump()
+    _pencil(window, pump, _rows(window, 'solid')[0])
+    panel = window.scene.mesh_panel
+    assert panel.title.text() == 'Edit Hole' and panel.through.isChecked()
+    panel.through.setChecked(False)
+    panel.set_values(dimensions=(0.25, 0.75, 0.0, 0.0))
+    pump()
+    panel.add_button.click()
+    pump()
+    assert window.project.journal[-1] == (
+        "project.edit_solid('Part', 1, dimensions=(0.25, 0.75, 0.0, 0.0), unit='in')")
+    assert geometry.solids[0].dimensions[1] == pytest.approx(0.75 * INCH)
+

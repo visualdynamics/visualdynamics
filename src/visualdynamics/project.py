@@ -2219,15 +2219,9 @@ class Project(dict):
         gone, or somewhere it was not measured or solved. `what` finishes
         the sentence: what the change does to it, and what to do first."""
         for other in self.object_group_of(name) or []:
-            obj = self.get(other)
-            dofs = [*(getattr(obj, 'response_dof', None) or []),
-                    *(getattr(obj, 'reference_dof', None) or []),
-                    *(getattr(obj, 'coordinate', None) or [])]
-            if other == name or not dofs:
+            if other == name:
                 continue
-            named = {int(''.join(ch for ch in str(dof) if ch.isdigit()) or -1)
-                     for dof in dofs}
-            clash = sorted(named & set(nodes))
+            clash = sorted(_dof_nodes(self.get(other)) & set(nodes))
             if clash:
                 raise ValueError(
                     f'{other} names node {clash[0]}, which {what} before '
@@ -2613,15 +2607,165 @@ class Project(dict):
                                    float(radius) * scale, float(length) * scale,
                                    angles, name)
 
+    def add_solid_section(self, source: Any, shape: str, center: Any,
+                          dimensions: Any, length: float,
+                          angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
+                          unit: str = 'm') -> int:
+        """Add a section to a geometry's solids (`core.solids.add_section`):
+        an I-beam, a channel, a tee, an angle, a rectangular or a round
+        tube, `length` along its own axis, sized by its own dimensions
+        and changed by them after (`edit_solid`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        shape : str
+            One of `core.solids.SECTIONS`: 'I-beam', 'channel', 'tee',
+            'angle', 'rectangular tube' or 'round tube'.
+        center : array_like
+            Three numbers, in `unit`: the middle of the box it fills.
+        dimensions : sequence of float
+            In `unit`, in the order `SECTIONS[shape]` names them — an
+            I-beam's depth, flange width, flange thickness and web
+            thickness, as the beam element's section takes them.
+        length : float
+            In `unit`.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes; with none
+            it runs along Z.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_section(geometry, shape,
+                                  np.asarray(center, dtype=float) * scale,
+                                  np.asarray(dimensions, dtype=float) * scale,
+                                  float(length) * scale, angles, name)
+
+    def add_solid_hole(self, source: Any, center: Any, diameter: float,
+                       depth: float | None = None, angles: Any = (0.0, 0.0, 0.0),
+                       name: str = '', *, counterbore: Any = None,
+                       unit: str = 'm') -> int:
+        """Add a hole to a geometry's solids (`core.solids.add_hole`), to
+        subtract from a part (`combine_solids`): entered at `center`,
+        running `depth` along its own -Z, or through the part it is cut
+        from with none; a counterbore wider at the entry.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Where it enters, three numbers in `unit`.
+        diameter : float
+            In `unit`.
+        depth : float, optional
+            In `unit`; None through.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes; with none
+            it runs down Z.
+        name : str, optional
+            What to call it.
+        counterbore : (float, float), optional
+            Its diameter and depth, in `unit`.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_hole(
+            geometry, np.asarray(center, dtype=float) * scale, float(diameter) * scale,
+            None if depth is None else float(depth) * scale, angles, name,
+            None if counterbore is None else
+            tuple(float(v) * scale for v in counterbore))
+
+    def _data_nodes(self) -> set[int]:
+        """Every node some data in the project is measured or solved at:
+        the nodes its DOFs name — records' responses and references,
+        shapes' coordinates, the channel table's nodes."""
+        found: set[int] = set()
+        for obj in self.values():
+            found |= _dof_nodes(obj)
+            # a channel table's nodes: its frame's column, blanks left out
+            frame = getattr(obj, 'frame', None)
+            if frame is not None and 'node' in getattr(frame, 'columns', ()):
+                found.update(int(n) for n in frame['node'].dropna())
+        return found
+
+    def delete_elements(self, source: Any, ids: Any) -> dict:
+        """Delete a geometry's elements, and the nodes only they used —
+        except nodes data in the project is measured or solved at
+        (Brandon, 2026-10-12): a meshed part's bricks deleted take its
+        nodes, a test geometry's panels deleted leave its measurement
+        points (`Geometry.delete_elements`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The elements, by id.
+
+        Returns
+        -------
+        dict
+            'elements' and 'nodes', how many went.
+        """
+        _name, geometry = self._solid_geometry(source)
+        return geometry.delete_elements([int(i) for i in ids], nodes=True,
+                                        keep=sorted(self._data_nodes()))
+
+    def delete_element_groups(self, source: Any, ids: Any) -> dict:
+        """Delete a geometry's element groups with their elements, and the
+        nodes only they used — except nodes data in the project is
+        measured or solved at (`Geometry.delete_groups`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The element groups, by id.
+
+        Returns
+        -------
+        dict
+            'groups', 'elements' and 'nodes', how many went.
+        """
+        _name, geometry = self._solid_geometry(source)
+        return geometry.delete_groups([int(i) for i in ids],
+                                      keep=sorted(self._data_nodes()))
+
     def edit_solid(self, source: Any, solid_id: int, *, center: Any = None,
                    widths: Any = None, angles: Any = None, radius: Any = None,
                    length: Any = None, corner: Any = None, counts: Any = None,
-                   spacing: Any = None, name: Any = None,
+                   spacing: Any = None, dimensions: Any = None, name: Any = None,
                    unit: str = 'm') -> None:
         """Change a solid after it is made (`core.solids.edit`): a block's
         center, widths, angles and corner, a cylinder's center, radius,
-        length and angles, a pattern's counts and spacing, any solid's
-        name. What is not given is kept.
+        length and angles, a section's center, dimensions, length and
+        angles, a hole's center, dimensions and angles, a pattern's
+        counts and spacing, any solid's name. What is not given is kept.
         A boolean it is part of takes the change; a mesh made from it
         does not, until Mesh Solids meshes it again.
 
@@ -2636,6 +2780,10 @@ class Project(dict):
             lengths in `unit`.
         counts, spacing : optional
             As `pattern_solids` takes them.
+        dimensions : sequence of float, optional
+            A section's, as `add_solid_section` takes them, or a hole's:
+            its diameter, its depth (zero through), and its counterbore's
+            diameter and depth (zeros, none) — in `unit`.
         unit : str, default 'm'
             The unit the lengths are in. A geometry whose units are not
             defined takes them as given.
@@ -2651,9 +2799,9 @@ class Project(dict):
         changes = {key: value for key, value in (
             ('center', center), ('widths', widths), ('angles', angles),
             ('radius', radius), ('length', length), ('corner', corner),
-            ('counts', counts), ('spacing', spacing),
+            ('counts', counts), ('spacing', spacing), ('dimensions', dimensions),
             ('name', name)) if value is not None}
-        for key in ('center', 'widths', 'spacing'):
+        for key in ('center', 'widths', 'spacing', 'dimensions'):
             if key in changes:
                 changes[key] = np.asarray(changes[key], dtype=float) * scale
         for key in ('radius', 'length', 'corner'):
@@ -2761,7 +2909,9 @@ class Project(dict):
         extrusions along X, Y or Z, on one grid cut at every flat face,
         their holes rounded, each part an element group named for it,
         parts meshed together sharing nodes where they touch
-        (`core.solids.extrusion_mesh`). The solids stay, to mesh again.
+        (`core.solids.extrusion_mesh`). The solids stay, to mesh again,
+        and meshed again a part replaces its earlier mesh: the bricks of
+        the element group of its name, the group and its material kept.
 
         Parameters
         ----------
@@ -2788,8 +2938,9 @@ class Project(dict):
         -------
         dict
             'bricks', 'nodes', 'axis', 'rounded', 'shortest' as
-            `extrusion_mesh` says them, and 'added', 'shared' and
-            'groups' as `mesh.join` does.
+            `extrusion_mesh` says them, 'added', 'shared' and 'groups'
+            as `mesh.join` does, and 'replaced', the bricks of the
+            parts' earlier mesh it took the place of.
         """
         from .core import mesh, solids
 
@@ -2798,9 +2949,19 @@ class Project(dict):
         held = (solids.mesh_size(geometry, ids) if size is None
                 else float(size) * self._solid_scale(geometry, unit))
         part, made = solids.extrusion_mesh(geometry, ids, held, parts_apart)
+        # meshed again, a part replaces its earlier mesh (Brandon,
+        # 2026-10-12): the bricks of the element groups this mesh joins
+        # by name go first, with the nodes only they used unless data
+        # uses them. The groups stay, and their materials with them.
+        # Left in, the new bricks that landed on old ones were left out
+        # as already there, and a table meshed again without its legs
+        # kept the legs' bricks
+        replaced = [int(e) for e in solids.meshed_bricks(geometry, part.group_name)]
+        if replaced:
+            geometry.delete_elements(replaced, nodes=True, keep=sorted(self._data_nodes()))
         found = mesh.join(geometry, part, apart=apart)
         return {**made, 'added': found['added'], 'shared': found['shared'],
-                'groups': found['groups']}
+                'groups': found['groups'], 'replaced': len(replaced)}
 
     def delete_solids(self, source: Any, ids: Any) -> int:
         """Delete a geometry's solids, each with everything it is made of
@@ -4527,6 +4688,8 @@ _VERB_APPLIES: tuple = (
     # solids go into any geometry too (2026-10-11)
     ('add_solid_block', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_cylinder', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_section', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_hole', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
@@ -4535,6 +4698,22 @@ _VERB_APPLIES: tuple = (
     ('merge', lambda p, o: any(type(other) is type(o) and other is not o
                                for other in p.values())),
 )
+
+
+def _dof_nodes(obj) -> set[int]:
+    """The nodes an object's DOFs name: a record's responses and
+    references, a shape set's coordinates — what a node deleted or moved
+    under data would leave pointing nowhere."""
+    from .core.data import parse_dof
+
+    found = set()
+    for dofs in (getattr(obj, 'response_dof', None), getattr(obj, 'reference_dof', None),
+                 getattr(obj, 'coordinate', None)):
+        for dof in dofs if dofs is not None else ():
+            node, _direction = parse_dof(dof)
+            if node is not None:
+                found.add(node)
+    return found
 
 
 def _reads_as(project, obj, direction):
@@ -4614,9 +4793,10 @@ _JOURNALED_VERBS = (
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry', 'add_plane',
-    'add_block', 'add_solid_block', 'add_solid_cylinder', 'combine_solids',
+    'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_section',
+    'add_solid_hole', 'combine_solids',
     'delete_solids', 'separate_solids', 'mesh_solids', 'pattern_solids',
-    'edit_solid', 'move_solids',
+    'edit_solid', 'move_solids', 'delete_elements', 'delete_element_groups',
     'tie_elements',
     'merge_groups', 'set_view', 'set_comparison_scale',
     'read_as_specification', 'read_as_psd',

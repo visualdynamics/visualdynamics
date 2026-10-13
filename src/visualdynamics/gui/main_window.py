@@ -82,6 +82,7 @@ from ..core.data import (
     has_phase,
 )
 from ..core.entities import LABELS as ENTITY_LABELS
+from ..core.fem import with_article
 from ..core.geometry import (
     CS_TYPES,
     ELEMENT_TYPES,
@@ -112,6 +113,7 @@ from ..core.sine import (
     SineLevelSet,
     SineSweepSpecification,
 )
+from ..core.solids import SECTIONS
 from ..deform import (
     EnvelopeDeflection,
     OdsDeflection,
@@ -187,6 +189,7 @@ EXTEND_KEYS = 'Shift or Cmd' if sys.platform == 'darwin' else 'Shift or Ctrl'
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
+from .mesh_panel import SOLID_KINDS
 from .object_tables import (
     ENTITY_TABLES,
     channel_table_model,
@@ -276,10 +279,12 @@ DRAWN_AS = {'groups': 'elements'}
 #: (`core.solids`, 2026-10-11)
 SOLID_LABELS = {'block': 'Block', 'cylinder': 'Cylinder', 'union': 'Union',
                 'subtract': 'Subtraction', 'intersect': 'Intersection',
-                'pattern': 'Pattern'}
+                'pattern': 'Pattern', 'hole': 'Hole',
+                **{shape: f'{shape[:1].upper()}{shape[1:]}' for shape in SECTIONS}}
 SOLID_ICONS = {'block': 'solid_block', 'cylinder': 'solid_cylinder',
                'union': 'solid_union', 'subtract': 'solid_subtract',
-               'intersect': 'solid_intersect', 'pattern': 'solid_pattern'}
+               'intersect': 'solid_intersect', 'pattern': 'solid_pattern',
+               'hole': 'solid_hole', **dict.fromkeys(SECTIONS, 'solid_section')}
 #: how see-through a solid is drawn, and one picked in the tree
 SOLID_OPACITY, SOLID_PICKED_OPACITY = 0.35, 0.6
 
@@ -325,11 +330,11 @@ def _entity_key(geometry, component, row):
 
 
 def _delete_from_geometry(geometry, component, keys):
+    """Nodes or coordinate systems deleted; elements and element groups
+    go through the project's verbs (`MainWindow._delete_from`)."""
     return {
         'nodes': geometry.delete_nodes,
         'coordinate_systems': geometry.delete_coordinate_systems,
-        'elements': geometry.delete_elements,
-        'groups': geometry.delete_groups,
     }[component](keys)
 
 
@@ -2711,6 +2716,20 @@ class MainWindow(QMainWindow):
         the project's `add_solid_cylinder`."""
         self._open_mesh_pane('solid_cylinder')
 
+    def add_solid_section_act(self) -> None:
+        """A section typed into the selected geometry's solids: an I-beam,
+        a channel, a tee, an angle or a tube picked, its dimensions, a
+        length along its own Z, a center, three angles, a name; each Add
+        the project's `add_solid_section`."""
+        self._open_mesh_pane('solid_section')
+
+    def add_solid_hole_act(self) -> None:
+        """A hole typed into the selected geometry's solids, to subtract
+        from a part: where it enters, a diameter, a depth or Through, a
+        counterbore when asked for; each Add the project's
+        `add_solid_hole`."""
+        self._open_mesh_pane('solid_hole')
+
     def _solids_changed(self, name: str, pick=()) -> None:
         """The tree and the view after the solids changed, `pick`'s rows
         selected again — the rebuilt rows lose the selection."""
@@ -2836,10 +2855,15 @@ class MainWindow(QMainWindow):
                     if meshing['defined'] else made['shortest'])
         rounded = (f' {made["rounded"]:,} nodes on circles.'
                    if made['rounded'] else '')
+        # a part meshed before is meshed again in place of the old bricks
+        # (`Project.mesh_solids`): said before Mesh is pressed
+        earlier = len(solids.meshed_bricks(geometry, part.group_name))
+        replacing = (f' It replaces the {earlier:,} bricks meshed before.'
+                     if earlier else '')
         panel.show_reading(
             f'{made["bricks"]:,} bricks, {made["nodes"]:,} nodes, extruded '
             f'along {"XYZ"[made["axis"]]}.{rounded} The shortest edge is '
-            f'{shortest:.4g} {meshing["unit"]}.', True)
+            f'{shortest:.4g} {meshing["unit"]}.{replacing}', True)
 
     def _mesh_solids_apply(self) -> None:
         """Mesh: the project's `mesh_solids` at the typed size, and the pane
@@ -2864,8 +2888,10 @@ class MainWindow(QMainWindow):
         self._refresh_item(self._item_for_object(name), obj)
         self.refresh_compatibility()
         self.render_current()
+        replaced = (f', replacing the {found["replaced"]:,} meshed before'
+                    if found.get('replaced') else '')
         self._show_status(
-            f'{name}: meshed into {found["bricks"]:,} bricks — '
+            f'{name}: meshed into {found["bricks"]:,} bricks{replaced} — '
             f'{found["added"]:,} nodes added, {found["shared"]:,} shared with '
             f'the geometry; {obj.num_nodes:,} nodes in all')
 
@@ -3361,13 +3387,25 @@ class MainWindow(QMainWindow):
         self.render_current()
         self._show_status('Removed ' + ', '.join(removed))
 
+    def _delete_from(self, name, geometry, component, keys):
+        """Delete a geometry's entities, journaled. Elements and element
+        groups go through the project's verbs, which keep the nodes the
+        project's data is measured or solved at and journal themselves
+        (2026-10-12); nodes and coordinate systems through the geometry,
+        journaled here."""
+        if component == 'elements':
+            return self.project.delete_elements(name, keys)
+        if component == 'groups':
+            return self.project.delete_element_groups(name, keys)
+        report = _delete_from_geometry(geometry, component, keys)
+        self._journal_geometry_delete(geometry, component, keys)
+        return report
+
     def _journal_geometry_delete(self, geometry, component, keys):
         """A geometry deletion, journaled by the ids a script names —
         stable across a replay where row numbers are not."""
         method = {'nodes': 'delete_nodes',
-                  'coordinate_systems': 'delete_coordinate_systems',
-                  'elements': 'delete_elements',
-                  'groups': 'delete_groups'}[component]
+                  'coordinate_systems': 'delete_coordinate_systems'}[component]
         self.project.record_call(geometry, method,
                                  sorted(int(k) for k in keys))
 
@@ -3583,6 +3621,9 @@ class MainWindow(QMainWindow):
          'add_solid_block_act'),
         ('add_solid_cylinder', 'Add Cylinder', 'solid_cylinder',
          'add_solid_cylinder_act'),
+        ('add_solid_section', 'Add Section', 'solid_section',
+         'add_solid_section_act'),
+        ('add_solid_hole', 'Add Hole', 'solid_hole', 'add_solid_hole_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
         ('read_as_specification', 'Read as Specification',
          'as_specification', 'read_as_specification_act'),
@@ -3596,7 +3637,8 @@ class MainWindow(QMainWindow):
 
     #: the acts offered on a geometry's Solids row: the shapes a part is
     #: built from before it is meshed (Brandon, 2026-10-11)
-    SOLID_ACTS: ClassVar[tuple] = ('add_solid_block', 'add_solid_cylinder')
+    SOLID_ACTS: ClassVar[tuple] = ('add_solid_block', 'add_solid_cylinder',
+                                   'add_solid_section', 'add_solid_hole')
 
     #: the acts offered on element groups picked in the tree rather than
     #: the geometry's row: merging every coincident node of a whole model
@@ -4758,11 +4800,10 @@ class MainWindow(QMainWindow):
             if not keys:
                 continue
             try:
-                report = _delete_from_geometry(geometry, component, keys)
+                report = self._delete_from(name, geometry, component, keys)
             except ValueError as e:
                 refused.append(str(e))
                 continue
-            self._journal_geometry_delete(geometry, component, keys)
             for kind, count in report.items():
                 removed[kind] = removed.get(kind, 0) + count
         item = self._item_for_object(name)
@@ -4797,11 +4838,10 @@ class MainWindow(QMainWindow):
         if geometry is None:
             return
         try:
-            report = _delete_from_geometry(geometry, component, keys)
+            report = self._delete_from(name, geometry, component, keys)
         except ValueError as e:
             self._show_status(str(e))
             return
-        self._journal_geometry_delete(geometry, component, keys)
         item = self._item_for_object(name)
         if item is not None:
             self._refresh_item(item, geometry)
@@ -12834,8 +12874,9 @@ class MainWindow(QMainWindow):
             # a pattern is its counts and spacing: Pattern's own pane
             self._open_pattern_pane(name, list(item.operands), editing=solid_id)
             return
-        kind = {'block': 'solid_block', 'cylinder': 'solid_cylinder'}.get(
-            item.kind, 'solid_part')
+        kind = ({'block': 'solid_block', 'cylinder': 'solid_cylinder',
+                 solids.HOLE: 'solid_hole'}.get(item.kind)
+                or ('solid_section' if item.kind in solids.SECTIONS else 'solid_part'))
         self._open_mesh_pane(kind, editing=(name, solid_id))
 
     @staticmethod
@@ -12855,12 +12896,15 @@ class MainWindow(QMainWindow):
             return {'center': tuple((low + high) / 2.0 / scale),
                     'widths': tuple((high - low) / scale),
                     'angles': (0.0, 0.0, 0.0), 'group': item.name}
+        shaped = ({'shape': item.kind} if item.kind in solids.SECTIONS else {})
+        if item.kind in solids.SHAPED:
+            shaped['dimensions'] = tuple(np.asarray(item.dimensions) / scale)
         return {'center': tuple(np.asarray(item.center) / scale),
                 'angles': tuple(item.angles),
                 'widths': (tuple(np.asarray(item.widths) / scale)
                            if item.kind == 'block' else (1.0, 1.0, 1.0)),
                 'radius': item.radius / scale, 'length': item.length / scale,
-                'corner': item.corner / scale, 'group': item.name}
+                'corner': item.corner / scale, 'group': item.name, **shaped}
 
     def _mesh_default_group(self, geometry, kind: str) -> str:
         """The element group the pane opens on: the last of the geometry's
@@ -12933,7 +12977,7 @@ class MainWindow(QMainWindow):
         values = self.scene.mesh_panel.values()
         frame, kind = self._mesh['frame'], self._mesh['kind']
         widths = np.asarray(values['widths'], dtype=float)
-        if kind in ('solid_block', 'solid_cylinder', 'solid_part'):
+        if kind in SOLID_KINDS:
             return self._solid_call(values, frame, kind)
         if kind == 'block':
             if np.any(widths <= 0.0):
@@ -12969,6 +13013,19 @@ class MainWindow(QMainWindow):
                 'name': values['group']}
         if kind == 'solid_part':
             return 'move_solids', call
+        # a section's and a hole's rules are the core's, refused when the
+        # preview builds them (`_solid_refresh`)
+        if kind == 'solid_section':
+            return 'add_solid_section', {**call, 'shape': values['shape'],
+                                         'dimensions': tidy(values['dimensions']),
+                                         'length': float(values['length'])}
+        if kind == 'solid_hole':
+            diameter, depth, wide, deep = values['dimensions']
+            return 'add_solid_hole', {**call, 'diameter': float(diameter),
+                                      'depth': float(depth) or None,
+                                      'counterbore': (float(wide), float(deep))
+                                      if wide else None,
+                                      'dimensions': tidy(values['dimensions'])}
         if kind == 'solid_block':
             if min(values['widths']) <= 0.0:
                 raise ValueError('a block needs a width along all three axes')
@@ -13005,15 +13062,47 @@ class MainWindow(QMainWindow):
             return
         # built in the display unit as typed: the preview is drawn in it
         scratch = Shapes(node_id=[], node_xyz=np.empty((0, 3)))
-        if verb == 'add_solid_block':
-            made = solids.add_block(scratch, call['center'], call['widths'],
-                                    call['angles'], corner=call['corner'])
-        else:
-            made = solids.add_cylinder(scratch, call['center'], call['radius'],
-                                       call['length'], call['angles'])
+        try:
+            if verb == 'add_solid_block':
+                made = solids.add_block(scratch, call['center'], call['widths'],
+                                        call['angles'], corner=call['corner'])
+            elif verb == 'add_solid_section':
+                made = solids.add_section(scratch, call['shape'], call['center'],
+                                          call['dimensions'], call['length'],
+                                          call['angles'])
+            elif verb == 'add_solid_hole':
+                made = solids.add_hole(scratch, call['center'], call['diameter'],
+                                       call['depth'], call['angles'],
+                                       counterbore=call['counterbore'])
+            else:
+                made = solids.add_cylinder(scratch, call['center'], call['radius'],
+                                           call['length'], call['angles'])
+        except ValueError as refusal:
+            # the shape's own rules: a web wider than its flange, a wall
+            # thicker than half the tube
+            self._draw_plane_preview(None)
+            text = str(refusal)
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            return
         self._draw_plane_preview(
             solids.shape_triangles(solids.shape(scratch, made)))
-        if verb == 'add_solid_block':
+        if verb == 'add_solid_hole':
+            what = self._hole_said(call, label)
+            if before is None:
+                panel.show_reading(f'{what} — subtract it from a part.', True)
+                return
+            changes = self._solid_changes(call)
+            panel.show_reading(f'{what}.' + ('' if changes else ' As it is: change '
+                                             'a number, or drag it, to apply.'),
+                               bool(changes))
+            return
+        if verb == 'add_solid_section':
+            dims = ', '.join(f'{named} {value:.4g}' for named, value in zip(
+                solids.SECTIONS[call['shape']], call['dimensions']))
+            what = (f'{with_article(call["shape"])[:1].upper()}'
+                    f'{with_article(call["shape"])[1:]} {call["length"]:.4g} {label} '
+                    f'long — {dims} {label}')
+        elif verb == 'add_solid_block':
             w = call['widths']
             rounded = (f', its corners rounded to {call["corner"]:.4g} {label}'
                        if call['corner'] else '')
@@ -13032,20 +13121,37 @@ class MainWindow(QMainWindow):
                            + ('' if changes else ' As it is: change a number, '
                               'or drag it, to apply.'), bool(changes))
 
+    @staticmethod
+    def _hole_said(call, label: str) -> str:
+        """A hole in a sentence: how wide, how deep, its counterbore."""
+        deep = (f'{call["depth"]:.4g} {label} deep' if call['depth'] else
+                'through the part it is cut from')
+        bored = (f', counterbored {call["counterbore"][0]:.4g} {label} across and '
+                 f'{call["counterbore"][1]:.4g} {label} deep'
+                 if call['counterbore'] else '')
+        return f'A hole {call["diameter"]:.4g} {label} across, {deep}{bored}'
+
     def _solid_changes(self, call) -> dict:
         """What the fields change of the solid the pane is on, as
         `edit_solid` takes it: only the numbers that moved, so the
         journal line says what was done."""
         before = self._mesh['before']
         # in the verb's own order, so the journal reads as its signature
-        block = self._mesh['kind'] == 'solid_block'
-        now = {'center': call['center'],
-               **({'widths': call['widths']} if block else {}),
-               'angles': call['angles'],
-               **({} if block else {'radius': call['radius'],
-                                    'length': call['length']}),
-               **({'corner': call['corner']} if block else {}),
-               'name': call['name']}
+        kind = self._mesh['kind']
+        block = kind == 'solid_block'
+        if kind in ('solid_section', 'solid_hole'):
+            now = {'center': call['center'], 'angles': call['angles'],
+                   'dimensions': call['dimensions'],
+                   **({'length': call['length']} if kind == 'solid_section' else {}),
+                   'name': call['name']}
+        else:
+            now = {'center': call['center'],
+                   **({'widths': call['widths']} if block else {}),
+                   'angles': call['angles'],
+                   **({} if block else {'radius': call['radius'],
+                                        'length': call['length']}),
+                   **({'corner': call['corner']} if block else {}),
+                   'name': call['name']}
         changes = {}
         for key, value in now.items():
             if key == 'name':
@@ -13110,7 +13216,7 @@ class MainWindow(QMainWindow):
         panel = self.scene.mesh_panel
         if self._mesh is None:
             return
-        if self._mesh['kind'] in ('solid_block', 'solid_cylinder', 'solid_part'):
+        if self._mesh['kind'] in SOLID_KINDS:
             self._solid_refresh()
             return
         obj = self.objects.get(self._mesh['name'])
@@ -13174,9 +13280,21 @@ class MainWindow(QMainWindow):
         if self._mesh.get('editing') is not None:
             self._apply_solid_edit(verb, call)
             return
-        if verb in ('add_solid_block', 'add_solid_cylinder'):
+        if verb in ('add_solid_block', 'add_solid_cylinder', 'add_solid_section',
+                    'add_solid_hole'):
             extra = {k: v for k, v in call.items() if k not in ('center', 'name')}
-            if verb == 'add_solid_block':
+            if verb == 'add_solid_section':
+                new = self.project.add_solid_section(
+                    name, extra['shape'], call['center'], extra['dimensions'],
+                    extra['length'], call['angles'], call['name'],
+                    unit=self._mesh['unit'])
+            elif verb == 'add_solid_hole':
+                # the keywords only when used, so a journal line reads plain
+                optional = {'counterbore': extra['counterbore']} if extra['counterbore'] else {}
+                new = self.project.add_solid_hole(
+                    name, call['center'], extra['diameter'], extra['depth'],
+                    call['angles'], call['name'], unit=self._mesh['unit'], **optional)
+            elif verb == 'add_solid_block':
                 # the keyword only when used, so a journal line reads plain
                 corner = ({'corner': extra['corner']} if extra['corner'] else {})
                 new = self.project.add_solid_block(

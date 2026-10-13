@@ -153,19 +153,85 @@ def test_matlab_sees_structs_cells_and_columns(tmp_path):
     assert list(data.response_dof) == project[data.name].response_dof
 
 
-def test_values_are_si_with_the_units_named(tmp_path):
-    """The file is the project, not a display of it: SI, units beside,
-    whatever system the export was asked for."""
+def test_values_are_in_the_display_units_and_labeled_with_them(tmp_path):
+    """Brandon (2026-10-13): a time history declared in g, exported with
+    in-slinch-lbf-s (g) on, came out in m/s² beside an ordinate_unit of
+    'g'. Now its numbers are in g and say so, the file names the system,
+    and it reads back to the same SI values."""
+    from visualdynamics.core.data import TimeHistory
     from visualdynamics.units import SYSTEMS
 
+    history = TimeHistory(np.arange(5) * 0.01, [[0.0, 1.0, -2.0, 0.5, 3.0]], ['1X+'])
+    history.define_units('g')
+    path = str(tmp_path / 'history.mat')
+    export_file(history, path, unit_system=SYSTEMS['in-slinch-lbf-s (g)'])
+    variables = loadmat(path, squeeze_me=True, struct_as_record=False)
+    assert np.allclose(variables['data'].ordinate, [0.0, 1.0, -2.0, 0.5, 3.0])
+    assert variables['data'].ordinate_unit == 'g'
+    assert variables['unit_system'] == 'in-slinch-lbf-s (g)'
+    back = import_file(path)
+    assert np.allclose(back.ordinate, history.ordinate, rtol=1e-12)
+    assert back.ordinate_unit == ['g'] and back.ordinate_dim == ['acceleration']
+
+
+def test_an_frf_is_written_in_the_systems_units_over_its_reference(tmp_path):
+    """Declared in m/s² per N, written in in/s² per lbf: the numbers the
+    view shows, each half of the unit named."""
+    from visualdynamics.units import SYSTEMS
+
+    system = SYSTEMS['in-slinch-lbf-s']
     frf = visualdynamics.import_file(fixture_path('plate', 'frfs.npz'),
                                      response_unit='m/s**2',
                                      reference_unit='N')
     path = str(tmp_path / 'frf.mat')
-    export_file(frf, path, unit_system=SYSTEMS['in-slinch-lbf-s'])
+    export_file(frf, path, unit_system=system)
     variables = loadmat(path, squeeze_me=True, struct_as_record=False)
-    assert np.allclose(variables['data'].ordinate, frf.ordinate)
-    assert variables['data'].ordinate_unit[0] == 'm/s**2'
+    assert np.allclose(variables['data'].ordinate, frf.display_ordinate(system))
+    assert not np.allclose(variables['data'].ordinate, frf.ordinate)
+    assert variables['data'].ordinate_unit[0] == 'in/s**2'
+    assert variables['data'].reference_unit[0] == 'lbf'
+    back = import_file(path)
+    assert np.allclose(back.ordinate, frf.ordinate, rtol=1e-12)
+
+
+def test_without_a_display_system_the_file_is_the_project_file(tmp_path):
+    """SI exactly, with the declared units, and no unit_system: what
+    Project.save writes, and how a file from before 2026-10-13 reads."""
+    frf = visualdynamics.import_file(fixture_path('plate', 'frfs.npz'),
+                                     response_unit='m/s**2',
+                                     reference_unit='N')
+    path = str(tmp_path / 'frf.mat')
+    export_file(frf, path)
+    variables = loadmat(path, squeeze_me=True, struct_as_record=False)
+    assert 'unit_system' not in variables
+    assert np.array_equal(variables['data'].ordinate, frf.ordinate)
+    assert np.array_equal(import_file(path).ordinate, frf.ordinate)
+
+
+@pytest.mark.parametrize('system', ['in-slinch-lbf-s (g)', 'mm-kg-N-s'])
+def test_the_whole_corpus_comes_back_from_a_display_system(tmp_path, system):
+    """Every kind with units — records, specifications and their limits,
+    geometry, shapes, sine tones and levels — written in a display
+    system and read back: the same SI values, only the declared units
+    moved to the ones written in."""
+    from visualdynamics.units import SYSTEMS
+
+    project = native.load(CORPUS)
+    mat = str(tmp_path / 'corpus.mat')
+    export_file(project, mat, unit_system=SYSTEMS[system])
+    back = import_file(mat)
+    project.save(str(tmp_path / 'a.vdyn'))
+    back.save(str(tmp_path / 'b.vdyn'))
+    a, b = vdyn_tree(tmp_path / 'a.vdyn'), vdyn_tree(tmp_path / 'b.vdyn')
+    assert set(a) == set(b), (set(a) ^ set(b))
+    labels = ('ordinate_unit', 'reference_unit', 'length_unit', 'mass_unit')
+    moved = [key for key in a if not same(a[key], b[key])]
+    numbers = [key for key in moved if not key.split('/')[-1].split('@')[-1] in labels]
+    assert numbers, 'some values were converted and back'
+    for key in numbers:
+        assert np.allclose(np.asarray(a[key]), np.asarray(b[key]), rtol=1e-9,
+                           atol=0), key
+    assert any(key.endswith('ordinate_unit') for key in moved), 'labels moved'
 
 
 # ---- refusals, said by name -------------------------------------------------

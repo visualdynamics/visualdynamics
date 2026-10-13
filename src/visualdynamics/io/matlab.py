@@ -45,13 +45,31 @@ one, as an attribute too; the loader reads the one it wants and the
 other is never looked at. Strings are char arrays, lists of strings
 are cellstr, and `''` (an undeclared unit) is MATLAB's empty char.
 
-**Values are SI**, exactly as in a `.vdyn`, with every record's unit
-named beside it — the one other format that stores SI regardless of
-the display system is ADF, whose definition requires it; here it is
-what keeps the file the project file. A record whose units were never
-declared is written as it stands, marked `''`, and comes back
-undeclared. Convert in MATLAB from the unit strings if a display
-system is wanted.
+**Values are in the display units**, and every unit field names the
+unit its values are in (Brandon, 2026-10-13: a time history declared in
+g, exported with in-slinch-lbf-s (g) on, came out in m/s² beside an
+`ordinate_unit` of `'g'` — the project file's field, which names the
+unit a record was *declared* in over values that are always SI). So a
+`.mat` exported in a display system holds each record in that system's
+unit for its quantity, labeled with it: g over g, `(in/s**2)/lbf`
+beside an FRF in those units, a geometry's coordinates in inches with
+`length_unit` `'in'`, shapes against slinch. The file says which system
+in a `unit_system` variable, and the reader takes each object back to
+SI from its own labels — the declared unit, on the way back, is the one
+it was written in. What stays SI is what the project file names as SI
+whatever was declared: material and section properties, and the
+abscissa, which is seconds or hertz in every system. A record whose
+units were never declared is written as it stands, marked `''`, and
+comes back undeclared. Without a display system — `Project.save` to
+`.mat`, or a script that names none — the file is the project file
+exactly, SI, and a file from before 2026-10-13, which has no
+`unit_system`, is read as SI.
+
+The conversion is the core's own, run on a copy: each object is
+labeled with the display unit and `undefine_units` takes it there, the
+inverse of how a declaration takes a file's numbers to SI; the reader
+clears the labels and declares them again (`_in_display`,
+`_from_display`).
 
 The stamp `visualdynamics_schema` travels as a variable, and the
 reader keeps the `.vdyn` contract: a newer stamp is refused, an older
@@ -83,6 +101,8 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 SUFFIX = '.mat'
 STAMP = 'visualdynamics_schema'
+#: the display system a file's values are in, by name; absent, SI
+SYSTEM = 'unit_system'
 MATRIX_FIELDS = 'matrix_fields'
 #: scipy's MAT-5 writer raises once a matrix passes 2**32 bytes — after
 #: writing most of the file. Refuse first, and say which array.
@@ -213,31 +233,128 @@ def _check_size(tree: dict[str, Any], where: str = '') -> None:
 
 def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
          **_ignored: Any) -> None:
-    """Write an object, or a whole project, as a `.mat` file.
-
-    `unit_system` is taken for the exporter's uniform signature and
-    unused: the file stores SI with the units named, like the project
-    file it is (see the module docstring).
+    """Write an object, or a whole project, as a `.mat` file: its values
+    in `unit_system`'s units, each unit field naming them, or SI — the
+    project file exactly — with none (see the module docstring).
     """
     from scipy.io import savemat
 
     from ..project import Project
 
+    def shown(item):
+        return item if unit_system is None else _in_display(item, unit_system)
+
     with _memory_file() as f:
         if isinstance(obj, Project):
-            native.save_test_into(f, obj.name, dict(obj),
+            native.save_test_into(f, obj.name,
+                                  {name: shown(item) for name, item in obj.items()},
                                   active_geometry=obj.active_geometry,
                                   project_type=obj.project_type,
                                   object_groups=obj.object_groups, provenance=obj.provenance)
         else:
-            native.save_into(obj, f)
+            native.save_into(shown(obj), f)
         tree = _tree_out(f)
+    if unit_system is not None:
+        tree[SYSTEM] = unit_system.name
     _check_size(tree)
     path = str(path)
     if not path.endswith(SUFFIX):
         path += SUFFIX
     savemat(path, tree, do_compression=True, long_field_names=True,
             oned_as='column')
+
+
+# ---- the display units --------------------------------------------------------
+
+def _in_display(obj: Any, system: Any) -> Any:
+    """A copy of `obj` with its values in `system`'s units and its unit
+    fields naming them; `obj` itself if it has no units, or none
+    declared. Each kind is labeled with the display unit and its own
+    `undefine_units` takes its SI values there."""
+    import copy
+
+    from ..core.data import DataArray
+    from ..core.geometry import Geometry
+    from ..core.shapes import ShapeSet
+    from ..core.sine import SineLevelSet, SineSweepSpecification
+    from ..units import si_transform
+
+    if isinstance(obj, DataArray):
+        rows = [i for i, unit in enumerate(obj.ordinate_unit) if unit is not None]
+        if not rows:
+            return obj
+        out = copy.deepcopy(obj)
+        labels = {i: type(out).units_for(out.ordinate_dim[i], system) for i in rows}
+        dims = list(out.ordinate_dim)
+        for i, (unit, reference) in labels.items():
+            out.ordinate_unit[i], out.reference_unit[i] = unit, reference
+        out.undefine_units(rows)
+        for i, (unit, reference) in labels.items():
+            out.ordinate_unit[i], out.reference_unit[i] = unit, reference
+            out.ordinate_dim[i] = dims[i]
+        return out
+    if isinstance(obj, Geometry) and obj.length_unit is not None:
+        out = copy.deepcopy(obj)
+        out.length_unit = system.unit('length')
+        out.undefine_units()
+        out.length_unit = system.unit('length')
+        return out
+    if isinstance(obj, ShapeSet) and obj.mass_unit is not None:
+        out = copy.deepcopy(obj)
+        out.mass_unit = system.unit('mass')
+        out.undefine_units()
+        out.mass_unit = system.unit('mass')
+        return out
+    if isinstance(obj, SineLevelSet):
+        out = copy.copy(obj)
+        out.levels = [_in_display(level, system) for level in obj.levels]
+        return out
+    if isinstance(obj, SineSweepSpecification) and obj.ordinate_unit is not None:
+        # its amplitudes are held in their SI unit, named: no declaration
+        # to take back, so scaled here by the one transform
+        out = copy.deepcopy(obj)
+        out.ordinate_unit = system.unit(obj.ordinate_dim)
+        scale, offset = si_transform(out.ordinate_unit)
+        for tone in out.tones:
+            tone.amplitude = (tone.amplitude - offset) / scale
+            tone.limits = {name: (values - offset) / scale
+                           for name, values in tone.limits.items()}
+        return out
+    return obj
+
+
+def _from_display(obj: Any) -> Any:
+    """`obj`, read from a file written in a display system, back in SI
+    in place: each label cleared and declared again, so the values are
+    taken from the unit it names — the inverse of `_in_display`."""
+    from ..core.data import DataArray
+    from ..core.geometry import Geometry
+    from ..core.shapes import ShapeSet
+    from ..core.sine import SineLevelSet, SineSweepSpecification
+    from ..units import SI, si_transform
+
+    if isinstance(obj, DataArray):
+        units, references = list(obj.ordinate_unit), list(obj.reference_unit)
+        obj.ordinate_unit = [None] * obj.num_records
+        obj.reference_unit = [None] * obj.num_records
+        obj.define_units(units, references)
+    elif isinstance(obj, Geometry) and obj.length_unit is not None:
+        unit, obj.length_unit = obj.length_unit, None
+        obj.define_units(unit)
+    elif isinstance(obj, ShapeSet) and obj.mass_unit is not None:
+        unit, obj.mass_unit = obj.mass_unit, None
+        obj.define_units(unit)
+    elif isinstance(obj, SineLevelSet):
+        for level in obj.levels:
+            _from_display(level)
+    elif isinstance(obj, SineSweepSpecification) and obj.ordinate_unit is not None:
+        scale, offset = si_transform(obj.ordinate_unit)
+        for tone in obj.tones:
+            tone.amplitude = tone.amplitude * scale + offset
+            tone.limits = {name: values * scale + offset
+                           for name, values in tone.limits.items()}
+        obj.ordinate_unit = SI.unit(obj.ordinate_dim)
+    return obj
 
 
 # ---- MATLAB variables -> HDF5 tree ------------------------------------------
@@ -381,6 +498,12 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Any:
                 'documented layout of one object is read too.')
         kind, fields = bare
         variables = {STAMP: native.SCHEMA_VERSION, kind: fields}
+    shown = variables.pop(SYSTEM, None)
     with _memory_file() as f:
         _write_tree(f, variables)
-        return native.load_from(f, path=path)
+        loaded = native.load_from(f, path=path)
+    if shown is None:
+        return loaded
+    for item in (loaded.values() if isinstance(loaded, dict) else [loaded]):
+        _from_display(item)
+    return loaded

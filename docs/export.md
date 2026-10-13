@@ -205,9 +205,18 @@ saved alone is one struct named for its kind (`data`, `geometry`,
 `shapes`, …). The respellings MATLAB needs are mechanical: ragged
 connectivity is a cell array of row vectors, one-dimensional datasets
 are column vectors, strings are char arrays and lists of them cellstr,
-`''` still means undeclared. **Values are SI with every unit named**,
-as in `.vdyn` — the file is the project, not a display of it — so
-convert in MATLAB from the unit strings if a display system is wanted.
+`''` still means undeclared. **Values are in the display units, and
+every unit field names the unit its values are in** (2026-10-13): with
+in-slinch-lbf-s (g) chosen, an acceleration is in g with an
+`ordinate_unit` of `'g'`, an FRF in in/s² per lbf with `'in/s**2'` and
+`'lbf'`, a geometry's coordinates in inches with `length_unit` `'in'`.
+A `unit_system` variable names the system, and reading the file back
+takes every value to SI from its own unit, so a record comes back
+declared in the unit it was written in. Material and section properties
+stay SI, as the project file names them, and an abscissa is seconds or
+hertz in every system. Saving the project as `.mat`, or exporting from
+a script with no `unit_system`, writes the project file exactly: SI,
+each record beside the unit it was declared in.
 The reader takes back the files it writes, and one other thing: a
 single struct built by hand to the documented layout of one object,
 without the schema stamp. Anything else in a `.mat` is refused by name

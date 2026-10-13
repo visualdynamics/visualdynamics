@@ -382,7 +382,7 @@ class DataArray:
         for i, dim in enumerate(self.ordinate_dim):
             if dim == UNKNOWN or self.ordinate_unit[i] is not None:
                 continue
-            unit, reference = self._si_units_for(dim)
+            unit, reference = self.units_for(dim)
             self.ordinate_unit[i] = unit
             if self.reference_unit[i] is None:
                 self.reference_unit[i] = reference
@@ -423,9 +423,24 @@ class DataArray:
         return self.dimension_hint[i] or UNKNOWN
 
     @classmethod
-    def _si_units_for(cls, dimension):
-        """(ordinate unit, reference unit) in SI for a known dimension."""
-        return SI.unit(dimension), None
+    def units_for(cls, dimension, system=SI):
+        """(ordinate unit, reference unit) a unit system names for a known
+        dimension — SI unless another is given: what a record's values
+        are declared in once they are written in that system (a `.mat`
+        written in the display units, 2026-10-13).
+
+        Parameters
+        ----------
+        dimension : str
+            An `ordinate_dim`, such as 'acceleration'.
+        system : UnitSystem, optional
+            The units to name; SI when omitted.
+
+        Returns
+        -------
+        (str, str or None)
+        """
+        return system.unit(dimension), None
 
     @staticmethod
     def _str_list(value, n, name):
@@ -2491,9 +2506,9 @@ class Frf(DataArray):
     needs_reference = True
 
     @classmethod
-    def _si_units_for(cls, dimension):
+    def units_for(cls, dimension, system=SI):
         response, _, reference = dimension.partition('/')
-        return SI.unit(response), SI.unit(reference)
+        return system.unit(response), system.unit(reference)
 
     def _conversion(self, unit, reference_unit=None):
         if reference_unit is None:
@@ -3196,12 +3211,12 @@ class Psd(_Bands, DataArray):
                                   if self.comment else 'coherence'))
 
     @classmethod
-    def _si_units_for(cls, dimension):
+    def units_for(cls, dimension, system=SI):
         numerator = dimension.split('/')[0]
         if numerator.endswith('**2'):
-            return SI.unit(numerator[:-3]), None
+            return system.unit(numerator[:-3]), None
         base, _, cross = numerator.partition('*')
-        return SI.unit(base), (SI.unit(cross) if cross else None)
+        return system.unit(base), (system.unit(cross) if cross else None)
 
     def _conversion(self, unit, reference_unit=None):
         base_dim = dimension_of(unit)

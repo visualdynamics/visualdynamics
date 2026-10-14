@@ -1,18 +1,20 @@
-"""Reports from runs: the batch of one-call reports, asked in the window.
+"""Reports from Runs: the one-call reports for a batch of runs, asked
+for in the window.
 
 `visualdynamics.run_report` writes the report each controller run's
-type calls for, one per run, and a script hands it the runs, a
-geometry, a destination and a marking (Brandon, 2026-10-04: "We made
-functions to batch process multi-selected nc4 files. Can we make a way
-to call those from the application?"). This dialog asks for the same
-four things, so File → Reports from Runs… is that call and nothing
-else: the window runs `run_report` with the answers, on its long-verb
-runner, with the bar and Cancel.
+type calls for, one per run, and a script passes it the runs, a
+geometry, a destination and a marking. This dialog asks for the same
+things, so File → Reports from Runs… is that call and nothing else: the
+window runs `run_report` with the answers on its runner for long verbs,
+with the progress bar and Cancel.
 
-The runs are listed with the report each one will get, read from the
-file the way `run_report` reads it (`report_kind`), so a campaign's
-odd one out — a modal survey in a folder of random runs — is seen and
-left out here rather than refusing the batch after the button.
+Each run is listed with the report it will get, read from the file the
+way `run_report` reads it (`report_kind`), and how much of its end to
+read (Last). The report can be changed or the run left out, so a run
+that does not belong with the rest (a modal survey in a folder of
+random runs, for example) is seen and left out here, instead of the
+batch being refused after the button is pressed. A random-and-sine run
+gets two reports, and the button counts reports, not runs.
 """
 
 from __future__ import annotations
@@ -42,6 +44,10 @@ from PySide6.QtWidgets import (
 
 from .ask import GEOMETRY_FILTER
 
+# Brandon, 2026-10-04: "We made functions to batch process
+# multi-selected nc4 files. Can we make a way to call those from the
+# application?"
+
 #: what each kind of one-call report is called where a person reads it
 KIND_NAMES = {'random': 'Random Vibration',
               'mixed': 'Random and Sine: a random and a sine report',
@@ -66,8 +72,8 @@ DEFAULT_MARKING = 'UNCLASSIFIED'
 
 
 def run_kind(path: str) -> tuple[str | None, str]:
-    """(kind, what the list says) for one run: the one-call report it
-    gets, or None and why it gets none."""
+    """(kind, label) for one run: the one-call report it gets and its
+    name in the list, or None and the reason it gets none."""
     from ..io.rattlesnake import project_type
     from ..project import report_kind
 
@@ -89,10 +95,10 @@ class RunReportsDialog(QDialog):
     """The runs, the report each gets and how much of it to read, the
     geometry, where the reports go, and their marking.
 
-    `choices()` is the answer in `run_report`'s own keywords: `runs`
-    (the ones not left out), `kinds` and `last` (each by run), `path`
-    (a folder, or None for beside each run), `geometry` (a path or
-    None) and `marking`.
+    `choices()` returns the answers as `run_report`'s keywords: `runs`
+    (those not left out), `kinds` and `last` (each a dict by run),
+    `path` (a folder, or None for beside each run), `geometry` (a path
+    or None) and `marking`.
     """
 
     def __init__(self, runs: list[str], parent: QWidget | None = None) -> None:
@@ -243,7 +249,7 @@ class RunReportsDialog(QDialog):
             self.beside.setChecked(True)
 
     def choices(self) -> dict[str, Any]:
-        """The answer, in `run_report`'s keywords."""
+        """The answers, as `run_report`'s keywords."""
         picked = [row for row in self._picked() if row[1]]
         return {
             'runs': [path for path, _kind, _last in picked],
@@ -271,7 +277,8 @@ def _seconds_box() -> QDoubleSpinBox:
 
 def ask_run_reports(parent: QWidget | None, runs: list[str]
                     ) -> dict[str, Any] | None:
-    """The dialog, modal; its choices, or None when cancelled."""
+    """Show the dialog, modal. Returns its choices, or None when it is
+    canceled."""
     dialog = RunReportsDialog(runs, parent)
     if dialog.exec() == QDialog.DialogCode.Accepted:
         return dialog.choices()

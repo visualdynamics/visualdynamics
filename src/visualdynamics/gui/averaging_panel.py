@@ -1,21 +1,24 @@
-"""The averaging parameters, as a table beside the time history.
+"""The averaging settings, as a table beside the time history.
 
-Five numbers are set here — start, frame length, overlap, window, frame
-count — and four more are shown that follow from them: where the
-analysis ends, how fine the frequency resolution will be, how long each
-frame lasts, and how many averages the PSD will actually be built from.
-The derived four are never edited, because a value that can be typed in
-two places disagrees with itself by the second edit.
+The settings are the start, the frame length, the overlap, the window
+(with its parameter, for the Tukey and Kaiser windows), the detrend and
+the frame count. Four values that follow from them are shown below and
+cannot be edited: how many averages the spectra are built from, the
+frequency resolution, how long each frame lasts, and where the analysis
+ends. They cannot be edited because a value that could be typed in two
+places would disagree with itself after the second edit. Detect fills
+the settings in from the record itself.
 
-The panel says what the parameters are, reports when they move, and
-computes with its own buttons (Compute PSDs, CPSDs, FRFs, Multiple
-Coherence, Spectra) — each calling the project verb a script calls,
-with whatever is set at that moment (principle 13).
+The panel says what the settings are, reports when they change, and
+computes with its own buttons (Compute PSDs, Compute CPSDs, Compute
+FRFs, Multiple Coherence and Compute Spectra), each calling the project
+verb a script calls, with whatever is set at that moment (principle
+13). The FRF and coherence buttons are shown only when the history has
+excitation and response channels.
 
-A capture the controller already cut into frames arrives with its frame
-length and count settled by the file. The panel shows them, grayed, and
-leaves only the window live — there is no second frame inside a record
-to overlap with, and nowhere for the start to go.
+A capture the controller already cut into one record per average keeps
+every setting editable, with the file's frames as the default. Only
+Detect is disabled, because there is no stream to search for the test.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 
 class AveragingPanel(QWidget):
-    """The parameter table. Edits arrive as a whole `Averaging`."""
+    """The settings table. Edits are emitted as a whole `Averaging`."""
 
     #: a parameter moved; here is the averaging that describes it now
     changed = Signal(object)
@@ -239,11 +242,11 @@ class AveragingPanel(QWidget):
         self.changed.emit(found)
 
     def chosen_window(self) -> str:
-        """Which window shapes each frame.
+        """The name of the window applied to each frame.
 
-        Not `window()`: that is Qt's own verb on every widget, for the
-        top-level window this one sits in, and taking the name would
-        hand a string to the next caller that meant Qt's.
+        It is not called `window()` because that is Qt's own method on
+        every widget, returning the top-level window this one is in, and
+        a string in its place would break any caller that meant Qt's.
         """
         return self.window_box.currentData()
 
@@ -256,8 +259,8 @@ class AveragingPanel(QWidget):
                      averaging: Averaging) -> None:
         """Point the panel at a time history and the averaging set on it.
 
-        The record's length and rate are what every clamp is against, so
-        they come from the history rather than being guessed from the
+        Every limit on the boxes comes from the record's length and
+        sample rate, taken from the history instead of guessed from the
         numbers already in the boxes.
         """
         self._history = history
@@ -279,7 +282,8 @@ class AveragingPanel(QWidget):
         self.set_averaging(averaging)
 
     def set_averaging(self, averaging: Averaging) -> None:
-        """Restate the panel from an averaging — what a drag arrives as."""
+        """Show an averaging in the panel without emitting `changed`. A
+        drag on the plot arrives this way."""
         self._loading = True
         try:
             # the limits first: a spin box clamps to the range it has at
@@ -307,7 +311,8 @@ class AveragingPanel(QWidget):
         self._restate(averaging)
 
     def averaging(self) -> Averaging:
-        """The averaging the editors currently describe, unclamped."""
+        """The averaging the editors currently describe, before it is
+        clamped to the record."""
         offered = self.window_box.currentData() in WINDOW_PARAMETERS
         return Averaging(frame_length=self.length_box.value(),
                          overlap=self.overlap_box.value() / 100.0,

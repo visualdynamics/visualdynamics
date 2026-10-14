@@ -138,6 +138,46 @@ def test_stl_without_a_declared_unit_imports_unitless(tmp_path):
         'STL cannot say; pretending it said millimeters would be a guess')
 
 
+def _unitless_triangle():
+    return Geometry(node_id=[1, 2, 3],
+                    node_xyz=[[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+                    elem_id=[1], elem_type=[41], elem_conn=[np.array([1, 2, 3])],
+                    elem_group=[1], group_id=[1], group_name=['plate'])
+
+
+def test_stl_writes_undefined_coordinates_as_they_stand(tmp_path):
+    """A unit system converts coordinates that are meters; undefined
+    ones are not, and were scaled as if they were (2026-10-13)."""
+    from visualdynamics.io import stl
+    from visualdynamics.units import IN_LBF_S
+
+    path = tmp_path / 'unitless.stl'
+    stl.save(_unitless_triangle(), path, IN_LBF_S)
+    assert import_file(path).node_xyz.max() == pytest.approx(10.0), (
+        'written as stored, not divided by 0.0254')
+    stl.save(_two_block_geometry(), path, IN_LBF_S)
+    assert import_file(path).node_xyz.max() == pytest.approx(3 / 0.0254), (
+        'defined meters still convert')
+
+
+def test_3mf_declares_no_unit_for_an_undefined_geometry(tmp_path):
+    """3MF cannot say 'no unit', so the writer leaves the unit out and
+    the format's default, millimeters, applies; it declared meters,
+    a unit nobody chose (2026-10-13). A defined geometry still says
+    meters."""
+    path = tmp_path / 'unitless.3mf'
+    export_file(_unitless_triangle(), path)
+    with zipfile.ZipFile(path) as archive:
+        model = archive.read('3D/3dmodel.model').decode()
+    assert 'unit=' not in model
+    back = import_file(path)
+    assert back.node_xyz.max() == pytest.approx(0.010), (
+        'the numbers as they stood, read as the default millimeters')
+    export_file(_two_block_geometry(), path)
+    with zipfile.ZipFile(path) as archive:
+        assert 'unit="meter"' in archive.read('3D/3dmodel.model').decode()
+
+
 def test_ascii_stl_solids_become_named_blocks(tmp_path):
     plate = """solid left plate
 facet normal 0 0 1

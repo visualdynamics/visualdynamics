@@ -1,90 +1,90 @@
-"""The tracking filter, drawn on the record it reads.
+"""Drawing a tracking filter's band on the record it is applied to.
 
-A level read through a tracking filter is a number with a cause, and
-the cause is a band that moves. This view draws the band where it is
-applied, the way the averaging's frames are drawn on the record they
-are cut from and a filter's preview over the trace it filters: one
-tone of one channel, the record above, its time-frequency picture
-below, the band's shape beside the picture at one instant.
+A level read through a tracking filter depends on a band that moves
+with the drive frequency. This view draws the band where it is applied,
+in the same way the averaging frames are drawn on the record they are
+cut from and a filter preview is drawn over the time history it
+filters. It shows one tone of one channel: the record at the top, its
+scalogram below, and beside the scalogram the band's magnitude at one
+instant.
 
-**The record and the band's output, FilterOverlay's way round.** The
-record stands back in gray and what the band passes takes the ink,
-because the passed waveform is the subject (Brandon, 2026-08-25, for
-the filter's preview: the reader judged the thing being decided from
-the drabber line when it was the other way). The ink is the theme's
-`filter_preview` rather than the channel's own color, and that is the
-one place this departs from the preview: here the same color draws the
-band's corridor, its shape and its weight on the record as well, so
-magenta means *the filter* on all three panels and nothing else does.
+The record is drawn gray and the band's output, the waveform it
+passes, is drawn over it in color, as in the filter preview, because
+the passed waveform is what is being judged. The color is the theme's
+`filter_preview` (magenta) and not the channel's own color, which is
+the one difference from the filter preview. The same color is used for
+the band's corridor, its shape and its weight on the record, so that on
+all three panels magenta means the filter and nothing else is drawn in
+it.
 
-**The picture is the scalogram, in decibels.** `core.wavelet`'s
-transform, drawn by `plot.scalogram.scalogram_image` — time across,
-log frequency up, the cone of influence veiled — because it is already
-the repository's time-frequency reading and its rows are evenly spaced
-in log frequency, which is the axis a proportional band is a constant
-width on. Two settings differ from the scalogram view, both for this
-question. The color is the magnitude in dB below the picture's
-largest, over `COLOR_RANGE`: on the scalogram's linear scale a noise
-floor a fifth of the tone's amplitude, spread over the whole band, is
-a few percent of the color bar and draws black, and a picture meant to
-show the band holding the noise out has to show the noise. And the
-wavelet is narrower in frequency (`OMEGA0`, twelve cycles against the
-scalogram's six), so the tone's ridge is narrower than the common
-bands: at six cycles it is 14 % either side of the tone at −3 dB, more
-than half of a 50 % band's 25 %; at twelve, 7 %. A band narrower than
-that — 10 % proportional, a few hertz fixed — is narrower than a
-picture of a moving tone resolves, and its corridor drawn inside the
-ridge says exactly that. The price is time: a longer wavelet smears a sweep along it, and at an
-octave a second the drive moves about 7 % within the wavelet's width
-at 20 Hz — as much as the wavelet resolves — and a fifth of that at
-100 Hz, so the ridge stays a ridge from the bottom of a sweep up.
+The time-frequency picture is the scalogram of `core.wavelet`, drawn by
+`plot.scalogram.scalogram_image` with time across, log frequency up and
+the cone of influence shaded. Its rows are evenly spaced in log
+frequency, the axis on which a proportional band has a constant width.
+Two settings differ from the scalogram view. First, the color is the
+magnitude in dB below the picture's largest value, over `COLOR_RANGE`.
+On the scalogram's linear scale, a noise floor a fifth of the tone's
+amplitude spread over the whole band is a few percent of the color bar
+and is drawn black, and this picture has to show the noise in order to
+show the band keeping it out. Second, the wavelet is narrower in
+frequency: `OMEGA0` is twelve cycles, against the scalogram's six, so
+the tone's ridge is narrower than the common bands. At six cycles the
+ridge is 14 % either side of the tone at -3 dB, more than half of a
+50 % band's 25 %; at twelve it is 7 %. A band narrower than that, such
+as 10 % proportional or a few hertz fixed, is narrower than the picture
+can resolve for a moving tone, and its corridor is drawn inside the
+ridge. The cost is resolution in time, because a longer wavelet spreads
+a sweep along the time axis. At one octave per second the drive moves
+about 7 % within the wavelet's width at 20 Hz, as much as the wavelet
+resolves, and a fifth of that at 100 Hz, so the ridge stays narrow from
+the bottom of a sweep up.
 
-**The band is a corridor that follows the sweep.** Its edges are the
-drive plus and minus half the bandwidth, the −3 dB points, drawn over
-the picture as dashed lines on a halo: dashes because a reader who
-cannot tell magenta from the colormap can still tell a dashed line
-from a field, the halo because a thin line over viridis vanishes into
-whichever stop it happens to match. A proportional band is a constant
-width on the log axis, a pair of lines parallel to the ridge; a fixed
-band is a constant width in hertz, wide at the bottom of the axis and
-pinched at the top. That difference is the point of the picture.
+The band is drawn over the picture as a corridor that follows the
+sweep. Its edges are the drive plus and minus half the bandwidth, the
+-3 dB points, drawn as dashed lines over a wider line in the background
+color. The dashes let a reader who cannot tell magenta from the
+colormap still tell the line from the image, and the wider line under
+them keeps a thin line visible over every color of the colormap. A
+proportional band has a constant width on the log axis and is drawn as
+a pair of lines parallel to the ridge. A fixed band has a constant
+width in hertz, so it is wide at the bottom of the axis and narrow at
+the top. Showing that difference is the purpose of the picture.
 
-**The shape stands on the picture's own frequency axis.** The band's
-magnitude at the cursor (`SineTracking.response`) is drawn beside the
-picture with frequency up, linked to it, so the −3 dB edges of the
-shape continue the corridor's edges across the gap and the drive and
-its harmonics are marked at the same heights on both: the drive inside
-the band, where the shape is 0 dB; a harmonic outside it, where the
-shape reads its rejection. The marks are told apart by shape — a
-circle for the drive, a triangle for a harmonic — and drawn two-tone,
-the background inside the foreground, so they read on any stop of the
-colormap.
+The band's magnitude at the cursor (`SineTracking.response`) is drawn
+beside the picture with frequency up, on an axis linked to the
+picture's, so the -3 dB edges of the shape line up with the corridor's
+edges, and the drive and its harmonics are marked at the same heights
+on both. The drive is inside the band, where the shape is 0 dB; a
+harmonic is outside it, where the shape gives its rejection. The drive
+is marked with a circle and a harmonic with a triangle, each filled
+with the background color and outlined in the foreground color, so
+they can be seen over any color of the colormap.
 
-**The band's weight on the record, drawn behind the cursor.** The
-band's output at an instant is the record before it weighted by the
-low-pass's impulse response (`SineTracking.weighting`), so that weight
-is shaded on the record, reaching back from the cursor, fading as the
-weight does — the averaging's band, whose shading is the weight each
-moment of the record carries, applied to a filter instead of a frame.
-Its length is the settling the readout states: a wide band's weight is
-a sliver, a narrow one's reaches back across a change in level, and
-the passed waveform's envelope follows that change over the same
-stretch. The shading is clipped at zero where the fourth order's
-response dips negative, as the averaging's flat-top shoulders are;
-the dip is about a sixth of the peak, and it is why the band
-overshoots a step.
+The band's output at an instant is the record before that instant
+weighted by the low-pass filter's impulse response
+(`SineTracking.weighting`). That weight is shaded on the record,
+reaching back from the cursor and fading as the weight decreases, in
+the same way the averaging band's shading shows the weight each part of
+the record carries in a frame. Its length is the settling time given in
+the readout: a wide band's weight is short, a narrow band's reaches
+back across a change in level, and the envelope of the passed waveform
+follows that change over the same time. The shading is clipped at zero
+where the impulse response is negative. For the default fourth-order
+filter the negative part is about a sixth of the peak, and it is the
+reason the band overshoots a step.
 
-**One setting per view.** Several corridors over one picture, each
-with its own shape beside it, crowd the field the corridors are meant
-to be read against; two settings are two calls, laid side by side.
-The level strip that could sit under the record is left out for the
-same reason: the passed waveform's envelope is the 'filtered' reading,
+One setting is drawn per view. Several corridors over one picture,
+each with its own shape beside it, would cover the image they are read
+against, so two settings are two calls placed side by side. A strip of
+the level under the record is left out for the same reason: the
+envelope of the passed waveform is the 'filtered' reading and is
 already drawn at every sample.
 
-**The cursor is a handle in the window.** Shown in the application's
-pane it can be dragged along either time axis, and the shape, the
-marks, the weight and the readout follow the hand — each a closed
-form, so the redraw is immediate. Headless, it is an argument.
+In the application the cursor can be dragged along either time axis,
+and the shape, the marks, the weight and the readout follow it. Each is
+computed in closed form, so the redraw is immediate. In a script the
+cursor is set by the `cursor` argument or by
+`TrackingFilterView.set_cursor`.
 """
 
 from __future__ import annotations
@@ -95,6 +95,11 @@ from typing import Any
 import numpy as np
 
 from ..core import wavelet
+
+# The record is gray and the passed waveform in color, the filter
+# preview's way round (Brandon, 2026-08-25, for the filter's preview:
+# with the colors the other way, the reader judged the thing being
+# decided from the drabber line).
 
 #: the shape panel's floor and ceiling, dB. The floor is the filter
 #: panel's: below it a band has stopped doing anything a real record
@@ -148,9 +153,12 @@ SHAPE_WIDTH = 240
 
 def default_range(waveform: Any, harmonics: Sequence[int],
                   sample_rate: float) -> tuple[float, float]:
-    """The picture's frequency range, Hz: an octave under the lowest
-    drive up to half again past the highest harmonic marked (the
-    band's top edge, if that is higher), held under Nyquist."""
+    """The picture's frequency range in Hz, as (low, high).
+
+    From an octave below the lowest drive frequency up to 1.5 times the
+    highest harmonic marked, or 1.5 times the band's top edge if that is
+    higher, and no higher than 0.45 times `sample_rate`.
+    """
     drive = np.asarray(waveform.drive, dtype=float)
     top_edge = float(np.max(drive + waveform.setting.bandwidth(drive) / 2.0))
     highest = float(drive.max()) * max([1, *harmonics])
@@ -169,9 +177,13 @@ def _seconds(value: float) -> str:
 
 
 class TrackingFilterView:
-    """The items `build_tracking_filter` draws, and the cursor that
-    moves them. Owns every item it adds; `set_cursor` restates the
-    shape, the marks, the weight and the readout for a new instant."""
+    """The items `build_tracking_filter` draws, and the cursor that moves them.
+
+    The view owns every item it adds. `set_cursor` redraws the shape,
+    the marks, the weight and the readout for a new instant. After each
+    call, `cursor`, `drive_hz`, `bandwidth_hz`, `edges_hz`,
+    `harmonic_db` and `text` hold what was read there.
+    """
 
     def __init__(self, record_plot: Any, picture: Any, shape: Any,
                  readout: Any, waveform: Any, frequencies: np.ndarray,
@@ -256,9 +268,12 @@ class TrackingFilterView:
     # ---- the cursor --------------------------------------------------------
 
     def set_cursor(self, seconds: float) -> float:
-        """Put the cursor at `seconds` on the record's clock (held to the
-        tone's span) and restate everything read there; returns where
-        it landed."""
+        """Move the cursor to `seconds` and redraw what is read there.
+
+        `seconds` is on the record's clock, and the cursor is held
+        inside the tone's span. Returns the time it was placed at, in
+        seconds.
+        """
         time = self.waveform.time
         at = float(np.clip(seconds, time[0], time[-1]))
         self.cursor = at
@@ -382,17 +397,20 @@ def build_tracking_filter(layout: Any, history: Any, waveform: Any, *,
                           omega0: float = OMEGA0,
                           unit_system: Any = None, theme: Any = None,
                           interactive: bool = True) -> TrackingFilterView:
-    """Draw one tone's tracking band on its record, and return the view.
+    """Draw one tone's tracking band on its record and return the view.
 
-    `waveform` is `core.sine_tracking.track_waveform`'s, of `history`'s
-    channel `waveform.dof`. The record and the passed waveform are
-    drawn in row 0, the picture with the corridor in row 2 and the
-    shape beside it in column 1, the readout above the shape, the
-    legend under the picture. `cursor` is seconds on the record's
-    clock, the middle of the tone's span by default; `span` the stretch
-    of record the time axes show, the whole record by default.
-    `harmonics` are the multiples of the drive marked; `low`, `high`
-    and `omega0` set the picture (`default_range`, `OMEGA0`).
+    `waveform` is the result of `core.sine_tracking.track_waveform` for
+    channel `waveform.dof` of `history`. The record and the passed
+    waveform are drawn in row 0, the picture and the corridor in row 2
+    with the shape beside it in column 1, the readout above the shape,
+    and the legend under the picture. `cursor` is a time in seconds on
+    the record's clock, the middle of the tone's span by default; `span`
+    is the (start, stop) the time axes show, the whole record by
+    default. `harmonics` are the multiples of the drive frequency that
+    are marked, the third by default. `low` and `high` are the
+    picture's frequency range in Hz (`default_range` when omitted), and
+    `omega0` is the wavelet's width parameter (`OMEGA0`). With
+    `interactive` False the cursor cannot be dragged.
     """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt

@@ -1,18 +1,18 @@
-"""The bands of a specification, dragged on the plot.
+"""Dragging a specification's bands on the plot.
 
-A specification's warning and abort bands are read off the plot as
-shaded zones (`plot._shade_limit_zones`); while its sheet is open they
-are also *set* there. Each edge of each band — warning below and
-above, abort below and above — carries one handle per run of segments
-sharing a band, for the channel drawn; dragging a handle moves that
-edge by the decibels dragged, and lands when the drag ends (Brandon,
-2026-09-06: the only place the bands are shown is the plot, the edit
-applies to every selected channel in that frequency range, and it
-lands when the drag stops). The handle knows nothing of channels or
-constraints: it reports (kind, side, segments, decibels) — the level
-the edge was let go at — and whoever opened the sheet lands it
-through the draft's `with_band_edge`, which puts every channel there
-under its own symmetric and uniform rules.
+A specification's warning and abort bands are drawn on the plot as
+shaded zones. While its sheet is open they can also be set there. Each
+of the four edges (warning lower and upper, abort lower and upper) has
+one handle for each run of segments that share a band, for the channel
+drawn. Dragging a handle moves that edge in steps of `STEP` decibels,
+and the change is applied when the drag ends, to every selected channel
+in that frequency range.
+
+A handle knows nothing of channels or constraints. It reports
+(kind, side, segments, decibels), the level the edge was released at,
+and whatever opened the sheet applies it through the draft's
+`with_band_edge`, which applies each channel's symmetric and uniform
+settings.
 """
 
 from __future__ import annotations
@@ -24,12 +24,16 @@ import numpy as np
 
 from ..core.author import LIMIT_STEP_DB
 
+# Brandon, 2026-09-06: the only place the bands are shown is the plot,
+# the edit applies to every selected channel in that frequency range,
+# and it lands when the drag stops.
+
 #: how wide the grab is, in pixels, either side of an edge
 GRAB = 6
-#: the decibel grid a drag lands on
 def snap_db(value_db: float, dy: float) -> float:
-    """The decibels a drag of `dy` decades from `value_db` reaches, on
-    the `STEP` grid: ten decibels to the decade, rounded to the step."""
+    """The level in decibels that a drag of `dy` decades from `value_db`
+    reaches: ten decibels per decade, rounded to the nearest multiple of
+    `STEP`."""
     return float(np.round((float(value_db) + 10.0 * dy) / STEP) * STEP)
 
 
@@ -40,14 +44,17 @@ STEP = LIMIT_STEP_DB
 
 def band_edges(draft: Any, channel: int, unit_system: Any
                ) -> dict[tuple[str, str], list[tuple[list[int], np.ndarray, np.ndarray]]]:
-    """The four band edges of one channel in display units, one piece
-    per run of segments sharing a band: `(kind, side) -> [(segments,
-    frequencies, levels)]`. Each piece is its own band over its own
-    span, corner to corner — so where the band steps at a breakpoint
-    two pieces meet at one frequency at two levels, exactly as the
-    shading does. Taken at the breakpoints instead, a corner belongs
-    to the section on its right and the left section's line slanted
-    to its neighbor's level (Brandon, 2026-09-06)."""
+    """The four band edges of one channel, in display units.
+
+    Returns a dict `(kind, side) -> [(segments, frequencies, levels)]`
+    with one piece per run of segments that share a band. Each piece
+    covers its own span from breakpoint to breakpoint, so where the band
+    steps at a breakpoint two pieces meet at one frequency at two
+    levels, the same as the shading.
+    """
+    # Each piece runs corner to corner (Brandon, 2026-09-06). Taken at
+    # the breakpoints instead, a corner belonged to the section on its
+    # right and the left section's line slanted to its neighbor's level.
     f = np.asarray(draft.frequencies, dtype=float)
     density = f'{draft.dims[channel]}**2/frequency'
     target = np.asarray(unit_system.from_si(
@@ -70,8 +77,16 @@ def add_band_handles(plot: Any, draft: Any, channel: int, unit_system: Any,
                      on_release: Callable[[str, str, list[int], float], None],
                      on_menu: Callable[[Any], None] | None = None
                      ) -> list[Any]:
-    """One draggable handle per run of segments sharing a band, per
-    edge, for the drawn channel. Returns the handles added."""
+    """Add a draggable handle for each band edge of the drawn channel.
+
+    There is one handle per edge for each run of segments that share a
+    band, with a label giving its level in decibels. When a drag ends,
+    `on_release(kind, side, segments, decibels)` is called with the
+    level reached; a drag on a linear ordinate changes nothing. A
+    right-click calls `on_menu` with the screen position, when given.
+
+    Returns the handles added.
+    """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor
@@ -171,8 +186,8 @@ def _handle_base():
                 self.setPos(0, 0)
                 self.release(dy)
             else:
-                # ride with the cursor, but only to the next whole
-                # decibel, and say which
+                # ride with the cursor, but only to the next `STEP`
+                # of decibels, and say which
                 reached = self.snapped(dy) if self.log_y else self.value_db
                 self.setPos(0, (reached - self.value_db) / 10.0)
                 if self.label is not None:
@@ -184,7 +199,7 @@ def _handle_base():
         def release(self, dy: float) -> None:
             """The drag landed `dy` up in the plot's own y units —
             decades on a log axis, so ten times that in decibels,
-            snapped to the whole decibel; on a linear axis there is no
+            snapped to the `STEP` grid; on a linear axis there is no
             honest decibel and nothing moves."""
             if not self.log_y:
                 return

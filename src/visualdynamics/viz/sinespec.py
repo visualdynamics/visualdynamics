@@ -1,18 +1,17 @@
 """The sine specification on a 3-D stage: frequency, time, amplitude.
 
-A sine sweep specification *is* three-dimensional (Brandon,
-2026-08-22): each tone is a path through (time, frequency) with an
-amplitude along it, and its warning and abort limits ride the same
-path above and below. Flattened onto amplitude-versus-frequency the
-timing disappears — which tones overlap, which cross, which are done
-before the others begin — so the specification's own view is the
-stage: frequency across, time receding, amplitude up, one polyline
-per curve.
+A sine sweep specification has three dimensions: each tone is a path
+through time and frequency with an amplitude along it, and its warning
+and abort limits follow the same path above and below. Drawn as
+amplitude against frequency the timing is lost (which tones overlap,
+which cross, which are done before the others begin), so the
+specification's own view is this stage: frequency across, time
+receding, amplitude up, one polyline per curve.
 
-The same stage the waterfall stands on (`STAGE`, `place_camera`), so
-the two 3-D readings feel like one room. Amplitudes draw in the
-display unit system; a specification with undeclared units draws its
-raw values and the axis says so by giving no unit.
+It is the same stage the waterfall is drawn on (`STAGE`,
+`place_camera`), so the two 3-D views look alike. Amplitudes are drawn
+in the display unit system. A specification with undeclared units is
+drawn with its raw values, and the axis title then gives no unit.
 """
 
 from __future__ import annotations
@@ -26,6 +25,9 @@ from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM, UNKNOWN, UnitSystem
 from ._quiet import one_render
 from .waterfall import STAGE, finish_scene, place_camera, ribbon
+
+# The sine specification was the first stage drawn in its own three
+# dimensions (Brandon, 2026-08-22).
 
 #: matplotlib's tab10, the same cycle the 2-D curves use — one color
 #: per tone, the limit curves in the zone colors whatever the tone
@@ -41,16 +43,17 @@ ZONE_OPACITY = 0.22
 
 def limit_zones(level: Any, length: int,
                 ceiling: float) -> list[tuple[np.ndarray, np.ndarray, str]]:
-    """The zones a requirement's limits shade on a stage, exactly as the
-    2-D comparison shades them: yellow between warning and abort, and
-    past abort *which way* — red above to the stage's `ceiling`, blue
-    below to its floor (zero), the same over/under colors every other
-    mark uses. A warning with no abort beside it runs to the edge.
+    """The zones a requirement's limits shade on a stage, as the 2-D
+    comparison shades them: yellow between warning and abort, and past
+    abort by direction, red above up to the stage's `ceiling` and blue
+    below down to its floor (zero), the same over and under colors as
+    every other mark. A warning with no abort limit beside it runs to
+    the ceiling or the floor.
 
-    `level(name)` gives a limit's heights on the stage, or None where
-    it was not written; `length` is how many points each has. Returns
+    `level(name)` gives a limit's heights on the stage, or None when it
+    was not written, and `length` is how many points each has. Returns
     (inner, outer, color key) for each zone. The banded and the sine
-    stage both draw from it.
+    stages both use it.
     """
     zones = []
     for warning, abort, edge, beyond in (
@@ -73,12 +76,16 @@ def sine_stage_arrays(specification: Any, channel: int = 0,
                       unit_system: UnitSystem | None = None,
                       lines: int = LINES,
                       tones: Any = None) -> dict[str, Any]:
-    """The curves of the stage, as plain arrays.
+    """The curves of the stage for one `channel`, as plain arrays.
 
-    One entry per tone: `t` (environment seconds), `f` (Hz), and a
-    dict of amplitude curves — `'target'` always, each written limit
-    beside it — in display units. Pure numpy, so a test holds the
-    numbers without a scene.
+    Returns a dict: ``tones``, one entry per tone (only those named in
+    `tones` when it is given), each with its ``name``, ``t``
+    (environment seconds), ``f`` (Hz) and ``curves``, a dict of
+    amplitude curves in display units with ``'target'`` always and each
+    written limit beside it; ``zlabel``, the amplitude axis title; and
+    ``channel``, the channel's DOF. Each tone's path is sampled at about
+    `lines` points. Pure numpy, so a test can check the numbers without
+    a scene.
     """
     us = unit_system or DEFAULT_SYSTEM
     dim = specification.ordinate_dim
@@ -112,7 +119,8 @@ def add_sine_specification(plotter: Any, specification: Any,
                            theme: Any = None,
                            lines: int = LINES,
                            tones: Any = None) -> dict[str, Any]:
-    """The specification alone — `add_sine_stage` with no levels."""
+    """Draw the specification alone, for one `channel`: `add_sine_stage`
+    with no levels. Returns its dict."""
     dof = (str(specification.response_dof[channel])
            if specification.response_dof else None)
     return add_sine_stage(plotter, specification=specification, dof=dof,
@@ -127,28 +135,35 @@ def add_sine_stage(plotter: Any, specification: Any = None,
                    theme: Any = None, lines: int = LINES,
                    tones: Any = None,
                    dofs: Sequence[str] | None = None) -> dict[str, Any]:
-    """Draw the specification's stage into a plotter.
+    """Draw the sine stage into a plotter.
 
-    The stage takes either half or both: a specification's tones
-    (target curves, one color per tone, the warning and abort limits
-    as thin lines *and* as the translucent zone ribbons the 2-D
-    comparison shades, with its fallbacks), and measured levels —
-    each tone's extracted path in the tone's color, timed by its own
-    per-line clock. With both drawn the targets step back to the
-    specification gray the 2-D comparison uses, because the
-    measurement is what is being looked at. A level's clock is
-    aligned to the specification's (its onset to the tone's start
-    time) when the tone is known, and left in recording seconds
-    otherwise. Returns the arrays dict with ``points`` added — the
-    vertex count a size test can pin.
+    The stage draws either a specification's tones, measured levels, or
+    both. The tones are drawn as target curves, one color per tone, with
+    the warning and abort limits as thin lines and also as the
+    translucent zones the 2-D comparison shades (`limit_zones`). The
+    levels are each tone's extracted path in the tone's color, placed in
+    time by its own per-line clock, with a rectangle over each line that
+    went outside one of its tone's abort limits. When both are drawn, the targets are in
+    the specification gray the 2-D comparison uses, because the
+    measurement is what is being looked at. A level's clock is aligned
+    to the specification's (its onset to the tone's start time) when its
+    tone is in the specification, and is left in recording seconds
+    otherwise. `tones` limits the drawing to the named tones, and each
+    tone is sampled at about `lines` points.
 
     `dofs` draws several control DOFs at once, one entry per (tone,
-    DOF) — the rows a person picked in the tree, with the tone on the
-    bar (2026-09-25); `dof` is the one-DOF form the report and the
-    specification-alone view keep. An entry is named by its tone when
-    one DOF is drawn and by tone and DOF when several are, and a level
-    path takes the color of the entry it belongs to.
+    DOF): the rows picked in the tree, with the tone chosen on the bar.
+    `dof` is the one-DOF form that the report and the specification-only
+    view use. An entry is named by its tone when one DOF is drawn and by
+    tone and DOF when several are, and a level path takes the color of
+    the entry it belongs to.
+
+    Returns the dict of `sine_stage_arrays` (its ``tones`` for every
+    DOF drawn) with ``levels``, the level paths drawn, and ``points``,
+    the vertex count, added.
     """
+    # The several-DOF form came with picking rows in the tree
+    # (2026-09-25).
     import pyvista as pv
 
     colors = resolve_theme(theme)
@@ -395,10 +410,11 @@ def sine_specification_scene(specification: Any, channel: int = 0,
                              plotter: Any = None,
                              off_screen: bool = False,
                              theme: Any = None) -> Any:
-    """Build (or add to) a PyVista plotter showing the stage.
+    """Build a PyVista plotter showing the specification's stage for one
+    `channel`, or add it to `plotter`.
 
-    Same shape as `waterfall_scene`: returns the plotter — `.show()`
-    it, or `.screenshot()` if off_screen.
+    Called the same way as `waterfall_scene`: returns the plotter, to
+    ``.show()``, or to ``.screenshot()`` when it is off screen.
     """
     import pyvista as pv
 
@@ -417,8 +433,10 @@ def plot_sine_specification(specification: Any, channel: int = 0, *,
                             screenshot: str | None = None,
                             unit_system: UnitSystem | None = None,
                             theme: Any = None, show: bool = True) -> Any:
-    """Show the stage interactively, or render it to `screenshot` —
-    the scriptable face of the plot bar's 3-D specification view."""
+    """Show one `channel` of the specification's stage interactively, or
+    render it to `screenshot`: the script version of the plot bar's 3-D
+    specification view. Returns the image array when rendering to a
+    file, and otherwise the plotter (`finish_scene`)."""
     off_screen = screenshot is not None or not show
     plotter = sine_specification_scene(
         specification, channel, unit_system,
@@ -432,18 +450,20 @@ def plot_sine_stage(specification: Any = None, levels: Any = None, *,
                     unit_system: UnitSystem | None = None,
                     theme: Any = None, screenshot: str | None = None,
                     show: bool = True) -> Any:
-    """The sine stage with measured levels on it — the app's 3-D sine
+    """The sine stage with measured levels on it, the app's 3-D sine
     comparison: a specification's tones and the levels extracted
     against it (a `SineLevelSet` or a list of `SineLevel`), either or
-    both, shown interactively or rendered to `screenshot`.
-    `plot_sine_specification` is the specification alone.
+    both, shown interactively or rendered to `screenshot`
+    (`add_sine_stage`). `plot_sine_specification` draws the
+    specification alone. Returns the image array when rendering to a
+    file, and otherwise the plotter.
 
         from visualdynamics.viz.sinespec import plot_sine_stage
         plot_sine_stage(spec, project['Sine Levels'], tones=['Up'],
                         dofs=['101Z+'], screenshot='sine.png')
 
-    `dofs` and `tones` narrow it the way picking rows in the tree and
-    the tone on the bar do; everything is drawn when they are left out.
+    `dofs` and `tones` limit it, as picking rows in the tree and the
+    tone on the bar do; everything is drawn when they are left out.
     """
     import pyvista as pv
 

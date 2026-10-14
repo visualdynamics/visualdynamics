@@ -1,17 +1,17 @@
-"""STEP and IGES — B-rep CAD, tessellated here by OpenCASCADE.
+"""Read STEP and IGES files (B-rep CAD), tessellated by OpenCASCADE.
 
-Unlike STL and 3MF these files hold mathematics rather than
-triangles, so reading them takes a geometry kernel: OCP (Apache-2.0
-bindings) over OpenCASCADE (LGPL-2.1 with exception — the same
-replaceable-library posture as Qt; see NOTICE.md). The kernel ships
-in every packaged build, because a frozen application cannot grow it
-later; the pip install keeps it optional (``visualdynamics[step]``)
-and this module refuses with the install command when it is absent.
+Unlike STL and 3MF, these files hold surfaces rather than triangles, so
+reading them needs a CAD kernel: OCP (Apache-2.0 bindings) over
+OpenCASCADE (LGPL-2.1 with an exception, a replaceable library as Qt
+is; see NOTICE.md). The kernel is included in every packaged build,
+because a frozen application cannot add it later. A pip install has it
+as an option (``visualdynamics[step]``), and without it this module
+refuses with the install command.
 
-What comes out matches the 3MF importer's contract: the assembly's
-named parts become named blocks, each instance placed by its own
-transform, coordinates in meters. This is the importer that takes a
-McMaster-Carr download directly — their STEP and IGES both land here.
+The result is the same as the 3MF reader's: triangle face elements in
+meters, with the units defined, one named element group per top-level
+(free) shape in the file. Part models downloaded from vendors in STEP or
+IGES read directly.
 """
 
 from __future__ import annotations
@@ -71,7 +71,8 @@ def _document(path: str):
 
 
 def load(path: str | os.PathLike) -> Geometry:
-    """Read a STEP or IGES file as a geometry — parts as named blocks.
+    """Read a STEP or IGES file as a geometry, with each top-level shape
+    as a named element group.
 
     Parameters
     ----------
@@ -81,8 +82,16 @@ def load(path: str | os.PathLike) -> Geometry:
     Returns
     -------
     Geometry
-        Triangle face elements in meters, tessellated by the kernel —
-        one named block per free shape the file holds.
+        Triangle face elements in meters, tessellated by the kernel, with
+        one element group per free shape the file holds, named as the
+        file names it or for the file when it has no name.
+
+    Raises
+    ------
+    ValueError
+        When the kernel is not installed, the kernel refuses the unit
+        setting, the file does not read, nothing transfers, or no shape
+        tessellates.
     """
     _require_kernel()
     from OCP.TDataStd import TDataStd_Name

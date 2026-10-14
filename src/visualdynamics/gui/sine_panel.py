@@ -1,19 +1,17 @@
 """The sine extraction's settings, as a table beside the time history.
 
-How a sweep's levels are read out of the recording — the smoothing,
-automatic or set, and whether the sweep clock is refined against the
-recording — with what follows from it read beside the numbers: the
-cycles the automatic chose, the smoothing window in seconds at the
-sweep's ends, the scatter a reading is predicted to carry and how
-much of the sweep sits under the noise floor, and a preview of the
-readings themselves, sampled along each tone at the smoothing shown
-(`core.sine.sample_levels`: a few short solves, so it follows every
-edit). Beside it the Extract Sine Levels button, the project verb with
-whatever is set at that moment — the same division of labor as the
-filter panel, because it is the same kind of thing: parameters that
-ride the record (Brandon, 2026-09-30: a 0.5 g sweep under a 2.3 g
-random environment read with a 17 dB spread at the one smoothing the
-code allowed, and the lever had no control).
+The settings say how a sweep's levels are read out of the recording:
+the smoothing, chosen automatically or set as a number of cycles, and
+whether the sweep clock is fitted to the recording. Below them are the
+values that follow: the cycles the automatic choice used, the smoothing
+window in seconds at the start and end of the first tone, the median
+scatter a reading is predicted to have, and the share of samples under
+the noise floor. A preview plot shows the readings themselves, sampled
+along each tone at the smoothing shown (`core.sine.sample_levels`, a
+few short solves, so it follows every edit). The Extract Sine Levels
+button runs the project verb with whatever is set at that moment, the
+same split as in the filter panel, since these are also settings
+carried by the record.
 """
 
 from __future__ import annotations
@@ -45,19 +43,23 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
     from ..core.sine import SineSweepSpecification
 
+# Brandon, 2026-09-30: a 0.5 g sweep under a 2.3 g random environment
+# read with a 17 dB spread at the one smoothing the code allowed, and
+# there was no control for it. Hence the settings and this panel.
+
 #: the two ways the smoothing is chosen, in the order the box lists them
 MODES = ('automatic', 'set')
 MODE_LABELS = ('Automatic', 'Set')
 
 
 class SamplePlot(PreviewPlot):
-    """The sampled readings against frequency: dots per control
-    channel at the smoothing shown, the noise floor beside each as a
-    hollow ring where the tone sits under it.
+    """The sampled readings against frequency: a dot per control
+    channel at the smoothing shown, or a hollow ring at the noise floor
+    where the tone is under it.
 
-    Small on purpose, like the filter panel's response: it answers
-    "how clean does this smoothing read" at a glance, and the
-    extracted levels answer the rest.
+    It is small on purpose, like the filter panel's response plot: it
+    shows at a glance how clean the readings are at this smoothing, and
+    the extracted levels show the rest.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -66,7 +68,8 @@ class SamplePlot(PreviewPlot):
 
     def show_samples(self, sampled: list[dict[str, Any]]) -> None:
         """Draw the sampled readings: one color per tone, a dot per
-        channel and point, rings where the tone was under its floor."""
+        channel and point, and a ring at the floor where the tone was
+        under it."""
         import numpy as np
         import pyqtgraph as pg
 
@@ -98,7 +101,7 @@ class SamplePlot(PreviewPlot):
 
 
 class SinePanel(QWidget):
-    """The parameter table. Edits arrive as a whole `SineExtraction`."""
+    """The settings table. Edits are emitted as a whole `SineExtraction`."""
 
     #: a parameter moved; here is the setting that describes it now
     changed = Signal(object)
@@ -190,14 +193,15 @@ class SinePanel(QWidget):
                      specification: SineSweepSpecification,
                      setting: SineExtraction) -> None:
         """Point the panel at a record, the sweep it is read against
-        and the setting on it; sample the readings at that setting."""
+        and the setting on it, and sample the readings at that
+        setting."""
         self._history = history
         self._specification = specification
         self._chosen = setting.chosen
         self.set_setting(setting)
 
     def set_setting(self, setting: SineExtraction) -> None:
-        """Restate the panel from a setting, without re-emitting."""
+        """Show a setting in the panel without emitting `changed`."""
         self._loading = True
         try:
             self.mode_box.setCurrentIndex(
@@ -214,8 +218,8 @@ class SinePanel(QWidget):
         self._restate()
 
     def setting(self) -> SineExtraction:
-        """The setting the editors currently describe, carrying what
-        the automatic chose for this record."""
+        """The setting the editors currently describe, carrying the
+        cycles the automatic choice picked for this record."""
         automatic = MODES[self.mode_box.currentIndex()] == 'automatic'
         return SineExtraction(
             cycles=None if automatic else float(self.cycles_box.value()),
@@ -297,7 +301,8 @@ class SinePanel(QWidget):
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:
-    """The setting with what the automatic chose written on it."""
+    """A copy of the setting with `chosen`, the cycles the automatic
+    choice picked, written on it."""
     return replace(setting, chosen=chosen)
 
 

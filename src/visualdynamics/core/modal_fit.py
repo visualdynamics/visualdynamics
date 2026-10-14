@@ -1,22 +1,25 @@
 """Fit real normal modes to measured FRFs, one mode at a time.
 
 The session holds the measured FRF matrix and the modes confirmed so far.
-Everything it shows is computed on the *residual* — measurement minus the
-synthesis of the confirmed modes — so each confirmed mode collapses its
-own CMIF peak and the largest remaining peak is the natural next
+Everything it shows is computed on the residual, the measurement minus
+the synthesis of the confirmed modes, so a confirmed mode removes its own
+peak from the CMIF and the most prominent peak left is the next
 suggestion.
 
 One mode is fitted from the residual alone:
 
-- the peak line's SVD gives the shape direction (its first left singular
-  vector, rotated to the nearest real vector — these are real normal
-  modes);
-- half-power points on the residual CMIF give the damping estimate;
+- the SVD at the peak line gives the shape direction (its first left
+  singular vector, rotated to the nearest real vector, since these are
+  real normal modes);
+- the frequency and damping are the values that leave the least
+  residual over a band around the peak, searched from a half-power
+  estimate (`search`, `search_damping`);
 - a least-squares fit of the SDOF term over a band around the peak gives
   one real residue per reference, which scales the unit shape into a
-  mass-normalized one. A drive point ties the scale down exactly; without
-  one the scale comes from the residue magnitudes, which still
-  resynthesizes the measured records correctly.
+  mass-normalized one. A drive point (a reference also measured as a
+  response) sets the scale. Without one the scale comes from the residue
+  magnitudes, the synthesis still reproduces the measured records, and
+  the shape set is marked unscaled.
 
 References
 ----------
@@ -29,7 +32,7 @@ it and the indicator driving it are set out.
 2. Allemang, R. J., & Brown, D. L. (1998). "A Complete Review of the
    Complex Mode Indicator Function (CMIF) with Applications."
    *Proceedings of ISMA*. The indicator whose peaks suggest the next
-   mode and whose collapse confirms one.
+   mode, and whose peak drops away once that mode is confirmed.
 3. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
    Experimental Modal Analysis*. Research Studies Press. Residue to
    mode-shape scaling, including the unit-modal-mass convention.
@@ -52,7 +55,18 @@ _POWERS = {'length': 0, 'velocity': 1, 'acceleration': 2}
 
 
 class ModalFitSession:
-    """An interactive fit of real normal modes to one FRF set."""
+    """An interactive fit of real normal modes to one FRF set.
+
+    `frf` is the measured FRF. `records` picks which of its records
+    take part, all of them when None. `coherence`, when given, weights
+    each response channel at each line in the least squares by
+    γ²/(1 - γ²), the inverse of the FRF estimate's relative variance,
+    with γ² capped at 0.999 and the weights scaled to a maximum of one.
+    A channel with low coherence counts for less, and a response the
+    coherence does not cover has weight one. A suggestion is made when
+    the session is
+    created, so `pending` already holds a frequency and damping.
+    """
 
     def __init__(self, frf: Frf, records: Sequence[int] | None = None,
                  coherence: Any | None = None) -> None:
@@ -148,13 +162,16 @@ class ModalFitSession:
         return out / peak if peak > 0 else None
 
     def adopt(self, shapes: ShapeSet) -> None:
-        """Seed the fit with an existing shape set's modes.
+        """Start the fit from an existing shape set's modes.
 
-        Editing a published fit means starting from it, not from nothing —
-        and a ShapeSet already carries the whole fit state: frequency,
-        damping, shape and description per mode. Shapes map onto this
-        session's DOFs by name; DOFs the set lacks contribute nothing, and
-        DOFs beyond this FRF's records are left behind.
+        This is how a published fit is edited. A shape set holds the
+        frequency, damping, shape and description of each mode, which is
+        everything the session keeps for a confirmed mode. Shapes are
+        matched to this session's DOFs by name: a DOF the set does not
+        have gets zero, and the set's DOFs that are not in this FRF are
+        dropped. A shape set does not store the order its modes were
+        confirmed in, so the adopted modes are replayed in frequency
+        order. A new suggestion is made afterward.
         """
         positions = {dof: k for k, dof in enumerate(shapes.coordinate)}
         for m in range(shapes.num_shapes):
@@ -212,19 +229,24 @@ class ModalFitSession:
         return q
 
     def synthesis_matrix(self) -> np.ndarray:
+        """The synthesis of the confirmed modes, (lines, responses,
+        references), in the layout of `matrix`."""
         out = np.zeros_like(self.matrix)
         for mode in self.modes:
             out += self._mode_term(mode)
         return out
 
     def residual_matrix(self) -> np.ndarray:
-        """The matrix with every confirmed mode taken out of it.
+        """The measured matrix minus the synthesis of the confirmed modes,
+        (lines, responses, references).
 
-        Cached against the modes, because it does not depend on where
-        the cursor is and dragging asks for it constantly. The SVD over
-        it is 4.7 ms on the airplane's FRFs — a third of a frame at 60
-        Hz — which is what made dragging have to stay free of it.
+        The result is cached against the number of confirmed modes. It
+        does not depend on the cursor, and a drag asks for it on every
+        mouse move.
         """
+        # The SVD over the residual is 4.7 ms on the airplane's FRFs, a
+        # third of a frame at 60 Hz, which is why the drag path must not
+        # recompute it.
         stamp = len(self.modes)
         if self._residual is None or self._residual_stamp != stamp:
             self._residual = self.matrix - self.synthesis_matrix()
@@ -236,28 +258,29 @@ class ModalFitSession:
 
     def synthesis_singular_values(self, include_preview: bool = True
                                   ) -> np.ndarray | None:
-        """The synthesis CMIF's singular values, (k, freqs), exactly —
-        without ever materializing the synthesis.
+        """The singular values of the synthesis CMIF, (k, lines),
+        computed without building the synthesis matrix.
 
-        The modal synthesis is rank-`m` by construction: every mode
-        contributes `q_k(w) * outer(shape, participation)`, so the
-        whole matrix is `U diag(q(w)) V^T` with *constant* U and V.
-        Singular values are invariant under matrices with orthonormal
-        columns on the left and orthonormal rows on the right, so QR
-        both factors once and every line's SVD collapses from
-        (responses x references) to (m x references) on the tiny R
-        factors. On the hard drone survey that is the difference
-        between 6.5 seconds — building a two-gigabyte record array and
-        decomposing 1197x12 at every line — and a few milliseconds,
-        for bit-identical curves.
+        The modal synthesis of m modes has rank m: each mode adds
+        `q_k(w) * outer(shape, participation)`, so the whole matrix is
+        `U diag(q(w)) V^T` with U and V constant over frequency.
+        Singular values do not change under a matrix with orthonormal
+        columns on the left or orthonormal rows on the right, so U and V
+        are each QR-factored once, and the SVD at each line is taken of
+        a core at most m by m built from the two R factors, in place of
+        the full (responses x references) matrix. The values are the
+        same as the full SVD gives, to rounding.
 
-        Padded with zero rows up to min(responses, references), which
-        is what the materialized SVD reports: the extra singular
-        values of a rank-m matrix are zero, and the plot's floor test
-        counts rows.
-
-        None with nothing to synthesize.
+        `include_preview` adds the previewed mode (fitted, not yet
+        confirmed). The result is padded with zero rows up to
+        min(responses, references), the number of rows the full SVD
+        returns: the extra singular values of a rank-m matrix are zero,
+        and the plot's floor test counts rows. None when there is no
+        mode to synthesize.
         """
+        # On the drone survey this is the difference between 6.5 s
+        # (building a two-gigabyte record array and decomposing 1197x12
+        # at every line) and a few milliseconds.
         modes = list(self.modes)
         if include_preview and self.preview is not None:
             modes.append(self.preview)
@@ -282,8 +305,9 @@ class ModalFitSession:
         return singular
 
     def synthesis_records(self, include_preview: bool = True) -> np.ndarray:
-        """The confirmed (and previewed) modes' synthesis, in the
-        source's record layout — what the dashed CMIF is drawn from."""
+        """The synthesis of the confirmed modes, and of the previewed mode
+        when `include_preview` is set, in the source FRF's record layout,
+        (records, lines). The dashed CMIF is drawn from this."""
         modes = list(self.modes)
         if include_preview and self.preview is not None:
             modes.append(self.preview)
@@ -308,18 +332,20 @@ class ModalFitSession:
     def searched(self,
                  within: tuple[float, float] | None = None
                  ) -> tuple[float, float]:
-        """(low, high) a suggestion may land in — the view, or all of it.
+        """(low, high), the frequency range a suggestion may land in.
 
-        Zooming to a region is the plainest way to say "the next mode is
-        in here", and it is now the *only* way. There used to be a pair
-        of draggable bounds as well, shading the rest of the plot out,
-        and `searched` intersected the two. They earned nothing: the
-        answer was almost always the view, and saying the same thing
-        twice meant zooming and then dragging two bars to match.
-
-        Clamped to the measured range, so a view scrolled past the end
-        of the data still searches data.
+        `within` is the plot's view, (low, high) in Hz; zooming to a
+        region is how the user says the next mode is in there. Without
+        it the whole measured range is searched. The range is clamped to
+        the measured range, so a view scrolled past the end of the data
+        still searches data, and a view entirely outside the data gives
+        the whole range.
         """
+        # The view is the only way to narrow the search. There used to
+        # be a pair of draggable bounds as well, shading the rest of the
+        # plot out, and this intersected the two. They added nothing: the
+        # answer was almost always the view, and saying the same thing
+        # twice meant zooming and then dragging two bars to match.
         if within is None:
             return self.span
         near, far = sorted((float(within[0]), float(within[1])))
@@ -331,33 +357,42 @@ class ModalFitSession:
 
     def suggest(self, within: tuple[float, float] | None = None
                 ) -> tuple[float, float]:
-        """Move the pending mode to the most *prominent* residual CMIF
-        peak inside `within` — the frequencies on screen — or anywhere.
+        """Move the pending mode to the most prominent residual CMIF peak
+        and return its (frequency, damping).
 
-        Prominence, not height, and the difference is the difference
-        between the eye and a ruler. The CMIF is accelerance in most
-        tests, so its raw height grows as frequency squared, and the
-        tallest residual line is nearly always a shoulder of the
-        highest dense cluster — ranked by height, ten Confirms on a
-        real survey spent every one of them inside a single 1340 Hz
-        cluster and never visited the 64 Hz fundamental any engineer
-        would fit first. Ranked by how far a peak stands above its own
-        local floor, in log height — which is what a peak *looks like*
-        on the plot — the same ten confirms landed on the very set of
-        modes the survey's engineer had picked by hand.
+        `within` is the plot's view, as for `searched`; without it the
+        whole measured range is searched. Peaks are ranked by
+        prominence, not height: how far a peak stands above the median
+        of the log CMIF around it (at least 25 lines either side), which
+        is how a peak looks on the plot. The CMIF of accelerance grows
+        as frequency squared, so ranked by raw height the tallest
+        residual line is nearly always a shoulder of the highest dense
+        cluster.
 
-        A confirmed mode's half-power width is also spoken for — unless
-        the shape standing there is somebody else's. The subtraction of
-        a fitted mode is exact only when the mode is alone; in a cluster
-        it leaves ridge enough that the same line stays the tallest, and
-        the loop confirmed fourteen modes at one frequency without ever
-        moving on. But frequency alone cannot tell that ridge from a
-        genuine neighbor — a repeated pair's second mode stands at the
-        confirmed frequency and was shadowed for exactly that reason —
-        and shape can: ridge keeps the shape of the mode that left it,
-        a real neighbor has its own (`_another_mode_at`). The cursor
-        can still be dragged anywhere by hand.
+        Lines inside a confirmed mode's half-power width are skipped,
+        unless the residual there has a shape the confirmed modes do not
+        explain (`_another_mode_at`). Subtracting a fitted mode is exact
+        only when the mode is alone; in a cluster it leaves a ridge that
+        keeps the shape of the mode that left it, while the second mode
+        of a repeated pair, at the same frequency, has a shape of its
+        own. When no local peak qualifies, the tallest free line is
+        taken. The frequency and damping are then found by `search`, and
+        the pending mode's held damping is released. The cursor can
+        still be dragged anywhere by hand.
         """
+        # Prominence, not height: ranked by height, ten
+        # Confirms on a real survey all landed inside a single 1340 Hz
+        # cluster and never reached the 64 Hz fundamental an engineer
+        # would fit first. Ranked by prominence, the same ten Confirms
+        # landed on the set of modes the survey's engineer had picked by
+        # hand.
+        #
+        # The half-power exclusion exists because, without it, the ridge
+        # a cluster's imperfect subtraction leaves kept the same line the
+        # tallest, and the loop confirmed fourteen modes at one frequency
+        # without moving on. Frequency alone cannot tell that ridge from
+        # a real neighbor (a repeated pair's second mode was shadowed for
+        # exactly that reason), and shape can.
         s1 = self._residual_cmif()
         low, high = self.searched(within)
         inside = (self.frequencies >= low) & (self.frequencies <= high)
@@ -454,18 +489,20 @@ class ModalFitSession:
             < self.RIDGE_FRACTION
 
     def move_to(self, frequency: float, damping: bool = True) -> None:
-        """The cursor moved. With `damping`, say what damping that
-        frequency implies.
+        """Move the pending mode to `frequency`, in Hz, where the cursor is.
 
-        This used to be free by necessity: the damping estimate meant a
-        full SVD of the residual every mouse tick. The residual does
-        not depend on the cursor, so it is cached against the modes
-        instead, and what a tick actually costs is a one-dimensional
-        search over a couple of dozen lines.
-
-        A caller that cannot afford even that — a drag already running
-        behind — passes False and gets the old behavior.
+        With `damping` True (the default), and the damping not held by
+        hand, the damping is searched at the new frequency
+        (`search_damping`). The residual is cached against the confirmed
+        modes, so this costs one small SVD at the cursor line and a
+        one-dimensional search over a few dozen lines. A caller that
+        cannot afford even that, such as a drag that is already running
+        behind, passes False and the damping is left as it was. Any
+        preview is dropped.
         """
+        # This used to be free by necessity: the damping estimate meant
+        # a full SVD of the residual on every mouse move, until the
+        # residual was cached against the modes.
         self.pending['frequency'] = float(frequency)
         if damping and not self.pending['overridden']:
             # seeded from the half-power width *at this line*, never
@@ -481,14 +518,14 @@ class ModalFitSession:
         self.preview = None       # fitted somewhere else, if at all
 
     def override_damping(self, damping: float) -> None:
-        """Hold the damping by hand: the pending mode keeps this value
-        until Find Mode suggests afresh or a confirm resets it.
+        """Hold the pending mode's damping at `damping` (a fraction of
+        critical), clipped to 1e-4 to 0.5.
 
-        This is the second axis of the search put in the user's hand.
-        Where two solutions sit at nearly the same frequency they are
-        told apart by their damping, and the automatic estimate can
-        only pick one; holding the damping says which neighborhood the
-        fit is meant to land in.
+        The pending mode keeps this value until Find Mode suggests again
+        or a confirm resets it. Where two solutions sit at nearly the
+        same frequency they differ in damping, and the automatic search
+        finds only one of them; holding the damping chooses which one
+        the fit lands on. Any preview is dropped.
         """
         self.pending['damping'] = float(np.clip(damping, 1e-4, 0.5))
         self.pending['overridden'] = True
@@ -496,25 +533,27 @@ class ModalFitSession:
 
     def pending_curve(self, unit_system: Any | None = None
                       ) -> tuple[np.ndarray, np.ndarray]:
-        """The SDOF magnitude the pending (frequency, damping) claims,
-        scaled to the residual CMIF at the cursor — the parabola under
-        the cursor that shows how sharp a mode is about to be fitted.
+        """The SDOF magnitude curve of the pending (frequency, damping),
+        as (frequencies, values).
 
-        Closed form: no SVD, no least squares, safe to redraw on every
-        tick of a drag. The crown touches the residual CMIF at the
-        cursor's line, so the curve reads as "a mode this tall and this
-        wide, here"; the width is the damping made visible, which is
-        what lets a vertical drag be *aimed*.
+        This is the curve drawn under the cursor to show how sharp a
+        mode is about to be fitted. Its peak is scaled to meet the
+        residual CMIF at the cursor's line, and its width shows the
+        damping, which is what lets a vertical drag set the damping. It
+        covers max(6ζ, 0.015) times the frequency either side of the
+        cursor, and at least two lines. It is closed form (no SVD, no
+        least squares), so it can be redrawn on every mouse move.
 
-        `unit_system` converts the heights the way the plotted CMIF is
-        converted. The session works in SI; the plot draws display
-        units, and on in-lbf-s data the two are a couple of orders of
-        magnitude apart — the SI-valued parabola was drawn that far
-        below the curves it was meant to hug, which on screen is
-        indistinguishable from not being drawn at all. It passed every
-        test, because the test fixture's units were undefined and
-        undefined values display as they stand.
+        `unit_system` converts the values the way the plotted CMIF is
+        converted: the session works in SI and the plot draws display
+        units. When no fit record has a defined dimension, the values
+        are returned unconverted.
         """
+        # Without the conversion, on in-lbf-s data the SI-valued curve
+        # was drawn a couple of orders of magnitude below the curves it
+        # was meant to meet, which on screen looks like not being drawn
+        # at all. It passed every test, because the test fixture's units
+        # were undefined and undefined values display as they stand.
         frequency = self.pending['frequency']
         damping = self.pending['damping']
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
@@ -539,6 +578,14 @@ class ModalFitSession:
         return self.frequencies[band], values
 
     def estimate_damping(self, frequency: float) -> float:
+        """The half-power damping estimate at the line nearest
+        `frequency`, read from the residual CMIF.
+
+        A side that never falls to half power borrows the other side's
+        width; with no crossing on either side the estimate is 0.01. The
+        result is clipped to 1e-4 to 0.5. This is the seed the searches
+        start from, not the damping a fit uses.
+        """
         s1 = self._residual_cmif()
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
         return self._half_power(s1, index)
@@ -574,14 +621,28 @@ class ModalFitSession:
     # ---- fitting one mode ---------------------------------------------------
 
     def fit_pending(self) -> dict[str, Any]:
-        """Fit the pending mode where the cursor is, without adding it.
+        """Fit the pending mode where the cursor is, without adding it,
+        and return it.
 
-        Estimates the damping (unless the user typed one), computes the
-        shape, and holds the result as a preview — the synthesis and MAC
-        show it, and Confirm adopts it.
+        Unless the damping is held by hand, it is searched at the cursor
+        first (`search_damping`, as `move_to` does), so the fit uses the
+        damping the cursor's curve showed. The shape is then computed and
+        the result held as `preview`: the synthesis and the MAC show it,
+        and Confirm adopts it. With the damping held by hand, the mode's
+        amplitude is scaled so its own CMIF at the cursor meets the
+        residual CMIF there, by a factor between 0.25 and 4.
+
+        The returned mode is a dict of `frequency`, `damping`, `shape`
+        (over `coordinate`), `description` and `scaled` (False when no
+        drive point set the scale).
         """
         if not self.pending['overridden']:
-            self.pending['damping'] = self.estimate_damping(
+            # the residual search, as the cursor's own estimate is
+            # (`move_to`): this read the half-power width, which the
+            # search replaced, so a dragged fit took a damping other than
+            # the one its parabola showed (2026-10-13, found by the
+            # website pass)
+            self.pending['damping'] = self.search_damping(
                 self.pending['frequency'])
         self.preview = self._fit_mode(self.pending['frequency'],
                                       self.pending['damping'],
@@ -592,7 +653,15 @@ class ModalFitSession:
     def confirm(self, frequency: float | None = None,
                 damping: float | None = None,
                 description: str | None = None) -> dict[str, Any]:
-        """Add the pending mode, fitting it first if Fit Mode has not."""
+        """Add the pending mode to the confirmed modes, and return it.
+
+        `frequency`, `damping` and `description` replace the pending
+        values when given. The preview is used when it was fitted at the
+        same frequency and damping; otherwise the mode is fitted here.
+        The modes are kept sorted by frequency, the confirm order is
+        recorded in `confirmed`, and the pending description and any
+        held damping are cleared.
+        """
         frequency = (self.pending['frequency'] if frequency is None
                      else float(frequency))
         damping = (self.pending['damping'] if damping is None
@@ -723,42 +792,47 @@ class ModalFitSession:
         return shape, bool(kept)
 
     def refine_residues(self) -> int:
-        """Re-fit every confirmed mode's residues together, poles held —
-        and let the CMIF choose how far to trust the joint solve.
+        """Fit the residues of all confirmed modes again, together, with
+        the frequencies and dampings held, and return how many modes were
+        refined (0 with none confirmed).
 
-        Fitting is sequential peeling: each mode was fit on the residual
-        as it stood, so the first of a close pair was fit on data that
-        still contained the second's tail, and its residues absorbed a
-        piece of it. The sum of the pair tracks the measurement — the
-        error is in the *decomposition* — and nothing in the loop ever
-        went back. This goes back: the poles stay exactly where the user
-        put them, and the residues are re-estimated with all the SDOF
-        terms present at once, over the union of the modes' own bands —
-        lines far from every fitted mode hold only what was never
-        fitted, and a full-band solve would smear that into the shapes.
+        Each mode was fit on the residual as it stood when it was
+        confirmed, so the first of a close pair was fit on data that
+        still held the second mode's tail, and its residues took up part
+        of it. The sum of the pair matches the measurement; the error is
+        in how it is split between them. Here the residues are fitted
+        with all the SDOF terms present at once, over the lines near
+        each mode (3ζf either side, at least two lines). Lines far from
+        every mode are left out, because they hold only what was never
+        fitted, and a full-band solve would spread that into the shapes.
 
-        The pure joint solve has a failure mode that shipped and was
-        caught by eye: when close poles come with *similar shapes* the
-        basis is ill-conditioned, and plain least squares amplifies
-        measurement noise into amplitude swaps between the pair — the
-        shapes' directions stay right while the synthesized CMIF walks
-        visibly away from the measured one. Regularizing toward the
-        sequential answer damps the swap, but no fixed weight suits
-        both a parallel pair and a well-separated one.
+        Modes are solved together only when their bands overlap, and
+        each such cluster is solved on the measurement minus the other
+        modes at their current residues. Where close modes have similar
+        shapes the least squares is badly conditioned and noise moves
+        amplitude between the pair, so each cluster compares five
+        candidates: the plain least-squares answer, three answers
+        regularized toward the current residues (ridge weights 0.01,
+        0.05 and 0.2 of the mean diagonal), and the current residues
+        themselves. The candidate whose synthesized CMIF is closest to
+        the measured CMIF over the cluster's band is kept, so refining
+        cannot make that score worse. A mode alone in its cluster keeps
+        its shape. With coherence weights, each response channel's
+        equations are weighted by its coherence weight.
 
-        So the weight is not fixed. A short ladder of candidates is
-        solved — the pure joint answer, three ridge strengths pulled
-        toward the sequential residues, and the sequential answer
-        itself — and each is scored by how far its synthesized CMIF
-        sits from the *measured* CMIF over the band. The winner is
-        adopted. The residues are optimized on the FRFs; the model
-        among them is selected on the CMIF, which is the curve the fit
-        is judged by — and with the sequential answer in the ladder,
-        refining can never worsen that curve.
-
-        Returns the number of modes refined; the shapes are unchanged
-        when the sequential answer won.
+        The frequencies and dampings do not change, and the shapes do not
+        change where the current residues won. Any preview is dropped.
         """
+        # Why a ladder of candidates and not one solve: the plain joint
+        # solve shipped first and its failure was caught by eye. With
+        # close poles and similar shapes, the least squares turned
+        # measurement noise into amplitude swaps between the pair; the
+        # shapes' directions stayed right while the synthesized CMIF
+        # moved visibly away from the measured one. Regularizing toward
+        # the sequential answer reduces the swap, but no fixed weight
+        # suits both a parallel pair and a well-separated one. The
+        # residues are optimized on the FRFs and the candidate is chosen
+        # on the CMIF, the curve the fit is judged by.
         if not self.modes:
             return 0
         self.refined += 1
@@ -981,8 +1055,8 @@ class ModalFitSession:
         return count
 
     def residual_records(self) -> np.ndarray:
-        """The residual back in the source's record layout,
-        (records, freqs) — what a plot of the residual draws."""
+        """The residual in the source FRF's record layout, (records,
+        lines). A plot of the residual draws this."""
         row = {dof: k for k, dof in enumerate(self.responses)}
         column = {dof: k for k, dof in enumerate(self.references)}
         residual = self.residual_matrix()
@@ -1070,16 +1144,21 @@ class ModalFitSession:
 
     def search_damping(self, frequency: float, seed: float | None = None,
                        refine: int = 4, steps: int = 5) -> float:
-        """The damping that leaves the least behind *at this frequency*.
+        """The damping that leaves the least residual at `frequency`,
+        with the frequency held.
 
-        The one-dimensional half of `search`, for a cursor being
-        dragged: the user is choosing the frequency by hand, so there
-        is nothing to search along it, and what is worth showing live
-        is what damping that frequency implies and how well it fits.
+        This is the one-dimensional form of `search`, for a cursor being
+        dragged: the user sets the frequency by hand, so only the damping
+        is searched. `seed` is where the search starts (the half-power
+        estimate when None or zero). Each of the `refine` passes tries
+        `steps` dampings across the current span, starting at the seed
+        plus or minus the seed, and fits a parabola through the best
+        and its neighbors; each pass then narrows the span to a fifth.
+        The result is clipped to 1e-4 to 0.5.
 
-        Cheap enough to run on a drag — the residual and its SVD are
-        cached against the modes rather than the cursor, so what is
-        left is a couple of dozen SDOF terms.
+        It is cheap enough to run on every mouse move: the residual is
+        cached against the confirmed modes, so a call costs one small
+        SVD at the cursor line and a few dozen SDOF evaluations.
         """
         index = int(np.argmin(np.abs(self.frequencies - frequency)))
         seed = float(seed) if seed else self._half_power(
@@ -1101,29 +1180,39 @@ class ModalFitSession:
 
     def search(self, index: int, damping: float | None = None,
                refine: int = 4, steps: int = 5) -> tuple[float, float]:
-        """The (frequency, damping) that leave the least behind.
+        """The (frequency, damping) near line `index` that leave the least
+        residual.
 
-        Coarse to fine: a small grid over half a line either side and a
-        wide span of damping, then the same grid again around the
-        winner at a fifth the span, each pass ending on a parabola
-        through the best and its neighbors in each direction. Four
-        passes: the cost is not quite a parabola at a pass's spacing,
-        so the vertex lands a little off the minimum, and two passes
-        read the damping of exact data 0.46 % high in every case tried
-        (2026-10-11). Each pass shrinks that about twenty-five times —
-        three left 0.02 %, four 0.001 % — for under a millisecond more
-        a search, against a residual whose SVD costs far more.
+        The search runs coarse to fine. The first pass is a `steps` by
+        `steps` grid over half a line either side in frequency and the
+        seed plus or minus the seed in damping; each later pass repeats
+        the grid around the best point at a fifth of the span, `refine`
+        passes in all. Each pass ends with a parabola through the best
+        point and its neighbors in each direction. A pass whose best
+        frequency is on the edge of its grid moves the grid and looks
+        again (up to eight times) instead of narrowing, as long as the
+        best frequency stays within 1.5 lines of the starting line and
+        short of every confirmed mode's half-power width. A start inside
+        a confirmed mode's half-power width does not move the grid at
+        all. The damping is clipped to 1e-4 to 0.5.
 
-        This replaces reading the damping off two half-power crossings.
-        Those are two points on a curve, they assume the peak is one
-        isolated mode, and where two modes sit close the width they
-        measure is the pair's — so the damping comes back too high and
-        nothing says so. A residual minimum assumes none of that.
+        This is used in place of reading the damping from two
+        half-power crossings. Those are two points on a curve and assume
+        the peak is one isolated mode; where two modes are close, the
+        width they measure is the pair's, and the damping comes out too
+        high with nothing to show it. A residual minimum does not assume
+        either.
 
         `damping` seeds the span when the user has typed one; otherwise
-        the half-power estimate seeds it, which is a fine starting
-        guess even where it is a poor answer.
+        the half-power estimate seeds it, which is a good enough start
+        even where it is a poor answer.
         """
+        # Four passes (2026-10-11): the cost is not quite a parabola at a
+        # pass's spacing, so the vertex lands a little off the minimum,
+        # and two passes read the damping of exact data 0.46 % high in
+        # every case tried. Each pass reduces that about twenty-five
+        # times (three left 0.02 %, four 0.001 %) for under a millisecond
+        # more per search, against a residual whose SVD costs far more.
         line = float(self.frequencies[index])
         df = float(self.frequencies[1] - self.frequencies[0]
                    if len(self.frequencies) > 1 else 1.0)
@@ -1219,7 +1308,13 @@ class ModalFitSession:
     # ---- what the fit is ----------------------------------------------------
 
     def shape_set(self) -> ShapeSet:
-        """The confirmed modes as a ShapeSet, ready for the project."""
+        """The confirmed modes as a ShapeSet, ready for the project.
+
+        The mass unit is kg when every fit record has a defined
+        dimension, and None otherwise, since shapes fitted to raw values
+        are raw. The set is marked unscaled when any mode had no drive
+        point to set its scale.
+        """
         from .shapes import ShapeSet
 
         # defined, not merely hinted: known_dim falls back to the file's

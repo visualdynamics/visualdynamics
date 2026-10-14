@@ -1,21 +1,20 @@
-"""Rattlesnake sine specification files (.npz): one tone per file.
+"""Read Rattlesnake sine specification files (.npz), one tone per file.
 
-The controller's sine environment saves each specification the way
-its own `save_specification` writes it: `frequency` (the breakpoints),
-`amplitude` (channels by breakpoints, the table's column transposed),
-`sweep_type` and `sweep_rate` per segment, and when the version
-writing it had them, `phase` in degrees, `warning` and `abort` as
-(lower/upper, left/right, channels, breakpoints), `start_time` and
-`name`. Older files hold the first five only (Brandon, 2026-10-02: nine
-such files, one per sweep, refused as "an npz archive holding 5
-arrays").
+The controller's sine environment saves each specification the way its
+own `save_specification` writes it: `frequency` (the breakpoints),
+`amplitude` (channels by breakpoints, the specification table's column
+transposed), and `sweep_type` and `sweep_rate` for each segment; and,
+from the controller versions that have them, `phase` in degrees,
+`warning` and `abort` as (lower/upper, left/right, channels,
+breakpoints), `start_time` and `name`. Files from older versions lack
+some of the optional arrays, and read as well.
 
-The file names no channels and carries no units. The channels come
-back as the controller's own order, '1', '2', ... — which is also what
-a run through a response transformation records them as — unless
-`response_dof` names them; the amplitudes come back as written unless
-`ordinate_unit` says what they are in. Nine files are nine
-specifications of one tone each; `Project.merge` joins them into one.
+The file names no channels and has no units. The channels are named in
+the controller's own order, '1', '2' and so on, which is also how a run
+through a response transformation records them, unless `response_dof`
+names them; the amplitudes are read as written unless `ordinate_unit`
+gives their unit. Nine files are nine specifications of one tone each;
+`Project.merge` joins them into one.
 """
 
 from __future__ import annotations
@@ -29,13 +28,17 @@ import numpy as np
 from ..core.sine import SineSweepSpecification, SineTone
 from .sniffing import npz_has
 
+# Brandon, 2026-10-02: nine older files, one per sweep, were refused as "an
+# npz archive holding 5 arrays", which is why the later arrays are optional.
+
 _RANDOM_KEYS = {'f', 'cpsd'}
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    """The four arrays every sine specification carries, and not the
-    random specification's own pair — the two formats share a writer
-    family and nothing else."""
+    """True for an `.npz` with the four arrays every sine specification
+    has, and without the random specification's `f` and `cpsd`, since
+    the two formats come from the same controller and are otherwise
+    unrelated."""
     return (npz_has(path, {'frequency', 'amplitude', 'sweep_type', 'sweep_rate'},
                     allow_pickle=False)
             and not npz_has(path, _RANDOM_KEYS, allow_pickle=False))
@@ -45,7 +48,13 @@ def load(path: str | os.PathLike,
          response_dof: Sequence[str] | None = None,
          ordinate_dim: str = 'acceleration',
          ordinate_unit: str | None = None) -> SineSweepSpecification:
-    """One tone, as the controller wrote it.
+    """Read one tone as the controller wrote it.
+
+    The phase is converted from degrees to radians. The warning and
+    abort bands must be the same on the left and right sides of each
+    breakpoint, since a tone here has one value per breakpoint; a file
+    where they differ is refused. The tone is named by the file's `name`,
+    or by the file name without it.
 
     Parameters
     ----------
@@ -53,13 +62,26 @@ def load(path: str | os.PathLike,
         The `.npz` file.
     response_dof : sequence of str, optional
         The control channels the amplitude columns belong to, in the
-        file's order. Defaults to '1', '2', ... — the controller's
-        channel order, which is what a transformed run calls them.
-    ordinate_dim : str
-        What the amplitudes measure; acceleration unless said.
+        file's order. Defaults to '1', '2', ..., the controller's
+        channel order, which is how a run through a response
+        transformation names them.
+    ordinate_dim : str, default 'acceleration'
+        What the amplitudes measure.
     ordinate_unit : str, optional
-        The amplitudes' unit. None keeps the file's raw values, to be
-        read beside data in the same unit.
+        The amplitudes' unit. None keeps the file's values as they are,
+        to be read beside data in the same unit.
+
+    Returns
+    -------
+    SineSweepSpecification
+        A specification of one tone.
+
+    Raises
+    ------
+    ValueError
+        For a file with no breakpoints, a `response_dof` whose length is
+        not the number of amplitude columns, a band of the wrong shape,
+        or a band that differs between the sides of a breakpoint.
     """
     with np.load(path, allow_pickle=False) as d:
         frequency = np.asarray(d['frequency'], dtype=float).ravel()

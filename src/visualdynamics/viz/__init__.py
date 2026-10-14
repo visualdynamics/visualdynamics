@@ -1,8 +1,8 @@
 """The 3-D scene: geometry, DOF arrows and moving mode shapes.
 
-PyVista over VTK, shown in the app's own pane or rendered
-off-screen to an image. The plots on an axis are `visualdynamics.plot`;
-this is the half that has a camera in it.
+Drawn with PyVista over VTK, either in the app's own pane or off
+screen to an image. Plots on a 2-D axis are in `visualdynamics.plot`;
+this package is the half with a camera.
 """
 
 from .geometry import geometry_scene, plot_geometry
@@ -10,30 +10,27 @@ from .waterfall import plot_waterfall, waterfall_scene
 
 
 def undeferred(plotter):
-    """Make this Qt plotter render synchronously, and return it.
+    """Make a Qt plotter render synchronously, and return it.
 
-    On macOS pyvistaqt wraps ``render()`` in a worker thread that emits
-    a signal back to the GUI thread, so every render becomes a queued
-    metacall delivered later by the event loop. That indirection exists
-    to make ``render()`` safe to call *from* another thread — which
-    nothing here ever does — and it opens a race that nothing here can
-    close: if the widget's native window goes away between the emit and
-    the delivery, the queued call walks into ``vtkCocoaRenderWindow``
-    with a dead ``QPlatformWindow`` and the process dies with SIGSEGV
-    (seen in the field: ``QPlatformWindow::window()`` dereferencing
-    null out of ``NSOpenGLContext update``).
+    On macOS pyvistaqt runs ``render()`` through a worker thread that
+    signals back to the GUI thread, so every render is queued and
+    delivered later by the event loop. That is only needed when
+    ``render()`` is called from another thread, which nothing here does,
+    and it allows a crash: if the widget's native window is destroyed
+    between the signal and its delivery, the queued render reaches
+    ``vtkCocoaRenderWindow`` with no window and the process dies with
+    SIGSEGV. This replaces ``render`` with a direct call to the
+    unthreaded path, and sets ``_rendered`` the way pyvistaqt's threaded
+    version does (``BasePlotter.render`` does not set it when it skips a
+    render). It also stops the widget's automatic render timer, since
+    every render here is explicit.
 
-    Calling the unthreaded path directly is what the queued delivery
-    would have done, minus the window between emit and delivery in
-    which the target can die. ``_rendered`` is forced the way the
-    threaded override forces it, because ``BasePlotter.render`` skips
-    the flag when it skips the render, and pyvistaqt marked that flag
-    "crucial".
-
-    Bound on the instance at construction rather than patched on the
-    class, so a pyvistaqt used by anything else in the process keeps
-    its own behavior.
+    The change is made on this instance only, not on the class, so any
+    other use of pyvistaqt in the process keeps its own behavior.
     """
+    # The SIGSEGV was seen in the field: QPlatformWindow::window()
+    # dereferencing null out of NSOpenGLContext update. pyvistaqt's own
+    # source calls the _rendered flag "crucial".
     unthreaded = plotter._render
 
     def render():

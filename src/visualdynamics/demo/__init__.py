@@ -1,11 +1,10 @@
-"""Models to try the toolset on, built by the toolset.
+"""Models to try the toolset on, built with the toolset.
 
-A structural dynamics package needs something to demonstrate on, and a
-from-scratch one has a particular reason to build its own: the demonstration
-is the claim. These models are assembled with `visualdynamics.fem` and
-nothing else, so every number they produce — geometry, mode shapes,
-synthesized FRFs — is the package's own answer rather than another
-library's, imported.
+There are four: the quadcopter (`drone`), the free plate (`plate`), the
+BARC (`barc`) and the Frame-Wing (`frame_wing`). Each is built with this
+package alone (`visualdynamics.fem`, `visualdynamics.mesh` and the
+project verbs), so every number they produce (geometry, mode shapes,
+synthesized FRFs) is computed by this package.
 
     from visualdynamics.demo import drone
 
@@ -13,10 +12,10 @@ library's, imported.
     shapes = model.eigensolution(maximum_frequency=300, damping=0.02)
     model.geometry().plot()
 
-Building is deliberately a call rather than a module-level object. The dense
-quadcopter is 1230 degrees of freedom and its eigensolution takes a second
-or two, which is not something to spend on an import that may only have
-wanted the mesh.
+A model is built by calling `build()`, not when the module is imported.
+The quadcopter has 8532 degrees of freedom and its eigensolution takes
+about a second, which an import that only wanted the mesh should not
+have to spend.
 """
 
 #: The submodules are not imported here. `from visualdynamics.demo import

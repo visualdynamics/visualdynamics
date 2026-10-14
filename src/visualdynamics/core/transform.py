@@ -1,68 +1,67 @@
-"""Physical responses through a shape set to modal responses, and back.
+"""Transform physical responses through a shape set to modal responses,
+and back.
 
-`u = Φq` is the whole relationship (PLAN.md, "The virtual point arc",
-phase 2). Physical to modal is `q = Φ⁺u`, the least-squares fit over
-the DOFs the data and the set share; modal to physical is `u = Φq`,
-exact by definition. Any shape set serves — a fitted set, an
-eigensolution, the six rigid-body shapes of a geometry, which is the
-virtual point transformation of the substructuring literature with
-no special case in the code.
+The relationship is `u = Φq`. Physical to modal is `q = Φ⁺u`, the
+least-squares fit over the DOFs the data and the set share; modal to
+physical is `u = Φq`, exact by definition. Any shape set can be used: a
+fitted set, an eigensolution, or the six rigid-body shapes of a
+geometry, which gives the virtual point transformation of the
+substructuring literature with no special case in the code.
 
-**Every kind of data goes through the same two rules, in the form its
-kind needs.** A time history or a spectrum is rows, one per channel:
-`q = Φ⁺u` line by line, complex where the rows are. A cross-spectral
-matrix is a quadratic form, `S_qq = Φ⁺ S_uu Φ⁺ᴴ`, so it needs *every*
-cross term between the shared channels — the phase between two
-channels is exactly what tells a translation from a rotation — and a
-set of autospectra alone is refused rather than completed with a
-guess (Brandon, 2026-09-04: no assumptions about cross terms; the
-user defines or computes them when they are needed). An FRF is a
-matrix from references to responses: its response rows transform
-through `Φ⁺` like any response, and its reference columns through the
-force rule, `f = (Φᵀ)⁺ f_m`, when the set covers the drives — the
-virtual point's FRF in both halves; references the set does not cover
-stay physical, and the report says so. A shock response spectrum, a
-coherence and a sine level set do not transform at all — a maximum, a
-ratio, a magnitude without phase — and the refusal says to transform
-the time history and recompute.
+Each kind of data goes through the same two rules, in the form its kind
+needs. A time history or a spectrum is rows, one per channel, and is
+transformed as `q = Φ⁺u` line by line, complex where the rows are. A
+cross-spectral matrix is a quadratic form, `S_qq = Φ⁺ S_uu Φ⁺ᴴ`, so it
+needs every cross term between the shared channels: the phase between
+two channels is what tells a translation from a rotation. A set of
+autospectra alone is refused, not completed with assumed cross terms;
+the user computes or defines the cross terms when they are needed. An
+FRF is a matrix from references to responses. Its response rows
+transform through `Φ⁺` like any response, and its reference columns
+through the force rule, `f = (Φᵀ)⁺ f_m`, when the set covers the
+drives, which gives the virtual point's FRF in both halves. References
+the set does not cover stay physical, and the report says so. A shock
+response spectrum (a maximum) and a coherence (a ratio) do not
+transform at all, and the refusal says to transform the time history
+and compute them again.
 
-**Records match shape columns by (DOF, quantity)**, with the sign
-honored: a `101Z-` channel against a `101Z+` column negates. Every
-column is a displacement quantity today; matching by quantity as well
-is what lets a later set carry strain at gauge DOFs beside
-displacement at accelerometer DOFs and slot into the same transform.
+Records are matched to shape columns by DOF, within each quantity, with
+the sign honored: a `101Z-` channel against a `101Z+` column is
+negated. Every shape column is a displacement today.
 
-**The quantity rule**, three classes. Motions (acceleration,
+Each record's quantity sets how it transforms. Motions (acceleration,
 velocity, displacement) transform as responses, `q = Φ⁺u`, each
-quantity group with its own rule and unit. Forces transform the other
-way — a force is work-conjugate to a motion, so the modal force is
-`Φᵀf`, no pseudo-inverse and no rank condition. Everything else
-(temperature, voltage, pressure, strain) is left out and said: a
-displacement shape set says nothing about it, and a temperature at a
-virtual point would be a fiction.
+quantity separately with its own unit. Forces transform the other way:
+a force is work-conjugate to a motion, so the modal force is `Φᵀf`,
+with no pseudo-inverse and no rank condition. Every other quantity
+(temperature, voltage, pressure, strain) is left out and reported,
+since a displacement shape set says nothing about it. A record whose
+units are not defined is left out and reported too, since its values
+are raw numbers.
 
-**The unit rule is `[q] = [u]/[Φ]`.** Unit rigid-body shapes have
+The unit rule is `[q] = [u]/[Φ]`. Unit rigid-body shapes have
 dimensionless translations and length-per-radian rotations, so the
-translational responses keep the data's quantity and the rotational
-ones come out per radian (rad/s², or lbf·in for a force). A
-mass-normalized set is in 1/√kg, so its modal responses carry a half
-power of mass — the `modal_*` dimension tags. A set with no declared
-mass unit gives responses with no unit, hinted with the modal tag for
-Define Units to declare. The expansion applies the same rule the
-other way, which is what makes the round trip honest.
+translational modal responses keep the data's quantity and the
+rotational ones come out per radian (rad/s², or a moment for a force).
+A mass-normalized set is in 1/√kg, so its modal responses carry a half
+power of mass, the `modal_*` dimensions. Any other set with no declared
+mass unit gives modal responses with no unit, hinted with the `modal_*`
+dimension for Define Units to declare. The expansion applies the same
+rule the other way, so a round trip returns the original quantity and
+unit.
 
-**A specification's bands carry through exactly when they can.** The
-transform is linear, so a band that is the same decibels on every
-channel at a line is the same decibels on every modal channel there;
-bands that differ between channels have no single answer, and the
-transform refuses rather than pick one.
+A specification's bands carry through when every channel has the same
+band. The transform is linear, so a band that is the same number of
+decibels on every channel at a line is the same on every modal channel
+there. Bands that differ between channels have no single answer, and
+the transform refuses them.
 
-**Modal DOF names.** A modal coordinate is spelled `M` and the
-mode's 1-based index — `M1` … `M6` for a rigid set, `M1` … `M22` for a
-fitted one — one rule for every set (`validate.modal_coordinate`).
-Visibly not a node, and stable across renames; which set it belongs
-to is the object's provenance and each record's comment, which names
-the mode as the set describes it.
+A modal coordinate is named `M` and the mode's 1-based index (`M1` …
+`M6` for a rigid set, `M1` … `M22` for a fitted one), one rule for
+every set (`validate.modal_coordinate`). The names are visibly not
+nodes and do not change when a set is renamed; which set a coordinate
+belongs to is in the object's provenance and in each record's comment,
+which names the mode as the set describes it.
 """
 
 from __future__ import annotations
@@ -82,6 +81,10 @@ from .validate import MODAL_PREFIX, modal_coordinate
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import DataArray
     from .shapes import ShapeSet
+
+# The design is PLAN.md, "The virtual point arc", phase 2. No cross
+# terms are ever assumed (Brandon, 2026-09-04: no assumptions about
+# cross terms; the user defines or computes them when they are needed).
 
 #: the response quantities that transform as motions, `q = Φ⁺u`
 MOTIONS = ('acceleration', 'velocity', 'length')
@@ -140,9 +143,12 @@ def _is_modal(dof: str, shapes: ShapeSet) -> bool:
 
 
 def reads_as(data: DataArray, shapes: ShapeSet) -> str | None:
-    """`'physical'` when the data's DOFs are on the set's coordinates,
-    `'modal'` when they are the set's modal names, None when neither
-    — or when the kind of data does not transform at all.
+    """Which way a transform of `data` through `shapes` would go.
+
+    `'physical'` when any of the data's DOFs is on the set's
+    coordinates, `'modal'` when any is one of the set's modal names, and
+    None when neither, or when the kind of data does not transform at
+    all.
 
     Parameters
     ----------
@@ -171,21 +177,28 @@ def reads_as(data: DataArray, shapes: ShapeSet) -> str | None:
 class TransformReport:
     """What a transform used, left out, and left unexplained.
 
-    Attributes:
-        shared: The physical DOFs matched to shape columns, per
-            quantity.
-        dropped: The DOFs of transformable quantities the set has no
-            column for — a shaker's synthetic drive DOF, a node the
-            set never covered.
-        skipped: How many records of each untransformable quantity
-            were left out (`{'temperature': 2}`).
-        rank: The rank of the shared shape matrix per motion quantity,
-            against the number of modes.
-        residual: Per shared motion DOF, the fraction of its RMS (or
-            of its power, for a density) the modes do not explain — 0
-            when the fit is exact.
-        notes: Anything else worth a sentence — references kept
-            physical, cross-quantity blocks left out.
+    Attributes
+    ----------
+    shared : dict of str to list of str
+        The DOFs matched to shape columns, per quantity.
+    dropped : list of str
+        The DOFs of transformable quantities the set has no column for,
+        such as a shaker's synthetic drive DOF or a node the set never
+        covered.
+    skipped : dict of str to int
+        How many records of each quantity that does not transform were
+        left out (`{'temperature': 2}`), including records whose units
+        are not defined.
+    rank : dict of str to (int, int)
+        Per motion quantity, the rank of the shared shape matrix and the
+        number of modes.
+    residual : dict of str to float
+        Per shared motion DOF, the fraction of its RMS (or of its power,
+        for a density) the modes do not explain; 0 when the fit is
+        exact.
+    notes : list of str
+        Anything else worth a sentence, such as references kept physical
+        or cross-quantity terms left out.
     """
 
     shared: dict[str, list[str]] = field(default_factory=dict)
@@ -201,8 +214,8 @@ class TransformReport:
         return max(self.residual.values(), default=0.0)
 
     def describe(self) -> str:
-        """One line: what was shared, dropped, skipped, and left
-        unexplained — the status line's wording."""
+        """One line saying what was shared, dropped, skipped and left
+        unexplained, worded as the status line shows it."""
         shared = len({dof for dofs in self.shared.values() for dof in dofs})
         parts = [f'{shared} DOF{"s" * (shared != 1)} shared']
         if self.dropped:
@@ -816,10 +829,13 @@ def _frf_to_physical(data, shapes, records, report):
 def to_modal(data: DataArray, shapes: ShapeSet,
              records: Sequence[int] | None = None
              ) -> tuple[DataArray, TransformReport]:
-    """Physical responses through the set: modal responses at the
-    set's modal DOFs `M1` … `Mn`, in the form the data's kind takes —
-    rows for a time history or spectrum, the matrix for a density or
-    specification, both halves for an FRF.
+    """Transform physical responses through the set into modal
+    responses at the set's modal DOFs `M1` … `Mn`.
+
+    The result takes the form the data's kind needs: rows for a time
+    history or spectrum, the matrix for a density or specification, and
+    both halves for an FRF. A time history's averaging frames and shock
+    windows are carried onto the result.
 
     Parameters
     ----------
@@ -832,14 +848,25 @@ def to_modal(data: DataArray, shapes: ShapeSet,
         The set to transform through. Complex sets are refused: real
         data cannot carry a complex modal coordinate.
     records : sequence of int, optional
-        Which records to carry through — the channels picked in the
+        Which records to carry through, the channels picked in the
         tree. All of them when omitted.
 
     Returns
     -------
     tuple of (DataArray, TransformReport)
-        The modal responses, of the source's own class, and what was
-        shared, dropped and left unexplained.
+        The modal responses, and what was shared, dropped and left
+        unexplained. A density or FRF comes back as the source's own
+        class; a time history or spectrum as a `TimeHistory` or
+        `Spectrum`.
+
+    Raises
+    ------
+    ValueError
+        When the kind of data does not transform, the set is complex or
+        has no modes, the shared DOFs of a motion quantity resolve fewer
+        modes than the set has, cross terms or FRF pairs are missing,
+        the bands differ between channels, or no motion or force record
+        is on a DOF the shapes cover.
     """
     from .data import Frf, Psd, TimeHistory
 
@@ -862,15 +889,15 @@ def to_modal(data: DataArray, shapes: ShapeSet,
 def to_physical(data: DataArray, shapes: ShapeSet,
                 records: Sequence[int] | None = None
                 ) -> tuple[DataArray, TransformReport]:
-    """Modal responses back through the set: `u = Φq` at every DOF the
-    set covers, summed over the modes present, in the form the data's
-    kind takes.
+    """Expand modal responses back through the set, `u = Φq`, at every
+    DOF the set covers.
 
-    Every mode gives the motion of the structure; a few — one record
-    picked in the tree — give those modes' contribution to it, which
-    is what a modal contribution plot is. The result's comments say
-    which modes it carries. Modal forces are left out: many force
-    distributions give one modal force.
+    The result is summed over the modes present, in the form the
+    data's kind takes. With every mode it is the motion of the
+    structure; with a few (the records picked in the tree) it is those
+    modes' contribution to it, as in a modal contribution plot. The
+    result's comments say which modes it carries. Modal forces are left
+    out, because many force distributions give the same modal force.
 
     Parameters
     ----------
@@ -879,13 +906,22 @@ def to_physical(data: DataArray, shapes: ShapeSet,
     shapes : ShapeSet
         The set the record was transformed through.
     records : sequence of int, optional
-        Which modal records to expand — the modes picked in the tree.
+        Which modal records to expand, the modes picked in the tree.
         All of them when omitted.
 
     Returns
     -------
     tuple of (DataArray, TransformReport)
         The physical responses, and which modal DOFs were used.
+
+    Raises
+    ------
+    ValueError
+        When the kind of data does not transform, the set is complex or
+        has no modes, the record's DOFs are not this set's modal
+        coordinates, cross terms or FRF pairs are missing, the bands
+        differ between modal channels, or no motion record is at one of
+        the set's modal DOFs.
     """
     from .data import Frf, Psd, TimeHistory
 
@@ -910,8 +946,9 @@ def to_physical(data: DataArray, shapes: ShapeSet,
 
 
 def carried_modes(report: TransformReport, shapes: ShapeSet) -> list[str]:
-    """The modal DOFs an expansion carried, in mode order — empty when
-    it carried every mode, so a name need only say so when it matters."""
+    """The modal DOFs an expansion carried, in mode order, or an empty
+    list when it carried every mode, so a name lists the modes only
+    when that matters."""
     used = sorted({dof for dofs in report.shared.values() for dof in dofs
                    if modal_coordinate(dof) is not None},
                   key=lambda dof: modal_coordinate(dof) or 0)

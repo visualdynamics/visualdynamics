@@ -1,16 +1,17 @@
-"""The truncation parameters, as a table beside the time history.
+"""The truncation settings, as a table beside the time history.
 
-Two instants are set here — where the kept stretch starts and where it
-stops — and the record on the plot shows the cut as it is made: the
-discarded ends grayed over, the kept span between two draggable edges
-(`plot.truncation`), the same span-editing grammar as the averaging
-region because it is the same kind of gesture.
+Two times are set here, where the kept stretch starts and where it
+stops, and the plot shows the cut as it is made: the discarded ends are
+grayed over, and the kept span lies between two edges that can be
+dragged (`plot.truncation`), edited the same way as the averaging
+region.
 
-The panel says what the settings are, reports when they move, and
-its Apply Truncation button makes the truncated record with whatever
-is set at that moment — the project verb a script calls, the same
-division of labor as the averaging and filter panels, because it is
-the same kind of thing: parameters that ride the record.
+The panel says what the settings are and reports when they change, and
+its Apply Truncation button makes the truncated record with whatever is
+set at that moment, through the project verb a script calls. This is
+the same split as in the averaging and filter panels, since these are
+also settings carried by the record. The button is disabled while the
+span covers the whole record.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 
 class TruncatePanel(QWidget):
-    """The parameter table. Edits arrive as a whole `Truncation`."""
+    """The settings table. Edits are emitted as a whole `Truncation`."""
 
     #: a parameter moved; here is the truncation that describes it now
     changed = Signal(object)
@@ -112,8 +113,8 @@ class TruncatePanel(QWidget):
                      truncation: Truncation) -> None:
         """Point the panel at a time history and the span set on it.
 
-        The walls come from the history rather than being guessed from
-        the numbers already in the boxes.
+        The limits a span cannot go past are the history's first and
+        last times, not the numbers already in the boxes.
         """
         import numpy as np
 
@@ -129,10 +130,10 @@ class TruncatePanel(QWidget):
                   truncation: Truncation) -> None:
         """Point the panel at a span of time with no record behind it.
 
-        The import window: the run is still in its file, so the walls
-        and the sample count come from its clock — first and last
-        instant, and the period between samples — rather than from an
-        abscissa nobody has read yet.
+        This is for the import window, where the run is still in its
+        file: the limits and the sample count come from its clock (the
+        first and last times, and the `period` between samples) instead
+        of from an abscissa that has not been read yet.
         """
         self._history = None
         self._period = float(period)
@@ -141,7 +142,7 @@ class TruncatePanel(QWidget):
         self.set_truncation(truncation)
 
     def set_truncation(self, truncation: Truncation) -> None:
-        """Restate the panel from a truncation, without re-emitting."""
+        """Show a truncation in the panel without emitting `changed`."""
         self._loading = True
         try:
             # the walls first, for the same reason every panel here

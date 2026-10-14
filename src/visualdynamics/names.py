@@ -1,12 +1,14 @@
 """How an object is named in a project.
 
-An importer's keys are for code — `time_data`, `Modal_frf`, `ChannelTable` —
-and the tree is for reading. So the tree shows the object, spelled the way it
-would be written down: words separated by spaces, each capitalized, and the
-acronyms this field actually uses left as acronyms.
+An importer's keys are written for code (`time_data`, `Modal_frf`,
+`ChannelTable`), and the tree is for reading. So the tree shows the
+object spelled the way it would be written down: words separated by
+spaces, each capitalized, and the acronyms of the field (FRF, CPSD, PSD,
+ASD, SRS, DOF, RMS) in capitals.
 
-The name is the key: renaming an item renames the object, so these are what
-`MainWindow.objects` is keyed by. Nothing here parses them back.
+The name is the key: renaming an item renames the object, so these
+names are what `MainWindow.objects` is keyed by. Nothing here parses
+them back.
 """
 
 from __future__ import annotations
@@ -32,10 +34,17 @@ _WORDS = re.compile(r'[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|\d+')
 
 
 def display_name(key: str) -> str:
-    """'Modal_frf' -> 'Modal FRF'. 'ShapeSet' -> 'Shape Set'.
+    """A key from code as a name to read: 'Modal_frf' -> 'Modal FRF',
+    'ShapeSet' -> 'Shape Set'.
 
-    Anything already spelled as a name comes back unchanged, so a user's own
-    rename is never reformatted underneath them.
+    The key is split into words at underscores, spaces, digits and
+    internal capitals. Each word is capitalized, or written as its
+    acronym, and the words are joined with single spaces. A key already
+    spelled that way, such as 'Shape Set', comes back unchanged.
+    Punctuation is dropped and lower-case words are capitalized
+    ('my frf data' -> 'My FRF Data'), so this is for keys from code, not
+    for names a person typed. A key with no letters or digits comes back
+    as given.
     """
     words = _WORDS.findall(key)
     if not words:

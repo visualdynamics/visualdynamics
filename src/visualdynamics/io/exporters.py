@@ -1,24 +1,24 @@
 """The exporter registry.
 
-Nearly anything visualdynamics can read, it can write — the exceptions are
-named in docs/export.md — because a format that only goes one way makes
-the tool a dead end for whoever needs the data next. Exporters register
-themselves the same way importers do, and say which objects they can take.
+Most formats Visual Dynamics can read, it can also write (the
+exceptions are listed in docs/export.md), so that data read here can be
+passed on to the next tool in the same format. Exporters are registered
+the same way importers are, and each says which objects it can write.
 
-Values are written in the unit system asked for, which the GUI takes from
-the display selector: what you are looking at is what you get. Given no
-system they go out as stored, which is SI once units are declared.
+Values are written in the unit system asked for, which the app takes
+from the display selector, so a file holds the numbers shown on screen.
+With no system given, they are written as stored: SI once units are
+declared.
 
-Display-only overrides do not travel. Reading accelerations in g is a
-convenience of the screen; no file format here can record "g" as a unit —
-UNV's units block carries length, force and temperature factors and
-nothing else — so a file written in g would either be undeclarable or
-misread by anyone who did the arithmetic. Exports use the coherent system
-the display one is built on, and the status line names it.
+A display system that shows acceleration in g writes the coherent system
+it is built on (in/s² for in-slinch-lbf-s (g)), because most formats
+cannot label a value as g: UNV's units block, for one, carries length,
+force and temperature factors and nothing else. A few formats write
+their own way, and `units_written` says how each one did, for the line
+the app shows after a save.
 
 An object whose units are unknown is written exactly as it stands. There
-is no factor to convert it by, and multiplying by one would be the same as
-claiming it was SI all along.
+is no factor to convert it by.
 """
 
 from __future__ import annotations
@@ -40,11 +40,13 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Exporter:
-    """One format visualdynamics can write.
+    """One format Visual Dynamics can write.
 
-    `handles(obj)` says whether this exporter has anything to do with
-    that object — which is what fills the Export menu with the formats
-    that apply and no others — and `save(obj, path)` writes it.
+    `handles(obj)` says whether this exporter can write that object,
+    which is how the Export menu lists only the formats that apply,
+    and `save(obj, path, unit_system=..., **kwargs)` writes it.
+    `suffix` is the file suffix that selects this exporter when no
+    format is named.
     """
 
     name: str
@@ -81,23 +83,70 @@ def _refuse_modal(exporter: Exporter, obj: Any) -> None:
 
 def register_exporter(name: str, description: str, suffix: str,
                       handles: Callable, save: Callable) -> None:
-    """Teach visualdynamics to write a format."""
+    """Add a format to the exporters.
+
+    When `export_file` chooses by suffix, the first registered exporter
+    that can write the object and matches the suffix is used, so of two
+    exporters with one suffix the one registered first is the default.
+    """
     _EXPORTERS.append(Exporter(name, description, suffix, handles, save))
 
 
 def exporters(obj: Any = None) -> list[Exporter]:
-    """Every exporter, or only those that can write this object."""
+    """Every exporter in registration order, or only those that can
+    write `obj` when it is given."""
     if obj is None:
         return list(_EXPORTERS)
     return [e for e in _EXPORTERS if e.handles(obj)]
 
 
+def units_written(format: str, unit_system: UnitSystem) -> str:
+    """The units a file of `format` holds its values in when saved with
+    `unit_system` chosen, in words.
+
+    The status line shows this after a save, because most formats do
+    not record it themselves. A `.mat` is in the display system itself,
+    g included; Nastran and ADF files are SI; 3MF is in meters; ESCDF
+    labels each value with the unit it was declared in; every other
+    format is in the coherent system the display system is built on.
+
+    Parameters
+    ----------
+    format : str
+        An exporter's name (`exporters`).
+    unit_system : UnitSystem
+        The display system the save was asked for.
+
+    Returns
+    -------
+    str
+        For example 'in-slinch-lbf-s', 'SI', or 'the units each object
+        was declared in'.
+    """
+    # MATLAB writes the display system itself, g included; ADF's
+    # definition and Nastran's writer are SI; 3MF declares meters; ESCDF
+    # labels each value with the unit it was declared in. The rest write
+    # the coherent system (2026-10-13: the line named the coherent system
+    # whatever the format did)
+    if format == 'matlab':
+        return unit_system.name
+    if format == 'nastran' or format.startswith('adf'):
+        return 'SI'
+    if format == 'threemf':
+        return 'meters'
+    if format == 'escdf':
+        return 'the units each object was declared in'
+    return unit_system.coherent.name
+
+
 def geometry_values(geometry: Geometry, unit_system: UnitSystem | None
                     ) -> tuple[np.ndarray, np.ndarray]:
-    """(coordinates, coordinate system matrices) in the target system.
+    """(coordinates, coordinate system matrices) in the coherent form of
+    `unit_system`, or as stored when it is None or the geometry has no
+    units defined.
 
-    Only the origin row of a coordinate system carries length; its axes are
-    directions and stay as they are.
+    Only the origin row of a coordinate system matrix has length; its
+    axes are directions and are not changed.
     """
     points = np.asarray(geometry.node_xyz, dtype=np.float64)
     matrices = np.asarray(geometry.cs_matrix, dtype=np.float64).copy()
@@ -110,7 +159,8 @@ def geometry_values(geometry: Geometry, unit_system: UnitSystem | None
 
 def data_values(data: DataArray, unit_system: UnitSystem | None
                 ) -> tuple[np.ndarray, np.ndarray]:
-    """(abscissa, ordinate) in the target system."""
+    """(abscissa, ordinate) in the coherent form of `unit_system`, or as
+    stored when it is None or the data has no units defined."""
     if unit_system is None or not data.units_defined:
         return data.abscissa, data.ordinate
     unit_system = unit_system.coherent
@@ -120,10 +170,12 @@ def data_values(data: DataArray, unit_system: UnitSystem | None
 
 def shape_values(shapes: ShapeSet,
                  unit_system: UnitSystem | None) -> np.ndarray:
-    """Mode shape coefficients in the target system's mass unit.
+    """Mode shape coefficients in the mass unit of the coherent form of
+    `unit_system`, or as stored when it is None or the shapes have no
+    units defined.
 
-    They are mass normalized, so they scale by 1/sqrt(mass) — the inverse
-    of the factor that brought them to 1/sqrt(kg).
+    The shapes are mass normalized, so they scale by 1/sqrt(mass), the
+    inverse of the factor that converted them to 1/sqrt(kg).
     """
     values = np.asarray(shapes.shape_matrix)
     if unit_system is None or not shapes.units_defined:
@@ -137,12 +189,16 @@ def shape_values(shapes: ShapeSet,
 def export_file(obj: Any, path: str | os.PathLike, format: str | None = None,
                 unit_system: UnitSystem | None = None,
                 **kwargs: Any) -> None:
-    """Write `obj` to a foreign format, chosen by name or by suffix.
+    """Write `obj` to a file in a format chosen by name or by suffix.
 
-    `unit_system` is the system to write in; without one the stored values
-    go out as they are. Raises ValueError naming what the object *can* be
-    written as, since "cannot export" is nearly always a question of which
-    format.
+    `unit_system` is the system to write in; without one the stored
+    values are written as they are. When no exporter can write the
+    object to that format, the ValueError lists the formats it can be
+    written as, since the fix is nearly always a different format. A
+    ValueError is also raised when a format that writes DOFs as node
+    numbers (UNV, ADF functions and time histories, Exodus, the sdynpy
+    data array) is asked to write modal coordinates. A leading `~` in
+    the path is expanded.
 
     Parameters
     ----------

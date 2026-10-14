@@ -1,88 +1,85 @@
 """MATLAB `.mat` files: the project file in MATLAB's container.
 
-A `.mat` written here is a `.vdyn` respelled — the same schema, the
-same names, the same values (`docs/vdyn-format.md`) — so a MATLAB user
-gets `load('modal.mat')` and structs with the right shapes and complex
-numbers assembled, rather than HDF5 datasets to walk with `h5read`
-(which a `.vdyn` already allows). Everything a project holds has a
-MATLAB form, so the round trip is lossless and the reader takes its
-own files back exactly.
+A `.mat` written here has the `.vdyn` schema and names
+(`docs/vdyn-format.md`), so a MATLAB user gets `load('modal.mat')` and
+structs with the right shapes and complex numbers assembled, rather
+than HDF5 datasets to read one at a time with `h5read` (which a
+`.vdyn` already allows). Everything a project holds has a MATLAB form,
+so the reader reads its own files back completely.
 
-There is one implementation of the layout, and it is not here. The
-writer runs the native `.vdyn` writer into an HDF5 file held in memory
-and carries that tree into `.mat` variables; the reader rebuilds an
-in-memory HDF5 tree from the `.mat` and hands it to the native loader.
-A field the schema grows tomorrow travels tomorrow with no change
-here, and the two files cannot drift apart because neither this module
-nor `native.py` knows two layouts (principle 9). The price is one
-in-memory HDF5 round trip per file, which is cheap.
+The layout is implemented once, and not in this module. The writer
+runs the native `.vdyn` writer into an HDF5 file held in memory and
+converts that tree into `.mat` variables; the reader rebuilds an
+in-memory HDF5 tree from the `.mat` and passes it to the native
+loader. A field added to the schema is carried with no change here,
+and the two file types cannot drift apart, because neither this module
+nor `native.py` knows two layouts (principle 9). It costs one
+in-memory HDF5 round trip per file, which is fast.
 
-Three things MATLAB spells differently from HDF5, and the rules for
-them, applied mechanically both ways:
+MATLAB holds three things differently from HDF5, and the same rules
+convert them in both directions:
 
-- **Ragged arrays** — the `<name>_flat` / `<name>_offsets` pairs
-  (element connectivity) — are one cell array `<name>`,
-  one row vector per entry, which is how MATLAB holds a ragged list.
-- **Numbered groups** — the project's `objects/0000, 0001, …` and a
-  sine specification's `tones/0, 1, …` — are a cell array of structs
-  in the same order (`p.objects{3}.name`); each object struct keeps
-  the `name` and `kind` its group's attributes carried.
-- **Vectors are columns.** A one-dimensional dataset is written N×1,
+- Ragged arrays, the `<name>_flat` / `<name>_offsets` pairs (element
+  connectivity), are one cell array `<name>` with one row vector per
+  entry, which is how MATLAB holds a ragged list.
+- Numbered groups, the project's `objects/0000, 0001, …` and a sine
+  specification's `tones/0, 1, …`, are a cell array of structs in the
+  same order (`p.objects{3}.name`); each object struct keeps the
+  `name` and `kind` its group's attributes held.
+- Vectors are columns. A one-dimensional dataset is written N×1,
   MATLAB's own vector orientation, so it reads back one-dimensional;
-  a genuinely two-dimensional array (`ordinate`, records × samples)
-  stays as it is even with one row. MATLAB has no one-dimensional
-  array, so a matrix that happens to have one column (a sine tone's
-  amplitude over one channel) would read back as a vector; a struct
-  holding one carries a `matrix_fields` cellstr naming it, written
-  only then, and read if present.
+  a two-dimensional array (`ordinate`, records × samples) stays as it
+  is even with one row. MATLAB has no one-dimensional array, so a
+  matrix with one column (a sine tone's amplitude over one channel)
+  would read back as a vector. A struct holding one has a
+  `matrix_fields` cellstr naming it, written only in that case and
+  read if present.
 
-HDF5 attributes and datasets both become plain fields — `frf.function_type`
-beside `frf.ordinate` — because a MATLAB struct has no second kind of
-member and a hidden marker would be clutter. On the way back the
-native loader asks for each by the kind it expects, so the rebuild
-writes every field as a dataset and, where it is small enough to be
-one, as an attribute too; the loader reads the one it wants and the
-other is never looked at. Strings are char arrays, lists of strings
-are cellstr, and `''` (an undeclared unit) is MATLAB's empty char.
+HDF5 attributes and datasets both become plain fields
+(`frf.function_type` beside `frf.ordinate`), because a MATLAB struct
+has only one kind of member and a hidden marker would be clutter. On
+the way back the native loader asks for each field as the kind it
+expects, so the rebuild writes every field as a dataset and, where it
+is small enough, as an attribute too; the loader reads the one it
+wants. Strings are char arrays, lists of strings are cellstr, and
+`''` (an undeclared unit) is MATLAB's empty char.
 
-**Values are in the display units**, and every unit field names the
-unit its values are in (Brandon, 2026-10-13: a time history declared in
-g, exported with in-slinch-lbf-s (g) on, came out in m/s² beside an
-`ordinate_unit` of `'g'` — the project file's field, which names the
-unit a record was *declared* in over values that are always SI). So a
-`.mat` exported in a display system holds each record in that system's
-unit for its quantity, labeled with it: g over g, `(in/s**2)/lbf`
-beside an FRF in those units, a geometry's coordinates in inches with
-`length_unit` `'in'`, shapes against slinch. The file says which system
-in a `unit_system` variable, and the reader takes each object back to
-SI from its own labels — the declared unit, on the way back, is the one
-it was written in. What stays SI is what the project file names as SI
-whatever was declared: material and section properties, and the
-abscissa, which is seconds or hertz in every system. A record whose
-units were never declared is written as it stands, marked `''`, and
-comes back undeclared. Without a display system — `Project.save` to
-`.mat`, or a script that names none — the file is the project file
-exactly, SI, and a file from before 2026-10-13, which has no
-`unit_system`, is read as SI.
+Values are in the display units, and every unit field names the unit
+its values are in. A `.mat` exported in a display system holds each
+record in that system's unit for its quantity, labeled with it: g
+values with an `ordinate_unit` of `'g'`, `(in/s**2)/lbf` with an FRF
+in those units, a geometry's coordinates in inches with `length_unit`
+`'in'`, shapes in slinch. The file names the system in a
+`unit_system` variable, and the reader converts each object back to SI
+from its own labels, so on reading the declared unit is the one it was
+written in. Some values stay SI in every system, because the project
+file defines them as SI: material and section properties, and the
+abscissa, which is seconds or hertz. A record whose units were never
+declared is written as it is, marked `''`, and is read back
+undeclared. Without a display system (`Project.save` to `.mat`, or a
+script that names none) the file holds exactly what the project file
+holds, in SI, and a file with no `unit_system` variable is read as SI.
 
 The conversion is the core's own, run on a copy: each object is
-labeled with the display unit and `undefine_units` takes it there, the
-inverse of how a declaration takes a file's numbers to SI; the reader
-clears the labels and declares them again (`_in_display`,
-`_from_display`).
+labeled with the display unit and `undefine_units` converts its values
+to it, the inverse of how a declaration converts a file's numbers to
+SI; the reader clears the labels and declares them again
+(`_in_display`, `_from_display`).
 
-The stamp `visualdynamics_schema` travels as a variable, and the
-reader keeps the `.vdyn` contract: a newer stamp is refused, an older
-one always loads. A `.mat` with no stamp is accepted in one case only —
-a single struct in the documented layout of one object (a data array
-with `abscissa`, `ordinate` and `data_class`, a geometry with
-`node_xyz`, a shape set with `shape_matrix`), which is a user's own
-struct built to the page — and refused by name otherwise: reading a
-stranger's workspace would be guessing.
+The stamp `visualdynamics_schema` is written as a variable, and the
+reader follows the `.vdyn` rule: a newer stamp is refused, and an
+older one always loads. A `.mat` with no stamp is accepted in one case
+only, a single struct in the documented layout of one object (a data
+array with `abscissa`, `ordinate` and `data_class` or `function_type`,
+a geometry with `node_xyz`, a shape set with `shape_matrix`, a channel
+table with `column_order`), which is a user's own struct built to that
+layout. Any other `.mat` is refused with a ValueError naming the
+variables it holds, because reading an arbitrary workspace would be
+guessing.
 
 `.mat` version 5 (what `save -v7` writes, and what scipy reads and
 writes) holds at most 4 GB per variable. A record larger than that is
-refused before anything is written, naming the array; version 7.3
+refused before anything is written, with the array named; version 7.3
 files are HDF5 and are not read or written here yet.
 """
 
@@ -95,6 +92,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from . import native
+
+# Values in the display units, labeled (Brandon, 2026-10-13): a time
+# history declared in g, exported with in-slinch-lbf-s (g) on, came out
+# in m/s² beside an `ordinate_unit` of 'g'. That is the project file's
+# field, which names the unit a record was declared in over values that
+# are always SI. A file from before 2026-10-13 has no unit_system and
+# is read as SI.
 
 if TYPE_CHECKING:                                    # pragma: no cover
     import h5py
@@ -120,7 +124,8 @@ _DIGITS = re.compile(r'^\d+$')
 
 
 def handles(obj: Any) -> bool:
-    """Every object the project file holds, and a whole project."""
+    """Whether `obj` can be written as a `.mat`: any object the project
+    file holds, or a whole project."""
     from ..project import Project
 
     if isinstance(obj, Project):
@@ -133,9 +138,13 @@ def handles(obj: Any) -> bool:
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    """A `.mat` by suffix; whether it is ours is `load`'s to say, by
-    name, since a wrong-format error beats "no importer recognises"."""
-    return str(path).endswith(SUFFIX)
+    """Whether `path` ends in `.mat`, in any case (`.MAT` too).
+
+    The suffix is the only check. Whether the file was written here is
+    decided by `load`, which raises a ValueError saying what is wrong;
+    that is more useful than a message that no importer recognized the
+    file."""
+    return str(path).lower().endswith(SUFFIX)
 
 
 # ---- HDF5 tree -> MATLAB variables ------------------------------------------
@@ -233,9 +242,14 @@ def _check_size(tree: dict[str, Any], where: str = '') -> None:
 
 def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
          **_ignored: Any) -> None:
-    """Write an object, or a whole project, as a `.mat` file: its values
-    in `unit_system`'s units, each unit field naming them, or SI — the
-    project file exactly — with none (see the module docstring).
+    """Write an object, or a whole project, as a `.mat` file.
+
+    With a `unit_system`, the values are in that system's units and
+    each unit field names them; with None, the values are SI, exactly
+    as the project file holds them (see the module docstring). `.mat`
+    is added to `path` when it does not end in it. Raises ValueError,
+    before anything is written, when an array is larger than the 4 GB
+    a version 5 file allows per variable.
     """
     from scipy.io import savemat
 
@@ -474,8 +488,15 @@ def _bare_kind(variables: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
 
 
 def load(path: str | os.PathLike, **_ignored: Any) -> Any:
-    """Read a `.mat` written here (or one struct built to the layout):
-    the object it holds, or a whole project."""
+    """Read a `.mat` written here, or a single struct built to the
+    documented layout of one object.
+
+    Returns the object the file holds, or a `Project` for a whole
+    project. Values written in a display system are converted
+    back to SI. Raises ValueError for a version 7.3 file, for a schema
+    stamp newer than this version reads, and for a file that has no
+    `visualdynamics_schema` stamp and is not a single struct in the
+    documented layout."""
     from scipy.io import loadmat
 
     path = str(path)

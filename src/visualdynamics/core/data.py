@@ -1,39 +1,42 @@
 """Data arrays: time histories, spectra, FRFs, PSDs.
 
-Shared structure: one common abscissa (time or frequency, SI), an ordinate
-matrix of shape (records, samples), a response DOF string per record
-('101X+'), an optional reference DOF per record (FRFs, cross spectra), and
-per-record unit information.
+Every kind has the same structure: one abscissa shared by all records
+(time or frequency, in SI), an ordinate matrix of shape (records,
+samples), a response DOF string per record ('101X+'), an optional
+reference DOF per record (FRFs, cross spectra), and unit information per
+record.
 
-Units are per record, because one measurement set routinely mixes
-quantities — a test's time data may hold accelerations, forces, voltages,
-strains and temperatures side by side. Each record carries:
+Units are kept per record, because one measurement set often mixes
+quantities: a test's time data may hold accelerations, forces, voltages,
+strains and temperatures together. Each record has:
 
-- `ordinate_unit[i]`: the unit its values were declared in, or None when the
-  source did not say. `reference_unit[i]` holds an FRF's denominator unit.
-- `ordinate_dim[i]`: the dimension tag driving display ('acceleration',
+- `ordinate_unit[i]`: the unit its values were declared in, or None when
+  the source did not say. `reference_unit[i]` holds an FRF's denominator
+  unit, or a cross spectrum's second unit.
+- `ordinate_dim[i]`: the dimension tag used for display ('acceleration',
   'acceleration/force', ..., or 'unknown').
-- `dimension_hint[i]`: what kind of quantity the source said this was, kept
-  only for records whose units are undefined.
+- `dimension_hint[i]`: the kind of quantity the source said this was,
+  kept only for records whose units are undefined.
 
-A record whose unit is unknown keeps the file's raw numbers untouched;
-`define_units()` converts it to SI once and remembers the unit, so a wrong
-guess can be corrected later by reinterpreting rather than reimporting.
+A record whose unit is unknown keeps the file's raw numbers unchanged.
+`define_units()` converts it to SI once and records the unit, so a wrong
+choice can be corrected later by redefining the units instead of
+importing again.
 
-Knowing what a quantity *is* and knowing what *scale* its numbers are on are
-separate things, and a file can tell us one without the other: a UNV with no
-dataset 164 still says a channel is an acceleration, but leaves no way to
-tell g from m/s**2. Such a record imports undefined — raw values, dimension
-'unknown', nothing converted — while `dimension_hint` remembers the claim.
-It is advisory only: nothing scales by it. It narrows the choices offered
-when units are defined by hand, labels a plot axis, and survives a round
-trip back out to a format that can name a quantity without sizing it.
+What a quantity is and what scale its numbers are on are separate facts,
+and a file can give one without the other. A UNV with no dataset 164
+still says a channel is an acceleration, but gives no way to tell g from
+m/s**2. Such a record is imported undefined (raw values, dimension
+'unknown', nothing converted), and `dimension_hint` keeps the claim.
+Nothing is ever scaled by a hint. It limits the units offered when units
+are defined by hand, labels a plot axis, and is written back out to a
+format that can name a quantity without giving its unit.
 
 Function type codes follow UFF dataset 58 (also used by sdynpy):
 1 time response, 4 FRF, 6 coherence, 9 PSD, 12 spectrum,
-24 shock response spectrum, 26 multiple coherence. A specification is
-a PSD and a shock specification is an SRS — each is the ordinary thing
-with limits on it, and rides a file as its own type.
+24 shock response spectrum, 26 multiple coherence. A specification is a
+PSD with limits, and a shock specification is an SRS with limits; each
+is saved to a file as its own type.
 """
 
 from __future__ import annotations
@@ -77,6 +80,21 @@ _DIRECTIONS = {0: '', **{code: text
 
 
 def dof_string(node: int | str, direction_code: int) -> str:
+    """(101, 3) -> '101Z+': a node and a UFF direction code as a DOF string.
+
+    Parameters
+    ----------
+    node : int or str
+        The node id.
+    direction_code : int
+        The UFF direction code (1 to 6 for X+ to RZ+, negative for the
+        minus directions, 0 for none).
+
+    Returns
+    -------
+    str
+        The DOF string; just the node when the code is 0 or unknown.
+    """
     return f'{node}{_DIRECTIONS.get(int(direction_code), "")}'
 
 
@@ -84,10 +102,26 @@ _CODES = {text: code for code, text in _DIRECTIONS.items()}
 
 
 def direction_code(direction: str) -> int:
-    """'Z+' -> 3. The inverse of the table `dof_string` reads.
+    """'Z+' -> 3: a direction string as its UFF code; the inverse of the
+    table `dof_string` reads.
 
     An unsigned direction means the positive one, which is how DOFs are
-    usually written by hand.
+    usually written by hand. Case and surrounding spaces are ignored.
+
+    Parameters
+    ----------
+    direction : str
+        The direction, such as 'Z+', 'z' or 'RX-'.
+
+    Returns
+    -------
+    int
+        The direction code.
+
+    Raises
+    ------
+    ValueError
+        If the direction is not one of the twelve.
     """
     text = str(direction).strip().upper()
     if text in _CODES:
@@ -98,10 +132,19 @@ def direction_code(direction: str) -> int:
 
 
 def parse_dof(text: str) -> tuple[int | None, str]:
-    """'101RX+' -> (101, 'RX+'). The inverse of dof_string().
+    """'101RX+' -> (101, 'RX+'); the inverse of `dof_string`.
 
-    Returns (None, direction) when the leading node number is missing or
-    unparseable, so callers can report it rather than crash.
+    Parameters
+    ----------
+    text : str
+        The DOF string.
+
+    Returns
+    -------
+    tuple of (int or None, str)
+        The node number and the rest of the string. The node is None
+        when the string does not start with a digit, so a caller can
+        report the problem instead of failing.
     """
     text = str(text).strip()
     digits = 0
@@ -153,7 +196,22 @@ def _even_steps(abscissa, what: str) -> float:
 
 
 def has_phase(values: ArrayLike) -> bool:
-    """Is there imaginary content here, or only the dust of computing it?"""
+    """Whether complex values have an imaginary part that was measured,
+    not only round-off from computing them.
+
+    The imaginary part counts when its largest magnitude is more than
+    `REAL_FLOOR` times the largest real magnitude.
+
+    Parameters
+    ----------
+    values : array-like
+        The values.
+
+    Returns
+    -------
+    bool
+        False for real values or an imaginary part below the floor.
+    """
     values = np.asarray(values)
     if not np.iscomplexobj(values):
         return False
@@ -162,16 +220,28 @@ def has_phase(values: ArrayLike) -> bool:
 
 
 def channel_quantities(dim: str) -> tuple[str, str]:
-    """(response, reference) quantities a record's dimension names.
+    """The (response, reference) quantities a record's dimension names.
 
-    A record's dimension composes its two channels' quantities — an
-    FRF's 'acceleration/force', a CPSD cross term's
-    'acceleration*force/frequency', a diagonal's
-    'acceleration**2/frequency' — and channel *identity* needs the
-    factors, not the compound: keyed by the whole dimension, one
-    accelerometer's records split into a row per thing it was measured
-    against, which is how a 13-channel CPSD came up 26 rows.
+    A record's dimension combines its two channels' quantities: an FRF's
+    'acceleration/force' gives ('acceleration', 'force'), a CPSD cross
+    term's 'acceleration*force/frequency' the same, and a diagonal's
+    'acceleration**2/frequency' gives ('acceleration', 'acceleration').
+    A single quantity is paired with itself.
+
+    Parameters
+    ----------
+    dim : str
+        The record's dimension.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The response quantity and the reference quantity.
     """
+    # A channel is identified by these factors, not by the compound: keyed
+    # by the whole dimension, one accelerometer's records split into a row
+    # per thing it was measured against, which is how a 13-channel CPSD
+    # came up 26 rows.
     numerator = dim.partition('/')[0]
     if numerator.endswith('**2'):
         base = numerator.removesuffix('**2')
@@ -195,20 +265,29 @@ _FREQUENCY_AXIS: bool | None = None
 
 
 def frequency_axis(mode: str | bool | None = ...) -> str:
-    """Read or set how frequency axes are drawn: 'log', 'linear', or
-    'default' (each kind of data by its own convention).
+    """Read or set how frequency axes are drawn in every plot, 3-D view
+    and report figure: 'log', 'linear', or 'default' (each kind of data
+    by its own convention: an SRS on a log axis, the rest linear).
+
+    The setting belongs to the session, not to a project, and is not
+    saved.
 
     Parameters
     ----------
     mode : {'log', 'linear', 'default'} or bool or None, optional
-        The choice to make. Omitted, the current one is read back.
-        True and False stand for 'log' and 'linear'; None for
+        The choice to make. When omitted, the current one is returned.
+        True and False stand for 'log' and 'linear', None for
         'default'.
 
     Returns
     -------
     str
-        The choice in force after the call.
+        The setting after the call.
+
+    Raises
+    ------
+    ValueError
+        If `mode` is none of these.
     """
     global _FREQUENCY_AXIS
     if mode is not ...:
@@ -252,47 +331,86 @@ def _recast(obj: Any, cls: type) -> Any:
 class DataArray:
     """Base class; use a concrete subclass (TimeHistory, Spectrum, Frf, Psd).
 
-    One object holds **many records** — 36 accelerometer channels, or the
-    2 592 FRFs of a 36-by-72 matrix — sharing one abscissa. Everything
-    that varies between records is a list of that length, so record *i*
-    is `ordinate[i]` measured at `response_dof[i]`, and there is no
-    per-record object to go stale.
+    One object holds many records, such as 36 accelerometer channels or
+    the 2 592 FRFs of a 36-by-72 matrix, all sharing one abscissa.
+    Everything that varies between records is a list with one entry per
+    record, so record *i* is `ordinate[i]` measured at `response_dof[i]`.
 
-    Values are stored in **SI** once their units are known. A record
-    whose units were never declared keeps the file's raw numbers and
-    reports `ordinate_dim == 'unknown'`; what the file *said* it was,
-    without saying its scale, is kept beside it in `dimension_hint`.
+    Values are stored in SI once their units are known. A record whose
+    units were never declared keeps the file's raw numbers and has
+    `ordinate_dim == 'unknown'`; what the file said it was, without giving
+    its unit, is kept in `dimension_hint`.
 
-    Attributes:
-        abscissa: The x axis, shared by every record — seconds for a time
-            history, hertz for anything in the frequency domain. Stored
-            as it arrived: **uneven spacing and out-of-order samples are
-            both allowed**, because both are real and refusing them at
-            the door would refuse real data. What needs an even step —
-            anything with an FFT under it — asks for one at the point of
-            use and says so when it cannot have it.
-        ordinate: `(records, len(abscissa))`. Complex where the subclass
-            says so (`complex_ordinate`), real otherwise.
-        response_dof: What each record was measured at, as a DOF string
-            (`'101X+'`). One per record.
-        reference_dof: What each record was measured *against*, for the
-            types that need one — the shaker on an FRF, the other channel
-            of a cross spectrum. `None` where the type has no reference.
-        block: Which repeat of the same measurement each record is: an
-            average, a run, a shock. A short label, not a time.
-        ordinate_dim: The quantity each record measures
-            (`'acceleration'`, `'force'`), or `'unknown'` while its units
-            are undeclared.
-        ordinate_unit: The unit its values are in — always the SI one
-            while the dimension is known, since that is how they are
-            stored. `None` means undeclared.
-        reference_unit: The same for the reference of a ratio, so an FRF
-            record knows both halves of m/s²/N.
-        dimension_hint: What the file claimed a record measures without
-            saying at what scale. Nothing is ever scaled by a hint: it
-            narrows the units offered, labels an axis, and survives
-            export.
-        comment: Free text per record, as the source file carried it.
+    Parameters
+    ----------
+    abscissa : array-like
+        The x axis, in seconds or hertz.
+    ordinate : array-like
+        The values, shape (records, len(abscissa)); a single record may
+        be one-dimensional.
+    response_dof : str or sequence of str
+        One DOF string per record, or one string for every record.
+    reference_dof : str or sequence of str, optional
+        One per record. Required by the kinds that need a reference
+        (`Frf`).
+    ordinate_dim : str or sequence of str, optional
+        The dimension of each record; 'unknown' when omitted.
+    comment : str or sequence of str, optional
+        Free text per record.
+    ordinate_unit, reference_unit : str or sequence of str, optional
+        The unit each record was declared in. Filled with the SI unit
+        where the dimension is known and no unit is given.
+    dimension_hint : str or sequence of str, optional
+        The quantity the source named for each record, kept only where
+        the dimension is unknown.
+    block : str or sequence of str, optional
+        A label per record for repeats of the same measurement.
+
+    Raises
+    ------
+    ValueError
+        If the ordinate's shape does not match the abscissa, a list has
+        the wrong length, a DOF cannot be read, or a needed reference is
+        missing.
+
+    Attributes
+    ----------
+    abscissa : numpy.ndarray
+        The x axis, shared by every record: seconds for a time history,
+        hertz for anything in the frequency domain. It is stored as it
+        arrived, and uneven spacing and out-of-order samples are both
+        allowed, since both occur in real data. Anything that needs an
+        even step (anything with an FFT in it) checks for one when it
+        runs and raises a ValueError saying what is wrong.
+    ordinate : numpy.ndarray
+        Shape `(records, len(abscissa))`. Complex where the subclass says
+        so (`complex_ordinate`), real otherwise.
+    response_dof : list of str
+        What each record was measured at, as a DOF string (`'101X+'`).
+    reference_dof : list of str or None
+        What each record was measured against, for the kinds that have
+        one: the shaker on an FRF, the other channel of a cross spectrum.
+        None where the kind has no reference.
+    block : list of str or None
+        Which repeat of the same measurement each record is: an average,
+        a run, a shock. A short label, not a time.
+    ordinate_dim : list of str
+        The quantity each record measures (`'acceleration'`, `'force'`),
+        or `'unknown'` while its units are undeclared.
+    ordinate_unit : list of str or None
+        The unit each record was declared in, such as 'g'. The values are
+        stored in SI whatever the declared unit; a record made with a
+        known dimension and no unit is given the SI unit. None means
+        undeclared.
+    reference_unit : list of str or None
+        The same for the reference of a ratio, so an FRF record has both
+        halves of (m/s²)/N.
+    dimension_hint : list of str or None
+        What the file said a record measures, without giving its unit.
+        Nothing is ever scaled by a hint: it limits the units offered,
+        labels an axis, and is written back out on export.
+    comment : list of str
+        Free text per record, as the source file had it.
     """
 
     function_type = 0
@@ -402,10 +520,9 @@ class DataArray:
     def known_dim(self, i: int) -> str:
         """What quantity record `i` holds, whether or not its unit is known.
 
-        The dimension when the units are defined, otherwise the source's
-        claim, otherwise 'unknown'. Never use this to scale anything — a
-        hinted record's values are raw, and the scale is exactly what is
-        missing.
+        The dimension when the units are defined, otherwise the dimension
+        hint, otherwise 'unknown'. Do not scale values by this: a hinted
+        record's values are raw, and its scale is what is not known.
 
         Parameters
         ----------
@@ -424,22 +541,31 @@ class DataArray:
 
     @classmethod
     def units_for(cls, dimension, system=SI):
-        """(ordinate unit, reference unit) a unit system names for a known
-        dimension — SI unless another is given: what a record's values
-        are declared in once they are written in that system (a `.mat`
-        written in the display units, 2026-10-13).
+        """The (ordinate unit, reference unit) a unit system gives for a
+        known dimension.
+
+        With SI, the default, this is the pair a record is labeled with
+        when it is made with a known dimension and no unit. With another
+        system it is the pair a record is labeled with when its values
+        are written in that system, as the `.mat` writer does in the
+        display units. The base class returns no reference unit; `Frf`
+        and `Psd` split the dimension into its two halves.
 
         Parameters
         ----------
         dimension : str
             An `ordinate_dim`, such as 'acceleration'.
         system : UnitSystem, optional
-            The units to name; SI when omitted.
+            The unit system; SI when omitted.
 
         Returns
         -------
-        (str, str or None)
+        tuple of (str, str or None)
+            The ordinate unit and the reference unit, None where the
+            record has no reference.
         """
+        # Generalized from the SI pair on 2026-10-13, for a `.mat` written
+        # in the display units.
         return system.unit(dimension), None
 
     @staticmethod
@@ -464,16 +590,22 @@ class DataArray:
         return out
 
     def record_fields(self) -> dict[str, Any]:
-        """Each record's description — DOFs, quantity, units, hint,
-        comment and block — as the keyword arguments a derived object of
-        the same records is made with, every list a copy.
+        """Each record's description (DOFs, quantity, units, hint, comment
+        and block) as the keyword arguments for making a derived object
+        with the same records. Every list is a copy.
 
         A filter, a truncation and an octave banding keep their source's
-        records and change only the numbers; this is the one statement
-        of what "the same records" carries, where it was written out at
-        each (2026-10-10). Override `comment` where the derivation says
-        what it did.
+        records and change only the values. Override `comment` where the
+        derived object should say how it was made.
+
+        Returns
+        -------
+        dict
+            Keyword arguments for a `DataArray` constructor, without the
+            abscissa and ordinate.
         """
+        # The one statement of what "the same records" carries, where it
+        # was written out at each derivation before (2026-10-10).
         return {
             'response_dof': list(self.response_dof),
             'reference_dof': (None if self.reference_dof is None
@@ -489,17 +621,15 @@ class DataArray:
                    quantity: str | None = None) -> int:
         """Give a channel's coordinate a new name, in place.
 
-        A channel is a coordinate *and* a quantity — a drive point
-        carries a load cell and an accelerometer at one DOF — and the
-        rename is the channel's: a force labeled at the wrong node
-        moves without taking the accelerometer at that node with it,
-        and the other is changed explicitly if it should be (Brandon,
-        2026-09-06). The channel moves wherever a record wears it, as
-        a response and as a reference alike: a CPSD's accelerometer is
-        on both sides of its cross terms and is one sensor. A rename
-        that would give two records one identity — two accelerometers
-        at one point — is refused, where it would have made two rows of
-        the grid into one and hidden a record.
+        A channel is a coordinate and a quantity: a drive point has a
+        load cell and an accelerometer at one DOF. With `quantity` given,
+        only that channel is renamed, so a force labeled at the wrong
+        node can be moved without moving the accelerometer at the same
+        node. The channel is renamed wherever it appears, as a response
+        and as a reference, since a CPSD's accelerometer is on both sides
+        of its cross terms and is one sensor. A rename that would give
+        two records the same coordinate and quantity (two accelerometers
+        at one point) is refused.
 
         Parameters
         ----------
@@ -509,17 +639,28 @@ class DataArray:
             The coordinate to give it; normalized the way every DOF is
             ('101Z' is '101Z+'), and refused when it is not one.
         quantity : str, optional
-            Which channel at `old`: 'acceleration', 'force' … as
-            `channel_quantities` names a record's factors. Every
-            quantity at the coordinate when omitted — the point rather
-            than the channel, said explicitly.
+            Which channel at `old`: 'acceleration', 'force' and so on, as
+            `channel_quantities` names a record's factors. When omitted,
+            every quantity at the coordinate is renamed.
 
         Returns
         -------
         int
-            How many records changed, counting a response and a
-            reference on one record separately.
+            How many DOFs changed, counting a response and a reference
+            on one record separately; 0 when `new` equals `old`.
+
+        Raises
+        ------
+        ValueError
+            If `new` is not a DOF, no record matches, or the rename would
+            put two channels of one quantity at one coordinate.
         """
+        # The rename is the channel's, not the point's: a force labeled
+        # at the wrong node moves without the accelerometer beside it,
+        # and the other is changed explicitly if it should be (Brandon,
+        # 2026-09-06). Two records given one identity would have made two
+        # rows of the grid into one and hidden a record, so that is
+        # refused.
         old = str(old).strip()
         (new,) = _dofs([str(new)], 'DOF')
         if new == old:
@@ -550,44 +691,54 @@ class DataArray:
                        dim: str | Sequence[str] | None = None,
                        reference: str | Sequence[str] | None = None,
                        capture: int | Sequence[int] | None = None) -> None:
-        """Remove records in place — by index, by DOF, or by capture.
+        """Remove records in place, by index, by DOF, or by capture.
 
-        Everything a record owns goes with it: its row of the ordinate, its
-        DOFs, units, comment, hint, block — and, on a specification, its
-        limit curves, which would otherwise silently belong to the wrong
-        channels. Removing the last record is refused: an empty data array
-        is not a state anything else here can show.
+        Everything a record has is removed with it: its row of the
+        ordinate, its DOFs, units, comment, hint and block, and on a
+        specification its limit curves. Removing every record is refused,
+        since an empty data array cannot be shown. Numbered block labels
+        are renumbered without gaps afterward; named ones are kept.
 
-        `dof` and `capture` are the selectors a person means — "drop
-        channel 101Z+", "drop the third run" — where indices are the
-        machine's (Brandon, 2026-08-30, reading thirteen indices in the
-        journal where one capture number would have said it). They
-        combine as an intersection, and either combines with explicit
-        indices as a union.
+        `dof`, `dim`, `reference` and `capture` select records by what
+        they are ("channel 101Z+", "the third run"). Together they select
+        the records that match all of them, and that selection is added
+        to any `indices` given.
 
         Parameters
         ----------
         indices : sequence of int, optional
             Which records to remove, by position.
         dof : str or sequence of str, optional
-            Remove every record at these response DOFs. A drive point
-            carries two records at one DOF — a force and an
-            acceleration — and the DOF alone takes both; `dim` is how
-            the finer thing is said.
+            Remove the records at these response DOFs. A drive point has
+            two records at one DOF, a force and an acceleration, and the
+            DOF alone selects both; add `dim` to select one.
         dim : str or sequence of str, optional
-            Restrict to these quantities ('force', 'acceleration', …)
-            — the other half of a channel's identity.
+            Limit the selection to records whose `ordinate_dim` is one of
+            these ('force', 'acceleration', ...).
         reference : str or sequence of str, optional
-            Remove every record at these reference DOFs — a column of
-            an FRF matrix, where `dof` is a row.
+            Remove the records at these reference DOFs: a column of an
+            FRF matrix, where `dof` is a row.
         capture : int or sequence of int, optional
-            Remove these captures — each channel's n-th playing, the
-            numbering `capture_indices` gives. Time histories only.
+            Remove these captures, numbered as `capture_indices` numbers
+            them (each channel's n-th recording). Time histories only.
 
         Returns
         -------
         None
+
+        Raises
+        ------
+        ValueError
+            If the selection matches nothing, would remove every record,
+            or uses `reference` or `capture` on a kind that has none.
+        IndexError
+            If an index is out of range.
         """
+        # `dof` and `capture` are the selectors a person means, where
+        # indices are the machine's (Brandon, 2026-08-30, reading
+        # thirteen indices in the journal where one capture number would
+        # have said it). The limit curves go too, because left behind they
+        # would belong to the wrong channels.
         doomed = {int(i) for i in indices} if indices is not None else set()
         if dof is not None or dim is not None or reference is not None \
                 or capture is not None:
@@ -662,22 +813,22 @@ class DataArray:
 
     @property
     def num_records(self) -> int:
-        """How many records this object holds. One measurement per
-        record, all sharing the object's single abscissa."""
+        """How many records this object holds, all sharing its one
+        abscissa."""
         return self.ordinate.shape[0]
 
     # ---- units --------------------------------------------------------------
 
     @property
     def units_defined(self) -> bool:
-        """Whether every record knows what it measures. False while
-        any record is still in the file's own unconverted numbers."""
+        """Whether every record has its units defined. False while any
+        record still holds the file's unconverted numbers."""
         return all(dim != UNKNOWN for dim in self.ordinate_dim)
 
     @property
     def undefined_records(self) -> list[int]:
-        """Which records still have no declared dimension — the ones
-        holding the file's raw numbers, awaiting `define_units`."""
+        """The indices of the records with no declared dimension, which
+        hold the file's raw numbers until `define_units` is called."""
         return [i for i, dim in enumerate(self.ordinate_dim) if dim == UNKNOWN]
 
     def _conversion(self, unit, reference_unit=None):
@@ -693,23 +844,30 @@ class DataArray:
                      = None) -> DataArray:
         """Declare what the ordinate values are in, converting them to SI.
 
-        `units` is a single unit applied to every record, a sequence with one
-        entry per record, or a {record index: unit} mapping to set only some.
-        Entries of None leave a record's units undefined. Records that already
-        have units are reinterpreted, not re-scaled twice.
+        `units` is one unit applied to every record, a sequence with one
+        entry per record, or a {record index: unit} mapping to set only
+        some. An entry of None leaves that record as it is. A record that
+        already has units is converted from its original values, so it is
+        never scaled twice. The record's dimension is set from the unit.
 
         Parameters
         ----------
-        units : str or sequence of str
-            The unit each record's values are in; one string applies to
-            every record.
-        reference_units : str or sequence of str, optional
-            The denominator unit, for records that have one.
+        units : str, sequence of str, or dict
+            The unit each record's values are in.
+        reference_units : str, sequence of str, or dict, optional
+            The reference unit, in the same forms: an FRF's denominator
+            (required for an FRF), or a cross spectrum's second channel.
+            Kinds with no reference ignore it.
 
         Returns
         -------
         DataArray
             Self, converted to SI in place.
+
+        Raises
+        ------
+        UnitError
+            If a unit cannot be read or names no tracked dimension.
         """
         specs = self._expand(units, 'units')
         refs = self._expand(reference_units, 'reference_units')
@@ -729,12 +887,12 @@ class DataArray:
         return self
 
     def undefine_units(self, records: Sequence[int] | None = None) -> DataArray:
-        """Take a declaration back, restoring the file's raw values.
+        """Withdraw a units declaration, restoring the file's raw values.
 
-        The inverse of `define_units`. A wrong guess should be correctable
-        without reimporting, and that means being able to withdraw one, not
-        only to replace it — there is no unit string meaning 'I no longer
-        know'.
+        The inverse of `define_units`. The records return to dimension
+        'unknown' with no unit. There is no unit string that means "not
+        known", so withdrawing a declaration has its own call. Records
+        that have no units are left as they are.
 
         Parameters
         ----------
@@ -809,12 +967,12 @@ class DataArray:
         return (self.ordinate[i] - offset) / scale
 
     def column_keys(self) -> list[str] | None:
-        """What tells one record from another besides its response.
+        """What tells one record from another besides its response DOF.
 
-        The reference DOF when records are a matrix of measurements, the
-        block when they are the same measurement repeated, None when the
-        response alone is the whole identity. This is what decides whether
-        an object expands into a grid.
+        The reference DOFs when the records are a matrix of measurements,
+        the block labels when they are the same measurement repeated, and
+        None when the response DOF alone identifies a record. An object
+        with column keys is shown as a grid.
         """
         return self.reference_dof if self.reference_dof is not None else self.block
 
@@ -842,13 +1000,11 @@ class DataArray:
         return self.response_dof[i]
 
     def record_pair(self, i: int) -> tuple[str, str]:
-        """The (response, reference) record `i` is between.
+        """The (response, reference) DOFs of record `i`.
 
-        A record with no reference is an autospectrum — a channel
-        against itself — so it pairs with the diagonal, which is what
-        a specification bounds. The one reading of that rule: the
-        plot, the table beside it and the report all ask here, so
-        their labels cannot disagree.
+        A record with no reference is an autospectrum, a channel against
+        itself, so its reference is its own response DOF (the diagonal,
+        which is what a specification bounds).
 
         Parameters
         ----------
@@ -860,19 +1016,27 @@ class DataArray:
         tuple of str
             Response DOF, reference DOF.
         """
+        # The plot, the table beside it and the report all ask here, so
+        # their labels cannot disagree.
         response = self.response_dof[i]
         reference = (self.reference_dof[i]
                      if self.reference_dof is not None else response)
         return response, reference
 
     def log_scaled(self) -> bool:
-        """Whether this object's magnitude reads on a log axis.
+        """Whether this object's magnitude is drawn on a log axis.
 
-        Logarithmic for frequency-domain data unless the class pins it
-        (`log_ordinate` — a coherence is a 0..1 ratio and says nothing on
-        a log axis). The object answers so the 2-D plot and the 3-D
-        waterfall read one rule and cannot disagree about its axis.
+        Logarithmic for frequency-domain data unless the class sets
+        `log_ordinate` (a coherence is a ratio from 0 to 1 and is drawn
+        linear).
+
+        Returns
+        -------
+        bool
+            True for a log ordinate axis.
         """
+        # Asked of the object so the 2-D plot and the 3-D waterfall read
+        # one rule and cannot disagree about the axis.
         return (self.abscissa_dim == 'frequency' if self.log_ordinate is None
                 else bool(self.log_ordinate))
 
@@ -894,13 +1058,10 @@ class DataArray:
     def display_ordinate(self, unit_system: UnitSystem,
                          records: Iterable[int] | None = None
                          ) -> np.ndarray:
-        """Ordinate in display units; undefined records pass through as-is.
+        """The ordinate in display units; records with undefined units are
+        returned unchanged.
 
-        `records` limits the work to the ones asked for. A 1356-record FRF
-        has one or two distinct dimensions in it, so the conversion is
-        gathered per dimension and applied to a whole block at once —
-        converting row by row meant a unit lookup per record, which is how
-        drawing a single curve came to cost 2713 trips through pint.
+        Only the records in `records` are converted, in that order.
 
         Parameters
         ----------
@@ -912,9 +1073,14 @@ class DataArray:
         Returns
         -------
         numpy.ndarray
-            The values in display units. Records with undefined
-            units pass through untouched.
+            The values in display units, one row per record asked
+            for. Records with undefined units are unchanged.
         """
+        # The conversion is gathered per dimension and applied to a block
+        # of records at once: a 1356-record FRF has one or two distinct
+        # dimensions, and converting row by row meant a unit lookup per
+        # record, which is how drawing a single curve came to cost 2713
+        # trips through pint.
         rows = range(self.num_records) if records is None else list(records)
         out = np.empty((len(rows), self.ordinate.shape[1]),
                        dtype=self.ordinate.dtype)
@@ -931,14 +1097,14 @@ class DataArray:
     def display_blocks(self, unit_system: UnitSystem,
                        records: Iterable[int] | None = None,
                        block_bytes: int | None = None):
-        """`display_ordinate` a block of records at a time.
+        """`display_ordinate`, a block of records at a time.
 
-        Yields `(start, stop, values)`: positions within `records` and
-        the converted rows for them, each block at most `block_bytes`
-        (`DISPLAY_BLOCK_BYTES` by default) — so a reading that thins
-        every record before it draws it, the 3-D stage above all,
-        never holds a converted copy of the whole object. A record
-        larger than the block is still one block: a row is not split.
+        Yields `(start, stop, values)`: positions within `records` and the
+        converted rows for them, each block at most `block_bytes`
+        (`DISPLAY_BLOCK_BYTES` by default). A caller that reduces each
+        record before drawing it, such as the 3-D view, then never holds
+        a converted copy of the whole object. A record larger than the
+        limit is one block on its own; a row is never split.
 
         Parameters
         ----------
@@ -1004,7 +1170,8 @@ class DataArray:
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write it.
+            Where to write it; `.vdyn` is added when the suffix is not
+            there.
 
         Returns
         -------
@@ -1015,19 +1182,20 @@ class DataArray:
 
     def plot(self, unit_system: UnitSystem | None = None,
              **kwargs: Any) -> Any:
-        """Draw every record on one set of axes.
+        """Draw every record on one set of axes, in a window.
 
         Parameters
         ----------
         unit_system : UnitSystem, optional
             Units to draw in.
         **kwargs
-            Passed through to the plotting layer.
+            Passed to `visualdynamics.plot.plot_data` (`path`, `show`,
+            `marks`, `theme` and others).
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The plot pane, or the path when `path` is given.
         """
         from ..plot import plot_data
         return plot_data(self, unit_system=unit_system, **kwargs)
@@ -1035,59 +1203,63 @@ class DataArray:
     def save_plot(self, path: str | os.PathLike,
                   unit_system: UnitSystem | None = None,
                   **kwargs: Any) -> Any:
-        """Draw the records and write the figure to `path`.
+        """Draw the records and write the figure to `path`, with no window.
 
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write the image.
+            Where to write the image, a .png or .svg.
         unit_system : UnitSystem, optional
             Units to draw in.
         **kwargs
-            Passed through to the plotting layer.
+            Passed to `visualdynamics.plot.save_plot`.
 
         Returns
         -------
-        object
-            The plot widget or plotter.
+        str
+            The path written.
         """
         from ..plot import save_plot
         return save_plot(self, path, unit_system=unit_system, **kwargs)
 
     def plot_waterfall(self, records: Sequence[int] | None = None,
                        **kwargs: Any) -> Any:
-        """The records spread along a depth axis, colored by level —
-        the plot bar's 3-D reading, scripted. `screenshot=` renders
-        headless to a file; without it a window of the app's own 3-D
-        pane opens.
+        """Draw the records in 3-D, spread along a depth axis and colored by
+        level, as the plot bar's 3-D view does.
+
+        With `screenshot=` (a path) it renders to that file with no
+        window; without it, a window with the app's 3-D pane opens.
 
         Parameters
         ----------
         records : sequence of int, optional
-            Which records to stage. All of them when omitted.
+            Which records to draw. All of them when omitted.
         **kwargs
-            Passed through to the scene.
+            Passed to `visualdynamics.viz.waterfall.plot_waterfall`
+            (`screenshot`, `unit_system`, `component`, `marks` and
+            others).
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The pane (its `.plotter` is the PyVista plotter), or the
+            image array when rendering to a file.
         """
         from ..viz.waterfall import plot_waterfall
         return plot_waterfall(self, records, **kwargs)
 
 
 class TimeHistory(DataArray):
-    """A measurement against time: the record as it was acquired.
+    """A measurement against time, as it was acquired.
 
-    Everything else in a random or shock test is derived from one of
-    these, and the deriving is here — spectra, PSDs, the full CPSD
-    matrix, multiple coherence, shock response spectra. Two things ride
-    along that say *how* to read it: `averaging`, the frames a spectrum
-    is averaged over, and `shocks`, the events an SRS is computed from.
-    Both are the app's two views of a trace, and both are stored on the
-    history rather than passed at the call, so a PSD and the coherence
-    beside it cannot describe different measurements.
+    Everything else in a random or shock test is computed from a time
+    history, and the methods that compute it are here: spectra, PSDs, the
+    full CPSD matrix, FRFs, multiple coherence and shock response
+    spectra. Settings that say how to process the record are stored on
+    it, not passed to each call: `averaging` (the frames a spectrum is
+    averaged over), `shocks` (the events an SRS is computed from),
+    `truncation`, `filtering`, `sine_extraction` and `roles`. A PSD and
+    the coherence computed beside it therefore describe the same frames.
     """
 
     function_type = 1
@@ -1096,41 +1268,52 @@ class TimeHistory(DataArray):
 
     def animate(self, geometry: Any, records: Any = None,
                 **kwargs: Any) -> Any:
-        """The records moving on a geometry, sample by sample, as the
-        GUI plays a time history selected with one.
+        """Animate the records on a geometry, sample by sample, as the app
+        plays a time history selected with a geometry.
 
         Parameters
         ----------
         geometry : Geometry
             The geometry to move.
         records : sequence of int, optional
-            Which records. One per DOF either way (`animation_records`).
+            Which records. One record per DOF is used either way
+            (`animation_records`).
         **kwargs
-            Passed through to the scene: `screenshot=` for the still at
-            the furthest the model gets, `movie=` for the record once
-            through as an MP4, `seconds=` for how long that takes.
+            Passed to `visualdynamics.viz.animate.animate_time`:
+            `screenshot=` saves a still at the sample with the largest
+            deflection, `movie=` saves the record once through as an MP4,
+            `seconds=` sets how long that takes.
 
         Returns
         -------
         object
-            The plotter, or the file written.
+            The plotter, or the path written.
         """
         from ..viz.animate import animate_time
         return animate_time(geometry, self, records, **kwargs)
 
     def compute_spectra(self) -> Spectrum:
-        """The averaged spectrum of every channel — sdynpy's convention.
+        """The averaged spectrum of every channel.
 
-        A channel's frames — its records across the averages — are each
-        FFT'd single-sided with no amplitude scaling (numpy's rfft,
-        norm='backward': a sine of amplitude A on a bin reads A*N/2),
-        rectangular window, and averaged as the *complex mean*, exactly
-        what sdynpy's `TimeHistoryArray.fft` does with frames. Phase is
-        preserved; content whose phase is random frame to frame — a
-        burst random excitation's response — averages toward zero,
-        which is that convention's documented behavior. Returns a
-        Spectrum with one record per channel, carrying the channel's
-        own quantity and units.
+        Each of a channel's records (one per average) is transformed with
+        a one-sided FFT, a rectangular window and no amplitude scaling
+        (numpy's rfft with norm='backward', so a sine of amplitude A on a
+        bin reads A*N/2), and the transforms are averaged as a complex
+        mean. This is the same convention as sdynpy's
+        `TimeHistoryArray.fft`. Phase is kept, so content whose phase is
+        random from frame to frame, such as the response to burst random
+        excitation, averages toward zero.
+
+        Returns
+        -------
+        Spectrum
+            One record per channel, with the channel's quantity and
+            units.
+
+        Raises
+        ------
+        ValueError
+            If the time samples are not evenly spaced and in order.
         """
         step = _even_steps(self.abscissa, 'Computing spectra')
         groups = {}
@@ -1155,17 +1338,17 @@ class TimeHistory(DataArray):
 
     @property
     def sample_rate(self) -> float:
-        """Samples per second, from the abscissa — which must be even."""
+        """Samples per second, from the abscissa. Raises a ValueError if
+        the samples are not evenly spaced and in order."""
         return 1.0 / _even_steps(self.abscissa, 'A sample rate')
 
     def channel_key(self, i: int) -> tuple[str, str, str | None]:
         """What makes record `i` the same channel as another.
 
         The DOF and what is measured there, never the DOF alone: a drive
-        point carries a force record and an acceleration record at the
-        same DOF, and those two are not each other's averages. This is
-        the key the framing groups on, so counting channels and
-        averaging them cannot disagree about what a channel is.
+        point has a force record and an acceleration record at the same
+        DOF, and those two are not averages of each other. Spectra, PSDs
+        and the channel counts all group records by this key.
 
         Parameters
         ----------
@@ -1175,17 +1358,17 @@ class TimeHistory(DataArray):
         Returns
         -------
         tuple of (str, str, str or None)
-            The DOF, quantity and unit that identify the channel —
-            records sharing this key are the same channel.
+            The response DOF, the dimension and the dimension hint.
+            Records with the same key are the same channel.
         """
         return (self.response_dof[i], self.ordinate_dim[i],
                 self.dimension_hint[i])
 
     @property
     def records_per_channel(self) -> dict[tuple[str, str, str | None], int]:
-        """{channel key: how many records carry it}.
+        """{channel key: number of records with that key}.
 
-        Usually one. A capture a controller saved frame by frame holds
+        Usually one. A capture that a controller saved frame by frame has
         one record per average.
         """
         counts = {}
@@ -1199,9 +1382,10 @@ class TimeHistory(DataArray):
         """Whether the records are already the averages.
 
         A controller that saves its spectral captures writes each frame
-        as its own record. There is then nothing to slice and nothing to
-        overlap: the frame length and the count are settled by the file,
-        and the only parameter left to choose is the window.
+        as its own record. True when the averaging takes each record
+        whole as one frame and some channel has more than one record.
+        Then the frame length and count are fixed by the file, and only
+        the window is left to choose.
         """
         averaging = self.averaging
         return (averaging is not None
@@ -1213,11 +1397,11 @@ class TimeHistory(DataArray):
     def average_counts(self) -> tuple[int, int]:
         """(fewest, most) frames any one channel will be averaged over.
 
-        The two agree for anything a controller wrote, which saves every
-        channel the same number of times. They part only for a history
-        assembled by hand out of unequal captures, and then the table
-        has to say so rather than quote a number that is true of some
-        channels and not others.
+        The two are equal for anything a controller wrote, since it saves
+        every channel the same number of times. They differ only for a
+        history put together by hand from unequal captures, and the
+        table then shows both instead of a number true of only some
+        channels.
         """
         counts = self.records_per_channel
         if not counts:
@@ -1229,17 +1413,15 @@ class TimeHistory(DataArray):
     def suggest_averaging(self, **kwargs: Any) -> Averaging:
         """Averaging parameters worked out from the record itself.
 
-        A run holds more than the test — the shaker coming up, a
-        reduced-level check, whatever was still recording afterwards —
-        and this finds the settled stretch worth averaging and as many
-        frames as it will carry. See `visualdynamics.core.detect`.
+        A run holds more than the test (the shaker coming up, a
+        reduced-level check, whatever was still recording afterward), and
+        this finds the steady stretch to average and as many frames as fit
+        in it. See `visualdynamics.core.detect`.
 
-        A record that already carries an averaging — a controller's own
-        recipe from an import, or one set by hand — keeps its frame
-        length, window, overlap and detrend: only the start and the
-        count are worked out (Brandon, 2026-09-19: Detect must not
-        override the frame length, window and overlap the controller
-        used). A bare record gets the detector's own recipe.
+        A record that already has an averaging, from an import or set by
+        hand, keeps its frame length, window, overlap and detrend; only
+        the start and the number of frames are worked out. A record with
+        none gets the detector's own settings.
 
         Parameters
         ----------
@@ -1249,8 +1431,16 @@ class TimeHistory(DataArray):
         Returns
         -------
         Averaging
-            Parameters worked out from the record itself.
+            The suggested averaging.
+
+        Raises
+        ------
+        ValueError
+            If the detector cannot frame the record.
         """
+        # The record's own frame length, window and overlap are kept
+        # (Brandon, 2026-09-19: Detect must not override the frame
+        # length, window and overlap the controller used).
         from dataclasses import replace
 
         from .detect import suggest
@@ -1267,24 +1457,24 @@ class TimeHistory(DataArray):
         return found
 
     def default_averaging(self) -> Averaging:
-        """The averaging a view of this record opens on.
+        """The averaging a view of this record opens with.
 
-        The record's own when its start was chosen — by a file's import
-        that detected it, a drag, a typed number. Otherwise the
-        detector's answer, keeping whatever recipe the record carries
-        (frame length, window, overlap), as `suggest_averaging` does —
-        unless that answer holds fewer frames than the record's own
-        asks, when the record's own stands: a burst record has no
-        settled stretch to find, and the detector once returned four of
-        the twenty averages a modal survey asked for (2026-09-19). A
-        bare record gets the detector's recipe; one that cannot be
-        framed at all, each record as one frame (Brandon, 2026-09-30:
-        the view should open where Detect would put it, not at t = 0).
+        The record's own averaging when its start was set (by an import,
+        a drag or a typed value). Otherwise the result of
+        `suggest_averaging`, unless that has fewer frames than the
+        record's own averaging asks for, in which case the record's own is
+        used. A record with no averaging that the detector cannot frame
+        gets each record as one frame.
 
         Returns
         -------
         Averaging
+            The averaging to show.
         """
+        # A burst record has no steady stretch to find, and the detector
+        # once returned four of the twenty averages a modal survey asked
+        # for (2026-09-19), hence the fewer-frames rule. The view opens
+        # where Detect would put it, not at t = 0 (Brandon, 2026-09-30).
         from .averaging import Averaging
 
         own = self.averaging
@@ -1367,12 +1557,17 @@ class TimeHistory(DataArray):
         return frequencies, scale, groups
 
     def capture_indices(self) -> list[int]:
-        """Which playing each record is: 0 for a channel's first
-        record, 1 for its second, and so on — in exactly the order
-        `_spectral_frame` pools them, so the playing the averaging
-        view pages to is one of the playings the average adds up. A
-        channel is a `channel_key` group, the same grouping the
-        pooling uses.
+        """Which capture each record is: 0 for a channel's first record,
+        1 for its second, and so on.
+
+        A channel is a `channel_key` group. The numbering is the order in
+        which the PSD and CPSD computations combine the records, so the
+        capture the averaging view shows is one of those averaged.
+
+        Returns
+        -------
+        list of int
+            One capture number per record.
         """
         seen: dict = {}
         out = []
@@ -1414,11 +1609,16 @@ class TimeHistory(DataArray):
     roles = None
 
     def suggest_truncation(self) -> Any:
-        """The whole record — the only neutral span.
+        """A truncation that spans the whole record.
 
-        A starting point for the truncate view's handles, never a
-        default the act adopts: keeping everything is not an
-        act, so Truncate Data refuses until a real span is set.
+        This is the starting position of the truncate view's handles,
+        not a default that `truncate` uses: keeping everything changes
+        nothing, so Truncate Data is refused until a span is set.
+
+        Returns
+        -------
+        Truncation
+            From the first sample's time to the last's.
         """
         from .truncate import Truncation
 
@@ -1426,8 +1626,8 @@ class TimeHistory(DataArray):
         return Truncation(float(abscissa[0]), float(abscissa[-1]))
 
     def truncate(self, truncation: Any = None) -> TimeHistory:
-        """This record cut to a span (`core.truncate.truncate`), using
-        the history's own `truncation` unless one is passed.
+        """This record cut to a span (`core.truncate.truncate`), using the
+        history's own `truncation` unless one is passed.
 
         Parameters
         ----------
@@ -1438,8 +1638,13 @@ class TimeHistory(DataArray):
         Returns
         -------
         TimeHistory
-            The samples inside the span, every channel, the clock
-            kept.
+            The samples inside the span, every channel, with their
+            original times.
+
+        Raises
+        ------
+        ValueError
+            If no truncation is passed or set.
         """
         from .truncate import truncate
 
@@ -1461,22 +1666,22 @@ class TimeHistory(DataArray):
     sine_extraction = None
 
     def suggest_sine_extraction(self, specification: Any = None) -> Any:
-        """The extraction setting a record starts from: automatic
-        smoothing — chosen from the recording against the
-        specification when the levels are read — with the clock
-        refinement on.
+        """The sine extraction setting a record starts from: automatic
+        smoothing, chosen from the recording and the specification when
+        the levels are read, with the clock refinement on.
 
         Parameters
         ----------
         specification : SineSweepSpecification, optional
-            The sweep the levels would be read against. When given,
-            the smoothing the automatic would choose is worked out now
-            and rides the setting as `chosen`, so the sine view can
-            show it before anything is extracted.
+            The sweep the levels would be read against. When given, the
+            smoothing the automatic setting would choose is worked out
+            now and stored in the setting as `chosen`, so the sine view
+            can show it before anything is extracted.
 
         Returns
         -------
         SineExtraction
+            The default setting.
         """
         from .sine import SineExtraction, suggest_cycles
 
@@ -1489,27 +1694,31 @@ class TimeHistory(DataArray):
         return setting
 
     def suggest_filtering(self) -> Any:
-        """A starting low-pass: a tenth of the sample rate, order 4.
+        """A starting low-pass filter at a tenth of the sample rate,
+        order 4.
 
-        A low-pass rather than any other kind, because cutting noise
-        above the content is the reach-for-first case; the filter view
-        offers high- and band-pass beside it.
+        A low-pass, because removing noise above the content is the most
+        common case; the filter view also offers high-pass and band-pass.
+        The corner is a choice, not a detection, since nothing in the
+        record says where its content stops being signal. At a tenth of
+        the sample rate the integrate and differentiate round trip was
+        measured at about 2 % RMS error (`core.filters`), and the corner
+        is below the mounted-resonance range of a shock accelerometer.
+        Check it in the filter view before using it.
 
-        A judgment, not a detection — nothing in the record says where
-        its content stops being signal. A tenth of the rate is where
-        the integrate/differentiate round trip was measured at ~2% RMS
-        (core.filters), and it sits below the mounted-resonance range a
-        shock accelerometer pollutes. The filter view exists precisely
-        so this number gets looked at rather than trusted.
+        Returns
+        -------
+        Filtering
+            The suggested filter.
         """
         from .filters import Filtering
 
         return Filtering(high=self.sample_rate / 10.0)
 
     def filter(self, filtering: Any = None) -> TimeHistory:
-        """This record through its filter (`core.filters.filtered`) —
-        low-, high- or band-pass, whichever the filtering describes —
-        using the history's own `filtering` unless one is passed.
+        """This record filtered (`core.filters.filtered`): low-pass,
+        high-pass or band-pass, as the filtering describes, using the
+        history's own `filtering` unless one is passed.
 
         Parameters
         ----------
@@ -1520,7 +1729,12 @@ class TimeHistory(DataArray):
         Returns
         -------
         TimeHistory
-            Every channel through the filter, zero phase.
+            Every channel filtered, with zero phase shift.
+
+        Raises
+        ------
+        ValueError
+            If no filtering is passed or set.
         """
         from .filters import filtered
 
@@ -1531,16 +1745,15 @@ class TimeHistory(DataArray):
         return filtered(self, chosen)
 
     def integrate(self, drift_corner: Any = ...) -> TimeHistory:
-        """One integration — acceleration to velocity, velocity to
-        displacement (`core.filters.integrate`). ``...`` takes the
-        default drift corner; ``None`` integrates raw, drift and all.
+        """One integration: acceleration to velocity, velocity to
+        displacement (`core.filters.integrate`).
 
         Parameters
         ----------
         drift_corner : float or None, optional
             High-pass corner in Hz applied after integrating, so a sensor
-            bias cannot become a ramp. `...` takes the default; `None`
-            integrates raw.
+            bias does not become a ramp. Omitted (`...`), the default
+            corner is used; `None` integrates with no high-pass.
 
         Returns
         -------
@@ -1554,22 +1767,26 @@ class TimeHistory(DataArray):
                          else drift_corner)
 
     def differentiate(self) -> TimeHistory:
-        """One differentiation — displacement to velocity, velocity to
-        acceleration (`core.filters.differentiate`)."""
+        """One differentiation: displacement to velocity, velocity to
+        acceleration (`core.filters.differentiate`).
+
+        Returns
+        -------
+        TimeHistory
+            The differentiated channels.
+        """
         from .filters import differentiate
 
         return differentiate(self)
 
     def srs_windows(self, shocks: Sequence[Any] | None = None
                     ) -> list[Any]:
-        """The stretches an SRS of this record would read, settled.
+        """The windows an SRS of this record would be computed over.
 
-        The fallback chain `compute_srs` has always used, extracted so
-        the shock panel's derived rows and the spectrum itself cannot
-        disagree about it (one implementation): the shocks the record
-        carries; failing those, the averaging frames when the record
-        is being read as frames; failing everything, the whole record
-        as one window. Clipped to the record either way.
+        The record's shocks; if it has none, its averaging frames; if it
+        has neither, the whole record as one window. Every window is
+        clipped to the record. `compute_srs` and the shock panel both use
+        this.
 
         Parameters
         ----------
@@ -1594,7 +1811,10 @@ class TimeHistory(DataArray):
             # its own idea of how many there are. Two readings of one
             # record is exactly what the two buttons refuse to show at
             # once, and the numbers should not disagree either.
-            windows = tuple(Shock(start, stop) for start, stop
+            # a window's second field is its duration: the frame's stop
+            # went in there, and every frame but the first ran long by its
+            # own start (2026-10-13, found by the docstring pass)
+            windows = tuple(Shock(start, stop - start) for start, stop
                             in self.averaging.frame_bounds(rate))
         if not windows:
             windows = (Shock(0.0, samples / rate),)
@@ -1602,15 +1822,15 @@ class TimeHistory(DataArray):
 
     def srs_band(self, shocks: Sequence[Any] | None = None
                  ) -> tuple[float, float]:
-        """(low, high) in Hz: the band these windows can support.
+        """(low, high) in Hz: the band the SRS windows can support.
 
-        From a frequency low enough that the *shortest* window still
-        holds a cycle of it — a curve is one grid across every event,
-        so the shortest is what the grid has to fit — up to a fifth
-        of the sample rate, above which the ramp-invariant filter is
-        being asked about frequencies the record cannot resolve.
-        What `compute_srs` uses when no band is given, and what the
-        shock panel states beside its settings.
+        The low end is the frequency whose period is the shortest window
+        (at least 1 Hz), since every curve uses one frequency grid and
+        the shortest window has to hold a cycle of the lowest frequency.
+        The high end is a fifth of the sample rate; above it the
+        ramp-invariant filter would be asked about frequencies the record
+        cannot resolve. `compute_srs` uses this band when none is given,
+        and the shock panel shows it.
 
         Parameters
         ----------
@@ -1633,47 +1853,41 @@ class TimeHistory(DataArray):
                     kind: str = 'maximax') -> Srs:
         """A shock response spectrum for every channel of every shock.
 
-        The parameters live on the history, the way averaging does: pass
-        `shocks` to override, or leave it and the windows already on the
-        object are used. With none anywhere, the whole record is one
-        window, which is what a history holding a single trimmed
-        transient is.
+        The windows are stored on the history, as the averaging is: pass
+        `shocks` to override them. Otherwise the record's shocks are
+        used, or its averaging frames when it has no shocks, or the whole
+        record as one window when it has neither (`srs_windows`). A
+        specification has neither, and is one window.
 
-        The windows are the shocks the record carries, or — when it is
-        being read as frames rather than events — the frames. A
-        specification carries neither and is one window: it is a single
-        playing of a waveform, whole.
+        There is one curve per channel per event, never an average across
+        events, because a shock test is judged on the worst shock and the
+        mean of four shocks describes none of them. The event a curve came
+        from is in its `block` label ('shock 2').
 
-        One curve per channel *per event*, never averaged across events.
-        A shock test is judged on the worst shock, and the mean of four
-        of them describes none of them. Which event a curve came from is
-        in `block`, exactly as which average a frame came from is.
-
-        The band defaults to what the windows can support: from a
-        frequency low enough that the *shortest* window still holds a
-        cycle of it — a curve is one grid across every event, so the
-        shortest is what the grid has to fit — up to a fifth of the
-        sample rate, above which the ramp-invariant filter is being
-        asked about frequencies the record cannot resolve.
+        The band defaults to `srs_band`: from the lowest frequency the
+        shortest window holds a cycle of, up to a fifth of the sample
+        rate.
 
         Parameters
         ----------
-        shocks : sequence of int, optional
-            Which shock windows to use. All of them when omitted.
+        shocks : sequence of Shock, optional
+            The windows to use in place of the record's own.
         low, high : float, optional
             The natural-frequency band, in Hz.
         per_octave : int, optional
             Frequency lines per octave.
         q : float, optional
-            The oscillator amplification.
+            The oscillator amplification; `srs.DEFAULT_Q` when omitted.
         kind : str, default 'maximax'
             Which peak to keep: 'maximax' (largest magnitude of either
-            sign), 'positive' or 'negative'.
+            sign), 'positive' or 'negative' (reported as a positive
+            magnitude).
 
         Returns
         -------
         Srs
-            One curve per channel per shock.
+            One curve per channel per shock (a `ShockSpecification` for
+            a target, see `srs_type`).
         """
         from .srs import DEFAULT_Q, PER_OCTAVE, maximax, octave_frequencies
         from .srs import peaks as srs_peaks
@@ -1716,16 +1930,16 @@ class TimeHistory(DataArray):
         """One-sided auto-power spectral density per channel, averaged
         across the frames.
 
-        Welch's method where each average is already its own frame:
-        rectangular window, no overlap, Gxx = 2|X|²/(fs·N) except at DC
-        and Nyquist, which have no mirror image to fold in and so are
-        |X|²/(fs·N) — as scipy's welch has it, and what makes the
-        spectrum's total the record's mean square. The frames' powers
-        are averaged. Power is phase-insensitive, so burst random's
-        random phase costs nothing here. Values land in (SI unit)²/Hz
-        with the Psd dimension convention ('acceleration**2/frequency');
-        a channel with undefined units stays undefined, its hint squared
-        along.
+        Welch's method: each frame is windowed and transformed, and
+        Gxx = 2|X|²/(fs·S) with S the sum of the window's squares (N for
+        a rectangular window). DC and Nyquist have no mirror image to fold
+        in and are |X|²/(fs·S), as scipy's welch computes them, so the
+        spectrum sums to the record's mean square. The frames' powers are
+        averaged. Power does not depend on phase, so the random phase of
+        burst random excitation does not affect the result. Values are in
+        (SI unit)²/Hz with dimensions such as
+        'acceleration**2/frequency'; a channel with undefined units stays
+        undefined, with its hint squared the same way.
 
         Parameters
         ----------
@@ -1736,7 +1950,14 @@ class TimeHistory(DataArray):
         Returns
         -------
         Psd
-            One auto-power spectral density per channel.
+            One auto-power spectral density per channel (a
+            `Specification` for a target, see `psd_type`).
+
+        Raises
+        ------
+        ValueError
+            If the samples are not evenly spaced, or the frames do not
+            fit in the record.
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
         rows, dofs, dims, hints = [], [], [], []
@@ -1758,37 +1979,49 @@ class TimeHistory(DataArray):
         return out
 
     def psd_type(self) -> type[Psd]:
-        """What a PSD of this history is.
+        """The class of a PSD computed from this history.
 
-        A plain record's spectra are plain spectra. A **target's** are
-        still a target: the PSD of a waveform the article was required
-        to see is the spectrum it was required to see, and losing that
-        on the way through an FFT would leave two objects of the same
-        class with nothing but a name to say which was the requirement.
-        Overridden in `TransientSpecification` rather than decided by
-        the caller, so a script and the app cannot disagree.
+        `Psd` for an ordinary record. A target's PSD is still a target:
+        the PSD of a waveform the test article was required to see is the
+        spectrum it was required to see, so `TransientSpecification`
+        overrides this to return `Specification`. Otherwise a requirement
+        and a measurement would be two objects of the same class, told
+        apart only by name.
+
+        Returns
+        -------
+        type
+            A `Psd` subclass.
         """
+        # Overridden in the class rather than decided by the caller, so a
+        # script and the app cannot disagree.
         return Psd
 
     def srs_type(self) -> type[Srs]:
-        """What an SRS of this history is — see `psd_type`."""
+        """The class of an SRS computed from this history: `Srs`, or
+        `ShockSpecification` for a target (see `psd_type`).
+
+        Returns
+        -------
+        type
+            An `Srs` subclass.
+        """
         return Srs
 
     def compute_cpsds(self, averaging: Averaging | None = None) -> Psd:
         """The full cross-spectral density matrix, averaged across the
-        frames — every channel against every channel, not just each
-        against itself.
+        frames: every channel against every channel.
 
-        Gxy = 2·conj(X)·Y/(fs·N), not doubled at DC and Nyquist, which is
-        `compute_psds` on the diagonal, where conj(X)·X is |X|². The
-        cross terms are how two channels move together, which is most of
-        what a CPSD is for, and they are what a PSD throws away.
+        Gxy = 2·conj(X)·Y/(fs·S), not doubled at DC and Nyquist, which
+        equals `compute_psds` on the diagonal, where conj(X)·X is |X|².
+        The cross terms describe how two channels move together, which a
+        PSD does not.
 
-        Laid out as the importer lays an imported matrix out: one record
-        per (response, reference) pair, row by row, so an n-channel
-        history gives n² records that read as a grid. A cross term's
-        dimension is the product of the two, `a*b/frequency`, against
-        `a**2/frequency` down the diagonal.
+        The records are laid out as an imported matrix is: one record per
+        (response, reference) pair, row by row, so an n-channel history
+        gives n² records shown as a grid. A cross term's dimension is the
+        product of the two, `a*b/frequency`, and a diagonal term's is
+        `a**2/frequency`.
 
         Parameters
         ----------
@@ -1799,8 +2032,13 @@ class TimeHistory(DataArray):
         Returns
         -------
         Psd
-            The full cross-spectral matrix, every channel against
-            every channel.
+            The full cross-spectral matrix, complex, with reference DOFs.
+
+        Raises
+        ------
+        ValueError
+            If the samples are not evenly spaced, or the frames do not
+            fit in the record.
         """
         frequencies, scale, groups = self._spectral_frame(averaging)
         keys = list(groups)
@@ -1836,12 +2074,18 @@ class TimeHistory(DataArray):
     EXCITATION_DIMS = ('force', 'voltage')
 
     def drive_dofs(self) -> list[str]:
-        """The DOFs this history looks like it was driven at.
+        """The DOFs this history appears to have been driven at: those
+        with a force or voltage record (`EXCITATION_DIMS`).
 
-        A guess from the quantities alone, and it is only ever a
-        default. What actually makes a channel a drive is that the
-        controller had a feedback device on it, which the channel table
-        records and a time history does not.
+        This is a guess from the quantities alone and only a default.
+        What makes a channel a drive is that the controller had a
+        feedback device on it, which the channel table records and a time
+        history does not.
+
+        Returns
+        -------
+        list of str
+            The DOFs, each once, in record order.
         """
         return list(dict.fromkeys(
             dof for dof, dim in zip(self.response_dof, self.ordinate_dim)
@@ -1883,24 +2127,32 @@ class TimeHistory(DataArray):
         return 'monitor'
 
     def channel_identities(self) -> list[tuple[str, str]]:
-        """Every channel as (DOF, quantity), in first-record order —
-        the identity `roles` names a channel by."""
+        """Every channel as (DOF, quantity), in order of first record.
+        `roles` names channels by this pair.
+
+        Returns
+        -------
+        list of (str, str)
+            One entry per channel.
+        """
         return list(dict.fromkeys(zip(self.response_dof, self.ordinate_dim)))
 
     def channel_roles(self, stated: bool = True
                       ) -> dict[tuple[str, str], str]:
-        """Every channel's role, {(DOF, quantity): role}: the one
-        reading FRFs, multiple coherence and the grid's Role column
-        share. What `roles` says, and for a channel it does not name,
-        the default from the quantity (`default_role`): a force a
-        reference, a motion a response, anything else a monitor.
+        """Every channel's role, {(DOF, quantity): role}.
+
+        The role `roles` gives, or for a channel it does not name, the
+        default for the quantity (`default_role`): a force is a
+        reference, a motion a response, anything else a monitor. FRFs,
+        multiple coherence and the grid's Role column all read this.
 
         Parameters
         ----------
         stated : bool, default True
-            False gives the guess alone, whatever `roles` says — what
-            the fingerprint compares against, so stating the roles the
-            guess would give changes nothing derived.
+            False gives the defaults alone, ignoring `roles`. The
+            provenance fingerprint compares against these, so stating
+            the roles the defaults would give does not mark derived
+            objects out of date.
 
         Returns
         -------
@@ -1918,13 +2170,13 @@ class TimeHistory(DataArray):
         """The channels an FRF or a coherence takes as references, as
         (DOF, quantity) pairs.
 
-        Omitted, the channels whose role is 'reference'
-        (`channel_roles`). A call may instead name them, as a script
-        does — as (DOF, quantity) pairs, or by bare DOF, where a DOF
-        picks the excitation channel at the point (the force at a drive
-        point, not the accelerometer beside it, which is what a
-        controller computes against) and only where there is none does
-        the DOF alone decide.
+        When `references` is omitted, the channels whose role is
+        'reference' (`channel_roles`). A call may name them instead, as
+        (DOF, quantity) pairs or by DOF alone. A DOF alone picks the
+        excitation channel (force or voltage) at that point, the force at
+        a drive point and not the accelerometer beside it, which is what
+        a controller computes against; if the point has no excitation
+        channel, its first channel is used.
 
         Parameters
         ----------
@@ -1960,12 +2212,13 @@ class TimeHistory(DataArray):
 
     def response_channels(self, references: Sequence[Any] | None = None
                           ) -> list[tuple[str, str]]:
-        """The channels an FRF or a coherence explains, as (DOF,
-        quantity) pairs: every channel that is neither a reference nor a
-        monitor. With `references` named by the call, a channel whose
-        role is 'reference' but that the call left out is a response —
-        a script asking for one drive of two gets the other explained —
-        and a monitor stays out either way.
+        """The channels an FRF or a coherence explains, as (DOF, quantity)
+        pairs: every channel that is neither a reference nor a monitor.
+
+        With `references` named by the call, a channel whose role is
+        'reference' but that the call left out is a response, so a script
+        asking for one drive of two gets the other as a response. A
+        monitor is left out either way.
 
         Parameters
         ----------
@@ -1975,6 +2228,7 @@ class TimeHistory(DataArray):
         Returns
         -------
         list of (str, str)
+            The response channels, in order of first record.
         """
         drives = set(self.reference_channels(references))
         roles = self.channel_roles()
@@ -2059,74 +2313,67 @@ class TimeHistory(DataArray):
     def compute_frfs(self, references: Sequence[str] | None = None,
                      averaging: Averaging | None = None,
                      method: str = 'Hv') -> Frf:
-        """The frequency response functions, one per response/drive pair.
+        """The frequency response functions, one per response and reference
+        pair.
 
-        The three estimators differ in one assumption — where the noise
-        is — and agree wherever there is little of it. They part company
-        exactly where a measurement is worst, which is why the choice
-        matters and why it is a choice.
+        The three estimators differ in one assumption, where the noise
+        is, and agree wherever there is little noise. They differ most
+        where a measurement is worst, so the estimator is a choice.
 
-        **H1** assumes the noise is on the *response*. It biases low at
+        H1 assumes the noise is on the response. It is biased low at
         resonance, where the response is large and the force small, and
         it is what a controller computes and a modal fit expects.
 
             Gfx = Gff H,   so   H = Gff^-1 Gfx
 
-        With one reference that is the textbook `Gfx / Gff`. With
-        several it is the MIMO estimate, and the matrix inverse is the
-        whole point: two shakers driving one article are correlated, and
-        dividing each response by each drive separately would credit
-        both with the same motion.
+        With one reference that is `Gfx / Gff`. With several it is the
+        MIMO estimate, and the matrix inverse is required: two shakers
+        driving one test article are correlated, and dividing each
+        response by each drive separately would credit both with the
+        same motion. A pseudoinverse is used instead of a solve, because
+        two shakers can be very nearly the same drive and `Gff` is then
+        close to singular; the pseudoinverse gives the least-squares
+        answer.
 
-        **H2** assumes the noise is on the *reference*, and biases high
-        at anti-resonance for the mirror-image reason. With one
-        reference it is `Gxx / Gxf`, one response at a time. With
-        several references it needs as many equations as unknowns, and
-        there are exactly enough only when the system is *square* — as
-        many responses as references — where it becomes the classical
-        coupled form `Gxx * Gfx^-1` (Rocklin, Crowley and Vold, 1985),
-        computed here exactly as sdynpy computes it (matched by
-        decision, Brandon 2026-08-28, and pinned against its numbers).
-        The coupling is worth knowing about: every response feeds one
-        matrix inverse, so a channel's H2 depends on which other
-        channels are in the set — measured at 0.2% on the oracle
-        signals, growing with noise — where H1 and Hv rows never do. A
-        non-square multi-reference set is refused; Hv answers the same
-        noise-on-both question per response, uncoupled.
+        H2 assumes the noise is on the reference, and is biased high at
+        anti-resonance for the same reason. With one reference it is
+        `Gxx / Gxf`, one response at a time. With several references it
+        needs as many equations as unknowns, which holds only when the
+        system is square (as many responses as references). It is then
+        the coupled form `Gxx * Gfx^-1` (Rocklin, Crowley and Vold,
+        1985), computed the same way as sdynpy computes it. Because every
+        response enters one matrix inverse, a channel's H2 depends on
+        which other channels are in the set (measured at about 0.2 % on
+        test signals with 5 % noise, more with more noise); H1 and Hv
+        rows do not. A multi-reference set that is not square is refused;
+        Hv answers the same question per response for any shape.
 
-        **Hv** (the default) assumes noise on both and asks for neither:
-        it is the total-least-squares fit, the null direction of
+        Hv, the default, assumes noise on both. It is the total least
+        squares fit: the null direction of
 
             [[Gff, Gfx], [Gxf, Gxx]]
 
         taken as the eigenvector of its smallest eigenvalue, per response
-        and per line. It falls between H1 and H2 — strictly between,
-        wherever the coherence is under one — and needs no claim about
-        which instrument is the better one. It is the default because
-        that claim is the one a test least often gets to make honestly:
-        an accelerometer out on a structure and a force cell in the load
-        path are both imperfect, in different places.
+        and per line. It falls between H1 and H2 (strictly between
+        wherever the coherence is less than one) and needs no claim about
+        which instrument is better. It is the default because a test can
+        rarely make that claim: an accelerometer on a structure and a
+        force cell in the load path both have errors, in different
+        places. A total least squares fit weighs a unit of error on the
+        force against a unit of error on the acceleration, which are not
+        the same thing; that is part of the standard formulation, and it
+        is why Hv is a middle estimate and not a better one.
 
-        Note what a total-least-squares fit means with units in play: it
-        weighs a unit of error on the force against a unit of error on
-        the acceleration, and those are not the same thing. That is
-        baked into the estimator and is the received formulation; it is
-        why Hv is a middle reading and not a better one.
-
-        A pseudo-inverse rather than a solve for H1, because two shakers
-        can be very nearly the same drive and `Gff` is then close to
-        singular — where a solve raises or returns nonsense, a
-        pseudo-inverse gives the least-squares answer the estimate is
-        asking for anyway.
-
-        Built on the same frames `compute_psds` averages and the same
+        The FRFs use the same frames `compute_psds` averages and the same
         references `compute_multiple_coherence` uses, so the coherence
         beside an FRF is that FRF's coherence.
 
         Parameters
         ----------
-        references : sequence of str, optional
-            The drive DOFs. Detected from the record when omitted.
+        references : sequence of str or (str, str), optional
+            The reference channels, by DOF or as (DOF, quantity) pairs
+            (see `reference_channels`). When omitted, the channels whose
+            role is 'reference'.
         averaging : Averaging, optional
             How to cut the record into frames. Defaults to the record's
             own `averaging`, or one frame per record.
@@ -2136,7 +2383,15 @@ class TimeHistory(DataArray):
         Returns
         -------
         Frf
-            One record per response and drive pair.
+            One record per response and reference pair, every reference
+            for one response before the next response.
+
+        Raises
+        ------
+        ValueError
+            If `method` is unknown, there are no reference or no response
+            channels, there are no more averages than references, or H2
+            is asked of a multi-reference set that is not square.
 
         References
         ----------
@@ -2293,43 +2548,37 @@ class TimeHistory(DataArray):
     def compute_multiple_coherence(
             self, references: Sequence[str] | None = None,
             averaging: Averaging | None = None) -> MultipleCoherence:
-        """How much of each response the drives together account for.
+        """How much of each response the references together account for.
 
-        Ordinary coherence asks what one reference explains. Multiple
-        coherence asks what a whole set of them explains at once, which
-        is the only useful question in a MIMO test: two shakers driving
-        one article are correlated with each other, so a response can
-        look poorly coherent with either one alone while being fully
-        accounted for by the pair.
+        Ordinary coherence measures what one reference explains; multiple
+        coherence measures what the whole set of references explains at
+        once. In a MIMO test this is the useful measure: two shakers
+        driving one test article are correlated with each other, so a
+        response can have poor coherence with either one alone and still
+        be fully accounted for by the pair.
 
         For a response x and references r,
 
             gamma^2 = (Grx^H Grr^-1 Grx) / Gxx
 
-        — the power of the best linear prediction of x from all the
-        references at once, over the power actually measured. With one
-        reference it collapses to the ordinary coherence, which is the
-        cheapest check that the algebra is right.
+        the power of the best linear prediction of x from all the
+        references at once, divided by the measured power. With one
+        reference it reduces to the ordinary coherence. Values are
+        limited to 0 to 1.
 
-        Built on the same frames `compute_psds` averages, so it covers
-        the stretch of record the averaging view has set and no other:
-        a coherence worked out over the whole file would describe a
-        different measurement from the PSD beside it.
-
-        `references` and the framing are `_cross_spectral_frame`'s, the
-        same ones `compute_frfs` uses — so the coherence beside an FRF
-        is that FRF's coherence and not a differently-framed one.
-
-        A pseudo-inverse rather than a solve, because two shakers
-        driving one article can be very nearly the same drive and the
-        reference matrix is then close to singular — where a solve
-        raises or returns nonsense, a pseudo-inverse gives the
-        least-squares answer the estimate is asking for anyway.
+        The coherence uses the same frames `compute_psds` averages, so it
+        covers the stretch of record the averaging view has set, and the
+        same references and framing as `compute_frfs`, so the coherence
+        beside an FRF is that FRF's coherence. A pseudoinverse is used
+        instead of a solve, because two shakers can be very nearly the
+        same drive and the reference matrix is then close to singular.
 
         Parameters
         ----------
-        references : sequence of str, optional
-            The drive DOFs. Detected from the record when omitted.
+        references : sequence of str or (str, str), optional
+            The reference channels, by DOF or as (DOF, quantity) pairs
+            (see `reference_channels`). When omitted, the channels whose
+            role is 'reference'.
         averaging : Averaging, optional
             How to cut the record into frames. Defaults to the record's
             own `averaging`, or one frame per record.
@@ -2338,6 +2587,12 @@ class TimeHistory(DataArray):
         -------
         MultipleCoherence
             One curve per response channel.
+
+        Raises
+        ------
+        ValueError
+            If there are no reference or no response channels, or no more
+            averages than references.
 
         References
         ----------
@@ -2388,42 +2643,38 @@ class TimeHistory(DataArray):
                     f'{averages} averages')
 
     def to_sep005(self, name: str | None = None) -> list[dict[str, Any]]:
-        """This record as SEP 005 timeseries — the sdypy ecosystem's
-        interchange form (`io.sep005` reads them back).
+        """This record as SEP 005 timeseries, the sdypy interchange format
+        (`io.sep005` reads them back).
 
             timeseries = history.to_sep005('run 4')
 
-        Returns the standard's **list** form: usually one dict, and one
-        per unit where channels mix. The sdypy validator holds a
-        series' ``unit_str`` to a single string, so accelerometers
-        beside a force gauge cannot be one compliant series — the list
-        of series is exactly what the standard provides for that, and a
-        split series wears the unit in its name so two of them stay
-        distinguishable.
+        Returns the standard's list form: usually one dict, and one per
+        unit and quantity where the channels mix. The sdypy validator
+        requires a series' ``unit_str`` to be a single string, so
+        accelerometers and a force gauge cannot be one valid series; the
+        standard's list of series is for that case. A split series has
+        its unit in its name, so the series can be told apart.
 
-        Values go exactly as they are held: SI where units are defined,
-        with ``unit_str`` naming the SI unit, and the file's raw
-        numbers where they are not, with ``unit_str`` empty — the
-        standard allows an empty unit, and inventing one would claim a
-        scale nobody declared. ``fs`` says the sampling when it is
-        even; an uneven record sends its ``time`` vector, which the
-        standard equally accepts. ``quantity`` rides where the
-        standard has a letter for what a series measures.
-
-        `name` defaults to the comment when the record carries one,
-        because a SEP 005 series must be named and the comment is the
-        nearest thing to a name an object holds — the project knows
-        what it called this record, the record does not.
+        Values are written as they are held: SI where units are defined,
+        with ``unit_str`` naming the SI unit, and the file's raw numbers
+        where they are not, with ``unit_str`` empty (the standard allows
+        an empty unit). ``fs`` gives the sample rate when the samples are
+        evenly spaced; otherwise the ``time`` vector is written, which
+        the standard also accepts. ``quantity`` is set where the standard
+        has a letter for what a series measures.
 
         Parameters
         ----------
         name : str, optional
-            A name for the series.
+            A name for the series. Defaults to the first non-empty
+            comment, or 'time history', since a SEP 005 series must be
+            named.
 
         Returns
         -------
         list of dict
-            One SEP 005 timeseries mapping per channel.
+            One SEP 005 timeseries mapping per unit and quantity, each
+            holding every channel of that unit.
         """
         from ..io.sep005 import DIMENSION_TO_QUANTITY
         from ..units import SI
@@ -2462,11 +2713,10 @@ class TimeHistory(DataArray):
 class Spectrum(DataArray):
     """A linear spectrum: amplitude and phase at each frequency line.
 
-    The complex average of a record's frames, not a power average — so
-    content whose phase is random frame to frame averages toward zero,
-    which is what makes this the wrong reading for burst random and the
-    right one for a deterministic signal. A `Psd` is the power average
-    and does not have that property.
+    It is the complex average of a record's frames, not a power average,
+    so content whose phase is random from frame to frame averages toward
+    zero. That makes it suited to a deterministic signal and not to burst
+    random. A `Psd` is the power average and does not have that property.
     """
 
     function_type = 12
@@ -2475,9 +2725,9 @@ class Spectrum(DataArray):
 
     def animate(self, geometry: Any, frequency: float | None = None,
                 **kwargs: Any) -> Any:
-        """The operating deflection shape at one frequency line, moving
-        on a geometry as the GUI animates it. Defaults to the strongest
-        line; `frequency` picks another.
+        """Animate the operating deflection shape at one frequency line on
+        a geometry, as the app does. The strongest line is used unless
+        `frequency` picks another.
 
         Parameters
         ----------
@@ -2486,19 +2736,25 @@ class Spectrum(DataArray):
         frequency : float, optional
             Which frequency line. The strongest when omitted.
         **kwargs
-            Passed through to the scene.
+            Passed to `visualdynamics.viz.animate.animate_ods`
+            (`screenshot`, `movie`, `scale` and others).
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The plotter, or the path written.
         """
         from ..viz.animate import animate_ods
         return animate_ods(geometry, self, frequency=frequency, **kwargs)
 
 
 class Frf(DataArray):
-    """Frequency response function: response per unit reference."""
+    """Frequency response function: response per unit reference.
+
+    Every record has a reference DOF. Units are declared as a response
+    unit and a reference unit (`define_units('g', 'lbf')`), and the
+    dimension is their ratio, such as 'acceleration/force'.
+    """
 
     function_type = 4
     abscissa_dim = 'frequency'
@@ -2507,6 +2763,22 @@ class Frf(DataArray):
 
     @classmethod
     def units_for(cls, dimension, system=SI):
+        """The (response unit, reference unit) a unit system gives for an
+        FRF dimension: 'acceleration/force' in SI is ('m/s**2', 'N').
+        See `DataArray.units_for`.
+
+        Parameters
+        ----------
+        dimension : str
+            An `ordinate_dim`, such as 'acceleration/force'.
+        system : UnitSystem, optional
+            The unit system; SI when omitted.
+
+        Returns
+        -------
+        tuple of (str, str)
+            The response unit and the reference unit.
+        """
         response, _, reference = dimension.partition('/')
         return system.unit(response), system.unit(reference)
 
@@ -2523,29 +2795,30 @@ class Frf(DataArray):
         return scale, 0.0, f'{response_dim}/{reference_dim}'
 
     def plot_cmif(self, shapes: Any = None, **kwargs: Any) -> Any:
-        """The CMIF the fitting screen draws; with `shapes` the modal
-        model's synthesis is drawn dashed over the measurement.
+        """Plot the CMIF, as the fitting screen draws it. With `shapes`,
+        the modal model's synthesized CMIF is drawn dashed over the
+        measured one.
 
         Parameters
         ----------
         shapes : ShapeSet, optional
             A modal fit, drawn as the synthesized CMIF over the measured one.
         **kwargs
-            Passed through to the plotting layer.
+            Passed to `visualdynamics.plot.plot_cmif`.
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The plot pane, or the path when a file is written.
         """
         from ..plot import plot_cmif
         return plot_cmif(self, shapes, **kwargs)
 
     def animate(self, geometry: Any, frequency: float | None = None,
                 **kwargs: Any) -> Any:
-        """The operating deflection shape at one frequency line, moving
-        on a geometry as the GUI animates it. Defaults to the strongest
-        line; `frequency` picks another.
+        """Animate the operating deflection shape at one frequency line on
+        a geometry, as the app does. The strongest line is used unless
+        `frequency` picks another.
 
         Parameters
         ----------
@@ -2554,12 +2827,13 @@ class Frf(DataArray):
         frequency : float, optional
             Which frequency line. The strongest when omitted.
         **kwargs
-            Passed through to the scene.
+            Passed to `visualdynamics.viz.animate.animate_ods`
+            (`screenshot`, `movie`, `scale` and others).
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The plotter, or the path written.
         """
         from ..viz.animate import animate_ods
         return animate_ods(geometry, self, frequency=frequency, **kwargs)
@@ -2592,26 +2866,28 @@ class _Bands:
         self.bandwidth = bandwidth
 
     def bin_widths(self) -> np.ndarray:
-        """The width of every line's own bin.
+        """The width of every line's bin, in hertz.
 
-        Its own when it has one, the midpoints between neighbors when
-        it does not — so a caller integrating never has to ask which
-        kind it is holding.
+        `bandwidth` when the object has one (octave bands); otherwise the
+        distance between the midpoints to the neighboring lines.
 
         Returns
         -------
         numpy.ndarray
+            One width per line.
         """
         if self.bandwidth is not None:
             return self.bandwidth
         return np.gradient(np.asarray(self.abscissa, dtype=float))
 
     def bin_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        """(left, right) of every line's own bin — see `octave.bin_bounds`.
+        """(left, right) edges of every line's bin, in hertz; see
+        `octave.bin_bounds`.
 
         Returns
         -------
         tuple of numpy.ndarray
+            The left edges and the right edges, one per line.
         """
         from .octave import bin_bounds
 
@@ -2619,12 +2895,13 @@ class _Bands:
                           self.bandwidth)
 
     def bin_edges(self) -> np.ndarray:
-        """The edges a step plot lands on: one more than there are
-        lines, `bin_bounds` tiled.
+        """The edges for a step plot: every bin's left edge, then the last
+        bin's right edge, so one more than there are lines.
 
         Returns
         -------
         numpy.ndarray
+            The edges, in hertz.
         """
         left, right = self.bin_bounds()
         return np.concatenate([left, right[-1:]])
@@ -2633,9 +2910,9 @@ class _Bands:
 class _CoherenceBase(_Bands, DataArray):
     """How much of a response its references account for, from 0 to 1.
 
-    A ratio of spectra, so dimensionless by construction — which makes it
-    the one kind of data array that never needs a unit declared. It arrives
-    fully defined and the Define Units step never offers it.
+    A coherence is a ratio of spectra and so is always dimensionless,
+    whatever dimension a caller passes. It never needs units declared,
+    and the Define Units step does not offer it.
     """
 
     abscissa_dim = 'frequency'
@@ -2652,7 +2929,19 @@ class _CoherenceBase(_Bands, DataArray):
         self._take_bandwidth(bandwidth)
 
     def plot_map(self, **kwargs: Any) -> Any:
-        """The coherence map: frequency across, channel down, 0..1."""
+        """Plot the coherence map: frequency across, channel down, values
+        from 0 to 1.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to `visualdynamics.plot.plot_coherence_map`.
+
+        Returns
+        -------
+        object
+            The plot pane, or the path when a file is written.
+        """
         from ..plot import plot_coherence_map
         return plot_coherence_map(self, **kwargs)
 
@@ -2660,11 +2949,11 @@ class _CoherenceBase(_Bands, DataArray):
 class Coherence(_CoherenceBase):
     """Ordinary coherence: one response against one reference.
 
-    UFF dataset 58 calls this function type 6, and gives *multiple*
-    coherence a code of its own — see `MultipleCoherence`. They are not the
-    same object with an optional reference: one is a matrix of pairs and the
-    other is one curve per response, and a file that says 6 is promising a
-    reference DOF per record.
+    UFF dataset 58 function type 6, and multiple coherence has a code of
+    its own (see `MultipleCoherence`). The two are separate classes, not
+    one class with an optional reference: ordinary coherence is a matrix
+    of pairs and has a reference DOF on every record, while multiple
+    coherence is one curve per response.
     """
 
     function_type = 6
@@ -2672,41 +2961,53 @@ class Coherence(_CoherenceBase):
 
 
 class MultipleCoherence(_CoherenceBase):
-    """How much of a response *all* the references together account for.
+    """How much of a response all the references together account for.
 
-    One curve per response channel, with no reference of its own — the
-    references are summed over, which is the whole point of it. This is what
-    a Rattlesnake modal survey reports, and what its random environment
-    reports against its control channels.
-
-    UFF dataset 58 function type 26. visualdynamics wrote 6 here for a while, which
-    claimed ordinary coherence and a reference DOF that was never there.
+    One curve per response channel, with no reference DOF, since it is
+    computed over the whole set of references. A Rattlesnake modal survey
+    reports this, and so does its random environment against its control
+    channels. UFF dataset 58 function type 26.
     """
+    # visualdynamics wrote function type 6 here for a while, which claimed
+    # ordinary coherence and a reference DOF that was never there.
 
     function_type = 26
 
 
 def paired_channels(signal: Any, floor: Any) -> list[tuple[int, int, str, str]]:
-    """The channels two densities share, as (signal row, floor row,
-    DOF, quantity).
+    """The channels two densities share, as (signal row, floor row, DOF,
+    quantity).
 
-    The pairing rule under every two-density reading (Brandon,
-    2026-08-25): matched by **(DOF, quantity)**, never by index — a
-    drive point carries an accelerometer and a load cell at one DOF,
-    and keyed by DOF alone the dict collapsed them, silently losing
-    half the drive-point channels from the first ratio drawn.
-    Channels only one side measured are left out; sharing none
-    refuses. Both sides must stand on the same frequency lines —
-    neither a ratio nor an overlay means anything across mismatched
-    bins, so that refuses rather than interpolating an answer nobody
-    measured.
+    Channels are matched by (DOF, quantity), never by index or by DOF
+    alone, since a drive point has an accelerometer and a load cell at
+    one DOF. Channels only one side has are left out. Both densities must
+    be on the same frequency lines; neither a ratio nor an overlay means
+    anything across different bins, so that is refused instead of
+    interpolated. The signal-to-noise ratio and the overlay of the two
+    densities both pair channels here.
 
-    Here rather than inside `snr.signal_to_noise` because the overlay
-    of the two densities and the ratio of them are the same pair read
-    two ways: the report draws them one above the other, and a figure
-    that paired its channels differently from the figure below it
-    would be two claims about one measurement.
+    Parameters
+    ----------
+    signal, floor : Psd
+        The two densities, such as a run and its noise floor.
+
+    Returns
+    -------
+    list of (int, int, str, str)
+        One entry per shared channel.
+
+    Raises
+    ------
+    ValueError
+        If the frequency lines differ or no channel is shared.
     """
+    # The pairing rule under every two-density reading (Brandon,
+    # 2026-08-25). Keyed by DOF alone, the dict collapsed a drive point's
+    # two channels and lost half the drive-point channels from the first
+    # ratio drawn. Here rather than inside `snr.signal_to_noise` because
+    # the report draws the overlay above the ratio, and a figure that
+    # paired its channels differently from the figure below it would be
+    # two claims about one measurement.
     if len(signal.abscissa) != len(floor.abscissa) or not np.allclose(
             signal.abscissa, floor.abscissa, rtol=1e-9, atol=1e-12):
         raise ValueError(
@@ -2735,15 +3036,28 @@ class Psd(_Bands, DataArray):
     #: its edges are a standard's and not its neighbors', and reading
     #: them off the centers would be a hair out at every band and wrong
     #: at the two ends.
-    """Power spectral density: the declared unit is the engineering unit
-    whose square-per-Hz the values are in (declare 'g' for g^2/Hz).
+    """Power spectral density. The declared unit is the engineering unit
+    whose square per hertz the values are in (declare 'g' for g²/Hz).
 
-    Held complex because a *cross* spectrum is complex — the phase
-    between two channels is most of what a CPSD is for. An autospectrum
-    is not: a channel against itself is a magnitude squared, real by
-    construction. So the type allows complex and the object stores what
-    it actually has, which for a specification or a set of ASDs is a
-    real array of half the size.
+    The class allows complex values because a cross spectrum is complex:
+    the phase between two channels is most of what a CPSD is for. An
+    autospectrum is a magnitude squared and real, so an object with no
+    imaginary content (`has_phase`) stores a real array, half the size.
+
+    `interpolation` says how values are read between the lines: 'bin'
+    (constant across each line's bin, drawn as steps) or 'log_log' (a
+    power law between breakpoints). `area`, the plots and octave banding
+    all follow it. `scale_db` is the decibels added to this spectrum when
+    it is compared against a specification, and nowhere else; None means
+    it is detected from the data.
+
+    Parameters
+    ----------
+    *args, **kwargs
+        As for `DataArray`.
+    bandwidth : array-like, optional
+        The width of each line's band, for lines that are not evenly
+        spaced (octave bands). Omitted for a narrowband spectrum.
     """
 
     #: How a value is read *between* the points, which is the one fact
@@ -2785,18 +3099,17 @@ class Psd(_Bands, DataArray):
 
     def principal_shapes(self, quantity: str | None = None
                          ) -> tuple[list[str], np.ndarray, str]:
-        """The dominant shape of the cross-spectral matrix at each line,
-        as (dofs, shapes (channels x lines), quantity).
+        """The dominant shape of the cross-spectral matrix at each line, as
+        (dofs, shapes (channels x lines), quantity).
 
-        The channels of one quantity form a square Hermitian matrix per
-        line; its largest eigenvalue's eigenvector, scaled by the square
-        root of that eigenvalue, is the principal operating deflection
-        shape — the direction of the output spectra's own CMIF, with
-        each channel's phase relative to the others and no reference to
-        choose. `quantity` picks which channels (the commonest when not
-        told). Refuses a set with no cross records — an autospectrum set
-        has no phase and its reading is the envelope — and an incomplete
-        block, whose eigenvectors would be shapes of holes.
+        The channels of one quantity form a square Hermitian matrix at
+        each line. The eigenvector of its largest eigenvalue, scaled by
+        the square root of that eigenvalue, is the principal operating
+        deflection shape: each channel's phase relative to the others,
+        with no reference to choose. `quantity` picks the channels (the
+        most common quantity when omitted). A set with no cross records
+        is refused, since an autospectrum set has no phase (its display
+        is the envelope), and so is a matrix with missing terms.
 
         Parameters
         ----------
@@ -2808,6 +3121,13 @@ class Psd(_Bands, DataArray):
         tuple of (list of str, numpy.ndarray, str)
             The DOF labels, the dominant shape at each line, and the
             quantity they are in.
+
+        Raises
+        ------
+        ValueError
+            If there are no cross records, no record names a quantity,
+            fewer than two channels have the quantity, or the matrix is
+            incomplete.
         """
         if self.reference_dof is None:
             raise ValueError('no cross records — an autospectrum set '
@@ -2848,16 +3168,14 @@ class Psd(_Bands, DataArray):
 
     def animate(self, geometry: Any, frequency: float | None = None,
                 quantity: str | None = None, **kwargs: Any) -> Any:
-        """This set on a geometry, as the GUI shows it.
+        """Animate this set on a geometry, as the app shows it.
 
-        A CPSD — cross records present — animates its principal
-        operating deflection shape: the dominant eigenvector of the
-        cross-spectral matrix per line, each channel's phase relative
-        to the others. An autospectrum set has no phase, so it shows
-        the envelope instead: two copies deflected ±sqrt(PSD), color
-        reading dB below the loudest node at any line. Defaults to the
-        strongest line; `frequency` picks another, `quantity` which
-        measurement deflects.
+        A CPSD (with cross records) animates its principal operating
+        deflection shape (`principal_shapes`). An autospectrum set has no
+        phase, so it shows the envelope instead: two copies deflected
+        ±sqrt(PSD), colored by dB below the largest node at that line.
+        The strongest line is used unless `frequency` picks another;
+        `quantity` picks which measurement deflects the geometry.
 
         Parameters
         ----------
@@ -2868,12 +3186,13 @@ class Psd(_Bands, DataArray):
         quantity : str, optional
             Which quantity, for a mixed object.
         **kwargs
-            Passed through to the scene.
+            Passed to `visualdynamics.viz.animate.animate_ods` or
+            `animate_envelope` (`screenshot`, `movie` and others).
 
         Returns
         -------
         object
-            The plot widget or plotter.
+            The plotter, or the path written.
         """
         try:
             dofs, shapes, _used = self.principal_shapes(quantity)
@@ -2889,12 +3208,10 @@ class Psd(_Bands, DataArray):
              high: float | None = None) -> float:
         """The area under one record, over a band or over all of it.
 
-        The one integral. Whichever way this spectrum is read, it is
-        read the same way here as it is drawn — that is what the field
-        above is for, and why nothing outside this method chooses.
-
-        Units are the ordinate's times frequency, so the square root of
-        it is an RMS for a PSD.
+        The record is integrated the way it is drawn, as set by
+        `interpolation`: the sum of value times bin width for 'bin', the
+        exact power-law area for 'log_log'. The area is in the ordinate's
+        units times hertz, so for a PSD its square root is the RMS.
 
         Parameters
         ----------
@@ -2906,8 +3223,8 @@ class Psd(_Bands, DataArray):
         Returns
         -------
         float
-            The area beneath the curve — the mean square, whose root
-            is the RMS.
+            The area under the curve (the mean square, whose root is
+            the RMS); NaN when no line is written.
         """
         return self._area_of(np.asarray(self.ordinate[record]), low, high)
 
@@ -2934,9 +3251,7 @@ class Psd(_Bands, DataArray):
 
     def areas(self, record: int, lows: ArrayLike, highs: ArrayLike
               ) -> np.ndarray:
-        """`area` over several bands at once: the comparison is
-        judged cell by cell, and a thousand cells must not cost a
-        thousand passes over the lines.
+        """`area` over several bands at once, in one pass over the lines.
 
         Parameters
         ----------
@@ -2948,8 +3263,12 @@ class Psd(_Bands, DataArray):
         Returns
         -------
         numpy.ndarray
-            One area per band; NaN where nothing is written.
+            One area per band; 0 for a band outside the written lines
+            (for a breakpoint curve with fewer than two usable points,
+            NaN).
         """
+        # Vectorized because the comparison is judged cell by cell, and a
+        # thousand cells must not cost a thousand passes over the lines.
         return self._areas_of(np.asarray(self.ordinate[record]), lows, highs)
 
     def _areas_of(self, values: ArrayLike, lows: ArrayLike,
@@ -2987,10 +3306,9 @@ class Psd(_Bands, DataArray):
         return np.where(highs > lows, np.maximum(total, 0.0), 0.0)
 
     def written(self, record: int | None = None) -> np.ndarray:
-        """Which lines say something: finite, and for a requirement
-        positive — a controller writes zero or NaN on every line it did
-        not control, and those lines are not a requirement of nothing.
-        Over one record, or any record when none is named.
+        """Which lines hold a value: the finite ones, in one record, or in
+        any record when none is named. (`Specification.written` also
+        requires a positive value.)
 
         Parameters
         ----------
@@ -3008,14 +3326,14 @@ class Psd(_Bands, DataArray):
         return np.isfinite(values).any(axis=0)
 
     def extent(self, record: int | None = None) -> tuple[float, float] | None:
-        """(low, high) this spectrum speaks for, in hertz.
+        """(low, high), in hertz, of the range this spectrum is written
+        over.
 
-        For a density per bin, the outer edges of the written bins — a
-        line stands for its whole bin. For a curve between breakpoints,
-        the first and last written points. What octave banding clips
-        its end bands to, and what a comparison is judged over
-        (Brandon, 2026-09-19): a controller's target is stored on
-        every FFT line to Nyquist and speaks only where it is written.
+        For a density per bin, the outer edges of the written bins, since
+        a line covers its whole bin. For a curve between breakpoints, the
+        first and last written points. Octave banding and comparisons use
+        this range, because a controller's target is stored on every FFT
+        line to Nyquist but is only written over part of them.
 
         Parameters
         ----------
@@ -3027,6 +3345,8 @@ class Psd(_Bands, DataArray):
         tuple of float, or None
             None when nothing is written above zero hertz.
         """
+        # What octave banding clips its end bands to, and what a
+        # comparison is judged over (Brandon, 2026-09-19).
         frequencies = np.asarray(self.abscissa, dtype=float)
         said = self.written(record) & np.isfinite(frequencies)
         if self.interpolation == 'log_log':
@@ -3052,23 +3372,24 @@ class Psd(_Bands, DataArray):
         self._take_bandwidth(bandwidth)
 
     def as_specification(self) -> Specification:
-        """This PSD read as a specification: the same numbers, records,
-        units and bands, held as the requirement a measurement is judged
-        against, with no limits.
+        """This PSD as a specification: the same values, records, units and
+        bands, as the requirement a measurement is judged against, with no
+        limits.
 
-        Nothing in a file says a PSD is a requirement when the format
-        has no word for one — ESCDF's data types do not, and a target
-        written by another program arrives as a PSD with only its name
-        to tell — so the person who knows says so (Brandon,
-        2026-10-09). A banded PSD steps, as a banded specification does;
-        otherwise its frequencies decide whether it reads as a
-        controller's lines or as breakpoints (`Specification.reading_of`).
+        Some formats have no way to mark a PSD as a requirement (ESCDF's
+        data types do not), so a target written by another program
+        arrives as a PSD, and the user marks it with this. A banded PSD is
+        read per bin, as a banded specification is; otherwise its
+        frequencies decide whether it is read as a controller's lines or
+        as breakpoints (`Specification.reading_of`). Any `scale_db` is
+        dropped, since a requirement is not scaled for comparison.
 
         Returns
         -------
         Specification
             A copy; this PSD is unchanged.
         """
+        # The person who knows says so (Brandon, 2026-10-09).
         spec = _recast(self, Specification)
         spec.limits = {}
         # a requirement is not scaled to be compared: the test level
@@ -3081,34 +3402,38 @@ class Psd(_Bands, DataArray):
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,
                   high: float | None = None) -> Psd:
-        """This spectrum integrated onto proportional bands.
+        """This spectrum integrated onto proportional (octave) bands.
 
-        An integration, not a resampling: each band takes the
-        mean-square content that falls in it, divided by its own width,
-        so the area under the spectrum — and therefore the RMS it
-        carries — is unchanged. Reading the narrowband curve at each
-        band center would throw away everything between the centers.
+        Each band takes the mean-square content that falls in it, divided
+        by its own width, so the area under the spectrum, and so the RMS,
+        is unchanged. Reading the narrowband curve at each band center
+        would lose everything between the centers.
 
-        The band grid is absolute (see `visualdynamics.core.octave`), so this
-        needs no specification to be told about: the frequency range
-        only chooses which bands of the one fixed grid come back, and
-        two runs banded the same way land on the same bands whatever
-        their ranges were.
-
-        Cross terms come through complex, which is what makes this work
-        for a CPSD as well as a PSD.
+        The band grid is fixed (see `visualdynamics.core.octave`): the
+        frequency range only chooses which bands of that grid are
+        returned, so two runs banded the same way are on the same bands
+        whatever their ranges. Bands are whole, so a band the data only
+        partly covers holds that content averaged over its whole width.
+        Cross terms stay complex, so a CPSD can be banded as well as a
+        PSD. `scale_db` is kept.
 
         Parameters
         ----------
         per_octave : int, optional
-            Bands per octave.
+            Bands per octave; `octave.PER_OCTAVE` when omitted.
         low, high : float, optional
-            The band to cover.
+            The frequency range to cover, in hertz. By default, the
+            range the written bins cover (`extent`).
 
         Returns
         -------
         Psd
-            The same power, arranged on proportional bands.
+            The same power on proportional bands, with `bandwidth` set.
+
+        Raises
+        ------
+        ValueError
+            If the spectrum has fewer than two lines above zero hertz.
         """
         from .octave import resample
 
@@ -3164,21 +3489,28 @@ class Psd(_Bands, DataArray):
     def coherence(self) -> Coherence:
         """The ordinary coherence of every cross term this CPSD holds:
         |S_pq|² / (S_pp S_qq), from the cross spectrum and the two
-        autospectra beside it.
+        autospectra.
 
-        Banded or not — a coherence of an octave-banded CPSD is the
-        banded quantity, each band's averaged cross spectrum against its
-        averaged autospectra, and keeps the bands so it draws flat
-        across them the way the CPSD does (2026-09-26, for the
-        band-average paper). It is not the average of a narrowband
-        coherence over the band, which would weight a band's lines
-        equally whatever their power.
+        For an octave-banded CPSD the result is the banded quantity (each
+        band's averaged cross spectrum against its averaged autospectra),
+        and it keeps the bands, so it is drawn flat across each band as
+        the CPSD is. That is not the average of a narrowband coherence
+        over the band, which would weight a band's lines equally whatever
+        their power. Values are limited to 0 to 1. A cross term without
+        both of its autospectra is left out.
 
         Returns
         -------
         Coherence
             One record per cross term, response against reference.
+
+        Raises
+        ------
+        ValueError
+            If the object has no reference DOFs, or no cross term has
+            both its autospectra.
         """
+        # Banded coherence added 2026-09-26, for the band-average paper.
         if self.reference_dof is None:
             raise ValueError('coherence needs a CPSD: records with a '
                              'reference as well as a response')
@@ -3212,6 +3544,24 @@ class Psd(_Bands, DataArray):
 
     @classmethod
     def units_for(cls, dimension, system=SI):
+        """The (unit, reference unit) a unit system gives for a PSD
+        dimension: 'acceleration**2/frequency' in SI is ('m/s**2', None),
+        and a cross term's 'acceleration*force/frequency' is ('m/s**2',
+        'N'). See `DataArray.units_for`.
+
+        Parameters
+        ----------
+        dimension : str
+            An `ordinate_dim`, such as 'acceleration**2/frequency'.
+        system : UnitSystem, optional
+            The unit system; SI when omitted.
+
+        Returns
+        -------
+        tuple of (str, str or None)
+            The engineering unit and, for a cross term with two
+            quantities, the second unit.
+        """
         numerator = dimension.split('/')[0]
         if numerator.endswith('**2'):
             return system.unit(numerator[:-3]), None
@@ -3234,25 +3584,37 @@ class Psd(_Bands, DataArray):
 
 
 class Srs(DataArray):
-    """A shock response spectrum: the peak an oscillator reached.
+    """A shock response spectrum: the peak response of an oscillator at
+    each natural frequency.
 
-    Not a spectrum of the shock. Every point is the largest response a
-    single-degree-of-freedom oscillator of that natural frequency ever
-    reached while its base was shaken by the measured transient — one
-    number out of one whole run of one filter. Two shocks with the same
-    SRS can look nothing alike, and an SRS cannot be turned back into a
-    time history, because the phase that produced each peak is gone.
+    It is not a spectrum of the shock. Every point is the largest
+    response that a single-degree-of-freedom oscillator of that natural
+    frequency reached while its base was driven by the measured
+    transient: one number from the whole response of one filter. Two
+    shocks with the same SRS can look very different, and an SRS cannot
+    be turned back into a time history, because the phase that produced
+    each peak is not kept.
 
     The abscissa is the oscillator's natural frequency, not a frequency
-    in the shock — laid out in decades (`log_abscissa`): an SRS is
-    specified at octave-spaced natural frequencies, and drawn linear
-    the bottom five octaves crush into the left margin. The ordinate is in the quantity the base was measured
-    in — an acceleration transient gives an acceleration SRS.
+    in the shock, and is drawn on a log axis (`log_abscissa`): an SRS is
+    specified at octave-spaced natural frequencies, and on a linear axis
+    the lowest five octaves would be squeezed against the left edge. The
+    ordinate is in the quantity the base was measured in, so an
+    acceleration transient gives an acceleration SRS.
 
-    `q` and `kind` change what the curve means, so they belong to the
-    object rather than to whoever happened to compute it: an SRS at
-    Q = 10 and the same shock at Q = 50 are different curves, and a
-    maximax reading is not a positive one. See `visualdynamics.core.srs`.
+    `q` and `kind` change what the curve means, so they are stored on
+    the object: an SRS at Q = 10 and the same shock at Q = 50 are
+    different curves, and a maximax SRS is not a positive one. See
+    `visualdynamics.core.srs`.
+
+    Parameters
+    ----------
+    *args, **kwargs
+        As for `DataArray`.
+    q : float, optional
+        The amplification factor; `srs.DEFAULT_Q` when omitted.
+    kind : str, default 'maximax'
+        Which peak each point is: 'maximax', 'positive' or 'negative'.
     """
 
     function_type = 24          # dataset 58's code for a shock response
@@ -3269,7 +3631,7 @@ class Srs(DataArray):
 
     @property
     def damping(self) -> float:
-        """The damping ratio the amplification factor means."""
+        """The damping ratio for the amplification factor, 1/(2Q)."""
         from .srs import damping_for
 
         return damping_for(self.q)
@@ -3287,32 +3649,44 @@ class Srs(DataArray):
 
 
 class Bounded:
-    """Limit curves held beside an ordinate, in the same units as it.
+    """Limit curves stored with an ordinate, in the same units.
 
-    What a test was controlled to is a target and the room around it:
-    how far the response may stray before the controller warns, and how
-    far before it stops. That is true of a random vibration
-    specification and of a shock one alike, and it is the same four
-    curves either way, so it is written once here and mixed into both.
+    A test is controlled to a target and the tolerance around it: how
+    far the response may go before the controller warns, and how far
+    before it stops. A random vibration specification and a shock
+    specification both have the same four curves, so they are defined
+    once here and mixed into both classes.
 
-    The limits are arrays beside the ordinate rather than four more data
-    objects. They share the abscissa, the DOFs, the dimensions and the
-    units by construction, which is the point: nothing can drift out of
-    step, and `_value_arrays` carries them through every unit conversion
-    the ordinate sees. `limit()` hands one back as a plain object of the
-    underlying kind when a caller wants one, to plot or export as such.
+    The limits are arrays stored with the ordinate, not four more data
+    objects, so they share the abscissa, the DOFs, the dimensions and
+    the units, and every unit conversion of the ordinate is applied to
+    them too. `limit()` returns one as an object of the underlying kind,
+    to plot or export.
 
-    Limits are per control channel, so a record that is not one has
-    none: those rows are NaN, which plots as a gap rather than as a line
-    at zero.
+    Limits are per control channel, so a record that is not a control
+    channel has none: its rows are NaN, which plots as a gap and not as
+    a line at zero.
 
-    Attributes:
-        warning_lower: The curve below which the controller warns, per
-            record, in the ordinate's own units. NaN where a record is
-            not a control channel, or where no such limit was written.
-        warning_upper: The same, above the target.
-        abort_lower: The curve below which the controller stops the test.
-        abort_upper: The same, above the target.
+    Parameters
+    ----------
+    *args, **kwargs
+        As for the underlying class (`Psd` or `Srs`).
+    warning_lower, warning_upper, abort_lower, abort_upper : array-like, optional
+        The limit curves, each the shape of the ordinate.
+
+    Raises
+    ------
+    ValueError
+        If a limit's shape differs from the ordinate's.
+
+    Attributes
+    ----------
+    limits : dict of str to numpy.ndarray
+        The limits given, by name (`LIMITS`). Each is in SI like the
+        ordinate, NaN where a record is not a control channel or no
+        limit was written: `warning_lower` and `warning_upper` are where
+        the controller warns, below and above the target, and
+        `abort_lower` and `abort_upper` where it stops the test.
     """
 
     LIMITS = ('warning_lower', 'warning_upper', 'abort_lower', 'abort_upper')
@@ -3346,13 +3720,14 @@ class Bounded:
 
     @property
     def has_limits(self) -> bool:
+        """Whether any limit curve is stored."""
         return bool(self.limits)
 
     def limit_area(self, name: str, record: int = 0,
                    low: float | None = None,
                    high: float | None = None) -> float:
-        """The area under one limit curve, read the way the
-        specification is — a limit is written the way its owner is.
+        """The area under one limit curve, integrated the same way as the
+        specification (its `interpolation`).
 
         Parameters
         ----------
@@ -3375,14 +3750,44 @@ class Bounded:
 
     def limit_areas(self, name: str, record: int, lows: ArrayLike,
                     highs: ArrayLike) -> np.ndarray:
-        """`limit_area` over several bands at once — see `areas`."""
+        """`limit_area` over several bands at once; see `areas`.
+
+        Parameters
+        ----------
+        name : str
+            One of `LIMITS`.
+        record : int
+            Which record.
+        lows, highs : array-like
+            The bands' edges, paired.
+
+        Returns
+        -------
+        numpy.ndarray
+            One area per band; all NaN when the limit was never written.
+        """
         values = self.limits.get(name)
         if values is None:
             return np.full(np.shape(np.atleast_1d(lows)), np.nan)
         return self._areas_of(np.atleast_2d(values)[record], lows, highs)
 
     def limit(self, name: str) -> DataArray | None:
-        """One limit in its own right, or None if it has none."""
+        """One limit as an object of the underlying kind (`PLAIN`), or None
+        if that limit is not stored.
+
+        The object has the specification's records and units, and its
+        `interpolation` where it has one.
+
+        Parameters
+        ----------
+        name : str
+            One of `LIMITS`.
+
+        Returns
+        -------
+        DataArray or None
+            The limit curve.
+        """
         if name not in self.limits:
             return None
         out = self.PLAIN(
@@ -3405,7 +3810,21 @@ class Bounded:
 
     def display_limit(self, name: str,
                       unit_system: UnitSystem) -> np.ndarray | None:
-        """A limit in display units; undefined records pass through as-is."""
+        """A limit in display units; records with undefined units are
+        returned unchanged.
+
+        Parameters
+        ----------
+        name : str
+            One of `LIMITS`.
+        unit_system : UnitSystem
+            The units to convert to.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The limit's values, or None if that limit is not stored.
+        """
         values = self.limits.get(name)
         if values is None:
             return None
@@ -3430,11 +3849,15 @@ class Bounded:
 
 
 class Specification(Bounded, Psd):
-    """What a random vibration test was controlled to: a PSD, and its band.
+    """What a random vibration test was controlled to: a PSD and its
+    limits.
 
-    A specification is a PSD in every respect — same abscissa, same
-    quantity, same conversions — with the four limit curves `Bounded`
-    carries. So it inherits both, rather than reimplementing either.
+    A specification is a PSD in every respect (the same abscissa,
+    quantity and unit conversions) with the four limit curves of
+    `Bounded`, and it inherits from both. By default its points are read
+    as breakpoints of a power law (`interpolation` 'log_log'); one
+    computed from a record, or a target on a controller's lines, is read
+    per bin.
     """
 
     PLAIN = Psd
@@ -3451,14 +3874,13 @@ class Specification(Bounded, Psd):
 
     @staticmethod
     def reading_of(frequencies: ArrayLike) -> str:
-        """How a specification written at these frequencies reads:
-        'bin', a density per line, for many lines on an even grid — a
-        controller's target on its FFT lines — and 'log_log', breakpoints
-        of a power law, for a few unevenly spaced points (Brandon,
-        2026-09-19: "breakpoint specifications have very few frequency
-        lines and I would expect an uneven spacing of them"). Both
-        octave-band and narrowband specifications step; only a
-        breakpoint curve is drawn as the law between its points.
+        """How a specification written at these frequencies is read.
+
+        'bin', a density per line, for `LINES_AT_LEAST` or more lines on
+        an even grid (a controller's target on its FFT lines), and
+        'log_log', breakpoints of a power law, otherwise. Octave-band and
+        narrowband specifications are drawn as steps; only a breakpoint
+        curve is drawn as the power law between its points.
 
         Parameters
         ----------
@@ -3470,6 +3892,8 @@ class Specification(Bounded, Psd):
         str
             'bin' or 'log_log'.
         """
+        # Brandon, 2026-09-19: "breakpoint specifications have very few
+        # frequency lines and I would expect an uneven spacing of them".
         f = np.asarray(frequencies, dtype=float)
         if f.size < Specification.LINES_AT_LEAST:
             return 'log_log'
@@ -3483,9 +3907,10 @@ class Specification(Bounded, Psd):
     _CROSS_POINTS = 64
 
     def written(self, record: int | None = None) -> np.ndarray:
-        """Which lines the requirement is written on: finite and
-        positive. A controller writes zero on the lines it did not
-        control, and zero is not a requirement of silence.
+        """Which lines the requirement is written on: finite and positive,
+        in one record, or in any record when none is named. A controller
+        writes zero on the lines it did not control, and those lines are
+        not a requirement of zero.
 
         Parameters
         ----------
@@ -3505,9 +3930,9 @@ class Specification(Bounded, Psd):
             return (np.isfinite(magnitude) & (magnitude > 0.0)).any(axis=0)
 
     def as_psd(self) -> Psd:
-        """This specification read as a plain PSD — `Psd.as_specification`
-        undone, for a PSD read as a requirement by mistake. Its reading
-        of its own points is kept.
+        """This specification as a plain PSD; the inverse of
+        `Psd.as_specification`, for a PSD marked as a requirement by
+        mistake. Its `interpolation` is kept.
 
         Returns
         -------
@@ -3517,9 +3942,9 @@ class Specification(Bounded, Psd):
         Raises
         ------
         ValueError
-            When it has limits: a PSD has nowhere to keep them, and
-            dropping them unasked would lose what the file said.
-            `limit(name)` hands one out as a PSD of its own.
+            If it has limits: a PSD cannot hold them, and dropping them
+            without being asked would lose what the file said.
+            `limit(name)` returns one as a PSD of its own.
         """
         if self.limits:
             raise ValueError(
@@ -3532,32 +3957,25 @@ class Specification(Bounded, Psd):
     def to_octave(self, per_octave: int | None = None,
                   low: float | None = None,
                   high: float | None = None) -> Specification:
-        """This specification integrated onto proportional bands, its
-        warning and abort limits with it.
+        """This specification integrated onto proportional bands, with its
+        warning and abort limits.
 
-        The same area rule as `Psd.to_octave`, read the way the object
-        is: a specification computed on lines is a density and each
-        line is a bin; one written at breakpoints is a power law
-        between them, and each band takes the exact area under that law
+        The same area rule as `Psd.to_octave`, applied the way the object
+        is read. A specification on lines is a density, and each line is
+        a bin. One written at breakpoints is a power law between them,
+        and each band takes the exact area under that law
         (`compliance.log_log_area`) over the part of the band the
-        specification covers, divided by the band's width. The limits
-        are curves written the same way and go through the same rule,
-        so a band's warning line stands in the same relation to its
-        target as the breakpoints did. Cross terms of a breakpoint
-        specification are not power laws (a phase is not), so they are
-        read onto a fine log grid the way the authoring sheet reads
-        them — magnitude log–log, phase straight — and integrated there.
+        specification covers, divided by the band's width. The limits go
+        through the same rule, so a band's warning line has the same
+        relation to its target as at the breakpoints. Cross terms of a
+        breakpoint specification are not power laws (the phase is not),
+        so they are read onto a fine log grid as the authoring sheet
+        reads them (magnitude log-log, phase linear) and integrated
+        there.
 
-        The result is a density per band (`interpolation` 'bin', the
-        bands' widths carried), which is what a banded measurement is
-        compared against band for band. Brandon, 2026-09-18: the
-        specification and the measurement it judges should be
-        convertible alike, so a compliance can be read on bands at both
-        ends — reversing the earlier reasoning (PLAN.md, "Octave
-        bands") that a written curve needed no banding because the
-        comparison integrates it exactly; it does, and a banded
-        specification is still the object a person asks to see and
-        hand on.
+        The result is a density per band (`interpolation` 'bin', with the
+        bands' widths), which a banded measurement is compared against
+        band by band. `scale_db` and any band constraints are kept.
 
         Parameters
         ----------
@@ -3569,9 +3987,21 @@ class Specification(Bounded, Psd):
         Returns
         -------
         Specification
-            The same power and the same limits, arranged on
-            proportional bands.
+            The same power and the same limits on proportional bands.
+
+        Raises
+        ------
+        ValueError
+            If the specification is not written over a range of
+            frequencies above zero.
         """
+        # Brandon, 2026-09-18: the specification and the measurement it
+        # judges should be convertible alike, so a compliance can be read
+        # on bands at both ends. This reverses the earlier reasoning
+        # (PLAN.md, "Octave bands") that a written curve needed no banding
+        # because the comparison integrates it exactly; it does, and a
+        # banded specification is still the object a person asks to see
+        # and pass on.
         from .compliance import log_log_area, written_band
         from .octave import resample
 
@@ -3659,17 +4089,16 @@ class Specification(Bounded, Psd):
 
 
 class ShockSpecification(Bounded, Srs):
-    """What a shock test was controlled to: an SRS, and its band.
+    """What a shock test was controlled to: an SRS and its limits.
 
-    The same relationship a `Specification` has to a `Psd`. A shock
-    target is written as a required SRS with tolerance either side of
-    it — conventionally +6 dB and -3 dB, which is a factor of 2 up and
-    0.707 down — and the limits are those curves.
+    It is to `Srs` what `Specification` is to `Psd`. A shock target is
+    written as a required SRS with a tolerance on each side, usually
+    +6 dB and -3 dB (a factor of 2 up and 0.707 down), and the limits are
+    those curves.
 
-    Written at one Q, and read at that Q: a target quoted at Q = 10 says
-    nothing about what the same shock does to a Q = 50 oscillator, so
-    the amplification travels with the target the way it travels with a
-    measurement.
+    A target is written at one Q and read at that Q: a target at Q = 10
+    says nothing about what the same shock does to a Q = 50 oscillator,
+    so the Q is stored with the target as it is with a measurement.
     """
 
     PLAIN = Srs
@@ -3678,44 +4107,49 @@ class ShockSpecification(Bounded, Srs):
 class TransientSpecification(TimeHistory):
     """What a transient test was controlled to: a target time history.
 
-    A different thing from a `ShockSpecification`, and the difference is
-    worth keeping straight because the two get called by each other's
-    names. A **shock** specification is an SRS: a required response
-    spectrum, and a controller meets it by producing *some* transient
-    whose spectrum lands inside the band. A **transient** specification
-    is a waveform: this acceleration, sample by sample, and the
-    controller inverts the structure's transfer function to reproduce
-    it. Rattlesnake can run the second today; the first it cannot.
+    This is different from a `ShockSpecification`, although the two are
+    often called by each other's names. A shock specification is an SRS,
+    a required response spectrum, and a controller meets it with any
+    transient whose SRS falls inside the limits. A transient
+    specification is a waveform, this acceleration sample by sample, and
+    the controller inverts the structure's transfer function to
+    reproduce it.
 
-    So this is a time history that happens to be a target, and the
-    comparison it invites is against another time history — what the
-    article actually did — rather than against a band. It carries no
-    limits for that reason: a tolerance on a waveform is not a settled
-    idea the way a tolerance on a spectrum is, and inventing one here
-    would be inventing a convention rather than reading one.
+    It is a time history that is a target, and it is compared against
+    another time history (what the test article did), not against
+    limits. It has no limits, since there is no settled convention for a
+    tolerance on a waveform as there is for one on a spectrum.
 
-    Its derived spectra stay targets. A PSD of this is a
-    `Specification` and an SRS of it is a `ShockSpecification` — both
-    without limits, for the reason above — because the spectrum of a
-    waveform the article was required to see is the spectrum it was
-    required to see. Left as plain objects they would be
-    indistinguishable from the response's own spectra but for a name,
-    and the comparison between them would have to be made by hand
-    instead of by type, which is the one thing this whole arrangement
-    exists to avoid.
+    Its computed spectra are targets too. Its PSD is a `Specification`
+    and its SRS a `ShockSpecification`, both without limits, because the
+    spectrum of a waveform the test article was required to see is the
+    spectrum it was required to see. As plain objects they could not be
+    told from the response's own spectra except by name, and the
+    comparison would have to be set up by hand instead of by type.
     """
+    # Rattlesnake can run a transient specification; it cannot run a
+    # shock (SRS) specification.
 
     def psd_type(self) -> type[Psd]:
-        """What a PSD of this record is: still a specification.
+        """The class of a PSD of this record: `Specification`, since the
+        spectrum of a required waveform is itself a requirement.
 
-        The spectrum of a required waveform is itself a requirement,
-        so it comes back as `Specification` rather than a plain `Psd`.
+        Returns
+        -------
+        type
+            `Specification`.
         """
         return Specification
 
     def srs_type(self) -> type[Srs]:
-        """What an SRS of this record is: a shock specification, for
-        the same reason `psd_type` gives."""
+        """The class of an SRS of this record: `ShockSpecification`, for
+        the same reason `psd_type` gives.
+
+        Returns
+        -------
+        type
+            `ShockSpecification`.
+        """
         return ShockSpecification
 
 
@@ -3739,6 +4173,23 @@ NAMED_CLASSES = {cls.__name__: cls
 
 
 def class_for_function_type(code: int) -> type[DataArray]:
+    """The data class for a UFF dataset 58 function type code.
+
+    Parameters
+    ----------
+    code : int
+        The function type: 1, 4, 6, 9, 12, 24 or 26.
+
+    Returns
+    -------
+    type
+        The `DataArray` subclass, such as `Frf` for 4.
+
+    Raises
+    ------
+    ValueError
+        If the code is not one of those.
+    """
     try:
         return DATA_CLASSES[int(code)]
     except KeyError:

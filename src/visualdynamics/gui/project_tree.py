@@ -1,44 +1,17 @@
-"""The project tree.
+"""The project tree: the window's list of objects, and the drags,
+drops, copies and pastes that act on it.
 
-Dropping files on the tree works, and it takes some doing.
+Files dropped on the tree are passed to the window's own importer, the
+same one a drop anywhere else on the window reaches. Objects dragged
+within the tree move between object groups. Objects dragged out of the
+tree to a file manager are saved there as files, one per object (a
+`.vdyn`, or a spreadsheet for a channel table and images for photos),
+and dragging the project row out saves the whole project as one file.
 
-The tree used to import what landed on it through `QAbstractItemView`'s
-own drop machinery, which decides what a drop means from the item under
-the cursor and the drag-drop mode — so the same file dragged onto the
-same tree would import on the third go. That was replaced by having the
-window answer drags for every part of itself at once, and the tree
-refuse them, on the understanding that Qt walks up from a widget that
-refuses to one that accepts.
-
-It does walk up. But the tree lives in a dock widget inside a scroll
-area, the walk starts at whichever child is under the cursor, and
-whether the window is reached depends on where in that stack the drag
-was resolved. Dropping on the tree still missed sometimes, while the
-plot pane on the other side of the window never did.
-
-So the tree accepts drags again — but it does not *handle* them. It
-takes a drag carrying files, refuses everything else outright so
-nothing else is swallowed, and hands the paths straight to the window's
-own importer. `setDragDropMode(NoDragDrop)` keeps the view's item
-machinery out of it entirely: these three overrides never call up to
-it. One importer, reached two ways, neither of which depends on Qt
-resolving a target through a dock.
-
-Objects drag *within* the tree too, to move one between object groups,
-and that rides on the same hand-rolled handling rather than on the item
-machinery: a drag of our own carries a mime type of our own, and a drop
-is read as the object row it lands on.
-
-Every one of our drags is accepted, including ones the project will go
-on to refuse, and this is the part that was wrong first. Refusing the
-drag reads well — the move is simply not offered — but Qt takes an
-ignored `dragMoveEvent` to mean the widget is not a drop target *there*,
-so releasing the mouse produces no drop at all: no move, no message,
-nothing. A geometry dragged onto a side that already had one behaved
-exactly like a broken feature, because from the outside there is no
-difference. So the drop always lands and the window always answers it,
-and `landing_for` decides only whether the landing *line* is drawn —
-the part that is genuinely about showing what applies.
+A drag of the tree's own objects is always accepted when it is dropped,
+including a move the project will refuse, so that the window always
+answers the drop. The landing line is drawn only where the move would
+happen.
 """
 
 from __future__ import annotations
@@ -71,6 +44,46 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
 )
+
+# Dropping files on the tree works, and it takes some doing.
+#
+# The tree used to import what landed on it through `QAbstractItemView`'s
+# own drop machinery, which decides what a drop means from the item under
+# the cursor and the drag-drop mode, so the same file dragged onto the
+# same tree would import on the third go. That was replaced by having the
+# window answer drags for every part of itself at once, and the tree
+# refuse them, on the understanding that Qt walks up from a widget that
+# refuses to one that accepts.
+#
+# It does walk up. But the tree lives in a dock widget inside a scroll
+# area, the walk starts at whichever child is under the cursor, and
+# whether the window is reached depends on where in that stack the drag
+# was resolved. Dropping on the tree still missed sometimes, while the
+# plot pane on the other side of the window never did.
+#
+# So the tree accepts drags again, but it does not *handle* them. It
+# takes a drag carrying files, refuses everything else outright so
+# nothing else is swallowed, and hands the paths straight to the window's
+# own importer. `setDragDropMode(NoDragDrop)` keeps the view's item
+# machinery out of it entirely: these three overrides never call up to
+# it. One importer, reached two ways, neither of which depends on Qt
+# resolving a target through a dock.
+#
+# Objects drag *within* the tree too, to move one between object groups,
+# and that uses the same hand-written handling rather than the item
+# machinery: a drag of our own carries a mime type of our own, and a drop
+# is read as the object row it lands on.
+#
+# Every one of our drags is accepted, including ones the project will go
+# on to refuse, and this is the part that was wrong first. Refusing the
+# drag reads well (the move is simply not offered), but Qt takes an
+# ignored `dragMoveEvent` to mean the widget is not a drop target *there*,
+# so releasing the mouse produces no drop at all: no move, no message,
+# nothing. A geometry dragged onto a side that already had one behaved
+# exactly like a broken feature, because from the outside there is no
+# difference. So the drop always lands and the window always answers it,
+# and `landing_for` decides only whether the landing *line* is drawn,
+# which is the part that is about showing what applies.
 
 #: a drag of tree objects, told apart from anything else that lands here
 OBJECT_MIME = 'application/x-visualdynamics-objects'
@@ -129,15 +142,19 @@ _LAST_ANSWER: dict[str, bool] = {}
 
 def trace_drag(who: str, what: str, mime: QMimeData | None = None,
                throttle: bool = False) -> None:
-    """One line per drag event, into a small log truncated at launch.
+    """Write one line about a drag event to the drop log.
 
-    Here because a drop that dies silently is undiagnosable from a
-    description: the badge shows, nothing lands, and every stage of the
-    chain — routing, accepting, delivering, importing — looks the same
-    from the outside. A drop on a real window from a real Finder cannot
-    be reproduced by tests, so when one misbehaves this log is the only
-    witness. The cost is a few lines per drag, in a file that never
-    outlives the session.
+    The log is `~/Library/Logs/VisualDynamics-drops.log`, emptied each
+    time the window opens. `who` names the surface (the tree, the
+    window), `what` the event, and `mime`, when given, adds how many
+    URLs the drag carries and its first six formats. With `throttle`,
+    the same event from the same surface is written at most once every
+    half second. A write that fails is skipped.
+
+    A drop on a real window from a real file manager cannot be
+    reproduced by the tests, and when one fails, every stage (routing,
+    accepting, delivering, importing) looks the same from the outside.
+    This log shows which stage the drag reached.
     """
     try:
         if throttle:
@@ -162,16 +179,14 @@ def trace_drag(who: str, what: str, mime: QMimeData | None = None,
 
 
 def start_trace() -> None:
-    """Truncate the log; called once, when the window comes up.
-
-    Deliberately *not* an application-wide event filter, though one
-    would also catch a drop delivered to a widget nobody instrumented:
-    a Python filter running for every event in a process that hosts
-    QtWebEngine segfaulted inside Chromium's own machinery. The
-    per-surface lines are enough — an accepted enter and accepted moves
-    followed by no drop is a platform non-delivery, whoever it was not
-    delivered to.
-    """
+    """Empty the drop log. The window calls this once, when it opens."""
+    # Deliberately *not* an application-wide event filter, though one
+    # would also catch a drop delivered to a widget nobody instrumented:
+    # a Python filter running for every event in a process that hosts
+    # QtWebEngine segfaulted inside Chromium's own machinery. The
+    # per-surface lines are enough: an accepted enter and accepted moves
+    # followed by no drop is a platform non-delivery, whoever it was not
+    # delivered to.
     try:
         TRACE.parent.mkdir(parents=True, exist_ok=True)
         TRACE.write_text('')
@@ -180,15 +195,17 @@ def start_trace() -> None:
 
 
 def dropped_files(mime: QMimeData) -> list[str]:
-    """The local paths a drag is carrying, if it carries any.
+    """The local file paths a drag is carrying, or an empty list.
 
-    **Our own drags carry none**, however real the file they are
-    offering. This is the one place that can say so: the tree ignoring
-    the drop was not enough, because an ignored drop propagates to the
-    window, which takes a file dropped anywhere on it — deliberately,
-    since a fresh window's tree is a 90 px strip and missing it reads as
-    the drop being ignored. Both ask here, so both get the same answer.
+    A drag started by the tree itself returns an empty list, even when
+    it offers a real `.vdyn` file, so that dropping a project back on
+    its own window does not import it a second time. The tree and the
+    window both call this, so they always agree on what a drop carries.
     """
+    # The tree ignoring its own drop was not enough: an ignored drop
+    # propagates to the window, which takes a file dropped anywhere on
+    # it (on purpose, since a fresh window's tree is a 90 px strip and
+    # missing it reads as the drop being ignored).
     if not mime.hasUrls() or mime.hasFormat(SELF_MIME):
         return []
     return [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
@@ -292,11 +309,12 @@ GUTTER_TEXT_X = 22
 
 
 class ProjectTree(QTreeWidget):
-    """Tree of imported objects.
+    """The tree of the project's objects.
 
-    Linked objects are joined by a bracket painted down the left edge —
-    `link_spans` is [(color, [items], bold, name)], maintained by the
-    window; the bold flag marks the Basis group's bracket."""
+    Linked objects are joined by a bracket painted down the left edge.
+    `link_spans` is a list of `(color, [items], bold, name)`, kept up to
+    date by the window, and the bold flag marks the Basis group's
+    bracket."""
 
     #: files were dropped on the tree; the window imports them
     files_dropped = Signal(list)
@@ -341,21 +359,24 @@ class ProjectTree(QTreeWidget):
             [list[str] | None, str], Sequence[str]] | None = None
 
     def eventFilter(self, watched: Any, event: Any) -> bool:
-        """Focus entering a record grid must not move the tree's current.
+        """Keep focus entering a record grid from changing the tree's
+        selection.
 
-        `setItemWidget` makes this view an event filter on the widget,
-        and QAbstractItemView's filter answers the widget's FocusIn by
-        moving the current index to the widget's own row — the grid's
-        holder, which is deliberately unselectable, so the move is a
-        ClearAndSelect that selects nothing and clears everything.
-        Any focus into a grid that a cell pick did not follow — a
-        click on its header, its margins, the space right of its last
-        column — silently dropped every other object's picks: a record
-        chosen in one FRF's grid vanished when a click aimed at
-        another grid's first row landed a few pixels high (Brandon,
-        2026-08-30; reproduced with setFocus() alone). The grid keeps
-        the focus; the tree keeps the selection.
+        The grid keeps the focus and the tree keeps the selection, so a
+        click on a grid's header or margin leaves every other object's
+        picked records as they were.
         """
+        # `setItemWidget` makes this view an event filter on the widget,
+        # and QAbstractItemView's filter answers the widget's FocusIn by
+        # moving the current index to the widget's own row: the grid's
+        # holder, which is deliberately unselectable, so the move is a
+        # ClearAndSelect that selects nothing and clears everything.
+        # Any focus into a grid that a cell pick did not follow (a
+        # click on its header, its margins, the space right of its last
+        # column) silently dropped every other object's picks: a record
+        # chosen in one FRF's grid vanished when a click aimed at
+        # another grid's first row landed a few pixels high (Brandon,
+        # 2026-08-30; reproduced with setFocus() alone).
         from .record_grid import RecordGrid
 
         if (event.type() == QEvent.Type.FocusIn
@@ -366,9 +387,10 @@ class ProjectTree(QTreeWidget):
     # ---- dragging objects between groups -----------------------------------
 
     def draggable(self, item: QTreeWidgetItem | None) -> bool:
-        """Whether an item is one of the project's objects. Sub-items —
-        a geometry's Nodes, a record inside a data array — are parts of
-        an object, and an object is what an object group holds."""
+        """Whether an item is one of the project's objects, which is
+        what an object group holds. Sub-items, such as a geometry's
+        Nodes or a record inside a data array, are parts of an object
+        and return False."""
         return item is not None and bool(item.data(0, ROLE_DRAGGABLE))
 
     def _target_at(self, position):
@@ -403,17 +425,17 @@ class ProjectTree(QTreeWidget):
         return None if tag is None else ('slot', tag)
 
     def startDrag(self, actions: Qt.DropAction) -> None:
-        """One drag, two readers.
+        """Start a drag of the selected objects, or of the project row.
 
-        Inside the tree it carries `OBJECT_MIME` and moves objects
-        between object groups, exactly as before. Outside — Finder,
-        Explorer, a file manager — it carries `text/uri-list` and
-        becomes a `.vdyn` saved wherever it lands. `_offer` and
-        `dropEvent` both ask for the object names first, so an internal
-        drop never sees the file half.
+        The drag carries two things. Dropped inside the tree, it carries
+        `OBJECT_MIME` and moves objects between object groups. Dropped
+        in a file manager, it carries `text/uri-list`, and the objects
+        are saved there as files, written only when the drop asks for
+        them. The tree reads the object names first, so a drop inside
+        the tree writes no file.
 
-        Copy *and* Move are offered, defaulting to Move: Finder refuses
-        a move-only drag outright, and Move is what a drop inside the
+        Copy and Move are both offered, with Move the default: Finder
+        refuses a move-only drag, and Move is what a drop inside the
         tree means.
         """
         payload = self._selection_payload()
@@ -428,14 +450,16 @@ class ProjectTree(QTreeWidget):
     # ---- the clipboard ------------------------------------------------------
 
     def copy_selected(self) -> list[str]:
-        """Copy (Cmd/Ctrl+C): the selection onto the clipboard, as the
-        same two-faced payload a drag carries — object names for a
-        paste back into a tree, and `.vdyn` files for a paste into
-        Finder or Explorer, written only when a file manager actually
-        asks (Brandon, 2026-09-03). Returns the names copied — or
-        `[PROJECT_ROW]` for the project row, which copies the whole
-        project as one file — and an empty list when nothing was
-        selected, in which case the clipboard is left as it was."""
+        """Copy (Cmd/Ctrl+C) the selection to the clipboard.
+
+        The clipboard gets the same two things a drag carries: the
+        object names, for a paste back into a tree, and the objects'
+        files, for a paste into a file manager, written only when the
+        file manager asks for them. Returns the names copied, or
+        `[PROJECT_ROW]` when the project row was copied as one file of
+        the whole project. When nothing is selected it returns an empty
+        list and leaves the clipboard as it was."""
+        # Copying as files for a file manager: Brandon, 2026-09-03.
         payload = self._selection_payload()
         if payload is None:
             return []
@@ -463,10 +487,12 @@ class ProjectTree(QTreeWidget):
         return mime, names, whole
 
     def paste(self) -> bool:
-        """Paste (Cmd/Ctrl+V): our own object names go to the window as
-        `objects_pasted`; files from anywhere — a file manager, another
-        window — arrive the way a drop of files does. Returns whether
-        the clipboard held anything we read."""
+        """Paste (Cmd/Ctrl+V) from the clipboard.
+
+        Object names copied from a tree go to the window as
+        `objects_pasted`. Files from anywhere else, such as a file
+        manager or another window, go to the window as a drop of files
+        does. Returns whether the clipboard held either."""
         mime = QApplication.clipboard().mimeData()
         if mime is None:
             return False
@@ -696,9 +722,9 @@ class ProjectTree(QTreeWidget):
             stack += [item.child(i) for i in range(item.childCount())]
 
     def span_at(self, position: QPoint) -> int | None:
-        """Index of the link bracket under a viewport position, or
-        None — how a right-click lands on a group rather than on the
-        object beside it."""
+        """The index in `link_spans` of the bracket under a viewport
+        position, or None. A right-click on a bracket uses this to act
+        on the group rather than on the object beside it."""
         if position.x() > 14:
             return None
         for index, (_color, items, _bold, _name) in enumerate(self.link_spans):

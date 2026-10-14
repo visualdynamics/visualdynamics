@@ -1,27 +1,29 @@
 """Solids: the shapes a part is made of, before it is meshed.
 
-A part is described most directly by its shapes: the Frame-Wing's frame
-is a block with four windows and 41 holes taken out of it, a wing a
-block less eighteen holes. Brandon (2026-10-11) wanted parts built that
-way in the app, a hole a cylinder subtracted rather than a parameter of
-one meshed block, and meshed once they are right. So a geometry holds a
-table of solids beside its nodes, coordinate systems and elements: each
-one a primitive — a block or a cylinder, placed by a center and three
-angles — or a boolean of others, union, subtract or intersect. They are
-not elements. Nothing that solves, animates or exports a geometry reads
-them; meshing one is what turns it into elements.
+A part is described most directly by its shapes. The frame of the
+Frame-Wing example is a block with four windows and 41 holes taken out
+of it, and a wing is a block less eighteen holes. So a geometry holds a
+table of solids beside its nodes, coordinate systems and elements. Each
+one is a primitive (a block or a cylinder, or a section or a hole made
+of them, placed by a center and three angles), a boolean of others
+(union, subtract or intersect), or a pattern of copies of others. Solids
+are not elements: nothing that solves, animates or exports a geometry
+reads them, and meshing them (Mesh Solids, `extrusion_mesh`) is what
+turns them into elements.
 
 The table holds recipes, the numbers a person typed, so a saved project
-reopens editable and needs no geometry kernel to load. Evaluating one —
-its volume, its surface for drawing, the boolean itself — is
-OpenCASCADE's work (`shape`), through the OCP bindings the STEP importer
-already uses: in every packaged build, and `visualdynamics[step]` for a
-pip install.
+reopens editable and needs no geometry kernel to load. Evaluating a
+solid (its volume, its surface for drawing, the boolean itself) is done
+by OpenCASCADE (`shape`), through the OCP bindings the STEP importer
+also uses. Every packaged build has them, and a pip install gets them
+with `visualdynamics[step]`. Whether a point is inside a solid, which is
+what meshing asks, is worked out from the recipes without the kernel
+(`contains`).
 
-Lengths are held as the geometry holds its coordinates — meters once
-its units are defined — and angles in degrees about the geometry's
-fixed X, then Y, then Z axes, the rule Add Block's pane turns a block
-by (`rotate.frame_from_angles`).
+Lengths are held as the geometry holds its coordinates (meters once its
+units are defined), and angles in degrees about the geometry's fixed X,
+then Y, then Z axes, the rule Add Block's pane turns a block by
+(`rotate.frame_from_angles`).
 """
 
 from __future__ import annotations
@@ -33,6 +35,10 @@ from typing import Any
 import numpy as np
 
 from .fem import SHAPES as BEAM_SHAPES
+
+# Brandon (2026-10-11) wanted parts built from their shapes in the app, a
+# hole a cylinder subtracted rather than a parameter of one meshed
+# block, and meshed once they are right.
 
 #: the shapes a section is, along its own Z, and the dimensions each is
 #: typed by, in order (2026-10-12): the beam element's shapes, named and
@@ -69,16 +75,16 @@ DEFLECTION = 0.005
 class Solid:
     """One row of a geometry's solids table.
 
-    A primitive is placed by its `center` and turned by `angles`; a
-    block is `widths` across along its own axes, a cylinder `radius`
-    round its own z axis and `length` along it. A boolean names its
-    `operands` by id, in order — a subtraction takes the rest from the
-    first — and its own numbers are unused. A pattern names its solids
-    as a boolean does, and holds `counts` copies along its own axes,
-    `widths` apart, turned by `angles` (Brandon, 2026-10-11: the copies
-    follow the original, and the pattern is changed as one). A section
-    or a hole is typed by its `dimensions` (`SECTIONS`, `HOLE`), a
-    section `length` along its own Z (2026-10-12).
+    A primitive is placed by its `center` and turned by `angles`. A block
+    is `widths` across along its own axes, and a cylinder is `radius`
+    about its own Z axis and `length` along it. A section or a hole is
+    sized by its `dimensions` (`SECTIONS`, `HOLE_DIMENSIONS`), and a
+    section is `length` along its own Z. A boolean names its `operands`
+    by id, in order (a subtraction takes the rest from the first), and
+    its own numbers are unused. A pattern names its solids as a boolean
+    does and holds `counts` copies along its own axes, `widths` apart,
+    turned by `angles`; the copies follow the originals, and the pattern
+    is changed as one.
 
     Parameters
     ----------
@@ -87,7 +93,7 @@ class Solid:
     name : str
         What a person calls it; may be empty.
     kind : str
-        One of `PRIMITIVES` or `OPERATIONS`, or `PATTERN`.
+        One of `PRIMITIVES`, one of `OPERATIONS`, or `PATTERN`.
     center : tuple of float
         The primitive's middle.
     angles : tuple of float
@@ -100,8 +106,8 @@ class Solid:
     operands : tuple of int
         A boolean's solids, by id.
     corner : float
-        A block's corner radius: its four edges along its own Z rounded
-        (2026-10-11) — a window cut with rounded corners leaves the
+        A block's corner radius, to which its four edges along its own Z
+        are rounded, so a window cut with rounded corners leaves the
         fillets a part has there.
     counts : tuple of int
         A pattern's copies along its own axes, the original counted.
@@ -110,6 +116,9 @@ class Solid:
         `HOLE_DIMENSIONS` name them.
     """
 
+    # patterns whose copies follow the original and are changed as one
+    # (Brandon, 2026-10-11); rounded corners (2026-10-11); sections and
+    # holes typed by their dimensions (2026-10-12)
     id: int
     name: str
     kind: str
@@ -124,8 +133,8 @@ class Solid:
     dimensions: tuple[float, ...] = ()
 
     def scaled(self, factor: float) -> Solid:
-        """The same solid with every length multiplied by `factor`:
-        what a change of the geometry's length unit does to it."""
+        """The same solid with every length multiplied by `factor`, which
+        is what a change of the geometry's length unit does to it."""
         return replace(self, center=tuple(float(c) * factor for c in self.center),
                        widths=tuple(float(w) * factor for w in self.widths),
                        radius=self.radius * factor,
@@ -169,22 +178,23 @@ def _numbers(values, count: int, what: str) -> tuple[float, ...]:
 
 def add_block(geometry: Any, center, widths, angles=(0.0, 0.0, 0.0),
               name: str = '', corner: float = 0.0) -> int:
-    """Add a block to `geometry`'s solids: `widths` across along its own
-    axes, its middle at `center`, turned by `angles`.
+    """Add a block to `geometry`'s solids, `widths` across along its own
+    axes, with its middle at `center` and turned by `angles`.
 
     Parameters
     ----------
     geometry : Geometry
         Where it goes; changed in place.
     center, widths : array_like
-        Three numbers each, as the geometry holds its coordinates.
+        Three numbers each, as the geometry holds its coordinates; every
+        width positive.
     angles : array_like, default (0, 0, 0)
         Degrees about the fixed X, then Y, then Z axes.
     name : str, optional
         What to call it.
     corner : float, default 0
-        The radius its four edges along its own Z are rounded to; at
-        most half its narrower width across.
+        The radius its four edges along its own Z are rounded to, from
+        zero to half the narrower of its widths along X and Y.
 
     Returns
     -------
@@ -212,9 +222,9 @@ def _block(solid_id: int, name: str, center, widths, angles, corner) -> Solid:
 
 def add_cylinder(geometry: Any, center, radius: float, length: float,
                  angles=(0.0, 0.0, 0.0), name: str = '') -> int:
-    """Add a cylinder to `geometry`'s solids: `radius` round its own z
-    axis and `length` along it, its middle at `center`, turned by
-    `angles` — with none, its axis is the geometry's Z.
+    """Add a cylinder to `geometry`'s solids, `radius` about its own Z
+    axis and `length` along it, with its middle at `center` and turned by
+    `angles`. With no angles its axis is the geometry's Z.
 
     Parameters
     ----------
@@ -223,7 +233,7 @@ def add_cylinder(geometry: Any, center, radius: float, length: float,
     center : array_like
         Three numbers, as the geometry holds its coordinates.
     radius, length : float
-        Likewise.
+        As the geometry holds its coordinates; both positive.
     angles : array_like, default (0, 0, 0)
         Degrees about the fixed X, then Y, then Z axes.
     name : str, optional
@@ -251,16 +261,21 @@ def _cylinder(solid_id: int, name: str, center, radius, length, angles) -> Solid
 def add_section(geometry: Any, shape: str, center, dimensions, length: float,
                 angles=(0.0, 0.0, 0.0), name: str = '') -> int:
     """Add a section to `geometry`'s solids: an I-beam, a channel, a tee,
-    an angle or a tube, `length` along its own Z (2026-10-12) — one row,
-    sized by its own dimensions, where a union of blocks would be three
-    rows changed one by one. Its middle, the middle of the box it fills,
-    is at `center`; with no `angles` it runs along the geometry's Z.
+    an angle, or a rectangular or round tube, `length` along its own Z.
 
-    Across, along its own axes: an I-beam's or a tee's `depth` runs
-    along Y, its flange `flange width` along X, a tee's at +Y; a
-    channel's flanges run along +X from its web; an angle's long leg
-    runs along +X and its short leg along +Y from the heel; a
-    rectangular tube is `width` along X and `height` along Y.
+    A section is one row, sized by its own dimensions, where a union of
+    blocks would be three rows changed one at a time. Its middle (the
+    middle of the box it fills) is at `center`, and with no `angles` it
+    runs along the geometry's Z.
+
+    Across, along its own axes: an I-beam's or a tee's `depth` runs along
+    Y and its `flange width` along X, with a tee's flange at +Y; a
+    channel's flanges run along +X from its web; an angle's long leg runs
+    along +X and its short leg along +Y from the heel; a rectangular tube
+    is `width` along X and `height` along Y. The dimensions are checked by
+    the beam section's rules (`fem.Section.of_shape`), so a shape refused
+    as a beam's section is refused here, and a round tube's wall must
+    also be under half its outer diameter.
 
     Parameters
     ----------
@@ -271,9 +286,10 @@ def add_section(geometry: Any, shape: str, center, dimensions, length: float,
     center : array_like
         Three numbers, as the geometry holds its coordinates.
     dimensions : sequence of float
-        In the order `SECTIONS[shape]` names them, likewise.
+        In the order `SECTIONS[shape]` names them, as the geometry holds
+        its coordinates.
     length : float
-        Likewise.
+        As the geometry holds its coordinates; positive.
     angles : array_like, default (0, 0, 0)
         Degrees about the fixed X, then Y, then Z axes.
     name : str, optional
@@ -284,6 +300,7 @@ def add_section(geometry: Any, shape: str, center, dimensions, length: float,
     int
         The new solid's id.
     """
+    # a section as one row, sized by its own dimensions (2026-10-12)
     if shape not in SECTIONS:
         raise ValueError(f'{shape!r} is not one of {tuple(SECTIONS)}')
     solid = _shaped(_next_id(geometry), name, shape, center, dimensions, length,
@@ -295,11 +312,13 @@ def add_section(geometry: Any, shape: str, center, dimensions, length: float,
 def add_hole(geometry: Any, center, diameter: float, depth: float | None = None,
              angles=(0.0, 0.0, 0.0), name: str = '',
              counterbore=None) -> int:
-    """Add a hole to `geometry`'s solids, to subtract from a part
-    (2026-10-12): entered at `center`, on the face it is drilled from,
-    and running `depth` along its own -Z — down the geometry's Z with no
-    `angles` — or, with none, through the part it is cut from, however
-    thick that is made. A counterbore is wider at the entry.
+    """Add a hole to `geometry`'s solids, to subtract from a part.
+
+    The hole enters at `center`, on the face it is drilled from, and runs
+    `depth` along its own -Z (down the geometry's Z with no `angles`).
+    With no depth it runs through the part it is cut from, however thick
+    that part is later made. A counterbore is a wider, shallower bore at
+    the entry.
 
     Parameters
     ----------
@@ -309,21 +328,24 @@ def add_hole(geometry: Any, center, diameter: float, depth: float | None = None,
         Where it enters, three numbers as the geometry holds its
         coordinates.
     diameter : float
-        Likewise.
+        As the geometry holds its coordinates; positive.
     depth : float, optional
-        Likewise; None through.
+        As the geometry holds its coordinates; None or zero for a hole
+        through the part.
     angles : array_like, default (0, 0, 0)
         Degrees about the fixed X, then Y, then Z axes.
     name : str, optional
         What to call it.
     counterbore : (float, float), optional
-        Its diameter, wider than the hole's, and its depth, shallower.
+        Its diameter, wider than the hole's, and its depth, positive and
+        (for a blind hole) shallower than the hole's.
 
     Returns
     -------
     int
         The new solid's id.
     """
+    # a hole as a solid to subtract (2026-10-12)
     wide, deep = (0.0, 0.0) if counterbore is None else counterbore
     solid = _shaped(_next_id(geometry), name, HOLE, center,
                     (diameter, 0.0 if depth is None else depth, wide, deep), 0.0,
@@ -380,15 +402,16 @@ EDITABLE = {'block': ('center', 'angles', 'widths', 'corner'),
 
 
 def edit(geometry: Any, solid_id: int, **changes) -> None:
-    """Change a solid after it is made, in place (Brandon, 2026-10-11:
-    move it, size it, reshape it). A block's center, angles, widths and
-    corner, a cylinder's center, angles, radius and length, a section's
-    center, angles, dimensions and length, a hole's center, angles and
-    dimensions, a pattern's counts, spacing and angles, and any solid's
-    name; the rest are kept. It keeps its id, so a boolean it is
+    """Change a solid after it is made, in place.
+
+    What can be changed is a block's center, angles, widths and corner; a
+    cylinder's center, angles, radius and length; a section's center,
+    angles, dimensions and length; a hole's center, angles and
+    dimensions; a pattern's counts, spacing and angles; and any solid's
+    name. The rest are kept. The solid keeps its id, so a boolean it is
     part of takes the change: a hole made larger is a larger hole in the
     plate it was subtracted from. A mesh already made from it is not
-    changed; Mesh Solids again meshes the change.
+    changed; running Mesh Solids again meshes the change.
 
     Parameters
     ----------
@@ -397,17 +420,21 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
     solid_id : int
         Which.
     **changes
-        The numbers to change, as `add_block`, `add_cylinder` and
-        `add_section` take them — a hole's as its `HOLE_DIMENSIONS`, a
-        depth of zero through — and `name`.
+        The numbers to change, as `add_block`, `add_cylinder`,
+        `add_section` and `pattern` take them (a hole's `dimensions` in
+        the order of `HOLE_DIMENSIONS`, a depth of zero for through), and
+        `name`.
 
     Raises
     ------
     ValueError
-        For a number its kind does not have — a boolean's shape is its
-        solids', changed one by one, and it is moved whole by `move` —
-        or one an add would refuse.
+        For a number its kind does not have (a boolean's shape is its
+        solids', changed one at a time, and a boolean is moved whole by
+        `move`), or a value an add would refuse.
+    KeyError
+        If there is no solid `solid_id`.
     """
+    # move it, size it, reshape it (Brandon, 2026-10-11)
     item = solid(geometry, solid_id)
     allowed = EDITABLE.get(item.kind, ()) + ('name',)
     wrong = [key for key in changes if key not in allowed]
@@ -441,12 +468,13 @@ def edit(geometry: Any, solid_id: int, **changes) -> None:
 
 def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
          turn=(0.0, 0.0, 0.0)) -> int:
-    """Move solids whole — a part with every solid it is made of — turned
-    by `turn` about the middle of their extent, then slid by `offset`;
-    how many primitives moved. A boolean has no place of its
-    own to change, so its solids are moved, each center turned about
-    that middle and each turned as much: the part is the same shape,
-    elsewhere.
+    """Move solids whole, each with every solid it is made of, turned by
+    `turn` about the middle of their extent and then moved by `offset`.
+
+    A boolean has no position of its own to change, so its solids are
+    moved, each center turned about that middle and each solid turned by
+    the same angles, and the part is the same shape in a new place. A
+    pattern's originals move, and its axes turn with them.
 
     Parameters
     ----------
@@ -459,6 +487,11 @@ def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
     turn : array_like, default (0, 0, 0)
         Degrees about the fixed X, then Y, then Z axes, as a solid's
         angles are.
+
+    Returns
+    -------
+    int
+        How many primitives moved.
     """
     from ..rotate import angles_of, frame_from_angles
 
@@ -506,11 +539,12 @@ def move(geometry: Any, ids, offset=(0.0, 0.0, 0.0),
 
 
 def combine(geometry: Any, operation: str, ids, name: str = '') -> int:
-    """Add a boolean of solids already there: their union, the first
-    with the rest subtracted from it, or what they share. Each solid
-    goes into one boolean only — the operands are the new solid's now,
-    and the table lists only the solids nothing else uses
-    (`top_level`).
+    """Add a boolean of solids already there: their union, the first with
+    the rest subtracted from it, or what they share.
+
+    Each solid goes into one boolean only, so a solid already part of
+    another is refused. The operands become part of the new solid, and
+    the table lists only the solids nothing else uses (`top_level`).
 
     Parameters
     ----------
@@ -565,9 +599,10 @@ def _checked(geometry: Any, ids) -> set[int]:
 
 def delete(geometry: Any, ids) -> int:
     """Delete solids, each with everything it is made of: a plate with
-    its holes cut goes whole, the cylinders that cut them with it. One a
-    boolean still uses is refused, named — take that boolean apart
-    first (`separate`).
+    holes cut in it is deleted whole, with the cylinders that cut them.
+    A solid that a boolean still uses is refused, by name, unless that
+    boolean is deleted with it; take the boolean apart first
+    (`separate`).
 
     Parameters
     ----------
@@ -593,16 +628,17 @@ def delete(geometry: Any, ids) -> int:
 
 
 def separate(geometry: Any, ids) -> int:
-    """Take booleans apart: each one goes, and its operands stand as
-    parts again — a subtraction made by mistake undone. A primitive has
-    nothing to take apart and is refused.
+    """Take booleans and patterns apart: each one is removed, and its
+    operands stand as parts again, which undoes a subtraction made by
+    mistake. A primitive has nothing to take apart and is refused, and so
+    is a solid that is still part of another.
 
     Parameters
     ----------
     geometry : Geometry
         Whose solids; changed in place.
     ids : sequence of int
-        The booleans, by id.
+        The booleans or patterns, by id.
 
     Returns
     -------
@@ -625,13 +661,15 @@ PATTERN_LIMIT = 10_000
 
 def pattern(geometry: Any, ids, counts, spacing) -> int:
     """A pattern of solids: `counts` copies along the geometry's X, Y and
-    Z, `spacing` apart, the originals the first of each — 13 holes along
-    a rail are one hole and (13, 1, 1) at the insert pitch. One solid,
-    made of the originals as a boolean is (Brandon, 2026-10-11): a hole
-    changed changes every copy, and the pattern's counts and spacing are
-    changed as one (`edit`). It takes its first solid's name, as a
-    boolean does. A pattern of a pattern is the grid of a grid: the row
-    of 13, two rows across the rails.
+    Z, `spacing` apart, with the originals as the first of each.
+
+    Thirteen holes along a rail are one hole and counts of (13, 1, 1) at
+    the insert pitch. The pattern is one solid, made of the originals as
+    a boolean is, so changing the hole changes every copy, and the
+    pattern's counts and spacing are changed as one (`edit`). It takes
+    its first solid's name, as a boolean does. A pattern of a pattern is
+    a grid of grids: the row of 13, then two rows across the rails. More
+    than `PATTERN_LIMIT` (10,000) copies is refused.
 
     Parameters
     ----------
@@ -644,13 +682,15 @@ def pattern(geometry: Any, ids, counts, spacing) -> int:
         more.
     spacing : sequence of float
         How far apart along X, Y and Z, as the geometry holds its
-        coordinates; zero along an axis with one only.
+        coordinates; it may be zero only along an axis with one copy.
 
     Returns
     -------
     int
         The pattern's id.
     """
+    # one solid, made of the originals as a boolean is (Brandon,
+    # 2026-10-11)
     ids = tuple(int(i) for i in ids)
     if not ids or len(set(ids)) < len(ids):
         raise ValueError('a pattern takes one solid or more, each once')
@@ -693,20 +733,20 @@ def _offsets(item: Solid) -> np.ndarray:
 
 
 def used_by(geometry: Any) -> dict[int, int]:
-    """{solid: the boolean it is part of}, for every solid that is one's
-    operand."""
+    """{solid id: the id of the boolean or pattern it is part of}, for
+    every solid that is an operand of another."""
     return {operand: s.id for s in geometry.solids for operand in s.operands}
 
 
 def top_level(geometry: Any) -> list[Solid]:
-    """The solids no boolean uses: the parts as they stand, the ones a
-    person sees, edits and meshes."""
+    """The solids no boolean uses: the parts as they stand, which are the
+    ones a person sees, edits and meshes."""
     used = used_by(geometry)
     return [s for s in geometry.solids if s.id not in used]
 
 
 def solid(geometry: Any, solid_id: int) -> Solid:
-    """The solid with this id."""
+    """The solid with this id; KeyError if there is none."""
     for s in geometry.solids:
         if s.id == int(solid_id):
             return s
@@ -716,7 +756,8 @@ def solid(geometry: Any, solid_id: int) -> Solid:
 # ---- the kernel ------------------------------------------------------------
 
 def require_kernel():
-    """The OCP bindings, or the sentence that says how to get them."""
+    """The OCP bindings, or a ValueError whose message says how to
+    install them."""
     try:
         import OCP
     except ImportError:
@@ -744,9 +785,13 @@ def _placed(shape, item: Solid):
 
 
 def shape(geometry: Any, solid_id: int):
-    """The solid as OpenCASCADE's shape: a primitive built and placed,
-    a boolean computed from its operands' shapes, as the geometry holds
-    its coordinates.
+    """The solid as an OpenCASCADE shape, in the units the geometry holds
+    its coordinates in.
+
+    A block or a cylinder is built and placed, a section or a hole is
+    built from the blocks and cylinders it is made of, and a boolean or a
+    pattern is computed from its operands' shapes. A boolean the kernel
+    cannot compute raises ValueError naming the solid.
 
     Parameters
     ----------
@@ -856,6 +901,7 @@ def volume(geometry: Any, solid_id: int) -> float:
     -------
     float
     """
+    require_kernel()
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
 
@@ -865,9 +911,9 @@ def volume(geometry: Any, solid_id: int) -> float:
 
 
 def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
-    """(n, 3, 3) corners of the triangles OpenCASCADE tessellates a
-    shape's faces into, `deflection` a fraction of its size: what draws
-    a solid, and what the STEP importer reads a part as.
+    """The corners of the triangles OpenCASCADE tessellates a shape's
+    faces into, with `deflection` a fraction of the shape's size. This is
+    what draws a solid, and how the STEP importer reads a part.
 
     Parameters
     ----------
@@ -880,6 +926,7 @@ def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
+        (n, 3, 3): each triangle's three corners.
     """
     from OCP.Bnd import Bnd_Box
     from OCP.BRep import BRep_Tool
@@ -1038,9 +1085,9 @@ def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
 
 
 def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
-    """Which of `points` lie inside the solid, read off its recipe: a
-    block's box, a cylinder's radius and length, combined as its
-    booleans say. A point on a face counts as inside.
+    """Which of `points` lie inside the solid, worked out from its recipe
+    without the kernel: a block's box and a cylinder's radius and length,
+    combined as its booleans say. A point on a face counts as inside.
 
     Parameters
     ----------
@@ -1148,9 +1195,13 @@ def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def extrusion_axis(geometry: Any, ids) -> int:
-    """The axis, 0, 1 or 2, the parts are extrusions along — every block
-    square to the geometry's axes and every cylinder's axis along it —
-    or the sentence that says which solid is not.
+    """The axis (0, 1 or 2) the parts are extrusions along.
+
+    Every block must be square to the geometry's axes, and every cylinder
+    and every rounded corner must run along the one axis; a part that is
+    not raises ValueError naming the solid. Blocks alone are an
+    extrusion along any axis, and the axis along which their extent is
+    thinnest is returned.
 
     Parameters
     ----------
@@ -1184,9 +1235,12 @@ def extrusion_axis(geometry: Any, ids) -> int:
 
 
 def mesh_size(geometry: Any, ids) -> float:
-    """The element size Mesh Solids opens on: half the thinnest feature —
-    the shortest span between two flat faces, or the narrowest cylinder
-    across — so every feature is two bricks across.
+    """The element size Mesh Solids opens with: half the thinnest
+    feature, so every feature is two bricks across.
+
+    The thinnest feature is the shortest span between two flat faces (a
+    cylinder's end counts as one), or the narrowest cylinder or rounded
+    corner across. With nothing to measure, the size is 1.0.
 
     Parameters
     ----------
@@ -1242,26 +1296,30 @@ def _cuts(geometry: Any, ids) -> list[np.ndarray]:
 def extrusion_mesh(geometry: Any, ids, size: float,
                    parts_apart: bool = False) -> tuple[Any, dict]:
     """The parts as eight-node bricks, ready to join to a geometry
-    (`mesh.join`): one element group per part, named for it, parts that
-    touch sharing their nodes there — or, `parts_apart`, each keeping its
-    own, on the same grid, so they lie on each other's for bolts to be
-    merged at (the BARC's box, channels and beam, 2026-10-11: meshed one
-    at a time, their grids did not meet at a quarter inch).
+    (`mesh.join`).
+
+    Each part gets one element group, named for it (or for its kind and
+    id when it has no name). Parts that touch share their nodes there,
+    or, with `parts_apart`, each keeps its own on the same grid, so the
+    nodes of one lie on the other's and bolts can be merged there later.
 
     The grid is cut at every flat face of every block along every axis,
-    each span divided into the whole number of bricks nearest `size`,
-    so flat faces fall on grid lines; a brick goes to the part whose
-    recipe holds its center (`contains`) — the later one where parts
-    overlap, as the Frame-Wing's steel screws take the inserts they
-    are threaded into — none to the void; and
-    a hole, a boss or an insert is round rather than stair-stepped:
-    about each circle with room a ring mesh replaces the grid, its nodes
-    on the circle evenly spaced (`_plane`), and a circle without room,
-    or a rounded corner's arc, has the nodes between its inside and the
-    material beside it pulled radially onto it, a pull that would turn
-    a brick inside out not made (`_round_onto_circles`). Refused,
-    with the solid named, when a part is not an extrusion along X, Y or
-    Z (`extrusion_axis`).
+    and each span is divided into the whole number of bricks nearest
+    `size`, so flat faces fall on grid lines. A brick goes to the part
+    whose recipe holds its center (`contains`), to the later part where
+    parts overlap (a steel screw added over the insert it is threaded
+    into makes those bricks steel), and to no part in a void. A hole, a
+    boss or an insert is meshed round, not stair-stepped. About each
+    circle with room, a ring mesh with its nodes evenly spaced on the
+    circle replaces the grid. About a circle without room, or a rounded
+    corner's arc, the nodes between its inside and the material beside
+    it are moved radially onto it, except where the move would turn a
+    brick inside out.
+
+    A part that is not an extrusion along X, Y or Z is refused with the
+    solid named (`extrusion_axis`), and so are a solid that is part of
+    another, a size that is not positive, and a grid of more than
+    `MESH_LIMIT` (2,000,000) bricks.
 
     Parameters
     ----------
@@ -1280,10 +1338,13 @@ def extrusion_mesh(geometry: Any, ids, size: float,
     -------
     (Geometry, dict)
         The bricks, in the geometry's length unit; and what was made:
-        'bricks', 'nodes', 'axis' (0, 1 or 2), 'rounded' (nodes pulled
-        onto a circle), 'rings' (the rings laid, one about each center
-        with room), 'shortest' (the shortest brick edge).
+        'bricks' and 'nodes', the counts; 'axis' (0, 1 or 2); 'rounded',
+        the number of nodes moved onto a circle; 'rings', the number of
+        rings laid, one about each circle with room; and 'shortest', the
+        shortest brick edge.
     """
+    # parts_apart is for the BARC's box, channels and beam (2026-10-11):
+    # meshed one at a time, their grids were a quarter inch from meeting.
     from .geometry import Geometry
 
     ids = [int(i) for i in ids]
@@ -1336,9 +1397,10 @@ def extrusion_mesh(geometry: Any, ids, size: float,
 
 
 def meshed_bricks(geometry: Any, names) -> np.ndarray:
-    """The ids of the bricks in the element groups named `names`: what
-    meshing those parts again replaces (`Project.mesh_solids`, and the
-    pane's reading before Mesh is pressed).
+    """The ids of the eight-node bricks in the element groups named
+    `names`, which are what meshing those parts again replaces
+    (`Project.mesh_solids`, and the pane's reading before Mesh is
+    pressed).
 
     Parameters
     ----------

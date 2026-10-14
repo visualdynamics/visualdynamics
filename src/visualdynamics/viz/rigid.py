@@ -1,10 +1,11 @@
 """The reference point of a rigid-body preview, drawn on the scene.
 
-A small sphere with three axis ticks at the point the rotations pivot
-on, so the pane's numbers have a place on the model. Sized from the
-model, never from the point's coordinates; excluded from the scene's
-bounds so it never resizes the axes, and unpickable so a click near it
-goes to the geometry — the same rules the stage marks live by.
+A small sphere with three axis ticks at the point the rotations turn
+about, so the numbers in the pane can be located on the model. It is
+sized from the model, never from the point's coordinates. Like the
+stage's marks, it is left out of the scene's bounds so it never resizes
+the axes, and it cannot be picked, so a click near it goes to the
+geometry.
 """
 
 from __future__ import annotations
@@ -24,7 +25,10 @@ NAME = 'rigid-point'
 
 def add_reference_point(plotter: Any, point: ArrayLike, model_size: float,
                         color: Any) -> None:
-    """Draw the marker at `point`, in the scene's display units."""
+    """Draw the marker at `point`, in the scene's display units, in
+    `color`. The sphere's radius is `RADIUS_FRACTION` of `model_size`,
+    and each tick reaches `TICK_RADII` radii from the center. The actors
+    are named from `NAME`, so drawing again replaces the marker."""
     import pyvista as pv
 
     center = np.asarray(point, dtype=np.float64)

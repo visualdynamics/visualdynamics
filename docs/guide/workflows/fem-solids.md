@@ -1,27 +1,29 @@
 # The solid workflow: the Frame-Wing
 
-A finite element model of solid bricks, built in the app the way a part
-is drawn: solid shapes added, copied in rows, subtracted and joined,
-then meshed, the parts bolted together by merging nodes, and solved.
-Everything on this page is done with the mouse and the keyboard; the
-demonstration module builds the same models with the same steps.
+This page builds a finite element model of solid bricks in the app, in
+the same order a part is drawn in CAD: solid shapes are added, copied in
+rows, subtracted and joined, then meshed; the parts are bolted together
+by merging nodes, and the model is solved. Everything on this page is
+done with the mouse and the keyboard, and the demonstration module
+builds the same models with the same steps.
 
-The structure is the **Frame-Wing**, a small aluminum frame and two
-wings the structural dynamics community shares as a test article for
-substructuring: a 16 by 6 in ladder cut from half-inch plate, two rails
-and five uprights half an inch wide, 41 threaded steel inserts to bolt
-things to, and two rectangular 22 by 4.385 in wings, thin (1/8 in) and
-thick (1/4 in), that screw across two of the frame's uprights. Its
-solid models, finite element models and test data are shared on the SEM
-Dynamic Substructuring Focus Group wiki,
+The structure is the Frame-Wing, a small aluminum frame with two wings
+that the structural dynamics community shares as a test article for
+substructuring. The frame is a 16 by 6 in ladder cut from half-inch
+plate, with two rails and five uprights half an inch wide and 41
+threaded steel inserts to bolt things to. The two wings are rectangular,
+22 by 4.385 in, one thin (1/8 in) and one thick (1/4 in), and either
+screws across two of the frame's uprights. Its solid models, finite
+element models and test data are shared on the SEM Dynamic
+Substructuring Focus Group wiki,
 <https://wiki.sem.org/wiki/Round_Robin_Frame_Structure>. Every dimension
 below was read off the finite element models shared there.
 
-A half-inch bar spanning a hundred-millimeter window is neither a beam
-nor a plate. The [BARC](fem-workflow.md) is built from planes of plate
-elements because its walls are thin; this frame is built from
-eight-node solid bricks with incompatible bending modes, so one brick
-through a plate's thickness bends like the plate.
+A half-inch bar spanning a 100 mm window is neither a beam nor a plate.
+The [BARC](fem-workflow.md) is built from planes of plate elements
+because its walls are thin. This frame is built from eight-node solid
+bricks with incompatible bending modes, so a single brick through a
+plate's thickness bends the way the plate does.
 
 ```python
 from visualdynamics.demo import frame_wing
@@ -29,8 +31,8 @@ from visualdynamics.demo import frame_wing
 frame_wing.project().save('frame-wing.vdyn')    # the five models this page builds
 ```
 
-The project's journal (the console) is this page's steps, one line per
-click.
+The project's journal (the console) records this page's steps, one line
+per click.
 
 | Step | Where | How |
 |---|---|---|
@@ -46,11 +48,12 @@ click.
 ## 1. The frame, as solids
 
 Choose the inch system in the unit menu, select the project's row and
-press **+** (*New Geometry*); rename it *Frame*. Select its **Solids**
-row and add each shape below with *Add Solid Block* or *Add Cylinder*:
-the pane beside the 3-D view takes a center, the widths (a block) or a
-radius and a length along Z (a cylinder), a corner radius (a block) and
-a name, draws the shape as it is typed, and **Add** puts it in the tree.
+press **+** (*New Geometry*), then rename the new geometry *Frame*.
+Select its **Solids** row and add each shape below with *Add Solid
+Block* or *Add Cylinder*. The pane beside the 3-D view takes a center,
+the size (three widths and a corner radius for a block, or a radius and
+a length along Z for a cylinder) and a name. It draws the shape as you
+type, and **Add** puts it in the tree.
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
@@ -59,19 +62,21 @@ a name, draws the shape as it is typed, and **Add** puts it in the tree.
 | rail hole | Cylinder | (−7.75, −2.75, −0.25) | radius 0.1451, length 1 | |
 | upright hole | Cylinder | (−7.75, −1.375, −0.25) | radius 0.1451, length 1 | |
 
-The window is cut deeper than the plate so it cuts all the way through, and
-its corner radius rounds its four edges along Z: cut from the plate, it
-leaves the 0.138 in fillets the frame has in each window's corners.
-Without them the frame's in-plane modes come out eight percent low.
+The window is deeper than the plate so that it cuts all the way through.
+Its corner radius rounds its four edges along Z, so once it is cut from
+the plate it leaves the 0.138 in fillets the frame has in each window's
+corners. Without the fillets, the frame's in-plane modes come out 8 %
+low.
 
-Then pattern them. Pick a solid in the tree and press *Pattern*: how
-many along X, Y and Z, the original included, and how far apart, the
-copies drawn as they are typed. **Pattern** makes one solid, the
-pattern, with the original under it in the tree, and picks it for the
-next step. The copies follow the original: its pencil changes every
-copy, and the pattern's own pencil changes how many there are and how
-far apart. One pattern is a whole grid, so both rails' 26 holes are
-one hole and 13 along X by 2 along Y.
+Then pattern the shapes. Pick a solid in the tree and press *Pattern*.
+The pane asks how many copies along X, Y and Z, counting the original,
+and how far apart, and draws the copies as you type. **Pattern** makes
+one solid, the pattern, with the original under it in the tree, and
+picks the pattern for the next step. The copies follow the original:
+the original's pencil changes every copy, and the pattern's own pencil
+changes how many there are and how far apart. One pattern can be a
+whole grid, so all 26 rail holes are one hole patterned 13 along X by 2
+along Y.
 
 | Pick | How many along X, Y, Z | Spacing along X, Y, Z |
 |---|---|---|
@@ -79,38 +84,43 @@ one hole and 13 along X by 2 along Y.
 | the rail hole | 13, 2, 1 | 1.291667, 5.5, 0 |
 | the upright hole | 5, 3, 1 | 3.875, 1.375, 0 |
 
-That is four windows, 26 holes along the rails and 15 down the
-uprights, 41 in all, in three patterns. Now pick the plate and the
-three patterns (click the plate, Shift-click the last pattern) and
-press *Subtract*: it takes the others from the first in the tree, the
-plate, and its tooltip says so. The result is named for the plate,
-*frame*.
+That gives four windows, 26 holes along the rails and 15 down the
+uprights (41 holes in all), in three patterns. Now pick the plate and
+the three patterns (click the plate, then Shift-click the last pattern)
+and press *Subtract*. Subtract takes the other solids from the first one
+in the tree, here the plate, and its tooltip names which one that is.
+The result is named for the plate, *frame*. *Union* makes the picked
+solids one, *Intersect* keeps only what they share, and *Take Apart*
+undoes a boolean or a pattern so its solids stand on their own again.
 
 The inserts fill the top 5/16 in of each hole. Add the same two
 cylinders again, centered a little higher and shorter, named *inserts*,
-and pattern them the same way:
+and pattern them the same way as the holes:
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
 | rail insert | Cylinder | (−7.75, −2.75, −0.15625) | radius 0.1451, length 0.3125 | inserts |
 | upright insert | Cylinder | (−7.75, −1.375, −0.15625) | radius 0.1451, length 0.3125 | inserts |
 
-Pick the two patterns and press *Union*: one part, *inserts*.
+Pick the two patterns and press *Union* to make one part, *inserts*.
 
 ## 2. Mesh
 
 Pick *frame* and *inserts* in the tree and press *Mesh Solids*. Type
-0.083333 for the element size (a twelfth of an inch: six bricks across
-a member, three across a hole) and press **Mesh**. Each part becomes an
-element group under **Hexes**, the two sharing their nodes around each
-hole. Each hole is meshed as rings of bricks about its circle, with a
-square core where an insert fills it, and the fillets are rounded:
-33,320 bricks, 45,087 nodes.
+0.083333 for the element size (a twelfth of an inch, which is six bricks
+across a member and three across a hole) and press **Mesh**. The pane
+opens on half the thinnest feature as its size. Each part becomes
+an element group under **Hexes**, and the two share their nodes around
+each hole. Each hole is meshed as rings of bricks about its circle, with
+a square core where an insert fills it, and the fillets are rounded. The
+frame comes out at 33,320 bricks and 45,087 nodes. If you change a solid
+and press *Mesh Solids* again, each part's new bricks replace its
+earlier mesh, and its element group and material are kept.
 
 ## 3. Materials and solve
 
-Click the pencil on an element group's row: the Element Groups table
-opens, one row per part. An element group of solids takes a material
+Click the pencil on an element group's row to open the Element Groups
+table, one row per part. An element group of solids takes a material
 and nothing else.
 
 | Element group | Material |
@@ -121,14 +131,14 @@ and nothing else.
 The inserts' numbers are the shared model's: a stiffness tuned to the
 tested frames and a density that gives the frame its measured mass,
 spread from the insert's annulus over its whole hole. Select the
-geometry and press **Solve Modes**; it solves in about half a minute,
-six rigid-body modes at 0 Hz and the elastic ones after them.
+geometry and press *Solve Modes*. It solves in about half a minute,
+with six rigid-body modes at 0 Hz followed by the elastic modes.
 
 ## 4. The wings
 
 Each wing alone is a geometry of its own: a plate with eighteen holes,
-1 in long cylinders through it. For the thick wing (the thin one is
-the same with 0.1243 for the thickness and 0.08975 for every Z):
+made by 1 in long cylinders through it. For the thick wing (the thin
+one is the same with 0.1243 for the thickness and 0.08975 for every Z):
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
@@ -143,23 +153,24 @@ the same with 0.1243 for the thickness and 0.08975 for every Z):
 | the rail hole | 2, 2, 1 | 1.291667, 5.5, 0 |
 | the end hole | 2, 2, 1 | 2.75, 15.5, 0 |
 
-Subtract the three patterns, eighteen holes, from the wing, mesh it
-at 0.125, and give it 6061-T6. It sits 0.0276 in above where the frame's top would be: the
-washers under it on the frame.
+Subtract the three patterns (eighteen holes) from the wing, mesh it at
+0.125, and give it 6061-T6. The wing's underside is 0.0276 in above
+the plane of the frame's top (z = 0), the thickness of the washers that
+go under it on the frame.
 
 ## 5. A wing bolted to the frame
 
-The wing on the frame is one geometry: the frame's steps again (copy
-the *Frame* geometry before meshing it, with Copy, then Paste on the
-project, and rename the copy *Thick Wing on Frame*), then the screws,
-then the wing's steps, then the bolting.
+The wing on the frame is one geometry. Before meshing the *Frame*
+geometry, copy it (Copy, then Paste on the project) and rename the copy
+*Thick Wing on Frame*. In the copy, add the screws, then repeat the
+wing's steps, then bolt the two together.
 
 ### The screws
 
-Each screw is threaded into the insert under it, and
-the steel there is what makes the joint stiff. In the copy, add a
-cylinder over one insert at a screw, named *screws*, and pattern it
-into the four, a pattern named *screws* as the cylinder is:
+Each screw is threaded into the insert under it, and the steel there is
+what makes the joint stiff. In the copy, add a cylinder over one insert
+at a screw, named *screws*, and pattern it into four. The pattern takes
+the cylinder's name, *screws*:
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
@@ -170,13 +181,13 @@ into the four, a pattern named *screws* as the cylinder is:
 | the screw | 2, 2, 1 | 3.875, 5.5, 0 |
 
 Then mesh *frame*, *inserts* and *screws* together at 0.083333. Where
-two parts overlap, the later in the tree takes the bricks, so the four
-inserts under the screws are steel.
+two parts overlap, the later one in the tree takes the bricks, so the
+four inserts under the screws become steel.
 
 ### The wing and its washers
 
-Add the wing's shapes (section 4) and a
-washer under it at each screw, patterned the same way:
+Add the wing's shapes (section 4), and a washer under the wing at each
+screw, patterned the same way as the screws:
 
 | Shape | Add | Center | Size | Name |
 |---|---|---|---|---|
@@ -187,45 +198,44 @@ washer under it at each screw, patterned the same way:
 | the washer | 2, 2, 1 | 3.875, 5.5, 0 |
 
 Pick the wing and the washers, press *Mesh Solids*, type 0.125, tick
-**Keep apart from other groups**, and press **Mesh**: the washers share
-nodes with the wing above them, and their undersides lie on the
-frame's top without sharing a node with it.
+**Keep apart from other groups**, and press **Mesh**. The washers share
+nodes with the wing above them, and their undersides lie on the frame's
+top without sharing any node with it.
 
 ### Bolting
 
-The washers and the frame were meshed apart, so the
-washers' nodes do not land on the frame's. Under **Hexes**, pick the
-element groups *frame*, *inserts*, *screws* and *washers* and press
-*Align Meshes*: each node of the frame's top under a washer is marked
-with a line to the washer node it would move onto (the washers' rings
-are the finer mesh, so the frame's nodes are the ones that move).
-Press **Align**.
-With the same four picked, press *Merge Coincident Nodes* and
-**Merge**: the washers are joined to the frame at the places just
+The washers and the frame were meshed separately, so the washers' nodes
+do not land on the frame's. Under **Hexes**, pick the element groups
+*frame*, *inserts*, *screws* and *washers* and press *Align Meshes*.
+Each node of the frame's top under a washer is marked, with a line to
+the washer node it would move onto; the washers' rings are the finer
+mesh, so the frame's nodes are the ones that move. Press **Align**.
+With the same four groups picked, press *Merge Coincident Nodes* and
+then **Merge**. The washers are joined to the frame at the places just
 aligned, and the wing is bolted on.
 
 ### The screws' heads
 
-Each screw's grams, its head and the washer
-under the head, sit on the wing's top: click the pencil on the
-**Points** row, switch on add mode (**+**), choose *New element group*,
-and click the node of the wing's top nearest each screw. Name the
-group *screw heads* and give it a mass of 1.9986e-5 lbf·s²/in (3.5 g)
-in the Element Groups table, and give *screws* and *washers* 1018
-steel.
+The rest of each screw's mass, its head and the washer under the head,
+sits on the wing's top. Click the pencil on the **Points** row, switch
+on add mode (**+**), choose *New element group*, and click the node of
+the wing's top nearest each screw. Name the group *screw heads* and give
+it a mass of 1.9986e-5 lbf·s²/in (3.5 g) in the Element Groups table.
+Give *screws* and *washers* 1018 steel.
 
-Select the geometry and press **Solve Modes**. The thick wing on the
-frame is 65,325 nodes and solves in about a minute.
+Select the geometry and press *Solve Modes*. The thick wing on the frame
+has 65,325 nodes and solves in under a minute.
 
 ## Sections, tubes and holes
 
 The frame is a block with holes, but a fixture or a stand is more often
 built from rolled shapes. *Add Section* on the **Solids** row adds one
-as a single solid: pick the shape (I-beam, channel, tee, angle,
+as a single solid. Pick the shape (I-beam, channel, tee, angle,
 rectangular tube or round tube), type its dimensions and a length, and
-it runs that length along its own Z, turned like any other solid. The
-dimensions are the ones the beam element's sections take, so a channel
-is its depth, flange width, flange thickness and web thickness:
+it runs that length along its own Z, and can be turned like any other
+solid. The dimensions are the same ones the beam element's sections
+take, so a channel is its depth, flange width, flange thickness and web
+thickness:
 
 | Shape | Dimensions | Laid across its own axes |
 |---|---|---|
@@ -235,20 +245,25 @@ is its depth, flange width, flange thickness and web thickness:
 | rectangular tube | width, height, wall | width along X, height along Y |
 | round tube | outer diameter, wall | |
 
-Its center is the middle of the box it fills. Its pencil opens the pane
-on its dimensions, so a deeper beam is one number changed. A section meshes as the blocks it is made of would:
-its flat faces on grid lines, a round tube as a ring.
+A section's center is the middle of the box it fills. Its pencil opens
+the pane on its dimensions, so making a beam deeper is one number
+changed. A section meshes the way the blocks it is made of would: its
+flat faces on grid lines, and a round tube as a ring.
 
 *Add Hole* adds a hole to subtract from a part. Its center is where it
-enters, on the face it is drilled from, and it runs down its own Z:
-with **Through** ticked it goes out the far side of the part it is cut
-from, and stays through when that part is made thicker; unticked, it
-goes the depth typed. **Counterbore** adds a wider, shallower bore at
-the entry. Pick the part and the hole and press *Subtract*. A hole
-patterned and then subtracted goes through just the same. From a
+enters, on the face it is drilled from, and it runs down its own Z. With
+**Through** ticked it goes out the far side of the part it is cut from,
+and stays through if that part is made thicker; unticked, it goes the
+depth typed. **Counterbore** adds a wider, shallower bore at the entry.
+Pick the part and the hole and press *Subtract*. A hole that is
+patterned and then subtracted goes through in the same way. From a
 script:
 
 ```python
+import visualdynamics
+
+project = visualdynamics.Project('Stand')
+project.new_geometry('Stand', unit='in')
 beam = project.add_solid_section('Stand', 'I-beam', (0, 0, 12), (4, 2, 0.25, 0.2),
                                  24, unit='in')
 plate = project.add_solid_block('Stand', (0, 0, -0.25), (8, 8, 0.5), unit='in')
@@ -259,23 +274,23 @@ base = project.combine_solids('Stand', 'subtract', [plate, hole])
 
 ## What was checked
 
-Three different checks were made.
+The model was checked three ways.
 
 ### The element
 
 The finite element model of the frame shared on the wiki was read with
-the Nastran importer and solved here. Its first ten elastic modes match
-the ones MSC Nastran gives for the same mesh to within a tenth of a
-percent, which checks the brick element and the sparse solver apart
-from the meshing.
+the Nastran importer and solved in Visual Dynamics. Its first ten
+elastic modes match the ones MSC Nastran gives for the same mesh to
+within 0.1 %, which checks the brick element and the sparse solver
+separately from the meshing.
 
 ### The frame and the wings, against test
 
-The wiki lists the first nine modes of five frames, which differ among themselves by
-up to five percent; the frame built here lands within 1 % of frame
-SN003 on six of them and within 4 % on the three in-plane modes. The
-wings' frequencies were fitted from the shared test FRFs with *Fit
-Modes*: the thin wing lands within 1 % of every one, the thick wing
+The wiki lists the first nine modes of five frames, which differ from
+each other by up to 5 %. The frame built here is within 1 % of frame
+SN003 on six of those modes and within 4 % on the three in-plane modes.
+The wings' frequencies were fitted from the shared test FRFs with *Fit
+Modes*: the thin wing is within 1 % on every mode, and the thick wing
 within 3 %.
 
 | Frame mode | Measured, SN003 | Built here |
@@ -292,11 +307,11 @@ within 3 %.
 
 ### The wings on the frame, against the shared models
 
-The finite element models of the same assemblies are shared on the
-wiki, tuned there to test (Linderholt, 2024). Against them, every one
-of the first nine modes built here is within 3 %. The shared models
-join each wing with rigid links between the screws' parts, which their
-author notes may make them slightly stiffer.
+Finite element models of the same assemblies are shared on the wiki,
+tuned there to test (Linderholt, 2024). Each of the first nine modes
+built here is within 3 % of them. The shared models join each wing with
+rigid links between the screws' parts, which their author notes may
+make them slightly stiffer.
 
 | Mode | Thick wing on frame, shared | Built here | Thin wing on frame, shared | Built here |
 |---|---|---|---|---|
@@ -310,12 +325,11 @@ author notes may make them slightly stiffer.
 | 8 | 645.1 | 654.5 | 417.2 | 412.0 |
 | 9 | 676.5 | 681.7 | 497.2 | 493.7 |
 
-A washer merged onto the insert's spread-out material read the thick
-wing's first mode 7 % low; the steel screw threaded into the insert,
-as the hardware has it, is what closed that gap. No property was
-adjusted to bring these numbers closer. None of the wiki's
-files are in this package or its examples; the numbers above are what
-was read from them.
+The steel screw threaded into the insert, as on the hardware, matters:
+with only a washer merged onto the insert's spread-out material, the
+thick wing's first mode reads 7 % low. No property was adjusted to bring
+these numbers closer. None of the wiki's files are in this package or
+its examples; the numbers above are the values read from them.
 
 From a script:
 

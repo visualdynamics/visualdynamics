@@ -1,27 +1,22 @@
 """The scalogram as a surface: time across, frequency back, amplitude up.
 
-The flat picture puts magnitude in color, which is the honest way to
-draw three quantities on two axes and is also the way a level is hardest
-to read — a viridis square is a number only as accurately as the eye can
-match it against a bar. A surface puts the third quantity on a third
-axis, where a ridge is a ridge and a floor is flat, and keeps the color
-as well, so the same value is said twice.
+The flat picture shows magnitude as color, which is the usual way to
+draw three quantities on two axes, but a level read from color is only
+as accurate as the eye can match a shade against the color bar. A
+surface puts the third quantity on a third axis, where a ridge stands
+up and a floor is flat, and keeps the color as well, so each value is
+shown twice. A scalogram is a function of two variables, so it has a
+natural 3-D form, and the wavelet view opens in it (principle 1).
 
-That is principle 1's rule, and it is why 3-D is what this reading opens
-in (Brandon, 2026-08-27): where a reading has a natural 3-D form, it
-gets one, and a scalogram's is about as natural as they come — it is
-already a function of two variables.
+The depth axis is log frequency, spaced as the transform's rows are. A
+wavelet's bandwidth is a constant fraction of its center frequency, so
+the rows are evenly spaced by octave, and drawing them evenly spaced in
+linear frequency would put them in the wrong places. The axis is
+labeled in Hz.
 
-The depth axis is **log frequency**, spaced as the transform's own rows
-are: a wavelet's bandwidth is a constant fraction of its center
-frequency, so the rows are evenly spaced by octave and drawing them
-evenly spaced in linear frequency would put the surface's own rows where
-they do not belong. The axis is labeled back in Hz.
-
-The cone of influence is drawn here too, as a translucent wall standing
-where the edges reach in. On the flat picture it is a veil over the
-suspect region; here it is a surface the ridge passes behind, which is
-the same statement in the geometry the eye is already reading.
+The cone of influence is drawn as two translucent walls where the
+record's ends reach in. On the flat picture it is shading over the
+affected region; here the ridge passes behind it.
 """
 
 from __future__ import annotations
@@ -35,6 +30,8 @@ from ..theme import theme as resolve_theme
 from ._quiet import one_render
 from .waterfall import STAGE
 
+# 3-D is what the wavelet view opens in (Brandon, 2026-08-27).
+
 
 @one_render
 def add_scalogram(plotter: Any, magnitude: np.ndarray, times: np.ndarray,
@@ -42,14 +39,17 @@ def add_scalogram(plotter: Any, magnitude: np.ndarray, times: np.ndarray,
                   omega0: float = wavelet.OMEGA0,
                   time_label: str = 'time [s]',
                   level_label: str = 'amplitude') -> dict[str, Any]:
-    """Draw one channel's scalogram as a surface, and say what it stands for.
+    """Draw one channel's scalogram as a surface, colored by level, with
+    the cone of influence and the frequency labels.
 
     Parameters
     ----------
     plotter : pyvista.Plotter
-        Cleared by the caller, as the waterfall's is.
+        The plotter to draw into, cleared by the caller as for the
+        waterfall.
     magnitude : numpy.ndarray
-        ``(frequencies, times)``. Already magnitude: this draws.
+        Shape ``(frequencies, times)``, already the magnitude; this
+        function only draws it.
     times : numpy.ndarray
         Seconds, one per column.
     frequencies : numpy.ndarray
@@ -57,17 +57,17 @@ def add_scalogram(plotter: Any, magnitude: np.ndarray, times: np.ndarray,
     theme : optional
         The theme name or mapping.
     omega0 : float
-        The wavelet's width, for the cone.
+        The wavelet's width, for the cone of influence.
     time_label, level_label : str
         Axis titles, units included.
 
     Returns
     -------
     dict
-        ``extents`` as ``(t0, t1, f0, f1, z0, z1)`` in real units — the
-        ranges the unit stage stands in for, so anything drawn after
-        this can land at a data position — and ``points``, the vertex
-        count, which is what a size-ceiling test pins.
+        ``extents`` as ``(t0, t1, f0, f1, z0, z1)`` in real units (the
+        ranges the stage stands for, so anything drawn after this can
+        be placed at a data position; the level runs from zero), and
+        ``points``, the vertex count.
     """
     import pyvista as pv
 
@@ -210,10 +210,12 @@ def plot_scalogram_stage(history: Any, channel: int = 0, *,
                          unit_system: Any = None,
                          screenshot: str | None = None,
                          theme: Any = None, show: bool = True) -> Any:
-    """One channel's scalogram as a surface — the reading the app's
-    wavelet view opens in — shown interactively or rendered to
-    `screenshot`. The settings are `plot.plot_scalogram`'s, read the
-    same way (`core.wavelet.reading`).
+    """One `channel`'s scalogram as a surface, as the app's wavelet view
+    first shows it, shown interactively or rendered to `screenshot`.
+    The settings (`low`, `high`, `per_octave`, `omega0`) are those of
+    `plot.plot_scalogram` and are read the same way
+    (`core.wavelet.reading`). Returns the image array when rendering to
+    a file, and otherwise the plotter.
 
         from visualdynamics.viz.scalogram import plot_scalogram_stage
         plot_scalogram_stage(history, screenshot='scalogram-3d.png')

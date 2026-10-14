@@ -1,49 +1,45 @@
-"""Femap Neutral files (.neu) — geometry and modes, read only.
+"""Read Femap neutral files (.neu): geometry and normal modes. Neutral
+files are not written.
 
-Phase 3 of the FEM interchange arc (PLAN.md). The neutral file is
-Femap's own text interchange: blocks bracketed by `-1` lines, each
-opening with its numeric ID. The layouts here were pinned against
-real files (a Femap 2020 model export, neutral version 11.1, and a
-translator-written results file, version 5.0) on 2026-08-21; no
-other tool's source was consulted. Writing waits until someone
-needs it.
+The neutral file is Femap's text interchange format: blocks bracketed
+by `-1` lines, each opening with its numeric ID. The layouts here were
+checked against real files, a Femap 2020 model export (neutral version
+11.1) and a results file written by a translator (version 5.0).
 
 What is read:
 
-- **403 (nodes)**: one line per node — id, definition and output
-  coordinate system, layer, color, six permanent constraints, x, y,
-  z, type. Coordinates are stored *in the definition system*, so a
-  node with a nonzero definition system needs block 405 resolved —
-  and no file here has shown 405's record layout (every sample's
-  block was empty), so such a node refuses by name rather than
-  placing it somewhere it is not. Scalar nodes (type 1) are skipped
-  knowingly, as everywhere else in this package.
+- 403, nodes: one line per node with the id, definition and output
+  coordinate systems, layer, color, six permanent constraints, x, y, z
+  and type. Coordinates are stored in the definition system, so a node
+  with a nonzero definition system would need block 405 (coordinate
+  systems), whose record layout no sample file has shown. Such a node
+  is refused by name instead of being placed in the wrong position.
+  Scalar nodes (type 1) are skipped, as everywhere else in this
+  package.
+- 404, elements: a fixed seven-line record in the version checked, a
+  header (14 fields, topology fifth), nodes 1-10, nodes 11-20,
+  orientation, two offset lines and a trailing list line. Every line's
+  field count is checked, and a mismatch is refused with the neutral
+  version named, because a version that changed the record would
+  otherwise be misread without an error. Rigid, MultiList, Contact and
+  Weld elements add list records that break the fixed record length,
+  so they are refused by name; skipping them is not safe when the
+  record length changes.
+- 450, output sets, with 451 or 1051, output data vectors: only
+  normal-modes sets (analysis type 2) become shapes. The set's value is
+  the frequency in Hz, and the nodal translation vectors (2, 3, 4) and
+  rotation vectors (6, 7, 8) become the ShapeSet's columns. Other
+  analyses' displacement vectors and all stress and strain vectors are
+  skipped, since this path is for correlating mode shapes. 451 lists
+  one `id, value` pair per line; 1051 packs runs of `first, last,
+  values...`; both end at a `-1`. The ShapeSet is marked unscaled,
+  because the neutral file records min/max statistics but not the
+  normalization, and its damping is zero.
 
-- **404 (elements)**: a fixed seven-line record in the vintage
-  pinned — header (14 fields, topology fifth), nodes 1-10,
-  nodes 11-20, orientation, two offset lines, a trailing list line.
-  Every line's field count is checked and a mismatch refuses naming
-  the neutral version, because an unknown vintage that changed the
-  record shape would otherwise be misread silently. Rigid, MultiList,
-  Contact and Weld topologies append extra list records that break
-  the fixed stride, so they refuse by name; ordinary constraint
-  handling (skip knowingly) is not safe when the record length
-  changes underneath the reader.
-
-- **450 (output sets) + 451/1051 (output data vectors)**: only
-  normal-modes sets (analysis type 2) become shapes — the set's
-  value is the frequency in Hz, and the nodal translation vectors
-  (2, 3, 4) and rotation vectors (6, 7, 8) become the ShapeSet
-  columns. Other analyses' displacement vectors, and all stress and
-  strain vectors, are skipped knowingly: this is a structural
-  dynamics correlation path, not a postprocessor. 451 lists one
-  `id, value` pair per line; 1051 packs runs of `first, last,
-  values...` — both end at a `-1` sentinel. The ShapeSet arrives
-  unscaled: the neutral records min/max statistics, never the
-  normalization convention.
-
-A neutral file is unitless; `length_unit=` declares on arrival,
-exactly as for a bulk deck or a universal file without dataset 164.
+A file with both returns a dict keyed 'geometry' and 'shapes'; a file
+with one returns it directly; a file with neither is refused. A neutral
+file has no units, so `length_unit` declares the unit of the positions,
+as for a bulk deck or a universal file without a dataset 164.
 """
 
 from __future__ import annotations
@@ -54,6 +50,10 @@ from typing import Any
 import numpy as np
 
 from .sniffing import text_head
+
+# Phase 3 of the FEM interchange work (PLAN.md). The layouts were checked
+# against the two real files on 2026-08-21, written from those files and
+# no other tool's source. Writing waits until someone needs it.
 
 # Femap element topology -> visualdynamics element type code
 _TOPOLOGY = {

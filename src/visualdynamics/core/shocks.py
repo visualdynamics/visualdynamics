@@ -1,42 +1,42 @@
-"""Finding the shocks in a recording, and the window to analyze each in.
+"""Find the shocks in a recording, and the window to analyze each one in.
 
-A shock test is a series of events in one continuous stream: the
-article sits quiet, something hits it, it rings down, and it sits quiet
-again until the next one. Nothing in the file says where they were.
-`Averaging` answers "which stretch of this record is the test?" for a
-stationary run; this answers "which stretches are the events?" for a
-transient one, and there is more than one answer per record.
+A shock test is a series of events in one continuous record: the
+article is quiet, something hits it, it rings down, and it is quiet
+again until the next one. Nothing in the file says where the events
+are. `detect` finds the one stretch of a stationary run to average;
+this finds every event in a transient run, and a record usually holds
+more than one.
 
-The shape of the problem is different enough from averaging to want its
-own algorithm, but the first move is the same: compress the record to
-one level per hop, across all channels at once, and decide everything
-afterwards on that short series. A shock record can be minutes long at
-50 kHz, and no amount of care about thresholds is worth a second pass
-over the samples.
+As in `detect`, the record is first compressed to one level per hop
+(1 ms by default) across all channels at once, and everything after
+that is decided on that short series. A shock record can be minutes
+long at 50 kHz, so every later step works on thousands of points
+instead of millions of samples.
 
-Three things make the detection robust rather than merely simple:
+Three choices set how the events are found:
 
-- **A Schmitt trigger, not a threshold.** One threshold chatters: a
+- The trigger has hysteresis (a Schmitt trigger). An event starts when
+  the level rises `ARM` dB (12) over the floor and ends only when it
+  falls back under `RELEASE` dB (6), so a ringdown is followed down
+  instead of being cut where it dips. With a single threshold, a
   ringdown crosses it on every cycle and one event comes back as forty.
-  An event starts when the level rises `ARM` dB over the floor and does
-  not end until it falls back under `RELEASE`, so the decay is followed
-  down instead of being chopped where it happens to dip.
-- **The floor is a low quantile, not the mean.** Shocks are sparse and
-  enormous; averaging them into the floor they are measured against
-  raises it by tens of dB. A quantile low enough to sit in the quiet is
-  unmoved by how hard, or how many, the shocks were.
-- **Everything is measured against the floor, not against the peak.**
-  A shock series is usually walked up in level, so the last event can
-  be ten times the first. Thresholds relative to each event's own peak
-  would find them all and give them different windows for no physical
-  reason; relative to the floor, they get the window their ringdown
-  actually needs.
+- The floor is a low quantile of the levels (the 10th percentile).
+  Shocks are short and large, and averaging them into the floor would
+  raise it by tens of dB; a low quantile stays in the quiet however
+  large or numerous the shocks are.
+- The thresholds are measured from the floor, not from each event's
+  peak. A shock series is usually run up in level, so the last event
+  can be ten times the first, and thresholds relative to each peak
+  would give the events different windows for no physical reason.
 
-The window is not the event. It reaches back before the rise, because
-an SRS oscillator has to start from rest and a window that opens mid-
-pulse invents a step that was never there, and it reaches past the
-release, because the ringdown that is still above the floor is the part
-the low-frequency oscillators are still answering.
+The window is longer than the event at both ends. It opens before the
+rise (by `LEAD`, 0.15 of the event's length), because an SRS oscillator has
+to start from rest, and a window that opens partway into the pulse adds
+a step that was never there. It closes past the release, once the
+loudest channel's ringing has settled `SETTLED` dB (30) under its peak
+or reached the quiet, because the low-frequency oscillators are still
+responding to the ringdown above the floor. By default every event in
+one record gets the same window length (`COMMON_LENGTH`).
 """
 
 from __future__ import annotations
@@ -159,12 +159,12 @@ MAX_EVENTS = 200
 class Shock:
     """One event's analysis window: when it opens and how long it runs.
 
-    Two numbers in seconds, both from the start of the record, and
-    everything else derived. The window rather than the event: it
-    already includes the lead-in and the tail, because what an SRS is
-    computed from is the window and there is nothing to be gained by
-    storing the event and re-deriving the window every time it is
-    wanted.
+    `start` and `duration` are in seconds, `start` from the beginning
+    of the record; everything else is derived from the two. The window
+    already includes the lead-in and the tail, since an SRS is computed
+    from the window, and storing the window saves working it out again
+    each time it is used. A window with no length, or one that starts
+    before the record, is refused.
     """
 
     start: float
@@ -180,26 +180,34 @@ class Shock:
 
     @property
     def stop(self) -> float:
+        """When the window closes, in seconds from the start of the
+        record."""
         return self.start + self.duration
 
     def start_sample(self, sample_rate: float) -> int:
+        """The index of the sample the window opens on, at
+        `sample_rate`."""
         return round(self.start * sample_rate)
 
     def samples(self, sample_rate: float) -> int:
-        """How many samples the window holds — at least two, since one
-        sample is not a transient."""
+        """How many samples the window holds at `sample_rate`, at least
+        two, since one sample is not a transient."""
         return max(round(self.duration * sample_rate), 2)
 
     def bounds(self, sample_rate: float) -> tuple[int, int]:
-        """(first, last) sample indices, last exclusive."""
+        """(first, last) sample indices at `sample_rate`, last
+        exclusive."""
         first = self.start_sample(sample_rate)
         return first, first + self.samples(sample_rate)
 
     def fits(self, samples: int, sample_rate: float) -> bool:
+        """Whether the window ends inside a record of `samples`
+        samples."""
         return self.bounds(sample_rate)[1] <= samples
 
     def clipped(self, samples: int, sample_rate: float) -> Shock:
-        """This window pulled inside the record it belongs to."""
+        """This window moved and cut to lie inside a record of `samples`
+        samples, at least two samples long."""
         first, last = self.bounds(sample_rate)
         first = max(min(first, samples - 2), 0)
         last = min(max(last, first + 2), samples)
@@ -213,19 +221,23 @@ class Shock:
 
 
 def hop_for(sample_rate: float, seconds: float = HOP_SECONDS) -> int:
-    """Samples per hop — at least one, whatever the rate."""
+    """Samples per hop of `seconds` at `sample_rate`, at least one."""
     return max(round(float(seconds) * float(sample_rate)), 1)
 
 
 def envelope(history: TimeHistory, seconds: float = HOP_SECONDS
              ) -> tuple[np.ndarray, int]:
-    """(levels in dB, hop in samples): the record as a short series.
+    """(levels in dB, hop in samples): the record compressed to one
+    level per hop of `seconds`.
 
-    The same compression the averaging detector uses — median across
-    channels so one bad channel is a vote and not the answer, mean
-    removed within each hop so a DC offset is not read as level — but
-    at a hop measured in milliseconds rather than in seconds, because
-    what is being looked for lasts milliseconds.
+    This is the compression the averaging detector uses
+    (`detect.hop_levels`): the median across channels, so one bad
+    channel does not decide the answer, with the mean removed within
+    each hop, so a DC offset is not read as level. The hop is
+    milliseconds instead of a large fraction of a second, because the
+    events last milliseconds. A channel counts as live if it carries
+    power anywhere, since a shock record's channels are quiet most of
+    the time.
     """
     hop = hop_for(history.sample_rate, seconds)
     # sparse: a shock record's channels are quiet most of the time, and
@@ -235,15 +247,17 @@ def envelope(history: TimeHistory, seconds: float = HOP_SECONDS
 
 def loudest(history: TimeHistory, seconds: float = RING_HOP
             ) -> np.ndarray:
-    """The loudest channel's level per hop, in dB, at the follow hop.
+    """The loudest channel's level per hop of `seconds`, in dB (25 ms by
+    default, `RING_HOP`).
 
-    The series the ringdown is followed down. Detection stays on the
-    median — one bad channel is a vote, not the answer — but an SRS is
-    one spectrum *per channel*, so one channel still ringing under
-    twenty quiet ones is a channel whose spectrum a median-sized
-    window cuts short. The maximum is the series that can see it, and
-    the coarse hop (`RING_HOP`) is what lets it see slow ringing at
-    all.
+    The end of each window is found on this series. Detection uses the
+    median across channels, but an SRS is one spectrum per channel,
+    and a window sized on the median would cut short the spectrum of
+    one channel still ringing under twenty quiet ones. The maximum
+    across channels shows that channel. The coarse hop is what lets the
+    series show slow ringing at all: a hop's level is the variance
+    within the hop, so content much slower than the hop is removed with
+    the mean.
     """
     hop = hop_for(history.sample_rate, seconds)
     return hop_levels(history.ordinate, hop, sparse=True, loudest=True)
@@ -251,16 +265,15 @@ def loudest(history: TimeHistory, seconds: float = RING_HOP
 
 def floor_of(level: np.ndarray, quantile: float = FLOOR_QUANTILE,
              dynamic: float = DYNAMIC) -> float | None:
-    """The quiet the events are measured against.
+    """The quiet level the events are measured against, in dB, or None
+    for an empty series.
 
-    A quantile rather than a mean or a median: shocks are sparse and
-    enormous, and any average of a record containing them sits well
-    above the quiet between them.
-
-    Never more than `dynamic` dB under the loudest hop. That is the
-    silence guard described at `DYNAMIC`, and it is why a synthesized
-    record whose gaps are exact zeros still gets thresholds that mean
-    something.
+    The floor is the `quantile` percentile of the levels (10 by
+    default), not a mean or a median: shocks are short and large, and
+    any average of a record holding them sits well above the quiet
+    between them. It is never more than `dynamic` dB (100) under the
+    loudest hop, so a synthesized record whose gaps are exact zeros
+    still gets thresholds that mean something (see `DYNAMIC`).
     """
     if level.size == 0:
         return None
@@ -352,16 +365,15 @@ def _windowed(runs: list[tuple[int, int]], hops: int, loud: np.ndarray,
 
 
 def uniform(shocks: Sequence[Shock], places: int = 6) -> bool:
-    """Whether these windows are all one length.
+    """Whether these windows are all one length, compared to `places`
+    decimal places of a second.
 
-    The mode is read off the windows rather than stored beside them. A
-    second copy of it in the project file is a copy that can disagree
-    with the lengths it describes, and then the checkbox and the data
-    say different things about the same series — so there is one place
-    it lives, and it is the series.
-
-    Rounded, because the lengths are built by rounding to samples and
-    two windows meant to match can differ in the last bit.
+    The common-length mode is read off the windows instead of being
+    stored beside them. A stored copy could disagree with the lengths
+    it describes, and then the checkbox and the data would say
+    different things about the same series. The lengths are rounded
+    because they are built by rounding to samples, and two windows
+    meant to match can differ in the last bit.
     """
     lengths = {round(s.duration, places) for s in shocks}
     return len(lengths) == 1
@@ -375,15 +387,18 @@ def with_added(shocks: Sequence[Shock],
                limit: float) -> tuple[Shock, ...]:
     """The series with one more window, placed where there is room.
 
-    The Add button's rule (Brandon, 2026-08-24): the detector misses
-    events the user knows about — below the arm threshold, or close
-    under a louder neighbor — and Remove's rationale cuts both ways.
-    The new window takes the series' own length (they are usually
-    uniform; the median otherwise, a tenth of the record when there
-    is nothing to copy), and stands in the middle of the largest
-    unwindowed stretch, shrunk when even the largest gap is tighter
-    than that. The caller drags or types it into place from there.
+    This is what the Add button does: the detector can miss events the
+    user knows about, below the arm threshold or close under a louder
+    neighbor. `limit` is the record's length in seconds. The new window
+    takes the median length of the series (the common length, when they
+    share one), or a tenth of `limit` when there are no windows yet. It
+    is centered in the largest stretch with no window in it, and is
+    never longer than 90 % of that stretch. With no room anywhere the series comes back unchanged.
+    The caller drags or types the new window into place from there.
     """
+    # The Add button's rule (Brandon, 2026-08-24): the detector misses
+    # events the user knows about, and the reasoning that gave the
+    # user Remove applies the other way as well.
     ordered = tuple(sorted(shocks, key=lambda shock: shock.start))
     if ordered:
         durations = sorted(shock.duration for shock in ordered)
@@ -410,16 +425,19 @@ def drag_settled(shocks: Sequence[Shock], index: int, low: float,
                  limit: float | None) -> tuple[Shock, ...] | None:
     """What a drag of one window's edges means for the whole series.
 
-    One implementation for both editors — the 2-D regions and the
-    stage's handles commit through this. *Which* window moved is
-    always just the dragged one; what can be shared is the *length*
-    (an analysis choice, not a measurement), so a resize under a
-    shared length regrows every window, while a move never resizes a
-    neighbor. Either way the result is stopped at its neighbors.
+    `index` is the dragged window, and `low` and `high` are its new
+    edges in seconds. `common` says the series is held at one length,
+    and `limit` is the record's length in seconds, or None. The 2-D
+    regions and the 3-D stage's handles both commit through this. Only
+    the dragged window moves. A resize under a common length gives
+    every window the new length (`same_length`), since the length is an
+    analysis choice and not a measurement; a move, or any change
+    without a common length, holds the dragged window inside the gap
+    its neighbors leave (`held_apart`).
 
     Returns the settled series, or None when the drag changed nothing
-    or asked for something the series has no room for — the caller
-    puts its handles back.
+    or asked for something the series has no room for, in which case
+    the caller puts its handles back.
     """
     if index >= len(shocks) or high - low <= 0:
         return None
@@ -440,22 +458,20 @@ def held_apart(shocks: Sequence[Shock],
                moved: int | None = None) -> tuple[Shock, ...]:
     """The windows with no two of them sharing a sample.
 
-    `_windowed` guarantees this at detection, but a window can also be
-    dragged on the plot or typed into the table, and neither of those
-    went through it — so one shock's window could be pulled over its
-    neighbor and its spectrum computed from the neighbor's ringdown.
-    This is where that invariant is restated, once, for every path that
-    can break it.
+    Detection already keeps the windows apart, but a window can also be
+    dragged on the plot or typed into the table, and without this one
+    shock's window could be pulled over its neighbor and its spectrum
+    computed from the neighbor's ringdown. This is the one place that
+    rule is applied after detection.
 
-    `moved` is which window the edit was aimed at, and it decides who
-    yields. Given it, that window is held inside the gap its untouched
-    neighbors leave: drag an edge into the next event and it stops at
-    the edge, which is what a person pulling it expects to happen and
-    would not expect of the event they did not touch. Without it — a
-    list arriving from somewhere with no single author — the earlier
-    window of an overlapping pair is cut back to where the later one
-    opens. Neither rule moves a window that was not in the way, so
-    neither can cascade down the record from one bad edit.
+    `moved` is the index of the window the edit was aimed at, and it
+    decides which window gives way. Given it, that window is held inside
+    the gap its neighbors leave: an edge dragged into the next event
+    stops at that event's edge, and the event that was not touched does
+    not move. Without it, for a list that did not come from one edit,
+    the earlier window of each overlapping pair is cut back to where the
+    later one opens. Neither rule moves a window that was not in the
+    way, so one bad edit cannot cascade down the record.
     """
     out = list(shocks)
     if len(out) < 2:
@@ -479,20 +495,19 @@ def held_apart(shocks: Sequence[Shock],
 
 def same_length(shocks: Sequence[Shock], length: float,
                 limit: float | None = None) -> tuple[Shock, ...]:
-    """Every window given `length`, each keeping its own start.
+    """Every window given `length`, in seconds, each keeping its own
+    start.
 
-    What a *resize* does to a series held at one length: pulling any
-    edge sets the length for all of them, and they grow together until
-    the closest pair runs out of room. Clamping only the window that
-    collided and leaving the rest is how a uniform series quietly stops
-    being uniform, which is the failure the mode exists to prevent, so
-    the cap is shared too.
-
-    The starts are not touched, and that is the whole division of
-    labor: a start belongs to the event it was measured from, so
-    moving one window is moving one window, and only the length — the
-    part that is an analysis choice rather than a measurement — is held
-    in common.
+    This is what a resize does to a series held at one length: pulling
+    any edge sets the length for all of them. The length is capped by
+    the closest pair of starts, and by `limit` (the record's length in
+    seconds, when given) less the last start. Capping only the window
+    that collided would leave the series no longer uniform, which is
+    what the mode exists to prevent, so the cap is shared. The starts
+    are not touched, because a start belongs to the event it was
+    measured from; only the length, an analysis choice, is held in
+    common. When the cap leaves no length, the windows come back
+    unchanged.
     """
     out = list(shocks)
     if not out:
@@ -517,13 +532,21 @@ def find(history: TimeHistory, hop_seconds: float = HOP_SECONDS,
          common: bool = COMMON_LENGTH) -> tuple[Shock, ...]:
     """The shocks in a record, as the windows to analyze them in.
 
-    Empty when there are none — which is the right answer for a random
-    vibration run, where the level never rises `arm` dB over its own
-    quiet because there is no quiet.
+    The defaults are the module's constants: `hop_seconds` is the
+    detection hop in seconds (`HOP_SECONDS`), `arm` and `release` are dB
+    over the floor, `quantile` is the floor's percentile, events closer
+    than `merge` seconds are joined, `lead` and `tail` are fractions of
+    each event's length, windows shorter than `minimum` seconds are
+    dropped, and at most `most` windows are returned.
 
-    `common` gives every event a window of one length, which is the
-    default and the reasoning is at `COMMON_LENGTH`. Pass False for a
-    record whose events are not the same kind of event.
+    Empty when there are none, which is the right answer for a random
+    vibration run: its level never rises `arm` dB over its own floor
+    because there is no quiet in it.
+
+    `common` (the default, `COMMON_LENGTH`) gives every event the length
+    of the longest window, capped so that no two windows overlap and
+    none runs past the record. Pass False for a record whose events are
+    not the same kind of event.
     """
     level, hop = envelope(history, hop_seconds)
     floor = floor_of(level, quantile)
@@ -558,12 +581,12 @@ def find(history: TimeHistory, hop_seconds: float = HOP_SECONDS,
 
 
 def suggest(history: TimeHistory, **kwargs: Any) -> tuple[Shock, ...]:
-    """`find`, or the whole record when it finds nothing.
+    """`find`, or one window over the whole record when it finds nothing.
 
-    What a caller wanting *something* to analyze asks for. A record with
+    This is for a caller that needs something to analyze. A record with
     no quiet in it has no shock the detector can point at, but it is
-    still a transient somebody wants a spectrum of, and the honest
-    fallback is the record itself rather than nothing.
+    still a transient someone wants a spectrum of. Keyword arguments go
+    to `find`. Empty only for a record of fewer than two samples.
     """
     found = find(history, **kwargs)
     if found:

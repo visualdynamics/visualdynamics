@@ -1,27 +1,31 @@
-"""The frames, drawn on the record they will be cut from.
+"""Averaging frames drawn on the time history they will be cut from.
 
-A list of five numbers does not tell you whether the analysis sits on
-the part of the record you meant. Drawn, it does.
+A list of frame start times does not show whether the analysis covers
+the part of the record that was intended, so the frames are drawn on
+the plot.
 
-Above the trace is the rail: one slot per frame carrying that frame's
-window, shaded under the curve, so the window is read where it is set
-rather than over the data it is applied to. Frames that overlap cannot
-share a slot without running through each other, so each takes the
-lowest slot whose last frame has already ended — one line at no
-overlap, two at half, four at three quarters.
+Above the trace is a rail: one row of slots, each frame's window drawn
+in its slot and shaded under the curve, so the window is shown where it
+is set and not over the data it is applied to. Frames that overlap
+cannot share a row without their windows running through each other,
+so each takes the lowest row whose last frame has already ended. That
+gives one row at no overlap, two at half overlap and four at three
+quarters.
 
-Under each frame's slot, its band falls to the foot of the plot. The
-height is what says which slot a frame is in, so where two frames share
-record you see two heights and the step between them: the overlap has a
-shape rather than only a shade.
+Under each frame's slot, a band runs down to the bottom of the plot.
+Its height shows which row the frame is in, so where two frames
+overlap there are two heights and a step between them. Each band's
+shading follows its frame's window, so it shows the weight each part
+of the record carries in the average.
 
-The span is one draggable region. Take it by the middle to slide the
-analysis along the record; take it by an edge to add or drop frames —
-and only whole frames, because half a frame is not an average, so the
-edge snaps back to where the last whole frame ends.
+The span of all the frames is one draggable region. Dragging its middle
+slides the analysis along the record; dragging an edge adds or removes
+frames. Only whole frames are used, so when the drag ends the edge
+moves to the end of the last whole frame.
 
-A capture the controller already cut into frames has nothing to drag:
-the frame is the record, and the region is drawn locked around it.
+A capture the controller already cut into frames has nothing to drag,
+because the frame is the record. For it the region is drawn with
+`locked` and cannot be moved.
 """
 
 from __future__ import annotations
@@ -57,12 +61,19 @@ MARK_Z = 20
 
 
 class AveragingOverlay(QObject):
-    """The averaging parameters as marks on a time history plot.
+    """Averaging parameters drawn as marks on a time history plot.
 
-    Owns every item it adds and takes them all away again on `remove`,
-    so a redraw cannot leave a band behind. It reports a drag and does
-    not act on it: what a new averaging *means* — storing it, redrawing
-    the table — belongs to whoever put the overlay up.
+    The overlay owns every item it adds and removes all of them in
+    `remove`, so a redraw cannot leave a band behind. While it is up it
+    raises the top of the plot's y range to make room for the rail, and
+    `remove` gives the plot its own range back. A finished drag is
+    reported through `changed` and not acted on here: storing the new
+    averaging and updating the table are left to whatever created the
+    overlay.
+
+    `samples` is the record's length in samples, which a drag cannot
+    pass, and `origin` is the time of its first sample, the zero the
+    averaging's start counts from.
     """
 
     #: the user dragged; here is the averaging that describes where it is
@@ -358,7 +369,7 @@ class AveragingOverlay(QObject):
         self.region = None
 
     def remove(self) -> None:
-        """Take every mark off the plot. The overlay is finished after."""
+        """Remove every mark from the plot. The overlay cannot be used after this."""
         try:
             self.plot.getViewBox().sigYRangeChanged.disconnect(self._rescale)
         except (RuntimeError, TypeError):
@@ -378,7 +389,7 @@ class AveragingOverlay(QObject):
             pass
 
     def set_averaging(self, averaging: Averaging) -> None:
-        """Draw a different averaging — what the table's edits arrive as."""
+        """Draw a different averaging, such as one edited in the table, without emitting `changed`."""
         self.averaging = averaging
         self._redraw_marks()
         if self.region is not None:

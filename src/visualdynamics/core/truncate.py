@@ -1,26 +1,25 @@
-"""Truncating a record to the stretch that matters.
+"""Truncating a time history to a start and stop time.
 
 A recording rarely starts and stops where the test does: there is a
 lead-in before the excitation reaches level, a tail after it stops,
-sometimes a false start at the front of the file. The truncation names
-the stretch to keep — a start and a stop, in seconds — and Truncate
-Data makes the record that holds only that stretch, every channel cut
-at the same two instants so the set stays one record.
+and sometimes a false start at the front of the file. A `Truncation`
+gives the part to keep as a start and a stop in seconds, and Truncate
+Data makes a record that holds only that part, with every channel cut
+at the same two times so the channels stay one record.
 
-**The clock is kept.** A truncated record's samples keep their
-measured instants rather than being re-zeroed: the sample recorded at
-t = 1.25 s still says 1.25 s, so events line up with the recording
-they came from, with the setup log, and with any untruncated channel
-set beside them. A re-zeroed clock would be a second time base to
-reconcile, silently.
+The time values are kept. A truncated record's samples keep their
+measured times rather than being shifted to start at zero: the sample
+recorded at t = 1.25 s is still at 1.25 s, so events line up with the
+original recording, with the setup log, and with any untruncated
+channels beside them. Shifting to zero would make a second time base
+to reconcile.
 
-**No marks are carried.** `core.filters` carries the averaging frames
-and shock windows onto what it makes because the abscissa is the same
-and the marks still say what they said. Here the abscissa changed —
-that is the whole point — and a frame or a window can refer to samples
-that no longer exist, so the honest answer is a clean record: re-find
-the shocks, re-frame the averaging, on the data that is actually
-there.
+Averaging frames and shock windows are not carried over.
+`core.filters` carries them onto what it makes because its abscissa is
+unchanged, so they still refer to the same samples. Truncation changes
+the abscissa, and a frame or a window could refer to samples that no
+longer exist, so the truncated record has neither; find the shocks and
+set the averaging again on the truncated data.
 """
 
 from __future__ import annotations
@@ -36,15 +35,18 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 @dataclass(frozen=True)
 class Truncation:
-    """The stretch a record is cut to: start and stop, in seconds.
+    """The part of a record to keep: start and stop, in seconds.
 
-    On the record's own clock — which may not begin at zero, since a
-    truncated record keeps its measured instants — so a second cut of
-    an already-cut record means what it says.
+    Both times are on the record's own time axis, which may not begin
+    at zero (a truncated record keeps its measured times), so a second
+    truncation of an already truncated record uses the times shown for
+    it. Both must be finite and `start` must be less than `stop`, or it
+    raises ValueError.
 
-    Frozen like `Averaging` and `Filtering`, and for the same reason:
-    the settings ride the history, the staleness fingerprint is their
-    fields, and a mutable setting would be a fingerprint that lies.
+    Frozen like `Averaging` and `Filtering`, for the same reason: the
+    settings are stored with the history, and the check for out-of-date
+    results compares their fields, which would be unreliable if the
+    settings could change in place.
     """
 
     start: float
@@ -63,19 +65,24 @@ class Truncation:
         object.__setattr__(self, 'stop', stop)
 
     def describe(self) -> str:
-        """The cut in words — 'keeping 0.5 to 2 s'. One implementation:
-        the status line and the staleness story both say it this way."""
+        """The truncation in words, for example 'keeping 0.5 to 2 s'.
+
+        The status line and the out-of-date message both use this
+        function, so they describe it the same way."""
         return f'keeping {self.start:g} to {self.stop:g} s'
 
 
 def truncate(data: TimeHistory, truncation: Truncation) -> TimeHistory:
-    """The record between the truncation's start and stop, inclusive
-    at both ends, every channel cut at the same two instants.
+    """A new record holding the samples between the truncation's start
+    and stop, inclusive at both ends, with every channel cut at the
+    same two times.
 
-    A sample is kept when its own instant lies inside the span — read
-    off the abscissa, so an unevenly sampled record cuts correctly
-    too. Refuses a span holding fewer than two samples: one sample has
-    no sample rate, and no downstream reading can be made from it.
+    A sample is kept when its time on the abscissa is inside the span,
+    so an unevenly sampled record is cut correctly too. The records'
+    DOFs, quantities, units and comments are copied unchanged. Raises
+    ValueError for a span holding fewer than two samples, because one
+    sample has no sample rate and nothing later can be computed from
+    it.
     """
     from .data import TimeHistory
 

@@ -1,43 +1,59 @@
-"""Nastran bulk data (.bdf/.dat/.nas) — geometry, read and written.
+"""Read and write Nastran bulk data decks (.bdf, .dat, .nas) as geometry.
 
-The bulk deck is the lingua franca of the FEM world this tool's
-measurements get correlated against, and its card formats are public
-knowledge documented in every Nastran vendor's reference guide and
-decades of literature. This reader is written from those card layouts;
-no other tool's source was consulted.
+The bulk data card formats are documented in every Nastran vendor's
+reference guide, and this reader is written from those card layouts.
+INCLUDE files are read relative to the deck. Lines before BEGIN BULK
+(executive and case control) and after ENDDATA are ignored; a file with
+neither marker is read as all bulk data. Small-field, large-field and
+free-field (comma) cards are all read.
 
-What is read is the *geometry*: GRID points with their definition and
-displacement systems, CORD2R/C/S coordinate systems (chained
-references resolved), the connection elements the vocabulary knows,
-and PLOTEL — Nastran's own display-only line — as tracelines. What is
-deliberately not read, and why:
+What is read:
 
-- **Properties, materials, loads, constraints, control decks** — a
-  bulk file describes an analysis; only its mesh is geometry. These
-  are skipped by card name, silently, the way a UNV reader skips the
-  datasets it was not asked about.
-- **Rigid elements (RBE2/RBE3/RBAR/RROD) and MPCs** are constraints
-  wearing element names — they carry no mesh and are skipped.
-- **CORD1R/C/S** (systems defined by grid points) refuse loudly: a
-  guessed frame places every node in it wrongly, and the cards are
-  rare enough that a refusal names the fix (redefine as CORD2).
-- Any other `C`-prefixed connection card refuses loudly with its
-  name, because an element silently dropped is a mesh that lies.
+- GRID points, with their definition (CP) and displacement (CD)
+  coordinate systems. Positions are converted to the basic frame.
+- CORD2R, CORD2C and CORD2S coordinate systems, with chains of
+  references resolved. A system defined in a cylindrical or spherical
+  system is refused.
+- The connection elements CROD, CBAR, CBEAM, CTRIA3, CTRIA6, CQUAD4,
+  CQUAD8, CTETRA, CPENTA, CHEXA and CPYRAM, one element group per
+  property id. The node count picks the variant (CTETRA with 4 grids is
+  a tet4, with 10 a tet10).
+- PSOLID, PSHELL and MAT1, as the properties of each element group: the
+  material, and a shell's thickness. A group whose cards are not all in
+  the deck has no properties.
+- CONM2 point masses, one element group per distinct mass. A CONM2 with
+  an offset or inertia is read as an element with no properties.
+- CELAS1 (with its PELAS) and CELAS2 springs, one element group per
+  distinct stiffness and direction. A spring joining two different
+  components, or acting on a scalar point, is refused.
+- SPC and SPC1 supports, one ground group per distinct set of
+  components. A deck with more than one SPC set, or an SPC that
+  enforces a displacement, is refused.
+- PLOTEL, Nastran's display-only line, as one drawn line.
 
-A deck is unitless by construction, so imports arrive raw and
-`length_unit=` declares — exactly the universal-file-without-164
-convention.
+What is not read:
 
-Writing is the mirror: coordinate systems as CORD2, grids as
-large-field GRID* (full precision — small-field's eight characters
-are why so many decks in the wild have five-digit coordinates),
-elements on their own cards with PID 1 throughout, and tracelines as
-PLOTEL chains. Properties are an analyst's statement about the
-structure, not the geometry's to invent, so the written deck is
-interchange geometry: it meshes viewers and preprocessors, and it
-would need PSHELL/PSOLID cards added before Nastran itself would run
-it — the docstring of `save` says so rather than leaving it to be
-discovered.
+- Loads, other property and material cards, and control cards. These
+  describe the analysis, not the mesh, and are skipped by card name
+  without a note.
+- Rigid elements (RBE1, RBE2, RBE3, RBAR, RBAR1, RROD, RTRPLT,
+  RSPLINE), which are constraints with no mesh, and are skipped.
+- CORD1R, CORD1C and CORD1S (systems defined by grid points) are
+  refused with an error that says to redefine them as CORD2 cards, since
+  a guessed frame would place every node in it wrongly.
+- Any other `C` card shaped like an element is refused with its name,
+  so an element is never dropped without a word.
+
+A deck has no units, so positions are read as written and
+`length_unit` declares their unit, as with a universal file without a
+dataset 164. The property, mass and stiffness values are taken as SI.
+
+`save` writes coordinate systems as CORD2 cards, grids as large-field
+GRID* cards (full precision, where a small field holds about five
+digits), elements on their own cards and drawn lines as PLOTEL chains.
+The deck is geometry for interchange: it opens in viewers and
+preprocessors, and needs property and material cards added before
+Nastran will run it.
 """
 
 from __future__ import annotations
@@ -645,19 +661,24 @@ def save(geometry: Geometry, path: str | os.PathLike,
          unit_system: Any = None) -> None:
     """Write a geometry as a bulk deck.
 
-    Interchange geometry, not a runnable analysis: elements carry
-    PID 1 and no PSHELL/PSOLID/MAT cards are written, because
-    properties are the analyst's statement about the structure and
-    inventing them here would put made-up stiffness in a real deck.
-    A point mass is the exception that is no invention: a CONM2 carries
-    the mass its element group was given, when it was given one, and 0.0
-    otherwise. Springs and supports likewise: a group of springs goes
-    out as a CELAS2 per element and direction with its stiffness, and a
-    ground group as SPC1 cards of its components (2026-10-08). Grids go
-    out large-field for full precision. Drawn lines become
-    PLOTEL chains — Nastran's own display-only line. Values are
-    written in SI, the geometry's storage.
+    The deck is geometry for interchange, not a runnable analysis. The
+    elements have PID 1 and no PSHELL, PSOLID or MAT cards are written,
+    because properties are the analyst's statement about the structure
+    and writing made-up ones would put a wrong stiffness in a real deck.
+    Masses, springs and supports are written, since their values are part
+    of the geometry: a point mass is a CONM2 with its element group's mass
+    (0.0 when the group has none), a group of springs is one CELAS2 per
+    element and direction with its stiffness, and a ground group is SPC1
+    cards (set 1) of its components. Grids are written large-field in the
+    coordinate system each one is defined in, for full precision, and
+    drawn lines are written as PLOTEL chains.
+
+    Values are written as the geometry stores them: SI when its units are
+    defined. `unit_system` is accepted and not used.
+
+    Raises ValueError for an element type with no bulk card.
     """
+    # Masses, springs and supports were added on 2026-10-08.
     from ..core.geometry import ELEMENT_TYPES as VOCABULARY
 
     lines = ['$ written by visualdynamics\n', 'BEGIN BULK\n']

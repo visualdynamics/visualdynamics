@@ -158,6 +158,45 @@ def test_the_standard_fields_alone_rebuild_the_objects(tmp_path):
     assert set(group['members']) == {'Plate FEM', 'FEM Modes', 'FRF', 'PSD', 'SRS'}
 
 
+def test_values_are_written_in_the_units_their_labels_name(tmp_path):
+    """A geometry in inches, a time history in g, shapes against slinch:
+    each standard field in the unit its label names, so another reader
+    gets the right numbers, and the standard fields alone come back to
+    the same values. They went out in SI under the declared labels
+    (2026-10-13), and only this program's own attachment read right."""
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.geometry import Geometry
+    from visualdynamics.core.shapes import ShapeSet
+
+    project = visualdynamics.Project('Inches')
+    geometry = Geometry(node_id=[1, 2], node_xyz=[[0.0, 0.0, 0.0], [10.0, 2.0, 0.0]])
+    geometry.define_units('in')
+    history = TimeHistory(np.arange(4) * 0.01, [[0.0, 1.0, -2.0, 0.5]], ['1X+'])
+    history.define_units('g')
+    shapes = ShapeSet([10.0], [0.01], ['1X+', '2X+'], [[0.5, 0.25]])
+    shapes.define_units('slinch')
+    project.add('Frame', geometry)
+    project.add('Run', history)
+    project.add('Modes', shapes)
+    path = tmp_path / 'inches.escdf'
+    project.save(path)
+    file = escdf.read(path)
+    fields = {d.descriptive_name: d.values for d in
+              list(file.metadata.values())
+              + [d for a in file.activities.values() for d in a.data.values()]}
+    np.testing.assert_allclose(fields['Frame']['node_position'][1], [10.0, 2.0, 0.0])
+    assert fields['Frame']['position_units'] == 'in'
+    np.testing.assert_allclose(fields['Run']['ordinate'], [[0.0, 1.0, -2.0, 0.5]])
+    np.testing.assert_allclose(np.asarray(fields['Modes']['shape']).T, [[0.5, 0.25]])
+    bare = tmp_path / 'bare.escdf'
+    _stripped(path, bare)
+    back = visualdynamics.Project.open(bare)
+    np.testing.assert_allclose(back['Frame'].node_xyz, geometry.node_xyz)
+    np.testing.assert_allclose(back['Run'].ordinate, history.ordinate)
+    np.testing.assert_allclose(back['Modes'].shape_matrix, shapes.shape_matrix)
+    assert back['Modes'].mass_unit == 'slinch'
+
+
 def test_units_are_declared_and_converted_on_import(tmp_path):
     """A foreign file's units are declared, not merely named: values in
     g arrive in m/s**2 and show as g, a PSD in g^2/Hz likewise, and a

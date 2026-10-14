@@ -1,15 +1,15 @@
 """Finding the entity under the cursor.
 
-Picking is done in screen space: project the geometry through the camera
-once, then ask which entity is nearest the cursor *in pixels*. That is the
-question the user is actually asking — "what is under my pointer" — and it
-answers it whether or not a ray would have hit anything, which matters for
-a wireframe where most of the screen is empty space between thin lines.
+Picking is done in screen space: the geometry is projected through the
+camera once, and the pick is the entity nearest the cursor in pixels.
+That answers the question being asked, what is under the pointer, even
+where a ray would hit nothing, which matters for a wireframe, where most
+of the screen is empty space between thin lines.
 
-The projection is cached and rebuilt only when the camera moves, so a mouse
-move costs one vectorized distance computation.
-
-Pure VTK and numpy: no picking hardware, no extra dependencies.
+The projection is cached and rebuilt only when the camera moves or the
+view is resized, so a mouse move costs one vectorized distance
+computation. It uses VTK's camera and numpy only, with no other
+dependency.
 """
 
 from __future__ import annotations
@@ -25,7 +25,9 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 
 class ScreenProjector:
-    """Projects a geometry's nodes to pixels, cached against camera moves."""
+    """Projects `points` (a geometry's nodes, as drawn) to pixels in
+    `renderer`, caching the result until the camera moves or the
+    renderer is resized."""
 
     def __init__(self, renderer: Any, points: ArrayLike) -> None:
         self.renderer: Any = renderer
@@ -44,7 +46,8 @@ class ScreenProjector:
         return (camera.GetMTime(), size)
 
     def screen(self) -> tuple[np.ndarray, np.ndarray]:
-        """(pixels (N,2), depth (N,)) for every node, from the cache."""
+        """(pixels (N, 2), depth (N,)) for every node, projected again
+        only when the camera or the size has changed."""
         key = self._camera_key()
         if key != self._key:
             self._project()
@@ -73,15 +76,17 @@ class ScreenProjector:
         self._depth = ndc[:, 2]
 
     def invalidate(self) -> None:
+        """Drop the cached projection, so the next use projects again."""
         self._key = None
 
     def reference_depth(self, x: float, y: float) -> float:
-        """Depth to place a new point at: that of the nearest existing node.
+        """The depth to place a new point at: that of the node nearest
+        (x, y) on screen, or 0 for an empty model.
 
-        A click gives two dimensions; the third has to come from somewhere.
-        Borrowing the nearest node's depth puts the new point on a plane
-        through the model near where the user clicked, which is where they
-        are looking.
+        A click gives two dimensions, and the third has to come from
+        somewhere. Using the nearest node's depth puts the new point on a
+        plane through the model near where the click was, which is where
+        the person is looking.
         """
         screen, depth = self.screen()
         if not len(screen):
@@ -90,13 +95,16 @@ class ScreenProjector:
         return float(depth[int(np.argmin(distances))])
 
     def place_point(self, x: float, y: float) -> np.ndarray:
-        """Where to put a new point clicked at (x, y).
+        """Where to put a new point clicked at (x, y), in world
+        coordinates.
 
-        The click gives two dimensions. The third comes from the model: the
-        click ray is intersected with a plane through the nearest node. For a
-        flat model — a plate, a panel — that plane is the model's own, so the
-        new point lands *on* it rather than floating above; otherwise the
-        plane faces the camera, which keeps the point near what was clicked.
+        The click gives two dimensions, and the third comes from the
+        model. For a flat model (a plate, a panel) the click ray is
+        intersected with the model's own plane through the node nearest
+        the click, so the new point lands on the model and not above it.
+        For any other model, or when the view is edge-on to the plane,
+        the point is placed at the nearest node's depth
+        (`reference_depth`), which keeps it near what was clicked.
         """
         screen, _ = self.screen()
         if not len(screen):
@@ -129,7 +137,9 @@ class ScreenProjector:
 
     def unproject(self, x: float, y: float,
                   depth: float | None = None) -> np.ndarray:
-        """The world point under a pixel, at a given (or inferred) depth."""
+        """The world point under a pixel, at `depth` in normalized device
+        coordinates (-1 near, 1 far), or at the nearest node's depth
+        when None."""
         self.screen()                  # make sure the transform is current
         if depth is None:
             depth = self.reference_depth(x, y)
@@ -168,7 +178,8 @@ def _cross2(u, v):
 
 
 def segment_distances(point, starts, ends):
-    """Distance from a 2D point to each of many 2D segments."""
+    """Distance from a 2-D point to each of many 2-D segments, given as
+    arrays of `starts` and `ends`."""
     segment = ends - starts
     length2 = np.einsum('ij,ij->i', segment, segment)
     length2[length2 == 0] = 1e-12
@@ -180,9 +191,12 @@ def segment_distances(point, starts, ends):
 class EntityPicker:
     """Which node, coordinate system or element is under a pixel.
 
-    Candidate geometry is reduced once to points or segments over node rows;
-    a pick then projects, measures in pixels, and takes the nearest within
-    the tolerance, breaking ties by depth so the front-most wins.
+    `kind` is 'nodes', 'coordinate_systems' or 'elements'. The candidate
+    geometry is reduced once to points, or to segments between node rows
+    (and, for elements, triangles of the face interiors). A pick then
+    projects them, measures the distance in pixels and takes the nearest
+    within the tolerance, breaking near ties by depth so the front-most
+    wins.
     """
 
     def __init__(self, geometry: Geometry, kind: str,
@@ -253,14 +267,16 @@ class EntityPicker:
              pixel_ratio: float = 1.0) -> int | None:
         """The entity under (x, y), or None.
 
-        `x`, `y` are in the device pixels VTK reports a cursor in and the
-        projector projects to; `tolerance` is in points, and
-        `pixel_ratio` is device pixels per point — 2 on a Retina screen.
-        Until 2026-10-10 the tolerance was pixels, which on Retina was a
-        6-point target. Returns a node id, a coordinate system id, or an
-        element index, matching what the rest of the code uses to
-        identify each kind.
+        `x` and `y` are in the device pixels VTK reports a cursor in and
+        the projector projects to. `tolerance` is in points, and
+        `pixel_ratio` is device pixels per point (2 on a Retina screen).
+        An element whose face contains the cursor is picked first; past
+        that, the nearest within the tolerance. Returns a node id, a
+        coordinate system id or an element index, which is how the rest
+        of the code identifies each kind.
         """
+        # Until 2026-10-10 the tolerance was in pixels, which on a Retina
+        # screen was a 6-point target.
         screen, depth = self.projector.screen()
         cursor = np.array([float(x), float(y)])
         tolerance = tolerance * pixel_ratio

@@ -1,17 +1,17 @@
 """Test-analysis correlation: FEM shapes sampled at the test's DOFs.
 
-A finite element model carries a dense mesh with three or more DOFs per
-node; the test measured a sparse set of directions at its own nodes.
-Comparing the two starts by projecting the model onto the test: match
-each test node to its nearest FEM node, take the FEM displacement there
-(already resolved to global by the deform machinery), and dot it with
-the test DOF's global direction — which handles uniaxial measurements
-and local coordinate systems in one step. The result is an ordinary
-ShapeSet at the test's DOFs, so everything downstream — cross-MAC,
-overlay animation, reports — works on it unchanged.
+A finite element model has a dense mesh with three or more DOFs per
+node; the test measured a smaller set of directions at its own nodes.
+Comparing the two starts by projecting the model onto the test: each
+test node is matched to its nearest FEM node, the FEM displacement
+there (already in global coordinates, from `deform`) is taken, and its
+dot product with the test DOF's global direction is the projected
+value. That handles uniaxial measurements and local coordinate systems
+in one step. The result is an ordinary ShapeSet at the test's DOFs, so
+cross-MAC, overlay animation and reports work on it unchanged.
 
-Both geometries must overlay in one frame already; aligning mismatched
-frames is a separate, later problem.
+Both geometries must already be in the same frame; this module does
+not align them.
 
 References
 ----------
@@ -45,19 +45,27 @@ def project_shapes(fem_shapes: ShapeSet, fem_geometry: Geometry,
                    test_shapes: ShapeSet, test_geometry: Geometry,
                    tolerance: float = 0.02
                    ) -> tuple[ShapeSet, dict[str, Any]]:
-    """`fem_shapes` reduced to `test_shapes`' DOFs.
+    """`fem_shapes` reduced to the DOFs of `test_shapes`.
 
-    `tolerance` is a fraction of the test geometry's extent: a test
-    node whose nearest FEM node lies further away is not matched, and
-    its DOFs are dropped from the result rather than guessed. A FEM
-    geometry of plates (its element groups giving thicknesses) is allowed half
-    its thickest plate beyond that, since its sensors are on surfaces
-    and its nodes on mid-surfaces.
+    `tolerance` is a fraction of the test geometry's extent (the
+    largest distance of a test node from the nodes' mean position): a
+    test node whose nearest FEM node is further away is not matched,
+    and its DOFs are dropped from the result rather than estimated.
+    When the FEM geometry has units defined and its element groups give
+    plate thicknesses, half the thickest plate is added to that limit,
+    because sensors are on surfaces and plate nodes are on
+    mid-surfaces.
 
     Returns (shape_set, report): the projected ShapeSet and a dict with
-    'matched' / 'total' test node counts, 'worst' matched distance and
-    'limit' (both meters, in the units-defined case), and 'dropped' —
-    the test DOFs the projection could not carry.
+    'matched' and 'total' test node counts, the 'worst' matched
+    distance and the 'limit' (both in meters when the units are
+    defined), and 'dropped', the test DOFs that could not be projected
+    (those that are not translations on the test geometry, and those
+    at unmatched nodes).
+
+    Raises ValueError when only one geometry has units defined, when
+    either has no nodes, when none of the test DOFs are translations
+    on the test geometry, or when no test node is matched.
     """
     from ..deform import dof_directions, node_displacements
     from ..units import SYSTEMS

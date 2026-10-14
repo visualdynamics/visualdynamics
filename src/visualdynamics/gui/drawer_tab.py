@@ -1,16 +1,16 @@
-"""The handle a collapsible drawer wears on its edge.
+"""The handle drawn on the edge of a collapsible drawer.
 
-Drawn to the design Brandon had made in Claude Design (2026-09-03,
-`icons/drawer-tab-shape.svg` is the reference): a flat tab with
-rounded shoulders and feet that flare out into the edge it sits on, the
-word in the middle and a chevron either side of it pointing where a
-click will move the edge. The reference is one fixed width, so the
-shape is drawn here from its radii at whatever width the label needs,
-and the colors come from the palette so light and dark both work.
+The handle is a flat tab with rounded shoulders and feet that flare out
+into the edge it sits on, with the word in the middle and a chevron on
+each side pointing the way a click will move the edge.
+`icons/drawer-tab-shape.svg` is the reference drawing. It has one fixed
+width, so the shape is drawn here from its radii at whatever width the
+label needs, and the colors come from the palette so it works in the
+light and dark themes.
 
-Painted by hand rather than styled: a stylesheet gives a box, and the
-flared feet are what make it read as a handle on an edge rather than a
-button floating near one.
+It is painted by hand instead of styled, because a stylesheet can only
+draw a box, and the flared feet are what make it look like a handle on
+an edge instead of a button near one.
 """
 
 from __future__ import annotations
@@ -21,11 +21,14 @@ from PySide6.QtWidgets import QAbstractButton, QWidget
 
 from .glyphs import drawer_glyph
 
+# The design is one Brandon had made in Claude Design (2026-09-03).
+
 
 class DrawerTab(QAbstractButton):
-    """A checkable handle for a drawer on the bottom edge: checked is
-    open. The edge is fixed for now; a drawer on another edge would
-    turn the shape and the text, and the glyph already knows how."""
+    """A checkable handle for a drawer on the bottom edge; checked means
+    open. Only the bottom edge is drawn for now. A drawer on another
+    edge would need the shape and the text turned, and `drawer_glyph`
+    already turns the chevron for any edge."""
 
     #: the reference's radii: the rounded top corners and the concave
     #: feet, in pixels
@@ -65,8 +68,8 @@ class DrawerTab(QAbstractButton):
         return self.sizeHint()
 
     def outline(self) -> QPainterPath:
-        """The tab's edge at its current size, open along the base so
-        no line is drawn across the edge it sits on."""
+        """The tab's outline at its current size, left open along the
+        base so no line is drawn across the edge it sits on."""
         w, h = self.width(), self.height()
         top, base = self.TOP, h - 0.5
         foot, shoulder = self.FOOT, self.SHOULDER

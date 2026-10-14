@@ -36,19 +36,19 @@
   <p>
     This toolset was created to streamline workflow and lower the
     barrier to entry for structural dynamics analysis. One project
-    carries the whole job — import a run, look at it, identify what is
-    there, judge it against a requirement, write the report — and each
-    step knows what the one before it produced.
+    holds the whole job: import a run, look at it, identify what is in
+    it, compare it against a requirement and write the report. Each
+    step works on the objects the step before it produced, so nothing
+    has to be exported and read back in between.
   </p>
 
-  <h2>What it is trying to be</h2>
+  <h2>Principles</h2>
   <p>
-    Thirteen principles shape it, and they are written down rather than
-    implied: data you can see and handle, a workflow that knows what
-    comes next, an interface that shows only what applies, and a
-    scripting API that can do everything the buttons can — so an
-    analysis done by hand on Tuesday can be replayed over a hundred
-    runs on Wednesday.
+    Thirteen written principles guide the design. Among them: data
+    should be visible and easy to handle, the interface shows only what
+    applies to the current selection, and the scripting API can do
+    everything the interface can. An analysis worked out by hand on one
+    run can therefore be repeated by a script over a hundred runs.
   </p>
   <p>
     <a href="https://github.com/visualdynamics/visualdynamics/blob/main/PRINCIPLES.md">Read the principles</a>.
@@ -61,42 +61,44 @@
     code and fix bugs as fast as possible.
   </p>
   <p class="note">
-    It is one of the thirteen principles rather than a footnote, and it
-    comes with the rest of them: every fix is falsified against a test
-    that fails without it, and the suite is the gate everything passes
-    before it lands.
+    Using AI is one of the thirteen principles, and the rest of them
+    apply to it. Every fix is checked by breaking it on purpose and
+    confirming that a test fails, and the full test suite has to pass
+    before a change is merged.
   </p>
 
-  <h2>Units, taken seriously</h2>
+  <h2>Units</h2>
   <p>
-    Every value carries what it is and what it is in. Data is stored in
-    SI and converted at the moment it is displayed, so a plot in g and
-    the same plot in m/s² are one measurement seen twice — not two
-    numbers that might disagree. A record whose units were never
-    declared says so rather than guessing.
+    Every value carries its quantity and its unit. Data is stored in SI
+    and converted when it is displayed, so a plot in g and the same plot
+    in m/s² come from the same stored numbers. Data imported from a
+    file that does not declare its units is kept as it was read and
+    marked as having unknown units until you define them.
   </p>
 
-  <h2>Standing on</h2>
+  <h2>References</h2>
   <p>
-    Bendat and Piersol for the spectral conventions; the universal file
-    format for saying what a channel is; and the open structural
-    dynamics tools that showed what these programs should do. Nothing
-    is taken from them — their methods were read and then written here.
+    The spectral conventions follow Bendat and Piersol, and the way a
+    channel is described follows the universal file format.
+    Methods from published work and from open structural dynamics
+    tools were studied and then implemented here independently; no
+    code is copied from them.
   </p>
 
   <h2>License</h2>
   <p>
     Visual Dynamics is open source under the
-    <a href="https://github.com/visualdynamics/visualdynamics/blob/main/LICENSE">MIT License</a>:
-    use it, change it and build it into your own work, open or closed,
-    keeping the copyright notice with it. How the installers are signed
-    is in the <a href="code-signing.html">code signing policy</a>.
+    <a href="https://github.com/visualdynamics/visualdynamics/blob/main/LICENSE">MIT License</a>.
+    You may use it, change it and build it into your own work, open or
+    closed, as long as the copyright notice goes with it. How the
+    installers are signed is described in the
+    <a href="code-signing.html">code signing policy</a>.
   </p>
 
   <h2>Getting in touch</h2>
   <p>
     Bug reports are very welcome and I will try to fix them promptly.
-    For anything larger, write first:
+    For a larger change, open an issue first, or write to
     <a href="mailto:contact@visualdynamics.org">contact@visualdynamics.org</a>.
   </p>
   <ul class="links">

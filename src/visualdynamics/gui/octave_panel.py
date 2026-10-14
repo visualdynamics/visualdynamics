@@ -1,13 +1,13 @@
-"""The octave-band parameters, as a table beside the spectrum.
+"""The octave-band settings, as a table beside the spectrum.
 
-One number is set here — bands per octave — and the conversion it
-means is previewed over the narrowband data it will be made from: the
-banded steps drawn on the same axes, so the trade (legibility against
-resolution) is read on the spectrum being banded, not imagined.
-Principle 13's four parts: the reading on the bar, these settings,
-that preview, and the Apply button below.
+One setting is made here, the bands per octave, and the banded spectrum
+it would make is previewed over the narrowband data it is made from.
+The band steps are drawn on the same axes, so the trade between
+legibility and resolution is judged on the spectrum being banded. These
+are principle 13's four parts: the reading on the bar, these settings,
+that preview, and the Apply button below them.
 
-Nothing here computes anything final. The button runs the same
+Nothing here computes the result. The button runs the same
 `compute_octave` verb a script calls, with whatever spacing is set at
 that moment.
 """
@@ -27,7 +27,7 @@ from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 
 class OctavePanel(QWidget):
-    """The parameter table. Edits arrive as bands per octave."""
+    """The settings table. Edits are emitted as bands per octave."""
 
     #: the spacing moved; here is bands-per-octave now
     changed = Signal(int)
@@ -77,11 +77,12 @@ class OctavePanel(QWidget):
             lambda _index: self.changed.emit(self.per_octave()))
 
     def per_octave(self) -> int:
-        """The spacing the editor currently describes."""
+        """The bands per octave currently chosen."""
         return int(self.per_box.currentData())
 
     def show_bands(self, count: int | None) -> None:
-        """Say how many bands the preview came out as — or a dash when
-        the spectrum refuses (too narrow for even one band)."""
+        """Show how many bands the preview has, or a dash when `count`
+        is None because the spectrum is refused (too narrow for even one
+        band)."""
         self.derived['bands'].setText('—' if count is None
                                       else str(count))

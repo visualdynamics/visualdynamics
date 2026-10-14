@@ -322,3 +322,14 @@ def test_the_window_offers_matlab_for_the_project(window, pump, monkeypatch,
     assert '*.mat' in seen['filters']
     assert os.path.exists(target + '.mat')
     assert isinstance(import_file(target + '.mat'), native.Project)
+
+
+def test_a_suffix_in_capitals_is_still_matlab(tmp_path):
+    """A `.MAT` from a Windows tool was offered to no importer."""
+    frf = visualdynamics.import_file(fixture_path('plate', 'frfs.npz'),
+                                     response_unit='m/s**2', reference_unit='N')
+    path = str(tmp_path / 'FRF.MAT')
+    matlab.save(frf, str(tmp_path / 'frf.mat'))
+    os.replace(str(tmp_path / 'frf.mat'), path)
+    assert matlab.sniff(path)
+    assert np.array_equal(import_file(path).ordinate, frf.ordinate)

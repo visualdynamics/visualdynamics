@@ -1,17 +1,15 @@
-"""Light/dark theme colors shared by the 3D view, 2D plots, and the GUI —
-and the one answer to "which is it right now".
+"""Light and dark theme colors for the 3-D view, the 2-D plots and the
+GUI, and the function that decides which theme applies.
 
-The colors are for the things visualdynamics draws itself (the VTK
-scene and the pyqtgraph plots); Qt's own widgets take theirs from the
-application palette. Which scheme applies is decided here too, in
-`system_scheme`: a statement for this launch (`VISUALDYNAMICS_THEME`,
-which the `--theme` flag sets), else what Qt reports, else — on Linux,
-where a packaged build without a platform-theme plugin made Qt answer
-Unknown on a dark desktop (2026-09-14) — the desktop asked directly
-through `desktop_scheme` (the settings portal, then GNOME's key, then
-KDE's file), else the palette's own lightness. The user's remembered
-choice, and telling Qt to *wear* a scheme rather than follow the OS,
-live in `gui/preferences.py`, which is Qt's side of this.
+The colors are for what Visual Dynamics draws itself (the VTK scene and
+the pyqtgraph plots); Qt's own widgets take theirs from the application
+palette. `system_scheme` decides which scheme applies, in this order:
+the `VISUALDYNAMICS_THEME` environment variable (which the `--theme`
+flag sets), then what Qt reports, then, on Linux, the desktop's own
+setting through `desktop_scheme`, then the lightness of the palette.
+The choice a person saves in the app, and telling Qt to use a scheme
+instead of following the operating system, are in `gui/preferences.py`,
+the Qt side of this.
 """
 
 from __future__ import annotations
@@ -131,10 +129,12 @@ PAIR_COLORS = ('#4c92d9', '#ff8c2b')
 
 def overlay_alphas(first_role: str | None,
                    second_role: str | None) -> tuple[float, float]:
-    """(first, second) opacity for an overlaid pair: the Basis is the
-    one being looked *at*, the other drawn through it. Which that is
-    depends on the object groups, not on the order the pair was picked
-    in; with no Basis among them the first leads."""
+    """The (first, second) opacity of an overlaid pair of shape sets.
+
+    The set whose role is 'Basis' is opaque and the other is drawn at
+    `OVERLAY_ALPHA` over it, whichever order the pair was picked in.
+    With no Basis, or two, the first set is the opaque one.
+    """
     if second_role == 'Basis' and first_role != 'Basis':
         return OVERLAY_ALPHA, 1.0
     return 1.0, OVERLAY_ALPHA
@@ -145,7 +145,11 @@ DEFAULT = 'light'
 
 
 def theme(name: str | Mapping[str, str] | None = None) -> dict[str, str]:
-    """Resolve a theme name (or a colors dict) to a colors dict."""
+    """The colors dict for a theme name, 'light' or 'dark'.
+
+    None gives the default ('light'), a dict is returned as given, and
+    any other name raises ValueError.
+    """
     if isinstance(name, dict):
         return name
     if name is None:
@@ -168,7 +172,12 @@ VIRIDIS = ((68, 1, 84), (71, 44, 122), (59, 81, 139), (44, 113, 142),
 
 
 def colormap(values: Any) -> Any:
-    """`values` in 0..1 as an (N, 3) array of RGB, on `VIRIDIS`."""
+    """`values` from 0 to 1 as RGB colors on `VIRIDIS`, interpolated
+    linearly between its stops.
+
+    Values outside 0 to 1 are clipped. The result has the shape of
+    `values` with a last axis of 3, as floats from 0 to 255.
+    """
     import numpy as np
 
     stops = np.asarray(VIRIDIS, dtype=float)
@@ -184,11 +193,13 @@ OVERRIDE = 'VISUALDYNAMICS_THEME'
 
 
 def system_scheme(app: Any = None) -> str:
-    """'dark' or 'light': the environment's say, else the OS appearance
-    via Qt, else the desktop asked directly, else the palette.
+    """'dark' or 'light', for the scheme that applies now.
 
-    Falls back to the default theme when Qt or an application instance is
-    unavailable (e.g. plain scripting use).
+    In order: the `VISUALDYNAMICS_THEME` environment variable, the
+    operating system's appearance as Qt reports it, the Linux desktop's
+    setting (`desktop_scheme`), and the lightness of the palette's window
+    color. Without Qt or an application instance, as in a plain script,
+    the answer is the variable or else the default, 'light'.
     """
     import os
 
@@ -224,15 +235,16 @@ def system_scheme(app: Any = None) -> str:
 
 def desktop_scheme(platform: str | None = None,
                    run: Any = None, home: str | None = None) -> str | None:
-    """The Linux desktop's own answer, or None where there is none.
+    """The Linux desktop's own color scheme, 'dark' or 'light', or None
+    when it gives none. Always None on other platforms.
 
-    Three doors, in the order a modern desktop answers them: the XDG
-    settings portal's `color-scheme` (GNOME, KDE and the rest, over
-    D-Bus through `gdbus`, which ships with GLib), GNOME's
-    `gsettings` key of the same name, and KDE's `kdeglobals`. Each is
-    a subprocess or a file read with a short timeout, and any failure
-    is "no answer" — never an exception in the way of a window.
-    `platform`, `run` and `home` are for the tests.
+    Three sources are tried in order: the XDG settings portal's
+    `color-scheme` (GNOME, KDE and others, over D-Bus through `gdbus`,
+    which ships with GLib), GNOME's `gsettings` key of the same name,
+    and the `ColorScheme` line of KDE's `~/.config/kdeglobals`. Each
+    command has a 2 s timeout, and a missing tool, a timeout or a file
+    that cannot be read means no answer from that source, never an
+    exception. `platform`, `run` and `home` are for the tests.
     """
     import os
     import subprocess

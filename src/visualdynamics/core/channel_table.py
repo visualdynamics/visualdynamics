@@ -1,23 +1,20 @@
 """Channel table: per-channel test metadata (sensor, DOF, engineering units).
 
-One fixed set of columns, each with a type and a rule, rather than
-whatever a source happened to carry. The table used to be a pandas
-frame that took anything — a Rattlesnake import arrived with thirteen
-columns of controller settings riding behind the ones visualdynamics
-reads — and "anything" is exactly what a column cannot have logic
-about. Now every column says what it holds, so a direction can be a
-drop-down, a unit can be narrowed by the channel's type, and an
-expiration can be a date.
+The table has one fixed set of columns, each with a type and a rule for
+what it accepts, and a source's other columns are dropped. Because every
+column says what it holds, a direction can be offered as a drop-down, a
+unit can be limited by the channel's type, and an expiration is read as
+a date.
 
-Two strictnesses, on purpose, and they are not the same:
+A file and an edit are checked differently:
 
-- **A file is read leniently.** A value that will not coerce is blanked
-  rather than refused, because refusing the import leaves the user
-  nothing to fix, and the whole point of this table is that it is the
-  place to fix it. (`validate.dofs` makes the same trade for DOFs.)
-- **An edit is refused.** Once a person is typing, invalid state is
-  rejected at entry with the reason, never written and complained about
-  afterwards.
+- A file is read leniently. A value that cannot be read takes the
+  column's default (blank for most columns) and the import goes on,
+  because refusing the import would leave the user nothing to correct,
+  and this table is where they correct it. `validate.dofs` does the
+  same for DOFs.
+- An edit is refused. When a person types a value the column cannot
+  hold, `set_cell` raises with the reason and writes nothing.
 """
 
 from __future__ import annotations
@@ -34,9 +31,21 @@ from .validate import DIRECTIONS
 if TYPE_CHECKING:                                    # pragma: no cover
     import pandas as pd
 
+# One fixed set of columns rather than whatever a source carried: the
+# table used to be a pandas frame that took anything, and a Rattlesnake
+# import arrived with thirteen columns of controller settings behind the
+# ones visualdynamics reads. A column that can hold anything is a column
+# no logic can be written about.
+
 
 class Spec(NamedTuple):
-    """What one column holds, and what it will accept."""
+    """What one column holds, and what it accepts.
+
+    `kind` is how a value is read ('int', 'index', 'float', 'choice',
+    'flag', 'date', 'unit' or 'text'), `default` fills a missing or
+    unreadable cell, `choices` limits a 'choice' column, `minimum`
+    bounds a numeric one, and `unique` makes the column a key.
+    """
 
     kind: str                              # how the value is coerced
     default: str = ''
@@ -90,21 +99,53 @@ AXES = ('X', 'Y', 'Z')
 
 
 def title_of(name: str) -> str:
-    """The header a column wears, wherever it is shown — the table in
-    the window and the table in the report are the same table."""
+    """The header shown for a column, in the window and in the report.
+
+    Parameters
+    ----------
+    name : str
+        The column name, such as 'serial_number'.
+
+    Returns
+    -------
+    str
+        The header, from `TITLES` or the name title-cased
+        ('Serial Number').
+    """
     return TITLES.get(name) or name.replace('_', ' ').title()
 
 
 def COLUMNS_KIND(name: str) -> str:
-    """What kind of value a column holds."""
+    """What kind of value a column holds, its `Spec.kind`.
+
+    Parameters
+    ----------
+    name : str
+        The column name.
+
+    Returns
+    -------
+    str
+        The kind, such as 'int', 'choice' or 'text'.
+    """
     return ChannelTable.COLUMNS[name].kind
 
 
 def CHOICES_FOR(name: str) -> tuple[str, ...]:
-    """The values a column limits itself to, empty when it does not.
+    """The values a column is limited to, empty when it is not limited.
 
-    'control' is a choice in every sense a spreadsheet cares about,
-    though the schema calls it a flag.
+    A flag column such as 'control' returns ('True', 'False'), since a
+    spreadsheet treats it as a choice of two.
+
+    Parameters
+    ----------
+    name : str
+        The column name.
+
+    Returns
+    -------
+    tuple of str
+        The allowed values.
     """
     spec = ChannelTable.COLUMNS[name]
     if spec.kind == 'flag':
@@ -115,13 +156,22 @@ def CHOICES_FOR(name: str) -> tuple[str, ...]:
 def canonical_name(name: str) -> str:
     """A source's column name as this schema spells it.
 
-    Tidy first — case, spaces, hyphens, a trailing colon someone typed,
-    and a parenthetical unit — then the alias table for words that
-    genuinely differ. The parenthetical matters twice over: it is how
-    this schema writes its own headers ('Sensitivity (mV/Unit)'), so a
-    spreadsheet exported from here has to read back in; and it is how a
-    calibration lab writes theirs ('Sensitivity (mV/g)'), which lands in
-    the same column for the same reason.
+    The name is lower-cased, spaces and hyphens become underscores, and
+    a trailing colon and anything from an opening parenthesis on are
+    dropped; then `ChannelTable.ALIASES` maps the words that differ.
+    Dropping the parenthetical unit reads this table's own headers back
+    ('Sensitivity (mV/Unit)'), and a calibration sheet's
+    ('Sensitivity (mV/g)') into the same column.
+
+    Parameters
+    ----------
+    name : str
+        The column name as the source wrote it.
+
+    Returns
+    -------
+    str
+        The schema's name for it, or the tidied name if it has none.
     """
     text = str(name).strip().rstrip(':')
     if '(' in text:
@@ -169,16 +219,34 @@ def _parse_date(text: str) -> str:
 
 
 class ChannelTable:
-    """Per-channel metadata, one fixed column set, each column typed.
+    """Per-channel metadata, in one fixed set of typed columns.
 
-    Attributes:
-        frame: The table, one row per channel, columns in `SCHEMA`
-            order. Every cell is text except `channel` and `node`,
-            which are integers — a serial number that happens to be all
-            digits is not a number, and a column read back as int64
-            would lose its leading zero and come out of a round trip a
-            different string.
+    Parameters
+    ----------
+    columns : mapping or pandas.DataFrame
+        The columns, by name, each with one entry per channel. Names are
+        read through `canonical_name`, columns outside `COLUMNS` are
+        dropped, missing ones take their default, and the values are
+        read leniently (see the module description). A channel type left
+        blank is filled in from the unit when the unit names one.
+
+    Raises
+    ------
+    ValueError
+        If a column in `CORE` is missing, or the columns differ in
+        length.
+
+    Attributes
+    ----------
+    frame : pandas.DataFrame
+        The table, one row per channel, columns in `SCHEMA` order. Every
+        cell is text except `channel` and `range`, which are integers.
+        `node` is text too, blank where no node was recorded.
     """
+    # Text and not numbers for the other columns: a serial number that
+    # happens to be all digits is not a number, and a column read back
+    # as int64 would lose a leading zero and come out of a round trip a
+    # different string.
 
     #: Every column, in the order the table shows them, each with the
     #: rule its cells answer to. A source's other columns are dropped:
@@ -391,10 +459,11 @@ class ChannelTable:
         return text
 
     def set_cell(self, name: str, row: int, value: object) -> None:
-        """Write one cell; a value the column cannot hold is refused.
+        """Write one cell, or refuse a value the column cannot hold.
 
-        Strict where `_typed` is lenient: a person typing gets the
-        reason, where a file gets the benefit of the doubt.
+        A unit that is not of the channel's declared type is refused;
+        change the type first. Changing the type clears a unit of another
+        kind.
 
         Parameters
         ----------
@@ -408,7 +477,17 @@ class ChannelTable:
         Returns
         -------
         None
+
+        Raises
+        ------
+        KeyError
+            If there is no column `name`.
+        ValueError
+            If the value cannot be read for that column, repeats a
+            channel number, or disagrees with the channel's type.
         """
+        # Strict where `_typed` is lenient: a person typing gets the
+        # reason, where a file gets the benefit of the doubt.
         if name not in self.COLUMNS:
             raise KeyError(f'no column {name!r}')
         spec = self.COLUMNS[name]
@@ -462,7 +541,7 @@ class ChannelTable:
                 f'{declared} — change the type first')
 
     def units_for(self, row: int) -> list[str]:
-        """The units this channel could be in, given its declared type.
+        """The units to offer for this channel, given its declared type.
 
         Parameters
         ----------
@@ -472,8 +551,8 @@ class ChannelTable:
         Returns
         -------
         list of str
-            The units this channel could be in, given its
-            declared type.
+            The shortlist for the declared type, or every unit in every
+            shortlist when the type is blank.
         """
         from .unit_choices import ALL_ORDINATE_UNITS, ORDINATE_UNITS
 
@@ -481,7 +560,7 @@ class ChannelTable:
         return list(ORDINATE_UNITS.get(declared, ALL_ORDINATE_UNITS))
 
     def delete_channels(self, indices: Sequence[int]) -> None:
-        """Remove the given rows in place; the last one is refused.
+        """Remove the given rows in place. At least one row must remain.
 
         Parameters
         ----------
@@ -491,6 +570,13 @@ class ChannelTable:
         Returns
         -------
         None
+
+        Raises
+        ------
+        IndexError
+            If an index is out of range.
+        ValueError
+            If every row would be removed.
         """
         doomed = {int(i) for i in indices}
         bad = [i for i in doomed if not 0 <= i < self.num_channels]
@@ -504,23 +590,25 @@ class ChannelTable:
 
     @property
     def num_channels(self) -> int:
-        """How many channels the table describes — one per row."""
+        """How many channels the table describes, one per row."""
         return len(self.frame)
 
     @property
     def column_names(self) -> list[str]:
-        """The table's column headings, in order."""
+        """The table's column names, in order (`title_of` gives the
+        headers shown)."""
         return [str(name) for name in self.frame.columns]
 
     def orientation(self, row: int, geometry: Any
                     ) -> tuple[np.ndarray | None, str | None, float | None]:
-        """One channel's measured direction against a geometry.
+        """One channel's measured direction on a geometry.
 
-        The DOF the row names — node and direction — read through the
-        frame that node is measured in (`Geometry.dof_direction`), as
-        a unit vector in the geometry's global system; the global axis
-        it is nearest, signed ('X+', 'Z-'); and the angle between the
-        two in degrees. What the derived columns show.
+        The row's DOF (node and direction) is read through the coordinate
+        system its node is measured in (`Geometry.dof_direction`). The
+        result is that direction as a unit vector in the geometry's
+        global system, the signed global axis nearest it ('X+', 'Z-'),
+        and the angle between the two in degrees. These are the values
+        the derived columns show.
 
         Parameters
         ----------
@@ -532,9 +620,10 @@ class ChannelTable:
         Returns
         -------
         tuple
-            (vector, axis, angle), each None when the geometry cannot
-            place the channel — a node it lacks, no direction, or a
-            node measured in a frame that turns with position.
+            (vector, axis, angle), each None when the geometry is None
+            or cannot place the channel: the node is not on it, the
+            direction is missing, or the node is measured in a
+            coordinate system that turns with position.
         """
         if geometry is None:
             return None, None, None
@@ -547,10 +636,11 @@ class ChannelTable:
         return vector, axis, angle
 
     def derived_cells(self, row: int, geometry: Any) -> list[str]:
-        """The derived columns' cells for one row, as text: three
-        components to three decimals, the nearest axis, the angle to a
-        tenth of a degree; empty where the geometry cannot place the
-        channel.
+        """The derived columns' cells for one row, as text.
+
+        The three components of the direction to three decimals, the
+        nearest axis, and the angle to a tenth of a degree; all empty
+        when the geometry cannot place the channel.
 
         Parameters
         ----------
@@ -570,18 +660,19 @@ class ChannelTable:
         return [f'{float(v):+.3f}' for v in vector] + [axis, f'{angle:.1f}']
 
     def dof_strings(self) -> list[str]:
-        """Each channel's degree of freedom, as '101Z+' strings."""
+        """Each channel's degree of freedom, as '101Z+' strings: the node
+        and direction cells joined, so a missing one is left out."""
         return [f'{node}{direction}' for node, direction
                 in zip(self.frame['node'], self.frame['direction'])]
 
     def rename_dof(self, old: str, new: str,
                    quantity: str | None = None) -> int:
-        """Give the channel at coordinate `old` the coordinate `new`,
-        in place — its node and direction cells rewritten, since a DOF
-        string is those two concatenated. The same correction a data
-        array's `rename_dof` makes, for the table that names the
-        channels (Brandon, 2026-09-06), and the same rule: the channel
-        moves, not every channel at the point.
+        """Give the channel at coordinate `old` the coordinate `new`, in
+        place, by rewriting its node and direction cells.
+
+        This is the same correction as `DataArray.rename_dof`, made in the
+        table that names the channels. Only the channels at `old` that
+        match `quantity` are changed, not every channel at the node.
 
         Parameters
         ----------
@@ -589,19 +680,26 @@ class ChannelTable:
             The coordinate as the table has it, '101Z+'.
         new : str
             The coordinate to give it: a node number then a direction,
-            normalized the way every DOF is, and refused when it is not
-            one — a table row may lack a node or a direction, but a
-            correction typed by a person is whole.
+            normalized as every DOF is. It is refused if either part is
+            missing, although a table row may lack one.
         quantity : str, optional
             Which channel at `old`, by the quantity its unit names
-            ('acceleration', 'force' …; 'unknown' where the unit names
-            none). Every channel at the coordinate when omitted.
+            ('acceleration', 'force' and so on; 'unknown' where the unit
+            names none). Every channel at the coordinate when omitted.
 
         Returns
         -------
         int
-            How many channels changed.
+            How many channels changed; 0 when `new` equals `old`.
+
+        Raises
+        ------
+        ValueError
+            If `new` is not a whole DOF, or no channel matches.
         """
+        # The table's version of a data array's `rename_dof` (Brandon,
+        # 2026-09-06), with the same rule: the channel moves, not every
+        # channel at the point.
         from ..units import dimension_of
         from .data import parse_dof
         from .validate import dofs
@@ -626,24 +724,27 @@ class ChannelTable:
         return len(rows)
 
     def roles(self) -> list[str]:
-        """Each channel's declared role, '' where undeclared."""
+        """Each channel's declared role ('reference', 'response' or
+        'monitor'), '' where undeclared."""
         return [str(v) for v in self.frame['role']]
 
     def controls(self) -> np.ndarray:
-        """Which channels are control channels, as booleans."""
+        """Which channels are control channels, as a boolean array."""
         return np.array([_parse_flag(str(v)) for v in self.frame['control']])
 
     def types(self) -> list[str]:
-        """What each channel measures, '' where undeclared."""
+        """Each channel's type (what it measures), '' where undeclared."""
         return [str(v) for v in self.frame['channel_type']]
 
     def sensitivities(self) -> np.ndarray:
-        """mV per engineering unit, NaN where undeclared."""
+        """Each channel's sensitivity in mV per engineering unit, NaN where
+        undeclared."""
         return np.array([float(v) if str(v).strip() else np.nan
                          for v in self.frame['sensitivity']])
 
     def ranges(self) -> np.ndarray:
-        """The instrumentation voltage limit, per channel."""
+        """Each channel's instrumentation voltage range, in volts, as
+        integers (5 by default)."""
         return np.array([int(v) for v in self.frame['range']])
 
     def __getitem__(self, name: str) -> np.ndarray:
@@ -665,12 +766,13 @@ class ChannelTable:
                 f'columns: {", ".join(self.column_names)})')
 
     def save(self, path: str | os.PathLike) -> None:
-        """Write the table to a file of its own.
+        """Write the table to a file of its own, in the `.vdyn` format.
 
         Parameters
         ----------
         path : str or os.PathLike
-            Where to write it.
+            Where to write it; `.vdyn` is added when the suffix is not
+            there.
 
         Returns
         -------

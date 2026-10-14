@@ -1,35 +1,34 @@
-"""Rattlesnake's random-vibration specification file, both ways.
+"""Read and write Rattlesnake's random vibration specification file.
 
-The controller's own target for a random test is not its `.nc4` (that
-is the recording of a run, and stays read-only here) but a small file
-its Random environment loads before the test: `f`, the frequency lines
-in Hz; `cpsd`, the full control-channel cross-spectral matrix at each
-line, `(lines, n, n)` complex; optionally `warning_upper`,
-`warning_lower`, `abort_upper`, `abort_lower`, `(lines, n)` real bands
-on the autospectra; and optionally `coordinate`, `(n, n, 2)` node and
-direction pairs the controller uses to put the matrix in its own
-channel order. Numpy `.npz` or MATLAB `.mat`; this module writes and
-reads the `.npz`. (Brandon, 2026-09-05: a specification edited in
-Visual Dynamics should come out as something Rattlesnake can read.)
+The controller's target for a random test is a small file its Random
+environment loads before the test (its `.nc4` is the recording of a
+run, and is only read here). The file holds `f`, the frequency lines in
+Hz; `cpsd`, the full cross-spectral matrix of the control channels at
+each line, `(lines, n, n)` complex; optionally `warning_upper`,
+`warning_lower`, `abort_upper` and `abort_lower`, `(lines, n)` real
+bands on the autospectra; and optionally `coordinate`, `(n, n, 2)` node
+and direction pairs the controller uses to put the matrix in its own
+channel order. The controller reads it as NumPy `.npz` or MATLAB
+`.mat`; this module writes and reads the `.npz`.
 
-The controller reads a whole matrix, and a specification here more
-often than not holds autospectra alone — that is how most random
-tests are run (Brandon, 2026-09-05). So a pair the specification
-does not hold is written as the controller's own targets carry it,
-a zero, and the file says which those were: `held`, an `(n, n)`
-mask of the cross terms the specification actually held, which the
-controller ignores and this reader honors, so a zero that was
-never stated does not come back as a statement of independence. A
-Hermitian half is completed, as the transform allows. The file has
-nowhere to record units, so values go out in the unit system asked
-for, the coherent one, and the status line names it; reading takes
-the unit as a parameter, as sdynpy's format does.
+The controller reads a whole matrix, and a specification here usually
+holds autospectra alone, since that is how most random tests are run.
+So a pair the specification does not hold is written as a zero, the way
+the controller's own targets have it, and the file records which pairs
+were held in `held`, an `(n, n)` boolean mask. The controller ignores
+`held`; this reader uses it, so a zero that was never specified does not
+read back as a specified zero cross term. A missing Hermitian half is
+filled with the conjugate of the half that was held.
 
-The file also carries `dof`, the channel names as Visual Dynamics
-writes them, which the controller ignores and this reader prefers:
+The file has no place for units. Values are written in the coherent
+form of the unit system asked for, and reading takes the unit as a
+parameter.
+
+The file also has `dof`, the channel names as Visual Dynamics writes
+them, which the controller ignores and this reader prefers.
 `coordinate` is written only when every channel is a node and a
-direction, since a modal coordinate (`M3`) has neither, and the
-strings are what bring the specification back exactly.
+direction, since a modal coordinate (`M3`) has neither; the names are
+what bring the specification back exactly.
 """
 
 from __future__ import annotations
@@ -44,6 +43,10 @@ from .sniffing import npz_has
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
+
+# Brandon, 2026-09-05: a specification edited in Visual Dynamics should come
+# out as something Rattlesnake can read; and most random tests are run on
+# autospectra alone, which is why `held` exists.
 
 #: the band arrays the controller reads, by the name Visual Dynamics
 #: keeps them under
@@ -74,12 +77,16 @@ def _channels(spec: Specification) -> list[str]:
 
 def save(spec: Specification, path: str | os.PathLike,
          unit_system: UnitSystem | None = None) -> None:
-    """Write a specification as the controller's target file.
+    """Write a specification as the controller's target file (`.npz`).
 
-    Values go out in `unit_system`'s coherent system, or as stored
-    without one; the file records no units. A pair the specification
-    does not hold is written as a zero, the controller's own
-    placeholder, and `held` records that it was one.
+    Values, bands included, are written in the coherent form of
+    `unit_system`, or as stored when there is none or the units are not
+    defined; the file records no units. A pair the specification does
+    not hold is written as a zero, the controller's own placeholder, and
+    `held` records which pairs were held.
+
+    Raises ValueError when the specification holds no autospectrum, or
+    holds a cross term of a channel that has no autospectrum.
     """
     from .exporters import data_values
 
@@ -134,16 +141,20 @@ def load(path: str | os.PathLike,
          ordinate_unit: str | None = None) -> Specification:
     """Read the controller's target file as a Specification.
 
-    Channels come from `dof` when the file has it, else from the
-    `coordinate` diagonal; a file with neither names nothing, and is
-    refused rather than given invented names. A file with `held` was
-    written here, and that mask says which cross terms were stated:
-    those come back, zeros included, and the rest were placeholders.
-    Any other file is the controller's or sdynpy's, and its cross
-    terms are kept only when one is a meaningful number, as the
-    `.nc4` reader does — an off-diagonal all NaN or zero is their
-    placeholder for autospectra alone. `ordinate_unit` declares what
-    the values are in — the file cannot say.
+    Channels come from `dof` when the file has it, otherwise from the
+    diagonal of `coordinate`. A file with neither names no channels and
+    is refused, since the controller matches it to its channel table by
+    order alone. A file with `held` was written by Visual Dynamics, and
+    the mask says which cross terms were held: those come back, zeros
+    included, and the rest are left out. In a file without `held`, the
+    cross terms are kept only when at least one off-diagonal value is
+    finite and not zero, as the `.nc4` reader does, because an
+    off-diagonal that is all NaN or zero is how other writers mark a
+    specification of autospectra alone. `ordinate_unit` declares the unit
+    of the values, which the file cannot state.
+
+    Raises ValueError when `cpsd` is not `(lines, n, n)` over the
+    frequency lines, or the channel names do not match its size.
     """
     with np.load(path, allow_pickle=False) as d:
         frequencies = np.asarray(d['f'], dtype=np.float64).reshape(-1)

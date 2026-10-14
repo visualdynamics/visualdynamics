@@ -391,3 +391,18 @@ def test_a_pattern_rides_the_file(tmp_path):
     record = solids.solid(geometry, hole).as_record()
     del record['counts']
     assert solids.Solid.from_record(record).counts == (1, 1, 1)
+
+
+def test_without_the_kernel_the_volume_says_how_to_install_it(monkeypatch):
+    """Every kernel call says how to get the kernel; the volume raised a
+    bare ImportError instead (2026-10-13)."""
+    import sys
+
+    from visualdynamics.core import solids
+    from visualdynamics.core.geometry import Geometry
+
+    geometry = Geometry(node_id=[], node_xyz=np.empty((0, 3)))
+    block = solids.add_block(geometry, (0, 0, 0), (1, 1, 1))
+    monkeypatch.setitem(sys.modules, 'OCP', None)
+    with pytest.raises(ValueError, match=r"pip install 'visualdynamics\[step\]'"):
+        solids.volume(geometry, block)

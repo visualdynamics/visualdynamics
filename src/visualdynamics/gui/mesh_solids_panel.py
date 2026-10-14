@@ -1,15 +1,17 @@
-"""Mesh Solids, as a pane beside the 3-D view (Brandon, 2026-10-11).
+"""Mesh Solids, as a pane beside the 3-D view.
 
-Select, see, set, apply (principle 13): the parts picked in the tree,
-the bricks they would be meshed into drawn in the view as the element
-size is typed, what that makes said here, and **Mesh**, the project's
-`mesh_solids`. Keep apart lands the bricks only on their own element
-groups' nodes, as Add Block's does, so a part meshed beside another
-keeps nodes of its own where they touch, to be merged at the places
-picked.
+It follows select, see, set, apply (principle 13). The parts are picked
+in the tree, the bricks they would be meshed into are drawn in the view
+as the element size is typed, the pane says what that size makes, and
+Mesh runs the project's `mesh_solids`. Keep apart joins the bricks only
+to nodes of their own element groups, as Add Block's option does, so a
+part meshed beside another keeps its own nodes where they touch, to be
+merged later at the places picked. With two or more parts, Keep the
+parts apart from each other meshes them on one grid with each part
+keeping its own nodes where the parts touch.
 
-The pane holds no rule of its own: the window asks `core.solids` what
-the size makes, draws it, and says it here.
+The pane holds no rules of its own: the window asks `core.solids` what
+the size makes, draws it, and shows the result here.
 """
 
 from __future__ import annotations
@@ -20,9 +22,11 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QWidg
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
+# The pane: Brandon, 2026-10-11.
+
 
 class MeshSolidsPanel(QWidget):
-    """The element size, what it makes, and the Mesh."""
+    """The element size, what it makes, and the Mesh button."""
 
     #: the size or Keep apart changed: the window meshes the preview again
     changed = Signal()
@@ -78,8 +82,10 @@ class MeshSolidsPanel(QWidget):
         self.close_button.clicked.connect(self.close_asked.emit)
 
     def open_for(self, unit: str, size: float, parts: str, count: int = 1) -> None:
-        """Set the pane up: the size in the display unit `unit`, the parts
-        it meshes, named, and how many there are."""
+        """Set the pane up: the size in the display unit `unit`, `parts`
+        naming the parts it meshes, and `count`, how many there are.
+        Both Keep apart boxes are cleared, and the second is shown only
+        for two or more parts."""
         self.size_label.setText(f'Element size [{unit}]')
         self.size.blockSignals(True)
         self.size.setSingleStep(max(size / 4.0, 1e-6))

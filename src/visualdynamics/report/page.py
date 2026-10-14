@@ -1,9 +1,11 @@
-"""The HTML shell, stylesheet, and viewers a report carries.
+"""The HTML page, stylesheet and viewers a report carries.
 
-All of it is ours: no CDN, no third-party embed — the file must open on
-a locked-down machine with no network and audit cleanly. The scene
-viewer is the desktop animator's phase math in an orthographic canvas;
-the plot viewer is a wheel-zoom, drag-pan line plot with decade ticks.
+All of it is written here, with nothing loaded from a CDN or embedded
+from a third party, so the file opens on a locked-down machine with no
+network and contains no code from anyone else. The scene viewer uses the
+desktop animator's phase arithmetic on an orthographic canvas; the plot
+viewer is a line plot that zooms with the wheel, pans by dragging, and
+has decade ticks on log axes.
 """
 
 _PAGE = """<!DOCTYPE html>

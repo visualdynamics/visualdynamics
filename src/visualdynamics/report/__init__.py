@@ -1,13 +1,13 @@
 """Render a Report to one self-contained HTML file.
 
-The whole point is the reader: they open the file in the browser they
-already have — no install, no network, no third-party code inside the
-deliverable. Everything interactive is a few hundred lines of our own
-JavaScript: an orthographic trackball scene that animates mode shapes
-with the same phase math as the desktop animator, and a zoomable
-log-magnitude plot with visualdynamics's own axis labels. Data rides along as one
-JSON payload, already converted to the display unit system, so the file
-shows exactly what the screen showed.
+The reader opens the file in the browser they already have, with
+nothing to install, no network, and no third-party code inside the file.
+Everything interactive is JavaScript written for this package (about
+2,200 lines, in `page.py`): an orthographic 3-D scene the reader can
+turn, which animates mode shapes with the same phase arithmetic as the
+desktop animator, and zoomable plots with the app's own axis labels.
+The data is carried as one JSON payload, already converted to the
+display unit system, so the file shows what the screen showed.
 """
 
 from __future__ import annotations
@@ -114,27 +114,32 @@ def render_html(report: Report, objects: Mapping[str, Any],
                 fill: bool = False, theme: str | None = None) -> str:
     """The report as one HTML document string.
 
-    `links` is the project's object groups: symbolic bindings like
-    '@basis:Frf' resolve against them, so a report depends on the
-    project's *structure*, never on what anyone named their objects.
-    Reading mode skips blocks whose references cannot resolve —
-    an unbound template block is a slot to fill, not an error to show a
-    reader. Edit mode keeps them as cards to rebind, tags every block
-    with its index, frames the block at `selected`, and wires one
-    message to the app over Qt's web channel — which block was
-    clicked. Every act lives on the application's bar and pane
-    (2026-09-08); the page carries no insert bars, block toolbars or
-    editors. Only the app ever loads edit mode; the exported file
-    carries none of it.
+    `objects` maps names to the project's objects, and `unit_system` is
+    the display unit system (the default system when None).
+    `object_groups` is the project's object groups: symbolic bindings
+    such as '@basis:Frf' are resolved against them, so a report depends
+    on how the project is linked, not on what its objects are named.
+
+    The reading page (`edit` False) leaves out blocks whose references
+    cannot be resolved, since an unbound block in a template is a place
+    to fill, not an error to show a reader. The edit page (`edit` True)
+    shows them as cards to bind again, tags every block with its index,
+    frames the block at `selected`, and sends one message to the app over
+    Qt's web channel: which block was clicked. `channel_js` is the text
+    of Qt's qwebchannel.js to put inline in the edit page; without it the
+    page loads it from qrc:. All editing is done from the app's bar and
+    pane, and the page has no insert bars, block toolbars or editors.
+    Only the app loads the edit page; an exported file has none of it.
 
     `labels`, when given, is filled with (label, caption) for every
-    numbered figure and table in order — what the editor's Reference
-    menu offers, from the same numbering the page shows.
+    numbered figure and table, in order: what the editor's Reference
+    menu offers, with the same numbering the page shows.
 
-    `fill` makes the page one figure filling its frame, without title,
-    marking or toggle (`export_html`); `theme`, 'light' or 'dark', fixes
-    the page's theme where it would otherwise follow the reader.
+    `fill` makes the page one figure filling its frame, without a title,
+    marking or theme toggle (`export_html`). `theme`, 'light' or 'dark',
+    fixes the page's theme, which otherwise follows the reader's.
     """
+    # All editing moved to the app's bar and pane on 2026-09-08.
     us = unit_system or DEFAULT_SYSTEM
     from ..theme import DARK, LIGHT, VIRIDIS
 
@@ -315,16 +320,17 @@ _REFERENCE = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 
 def resolve_references(text: str, objects: Mapping[str, Any], us: UnitSystem,
                        object_groups: Sequence[Mapping[str, Any]] | None = None) -> str:
-    """{{Object Name.field}} in report text becomes the live value.
+    """Replace each {{Object Name.field}} in report text with the
+    object's current value, formatted in the unit system `us`.
 
-    The whole point is templates: a summary that says how the data was
-    sampled fills itself in whatever project the template lands in.
-    The name may be a symbolic selector — {{@basis:TimeHistory.
-    sample_rate}} — resolved against the object groups, so the text
-    depends on no one's naming either. A reference that cannot
-    resolve — no such object, or a field the object cannot answer —
-    stays visible as written, the same way an unbound block stays a
-    slot instead of an error.
+    This is what makes templates work: a summary that says how the data
+    was sampled fills itself in, in whatever project the template is
+    used. The name may be a symbolic selector, such as
+    {{@basis:TimeHistory.sample_rate}}, resolved against `object_groups`,
+    so the text does not depend on the objects' names either. A
+    reference that cannot be resolved (no such object, or a field the
+    object does not have) is left in the text as written, the same way
+    an unbound block is left as a place to fill.
     """
     from ..core.report import resolve_binding
 
@@ -1002,9 +1008,9 @@ def _scalogram_candidates(block, source):
 
 
 def scalogram_channel_options(block, objects, object_groups=()):
-    """The DOF names a scalogram block may draw — for the editor's
-    drop-down (Brandon, 2026-08-29: the figure shows one channel, so
-    the reader chooses which).
+    """The DOF names a scalogram block can draw, for the editor's
+    drop-down list. The figure shows one channel, so the person editing
+    the report chooses which.
 
     Parameters
     ----------
@@ -1018,8 +1024,10 @@ def scalogram_channel_options(block, objects, object_groups=()):
     Returns
     -------
     list of str
-        The response DOFs the block's `select` admits.
+        The response DOFs the block's `select` allows; empty when the
+        source does not resolve or has no DOFs.
     """
+    # One channel, chosen in the editor (Brandon, 2026-08-29).
     from ..core.report import resolve_binding
 
     name = resolve_binding(block.get('source', ''), objects, object_groups)
@@ -3007,25 +3015,25 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
                 theme: str | None = None,
                 unit_system: UnitSystem | None = None,
                 fill: bool = True) -> str:
-    """One figure, interactive, as a single self-contained HTML file.
+    """Write one interactive figure as a single self-contained HTML file.
 
         visualdynamics.export_html('spec.html', psd, specification=spec,
                                    channel='101Z+', theme='light')
         visualdynamics.export_html('modes.html', geometry=g, shapes=modes)
 
-    The figure the report draws — zoom, pan and the readout on a plot,
-    turning and animating on a scene — with nothing else: no title and
-    no marking, and with `fill` the figure takes whatever frame holds
-    it, an iframe or a box on a slide, redrawing when the frame changes
-    size (Brandon, 2026-09-27, for an interactive slide deck from the
-    scripts that draw a paper's printed figures). Everything the page
-    needs is in the file, so it opens offline.
+    The figure is the one a report draws, with zoom, pan and the readout
+    on a plot, and turning and animation on a scene, and nothing else:
+    no title and no marking. With `fill` the figure fills whatever frame
+    holds it, such as an iframe or a box on a slide, and redraws when the
+    frame changes size. Everything the page needs is in the file, so it
+    opens offline.
 
-    A plot of `data` — against `specification` and its zones when one
-    is given, one `channel` of it when named, in `mode` ('curves',
-    'stage', 'cmif', 'mac' or 'map'); or, given a `geometry`, a scene of
-    it, its `shapes` animating or the `dofs` one object measures as a
+    Given a `geometry`, the figure is a scene of it, with its `shapes`
+    animating or, with `dofs`, the DOFs one object measures as a
     quantity, ``('acceleration', frf)``, drawn as labeled arrows.
+    Otherwise it is a plot of `data`, against `specification` and its
+    zones when one is given, of one `channel` when named, in `mode`
+    ('curves', 'stage', 'cmif', 'mac' or 'map').
 
     Parameters
     ----------
@@ -3060,7 +3068,14 @@ def export_html(path: str | os.PathLike, data: Any = None, *,
     -------
     str
         The path written.
+
+    Raises
+    ------
+    ValueError
+        When neither `data` nor `geometry` is given.
     """
+    # `fill` was added for an interactive slide deck made by the scripts
+    # that draw a paper's printed figures (Brandon, 2026-09-27).
     import pathlib
 
     from ..core.report import Report

@@ -1,16 +1,21 @@
-"""Importer for sdynpy native geometry files (.npz).
+"""Read and write sdynpy geometry files (.npz).
 
-The format is a numpy .npz archive with four structured arrays. Field layout
-(np.lib.format is self-describing; read with np.load):
+The format is a NumPy .npz archive of structured arrays (self-describing;
+read with np.load):
 
-- node: id, coordinate (3,), color, def_cs, disp_cs
-- coordinate_system: id, name, color, cs_type, matrix (4, 3) — rows 0-2 are
-  the rotation, row 3 the origin (length units)
-- traceline: id, color, description, connectivity (object: node id array)
-- element: id, type (UFF 2412 descriptor code), color, connectivity (object)
+- node: id, coordinate (3,), color, def_cs, disp_cs;
+- coordinate_system: id, name, color, cs_type, matrix (4, 3), where
+  rows 0-2 are the rotation and row 3 is the origin (a length);
+- traceline: id, color, description, connectivity (an object array of
+  node id arrays);
+- element: id, type (the universal file dataset 2412 descriptor code),
+  color, connectivity (an object array).
 
-The file carries no units. `length_unit` may be given to declare them at
-import; otherwise the geometry arrives unit-less.
+'node' and 'coordinate_system' are required; 'traceline' and 'element'
+may be absent, as in a point cloud. Each node's coordinates are read in
+the coordinate system it is defined in and converted to global. The
+file has no units: `length_unit` declares them at import, and without
+it the geometry is unit-less.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 import numpy as np
 
-from ..core.geometry import Geometry, to_global
+from ..core.geometry import Geometry, to_global, to_local
 from ..units import si_factor
 from .sniffing import npz_has
 
@@ -39,8 +44,13 @@ def sniff(path: str | os.PathLike) -> bool:
 
 
 def load(path: str | os.PathLike, length_unit: str | None = None) -> Geometry:
-    """sdynpy geometry files carry no units; without `length_unit` the
-    geometry imports with its raw coordinates for the user to define later."""
+    """Read an sdynpy geometry file.
+
+    The file has no units; without `length_unit` the geometry imports
+    with the file's coordinates and the units can be defined later. The
+    elements are split into one element group per element family, and
+    each traceline id becomes one drawn line.
+    """
     scale = 1.0 if length_unit is None else si_factor(length_unit, 'length')
 
     with np.load(path, allow_pickle=True) as d:
@@ -111,18 +121,25 @@ def _connectivity(rows):
 
 
 def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
-    """Write a geometry in sdynpy's own .npz layout.
+    """Write a geometry in the sdynpy .npz layout.
 
-    Coordinates go out in `unit_system`, or as stored without one. The
-    format records no units either way, so whoever reads it has to be told
-    — which is what "consistent units" means in this corner of the world.
+    Coordinates are written in the coherent form of `unit_system` when
+    the geometry's units are defined, and as stored otherwise. The format
+    records no units either way, so the reader has to be told what they
+    are. Each node's coordinates are written in the coordinate system it
+    is defined in, its `def_cs`, as `load` reads them. Drawn lines
+    are written as tracelines, one row per run, and not as elements.
     """
     from .exporters import geometry_values
 
     points, matrices = geometry_values(geometry, unit_system)
     node = np.zeros(geometry.num_nodes, dtype=NODE_DTYPE)
     node['id'] = geometry.node_id
-    node['coordinate'] = points
+    # written back into each node's own definition frame: the global
+    # numbers under a local def_cs were resolved a second time by `load`
+    # and the node moved (2026-10-13, found by the docstring pass)
+    node['coordinate'] = to_local(points, geometry.node_def_cs,
+                                  geometry.cs_id, geometry.cs_type, matrices)
     node['color'] = geometry.node_color
     node['def_cs'] = geometry.node_def_cs
     node['disp_cs'] = geometry.node_disp_cs

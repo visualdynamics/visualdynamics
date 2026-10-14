@@ -32,8 +32,8 @@
   <p class="lede">
     Visual Dynamics does not collect user data. There are no accounts,
     no usage statistics and no crash reports, and your projects and
-    measurements never leave your computer unless you send them
-    somewhere yourself.
+    measurements stay on your computer unless you send them somewhere
+    yourself.
   </p>
 
   <h2>The program</h2>
@@ -43,15 +43,20 @@
     installing or operating it.
   </p>
   <p>
-    The one request it can make is <em>File → Check for Updates…</em>,
-    and only when you choose it from the menu. On Windows and Linux,
-    and for a pip install, it reads
-    <code>visualdynamics.org/latest.json</code>. The macOS app asks
-    GitHub instead, for the list of updates attached to the newest
-    release, and downloads the update from GitHub only if you choose
-    to install it. The only thing either says about the program is its
-    version, in the request's user agent
-    (<code>VisualDynamics/0.1.0a14</code>, for example). Like any web
+    The only request it makes is <em>File → Check for Updates…</em>,
+    and only when you choose it from the menu. There is no check at
+    startup. On Windows and Linux, and for a pip install, the check
+    reads <code>visualdynamics.org/latest.json</code>. The packaged
+    macOS app uses Sparkle instead: it reads the list of updates
+    attached to the newest release on GitHub, and downloads the update
+    from GitHub only if you choose to install it. Sparkle's automatic
+    checks and its system profile are both off.
+  </p>
+  <p>
+    The only information either request sends about the program is its
+    name and version, in the user agent (<code>VisualDynamics/</code>
+    followed by the version number; on macOS, <code>Visual Dynamics/</code>
+    and the version, followed by Sparkle's own version). Like any web
     request, it reaches the host from your IP address. Nothing about
     you, your machine or your data is sent, and the program keeps no
     record of the check.
@@ -59,17 +64,24 @@
 
   <h2>This website</h2>
   <p>
-    The site is static pages served by Cloudflare Pages. It sets no
-    cookies and runs no analytics or tracking scripts. Cloudflare, as
-    the host, processes the ordinary connection details of each visit
-    (IP address, browser, the page asked for) to deliver and protect
-    the site, under
+    The site is served by Cloudflare Pages. It sets no cookies and runs
+    no analytics or tracking scripts. Cloudflare, as the host, processes
+    the ordinary connection details of each visit (IP address, browser,
+    the page requested) to deliver and protect the site, under
     <a href="https://www.cloudflare.com/privacypolicy/">its own privacy policy</a>.
   </p>
   <p>
+    Two pages load information from GitHub. The downloads page asks
+    GitHub's API, from your browser, which files the newest release
+    carries, so that visit also reaches GitHub. The feature requests
+    page gets its ranking from a small function on this site, which
+    asks GitHub on the site's behalf; your browser does not contact
+    GitHub for it.
+  </p>
+  <p>
     Downloads, updates, source code, bug reports and feature requests
-    live on GitHub, and the Python package on PyPI; those requests and
-    visits are covered by
+    are hosted on GitHub, and the Python package on PyPI; requests to
+    them and visits there are covered by
     <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's</a>
     and <a href="https://policies.python.org/pypi.org/Privacy-Notice/">PyPI's</a>
     privacy policies.
@@ -84,8 +96,8 @@
 
   <h2>Changes</h2>
   <p>
-    If this ever changes, this page will say so before the program or
-    the site does anything different. Last updated September 28, 2026.
+    If this policy changes, this page will say so before the program or
+    the site does anything different. Last updated October 13, 2026.
   </p>
 </main>
 <footer>

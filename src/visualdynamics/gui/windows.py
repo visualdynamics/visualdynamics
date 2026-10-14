@@ -1,13 +1,14 @@
 """A pane in a window of its own.
 
 `geometry.plot()` from a script opens the same 3-D view the app shows,
-with the same bar over it — the labeled axes and the orientation triad
-are toggles rather than arguments you have to know about beforehand.
-That is the whole point of the panes owning their own controls: the
-window and a one-line script put up the same thing.
+with the same bar over it, so the labeled axes and the orientation triad
+are toggles instead of arguments to know about in advance. Each pane
+owns its controls, so the window and a one-line script show the same
+thing.
 
-Nothing here is imported unless a plot is actually shown. Rendering to a
-file never comes through here, so a headless run never builds a widget.
+Nothing here is imported unless a plot is shown on screen. Rendering to
+a file does not use this module, so a headless run never builds a
+widget.
 """
 
 from __future__ import annotations
@@ -33,14 +34,17 @@ def scene_window(draw: Callable[[Any], Any], *, theme: Any = None,
                  title: str | None = None, axis_unit: str = '',
                  size: tuple[int, int] = (1000, 700),
                  show: bool = True, view: Any = None) -> ScenePane:
-    """Draw into a ScenePane of its own and put it on screen.
+    """Draw into a ScenePane of its own and show it on screen.
 
-    `draw(plotter)` adds whatever is being shown. `axis_unit` is what the
-    labeled axes say, which the pane needs to re-annotate when the bar's
-    toggles move. `view` is the geometry's `View` it opens on and Reset
-    View returns to; without one — a MAC's bars, a waterfall — whatever
-    camera `draw` placed is kept and fitted. Returns the pane; its
-    `.plotter` is the PyVista one.
+    `draw(plotter)` adds whatever is being shown. `axis_unit` is the unit
+    the labeled axes show; the pane needs it to label them again when
+    the bar's toggles change. `view` is the geometry's `View` the window
+    opens on and Reset View returns to. Without one (a MAC's bars, a
+    waterfall), the camera keeps the direction `draw` gave it and is
+    fitted to the scene. With
+    `show` and no event loop already running, this runs the event loop
+    and returns when the window is closed. Returns the pane; its
+    `.plotter` is the PyVista plotter.
     """
     app = _application()
     pane = ScenePane(theme)
@@ -68,17 +72,18 @@ def data_window(draw: Callable[[Any], Any], *, theme: Any = None,
                 size: tuple[int, int] = (1000, 700),
                 on_pane: Callable[[DataPane], Any] | None = None,
                 show: bool = True) -> DataPane:
-    """Draw into a DataPane of its own and put it on screen.
+    """Draw into a DataPane of its own and show it on screen.
 
     `draw(graphics)` builds the plot. With `complex_data` the component
-    box is offered, and choosing a part redraws — the same control the
-    app puts over an FRF. The rest of the app's bar is absent because it
-    is not a live option here: filtering to drive points is a record
-    selection, and Edit Fit opens a fitting session.
+    box is shown, and choosing a component redraws the plot, the same
+    control the app shows over an FRF. The rest of the app's bar is left
+    out because none of it applies here: filtering to drive points is a
+    record selection, and Edit Fit opens a fitting session.
 
-    `on_pane` is handed the pane before anything is drawn, so a caller
-    whose drawing depends on a control — which component to plot — can
-    read it on the first pass as well as on every redraw.
+    `on_pane` is called with the pane before anything is drawn, so a
+    caller whose drawing depends on a control (which component to plot)
+    can read it on the first pass as well as on every redraw. `show`
+    behaves as in `scene_window`. Returns the pane.
     """
     app = _application()
     pane = DataPane(theme)

@@ -1,15 +1,14 @@
 """Glyphs drawn from the package's own SVG files, without Qt's SVG module.
 
-The sanctioned Qt modules stop short of QtSvg (AGENTS.md rule 3), and
-the one glyph so far — the drawer tab's chevron, drawn in Claude Design
-(Brandon, 2026-09-03) — is a six-vertex outline that needs no renderer:
-its vertices are read straight out of the path and painted as a
-polygon, in whatever color the palette says, at whatever pixel ratio
-the screen has. A file replaces a file when the design changes.
+QtSvg is not in the set of Qt modules the project uses (AGENTS.md
+rule 3), and the one glyph so far, the drawer tab's chevron, is a
+six-vertex outline that needs no SVG renderer. Its vertices are read
+from the path and painted as a polygon, in the palette's color, at the
+screen's pixel ratio. When the design changes, the file is replaced.
 
-The parser takes exactly the dialect the files are asked for: absolute
-M/L/Z, straight edges, one path. Anything else is refused rather than
-drawn wrong.
+The parser accepts only the subset the files are drawn in: absolute M,
+L and Z commands, straight edges, one path. Anything else raises
+ValueError instead of being drawn wrong.
 """
 
 from __future__ import annotations
@@ -20,6 +19,8 @@ from importlib import resources
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF
 
+# The chevron was drawn in Claude Design (Brandon, 2026-09-03).
+
 _TOKENS = re.compile(r'[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)')
 
 #: the way the drawer-tab chevron points when the drawer is *closed*,
@@ -29,11 +30,12 @@ _CLOSED_TURN = {'bottom': 0, 'left': 90, 'top': 180, 'right': 270}
 
 
 def polygon_of(svg: str) -> tuple[list[tuple[float, float]], float]:
-    """The vertices of the one straight-edged path an SVG holds, with
-    the side of its square viewBox.
+    """The vertices of the single straight-edged path in an SVG, and the
+    side length of its square viewBox.
 
-    Raises ValueError for anything outside the dialect: curves,
-    relative commands, several paths, a non-square viewBox.
+    Raises ValueError for anything outside that subset: curves, relative
+    commands, more than one path, a viewBox that is not square or not at
+    the origin, or fewer than three vertices.
     """
     box = re.search(r'viewBox="0 0 (\S+) (\S+)"', svg)
     if box is None or box.group(1) != box.group(2):
@@ -67,11 +69,12 @@ def _load(name: str) -> tuple[list[tuple[float, float]], float]:
 
 def glyph(name: str, color: QColor, size: int = 16,
           turn: float = 0) -> QIcon:
-    """An icon of a packaged glyph, filled with `color`, turned
-    `turn` degrees clockwise about its center, `size` pixels a side.
+    """An icon of a packaged glyph, filled with `color`, turned `turn`
+    degrees clockwise about its center, `size` pixels on a side.
 
-    Rendered at one and two device pixels per point so a Retina
-    screen gets a sharp edge; the icon hands out whichever fits.
+    It is rendered at one and two device pixels per point so a Retina
+    screen gets a sharp edge, and the icon uses whichever fits the
+    screen.
     """
     vertices, side = _load(name)
     polygon = QPolygonF([QPointF(x, y) for x, y in vertices])
@@ -96,8 +99,8 @@ def glyph(name: str, color: QColor, size: int = 16,
 
 def drawer_glyph(edge: str, open_: bool, color: QColor,
                  size: int = 16) -> QIcon:
-    """The chevron a drawer tab wears: pointing away from `edge`
-    ('bottom', 'top', 'left' or 'right') while the drawer is closed,
-    toward it once open — where a click will move the edge."""
+    """The chevron on a drawer tab. It points away from `edge`
+    ('bottom', 'top', 'left' or 'right') while the drawer is closed and
+    toward it once open, which is the way a click will move the edge."""
     return glyph('drawer-tab', color, size,
                  _CLOSED_TURN[edge] + (180 if open_ else 0))

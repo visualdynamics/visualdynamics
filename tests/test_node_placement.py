@@ -134,6 +134,20 @@ def test_a_bulk_deck_places_its_grids_and_writes_them_back(tmp_path):
     )
 
 
+def test_an_sdynpy_archive_writes_its_nodes_back(tmp_path):
+    """The writer gave global coordinates under each node's local
+    def_cs, and the reader resolved them a second time, so every framed
+    node moved on a round trip (2026-10-13)."""
+    geometry = visualdynamics.import_file(_archive(tmp_path / 'source.npz'))
+    path = tmp_path / 'framed.npz'
+    visualdynamics.export_file(geometry, path, 'sdynpy_geometry')
+    with np.load(path) as archive:
+        assert archive['node']['coordinate'] == pytest.approx(WRITTEN, abs=1e-9), (
+            'each node stated in its own frame, as the source had it')
+    back = visualdynamics.import_file(path)
+    assert back.node_xyz == pytest.approx(geometry.node_xyz, abs=1e-9)
+
+
 def test_a_deck_that_places_a_grid_nowhere_says_so(tmp_path):
     """The one thing a shared primitive must not swallow: an unknown
     frame is silence in a universal file and an error in a deck, because

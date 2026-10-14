@@ -1,9 +1,10 @@
-"""Importer for sdynpy mode shape files (.npy).
+"""Read and write sdynpy mode shape files (.npy).
 
-A structured numpy array with one record per mode and fields 'frequency'
-(Hz), 'damping' (fraction of critical), 'coordinate' ((node, direction)
-pairs, one per DOF), 'shape_matrix' (a coefficient per DOF), 'modal_mass'
-and 'comment1'..'comment5'.
+The file is a structured NumPy array with one record per mode and the
+fields 'frequency' (Hz), 'damping' (fraction of critical), 'coordinate'
+((node, direction) pairs, one per DOF), 'shape_matrix' (a coefficient
+per DOF), 'modal_mass' and 'comment1' to 'comment5'. Every mode must
+cover the same DOFs.
 
 The file does not record which mass unit the shapes were normalized
 against, so they import unit-less unless `mass_unit` is declared.
@@ -75,22 +76,40 @@ def handles(obj: Any) -> bool:
 
 
 def save(shapes: ShapeSet, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
-    """Write mode shapes in sdynpy's own .npy layout.
+    """Write mode shapes in the sdynpy .npy layout.
 
-    Values go out in `unit_system`'s mass unit, or as stored without one.
-    The format records neither the unit nor the normalization.
+    The shape coefficients are written against the mass unit of
+    `unit_system` when the units are defined, and as stored otherwise;
+    the modal masses are written as stored, since against coefficients in
+    1/sqrt(mass) a modal mass carries no unit. The format records neither
+    the unit nor the normalization. Complex shapes are written in the
+    layout's complex form, coefficients and modal masses both complex;
+    real shapes with a complex modal mass are refused with ValueError.
+    The first comment field holds the mode's description, or
+    its comment when it has none.
     """
     from .exporters import shape_values
     dofs = shapes.num_dofs
+    # the layout has a complex form, the same fields with the shape
+    # matrix and modal mass complex, and `load` reads either. Writing
+    # only the real part threw away the phase of every complex mode
+    # without a word (2026-10-13, found by the docstring pass). The form
+    # follows the shapes: a complex modal mass on real shapes cannot be
+    # written in the real form, and the complex one would read back as
+    # complex shapes, which synthesize by the other formula.
+    number = '<c16' if shapes.is_complex else '<f8'
+    if number == '<f8' and np.any(np.imag(shapes.modal_mass)):
+        raise ValueError('real shapes with a complex modal mass: the '
+                         'sdynpy layout has no form for them')
     dtype = [('frequency', '<f8'), ('damping', '<f8'),
              ('coordinate', [('node', '<u8'), ('direction', 'i1')], (dofs,)),
-             ('shape_matrix', '<f8', (dofs,)), ('modal_mass', '<f8'),
+             ('shape_matrix', number, (dofs,)), ('modal_mass', number),
              *[(f'comment{i}', '<U80') for i in range(1, 6)]]
     records = np.zeros(shapes.num_shapes, dtype=dtype)
     records['frequency'] = shapes.frequency
     records['damping'] = shapes.damping
     records['modal_mass'] = shapes.modal_mass
-    records['shape_matrix'] = np.real(shape_values(shapes, unit_system))
+    records['shape_matrix'] = shape_values(shapes, unit_system)
 
     pairs = np.zeros(dofs, dtype=[('node', '<u8'), ('direction', 'i1')])
     for i, dof in enumerate(shapes.coordinate):

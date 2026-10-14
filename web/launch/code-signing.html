@@ -33,38 +33,54 @@
     Visual Dynamics is open source under the
     <a href="https://github.com/visualdynamics/visualdynamics/blob/main/LICENSE">MIT License</a>.
     Its installers are built from the public repository by GitHub
-    Actions and signed so that your operating system can confirm
-    where they came from.
+    Actions. The macOS images are signed so that your operating system
+    can confirm where they came from; the Windows installer and the
+    Linux AppImage are not signed yet.
   </p>
 
   <h2>Windows</h2>
   <p>
-    The Windows installer is unsigned for now, and Windows SmartScreen
-    warns before running it. Check the file against the
-    <code>SHA256SUMS</code> attached to its release before you run it.
+    The Windows installer is not signed, and Windows SmartScreen shows
+    a warning before running it. Before you run it, check the file
+    against the <code>SHA256SUMS</code> attached to its release.
   </p>
   <p>
     The <a href="https://signpath.org">SignPath Foundation</a> signs
-    open source projects at no cost, and Visual Dynamics applied in
-    September 2026. The Foundation asks for public visibility first
-    (users, contributors, references elsewhere), and a project a few
-    weeks old did not have it yet; the license and the code were not
-    the question. The project will apply again once it does. Until a
-    certificate exists, the installer stays unsigned rather than
-    signed under a name that is not the author's.
+    open source projects at no cost. Visual Dynamics has applied, and
+    the Foundation asked for more public visibility first (users,
+    contributors, references elsewhere); the license and the code met
+    its terms. The project will apply again once it has that
+    visibility. Until a certificate is issued, the installer stays
+    unsigned rather than being signed under a name that is not the
+    author's.
   </p>
   <p>
-    Only release builds are signed: the installer the release workflow
-    builds from a version tag in the
+    When Windows signing is in place, only release builds will be
+    signed: the installer the release workflow builds from a version
+    tag in the
     <a href="https://github.com/visualdynamics/visualdynamics">public repository</a>,
     and the application inside it. Nothing built on a personal machine
-    is submitted for signing.
+    will be submitted for signing.
   </p>
 
   <h2>macOS</h2>
   <p>
-    The macOS disk images are signed with the author's Apple Developer
-    ID and notarized by Apple.
+    The two macOS disk images, one for Apple silicon and one for Intel,
+    are built on GitHub's runners, signed with the author's Apple
+    Developer ID and notarized by Apple. A release build that cannot be
+    signed and notarized does not finish.
+  </p>
+  <p>
+    The macOS app updates itself through Sparkle. Each update is signed
+    with the project's EdDSA key, and the app checks that signature
+    against the public key it carries, and checks that the new app has
+    the same Developer ID, before installing anything.
+  </p>
+
+  <h2>Linux</h2>
+  <p>
+    The AppImage is not signed. Check it against the
+    <code>SHA256SUMS</code> attached to its release.
   </p>
 
   <h2>Team roles</h2>
@@ -88,10 +104,10 @@
     installing or operating it.
   </p>
   <p class="note">
-    The one request it can make is <em>File → Check for Updates…</em>,
+    The only request it makes is <em>File → Check for Updates…</em>,
     and only when you choose it from the menu. The full
     <a href="privacy.html">privacy policy</a> says what that request
-    carries.
+    sends.
   </p>
 </main>
 <footer>

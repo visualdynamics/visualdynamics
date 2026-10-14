@@ -1,17 +1,17 @@
-"""Pattern, as a pane beside the 3-D view (Brandon, 2026-10-11).
+"""Pattern, as a pane beside the 3-D view.
 
-The Frame-Wing has 41 insert holes, 41 inserts and 18 wing holes: a
-hundred cylinders, typed one at a time, is a workflow nobody finishes.
 Pattern copies the solids picked in the tree in rows, columns and
-layers — how many along the geometry's X, Y and Z, the originals
-included, and how far apart — drawn in the view as they are typed, and
-**Pattern** makes one solid of them, the originals under it, the copies
-following them (the project's `pattern_solids`). One hole and 13 along
-X at the insert pitch is a rail's row; that pattern picked and 2 along
-Y is both rails'. A pattern's pencil opens the pane on it again, to
-change its counts and spacing.
+layers, so a part with many identical holes or inserts does not need
+each one added by hand. The pane takes how many along the geometry's
+X, Y and Z (the originals included) and how far apart, and the copies
+are drawn in the view as the numbers are typed. Pattern then runs the
+project's `pattern_solids`, which makes one solid from the originals,
+so changing an original changes every copy. One hole repeated 13 times
+along X makes a row; that pattern picked and repeated twice along Y
+makes two rows. A pattern's pencil in the tree opens the pane on it
+again to change its counts and spacing.
 
-The pane holds no rule of its own: the window draws the copies and
+The pane holds no rules of its own: the window draws the copies and
 says what they are.
 """
 
@@ -23,9 +23,14 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
+# Brandon, 2026-10-11. The Frame-Wing has 41 insert holes, 41 inserts
+# and 18 wing holes: a hundred cylinders, typed one at a time, is a
+# workflow nobody finishes. One hole and 13 along X at the insert pitch
+# is a rail's row; that pattern picked and 2 along Y is both rails'.
+
 
 class PatternPanel(QWidget):
-    """How many along each axis, how far apart, and the Pattern."""
+    """How many along each axis, how far apart, and the Pattern button."""
 
     #: a count or a spacing changed: the window draws the copies again
     changed = Signal()
@@ -80,10 +85,11 @@ class PatternPanel(QWidget):
         self.close_button.clicked.connect(self.close_asked.emit)
 
     def open_for(self, unit: str, parts: str, editing: bool = False) -> None:
-        """Set the pane up, every count one and every spacing zero, the
-        spacing in the display unit `unit`. `editing` opens it on a
-        pattern already made, by its row's pencil (2026-10-11): Apply,
-        not Pattern."""
+        """Set the pane up with every count one and every spacing zero,
+        the spacing in the display unit `unit` and `parts` naming the
+        solids. `editing` opens it on a pattern already made, from its
+        row's pencil: the title reads Edit Pattern and the button
+        Apply."""
         self.title.setText('Edit Pattern' if editing else 'Pattern')
         self.pattern_button.setText('Apply' if editing else 'Pattern')
         self.spacing_label.setText(f'Spacing [{unit}]')
@@ -95,8 +101,9 @@ class PatternPanel(QWidget):
                 'spacing': tuple(box.value() for box in self.spacings)}
 
     def set_values(self, quiet: bool = False, **values) -> None:
-        """Fill fields by name — counts=(x, y, z), spacing=(x, y, z) —
-        as a test types; `quiet` without a `changed`."""
+        """Fill the fields by name, counts=(x, y, z) and
+        spacing=(x, y, z), as a test would type them. With `quiet`,
+        `changed` is not emitted."""
         boxes = [*self.counts, *self.spacings]
         for box in boxes:
             box.blockSignals(True)

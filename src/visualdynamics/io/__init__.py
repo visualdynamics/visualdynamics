@@ -1,12 +1,14 @@
 """File import and export.
 
-Importers and exporters each register themselves in a small registry, so a
-new format is added without touching existing code.
+Each importer and exporter is added to a registry here, so a new format
+is added without changing existing code.
 
-Anything visualdynamics can read, it can write. `.vdyn` (HDF5) is the native format
-and the one Save and Load use — it is the only one that keeps everything,
-including units. The foreign formats are for getting data to other tools,
-and each loses whatever it has no way to record; see each module.
+Every object that can be imported can also be saved, though not always
+in the format it came from. `.vdyn` (HDF5) is the native format and the
+one Save and Load use; it keeps everything, including units, and so
+does `.mat`, which is the same layout in MATLAB's container. The other
+formats are for exchanging data with other tools, and each loses
+whatever it has no field for; see each module.
 """
 
 from __future__ import annotations
@@ -47,12 +49,13 @@ from .sep005 import from_sep005
 
 @dataclass(frozen=True)
 class Importer:
-    """One format visualdynamics can read.
+    """One format Visual Dynamics can read.
 
-    `sniff(path)` says whether this is that format — by content where
-    the content says, never by the extension alone — and `load(path)`
+    `sniff(path)` says whether a file is in this format, from its
+    content where the content identifies the format, and `load(path)`
     returns the object, the dict of objects, or the whole Project the
-    file holds.
+    file holds. `project_type(path)`, for a format that records one,
+    gives the kind of project the file is a run of.
     """
 
     name: str
@@ -70,8 +73,8 @@ _IMPORTERS: list[Importer] = []
 def register_importer(name: str, description: str, sniff: Callable,
                       load: Callable,
                       project_type: Callable | None = None) -> None:
-    """Teach visualdynamics a format. Registered ones are tried in order, so a
-    reader added later is asked last.
+    """Add a format to the importers. Registered importers are tried in
+    order, so one added later is tried last.
 
     Parameters
     ----------
@@ -95,18 +98,20 @@ def register_importer(name: str, description: str, sniff: Callable,
 
 
 def importers() -> list[Importer]:
-    """Every format visualdynamics can read, in the order they are tried."""
+    """Every format Visual Dynamics can read, in the order they are
+    tried."""
     return list(_IMPORTERS)
 
 
 def project_type_of(path: str | os.PathLike) -> str | None:
-    """The kind of project a file says it is a run of, or None.
+    """The kind of project a file records itself as a run of, or None.
 
-    A controller's own save knows whether it was a modal test or a
-    random vibration run; asked before or after importing it, this is
-    how it says so. Anything else — a geometry, a photo, a file no
-    importer recognizes — answers None rather than raising: not knowing
-    is the ordinary case, not a failure.
+    A controller's own save records whether it was a modal test or a
+    random vibration run, and this reads it, before or after the file
+    is imported. Anything else (a geometry, a photo, a file no importer
+    recognizes, or one that cannot be read) gives None rather than
+    raising, because a file with no project type is the ordinary case,
+    not an error.
     """
     path = str(path)
     for imp in _IMPORTERS:
@@ -122,16 +127,23 @@ def project_type_of(path: str | os.PathLike) -> str | None:
 
 def import_file(path: str | os.PathLike, format: str | None = None,
                 progress: Any | None = None, **kwargs: Any) -> Any:
-    """Import a foreign file, returning the visualdynamics object it contains.
+    """Import a file, returning the Visual Dynamics object it contains.
 
-    Units may be declared here (e.g. length_unit='m') for sources that do not
-    carry them; without a declaration the object imports unit-less, holding
-    the file's raw values until `define_units()` is called.
-    `format` forces a specific importer by name. `progress` is a
-    (done, total) callable, honored where the reader can count — a
-    project file's objects, a Rattlesnake run's samples (2026-10-02) —
-    and quietly unused where it cannot: a UFF file is one parse, and
-    nothing inside it reports fractions worth relaying.
+    Units may be declared here (for example `length_unit='m'`) for
+    sources that do not record them; without a declaration the object
+    imports without units, holding the file's values as they are until
+    `define_units()` is called. `format` chooses an importer by name
+    instead of by recognizing the file; a `.vdyn` file is always read
+    by the native loader. `progress` is a (done, total) callable, used
+    where the reader can count (a project file's objects, a Rattlesnake
+    run's samples) and ignored where it cannot: a UFF file is read in
+    one parse with no partial progress to report. A leading `~` in the
+    path is expanded.
+
+    Raises FileNotFoundError when there is no file at `path`,
+    IsADirectoryError for a folder, and ValueError for an unknown
+    `format` or a file no importer recognizes (the message says what
+    the file appears to be, where that can be told).
 
     Parameters
     ----------
@@ -151,6 +163,9 @@ def import_file(path: str | os.PathLike, format: str | None = None,
         The object the file holds; a dict of them by name for a file that
         holds several, and a `Project` for a project file.
     """
+    # a Rattlesnake run's reader reports its samples as progress
+    # (2026-10-02); a reader without a progress parameter is not passed
+    # one
     import inspect
 
     def load_with(imp):
@@ -293,7 +308,9 @@ register_exporter('report_template', 'Report template (.vdreport)',
                   report_template.SUFFIX, report_template.handles,
                   report_template.save)
 # the project file in MATLAB's container: every object and a whole
-# project, SI with the units named, exactly as .vdyn holds them
+# project, with the units named. With no display system the values are
+# SI, exactly as .vdyn holds them; exported in a display system they
+# are in that system's units (matlab's module docstring)
 register_exporter('matlab', 'MATLAB file (.mat)', matlab.SUFFIX,
                   matlab.handles, matlab.save)
 register_exporter('escdf', 'Engineering Sciences Common Data Format (.h5)',

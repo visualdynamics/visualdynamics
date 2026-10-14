@@ -1,9 +1,9 @@
-"""What every sniffer does before it reads anything.
+"""The checks every sniffer makes before it reads anything.
 
-A sniffer answers "is this file yours?" and must never raise doing it —
-an unreadable file is simply not ours, whatever the reason. Each text
-importer was carrying its own copy of that try/open/except; the rule
-lives here once.
+A sniffer answers "is this file one this importer reads?" and must
+never raise while answering: a file it cannot read is not its file,
+whatever the reason. The open and the exception handling for that are
+here, once, for every importer.
 """
 
 from __future__ import annotations
@@ -11,12 +11,18 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 
+# Each text importer used to carry its own copy of the try/open/except, and
+# each npz importer its own copy of the open/except.
+
 
 def text_head(path: str | os.PathLike, size: int = 65536) -> str | None:
-    """The first `size` characters of a text file, or None where the
-    file cannot be read. `errors='replace'` because a sniff judges the
-    shape of the text, and one undecodable byte must not veto a file
-    the loader would take."""
+    """The first `size` characters of a text file, or None when the file
+    cannot be read.
+
+    Undecodable bytes are replaced rather than raised, because a sniff
+    judges the shape of the text, and one undecodable byte must not
+    reject a file the loader would read.
+    """
     try:
         with open(path, errors='replace') as f:
             return f.read(size)
@@ -26,11 +32,13 @@ def text_head(path: str | os.PathLike, size: int = 65536) -> str | None:
 
 def npz_has(path: str | os.PathLike, keys: Iterable[str], *,
             allow_pickle: bool = True) -> bool:
-    """Whether an `.npz` at `path` carries every one of `keys` — the
-    question the three npz importers ask, each of which once carried
-    its own copy of the open/except. `allow_pickle` is the caller's
-    call: the Rattlesnake specification is plain arrays and refuses
-    pickles, sdynpy's saves carry object arrays."""
+    """True when `path` is an `.npz` holding every one of `keys`; False
+    for any other file, or one that cannot be read.
+
+    `allow_pickle` is the caller's choice: the Rattlesnake specification
+    is plain arrays and refuses pickles, while the sdynpy formats hold
+    object arrays.
+    """
     if not str(path).endswith('.npz'):
         return False
     try:
@@ -42,9 +50,11 @@ def npz_has(path: str | os.PathLike, keys: Iterable[str], *,
 
 
 def npz_summary(path: str | os.PathLike) -> str | None:
-    """A one-line description of what an `.npz` holds, for a refusal
-    that would otherwise say only that nothing recognized it. None
-    when the file is not an npz archive."""
+    """A one-line description of what an `.npz` holds (the number of
+    arrays and the first eight names), for an error that would otherwise
+    say only that no importer recognized it. None when the file is not
+    an `.npz`.
+    """
     if not str(path).lower().endswith('.npz'):
         return None
     try:
@@ -63,8 +73,11 @@ def npz_summary(path: str | os.PathLike) -> str | None:
 
 
 def describe(path: str | os.PathLike) -> str | None:
-    """What a file is, for a refusal to say. An `.npz` is a container
-    whose contents decide which reader wants it, and a refusal that
-    names only the path cannot tell the wrong file from an
-    unsupported one."""
+    """What a file is, for an error message: `npz_summary` for an `.npz`,
+    None for anything else.
+
+    An `.npz` is a container whose contents decide which reader takes it,
+    and an error that names only the path cannot tell the wrong file
+    from an unsupported one.
+    """
     return npz_summary(path)

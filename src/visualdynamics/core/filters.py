@@ -1,38 +1,35 @@
 """Filtering, integration and differentiation of records.
 
-The shock workflow's chain (Brandon, 2026-08-24): an acceleration
-record is low-pass filtered, integrated to velocity, integrated again
-to displacement — and each step is a derived object with provenance,
-so a changed filter corner cascades staleness down the chain the same
-way a changed averaging does.
+These make up the shock workflow's chain: an acceleration record is
+low-pass filtered, integrated to velocity, and integrated again to
+displacement. Each step is a derived object with provenance, so a
+changed filter corner marks everything after it in the chain out of
+date, the same way a changed averaging does.
 
-**Whole record, never the shock windows.** Three reasons, decided
-before the first line: a zero-phase filter's edge transients land at
-the record's ends, far from the events, where per-window filtering
-would put them exactly on the data that matters; per-window
-integration hands each window its own arbitrary velocity baseline; and
-a derived record keeping the source's abscissa keeps its marks — the
-shock windows and averaging frames carry over untouched, so the report
-numbers the same events on the displacement it numbered on the
-acceleration.
+The whole record is processed, never the shock windows one at a time,
+for three reasons. A zero-phase filter's edge transients land at the
+record's ends, far from the events, where filtering each window would
+put them on the data that matters. Integrating each window would give
+each one its own arbitrary velocity baseline. And a derived record that
+keeps the source's abscissa keeps its marks: the shock windows and
+averaging frames carry over unchanged, so a report numbers the same
+events on the displacement as on the acceleration.
 
-**Time domain, on purpose.** The frequency-domain route (divide by iw)
-is the more familiar one, but it wraps the record onto a circle: the
-FFT's periodicity turns the mismatch between first and last sample
-into content. The trapezoid and the central difference read the record
-as the finite thing it is. Their cost is a known amplitude roll-off
-near Nyquist — sin(wT)/wT for the central difference — which is
-exactly why the chain filters *first*: below a corner of a tenth of
-the sample rate the round trip acceleration - velocity - displacement
-- velocity - acceleration comes back within ~2% RMS (measured, not
-assumed, 2026-08-24; ~4% at a corner of a fifth).
+Integration and differentiation are done in the time domain. The
+frequency-domain route (dividing by iω) treats the record as periodic,
+so the FFT turns the mismatch between the first and last samples into
+content. The trapezoid rule and the central difference treat the record
+as the finite length it is. Their cost is a known amplitude roll-off
+near Nyquist, sin(ωT)/(ωT) for the central difference, which is why the
+chain filters first: with a corner at a tenth of the sample rate, the
+round trip from acceleration to displacement and back to acceleration
+comes back within about 2 % RMS (about 4 % with a corner at a fifth).
 
-**Differentiation is `np.gradient`, not the trapezoid's inverse.**
-The exact algebraic inverse (x[i] = 2*(y[i]-y[i-1])/dt - x[i-1]) looks
-like it should round-trip perfectly and was tried: its recursion holds
-a pole at Nyquist, and on real noise it rang to 280% error where the
-central difference sat under 4%. Exactness that diverges is not
-accuracy.
+Differentiation is `np.gradient` (second-order central differences),
+not the exact inverse of the trapezoid rule. That inverse,
+x[i] = 2*(y[i]-y[i-1])/dt - x[i-1], has a pole at Nyquist in its
+recursion, and on real noise its error reached 280 % where the central
+difference stayed under 4 %.
 
 References
 ----------
@@ -62,6 +59,13 @@ import numpy as np
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
 
+# The chain is Brandon's (2026-08-24), and whole-record processing was
+# decided before the first line was written. The round-trip figures in
+# the module docstring were measured on 2026-08-24, and the
+# trapezoid's exact inverse was tried and removed after the 280 %
+# result: it looks like it should round-trip perfectly, but exactness
+# that diverges is not accuracy.
+
 #: where each quantity goes under one integration. Only motion
 #: integrates: the integral of a force is an impulse and the integral
 #: of a voltage is nothing a test report reads, so records of any
@@ -83,12 +87,16 @@ DRIFT_CORNER = 2.0
 
 
 def threaded_sosfiltfilt(sos: Any, rows: Any, axis: int = -1) -> np.ndarray:
-    """`scipy.signal.sosfiltfilt` over a record's channels, each channel
-    on its own core: the filter releases the interpreter lock, so a
-    thread pool over the rows is a six-fold cut on a 32-channel record
-    and copies nothing (2026-10-01; Brandon: use the cores). The
-    numbers are the serial ones to the bit — each row is the same call.
+    """`scipy.signal.sosfiltfilt` over a record's channels, one channel
+    per thread.
+
+    The filter releases the interpreter lock, so a thread pool over the
+    rows is about six times faster on a 32-channel record. The results
+    are the serial ones to the bit, since each row is the same call. A
+    single row, an array under a million values, or filtering along
+    another axis than the last goes to one serial call.
     """
+    # Threaded on 2026-10-01 (Brandon: use the cores).
     from scipy.signal import sosfiltfilt
 
     rows = np.asarray(rows)
@@ -120,33 +128,35 @@ def _filter_pool() -> Any:
 
 @dataclass(frozen=True, kw_only=True)
 class Filtering:
-    """The pass band a record is read through: its edges and order.
+    """The pass band a record is filtered to: its edges and order.
 
-    `low` and `high` are the edges of the *pass band*, in Hz: set
-    `high` alone for a low-pass (everything below it passes), `low`
-    alone for a high-pass, both for a band-pass. Which filter this is
-    follows from which edges exist (`kind`), so an invalid pairing —
-    a band-pass with one corner, a kind that contradicts its numbers
-    — cannot be stated at all. Keyword-only on purpose: the fields
-    were `(corner, order)` until 2026-08-28, and a bare
-    `Filtering(200.0)` quietly flipping its meaning from low-pass to
-    high-pass is exactly the kind of silent change a call site must
-    not survive.
+    `low` and `high` are the edges of the pass band, in Hz. Set `high`
+    alone for a low-pass (everything below it passes), `low` alone for
+    a high-pass, and both for a band-pass. Which filter it is follows
+    from which edges are set (`kind`), so an invalid pairing, such as a
+    band-pass with one corner, cannot be written. The fields are
+    keyword-only, so a bare `Filtering(200.0)` is an error. At least one
+    edge is required, edges must be above zero, `low` must be below
+    `high`, and `order` must be at least 1.
 
-    Frozen like `Averaging`, and for the same reason — the settings
-    ride the history, the staleness fingerprint is their fields, and
-    a mutable setting would be a fingerprint that lies.
+    The settings are frozen, like `Averaging`, because they are stored
+    with the history and their fields are its staleness fingerprint; a
+    setting that could change in place would make that fingerprint
+    wrong.
 
-    The filter itself is a Butterworth applied forward and backward
-    (`sosfiltfilt`): zero phase, so a shock's peak stays at its
-    measured instant — a causal filter would shift and smear the
-    front, and the report's time axis would be quietly wrong by the
-    group delay. The doubled pass also doubles the effective order;
-    `order` here is the design order of the underlying filter. A
-    band-pass of design order N carries N poles per edge (scipy's
-    convention), so each skirt rolls off like the matching low- or
-    high-pass of the same order.
+    The filter is a Butterworth applied forward and backward
+    (`sosfiltfilt`). It has zero phase, so a shock's peak stays at its
+    measured time; a causal filter would shift and smear the front by
+    its group delay. The double pass doubles the effective order;
+    `order` is the design order of the underlying filter. A band-pass of
+    design order N has N poles per edge (scipy's convention), so each
+    skirt rolls off like the low- or high-pass of the same order.
     """
+
+    # Keyword-only because the fields were `(corner, order)` until
+    # 2026-08-28, and a bare `Filtering(200.0)` changing its meaning
+    # from low-pass to high-pass without an error is the kind of change
+    # a call site must not survive.
 
     low: float | None = None
     high: float | None = None
@@ -174,8 +184,8 @@ class Filtering:
 
     @property
     def kind(self) -> str:
-        """'low-pass', 'high-pass' or 'band-pass' — derived from
-        which edges exist, never stored beside them."""
+        """'low-pass', 'high-pass' or 'band-pass', from which edges are
+        set; never stored beside them."""
         if self.low is None:
             return 'low-pass'
         if self.high is None:
@@ -183,9 +193,9 @@ class Filtering:
         return 'band-pass'
 
     def describe(self) -> str:
-        """The filter in words — 'low-pass at 500 Hz'. One
-        implementation: the status line, the staleness story and the
-        report prose all say it this way."""
+        """The filter in words, such as 'low-pass at 500 Hz'. The status
+        line, the staleness message and the report text all use this
+        wording."""
         if self.low is None:
             return f'low-pass at {self.high:g} Hz'
         if self.high is None:
@@ -194,13 +204,14 @@ class Filtering:
 
 
 def design(filtering: Filtering, sample_rate: float) -> Any:
-    """The filter itself, as second-order sections.
+    """The filter at `sample_rate`, as second-order sections from
+    `scipy.signal.butter`.
 
-    The one place a `Filtering` becomes a scipy design — the
-    application, the response plot and the GUI previews all take
-    their sections from here, so they cannot disagree about what the
-    settings mean. Refuses an edge at or above Nyquist for the same
-    reason: every caller refuses the same way.
+    This is the one place a `Filtering` becomes a scipy design:
+    filtering a record, the response plot and the GUI previews all take
+    their sections from here, so they agree on what the settings mean.
+    An edge at or above the Nyquist frequency raises ValueError here,
+    so every caller refuses it the same way.
     """
     from scipy.signal import butter
 
@@ -221,18 +232,19 @@ def design(filtering: Filtering, sample_rate: float) -> Any:
 
 
 def carrying_marks(source: Any, result: Any) -> Any:
-    """The source's readings, carried onto a derived record.
+    """Copy the source's averaging and shock windows onto a derived
+    record, and return the record.
 
-    Same abscissa, so the marks still say what they said: the
-    averaging frames and shock windows land on the same samples, and a
-    report numbers the same events on the displacement it numbered on
-    the acceleration — or on the modal coordinate it numbered on the
-    channels, since a transform through a shape set combines samples
-    and moves none (Brandon, 2026-09-04). The filtering is *not*
-    carried — the result of a filter has been filtered; offering to
-    filter it again with the same settings would be a button that
-    does nothing.
+    The derived record has the same abscissa, so the marks still mean
+    what they meant: the averaging frames and shock windows land on the
+    same samples, and a report numbers the same events on the
+    displacement as on the acceleration, or on the modal coordinates as
+    on the channels, since a transform through a shape set combines
+    samples and moves none. The filtering is not carried: the result of
+    a filter is already filtered, and offering to filter it again with
+    the same settings would be a button that does nothing.
     """
+    # Modal coordinates carry the marks too (Brandon, 2026-09-04).
     result.averaging = source.averaging
     # a tuple, matching `core.shocks.find` and the loader: the windows
     # are a fixed set for a record, and copying rather than sharing
@@ -244,9 +256,11 @@ def carrying_marks(source: Any, result: Any) -> Any:
 def filtered(data: TimeHistory, filtering: Filtering) -> TimeHistory:
     """The record through its filter, every channel, zero phase.
 
-    Every channel whatever it measures: a filter reads shape, not
-    quantity, and the drive force belongs at the same bandwidth as the
-    responses it drove.
+    Every channel is filtered whatever it measures: a filter acts on
+    the waveform, not the quantity, and the drive force belongs at the
+    same bandwidth as the responses it drove. The averaging and shock
+    windows are carried over (`carrying_marks`). A record with uneven
+    sampling, or an edge at or above Nyquist, is refused.
     """
 
     from .data import TimeHistory
@@ -287,20 +301,22 @@ def _derived(data: Any, rows: np.ndarray, kept: list[int],
 
 def integrate(data: TimeHistory,
               drift_corner: float | None = DRIFT_CORNER) -> TimeHistory:
-    """One integration: acceleration to velocity, velocity to
+    """One integration, acceleration to velocity or velocity to
     displacement, channel by channel.
 
-    Cumulative trapezoid, then the drift control: the channel's mean
-    removed before integrating (a bias integrates to a ramp, and
-    `sosfiltfilt`'s edge handling scales with how far the ramp runs)
-    and a gentle zero-phase high-pass at `drift_corner` after. Pass
-    ``None`` to integrate raw — the caller is saying the record's own
-    low end is trusted, drift and all.
+    The cumulative trapezoid rule, with drift control: each channel's
+    mean is removed before integrating, and a second-order Butterworth
+    high-pass at `drift_corner` in Hz (`DRIFT_CORNER`, 2 Hz) is applied
+    forward and backward afterward. The mean is removed first because a
+    bias integrates to a ramp, and the high-pass's edge transients grow
+    with how far the ramp runs. Below the corner nothing in the data
+    tells drift from true motion. Pass ``None`` to integrate raw, which
+    says the record's own low end is trusted, drift and all.
 
-    Records of quantities the chain has nowhere to take — forces,
-    voltages, anything undefined — are left out of the result; a
-    record with none of its channels mappable is refused, because an
-    empty answer delivered politely is still nothing.
+    Records of quantities the chain cannot take (forces, voltages,
+    anything undefined) are left out of the result. A record with no
+    acceleration or velocity channels is refused, as is a drift corner
+    that is not between zero and Nyquist.
     """
     from scipy.integrate import cumulative_trapezoid
     from scipy.signal import butter
@@ -326,13 +342,15 @@ def integrate(data: TimeHistory,
 
 
 def differentiate(data: TimeHistory) -> TimeHistory:
-    """One differentiation: displacement to velocity, velocity to
+    """One differentiation, displacement to velocity or velocity to
     acceleration, channel by channel.
 
-    Second-order central differences (`np.gradient`) — see the module
-    docstring for why the trapezoid's exact inverse was tried and
-    thrown out. No drift control: differentiation kills offsets
-    instead of growing them.
+    Second-order central differences (`np.gradient`); the module
+    docstring says why the exact inverse of the trapezoid rule is not
+    used. There is no drift control, since differentiation removes
+    offsets instead of growing them. Records of other quantities are
+    left out, and a record with no displacement or velocity channels
+    is refused.
     """
     rate = data.sample_rate
     kept = _mapped(data, DIFFERENTIATED)
@@ -356,21 +374,26 @@ RESPONSE_DECADES = 3.0
 
 def response(filtering: Filtering, sample_rate: float,
              lines: int = 400) -> tuple[np.ndarray, np.ndarray]:
-    """(frequencies, magnitude in dB) the record actually sees.
+    """(frequencies, magnitude in dB) of the filter as the record sees
+    it.
 
-    **The squared magnitude, not the filter's own** (Brandon,
-    2026-08-25). `filtered` runs the filter forward and backward for
-    zero phase, so the data is multiplied by |H| twice and the
-    effective response is |H|². The consequences are worth stating
-    because they contradict what the settings say: a Butterworth is
-    −3 dB at its nominal corner by definition, so the zero-phase pair
-    is **−6.02 dB** there, and its true −3 dB point sits at about
-    0.90 of the corner. Plotting |H| instead would draw a filter
-    nothing here applies.
+    This is the squared magnitude |H|², not the single-pass response.
+    `filtered` runs the filter forward and backward for zero phase, so
+    the data is multiplied by |H| twice. A Butterworth is -3 dB at its
+    nominal corner by definition, so the zero-phase pair is -6.02 dB
+    there, which is not what the settings suggest; for a fourth-order
+    low-pass (the default order) the -3 dB point is at about 0.90 of
+    the corner. Plotting |H| would draw a filter that is not the one
+    applied.
 
-    Log-spaced over `RESPONSE_DECADES` below Nyquist, which is where
-    a filter has anything to say.
+    The `lines` frequencies are log-spaced from `RESPONSE_DECADES` (3)
+    decades below Nyquist up to Nyquist, extended down to half the
+    lowest edge when an edge is lower than that. Edges at or above
+    Nyquist are clamped just under it instead of refused, so a curve
+    can be drawn while the settings are being edited. Values are
+    floored at -240 dB.
     """
+    # Squared magnitude, not the filter's own (Brandon, 2026-08-25).
     from scipy.signal import sosfreqz
 
     nyquist = float(sample_rate) / 2.0

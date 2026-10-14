@@ -1,17 +1,17 @@
-"""The MAC matrix as 3-D bars: height and color are both the value.
+"""The MAC matrix as 3-D bars, where both height and color are the value.
 
-The flat grid answers "which pairs match" at a glance; the bars answer
-the follow-up the grid is poor at — *how much* the near-misses differ,
-which as color alone is a judgment of shade. Height makes a 0.6
-against a 0.9 a visible step. The reading is pinned 0..1 exactly like
-the flat grid and the coherence map, because a MAC is a bounded ratio.
+The flat grid shows which pairs match at a glance. The bars show what
+the grid shows poorly, how much the near matches differ, which in color
+alone is a judgment of shade; as heights, a 0.6 next to a 0.9 is a
+visible step. The scale is fixed at 0 to 1, as in the flat grid and the
+coherence map, because a MAC is a bounded ratio.
 
-One mesh whatever the mode count, like the waterfall: a 139×139
-cross-MAC is 19 321 boxes and still one actor. Rows are the first
-set's modes and columns the second's, labeled by frequency the way
-the flat grid's axes are, and thinned past the same label limit.
-Row 0 sits nearest the viewer — the flat grid reads downward from the
-top-left, and the camera puts the same first mode in front.
+The bars are one mesh whatever the mode count, as in the waterfall: a
+139 by 139 cross-MAC is 19 321 boxes and still one actor. Rows are the
+first set's modes and columns the second's, labeled by frequency as the
+flat grid's axes are, and thinned past the same label limit. Row 0 is
+nearest the viewer: the flat grid reads down from the top left, and the
+camera puts the same first mode in front.
 """
 
 from __future__ import annotations
@@ -85,11 +85,12 @@ OUTLINE_LIMIT = 40
 
 
 def cell_to_pair(cell: int, columns: int) -> tuple[int, int]:
-    """Which (row, column) a picked mesh cell belongs to.
+    """Which (row, column) a picked cell of the bars mesh belongs to, for
+    a matrix with `columns` columns.
 
     The bars mesh is built box by box, six faces each, in row-major
-    order — this is that construction read backwards, and the picking
-    depends on it staying true."""
+    order, and this inverts that order. Picking depends on the two
+    staying in step."""
     box = int(cell) // 6
     return box // int(columns), box % int(columns)
 
@@ -102,15 +103,23 @@ def add_mac_bars(plotter: Any, frequencies: Sequence[float],
                  active: tuple[int, int] | None = None,
                  matched: Sequence[tuple[int, int]] = ()
                  ) -> dict[str, Any]:
-    """Draw the MAC bars into a plotter: one mesh, labels, the 0..1 axis.
+    """Draw the MAC bars into a plotter: one mesh, the frequency labels
+    and the 0 to 1 axis.
 
-    The marks mirror the flat grid's, in the same red: `selected` pairs
-    wear an outline traced around their bar, the `active` (animated)
-    pair the boldest one, and `matched` pairs — already committed to
-    the matched-modes table — wear the diagonal stripes across their
-    bar's top. Returns {'rows', 'columns', 'named_rows',
-    'named_columns'} — the named lists say which modes got a frequency
-    label, for the same thinning test the waterfall's labels have.
+    `frequencies` label the rows, and `column_frequencies` the columns
+    (the same as the rows when None). The marks match the flat grid's.
+    `selected` pairs get a blue outline traced around their bar, and the
+    `active` (animated) pair, when it is one of them, a heavier one.
+    `matched` pairs, already committed to the matched-modes table, get a
+    red checker on the top and the four sides of their bar. Every bar
+    has a thin black outline when neither side of the grid is over
+    `OUTLINE_LIMIT`.
+
+    Returns {'rows', 'columns', 'named_rows', 'named_columns'}; the
+    named lists say which modes got a frequency label.
+
+    Raises ValueError when the frequency counts do not match the
+    matrix's rows and columns.
     """
     import pyvista as pv
 
@@ -289,11 +298,12 @@ def add_mac_bars(plotter: Any, frequencies: Sequence[float],
 
 
 def place_camera(plotter: Any, rows: int, columns: int) -> None:
-    """The bars' home view: row 0 nearest, columns left to right.
+    """Place the camera at the bars' home view for a `rows` by `columns`
+    matrix: row 0 nearest, columns left to right.
 
-    Placed when the comparison changes and at no other time, the same
-    standing rule as every scene. Framed from the front-left and high
-    enough that a full-height bar clears the far edge.
+    The window calls this when the comparison changes and at no other
+    time, as for every scene. The view is from the front left, and high
+    enough that a full-height bar does not hide the far edge.
     """
     extent = max(rows, columns)
     plotter.camera_position = [
@@ -306,7 +316,10 @@ def mac_bars_scene(frequencies: Sequence[float], matrix: Any,
                    column_frequencies: Sequence[float] | None = None,
                    plotter: Any = None, off_screen: bool = False,
                    theme: Any = None) -> Any:
-    """Build (or add to) a PyVista plotter showing the MAC bars."""
+    """Build a PyVista plotter showing the MAC bars (`add_mac_bars`), or
+    add them to `plotter`, with the camera at the home view. Returns the
+    plotter, to ``.show()``, or to ``.screenshot()`` when it is off
+    screen."""
     import pyvista as pv
 
     colors = resolve_theme(theme)

@@ -33,22 +33,22 @@
 
   <p class="note">
     <strong>This is an alpha release.</strong> It has been checked
-    against known cases, not yet against a broad set of tests; numbers
-    it produces are to be verified by independent means before anything
-    depends on them. The application says so when it opens, and asks
-    for that to be acknowledged every time. Projects are saved as
+    against known cases, not yet against a broad set of tests, and the
+    numbers it produces are to be verified by independent means before
+    anything depends on them. The application shows this notice every
+    time it opens and asks you to acknowledge it. Projects are saved as
     <code>.vdyn</code> files, and Engineering Sciences Common Data
     Format (<code>.h5</code>) files are imported and exported for
     exchanging data with other tools. While Visual Dynamics is an alpha
-    the <code>.vdyn</code> format may still change; the promise that a
+    the <code>.vdyn</code> format may still change. The promise that a
     later version opens every earlier file starts with the first
     release that is not an alpha.
   </p>
 
   <h2>Compiled packages</h2>
   <p>
-    Nothing to set up — download, open, and the application is on your
-    desktop. This is the one to take unless you already work in Python.
+    Download, open, and the application runs; there is nothing else to
+    install. Choose one of these unless you already work in Python.
   </p>
   <div class="downloads">
     <a class="dl" id="dl-macos-arm" href="https://github.com/visualdynamics/visualdynamics/releases/latest">
@@ -82,22 +82,23 @@
   </div>
   <p class="note" id="dl-note">
     Every release is also on the <a href="https://github.com/visualdynamics/visualdynamics/releases">releases
-    page</a>, with notes and checksums — <code>SHA256SUMS</code>
-    beside the files, which <code>shasum -a 256 -c SHA256SUMS</code>
-    verifies.
+    page</a>, with release notes and a <code>SHA256SUMS</code> file
+    beside the downloads. Run <code>shasum -a 256 -c SHA256SUMS</code>
+    in the folder holding them to check them.
   </p>
 
   <h2 id="examples">Example projects</h2>
   <p>
-    Something to open on the first day: complete projects with the
-    work already done. The plate and the quadcopter are one project
-    per workflow, each with its report generated. Every run in them is
-    synthetic — a virtual test article driven through the same
-    controller the real ones are — and the photographs are renders of
-    the geometry. The BARC is a finite element model built from planes,
-    and again from solid bricks beside its removable component, all
-    solved; the Frame-Wing is five models, built from blocks of solid
-    bricks.
+    Complete projects with the work already done, to open on the first
+    day. The plate and the quadcopter have one project per workflow,
+    each with its report generated. Every run in them is synthetic: a
+    virtual test article was driven through the same controller used
+    for real tests, and the photographs are renders of the geometry.
+    The BARC is a finite element model built from planes, and again
+    from solid bricks with its removable component as a model of its
+    own, all solved. The Frame-Wing is five models built from solids
+    and meshed into bricks: the frame, each wing, and the frame with
+    each wing bolted on.
   </p>
   <div class="downloads examples">
     <a class="dl" href="https://github.com/visualdynamics/visualdynamics/releases/download/examples/VisualDynamics-examples-plate.zip">
@@ -118,14 +119,14 @@
     <a class="dl" href="https://github.com/visualdynamics/visualdynamics/releases/download/examples/VisualDynamics-examples-frame-wing.zip">
       <img class="app" src="frame-wing.png" alt="The Frame-Wing, the frame with its thick wing, as the app draws it" width="320" height="320">
       <span class="text"><span class="os">The Frame-Wing</span>
-      <span class="file">one project · the frame, two wings, two assemblies, solid models solved · 81 MB</span></span>
+      <span class="file">one project · the frame, two wings, two assemblies, solid models solved · 91 MB</span></span>
     </a>
   </div>
   <p class="note">
-    The plate is the data the figures on the <a href="examples.html">Examples</a>
-    page and the guide's screenshots come from; the quadcopter is the
-    same workflows on a model the size of a real test article. The
-    BARC is the documentation's
+    The figures on the <a href="examples.html">Examples</a> page and
+    the guide's screenshots come from the plate. The quadcopter runs the
+    same workflows on a model with the node count of a real test
+    article. The BARC is the documentation's
     <a href="documentation/guide/workflows/fem-workflow/">finite element workflow</a>
     carried out, checked against the finite element models shared on the
     <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring Focus Group wiki</a>;
@@ -134,64 +135,66 @@
     checked against the
     <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">wiki's</a>
     measured frequencies and shared models.
-    Unzip, then File → Open. They are <code>.vdyn</code> files, re-cut
-    whenever a release changes the format.
+    Unzip the file, then use File → Open. They are <code>.vdyn</code>
+    files, and they are cut again whenever a release changes the
+    format.
   </p>
 
   <h2 id="python">Python installation</h2>
   <p>
     The desktop application and the scripting API are one package, so
-    installing it gets you both — the analysis you can drive from a
-    notebook, and the same window the installers above put on your
-    desktop.
+    installing it gives you both: the API to drive an analysis from a
+    script or notebook, and the same application the installers above
+    provide.
   </p>
   <pre class="command">pip install visualdynamics</pre>
   <p class="note">
     Python 3.12 or newer. <code>python -m visualdynamics</code> opens
-    the application; <code>import visualdynamics</code> is the API the
+    the application, and <code>import visualdynamics</code> is the API the
     <a href="documentation/">documentation</a>
     describes.
   </p>
 
   <h2 id="contributor">Contributor installation</h2>
   <p>
-    To work <em>on</em> it — fix something, try a branch, run the test
-    suite — take the repository and install it in place, so your edits
-    are live without reinstalling:
+    To work on Visual Dynamics itself (fix something, try a branch, run
+    the test suite), clone the repository and install it in place, so
+    your edits take effect without reinstalling:
   </p>
   <pre class="command">git clone git@github.com:visualdynamics/visualdynamics.git
 cd visualdynamics
 pip install -e .</pre>
   <p>
-    That is the SSH remote, which uses the key you already push with.
-    Over HTTPS,
+    That is the SSH remote, which uses your GitHub SSH key. Over HTTPS,
     <code>https://github.com/visualdynamics/visualdynamics.git</code>
     clones the same thing.
   </p>
   <p>
-    To run what is on <code>main</code> without cloning it — a fix you
-    have been waiting on, say — pip installs from the repository
-    directly, and takes <code>@</code> a branch, tag or commit to pin
-    one:
+    To run what is on <code>main</code> without cloning it, for example
+    to get a fix before it is released, pip can install from the
+    repository directly. Add <code>@</code> and a branch, tag or commit
+    to choose a particular one:
   </p>
   <pre class="command">pip install git+ssh://git@github.com/visualdynamics/visualdynamics.git</pre>
   <p class="note">
-    There is nothing to compile; git and a Python 3.12 toolchain are
-    the whole of it. Bug reports are very welcome and I try to fix them
-    promptly — for anything larger,
-    <a href="mailto:contact@visualdynamics.org">write first</a>.
+    There is nothing to compile; git and Python 3.12 or newer are all
+    it needs. Bug reports are very welcome and I try to fix them
+    promptly. For a larger change, open an issue first or
+    <a href="mailto:contact@visualdynamics.org">write to me</a>.
   </p>
 
   <h2>What you need</h2>
   <ul>
-    <li><strong>macOS</strong> 13 or newer, Apple silicon or Intel — each has its own build above. Unsure which chip? Apple menu → About This Mac.</li>
+    <li><strong>macOS</strong> 14.4 or newer, Apple silicon or Intel. Each has its own build above; Apple menu → About This Mac shows which chip you have.</li>
     <li><strong>Windows</strong> 10 or 11, 64-bit.</li>
-    <li><strong>Linux</strong> with a desktop; the AppImage needs no
-      install — mark it executable and run it.</li>
+    <li><strong>Linux</strong> with a desktop. The AppImage needs no
+      installation: mark it executable and run it.</li>
   </ul>
   <p class="note">
-    The 3-D views want a working OpenGL stack, which any ordinary
-    desktop has. Nothing here phones home on its own or needs an account — <em>File → Check for Updates…</em> asks visualdynamics.org only when you ask it to. The <a href="privacy.html">privacy policy</a> has the details.
+    The 3-D views need working OpenGL, which any ordinary desktop
+    has. The application needs no account and makes no network request
+    on its own; <em>File → Check for Updates…</em> checks for a newer
+    version only when you choose it. The <a href="privacy.html">privacy policy</a> has the details.
   </p>
 
   <h2 id="signing">Code signing</h2>
@@ -199,9 +202,9 @@ pip install -e .</pre>
     The macOS images are signed with the author's Apple Developer ID
     and notarized by Apple. The Windows installer is not signed yet,
     so Windows SmartScreen asks before running it; every release
-    attaches a <code>SHA256SUMS</code> file you can check it against.
+    includes a <code>SHA256SUMS</code> file to check it against.
     The <a href="code-signing.html">code signing policy</a> says what
-    is signed, who approves it, where Windows signing stands, and
+    is signed, who approves it, the status of Windows signing, and
     what the program sends over the network.
   </p>
 </main>

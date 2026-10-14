@@ -1,25 +1,27 @@
-"""I-DEAS Associated Data Files — .afu, .ati and .ash, read natively.
+"""Read and write I-DEAS Associated Data Files: .afu (functions), .ati
+(time histories) and .ash (mode shapes).
 
-ADF is the binary sibling of the Universal File's dataset 58: the same
-function types, the same data-type codes, the same interleaved-uneven
-convention, in 512-byte blocks of little-endian float32. Shape files
-add a file-wide node table and per-mode records. The formats originate
-with SDRC I-DEAS and live on in Siemens NX. No public specification
-exists, so this reader was **derived from paired sample files and
-from published documentation — never from anyone's source code**.
+ADF is the binary counterpart of the universal file's dataset 58: the
+same function types, the same data-type codes and the same interleaved
+convention for uneven abscissas, stored in 512-byte blocks of
+little-endian float32. Shape files add a node table for the whole file
+and a record per mode. The format comes from SDRC I-DEAS and is still
+written by Siemens NX. There is no public specification, so this reader
+was worked out from paired sample files and from published
+documentation.
 
-Two facts a reader of the data should know, both established against
-those samples: **ADF files store SI regardless of the writing
-session's unit system** (round-tripped through all nine unit systems
-the format admits, with and without the G's flag), so imports arrive
-with units defined; and **the container stores float32 only** — data
-written as double precision was narrowed by the writer, and no reader
-can get it back.
+Two facts about the data, both established against those samples. ADF
+files store SI whatever unit system the writing session used (checked
+through all nine unit systems the format allows, with and without the
+G's flag), so imports arrive with their units defined. And the file
+stores float32 only: data written as double precision was rounded to
+single by the writer and cannot be recovered.
 
-The share with `unv.py` is deliberate: parsed function records become
-the same entry dicts UNV's dataset-58 parser produces and are grouped
-by `_build_data_objects` with SI factors, so an `.afu` and the
-equivalent `.unv` import through one code path and cannot disagree.
+Function records are parsed into the same entries the universal file's
+dataset 58 parser produces and are grouped by the same function
+(`unv._build_data_objects`, with SI factors), so an `.afu` and the
+equivalent `.unv` import through one code path and give the same
+objects.
 """
 
 from __future__ import annotations
@@ -30,6 +32,8 @@ from typing import Any
 import numpy as np
 
 from .unv import _58_DATA_TYPES, _build_data_objects
+
+# Written from samples and documentation, never from anyone's source code.
 
 #: the container's block size; every ADF is a whole number of these
 BLOCK = 512
@@ -56,8 +60,19 @@ def sniff(path: str | os.PathLike) -> bool:
 
 
 def load(path: str | os.PathLike) -> Any:
-    """Read an ADF; functions and time histories group exactly like a
-    universal file's dataset 58s, shapes become a `ShapeSet`."""
+    """Read an ADF file.
+
+    A shape file (one with a node table) returns a `ShapeSet`. Functions
+    and time histories are grouped as a universal file's dataset 58
+    records are: one object per function type, returned directly when
+    there is one and in a dict keyed by function name, as `unv.load`
+    keys them ('time', 'frf', 'psd' and so on), when there are several. A record whose data type is
+    Unknown or General is read unit-less, with its ordinate units label
+    kept as a hint, because the label is free text and is often wrong.
+
+    Raises ValueError when the file is not an ADF or its directory has
+    no records.
+    """
     path = str(path)
     with open(path, 'rb') as f:
         raw = f.read()
@@ -601,8 +616,19 @@ def handles_shapes(obj):
 
 
 def save(obj, path, unit_system=None):
-    """Write an ADF. Values go out in SI, which is what the format
-    stores by definition — and in float32, which is all it has."""
+    """Write an ADF file, chosen by the suffix of `path`.
+
+    A ShapeSet is written to `.ash`; a time history to `.ati`; an FRF,
+    coherence, PSD or spectrum to `.afu`. Values are written as stored,
+    which is SI when their units are defined, since the format stores SI
+    by definition, and as float32, the only precision it has. A record
+    whose units are not defined is written with data type Unknown.
+    `unit_system` is accepted and not used.
+
+    Raises ValueError for a ShapeSet to any suffix but `.ash`, a suffix
+    that is not an ADF suffix, or a data type the format has no function
+    type for.
+    """
     from ..core.shapes import ShapeSet
 
     path = str(path)

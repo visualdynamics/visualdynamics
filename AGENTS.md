@@ -154,6 +154,11 @@ Before saying anything is done:
 - Comments and docstrings explain *why*, especially where the obvious
   choice was tried and rejected. Match the surrounding density; the
   codebase is heavily commented by intention.
+- **Published text reads as a plain manual.** The documentation and
+  every public docstring (the API reference is generated from them)
+  say what the code does and why, in plain words, with no dates or
+  names. The history of a decision goes in a `#` comment beside the
+  code it explains. `docs/architecture.md` shows the pattern.
 - **One implementation of a rule.** The desktop app and
   `visualdynamics.Project` are two front ends over one workflow: put
   behavior in the project (or `core`) and let the GUI display it.

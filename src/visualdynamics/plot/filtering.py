@@ -1,18 +1,17 @@
-"""The filtered trace, previewed over the raw one.
+"""The filtered time history, previewed over the unfiltered one.
 
-A corner frequency is a number; what it *costs* is a shape. The
-preview draws each visible curve again through the filter being set,
-so the trade — noise gone, content kept — is read on the data it will
-be made from, before Apply Filter makes anything.
+A corner frequency alone does not show what a filter will remove. The
+preview draws each curve on the plot again through the filter being
+set, so the noise removed and the content kept can be judged on the
+data itself before Apply Filter creates anything.
 
 The preview filters the y-data already on the plot. That is the whole
-record in the units on screen, and filtering commutes with a unit
-scale, so this is exactly what `core.filters.filtered` will produce —
-no second implementation of the rule, just scipy called on what is
-drawn. One color for every preview rather than each channel's own:
-the question this view answers is "what does the filter do", and a
-preview dressed as another channel answers a different one. The
-color is `theme`'s `filter_preview`, shared with the stage's twin.
+record in the units on screen, and a filter is linear, so the result is
+the same as what `core.filters.filtered` will produce: both use the
+same `core.filters.design` and scipy's `sosfiltfilt`. Each preview is
+drawn in its channel's curve color, and the unfiltered curve under it
+is drawn gray, the color a specification is drawn in behind its
+response.
 """
 
 from __future__ import annotations
@@ -24,9 +23,12 @@ import numpy as np
 
 
 class FilterOverlay:
-    """Filtered twins of a plot's curves. Owns every item it adds and
-    takes them all away again on `remove`, so a redraw cannot leave a
-    preview behind."""
+    """Filtered copies of a plot's curves, drawn over the originals.
+
+    The overlay owns every item it adds and removes all of them in
+    `remove`, which also gives each original curve its pen back, so a
+    redraw cannot leave a preview behind.
+    """
 
     def __init__(self, plot: Any, filtering: Any, sample_rate: float,
                  colors: Mapping[str, str]) -> None:
@@ -45,7 +47,11 @@ class FilterOverlay:
         self.set_filtering(filtering)
 
     def set_filtering(self, filtering: Any) -> None:
-        """Restate the previews for a new corner or order."""
+        """Redraw the previews for new filter settings (a corner or an order).
+
+        Settings that cannot be designed at this sample rate, as happens
+        while a number is being typed, draw no preview.
+        """
         import pyqtgraph as pg
         from scipy.signal import sosfiltfilt
 
@@ -87,7 +93,7 @@ class FilterOverlay:
         self._previews = []
 
     def remove(self) -> None:
-        """Take the previews off and give the sources their pens back."""
+        """Remove the previews and give the original curves their pens back."""
         self._take_down()
         for curve, pen in zip(self._sources, self._pens):
             if pen is not None:

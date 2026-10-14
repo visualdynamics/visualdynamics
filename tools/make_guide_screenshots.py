@@ -266,8 +266,8 @@ def random():
     psd = next(n for n, o in window.objects.items()
                if type(o).__name__ == 'Psd')
     select(window, psd)
-    # the app's Compute Octave asks the band spacing in a dialog; the
-    # verb underneath with its default is the same one-sixth answer
+    # the app sets the band spacing in its Octave Bands pane and Apply
+    # Octave Bands calls this verb; its default is the same sixth-octave
     banded = window.project.compute_octave(psd)
     window.show_object(banded)
     pump(20)

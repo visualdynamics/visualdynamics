@@ -1,18 +1,18 @@
-"""3MF meshes — the CAD hand-off format that keeps parts and units.
+"""Read and write 3MF meshes, a CAD export format that keeps parts and
+units.
 
-A ``.3mf`` is a zip holding one XML model: already-tessellated
-triangles (our `tri3` face elements verbatim), **named objects** for
-an assembly's parts — each becomes a named block — and a declared
-unit, so nothing has to be asked at import. SolidWorks writes it from
-Save As, which is why this importer exists: "import my SolidWorks
-model" is an export to 3MF away, where the native format is closed
-and STEP needs a geometry kernel this project deliberately does not
-carry (see PLAN.md).
+A ``.3mf`` is a zip holding one XML model: triangles that are already
+tessellated (read as `tri3` face elements as they are), named objects
+for an assembly's parts, each of which becomes a named element group,
+and a declared unit, so there is nothing to ask at import. SolidWorks
+writes it from Save As, so a SolidWorks model can be imported by
+exporting it to 3MF; the native format is closed, and STEP (`io.step`)
+needs a CAD kernel, which a pip install has only as an option.
 
-Assemblies arrive as component references with affine transforms;
-they are resolved recursively, so each *placed instance* of a part
-gets its triangles where the assembly put them. Everything here is
-the standard library — ``zipfile`` and ``xml.etree`` — plus numpy.
+Assemblies are component references with affine transforms. They are
+resolved recursively, so each placed instance of a part has its
+triangles where the assembly put them. Only the standard library
+(``zipfile`` and ``xml.etree``) and numpy are used.
 """
 
 from __future__ import annotations
@@ -65,7 +65,8 @@ def _mesh_corners(node: ET.Element) -> np.ndarray:
 
 
 def load(path: str | os.PathLike) -> Geometry:
-    """Read a 3MF file as a geometry — one named block per placed part.
+    """Read a 3MF file as a geometry, one named element group per placed
+    part.
 
     Parameters
     ----------
@@ -75,9 +76,16 @@ def load(path: str | os.PathLike) -> Geometry:
     Returns
     -------
     Geometry
-        Triangle face elements in meters (the file's declared unit is
-        converted, so `length_unit` arrives set) — one block per part
-        instance the build places, carrying the part's own name.
+        Triangle face elements, converted from the file's declared unit
+        (millimeters when it declares none) with the units defined. There
+        is one element group per part instance the build places, named
+        with the part's own name, or 'object <id>' when it has none.
+
+    Raises
+    ------
+    ValueError
+        When the file has no model document, declares a unit 3MF does
+        not define, or places no meshes in its build.
     """
     with zipfile.ZipFile(path) as archive:
         model_name = next(
@@ -142,12 +150,16 @@ RELS = """<?xml version="1.0" encoding="UTF-8"?>
 
 def save(obj: Geometry, path: str | os.PathLike,
          unit_system: Any = None) -> None:
-    """Write the geometry's face elements as 3MF — one named object
-    per block, in meters (3MF can say so, so nothing is lost to an
-    assumed unit; `unit_system` is accepted for the exporter registry
-    and unused, because the file declares its own).
+    """Write the geometry's face elements as 3MF, one named object per
+    element group.
 
-    A geometry with no face elements is refused, like STL.
+    The coordinates are written as stored. The file declares them in
+    meters when the geometry's units are defined, which is what they
+    are, and declares no unit when they are not, which 3MF reads as
+    millimeters.
+    `unit_system` is accepted because every exporter takes it, and is not
+    used, since the file declares its own unit. A geometry with no face
+    elements is refused with ValueError, as for STL.
     """
     del unit_system
     parts = faces_as_triangles(obj)
@@ -156,7 +168,16 @@ def save(obj: Geometry, path: str | os.PathLike,
                          '3MF holds triangles and nothing else')
     names = {int(i): (name or f'block {int(i)}') for i, name in
              zip(obj.group_id, obj.group_name, strict=True)}
-    model = ET.Element('model', {'unit': 'meter', 'xmlns': CORE})
+    # 3MF has no "unit-less": its unit attribute is optional and an
+    # absent one means millimeters, so any undefined geometry comes back
+    # with some unit. Declaring meters asserted a unit nobody chose
+    # (2026-10-13, found by the docstring pass). Leaving the attribute
+    # out says only what is known, and the spec's default is the
+    # convention unit-less CAD meshes (STL above all) are made in.
+    attributes = {'xmlns': CORE}
+    if obj.units_defined:
+        attributes['unit'] = 'meter'
+    model = ET.Element('model', attributes)
     resources = ET.SubElement(model, 'resources')
     build = ET.SubElement(model, 'build')
     for index, (block, corners) in enumerate(parts, start=1):

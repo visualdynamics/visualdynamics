@@ -1,27 +1,26 @@
-"""What the scalogram is computed over, as a table beside it.
+"""The settings the scalogram is computed with, as a table beside it.
 
-Three things are set here — the frequency range to listen across, how
-finely, and how the wavelet trades time against frequency — and three
-more are shown that follow from them: what the record can actually
-resolve at the bottom of the range, how wide the cone of influence is
-there, and how many transforms that adds up to.
+Four values are set here: the bottom and top of the frequency range,
+the lines per octave, and the number of cycles under the wavelet, which
+sets how it trades time resolution against frequency resolution. Three
+more are shown that follow from them: the width of the cone of
+influence at the bottom of the range, the frequency resolution there,
+and the number of lines.
 
-Which record is *not* set here. It was, briefly, as a combo box — and
-that put the same choice in two places, because the project tree
-already selects records for every other view. The tree is the one
-selection everywhere (Brandon, 2026-08-29), so the scalogram reads its
-record off the selection and this panel keeps only what the tree
-cannot say.
+The record is not chosen here. The scalogram uses the record selected
+in the project tree, as every other view does, and this panel holds
+only the settings the tree cannot.
 
-The derived three are not decoration. A scalogram is the one reading in
-this toolset where the *settings* decide whether the picture is mostly
-artifact: ask for 1 Hz on a two-second record and the bottom of the
-axis is nothing but cone, and the picture will look perfectly plausible
-while saying nothing about the measurement. So the panel says it before
-the transform runs.
+The derived values are shown because the scalogram is the one reading
+in this toolset where the settings decide whether most of the picture
+is artifact. Ask for 1 Hz on a two-second record and the bottom of the
+axis is all cone of influence, and the picture still looks plausible
+while it says nothing about the measurement. So the panel says so before
+the transform runs, with a note under the table when the cone at the
+lowest frequency covers a third of the record or more.
 
-Nothing here computes. The panel says what the parameters are and
-reports when they move, the way the averaging panel does.
+Nothing here computes the transform. The panel shows the settings and
+reports when they change, as the averaging panel does.
 """
 
 from __future__ import annotations
@@ -41,6 +40,10 @@ from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
 
+# The record was briefly chosen here, in a combo box, which put the same
+# choice in two places. The tree is the one selection everywhere
+# (Brandon, 2026-08-29).
+
 #: The default frequency range lives in `core.wavelet.default_range`
 #: now — one implementation for this panel, `plot_scalogram` and the
 #: report, after the three drifted within a day (the panel's top moved
@@ -50,7 +53,9 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 
 class WaveletPanel(QWidget):
-    """The scalogram's parameters. Edits arrive as a whole settings dict."""
+    """The scalogram's settings. Each edit is reported on `changed` as
+    the whole settings dict: 'low' and 'high' in Hz, 'per_octave' and
+    'omega0'."""
 
     #: a parameter moved; here is what the scalogram should be now
     changed = Signal(object)
@@ -131,11 +136,13 @@ class WaveletPanel(QWidget):
 
     def show_history(self, history: TimeHistory,
                      settings: dict[str, Any] | None = None) -> None:
-        """Point the panel at a time history, and at the settings on it.
+        """Show the settings for a time history.
 
-        The range the record can carry is what every clamp is against,
-        so it comes from the history rather than from whatever numbers
-        the boxes are holding from the last one.
+        `settings` is the scalogram's settings on that history, and when
+        it is None the panel opens on `suggested`. The limits every value
+        is clamped to come from this history's sample rate, not from the
+        values the boxes held for the last record, and the range is
+        clamped as a pair, so it keeps at least an octave of width.
         """
         self.sample_rate = history.sample_rate
         self.samples = len(history.abscissa)
@@ -161,13 +168,14 @@ class WaveletPanel(QWidget):
         self._restate(self.settings())
 
     def suggested(self) -> dict[str, Any]:
-        """The range this record can honestly carry.
+        """The default settings for this record.
 
-        The top is a fraction of Nyquist — a wavelet up there is a
-        couple of samples long — and the bottom is where a handful of
-        the longest wavelets still fit inside the record rather than
-        hanging off both ends of it. Opening on a range that is mostly
-        cone would be opening on an artifact.
+        The range is `core.wavelet.default_range`: the top at 0.98 of
+        Nyquist, and the bottom at eight cycles over the record's
+        duration, so the longest wavelets still fit inside the record and
+        the bottom of the range is not mostly cone of influence. Lines per
+        octave and cycles are the defaults `core.wavelet.PER_OCTAVE` and
+        `core.wavelet.OMEGA0`.
         """
         low, high = wavelet.default_range(self.sample_rate or 1.0,
                                           self.duration)
@@ -175,7 +183,8 @@ class WaveletPanel(QWidget):
                 'per_octave': wavelet.PER_OCTAVE, 'omega0': wavelet.OMEGA0}
 
     def settings(self) -> dict[str, Any]:
-        """What the editors currently describe."""
+        """The settings the editors show now, as a dict: 'low' and 'high'
+        in Hz, 'per_octave' and 'omega0'."""
         return {'low': self.low_box.value(),
                 'high': self.high_box.value(),
                 'per_octave': self.per_octave_box.value(),

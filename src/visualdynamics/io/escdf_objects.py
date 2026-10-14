@@ -1,37 +1,48 @@
-"""A project to and from an ESCDF file: the objects as the standard's
-own types, and whole as Visual Dynamics keeps them.
+"""Write a project to an ESCDF file and read one back, with each object
+written both as the standard's own type and whole, as Visual Dynamics
+keeps it.
 
-The standard has a type for the things a test produces — `geometry`,
-`channel_table`, `data` and `response_spectrum`, `mode` — and every one
-of them is written here as that type, so any reader of the format gets
-nodes, channels, curves and modes with nothing of ours in the way. It
-has no field for much of what a project holds: element blocks and what
-they are made of, coordinate systems, the processing record and the
-provenance, reports, matched modes, sine and random specifications, a
-geometry's view. Those ride in the `attachments` every group inherits
-(Brandon, 2026-09-30: nothing that would make their reader fail), one
-attachment per object, holding the object in its own `.vdyn` layout —
-the one schema owner, `io.native`, run into memory — so a file written
-here reads back whole, and a foreign reader sees an attachment it can
-ignore. A report rides twice: rendered to its self-contained HTML, for
-anyone with the file, and as its definition, so it reopens editable.
+The standard has types for what a test produces: `geometry`,
+`channel_table`, `data`, `response_spectrum` and `mode`. Each object of
+those kinds is written as that type, so any reader of the format gets
+the nodes, channels, records and modes from the standard fields alone.
+The standard has no fields for much of what a project holds: element
+blocks and their properties, coordinate systems, the processing record
+and provenance, reports, matched modes, sine and random specifications,
+and a geometry's view. Those are kept in the `attachments` every group
+has, one attachment per object, holding the object in its `.vdyn`
+layout (written by `io.native` into memory). A file written here
+therefore reads back complete, and a reader that does not know the
+attachment can ignore it. A report is attached twice: rendered as a
+self-contained HTML page, and as its definition, so it opens again
+editable.
 
-An activity is an object group (Brandon: *an Activity should perhaps be
-equal to a linked group of objects*): the group's results are the
-activity's data, and the geometry and channel tables it reads against
-are metadata at the root, linked. A named group is an activity with
-that name; an unnamed one takes its basis object's name. Objects linked
-to nothing form one activity of their own. Photos, reports, matched
-modes and sine specifications are metadata too — parameter sets, linked
-to the activity whose group holds them — because the standard puts
-anything that is not a result at the root.
+Values in the standard fields are written in the units their labels
+name. A geometry's positions are in its declared length unit
+(`position_units`), each data record is in its own declared unit
+(`ordinate_unit`), and mode shape coefficients are normalized against
+the declared mass unit (`modal_mass_unit`). An object whose units are
+not defined is written as stored, with the unit left blank. Abscissas
+are written in seconds or hertz.
 
-Reading a file this program did not write builds each object from the
-standard fields: a geometry's nodes, lines, elements and per-node
-directions (a node whose axes are not the global ones gets a
-coordinate system of its own), a data type's records and units, a mode
-set's frequencies and shapes. The unit strings travel as the format
-spells them; both spellings parse here.
+An activity is an object group: the group's results (data and mode
+shapes) are the activity's data, and the geometry and channel tables
+it uses are metadata at the root, linked from the activity. A named
+group becomes an activity with that name; an unnamed one takes the
+name of its geometry, or of its first member. Objects in no group form
+one more activity. Photos, reports, matched modes and sine
+specifications are metadata as well, written as parameter sets and linked to the
+activity whose group holds them, because the standard puts anything
+that is not a result at the root.
+
+A file this program did not write is read from the standard fields: a
+geometry's nodes, lines, elements and per-node directions (a node whose
+axes are not the global ones gets a coordinate system of its own), a
+data record's values and units, and a mode set's frequencies, damping
+and shapes. The declared units are applied on reading, so positions,
+records and shapes are converted from the units the file names. Unit
+strings are written with '^' for a power, as the format's examples
+spell them, and either '^' or '**' is read.
 """
 
 from __future__ import annotations
@@ -70,6 +81,11 @@ from ..core.sine import SineLevelSet, SineSweepSpecification
 from ..project import Project
 from . import escdf, native
 from .notes import ImportNote
+
+# What the standard has no field for goes into the attachments every group
+# has (Brandon, 2026-09-30: nothing that would make their reader fail).
+# An activity is an object group (Brandon: *an Activity should perhaps be
+# equal to a linked group of objects*).
 
 __all__ = ['SUFFIX', 'SUFFIXES', 'from_file', 'handles', 'load', 'save', 'sniff', 'to_file']
 
@@ -141,7 +157,8 @@ _DOF = re.compile(r'^\d+(R?[XYZ]{1,2}[+-])?$')
 
 
 def handles(obj: Any) -> bool:
-    """A whole project, or any one object of it."""
+    """True for a whole project, or for any one kind of object a project
+    holds."""
     return isinstance(obj, (Project, Geometry, DataArray, ShapeSet, ChannelTable,
                             Report, Photos, MatchedModes, SineSweepSpecification,
                             SineLevelSet))
@@ -236,10 +253,19 @@ def _colors(indices: Any) -> np.ndarray:
 
 
 def _geometry_dataset(name: str, geometry: Geometry) -> escdf.Dataset:
+    from ..units import from_si
+
     nodes = [int(n) for n in geometry.node_id]
+    # in the unit `position_units` names, as every reader of the format
+    # takes them: they were written in meters under the declared unit, so
+    # a geometry in inches read 0.0254 times too small anywhere else
+    # (2026-10-13, found by the website pass)
+    xyz = np.asarray(geometry.node_xyz, dtype=np.float64).reshape(-1, 3)
+    if geometry.length_unit:
+        xyz = from_si(xyz, geometry.length_unit, 'length')
     values: dict[str, Any] = {
         'node_id': np.asarray(nodes, dtype=np.uint64),
-        'node_position': np.asarray(geometry.node_xyz, dtype=np.float64).reshape(-1, 3),
+        'node_position': xyz,
         'position_units': geometry.length_unit or '',
     }
     for axis in 'xyz':
@@ -321,7 +347,9 @@ def _data_dataset(name: str, data: DataArray) -> escdf.Dataset:
         'data_type': 'response spectrum' if isinstance(data, Srs)
         else _DATA_TYPES.get(type(data), 'spectrum'),
         'channel': channel,
-        'ordinate': np.asarray(data.ordinate),
+        # each record in the unit `ordinate_unit` names, as written: the
+        # values went out in SI under the declared unit (2026-10-13)
+        'ordinate': np.array([data._raw_record(i) for i in range(data.num_records)]),
         'abscissa_unit': _unit(getattr(data, 'abscissa_unit', None)
                                or ('s' if data.abscissa_dim == 'time' else 'Hz')),
     }
@@ -344,10 +372,14 @@ def _data_dataset(name: str, data: DataArray) -> escdf.Dataset:
 
 
 def _mode_dataset(name: str, shapes: ShapeSet) -> escdf.Dataset:
+    # the coefficients against the mass unit `modal_mass_unit` names,
+    # not against kilograms under that name (2026-10-13)
+    matrix = (shapes.shape_matrix if not shapes.mass_unit else
+              shapes.shape_matrix / ShapeSet._scale_to_si(shapes.mass_unit))
     values: dict[str, Any] = {
         'frequency': np.asarray(shapes.frequency, dtype=np.float64),
         'damping_ratio': np.asarray(shapes.damping, dtype=np.float64),
-        'shape': np.asarray(shapes.shape_matrix).T,
+        'shape': np.asarray(matrix).T,
         'dof_name': np.array([str(c) for c in shapes.coordinate], dtype=object),
     }
     if shapes.modal_mass is not None:
@@ -377,8 +409,12 @@ def _note(kind: str) -> str:
 
 def to_file(project: Project, created_by: str | None = None,
             unit_system: Any = None) -> escdf.File:
-    """A project as an ESCDF `File`: the objects as the standard's
-    types, each whole in an attachment, an activity per object group.
+    """A project as an ESCDF `File`, ready for `escdf.write`.
+
+    Each object is written as the standard's type with the object whole
+    in an attachment, and each object group becomes an activity. The
+    project's name, object groups, provenance and settings go in a
+    parameter set at the root named `visualdynamics_project`.
 
     Parameters
     ----------
@@ -387,7 +423,9 @@ def to_file(project: Project, created_by: str | None = None,
     created_by : str, optional
         The file's creator; the login name when left out.
     unit_system : UnitSystem, optional
-        The system the reports are rendered in; SI when left out.
+        The system the reports are rendered in; SI when left out. It
+        does not change the units of the standard fields, which are the
+        objects' own declared units.
 
     Returns
     -------
@@ -521,9 +559,15 @@ def save(obj: Any, path: str | os.PathLike, unit_system: Any = None,
         Where; `.h5` is added unless it already ends in `.h5`,
         `.hdf5` or `.escdf`.
     unit_system : UnitSystem, optional
-        The system reports are rendered in.
+        The system reports are rendered in; SI when left out. The
+        standard fields are written in each object's declared units
+        whatever this is.
     created_by : str, optional
-        The creator recorded in the file.
+        The creator recorded in the file; the login name when left out.
+
+    Returns
+    -------
+    None
     """
     path = str(path)
     if not path.endswith(SUFFIXES):
@@ -767,12 +811,17 @@ def _shapes_from(dataset: escdf.Dataset) -> ShapeSet:
     damping = (np.asarray(v['damping_ratio'], dtype=np.float64)
                if v.get('damping_ratio') is not None else np.zeros_like(frequency))
     description = _strings(v.get('description'))
-    return ShapeSet(frequency, damping, _strings(v['dof_name']),
-                    np.asarray(v['shape']).T,
-                    modal_mass=(np.asarray(v['modal_mass'], dtype=np.float64)
-                                if v.get('modal_mass') is not None else None),
-                    mass_unit=str(v['modal_mass_unit']) if v.get('modal_mass_unit') else None,
-                    comment=' '.join(description) if description else None)
+    shapes = ShapeSet(frequency, damping, _strings(v['dof_name']),
+                      np.asarray(v['shape']).T,
+                      modal_mass=(np.asarray(v['modal_mass'], dtype=np.float64)
+                                  if v.get('modal_mass') is not None else None),
+                      comment=' '.join(description) if description else None)
+    # declared, so the coefficients are taken against the unit the file
+    # names and converted, as a geometry's positions and a record's
+    # values are
+    if v.get('modal_mass_unit'):
+        shapes.define_units(str(v['modal_mass_unit']))
+    return shapes
 
 
 def _channel_table_from(dataset: escdf.Dataset) -> ChannelTable:
@@ -836,9 +885,15 @@ def _object_from(dataset: escdf.Dataset) -> Any | None:
 
 
 def from_file(file: escdf.File) -> Project:
-    """A project from an ESCDF `File`: every dataset an object, each
-    activity an object group named for it, and the project's own record
-    when the file carries one.
+    """A project from an ESCDF `File`.
+
+    Each dataset becomes an object, built from its whole-object
+    attachment when it has one and from the standard fields otherwise.
+    A dataset whose type the specifications do not define is left out
+    with a note. The project's own record, when the file has one,
+    restores the object names, order, object groups and provenance;
+    without it, each activity with two or more objects becomes an object
+    group named for the activity.
 
     Parameters
     ----------
@@ -900,7 +955,7 @@ def from_file(file: escdf.File) -> Project:
 
 
 def load(path: str | os.PathLike, **_ignored: Any) -> Project:
-    """Read an ESCDF file as a project.
+    """Read an ESCDF file as a project (see `from_file`).
 
     Parameters
     ----------

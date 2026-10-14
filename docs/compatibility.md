@@ -1,59 +1,73 @@
 # Compatibility: which geometry an object answers to
 
-A red row in the project tree means an object measures DOFs that the
-geometry it answers to does not have. Nothing is blocked by it — the
-object plots, exports and computes as before — but a shape cannot be
-drawn on a node that is not there, and a report figure that needs the
-geometry will say so. This page is the rule, the marks, and the one
-act the rule refuses.
+A red row in the project tree means an object names DOFs at nodes that
+the geometry it answers to does not have. The object still plots,
+exports and computes as before, but a shape cannot be drawn at a node
+that is not there, and a report figure that needs the geometry will say
+so. This page gives the rule, the marks, and what a link refuses.
 
 ## The rule
 
-An object **linked into a group that holds a geometry** is judged
-against that geometry — a link is a declaration that these things
-belong together, and the group's geometry is the one its shapes and
-channels are meant for. Everything else is judged against the
-**active geometry**: the one marked in the tree, or the first one in
-the project until one is chosen. Right-click a geometry and choose
-**Set as Active Geometry** to change it; the active one is drawn bold
-with a bullet beside its icon, because bold alone did not stand out
-among the darker real objects.
+An object linked into a group that holds a geometry is judged against
+that geometry, since the group's geometry is the one its shapes and
+channels belong to. Everything else is judged against the active
+geometry. The first geometry added to a project becomes the active one;
+to choose another, right-click it and choose **Set as Active
+Geometry**. The active geometry is drawn bold with a bullet beside its
+icon.
 
-Every DOF of a data object, shape set or channel table has to be a
-node in that geometry, in a direction the node can carry. A geometry
-that has the nodes is compatible whatever its units, and a project
-with no geometry at all has nothing to judge against and marks
-nothing.
+Every DOF of a shape set, a data object (its response and its reference
+DOFs) or a channel table has to name a node in that geometry. Only the
+node is checked, not the direction: `101RX+` fits wherever node 101
+exists. Units are not part of the check either; they have their own
+indicator. A project with no geometry has nothing to judge against, so
+nothing is marked.
+
+A data object whose DOFs are modal coordinates (`M1` to `Mn`) names no
+node. It answers to a shape set instead: one in its group if it is
+linked, any in the project otherwise, and that set needs at least as
+many modes as the highest coordinate the object names.
 
 ## The marks
 
-- **A red row** in the tree, with the reason on hover: how many DOFs
-  are missing out of how many, which ones (the first six, then *and N
-  more*), and which geometry was asked — for example *3 of 678 shape
-  DOFs are not in geometry 'plate': 501X+, 501Y+, 501Z+*.
-- **A red sub-row** where the object expands: the record, mode or
-  channel that carries the missing DOF is marked, not only its
-  parent.
-- **The same reason in a script**: `project.compatibility()` returns a
-  report whose `issue_for(name)` gives the issue for one object, with
-  its `missing_dofs`, and `incompatible_names` lists every marked
-  object.
+- A red row in the tree. Hovering over it shows the reason, also
+  given in the status line: how many DOFs are missing out of how many,
+  the first six of them (then *and N more*), and which geometry was
+  used, for example *3 of 678 shape DOFs are not in geometry 'plate':
+  501X+, 501Y+, 501Z+*. A data object counts records and a channel
+  table counts channels in the same way.
+- A red sub-row where the object expands: each record or channel
+  that carries a missing DOF is marked, not only its parent. For a
+  shape set every mode is marked, since every mode spans the same DOFs.
+- The same reasons in a script. `visualdynamics.check_compatibility`
+  returns a report in which `issue_for(name)` gives one object's issue, with
+  its `message` and `missing_dofs`, `is_compatible(name)` answers yes
+  or no, and `incompatible_names` lists every marked object.
 
-## What is refused
+```python
+report = visualdynamics.check_compatibility(
+    dict(project), project.active_geometry, project.object_groups)
+report.issue_for('modes').missing_dofs      # ['501X+', '501Y+', '501Z+']
+```
 
-Linking. `project.link` — and the link bar in the window — refuses to
-put an object into a group whose geometry lacks its DOFs, and says
-which DOFs. A group is a promise that its members fit together, and a
-link that broke the promise on the way in would have to be marked red
-the moment it was made.
+## What a link refuses
 
-## Why a rule rather than a search
+A missing node does not stop a link. A test often names places the
+model does not draw, such as drive points, control coordinates and
+virtual channels, so `project.link` (and **Link** on the tree's bar)
+links the objects and the red row reports the missing DOFs.
 
-The obvious alternative — an object is compatible if *any* geometry in
-the project can display it — was considered and rejected. It reads
-naturally with two demonstration models loaded side by side, and it is
-wrong the moment a project holds a test geometry and a model geometry
-that share node numbers: a shape set would be judged against
-whichever happened to fit, and the answer would change when a
-geometry was added or removed. The group's geometry, and otherwise the
-active one, is an answer the user chose.
+A link is refused in two cases, and the refusal says why:
+
+- the group would hold two geometries, because a group's members are
+  read against one geometry;
+- an object of modal coordinates would have no shape set in the group
+  with enough modes to answer to.
+
+## Why the rule names one geometry
+
+An object is not judged against whichever geometry in the project could
+display it. With a test geometry and a model geometry that share node
+numbers, that answer would depend on which geometry happened to fit,
+and it would change when a geometry was added or removed. The group's
+geometry, or otherwise the active one, is a geometry you chose.

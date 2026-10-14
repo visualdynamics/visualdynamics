@@ -2,29 +2,34 @@
 
 ## Install
 
-There are three ways in, and the
+There are three ways to install Visual Dynamics, and the
 [downloads page](https://visualdynamics.org/downloads) describes each
 in full.
 
-**A compiled package** — nothing to set up: download, open, and the
-application is on your desktop. Builds for macOS (Apple silicon and
-Intel, signed and notarized), a Windows installer and a Linux
-AppImage. This is the one to take unless you already work in Python.
+### A compiled package
 
-**The Python package** — the desktop application and the scripting API
-are one package, so installing it gets you both: the analysis you can
-drive from a notebook, and the same window the installers put on your
-desktop.
+Download it and open it; there is nothing else to set up. There are
+builds for macOS (Apple silicon and Intel, signed and notarized), a
+Windows installer and a Linux AppImage. Use this one unless you
+already work in Python.
+
+### The Python package
+
+The desktop application and the scripting API are one package, so
+installing it gives you both: the analysis you can drive from a
+notebook, and the same window the installers put on your desktop.
 
 ```bash
 pip install visualdynamics
 ```
 
-(Every release goes to PyPI the moment it is published, so `pip` and
-the downloads page never disagree about the latest version.)
+Every release is uploaded to PyPI when it is published, so `pip` and
+the downloads page always have the same latest version.
 
-**A contributor install** — take the repository and install it in
-place, so your edits are live without reinstalling:
+### A contributor install
+
+Clone the repository and install it in place, so your edits take
+effect without reinstalling:
 
 ```bash
 git clone https://github.com/visualdynamics/visualdynamics.git
@@ -32,66 +37,75 @@ cd visualdynamics
 pip install -e .
 ```
 
-Python 3.12 or newer, whichever way. The dependencies come with the
-package: numpy, scipy, pandas, h5py, netCDF4, pint, vtk, pyvista,
-pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi. One is optional: the
-STEP/IGES importer's geometry kernel, which the compiled packages
-include and a Python install adds with
-`pip install "visualdynamics[step]"`.
+`pip install -e '.[dev]'` adds the tools the test suite uses (pytest,
+pytest-xdist, ruff and the rest).
+
+### Requirements for a Python install
+
+A Python install needs Python 3.12 or newer. The dependencies are
+installed with the package: numpy, scipy, pandas, h5py, netCDF4, pint,
+vtk, pyvista, pyvistaqt, PySide6, pyqtgraph, openpyxl, certifi and
+truststore. One part is optional: the geometry kernel that solids
+(Add Solid Block, Mesh Solids and the rest) and the STEP/IGES importer
+use. The compiled packages include it, and a Python install adds it
+with `pip install "visualdynamics[step]"`.
 
 ## The app
 
 ```bash
 visualdynamics                      # or: python -m visualdynamics
-visualdynamics modal_run.nc4        # opening files on the way in
+visualdynamics modal_run.nc4        # import files as it opens
 ```
 
 A compiled package opens like any other application; the commands
-above are for the Python install. (`visualdynamics-gui` still works,
-for anything that learned it from the first alphas.)
+above are for a Python install. `visualdynamics-gui` is the same
+command under its older name.
 
-Something to open on the first day: the [downloads
-page](https://visualdynamics.org/downloads#examples) links two sets of
-example projects, one per workflow — the plate the guide's screenshots
-come from, and the quadcopter at the size of a real test article.
-Unzip, then File → Open.
+The [downloads page](https://visualdynamics.org/downloads#examples)
+has example projects to open on the first day: the plate the guide's
+screenshots come from and the quadcopter, a model the size of a real
+test article, each as one project per workflow; and two finite element
+models, the BARC and the Frame-Wing. Unzip one, then use File →
+Import… or drag the `.vdyn` onto the window. A project imported into
+an empty window becomes the window's project.
 
-The window follows the platform's light or dark appearance. Where
-the platform does not say (a Linux desktop Qt cannot read, or a
-preference of your own), **File → Appearance** chooses Light, Dark or
-System, and the choice is remembered; `--theme dark` on the command
-line, or `VISUALDYNAMICS_THEME=dark` in the environment, says it for
-one launch.
+The window follows the platform's light or dark appearance. Where the
+platform does not say (a Linux desktop Qt cannot read, for example) or
+you want something else, **File → Appearance** chooses Light, Dark or
+System, and the choice is remembered. `--theme dark` (or `light`) on
+the command line, or `VISUALDYNAMICS_THEME=dark` in the environment,
+sets it for one launch.
 
-Every launch of this alpha opens with a disclaimer to acknowledge —
-the software is offered as is, its numbers are the user's to check —
-and **File → About Visual Dynamics…** shows the version, readable
-without the network.
+Every launch of this alpha opens with a disclaimer to acknowledge: the
+software is provided as is, and checking its numbers is up to you.
+**File → About Visual Dynamics…** shows the version, and works without
+the network.
 
-**File → Check for Updates…** checks only when you choose it.
+**File → Check for Updates…** checks only when you choose it; nothing
+checks on startup. What it does depends on how you installed:
 
-- **The macOS app updates itself.** Sparkle opens its own window, shows
+- The macOS app updates itself. Sparkle opens its own window, shows
   what is new, and installs the update in place when you say so. It
   usually downloads only what changed between your version and the new
   one, and it verifies the update's signature before installing it.
-- **A pip install** is told the command that updates it, for its own
+- A pip install is shown the command that updates it, for its own
   Python, with a button that copies it:
   `python -m pip install --upgrade visualdynamics`. Only the package
-  itself is downloaded. An editable install (a checkout) is not offered
-  one, since `git pull` is how a checkout updates.
-- **Windows and Linux builds** are told a newer version exists, with the
-  download page to open.
+  itself is downloaded. An editable install (a clone) is not shown a
+  command, because `git pull` is how a clone is updated.
+- Windows and Linux builds are told that a newer version exists,
+  with a button that opens the download page.
 
-Outside the macOS app the check asks visualdynamics.org, verified
-against what the operating system trusts, so on a network that
-inspects HTTPS it works once the network's own certificate authority
-is installed on the machine, as it is for the browser; failing that,
-the status line says which part of the check failed.
+Outside the macOS app, the check asks visualdynamics.org and verifies
+the connection against the certificates the operating system trusts.
+On a network that inspects HTTPS it works once the network's own
+certificate authority is installed on the machine, as it is for the
+browser. When the check fails, the status line says which part failed.
 
-The command is created by the install, in the environment's own `bin`
-directory — it is on your `PATH` exactly when that environment is
-active. From a terminal that has not activated it, either activate
-first or call it by path; both run the same thing:
+The install puts the command in the environment's own `bin`
+directory, so it is on your `PATH` only while that environment is
+active. From a terminal where it is not active, either activate it
+first or call the command by its path; both run the same thing:
 
 ```bash
 source .venv/bin/activate && visualdynamics   # from the clone
@@ -108,55 +122,64 @@ on the bottom edge, and the display-unit selector in the status
 bar](guide/images/modal-import.png)
 
 Drag files anywhere onto the window to import them: Rattlesnake runs
-(`.nc4`), universal files (`.unv`/`.uff`), I-DEAS ADFs
-(`.afu`/`.ati`/`.ash`), Exodus meshes (`.exo`), Nastran bulk decks
-(`.bdf`/`.dat`/`.nas`) and punch eigenvectors (`.pch`), Femap Neutral
-files (`.neu`), sdynpy arrays (`.npz`/`.npy`), channel-table
-spreadsheets (`.xlsx`), CAD geometry (`.step`/`.iges` tessellated on
-import — a McMaster-Carr download drops straight in — and `.3mf` or
-`.stl` meshes, each part a named element group),
-photographs, MATLAB files in the project's own layout (`.mat`), and
-whole `.vdyn` projects. A run too long for the machine asks how much
-of it to import, on a preview of one channel. The
-full matrix of what each format carries, both directions, is in
-[Importing and exporting](export.md).
+(`.nc4`) and specifications (`.npz`), universal files (`.unv`/`.uff`),
+I-DEAS ADFs (`.afu`/`.ati`/`.ash`), Exodus meshes (`.exo`/`.e`),
+Nastran bulk decks (`.bdf`/`.dat`/`.nas`) and punch eigenvectors
+(`.pch`), Femap Neutral files (`.neu`), sdynpy arrays
+(`.npz`/`.npy`), channel-table spreadsheets (`.xlsx`), CAD geometry
+(`.step`/`.iges`, tessellated on import, so a McMaster-Carr download
+can be dropped in directly; `.3mf` and `.stl` meshes, each part a
+named element group), photographs, MATLAB files in the project's own
+layout (`.mat`), Engineering Sciences Common Data Format files
+(`.h5`), report templates (`.vdreport`) and whole `.vdyn` projects.
+A Rattlesnake run too large for the machine's memory asks how much of
+it to import, on a preview of one channel. **File → Truncate
+Rattlesnake File…** uses the same preview to write any run, cut to the
+stretch you pick, as a new `.nc4` with every channel and every setting
+kept. The full table of what each format carries, in both directions,
+is in [Importing and exporting](export.md).
 
 ### Launching from a session that uses sdynpy
 
 `import sdynpy` binds pyqtgraph to PyQt5 and sets `QT_API=pyqt5`, and
-neither can be undone once a process has started — so a notebook or
-VS Code session that has been using sdynpy cannot host visualdynamics's window
-in that same interpreter. `visualdynamics.launch_gui()` notices and starts the
-app in a fresh process instead, returning immediately:
+neither can be undone once a process has started. A notebook or VS
+Code session that has imported sdynpy therefore cannot show the Visual
+Dynamics window in the same interpreter. `visualdynamics.launch_gui()`
+detects this and starts the app in a new process instead, returning
+immediately:
 
 ```python
 import sdynpy, visualdynamics
 visualdynamics.launch_gui('modal.vdyn')     # its own process; sdynpy is untouched
 ```
 
-Pass `in_process=True` to insist on this interpreter (and get the
+Pass `in_process=True` to insist on this interpreter (you get the
 explanation if it cannot work), or `in_process=False` to always use a
-separate one — handy in a notebook, where the window then does not
-block the kernel.
+separate process. The second is useful in a notebook, because the
+window then does not block the kernel.
 
-Drag files onto the project tree to import them. Right-click the
-project root to set its type; select two objects and use the link bar
-to declare they belong together. Computations live where their
-settings are set: a time history's averaging view carries the
-spectral estimates (Compute PSDs, CPSDs, FRFs, Multiple Coherence,
-Spectra), the shock view carries Compute SRS, and the filter and
-truncate views apply their own acts — each panel's buttons compute
-with exactly the settings on screen. The transforms with no view of
-their own (integrate, differentiate, extract sine levels, the modal
-fit) are acts on the same bar — an icon each, the verb in its tooltip,
-offered only for the selection they apply to; with the project row
-selected the bar holds *Generate Report*. Objects copy and paste like
-files — Cmd/Ctrl-C and V in the tree duplicates them, pasting into a
-folder exports them, and a copy from another window carries them
-across. When a settings change leaves a derived object
-behind — more averages on the time data, a moved shock window — a
-refresh badge appears beside it saying why, and clicking the badge
-recomputes it in place.
+### First steps in the window
+
+Right-click the project row and use *Set Project Type* to say what kind
+of test this is. Select two objects and press *Link* on the bar above
+the tree to declare that they belong together. Each computation is run
+from the view where its settings are set: a time history's averaging
+view has the spectral estimates (*Compute PSDs*, *Compute CPSDs*,
+*Compute FRFs…*, *Multiple Coherence* and *Compute Spectra*), the shock
+view has *Compute SRS*, and the filter and
+truncate views apply their own changes. Each pane's buttons compute
+with the settings shown on screen. Operations with no view of their
+own, such as integrating, differentiating, extracting sine levels and
+fitting modes, are buttons on the same bar: an icon each, with the name
+in its tooltip, shown only when the selection is one they apply to.
+With the project row selected, the bar holds *Generate Report*.
+
+Objects copy and paste like files. Cmd/Ctrl-C and then V in the tree
+duplicates them, pasting into a folder exports them, and a copy from
+another window brings them across. When a settings change makes a
+derived object out of date (more averages on the time data, a moved
+shock window), a refresh badge appears beside it with the reason, and
+clicking the badge recomputes it in place.
 
 ## The same thing as a script
 
@@ -165,7 +188,7 @@ import visualdynamics
 
 project = visualdynamics.Project('Beam Airplane Modal Test')
 project.project_type = 'Modal Test'
-project.import_file('modal_run.nc4')
+project.import_file('modal_run.nc4')    # a modal run saved with its FRFs
 project.import_file('test_geometry.npz')
 project.geometry.define_units('m')
 project.set_basis(*list(project))       # the measured side
@@ -178,24 +201,25 @@ project.save('modal.vdyn')              # open this in the app
 ```
 
 `examples/modal_workflow.py` in the repository is a longer version of
-this — import, process, fit, correlate, match, plot, report — and it
-runs as a test, so it always works.
+this (import, process, fit, correlate, match, plot, report). It runs as
+part of the test suite, so it stays working.
 
 ## Which one should I use?
 
-Both, in either order. The app is faster for looking, judging and
-picking; a script is faster for repeating. They share the objects,
-the rules and the file, so a project can move between them mid-job:
-save from the app, load in a notebook, save again, reopen.
+Both, in either order. The app is faster for looking at data, judging
+it and picking; a script is faster for repeating a job. They share the
+objects, the rules and the file, so a project can move between them
+partway through a job: save from the app, load in a notebook, save
+again, reopen.
 
-The one thing a script cannot do is the judgment calls the screen
-asks you for — which residual peak is a real mode, which MAC squares
-are a match. Scripted, those become rules (a frequency band, a MAC
-threshold), and it is worth being deliberate about that.
+What a script cannot do is make the judgment calls the screen asks you
+for, such as which residual peak is a real mode or which MAC squares
+are a match. In a script those become rules (a frequency band, a MAC
+threshold), and you should choose those rules on purpose.
 
-And the bridge between the two is built in: the **console tab** along
-the bottom of the window writes the session as Python while you work —
-every import, every setting, every computation as the line that
-replays it, judgment calls included (an interactive mode fit journals
-as its confirmed picks). Expand the tab, copy the stretch you want,
-and yesterday's session is today's script.
+The **console tab** along the bottom of the window connects the two.
+It writes the session as Python while you work: every import, every
+setting and every computation, as the line that replays it, including
+the judgment calls (an interactive mode fit is recorded as its
+confirmed picks). Expand the tab, copy the part you want, and
+yesterday's session is today's script.

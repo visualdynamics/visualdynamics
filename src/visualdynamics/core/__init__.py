@@ -1,12 +1,12 @@
-"""The data model: what a test holds, with no Qt anywhere.
+"""The data model: what a test holds. Nothing here uses Qt.
 
-Geometry, the data arrays, shapes, channel tables, and the
-computations over them. Everything here works in a script, in a
-notebook and in the app equally, because none of it knows which
-it is in — the app is a view onto these objects, not the place
-they live. The guide's [The objects](../guide/objects.md) maps every
-kind — what it stores, where it comes from, what can be done with it
-— and points back here for the signatures.
+The geometry, the data arrays, the shapes, the channel tables and the
+computations on them. All of it works the same in a script, in a
+notebook and in the app, because none of it depends on where it is
+used; the app displays these objects and does not hold its own copy
+of them. The guide's [The objects](../guide/objects.md) describes each
+kind of object (what it stores, where it comes from, what can be done
+with it) and links back here for the signatures.
 """
 
 from . import fem, mesh

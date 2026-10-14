@@ -1,11 +1,15 @@
-"""Native .vdyn file format: HDF5.
+"""The native .vdyn file format, which is HDF5.
 
-A single object is one group named for its kind at the root. A whole test
-is an `objects/` container of numbered groups — number for order, `name`
-and `kind` as attributes, so a user's name is free to contain anything
-h5py would read as structure — plus the test's own name and active
-geometry as root attributes. Ragged connectivity is stored as a flat
-array plus offsets.
+A file with a single object has one group at the root, named for the
+object's kind ('geometry', 'data', 'shapes', and so on). A file with a
+whole test has an `objects/` group of numbered groups, numbered in the
+test's order, with each object's `name` and `kind` as attributes, so a
+name may contain anything, including characters h5py would read as a
+path. The test's name, active geometry, project type, object groups and
+provenance are attributes of the root. Ragged connectivity is stored as
+a flat array plus offsets. Every file is stamped with its schema
+version, and a file from a newer schema is refused with a message to
+update.
 """
 
 from __future__ import annotations
@@ -630,8 +634,9 @@ def load_matches(group: h5py.Group) -> MatchedModes:
 
 
 def save_sine_specification(spec, group) -> None:
-    """One subgroup per tone, the file's own shape: breakpoints with
-    the per-segment sweep law, bands where they exist."""
+    """Write a sine sweep specification into `group`, one subgroup per
+    tone: its breakpoints with the sweep law of each segment, and its
+    bands where it has them."""
     _write_strings(group, 'response_dof', spec.response_dof)
     group.attrs['ordinate_dim'] = spec.ordinate_dim
     group.attrs['ordinate_unit'] = spec.ordinate_unit or ''
@@ -676,8 +681,8 @@ def load_sine_specification(group):
 
 
 def save_sine_levels(levels, group) -> None:
-    """One subgroup per tone, each the ordinary data layout — the set
-    is grouping, not a new format."""
+    """Write a sine level set into `group`, one subgroup per tone, each
+    in the ordinary data layout, since the set only groups the levels."""
     _write_strings(group, 'tone_order',
                    [level.tone for level in levels.levels])
     if levels.cycles is not None:
@@ -743,7 +748,9 @@ def _visualdynamics_path(path: str | os.PathLike) -> str:
 
 
 def save(obj: Any, path: str | os.PathLike) -> None:
-    """Save a visualdynamics object to a .vdyn (HDF5) file.
+    """Save one Visual Dynamics object to a .vdyn (HDF5) file.
+
+    Raises TypeError for an object of a kind the format does not hold.
 
     Parameters
     ----------
@@ -763,9 +770,12 @@ def save(obj: Any, path: str | os.PathLike) -> None:
 
 
 def save_into(obj: Any, f: h5py.File) -> None:
-    """Write one object into an open, empty HDF5 file — the whole of
-    `save` but the opening, so another container (`io.matlab`) can run
-    the same writer into memory and carry the tree away."""
+    """Write one object into an open, empty HDF5 file.
+
+    This is `save` without opening the file, so that other formats
+    (`io.matlab`, `io.escdf_objects`) can write the same layout into
+    memory and store it inside their own files.
+    """
     group_name, saver = _saver_for(obj)
     f.attrs['visualdynamics_schema'] = SCHEMA_VERSION
     saver(obj, f.create_group(group_name))
@@ -785,11 +795,14 @@ def save_test(path: str | os.PathLike, name: str,
               project_type: str | None = None,
               object_groups: Sequence[Mapping[str, Any]] | None = None,
               provenance: Mapping[str, Any] | None = None) -> None:
-    """Save a whole test — every named object — to one .vdyn file.
+    """Save a whole test, every named object, to one .vdyn file.
 
-    Objects go in numbered groups with the name as an attribute, so a name
-    is free to contain anything h5py would read as structure. `links` is
-    the explicit association groups, lists of object names.
+    Objects go in numbered groups with the name as an attribute, so a
+    name may contain anything h5py would read as a path. `objects` maps
+    each name to its object, in order. `object_groups` is the object
+    groups, each a mapping with its `members` (object names);
+    `provenance` records how each derived object was computed. Both are
+    stored as JSON. `.vdyn` is added to `path` when it is not there.
     """
     import h5py
 
@@ -824,13 +837,13 @@ def save_test_into(f: h5py.File, name: str, objects: Mapping[str, Any],
 
 def load(path: str | os.PathLike,
          progress: Callable[[int, int], None] | None = None) -> Any:
-    """Load a .vdyn file: the object it contains, or a whole test.
+    """Load a .vdyn file: the object it holds, or a whole test.
 
-    `progress` is called as (objects loaded, objects in the file) —
-    once up front with 0 and once per object — because a project file
-    is minutes of someone's day and the reader is the only thing that
-    knows how far along it is. A single-object file reports nothing:
-    one object is one step, and a bar with one step is a light bulb.
+    For a whole test, `progress` is called as (objects loaded, objects
+    in the file), once at the start with 0 and once per object, because
+    a large project can take minutes to load and only the reader knows
+    how far along it is. For a single-object file it is not called,
+    since loading one object is a single step.
 
     Parameters
     ----------
@@ -844,6 +857,13 @@ def load(path: str | os.PathLike,
     -------
     object
         The object the file holds, or a `Project` for a whole test.
+
+    Raises
+    ------
+    ValueError
+        When the file has no schema stamp (it was not written by Visual
+        Dynamics), was written with a newer schema, or holds nothing
+        this reader recognizes.
     """
     import h5py
 
@@ -853,8 +873,8 @@ def load(path: str | os.PathLike,
 
 def load_from(f: h5py.File, progress: Callable[[int, int], None] | None = None,
               path: str = '') -> Any:
-    """`load` from an open HDF5 file (see `save_into`); `path` names
-    the file in the errors."""
+    """`load` from an open HDF5 file (see `save_into`). `path` names the
+    file in error messages."""
     # A newer stamp means a newer Visual Dynamics wrote fields this
     # reader has no idea exist, and half-loading someone's project
     # quietly is worse than telling them to update. A missing stamp

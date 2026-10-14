@@ -192,6 +192,24 @@ def test_readings_under_the_floor_are_ringed_on_the_comparison(window, pump):
     assert len(x) == int(level.below_floor[0].sum())
 
 
+def test_levels_against_their_specification_say_level_not_srs(window, pump):
+    """The comparison's two readings are the shock spectrum's buttons,
+    and they read "Spectra" and "SRS Error" over sine levels (2026-10-13).
+    Beside a sweep specification they say what they show."""
+    _sweep(window, pump)
+    window.extract_sine_levels('Record')
+    pump()
+    name = next(n for n, o in window.objects.items() if isinstance(o, SineLevelSet))
+    select_objects(window, pump, name, 'Sweep')
+    pane = window.data_pane
+    assert pane.srs_actions['curves'].isVisible()
+    assert [pane.srs_actions[k].text() for k in ('curves', 'error')] == [
+        'Levels', 'Level Error']
+    assert 'level it had to reach' in pane.srs_actions['error'].toolTip()
+    pane.show_srs_views(True)
+    assert pane.srs_actions['error'].text() == 'SRS Error', 'a shock spectrum says SRS'
+
+
 def test_the_glyph_is_its_own(window):
     from visualdynamics.gui.icons import control_icon
 

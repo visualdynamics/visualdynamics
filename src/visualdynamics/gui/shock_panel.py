@@ -1,14 +1,16 @@
 """The shocks found in a time history, as a table beside it.
 
-One row per event: when its window opens and how long it runs. Both are
-editable, because detection is a good guess and not an oracle — and the
-same two numbers are what dragging a region on the plot changes, so the
-table and the trace are two views of one list.
+There is one row per event: when its window starts and how long it is.
+Both can be edited, because detection can miss or misplace an event,
+and they are the same two numbers that dragging a region on the plot
+changes, so the table and the plot show one list. Detect finds the
+events again, Add adds a window the detector missed, Remove deletes the
+selected one, and Same length for all gives every window one length.
 
-The panel says where the events are, reports when that changes, and
-its Compute SRS button turns the history into spectra with whatever is
-set at that moment — the project verb a script calls. That is exactly
-how the averaging panel stands to a PSD.
+Below the table are the SRS settings (Q, which peak, and lines per
+octave) and the band the windows support. Compute SRS computes the
+spectra with whatever is set at that moment, through the project verb a
+script calls, as the averaging panel does for a PSD.
 """
 
 from __future__ import annotations
@@ -50,9 +52,10 @@ PLACES = 4
 class ShockPanel(QWidget):
     """The events, and what can be done to them.
 
-    `changed` carries the whole list rather than which row moved: the
-    list is short, the receiver rewrites the overlay from it either way,
-    and a diff nobody uses is a thing that can be wrong.
+    `changed` carries the whole list instead of the row that moved: the
+    list is short, the receiver redraws the overlay from all of it
+    either way, and a difference nobody uses is one more thing that can
+    be wrong.
     """
 
     changed = Signal(object)
@@ -194,7 +197,9 @@ class ShockPanel(QWidget):
 
     def set_shocks(self, shocks: Sequence[Shock],
                    locked: bool = False) -> None:
-        """Show these, without reporting them back as an edit."""
+        """Show these shocks without emitting `changed`. With `locked`
+        (a file that already cut the record into captures), the table
+        and its editing buttons are disabled."""
         shocks = tuple(shocks)
         self._shocks = shocks
         self._writing = True
@@ -316,11 +321,12 @@ class ShockPanel(QWidget):
         self.changed.emit(kept)
 
     def srs_settings(self) -> dict:
-        """The analysis choices as `compute_srs` keyword arguments."""
+        """The SRS settings as `compute_srs` keyword arguments: `q`,
+        `kind` and `per_octave`."""
         return {'q': float(self.q_box.value()),
                 'kind': str(self.kind_box.currentData()),
                 'per_octave': int(self.per_octave_box.value())}
 
     def show_band(self, low: float, high: float) -> None:
-        """State the band the current windows support."""
+        """Show the frequency band, in Hz, the current windows support."""
         self.band_label.setText(f'{low:.4g}–{high:.4g} Hz')

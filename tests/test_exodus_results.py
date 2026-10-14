@@ -411,3 +411,36 @@ def test_parabolic_solids_and_pyramids_round_trip_exodus(tmp_path):
     by_type = {int(t): c for t, c in zip(back.elem_type, back.elem_conn)}
     assert len(by_type[118]) == 10 and len(by_type[113]) == 15
     assert len(by_type[201]) == 5, 'the pyramid survives where UNV refuses'
+
+
+def test_shapes_written_in_inches_predict_the_same_frf(tmp_path):
+    """The modal mass is a scale factor with no unit, since the
+    coefficients carry the mass unit. It was converted as a mass too,
+    and the shapes came back predicting FRFs 175 times too large
+    (2026-10-13)."""
+    import warnings
+
+    import numpy as np
+
+    from visualdynamics.core.geometry import Geometry
+    from visualdynamics.core.shapes import ShapeSet
+    from visualdynamics.io import export_file, import_file
+    from visualdynamics.units import SYSTEMS
+
+    geometry = Geometry(node_id=[1, 2], node_xyz=[[0, 0, 0], [1, 0, 0]])
+    geometry.define_units('m')
+    shapes = ShapeSet([10.0, 25.0], [0.02, 0.02], ['1X+', '2X+'],
+                      [[0.5, 0.25], [0.3, -0.4]], modal_mass=[2.0, 3.0])
+    shapes.define_units('kg')
+    path = str(tmp_path / 'modes.exo')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        export_file(shapes, path, unit_system=SYSTEMS['in-slinch-lbf-s'],
+                    geometry=geometry)
+        back = import_file(path)
+    back = back if isinstance(back, ShapeSet) else next(
+        o for o in back.values() if isinstance(o, ShapeSet))
+    back.define_units('slinch')
+    f = np.linspace(1.0, 40.0, 50)
+    np.testing.assert_allclose(back.synthesize_frf(f, ['1X+'], ['1X+']),
+                               shapes.synthesize_frf(f, ['1X+'], ['1X+']), rtol=1e-9)

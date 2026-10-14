@@ -1,25 +1,27 @@
-"""The packaged macOS app updates itself, through Sparkle (2026-09-28).
+"""Updating the packaged macOS app in place, through Sparkle.
 
-Brandon: *is there a way to make the app update itself instead of making
-me re-download the whole dmg every time?* Sparkle is the updater most
-Mac applications outside the App Store use (MIT). It reads the feed
-named in the bundle's Info.plist (`update.SPARKLE_FEED`), shows what is
-new, downloads the smallest thing that gets there — a binary delta from
-the installed version when the release carries one, the whole archive
-otherwise — checks its EdDSA signature against the key in the
-Info.plist and the new app's Developer ID against this one's, then
-replaces the app and relaunches it.
+Sparkle (MIT licensed) is the updater most Mac applications outside the
+App Store use. When asked to check, it reads the feed named by
+`SUFeedURL` in the app's Info.plist (`update.SPARKLE_FEED`, one feed per
+architecture, since the arm64 and Intel builds are separate apps) and
+shows what is new. It then downloads a binary delta from the installed
+version when the release has one, or the whole archive otherwise,
+checks the download's EdDSA signature against `SUPublicEDKey` in the
+Info.plist and the new app's Developer ID signature against the
+installed app's, replaces the app and relaunches it.
 
-**Only when asked.** The Info.plist sets `SUEnableAutomaticChecks` off,
-so Sparkle never checks on its own and never asks to; *Check for
-Updates* is still the one network request the program makes, as the
-privacy policy says (Brandon, 2026-09-28: keep checks manual).
+It checks only when asked. The Info.plist turns off
+`SUEnableAutomaticChecks`, `SUAllowsAutomaticUpdates` and
+`SUAutomaticallyUpdate`, so Sparkle never checks on its own, never asks
+for permission to, and never downloads in the background. File → Check
+for Updates is the only time the program makes a network request, as
+the privacy policy says.
 
-The framework is reached through pyobjc's runtime alone — no Cocoa
-wrapper package — and only in the frozen macOS app, the one place
-Sparkle.framework exists (`packaging/build_macos.sh` puts it in
-`Contents/Frameworks`). Everywhere else `controller()` is None and the
-window keeps the manifest check (`update.py`).
+The framework is loaded through pyobjc's runtime (`pyobjc-core`), with
+no Cocoa wrapper package, and only in the frozen macOS app, the one
+place Sparkle.framework exists (`packaging/build_macos.sh` copies it
+into `Contents/Frameworks`). Everywhere else `controller()` returns
+None and Check for Updates uses the manifest check in `update.py`.
 """
 
 from __future__ import annotations
@@ -28,6 +30,11 @@ import os
 import sys
 from typing import Any
 
+# Brandon, 2026-09-28: "is there a way to make the app update itself
+# instead of making me re-download the whole dmg every time?" Sparkle
+# was the answer, and the same day he decided the checks stay manual
+# (the Info.plist settings in packaging/visualdynamics.spec).
+
 #: the one controller, held for the life of the process: Sparkle's
 #: updater is torn down with its last reference, mid-download included
 _CONTROLLER: Any = None
@@ -35,8 +42,9 @@ _TRIED = False
 
 
 def framework_path() -> str | None:
-    """Sparkle.framework inside this app bundle, or None where there is
-    none (not frozen, not macOS, or a build made without it)."""
+    """The path to Sparkle.framework inside this app bundle, or None
+    where there is none: not frozen, not macOS, no pyobjc, or a build
+    made without the framework."""
     if sys.platform != 'darwin' or not getattr(sys, 'frozen', False):
         return None
     try:
@@ -54,11 +62,12 @@ def framework_path() -> str | None:
 def controller() -> Any:
     """Sparkle's standard updater controller, started once, or None.
 
-    Started, because a controller that is not started refuses every
+    The first call decides and later calls return the same answer. The
+    controller is started because one that is not started refuses every
     check; with automatic checks off in the Info.plist, starting it
-    schedules nothing. A framework that will not load answers None
-    rather than raising: the menu item then falls back to the manifest
-    check, which is worse than an update but better than an error.
+    schedules nothing. If the framework does not load, this returns None
+    instead of raising, and the menu item falls back to the manifest
+    check, which can only report that a newer version exists.
     """
     global _CONTROLLER, _TRIED
     if _TRIED:
@@ -82,8 +91,9 @@ def controller() -> Any:
 
 
 def check() -> bool:
-    """Ask Sparkle to check now, with its own window; False when there
-    is no Sparkle to ask."""
+    """Ask Sparkle to check now, in its own window. Returns True when it
+    was asked, and False when there is no Sparkle to ask (see
+    `controller`), so the caller can use the manifest check instead."""
     updater = controller()
     if updater is None:
         return False

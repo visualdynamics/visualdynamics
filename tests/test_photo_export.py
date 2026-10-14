@@ -94,6 +94,17 @@ def test_jpeg_keeps_its_own_extension(tmp_path):
     assert pathlib.Path(written[0]).name == 'Article.jpg'
 
 
+@pytest.mark.parametrize('fmt, suffix', [('gif', '.gif'), ('bmp', '.bmp'),
+                                         ('jpg', '.jpg')])
+def test_an_escdf_photos_format_keeps_its_own_extension(fmt, suffix, tmp_path):
+    """An ESCDF import names the format by the attachment's suffix, and
+    a GIF, a BMP and a 'jpg' were each written as '.png' around bytes
+    that are not PNG (2026-10-13)."""
+    album = Photos(names=['Article'], formats=[fmt], images=[b'bytes'])
+    written = photo_files.save(album, str(tmp_path / 'out'))
+    assert pathlib.Path(written[0]).name == f'Article{suffix}'
+
+
 def test_it_is_registered_as_the_exporter_for_photos(photos):
     names = {e.name for e in visualdynamics.io.exporters(photos)}
     assert 'photos' in names, 'Photos had no exporter at all before this'

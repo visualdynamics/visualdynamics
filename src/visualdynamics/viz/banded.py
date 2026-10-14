@@ -1,23 +1,21 @@
-"""Banded spectra on a 3-D stage: frequency, channel, level.
+"""Specifications with limits on a 3-D stage: frequency, channel, level.
 
-The sine stage put a specification in the space it lives in; this is
-the same reading for every other banded spectrum (Brandon,
-2026-08-22). A random or shock specification is one curve *per
-channel*, so the third axis is the channel: frequency across,
-channels receding — the waterfall's own depth — level up. Alone, a
-specification shows every channel's requirement with its warning and
-abort zones on one stage; beside its measurement, every channel's
-comparison shows at once, with the frequency lines that went outside
-an abort limit shaded exactly as the 2-D comparison boxes them — one
-rectangle per exceeding line, its own bin wide, red to the ceiling
-above the upper abort, blue to the floor below the lower.
+A random or shock specification is one curve per channel, so the third
+axis is the channel: frequency across, channels receding (the
+waterfall's depth axis), level up. Alone, a specification shows every
+channel's requirement with its warning and abort zones on one stage.
+With its measurement, every channel's comparison shows at once, and the
+frequency lines that went outside an abort limit are shaded as the 2-D
+comparison shades them: one rectangle per line outside, as wide as its
+own bin, red up to the top of the stage above the upper abort limit and
+blue down to the floor below the lower one.
 
-The measured half rides `waterfall_arrays` — the same decimation,
-paging, log mapping and labels the plain waterfall uses — so the two
-3-D readings cost and behave alike. The exceedances are judged at
-full resolution through `core.compliance.outside`, the same call the
-2-D shading and the compliance table use, so what is shaded here and
-what is counted there cannot disagree.
+The measured curves come from `waterfall_arrays`, with the same
+decimation, log mapping and labels the plain waterfall uses, so the two
+3-D views cost and behave alike. The exceedances are judged at full
+resolution with `core.compliance.outside`, the same call the 2-D shading
+and the compliance table use, so what is shaded here and what is
+counted there agree.
 """
 
 from __future__ import annotations
@@ -40,6 +38,10 @@ from .waterfall import (
     waterfall_arrays,
 )
 
+# The sine stage put a specification in its own three dimensions first;
+# this is the same view for every other banded spectrum (Brandon,
+# 2026-08-22).
+
 
 def banded_stage_arrays(specification: Any, measured: Any = None,
                         records: Any = None,
@@ -47,14 +49,27 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
                         budget: int = POINT_BUDGET,
                         specification_records: Any = None
                         ) -> dict[str, Any]:
-    """The stage's numbers, before any VTK touches them.
+    """The stage's numbers, before VTK is involved.
 
-    One station per shared channel (every specification channel when
-    nothing is measured), in the specification's order. Each station
-    carries the specification's target and limit curves and, when
-    measured, that channel's drawn curves (decimated exactly as the
-    waterfall decimates) plus the full-resolution values the
-    exceedances are judged from.
+    One station per channel that the specification and the `measured`
+    records (`records` of it, the first page of `waterfall_arrays`)
+    share, or per specification channel when nothing is measured, in the
+    specification's order. `specification_records` limits the stations
+    to the channels of those specification records; with nothing
+    measured, each picked record is its own station instead, and a cross
+    term is drawn as its magnitude and labeled by its pair. A station's
+    target is its channel's autospectrum.
+
+    Each station holds the specification's target and limit curves (for
+    drawing, log10 when the level is log-scaled, and as written) and,
+    when measured, that channel's drawn curves (decimated to `budget`
+    as the waterfall decimates) and the abort exceedances, judged at
+    full resolution. Returns a dict of ``stations`` and the shared
+    values: ``spec_x`` and ``spec_x_drawn`` (the specification's lines,
+    and the abscissa its curves are drawn along), ``log_scaled``,
+    ``xlabel``, ``zlabel``, ``compared`` (whether anything is
+    measured), and the two transforms ``logged`` (level) and ``spread``
+    (abscissa) into drawing values.
     """
     from ..core.compliance import outside
 
@@ -225,13 +240,21 @@ def add_banded_stage(plotter: Any, specification: Any,
                      budget: int = POINT_BUDGET,
                      specification_records: Any = None
                      ) -> dict[str, Any]:
-    """Draw the stage into a plotter.
+    """Draw the stage into a plotter. The arguments are those of
+    `banded_stage_arrays`.
 
-    Alone, each channel's requirement wears its own color with its
-    zones; compared, the requirements step back to the specification
-    gray and the measured curves take the colors — the 2-D pairing
-    rule — with the exceedance rectangles over their own bins.
-    Returns the arrays dict with ``points`` added.
+    Alone, every channel's requirement is drawn in the 2-D plot's
+    response-curve color, with its warning and abort zones. Compared,
+    the requirements are drawn in the specification gray and each
+    station's measured curves in a color of their own, as the 2-D plot
+    pairs them, with the exceedance rectangles over their own bins. A
+    log abscissa is labeled in decades (`marks.add_decade_axis`).
+
+    Returns the dict from `banded_stage_arrays` with ``points`` (the
+    vertices drawn) added and, when there are stations, ``extents``
+    ((x0, x1, z0, z1), the real ranges the stage stands for, which a
+    preview drawn over it normalizes against), and for a log abscissa
+    ``decades``, the decade labels drawn.
     """
     import pyvista as pv
 
@@ -405,9 +428,11 @@ def plot_banded_stage(specification: Any, measured: Any = None,
                       screenshot: str | None = None,
                       unit_system: UnitSystem | None = None,
                       theme: Any = None, show: bool = True) -> Any:
-    """Show the stage interactively, or render it to `screenshot` —
-    the scriptable face of the 3-D specification and comparison
-    views the plot bar gives every banded spectrum."""
+    """Show the stage interactively, or render it to `screenshot`: the
+    script version of the 3-D specification and comparison views the
+    plot bar offers for every banded spectrum. `measured` and `records`
+    are those of `banded_stage_arrays`. Returns the image array when
+    rendering to a file, and otherwise the plotter (`finish_scene`)."""
     import pyvista as pv
 
     colors = resolve_theme(theme)

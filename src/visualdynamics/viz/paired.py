@@ -1,18 +1,16 @@
 """Two densities on one stage: channels receding, paired per station.
 
-The 3-D reading of two selected PSDs (Brandon, 2026-08-25), in the
-banded stage's own idiom: each shared channel is a station along the
-depth axis, and at each station the two objects meet — the louder
-drawn level-colored, the quieter stood back in the muted gray a
-compared reference wears. The Signal to noise reading divides
-instead: one curve per station, in decibels, linear — the number being
-read *is* the decibel.
+The 3-D view of two selected PSDs, laid out as the banded stage is:
+each shared channel is a station along the depth axis, and at each
+station the two objects are drawn together, the `loud` one colored by
+level and the `quiet` one in the muted gray of a compared reference.
+The signal-to-noise view divides them instead: one curve per station,
+in decibels on a linear axis, since the decibel value is what is read.
 
-Rides `waterfall_arrays` for decimation, paging and labels, and
+It uses `waterfall_arrays` for decimation, paging and labels, and
 `snr.signal_to_noise` for the division, so the stage, the flat plots and
-the report cannot disagree about a value.
-
-Kept free of Qt, like the rest of `viz`.
+the report cannot disagree about a value. Nothing here uses Qt, like the
+rest of `viz`.
 """
 
 from __future__ import annotations
@@ -35,6 +33,8 @@ from .waterfall import (
     waterfall_arrays,
 )
 
+# The paired stage: Brandon, 2026-08-25.
+
 __all__ = ['add_paired_stage', 'paired_arrays', 'plot_paired_stage']
 
 #: the quieter object's opacity — present, never competing
@@ -50,9 +50,14 @@ def paired_arrays(loud: Any, quiet: Any,
                   page: int = 0) -> dict[str, Any]:
     """The two objects' curves, matched into stations by label.
 
-    A station exists where both objects hold a record of the same
-    label (DOF and quantity, as `record_label` spells it); records
-    only one side holds are left out and counted in ``unmatched``.
+    Each object's curves come from `waterfall_arrays` (its `records`,
+    `quantity` and `page`), with half of `budget` points each. A station
+    exists where both objects have a record with the same label (DOF and
+    quantity, as `record_label` writes it); records only one side has are
+    left out and counted in ``unmatched``. Returns a dict of
+    ``stations`` (each ``{'label', 'loud', 'quiet'}``, the last two
+    ``(x, z)`` curves), ``unmatched``, and the loud object's
+    ``log_scaled``, ``xlabel``, ``zlabel``, ``page`` and ``pages``.
     """
     us = unit_system or DEFAULT_SYSTEM
     half = max(budget // 2, 1)
@@ -85,20 +90,24 @@ def paired_stage_curves(loud: Any, quiet: Any,
                         budget: int = POINT_BUDGET,
                         quantity: tuple[str, str | None] | None = None,
                         page: int = 0) -> dict[str, Any]:
-    """The pair placed on the unit stage — overlaid, or divided.
+    """The pair placed on the stage, overlaid (`mode` 'overlay') or
+    divided ('ratio').
 
-    The paired counterpart of `waterfall.stage_curves`, and here for
-    the same reason: the app draws this stage in VTK and the report
-    draws it in a canvas, and two normalizations would be two
-    pictures of one measurement. Returns ``runs`` — each
-    ``{'station', 'points', 'levels', 'quiet', 'label'}``, the quiet
-    ones being the stood-back object in an overlay — plus the real
-    ``extents`` (x0, x1, z0, z1) the stage stands in for, the station
-    ``labels``, and the axis titles.
+    The paired counterpart of `waterfall.stage_curves`, separate for the
+    same reason: the app draws this stage in VTK and the report draws it
+    in a canvas, and two normalizations would give two pictures of one
+    measurement. Returns the dict of `paired_arrays` with ``runs`` added
+    (each ``{'station', 'points', 'levels', 'quiet', 'label'}``, where
+    ``quiet`` marks the gray object of an overlay), the real
+    ``extents`` (x0, x1, z0, z1) the stage stands for, and ``drawn``,
+    the number of stations.
 
-    In 'ratio' the division is `snr.signal_to_noise` at full resolution —
-    the same call the flat plot and the report's flat figure divide
-    through — so no reading of a pair can disagree with another.
+    In 'ratio' the division is `snr.signal_to_noise` at full resolution,
+    the same call the flat plot and the report's flat figure use, so all
+    the views of a pair agree. It divides every channel the two objects
+    share, whatever `loud_records`, `quiet_records` and `page` say, with
+    only `quantity` narrowing it, and the axis title becomes
+    'signal to noise [dB]'.
     """
     us = unit_system or DEFAULT_SYSTEM
     arrays = paired_arrays(loud, quiet, loud_records, quiet_records,
@@ -179,11 +188,13 @@ def add_paired_stage(plotter: Any, loud: Any, quiet: Any,
                      budget: int = POINT_BUDGET,
                      quantity: tuple[str, str | None] | None = None,
                      page: int = 0) -> dict[str, Any]:
-    """Draw the pair into a plotter — overlaid, or divided in dB.
+    """Draw the pair into a plotter, overlaid or divided in dB.
 
     The numbers come from `paired_stage_curves`, which the report's
-    canvas figure reads too; this places them in VTK and labels the
-    axes with the real ranges the stage stands in for.
+    canvas figure uses too, with the same arguments; this function draws
+    them in VTK and labels the axes with the real ranges the stage
+    stands for. Returns that dict with ``points``, the vertices drawn,
+    added.
     """
     import pyvista as pv
 
@@ -253,7 +264,10 @@ def plot_paired_stage(loud: Any, quiet: Any, mode: str = 'overlay',
                       theme: Any = None,
                       screenshot: str | None = None,
                       show: bool = True) -> Any:
-    """The headless call for the stage's paired readings."""
+    """Show the paired stage of `loud` and `quiet` interactively, or
+    render it to `screenshot`, overlaid or divided (`mode`, as in
+    `paired_stage_curves`). Returns the image array when rendering to a
+    file, and otherwise the plotter."""
     import pyvista as pv
 
     colors = resolve_theme(theme)

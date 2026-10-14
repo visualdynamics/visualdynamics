@@ -1,108 +1,100 @@
 # The .vdyn file, laid out
 
-A `.vdyn` is a **standard HDF5 file** — the extension is a promise
-about the layout inside, not a new container. Rename one to `.h5` and
-HDFView browses it, `h5py` walks it, MATLAB's `h5read` reads every
-dataset. This page is the layout written down, so that claim is
-checkable without reading source; the schema's one owner in code is
-[`visualdynamics.io.native`](api/visualdynamics.io.native.md), and the
-frozen files under `testdata/vdyn_corpus/` hold each schema era to it.
+A `.vdyn` is a standard HDF5 file with a documented layout inside; the
+extension does not mean a new container. Rename one to `.h5` and
+HDFView browses it, `h5py` walks it, and MATLAB's `h5read` reads every
+dataset. This page writes the layout down so that you can read a file
+without reading the source. In the code the layout is defined in one
+module, [`visualdynamics.io.native`](api/visualdynamics.io.native.md),
+and the frozen files under `testdata/vdyn_corpus/` hold each schema to
+it.
 
-## The one version number
+## The version number
 
-Every file stamps a root attribute:
+Every file stamps one root attribute:
 
     visualdynamics_schema = 1        (integer)
 
-The schema evolves **by addition**: new datasets and attributes are
-optional with a default on read, existing ones are never renamed or
-repurposed, and the number moves only if a field's *meaning* would
-have to change — which has not happened yet. The reader's contract:
+The schema changes by addition. New datasets and attributes are
+optional, with a default when they are absent, and existing ones are
+never renamed or given a new meaning. The number would move only if a
+field's meaning had to change, which has not happened. The reader
+follows three rules:
 
-- a **newer** stamp than the reader knows is refused loudly ("written
-  by a newer Visual Dynamics — update to open it"), never
-  half-loaded;
-- a **missing** stamp is refused as not a Visual Dynamics file at all
-  — every writer stamps;
-- an **older** stamp always loads — every reader keeps its past, and
-  `tests/test_vdyn_corpus.py` opens every frozen era on every run.
+- a stamp newer than the reader knows is refused with a message saying
+  the file was written by a newer Visual Dynamics and to update to open
+  it; the file is never half loaded;
+- a file with no stamp is refused as not a Visual Dynamics file, since
+  every writer stamps;
+- an older stamp always loads, and `tests/test_vdyn_corpus.py` opens
+  the frozen files on every run.
 
-Before the first public release the "keeps its past" half was a
-soft promise, and the format used it: pre-release eras were dropped
-(2026-08-23), so the reader holds exactly schema 1 with no fallbacks
-for earlier spellings. Since the first release (0.1.0a1, 2026-09-14)
-every `.vdyn` written by any alpha has loaded in every later alpha,
-and the frozen corpus checks it on every run. While Visual Dynamics
-is an alpha that is a practice, not a promise: the `.vdyn` format may
-still change, and the promise that a later version opens every
-earlier file starts with the first release that is not an alpha.
-`.vdyn` is the project file, and it stays the project file; the
-Engineering Sciences Common Data Format (`.h5`) is imported and
-exported beside it, for exchanging data with other tools.
+Every `.vdyn` written by any release since the first (0.1.0a1) has
+loaded in every later release, and the frozen corpus checks this on
+every run. While Visual Dynamics is an alpha that is a practice, not a
+promise: the `.vdyn` format may still change, and the promise that a
+later version opens every earlier file starts with the first release
+that is not an alpha. `.vdyn` is the project file, and it stays the
+project file. The Engineering Sciences Common Data Format (`.h5`) is
+imported and exported beside it, for exchanging data with other tools.
 
-## Two shapes of file
+## Two kinds of file
 
-**A single object** saved on its own is one group at the root, named
-for its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
+A single object saved on its own is one group at the root, named for
+its kind: `geometry/`, `data/`, `shapes/`, `report/`, `photos/`,
 `matches/`, `channel_table/`, `sine_specification/` or `sine_levels/`.
-The loader recognizes the file by which group it finds.
+The loader recognizes the file by the group it finds.
 
-**A whole project** is an `objects/` container of numbered groups —
-`0000`, `0001`, … for order — each carrying two attributes, `name`
-(the user's name for the object, free to contain anything HDF5 would
-read as path structure) and `kind` (one of the group names above),
-with the object's own layout inside. The project's identity rides as
-root attributes:
+A whole project is an `objects/` container of numbered groups (`0000`,
+`0001`, and so on, which keep the order). Each group has two
+attributes, `name` (your name for the object, which may contain
+anything HDF5 would otherwise read as a path) and `kind` (one of the
+group names above), and holds the object's own layout. The project's
+identity is in root attributes:
 
     test_name         the project's name
     project_type      '' or e.g. 'Modal Test', 'Random Vibration'
-    active_geometry   '' or the name unlinked objects read against
+    active_geometry   '' or the name unlinked objects are read against
     links             JSON, the project's object groups: [{"members":
-                      [names...], "role": null or "Basis"}, ...] (files
-                      before 2026-08-30 carried a "side" key too; it is
-                      read and never written)
+                      [names...], "role": null or "Basis", "name": ...},
+                      ...]; "name" is present only for a named group.
+                      Files older than the first release may also carry
+                      a "side" key, which is read and never written
     provenance        JSON: {name: {"verb", "source", "params",
-                      "state"}, ...} — how each derived object was
+                      "state"}, ...}, how each derived object was
                       computed, with the settings fingerprint the
                       staleness badges compare against
 
-## Conventions, everywhere
+## Conventions
 
-- **Strings** are UTF-8 (`h5py.string_dtype('utf-8')`), one dataset
-  per field, one element per record. `''` marks *undefined* — an
+- Strings are UTF-8 (`h5py.string_dtype('utf-8')`), one dataset
+  per field and one element per record. `''` means undefined: an
   ordinate unit of `''` is a channel whose units were never declared,
   and it reloads as undefined, not as dimensionless.
-- **Ragged arrays** (element connectivity) are two
-  datasets: `<name>_flat`, the values run together, and
-  `<name>_offsets`, one longer than the count, so entry *i* is
+- Ragged arrays (element connectivity) are two datasets:
+  `<name>_flat`, the values run together, and `<name>_offsets`, one
+  longer than the count, so entry *i* is
   `flat[offsets[i]:offsets[i+1]]`.
-- **Optional fields are absent, not sentinel-valued.** A time history
-  with no averaging has no `averaging_*` attributes; a shape set that
-  never carried complex modal damping has no `modal_damping` dataset.
-  Absent-with-a-default is what keeps every old file loading.
-- Numeric datasets are whatever numpy held — float64, complex128,
-  int64 — at full precision. Nothing narrows.
+- Optional fields are absent rather than given a sentinel value. A
+  time history with no averaging has no `averaging_*` attributes, and
+  a shape set that never carried complex modal damping has no
+  `modal_damping` dataset. Absent fields take their defaults, which is
+  how older files keep loading.
+- Numeric datasets are whatever numpy held (float64, complex128,
+  int64) at full precision. Nothing is narrowed.
 
 ## `geometry/`
 
     attrs   dimension, length_unit ('' = undeclared)
+            mass_point, and mass and inertia when the rigid-body modes
+              are to be mass normalized (only when set)
+            view_eye, view_up      the view it opens on (only when set)
+            solids                 JSON, the solids as their numbers
+                                   were typed (only when there are any)
     dsets   node_id, node_xyz, node_def_cs, node_disp_cs, node_color,
             cs_id, cs_name, cs_type, cs_matrix,
             elem_id, elem_type, elem_color, elem_conn_flat / _offsets,
             elem_block, block_id, block_name
-
-    The element groups are stored under the names they had when the
-    format was set: `elem_block`, `block_id` and `block_name` on disk are
-    a geometry's `elem_group`, `group_id` and `group_name`, and
-    `block_properties` its `group_properties` (2026-10-08). Every file
-    written before or since reads the same.
-
-    A file from before 2026-09-30 also holds `traceline_id`,
-    `traceline_color`, `traceline_desc` and `traceline_conn_flat /
-    _offsets`: a loader turns each traceline id into an element group
-    of two-node beam elements with no properties, named by its
-    description, and splits any group holding more than one element
-    family. The file is written back without them.
     block_properties/<group id>/   (only element groups given properties)
             attrs   material_name, youngs_modulus, density, poissons_ratio,
                     modulus_of_rigidity (when set), thickness (plates) or
@@ -111,14 +103,32 @@ root attributes:
                     section was built from a shape (fem.SHAPES; meters,
                     in the constructor's order),
                     orientation (beams, when set);
-                    mass alone, kg, for a group of point masses
+                    mass alone, kg, for a group of point masses;
+                    stiffness, six values with NaN where a direction is
+                    free, for a group of springs;
+                    ground, the directions held ('X Y Z RX RY RZ'), for
+                    a group of ground points (0.1.0a39 wrote True for
+                    all six, which still reads)
 
-## `data/` — every measurement class
+The element groups are stored under their original names: `elem_block`,
+`block_id` and `block_name` on disk are a geometry's `elem_group`,
+`group_id` and `group_name`, and `block_properties` is its
+`group_properties`. Files from every release read the same way.
 
-One layout serves TimeHistory, Spectrum, Frf, Psd, Specification,
-Coherence, MultipleCoherence, OctaveBandPsd, Srs — the concrete class
-is named, because a Specification shares the PSD function type and
-the code alone could not say which to rebuild:
+A file written by 0.1.0a20 or earlier also holds `traceline_id`,
+`traceline_color`, `traceline_desc` and `traceline_conn_flat /
+_offsets`. The loader turns each traceline id into an element group of
+two-node beam elements with no properties, named by its description,
+and splits any element group that holds more than one element family.
+The file is written back without them.
+
+## `data/`, every measurement class
+
+One layout serves TimeHistory, Spectrum, Frf, Psd, Srs, Coherence,
+MultipleCoherence, Specification, ShockSpecification,
+TransientSpecification, SineLevel and SineTarget. The concrete class is
+stored by name, because a Specification has the PSD function type and
+the function type alone cannot say which class to rebuild:
 
     attrs   function_type        UFF dataset 58 code
             data_class           the class name, e.g. 'Psd'
@@ -126,37 +136,49 @@ the code alone could not say which to rebuild:
             ordinate             records × points, real or complex
             response_dof         strings, one per record
             ordinate_dim, comment, ordinate_unit, reference_unit,
-            dimension_hint       strings, '' = undefined / unsaid
+            dimension_hint       strings, '' = undefined / not stated
 
 Present only where they mean something:
 
-    reference_dof     records that have a reference (FRF, coherence)
-    block             which repeat a record is, for stacked captures
-    limit_<name>      a specification's warning/abort lines
-    bandwidth         octave-band widths, where bins are not midpoints
-    shocks            (start, duration) rows, where events were marked
-    attrs: srs_q, srs_kind          what an SRS was worked out at
-           interpolation           how a spec reads between its lines
-           sine_tone, sine_onset   which tone a sine level answers to,
-                                   and where its sweep began; the
-                                   sine_seconds dataset is its clock
-           scale_db                a hand-held comparison scale only —
-                                   auto-detected scaling is never saved
-           averaging_frame_length, _overlap, _window, _frames, _start,
-           _detrend, and _window_parameter when the window takes one
-           filtering_low, _high, _order   the filter reading, when set
-           truncation_start, _stop        the truncate reading, when set
-  roles        dataset of strings, DOF, quantity and role in threes,
-               flat — each channel's role (reference, response or
-               monitor) where something has said; a channel not named,
-               or a file without the dataset, takes the default for its
-               quantity (a force a reference, a motion a response,
-               anything else a monitor)
+    dsets   reference_dof     records that have a reference (FRF, coherence)
+            block             which repeat a record is, for stacked captures
+            limit_<name>      a specification's warning and abort lines
+            bandwidth         band widths, where the bins are not the
+                              midpoints between lines (octave bands)
+            shocks            (start, duration) rows, where events were marked
+            roles             strings, DOF, quantity and role in threes,
+                              flat: each channel's role (reference,
+                              response or monitor) where something has
+                              set one. A channel not listed, or a file
+                              without the dataset, takes the default for
+                              its quantity (a force is a reference, a
+                              motion a response, anything else a monitor)
+            sine_seconds      a sine level's clock
+            sine_floor, sine_below_floor   the noise floor beside each
+                              sine reading, and where the tone was under it
+    attrs   srs_q, srs_kind          what an SRS was computed with
+            interpolation            how a specification reads between
+                                     its lines
+            band_constraints         JSON, how a specification's bands
+                                     move together when edited
+            sine_tone, sine_onset, sine_drift_hz   which tone a sine
+                                     level belongs to, and where its
+                                     sweep began
+            sine_cycles (when set), sine_target_db, sine_refine,
+            sine_chosen (when set)   the sine extraction setting
+            scale_db                 a comparison scale set by hand only;
+                                     automatic scaling is never saved
+            averaging_frame_length, _overlap, _window, _frames, _start,
+            _detrend, _start_set, and _window_parameter when the window
+            takes one
+            filtering_low, _high (each when set), _order   the filter
+                                     reading
+            truncation_start, _stop  the truncate reading, when set
 
 ## `shapes/`
 
-    attrs   mass_unit ('' = undeclared), unscaled (no drive point —
-            modal masses are a convention, not physics)
+    attrs   mass_unit ('' = undeclared), unscaled (no drive point, so
+            the modal masses are a convention, not a measurement)
     dsets   frequency, damping, shape_matrix (modes × DOFs, complex
             where a source carried complex modes), modal_mass
             (complex where measured), coordinate, comment, description
@@ -165,17 +187,17 @@ Present only where they mean something:
 ## `channel_table/`
 
     attrs   column_order         every column, in the file's order
-    dsets   channel, range       integers — the schema's 'int' columns
+    dsets   channel, range       integers (the schema's 'int' columns)
             <every other column> strings, verbatim (node included: a
-                                 node nobody recorded is blank, and 0
-                                 cannot stand in for 'unstated')
+                                 node nobody recorded is blank, since 0
+                                 cannot stand for "not stated")
 
 ## `report/`, `photos/`, `matches/`
 
     report/   attrs: title, marking, marking_color ('ink' | 'red';
               marking '' = no strips);  dsets: blocks (one JSON string)
-    photos/   dsets: names, formats, image_0000... — the photograph
-              files' own bytes, verbatim, never re-encoded
+    photos/   dsets: names, formats, image_0000, ... (each photograph
+              file's own bytes, verbatim, never re-encoded)
     matches/  attrs: first, second, first_geometry, second_geometry
               dsets: pairs (n × 2 mode indices), macs
 
@@ -185,15 +207,16 @@ Present only where they mean something:
                          dsets: response_dof, tone_order
                          tones/<k>/: attrs name, start_time; dsets
                          frequency, amplitude, phase, segment_type,
-                         segment_rate, and any warning/abort limits —
-                         the file's own breakpoint shape, per tone
-    sine_levels/         dsets: tone_order; tones/<k>/ each an
-                         ordinary data/ layout — the set is grouping,
-                         not a new format
+                         segment_rate, and any warning or abort limits
+                         (the file's own breakpoints, per tone)
+    sine_levels/         attrs: sine_cycles (when set)
+                         dsets: tone_order; tones/<k>/ each an
+                         ordinary data/ layout (the set only groups
+                         them)
 
 ## Reading one without Visual Dynamics
 
-The point of the layout being documented HDF5 is that this works:
+Because the layout is documented HDF5, this works:
 
 ```python
 import h5py
@@ -201,15 +224,15 @@ import h5py
 with h5py.File('modal.vdyn') as f:
     for key in sorted(f['objects']):
         group = f['objects'][key]
-        print(group.attrs['name'], '—', group.attrs['kind'])
+        print(group.attrs['name'], group.attrs['kind'])
     frf = f['objects/0003']                    # say it's the FRF
     H = frf['ordinate'][()]                    # records × frequencies
     freq = frf['abscissa'][()]
 ```
 
-MATLAB reads the same file with `h5info('modal.vdyn')` and
-`h5read`. Nothing in a `.vdyn` needs this package to get back out. For
-a MATLAB user who would rather `load` structs than walk datasets, the
-same layout is written as a `.mat` file — `project.save('modal.mat')`,
-or *Save Project* in the app — and read back from one; the
+MATLAB reads the same file with `h5info('modal.vdyn')` and `h5read`.
+Nothing in a `.vdyn` needs this package to get it back out. If you
+would rather `load` structs in MATLAB than walk datasets, the same
+layout can be written as a `.mat` file, with `project.save('modal.mat')`
+or *Save Project As…* in the app, and read back from one. The
 [export page](export.md) says what MATLAB spells differently.

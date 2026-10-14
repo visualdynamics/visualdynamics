@@ -4,41 +4,44 @@ title: About
 
 # Visual Dynamics
 
-A units-aware structural dynamics toolset: import test and model data,
-look at it, identify modal parameters, correlate a test against a
-finite element model, and write the report — from a desktop app or
-from Python, with the same objects and the same verbs behind both.
+A units-aware structural dynamics toolset. It imports test and model
+data, plots it, identifies modal parameters, correlates a test with a
+finite element model, builds finite element models of its own, and
+writes the report. All of it can be done from the desktop app or from
+Python, and both use the same objects and the same verbs.
 
 ## Where to start
 
-- **[Principles](principles.md)** — what the toolset is trying to be,
-  and the standard every part of it is held to. Start here if you want
-  to know whether it fits how you work.
-- **[Getting started](getting-started.md)** — install, open the app,
+- [Principles](principles.md): what the toolset is meant to be, and
+  the standard every part of it is held to. Read this first if you want
+  to know whether it fits the way you work.
+- [Getting started](getting-started.md): install it, open the app, and
   run the same workflow as a script.
-- **[Guide](guide/README.md)** — how the pieces fit:
+- [Guide](guide/README.md): how the parts fit together, including
   [projects and links](guide/projects.md),
   [which geometry an object answers to](compatibility.md),
   [units](guide/units.md),
   [plotting](guide/plotting.md),
   [the modal workflow](guide/workflows/modal-workflow.md),
+  [the finite element workflow](guide/workflows/fem-workflow.md) and
   [reports](guide/reports.md).
-- **[Architecture and conventions](architecture.md)** — for someone
-  about to change the code: the package by layer, the one-workflow
-  rule, the docstring standard, the test conventions.
-- **API reference** — every module, class, attribute and function in the
-  package, generated from the code when the site is built, so it is never
-  out of date. It is in the site's navigation rather than in the
-  repository: run `properdocs serve` and it is the *API reference* section.
+- [Architecture and conventions](architecture.md): for someone about
+  to change the code. It covers the package by layer, the rule that the
+  app and a script share one workflow, the docstring standard and the
+  test conventions.
+- API reference: every module, class, attribute and function in the
+  package, generated from the code each time the site is built. It is
+  in the site's navigation rather than in the repository; run
+  `properdocs serve` and it is the *API reference* section.
 
-## The one idea worth knowing first
+## Projects
 
-A **project** holds named objects — a geometry, some time data, FRFs,
-mode shapes — and the structure around them: which objects are
+A **project** holds named objects (a geometry, some time data, FRFs,
+mode shapes) and the structure around them: which objects are
 **linked** together, which linked group is the **Basis** of
-comparisons, what kind of test this is. The desktop app's tree *is* a
-project, and so is `visualdynamics.Project` in a script; both save to the same
-`.vdyn` file, and each opens the other's.
+comparisons, and what kind of test it is. The tree in the desktop app
+is a project, and so is `visualdynamics.Project` in a script. Both save
+to the same `.vdyn` file, and each opens the other's.
 
 ```python
 import visualdynamics
@@ -62,26 +65,27 @@ Project: Plate Modal Survey  [Modal Test]
     FRF Modes            ShapeSet      5 modes, 439.2-1142 Hz
 ```
 
-Nothing above is a shortcut written for scripts: every line is the
-verb behind a button in the app. What each object holds, and what can
-be done with each kind, is one page: [The objects](guide/objects.md).
+Each line of the script is the verb behind a button in the app; none of
+it is a separate interface written for scripts. What each object holds,
+and what can be done with each kind, is on one page:
+[The objects](guide/objects.md).
 
-## Documentation policy
+## How the documentation is written
 
-Guides are written by hand and explain *why*. The API reference is not
-written down at all: `docs/gen_api.py` walks the package while the site
-builds and mkdocstrings renders the docstrings, so the reference *is* the
-code — a new module is a new page, a new method documents itself, and
-there is nothing that can drift because there is nothing to keep in step.
+The guides are written by hand and explain why things work the way
+they do. The API reference is not written separately: `docs/gen_api.py`
+walks the package while the site builds, and mkdocstrings renders the
+docstrings. A new module gets a new page and a new method appears with
+its docstring, so the reference always matches the code.
 
-That puts the weight on the docstrings, which is where it belongs.
+That makes the docstrings the place where the reference is kept.
 `properdocs build --strict` fails on a broken cross-reference, and
-`tests/test_docs.py` holds the generator to the whole package rather than
-to a list of it.
+`tests/test_docs.py` checks that the generator reaches every module in
+the package.
 
-The site is a page of visualdynamics.org: `properdocs build` writes it
-into the website's own tree, and the release workflow deploys the two
-together, so it answers at
+The documentation is part of visualdynamics.org: `properdocs build`
+writes it into the website's own tree, and the release workflow
+deploys the two together, so it is at
 [visualdynamics.org/documentation](https://visualdynamics.org/documentation/).
 To work on it from a clone:
 

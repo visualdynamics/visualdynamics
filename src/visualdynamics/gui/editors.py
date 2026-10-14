@@ -1,24 +1,21 @@
-"""When a typed number counts as meant.
+"""Spin boxes that report a typed number only when the edit is finished.
 
-A Qt spin box reports *every keystroke* by default — `keyboardTracking`
-is on unless it is turned off — so typing `50` into an overlap field
-emits 5 first and 50 second. That is not merely noisy. Each report is a
-real edit here: it lands on the object, the shading moves, the panel
-restates the clamped value, and restating it takes the selection away
-mid-number, so the second digit has nowhere to go. The field fights the
-person typing into it, and 50% overlap cannot be entered at all
-(Brandon, 2026-08-27; the same on frame length).
+A Qt spin box reports every keystroke by default (`keyboardTracking` is
+on unless it is turned off), so typing `50` into an overlap field
+reports 5 and then 50. Each report is a real edit here: it is applied to
+the object, the shading moves, and the panel restates the clamped value.
+Restating it takes the selection away in the middle of the number, so
+the second digit has nowhere to go, and with tracking on 50 % overlap
+cannot be entered at all.
 
-So every spin box in the application commits when the edit is *finished*
-— Enter, Tab, clicking elsewhere — or when its own arrows step it. That
-is Qt's `keyboardTracking(False)`, and it is a rule about the whole
-interface rather than a property of any one field, which is why it is a
-call here and not nine scattered ones.
+So every spin box in the application commits when the edit is finished
+(Enter, Tab, or clicking elsewhere) or when its own arrows step it. That
+is Qt's `keyboardTracking(False)`. It is a rule for the whole interface,
+so it is one call here instead of a setting repeated on each field.
 
-This is not in tension with principle 8, which puts the effort where the
-user is waiting: a *drag* is continuous and must stay live, because the
-gesture is the value. Typing is not continuous — the half-typed number
-is not a number the person means, and treating it as one is the bug.
+A drag is different: it is continuous and stays live, because the
+gesture is the value. A half-typed number is not a value the person
+means.
 """
 
 from __future__ import annotations
@@ -30,15 +27,22 @@ from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
 if TYPE_CHECKING:                                    # pragma: no cover
     from PySide6.QtWidgets import QAbstractSpinBox
 
+# Brandon, 2026-08-27: the overlap field took the selection away after
+# the first digit and 50 % could not be typed; the same on frame length.
+# This does not conflict with principle 8 (effort where the user is
+# waiting): a drag stays live, and only typing waits for the finished
+# edit.
+
 
 def commit_on_enter(*boxes: QAbstractSpinBox) -> None:
-    """Stop these editors reporting a value the user is still typing.
+    """Make these spin boxes report a value only when an edit is
+    finished.
 
     Parameters
     ----------
     *boxes : QAbstractSpinBox
-        Spin boxes — `QSpinBox`, `QDoubleSpinBox` — whose `valueChanged`
-        drives something. Each will report only on a finished edit or a
+        Spin boxes (`QSpinBox`, `QDoubleSpinBox`) whose `valueChanged`
+        drives something. Each then reports only a finished edit or a
         step of its own arrows.
     """
     for box in boxes:
@@ -104,8 +108,16 @@ class _Clamping:
 
 
 class SpinBox(_Clamping, QSpinBox):
-    """A whole-number box that commits on Enter and clamps what it is
-    given. See `_Clamping` and `commit_on_enter`."""
+    """A whole-number spin box that commits on a finished edit and
+    brings a typed value inside its range.
+
+    Qt's own spin box refuses a keystroke that would put the value out
+    of range: with a maximum of 1638, typing 2000 stops after the third
+    digit, and nothing says why. Here any number can be typed, and when
+    the edit is finished it is clamped to the range and rounded, so 2000
+    becomes 1638. Keyboard tracking is off, as `commit_on_enter` sets
+    it.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -116,8 +128,9 @@ class SpinBox(_Clamping, QSpinBox):
 
 
 class DoubleSpinBox(_Clamping, QDoubleSpinBox):
-    """A decimal box that commits on Enter and clamps what it is
-    given. See `_Clamping` and `commit_on_enter`."""
+    """A decimal spin box that commits on a finished edit and brings a
+    typed value inside its range, as `SpinBox` does for whole numbers.
+    """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

@@ -871,3 +871,20 @@ def test_the_singular_accessor_is_the_plain_object_beside_its_banded_one():
     project.add('Spec 2', spec)
     with pytest.raises(AttributeError, match='3 in project'):
         _ = project.specification
+
+
+def test_a_groups_name_survives_unlinking_and_removing_from_other_groups():
+    """Unlinking and pruning rebuilt every group from its members and
+    role, so a named group lost its name when anything was unlinked or
+    removed anywhere in the project (2026-10-13)."""
+    project = visualdynamics.Project('p')
+    for name, node in (('A', 101), ('C', 103)):
+        project.add(name, _geometry(node))
+    for name, node in (('B', 101), ('D', 103), ('E', 103)):
+        project.add(name, _shapes(node))
+    project.link('A', 'B', name='first')
+    project.link('C', 'D', 'E', name='second')
+    project.unlink('E')
+    assert [g.get('name') for g in project.object_groups] == ['first', 'second']
+    project.remove('D')
+    assert [g.get('name') for g in project.object_groups] == ['first']

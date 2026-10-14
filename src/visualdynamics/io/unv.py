@@ -1,34 +1,49 @@
-"""Importer for Universal Files (.unv/.uff), per the SDRL specifications
-(https://www.ceas3.uc.edu/sdrluff/ — local copies in docs/uff_spec).
+"""Read and write Universal Files (.unv, .uff, .uf), following the SDRL
+dataset specifications (https://www.ceas3.uc.edu/sdrluff/; local copies
+are in docs/uff_spec).
 
-Geometry datasets supported:
+Datasets read:
 
-- 164  units: length/force/temperature factors; per spec, file values are
-       DIVIDED by the factors to get SI, so a 164 makes the import unit-aware
-- 15   nodes (old single-precision form, one line per node)
-- 2411 nodes (double precision: 4I10 record + 3D25.16 record per node)
-- 82   tracelines: node list where 0 means pen-up (move without drawing);
-       pen-up runs are split into separate polylines
-- 2412 elements: FE descriptor codes match visualdynamics's element vocabulary; beam-
-       class descriptors carry an extra orientation record before the nodes
-- 58b  the binary form of 58: the same eleven ASCII header records, then
-       the values as raw floats. Read in either byte order at either
-       precision, and written little-endian IEEE 754 doubles when
-       `save(..., binary=True)` is asked for. Only IEEE 754 floats are
-       decoded — DEC VMS and IBM 5/370 floats are refused by name rather
-       than read as IEEE, which would return wrong numbers instead of
-       failing.
-- 58   functions at nodal DOFs (time histories, spectra, FRFs, PSDs). The
-       ordinate scale to SI comes from the axis data-type unit exponents
-       combined with the 164 factors; without a 164, unit-bearing data
-       imports unit-less unless ordinate_unit is declared. Functions are
-       grouped by type into one visualdynamics data object per type; unsupported
-       function types (coherence, etc.) are skipped.
+- 164, units: the length, force and temperature factors. The spec
+  divides file values by these factors to get SI, so a file with a 164
+  imports with its units defined.
+- 15, nodes in the old single-precision form, one line per node.
+- 2411, nodes in double precision, a 4I10 record and a 3D25.16 record
+  per node. Each position is converted to global from the coordinate
+  system the node is defined in.
+- 2420, coordinate systems.
+- 82, tracelines: a node list in which 0 lifts the pen (a move without
+  drawing). Each traceline becomes one element group of two-node line
+  elements, with one run for each stretch between pen-ups.
+- 2412, elements. The FE descriptor codes are the element type codes
+  Visual Dynamics uses; beam descriptors have an extra orientation
+  record before the nodes.
+- 55, mode shapes: normal modes (analysis type 2) or complex modes
+  (type 3), not both in one file.
+- 58, functions at nodal DOFs: time histories (function type 1), FRFs
+  (4), coherence (6), PSDs (9), spectra (12), shock response spectra
+  (24) and multiple coherence (26). The scale to SI comes from the axis
+  data-type unit exponents and the 164 factors. Without a 164, a record
+  whose quantity has a unit imports with its unit undefined, unless
+  `ordinate_unit` is given, and keeps the quantity's name as a hint.
+  Records are grouped by function type into one data object per type,
+  and records of one type with different abscissas go into separate
+  objects. Other function types are skipped.
+- 58b, the binary form of 58: the same eleven ASCII header records,
+  followed by the values as raw floats. Read in either byte order at
+  single or double precision. Only IEEE 754 floats are read; DEC VMS
+  and IBM 5/370 floats are refused by name, because reading them as
+  IEEE would return wrong numbers without an error.
 
-A file with several objects (e.g. geometry + FRFs) returns a dict keyed
-'geometry', 'time', 'spectrum', 'frf', 'psd'; a file with one object returns
-it directly. Unrecognized datasets are skipped (a UNV file is a stream of
-independent datasets delimited by '-1' lines).
+A file with several objects returns a dict keyed 'geometry', 'shapes'
+and the function names ('time', 'frf', 'coherence', 'psd', 'spectrum',
+'srs', 'multiple_coherence'; a second abscissa of one type is keyed
+'frf (2)' and so on). A file with one object returns it directly. Other
+datasets are skipped, since a UNV file is a stream of independent
+datasets separated by '-1' lines.
+
+`save` writes geometry, data of every function type above, and mode
+shapes; `save_binary` writes the functions as 58b.
 """
 
 from __future__ import annotations
@@ -116,12 +131,12 @@ _FP_FORMATS = {1: 'DEC VMS', 2: 'IEEE 754', 3: 'IBM 5/370'}
 
 @dataclass(frozen=True)
 class Binary:
-    """The binary half of a dataset 58b: how to read it, and it.
+    """The binary part of a dataset 58b: its bytes, and how to read them.
 
-    `order` and `fp_format` are the marker line's own fields, carried
-    with the bytes rather than read again from somewhere else — a blob
-    whose byte order has been separated from it is a blob that will one
-    day be decoded by the wrong one.
+    `order` (1 little endian, 2 big endian) and `fp_format` (2 is IEEE
+    754) are the fields of the dataset's own marker line, kept with the
+    bytes so that the data is always decoded by the byte order and
+    float format it was written with.
     """
 
     order: int
@@ -133,17 +148,17 @@ def iter_datasets(
         data: str | bytes) -> Iterator[tuple[int | None, list[str], bytes]]:
     """Yield (dataset_number, record_lines, payload) for each dataset.
 
-    `payload` is None for an ordinary ASCII dataset and a `Binary` for
-    a binary one (dataset 58b), whose eleven header records stay ASCII
-    and come back in `record_lines` like any other.
+    `payload` is None for an ordinary ASCII dataset and a `Binary` for a
+    binary one (dataset 58b), whose eleven header records are still
+    ASCII and come back in `record_lines` like any other. A dataset
+    whose number line is not an integer is not yielded.
 
-    Bytes rather than text, and a cursor rather than `splitlines`,
-    because a binary payload is not text: it contains newlines that are
-    float bytes, and it can contain the byte pattern of a '-1' delimiter
-    line. Splitting first and interpreting afterwards would cut a
-    dataset in half at a number that happened to look like a delimiter.
-    The payload is therefore taken by the byte count the marker line
-    declares, and never scanned.
+    `data` is read as bytes, a line at a time, rather than split into
+    lines first, because a binary payload is not text: its float bytes
+    can contain newlines and the byte pattern of a '-1' delimiter line,
+    and splitting first would cut a dataset in two there. The payload
+    is taken by the byte count its marker line declares and is never
+    scanned.
     """
     if isinstance(data, str):
         data = data.encode('utf-8', 'surrogateescape')
@@ -735,15 +750,17 @@ def handles(obj: Any) -> bool:
 
 
 def handles_binary(obj: Any) -> bool:
-    """Only function data, because only dataset 58 has a binary form.
+    """True for data arrays only, because only dataset 58 has a binary
+    form.
 
-    A geometry or a mode shape offered as "binary" would write exactly
-    the ASCII file the other exporter writes, under a name promising
-    something else — 2411, 82, 2412 and 55 have no `b` variant, and
-    inventing one would produce a file nothing else reads. Caught by
-    `test_shapes_can_be_written_to_every_format_that_holds_them`, which
-    already knew what a ShapeSet may be written as (2026-08-25).
+    Datasets 2411, 82, 2412 and 55 have no binary variant, so a geometry
+    or a mode shape set written "binary" would be the same ASCII file
+    the other exporter writes.
     """
+    # Caught by test_shapes_can_be_written_to_every_format_that_holds_them,
+    # which already knew what a ShapeSet may be written as (2026-08-25).
+    # Inventing a `b` variant of 2411, 82, 2412 or 55 would produce a file
+    # nothing else reads.
     from ..core.data import DataArray
 
     return isinstance(obj, DataArray)
@@ -1054,29 +1071,34 @@ def _complex_mode_record(shapes, mode):
 
 def save(obj: Any, path: str | os.PathLike,
          unit_system: UnitSystem | None = None, binary: bool = False) -> None:
-    """Write a geometry or a data array as a universal file.
+    """Write a geometry, a data array or a mode shape set as a universal
+    file.
 
-    Geometry goes out as 2420 coordinate systems, 2411 nodes, 82 tracelines
-    and 2412 elements; data as one dataset 58 per record; mode shapes as
-    one dataset 55 per mode.
+    Geometry is written as 2420 coordinate systems, 2411 nodes, 82
+    tracelines and 2412 elements; data as one dataset 58 per record; mode
+    shapes as one dataset 55 per mode. Node positions are written in the
+    coordinate system each node is defined in. Shape values stay in each
+    node's own displacement system, which is what dataset 55 means by
+    them, and the coordinate systems written with them define those
+    directions.
 
-    Shape values stay in each node's own displacement system, which is what
-    dataset 55 means by them — the coordinate systems written alongside are
-    what make that readable.
+    When the object's units are defined, the values are written in
+    `unit_system` (its coherent form, or SI when none is given) and a
+    dataset 164 declaring that system goes first, so the file reads back
+    with its units. When they are not defined, the stored values are
+    written as they are with no 164, and the file reads back unit-less.
 
-    A dataset 164 declaring SI is written when the object's units have been
-    defined, and left out when they have not. Stored values are SI either
-    way, but only in the first case is that a fact about the data rather
-    than an assumption — and a file that says so reads back with its units,
-    where one that does not reads back unit-less.
+    `binary` writes the functions as dataset 58b instead of 58: the same
+    eleven ASCII header records, then the values as little-endian IEEE
+    754 doubles instead of `13.5E` text. That is 8 bytes a value instead
+    of about 13 characters, and a float read back is exactly the float
+    written, where five decimal places are not. Only the functions
+    change form; geometry, mode shapes and the units dataset have no
+    binary variant and are written as ASCII.
 
-    `binary` writes the functions as dataset **58b** instead of 58: the
-    same eleven ASCII header records, and then the values as raw IEEE
-    754 doubles rather than as `13.5E` text. It is roughly a third of
-    the size and it is exact — a written-and-read float comes back the
-    float that went in, where five decimal places do not. Only the
-    functions change form; geometry, mode shapes and the units dataset
-    have no binary variant and go out as they always do.
+    Raises ValueError for a pyramid element, which dataset 2412 has no
+    descriptor for, and for a shape coordinate that is not a direction
+    dataset 55 can hold.
     """
     from ..core.geometry import Geometry
 
@@ -1101,11 +1123,11 @@ def save(obj: Any, path: str | os.PathLike,
 
 def save_binary(obj: Any, path: str | os.PathLike,
                 unit_system: UnitSystem | None = None) -> None:
-    """`save` in the binary form — the registry's entry for 58b.
+    """`save` with `binary=True`: the registry's exporter for dataset 58b.
 
-    A separate exporter rather than a checkbox on the other one,
-    because the Export menu is a list of formats and this is one: a
-    file another tool will or will not read. Choosing by suffix still
-    gets the ASCII form, which is the one to hand a stranger.
+    It is a separate exporter because the Export menu is a list of
+    formats, and whether another program reads 58b is a property of the
+    format. Choosing the format by suffix gets the ASCII form, which more
+    programs read.
     """
     save(obj, path, unit_system, binary=True)

@@ -1,10 +1,11 @@
-"""The markdown subset a report's text blocks speak.
+"""The subset of Markdown a report's text blocks are written in.
 
-Hand-rolled for the same reason the viewers are: nothing third-party
-rides inside a deliverable. The subset is what a test report actually
-uses — headings with #, **bold**, *italic*, `code`, bullet and numbered
-lists, paragraphs on blank lines. Everything is HTML-escaped first, so
-a report cannot smuggle markup; what you type is what renders.
+It is written here, as the viewers are, so that no third-party code is
+carried inside a report. The subset is what a test report uses:
+headings with # to ####, **bold**, *italic*, `code`, bullet lists (- or
+*), numbered lists (1. or 1)), and paragraphs separated by blank lines.
+The text is HTML-escaped first, so HTML typed into a text block is shown
+as text, not interpreted.
 """
 
 from __future__ import annotations
@@ -28,7 +29,11 @@ def _inline(text):
 
 
 def to_html(text: str) -> str:
-    """The markdown subset as HTML, one string in, one string out."""
+    """The Markdown subset in `text` as an HTML string.
+
+    A heading becomes h2 to h5, since h1 is the report's title. Lines of
+    one paragraph are kept as lines, joined with <br>.
+    """
     out, paragraph, listing = [], [], None
 
     def flush_paragraph() -> None:

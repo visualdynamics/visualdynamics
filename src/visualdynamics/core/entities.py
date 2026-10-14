@@ -1,18 +1,19 @@
 """A geometry's entities, grouped the way the project tree lists them.
 
-`geometry.nodes`, `.coordinate_systems`, `.elements` and
-`.groups` each hand back a view: the same rows you can expand in the
-tree, reachable from a script under the same names. A view is a window onto
-the geometry's own arrays and never a copy of them, so writing through a
-row writes into the geometry:
+`geometry.nodes`, `.coordinate_systems`, `.elements` and `.groups` each
+return a view: the same rows that can be expanded in the tree, available
+to a script under the same names. A view reads the geometry's own arrays
+and is never a copy of them, so writing through a row writes into the
+geometry:
 
     geometry.nodes[0].xyz = [0.0, 0.1, 0.0]     # moves the node
     geometry.nodes.xyz[:, 2] += 0.5             # and so does this
 
-Columns keep their plural name on the view and their singular on a row —
-`nodes.ids` is every id, `nodes[3].id` is one. Adding and deleting are
-forwarded to the geometry, which is what keeps ids unique and
-connectivity honest; everything is deleted by id, in every group.
+A column has its plural name on the view and its singular name on a
+row: `nodes.ids` is every id, and `nodes[3].id` is one. Adding and
+deleting are passed to the geometry's own methods, which keep ids unique
+and make sure elements only refer to nodes that exist. All four kinds of
+entity are deleted by id.
 """
 
 from __future__ import annotations
@@ -78,12 +79,12 @@ LABELS: dict[str, str] = {
 
 
 class EntityRow:
-    """One node, coordinate system, element or element group, in place.
+    """One node, coordinate system, element or element group of a geometry.
 
-    Holds a row number rather than the values, so it reads and writes the
-    geometry as it stands. Delete rows out from under one and it will be
-    describing whatever moved up into its place — take the values you
-    need rather than keeping the row.
+    A row holds a row number, not the values, so it always reads and
+    writes the geometry as it is now. If rows before it are deleted, it
+    describes whatever entity moved into its position, so copy the values
+    needed instead of keeping the row.
     """
 
     __slots__ = ('_row', '_view')
@@ -94,7 +95,7 @@ class EntityRow:
 
     @property
     def row(self) -> int:
-        """Where this sits in the geometry's arrays."""
+        """The index of this entity in the geometry's arrays."""
         return self._row
 
     def __getattr__(self, name: str) -> Any:
@@ -126,11 +127,12 @@ class EntityRow:
 
 
 class EntityView:
-    """One of a geometry's four groups of entities.
+    """One of a geometry's four kinds of entity, as rows and columns.
 
-    Reached as `geometry.nodes` and friends. Iterating gives one
-    `EntityRow` per entity; a column is reached by its plural name and is
-    the geometry's own array, so slicing and assigning into it edit the
+    Returned by `geometry.nodes`, `geometry.coordinate_systems`,
+    `geometry.elements` and `geometry.groups`. Iterating gives one
+    `EntityRow` per entity. A column is read by its plural name and is the
+    geometry's own array, so slicing and assigning into it edit the
     geometry in place.
     """
 
@@ -174,18 +176,26 @@ class EntityView:
 
     @property
     def columns(self) -> tuple[str, ...]:
-        """What this view can be asked for, in table order."""
+        """The plural names of this view's columns, in table order."""
         return tuple(plural for plural, _s, _a in COLUMNS[self.kind])
 
     def add(self, *args: Any, **kwargs: Any) -> int:
-        """Add one, by the geometry's rules — it keeps ids unique and
-        checks that connectivity names nodes that exist."""
+        """Add one entity through the geometry's own method.
+
+        The arguments and the return value are those of
+        `Geometry.add_node`, `add_coordinate_system`, `add_element` or
+        `add_group`: the new id, except for an element, which returns its
+        row index. Those methods keep ids unique and check that an
+        element's nodes exist.
+        """
         return getattr(self.geometry, VERBS[self.kind][0])(*args, **kwargs)
 
     def delete(self, ids: Ids) -> None:
-        """Delete by id, in every group — an id names an entity here the
-        same way it does everywhere else. Ids that are not there are
-        ignored, so deleting twice is not an error."""
+        """Delete entities by id, through the geometry's own method.
+
+        Ids that are not present are ignored, so deleting twice is not
+        an error.
+        """
         getattr(self.geometry, VERBS[self.kind][1])(ids)
 
     def __repr__(self) -> str:

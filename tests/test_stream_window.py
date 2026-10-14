@@ -336,7 +336,7 @@ def test_a_small_stream_imports_whole_without_a_question(window, pump, tmp_path,
 
     path = _stream(str(tmp_path / 'run.nc4'), samples=1 << 12)
     monkeypatch.setattr(stream_window, 'ask_stream_window',
-                        lambda *a: pytest.fail('a small stream was asked about'))
+                        lambda *a, **k: pytest.fail('a small stream was asked about'))
     monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1 << 40)
     window.import_paths([path])
     pump()
@@ -355,7 +355,7 @@ def test_a_large_stream_imports_the_window_chosen(window, pump, tmp_path,
     monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1)
     asked = []
 
-    def choose(parent, asked_path, summary, colors):
+    def choose(parent, asked_path, summary, colors, **_save):
         asked.append((asked_path, summary['streams'][0]['bytes']))
         return {'start': 1.0, 'stop': 2.0, 'channels': ['101Z+', '104Z+']}
 
@@ -383,7 +383,7 @@ def test_the_dialog_is_asked_under_the_arrow_not_the_wait_cursor(
     monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1)
     seen = []
 
-    def choose(*_args):
+    def choose(*_args, **_save):
         seen.append(QApplication.overrideCursor())
         return {}
 
@@ -405,7 +405,7 @@ def test_cancelling_the_dialog_skips_the_file(window, pump, tmp_path, monkeypatc
 
     path = _stream(str(tmp_path / 'run.nc4'), samples=1 << 12)
     monkeypatch.setattr(rattlesnake, 'machine_memory', lambda: 1)
-    monkeypatch.setattr(stream_window, 'ask_stream_window', lambda *a: None)
+    monkeypatch.setattr(stream_window, 'ask_stream_window', lambda *a, **k: None)
     window.import_paths([path])
     pump()
     assert _histories(window) == []

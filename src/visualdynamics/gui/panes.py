@@ -1,17 +1,17 @@
 """Self-contained view panes.
 
-A pane owns a view, the bar of controls that belongs to it, and the
-state those controls carry — and nothing else. It never reaches for the
-project, the tree or the selection: it reports that a choice moved and
-lets whoever placed it decide what that means. That is what lets the
-same pane sit in the main window, in a dock, or in a window of its own
-opened from a script.
+A pane holds a view, the bar of controls above it, and the state those
+controls carry, and nothing else. It does not read the project, the tree
+or the selection. When a choice on its bar changes, it emits a signal,
+and whoever placed the pane decides what the change means. As a result
+the same pane can be used in the main window, in a dock, or in a window
+of its own opened from a script.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -54,21 +54,25 @@ from .wavelet_panel import WaveletPanel
 
 
 def copy_act(pane: Any, what: str) -> tuple:
-    """The copy act a pane's bar carries beside the selection's acts:
-    what the pane shows, onto the clipboard as an image (Brandon,
-    2026-09-24: every plot, table and figure should copy like a chat's
-    code blocks do). An act rather than a standing control, because the
-    bar shows exactly when something on it applies, and a copy applies
-    exactly when something is drawn. One glyph and one tooltip shape on
-    both bars, so it reads as the same act."""
+    """The Copy act for a pane's bar, as an `offer_acts` entry.
+
+    Pressed, it copies what `pane` shows to the clipboard as an image;
+    `what` names that in the tooltip ("plot", "3-D view"). It is an act
+    rather than a control that is always there, so it is on the bar only
+    while something is drawn. Both panes use the same icon and tooltip
+    form, so it reads as the same act on each."""
+    # Brandon, 2026-09-24: every plot, table and figure should copy like
+    # a chat's code blocks do.
     return ('copy', 'Copy', 'copy', pane.copy_view,
             f'Copy the {what} to the clipboard as an image')
 
 
 def image_of(pixels: Any) -> QImage:
-    """A rendered (rows, columns, 3 or 4) array of bytes as a QImage
-    that owns its memory — the array a screenshot hands back is freed
-    with it, and a QImage over it would read garbage."""
+    """A rendered `(rows, columns, 3 or 4)` array of bytes as a QImage
+    with its own copy of the pixels.
+
+    The array a screenshot returns is freed with it, and a QImage that
+    only pointed at that memory would read garbage."""
     import numpy as np
 
     pixels = np.ascontiguousarray(pixels)
@@ -79,18 +83,22 @@ def image_of(pixels: Any) -> QImage:
 
 
 def offer_acts(toolbar: Any, state: dict, acts: Sequence[tuple]) -> None:
-    """Put the acts a selection can take on a bar, in their own fenced
-    group at its end — an icon each, like every other button on a
-    bar, the verb and its meaning in the tooltip (Brandon, 2026-09-12:
-    "none should [carry text] and the user should rely on tool tips to
-    learn icons they don't recognize"; this reverses the labeled
-    buttons of 2026-09-04). Every act on the bar, none behind a menu.
+    """Put the acts a selection can take on a bar, in their own group
+    at its end, after a separator.
 
-    `acts` is [(verb, label, icon name, callback, tooltip)], in the
-    order the bar shows them. Rebuilt on every call: a toolbar cannot
-    reorder its actions, and the order is part of the reading — the
-    same verb in the same place whatever else the selection allows.
+    Each act is an icon, like every other button on a bar, with the
+    label and what it does in the tooltip. Every act is on the bar;
+    none is behind a menu.
+
+    `acts` is a list of `(verb, label, icon name, callback, tooltip)`,
+    in the order the bar shows them. `state` is a dict the caller keeps
+    for this bar between calls. The group is rebuilt on every call,
+    because a toolbar cannot reorder its actions and each verb should
+    be in the same place whatever else the selection allows.
     """
+    # Icons only (Brandon, 2026-09-12: "none should [carry text] and the
+    # user should rely on tool tips to learn icons they don't
+    # recognize"); this reverses the labeled buttons of 2026-09-04.
     from PySide6.QtWidgets import QToolButton
 
     actions = state.setdefault('actions', {})
@@ -131,18 +139,20 @@ COMPONENTS: tuple[tuple[str, str], ...] = (
 
 
 class DataPane(QWidget):
-    """The 2-D data view: a plot under a bar saying how to read it.
+    """The data view: a plot, or its 3-D form, under a bar of choices
+    for how to read the data.
 
-    The bar speaks three vocabularies at once — how coherence reads,
-    which records an FRF is filtered to, and how an FRF beside a shape
-    set is used — and shows only what the data in front of it can
-    actually use, because a control that is not a live option is absent
-    rather than grayed.
+    The bar has the readings of the data shown (averaging, filter,
+    truncate, kurtosis, shocks, scalogram, octave bands, the CMIF and
+    others), the choices of a comparison against a specification, the
+    record filters and the acts the selection can take. It shows only
+    the controls the data can use. A control that does not apply is
+    hidden, not grayed out.
 
-    The pane keeps the choice and announces it. What a choice *means*
-    stays outside: filtering to the diagonal moves the tree selection,
-    and choosing Edit Fit opens a fitting session, neither of which is
-    a plot's business.
+    The pane keeps each choice and emits a signal when it changes. What
+    the choice means is decided outside: filtering to the diagonal
+    changes the tree's selection, and Edit Fit opens a fitting session,
+    and neither is the plot's job.
     """
 
     #: a reading choice moved; draw the same data again
@@ -560,12 +570,8 @@ class DataPane(QWidget):
         # and how far each channel sits from what it had to meet
         self.srs_group: QActionGroup = QActionGroup(self)
         self.srs_actions: dict[str, QAction] = {}
-        for key, icon, text, tip in (
-                ('curves', 'curves', 'Spectra',
-                 'The measured shock spectra against the one required'),
-                ('error', 'bars', 'SRS Error',
-                 ('How far each channel sits from the spectrum it had '
-                  'to meet, RMS across the band in dB'))):
+        for key, icon in (('curves', 'curves'), ('error', 'bars')):
+            text, tip = self.SRS_LABELS['srs'][key]
             action = QAction(control_icon(icon), text, self)
             action.setCheckable(True)
             action.setToolTip(tip)
@@ -786,12 +792,15 @@ class DataPane(QWidget):
         return toolbar
 
     def copy_view(self) -> bool:
-        """What the pane shows, onto the clipboard as an image: the 3-D
-        stage when it is up, the flat plot otherwise. The plot is drawn
-        the way the headless plots are (`plot.render_image`), on the
-        theme's own background, at the screen's pixel density, so a
-        retina display copies a retina image with every font at its
-        set size."""
+        """Copy what the pane shows to the clipboard as an image: the
+        3-D view when it is up, the flat plot otherwise.
+
+        The plot is drawn the way the headless plots are
+        (`plot.render_image`), on the theme's background and at the
+        screen's pixel density, so a Retina display copies a Retina
+        image with every font at its set size. Emits `copied` with a
+        line for the status bar, and returns False when nothing was
+        drawn."""
         from PySide6.QtWidgets import QApplication
 
         if (self.waterfall_plotter is not None
@@ -829,7 +838,8 @@ class DataPane(QWidget):
                  ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'))
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
-        """The acts the selection can take, on this bar (`offer_acts`)."""
+        """Put the acts the selection can take on this bar
+        (see `offer_acts`)."""
         offer_acts(self.toolbar, self.__dict__.setdefault('_acts', {}), acts)
         self.sync_toolbar()
 
@@ -906,25 +916,28 @@ class DataPane(QWidget):
 
     @property
     def showing_wavelet(self) -> bool:
-        """Whether the scalogram is up — asked by whoever draws."""
+        """Whether the scalogram is offered and checked."""
         return (self.wavelet_action.isVisible()
                 and self.wavelet_action.isChecked())
 
     @property
     def showing_kurtosis(self) -> bool:
-        """Whether the bar reading is up — asked by whoever draws."""
+        """Whether the kurtosis bar chart is offered and checked."""
         return (self.kurtosis_action.isVisible()
                 and self.kurtosis_action.isChecked())
 
     @property
     def rms_wanted(self) -> bool:
-        """Whether the RMS reading of a specification is asked for —
-        the checked state alone, so a render can decide its panes
-        before the bar is offered."""
+        """Whether the RMS reading of a specification is checked.
+
+        Only the checked state is read, not whether the toggle is
+        offered, so a render can lay out its plots before the bar is
+        set up."""
         return self.rms_action.isChecked()
 
     def offer_rms(self, offered: bool) -> None:
-        """Show the RMS toggle for a specification on its own."""
+        """Show or hide the RMS toggle for a specification shown on
+        its own."""
         self.rms_action.setVisible(offered)
         if offered:
             self.toolbar.setVisible(True)
@@ -939,7 +952,8 @@ class DataPane(QWidget):
         self.spectra_view_chosen.emit(which)
 
     def show_spectra_views(self, offered: bool) -> None:
-        """Offer the two-density readings, or take them away."""
+        """Show or hide the readings of two selected densities
+        (overlay, ratio, signal-to-noise)."""
         for action in self.spectra_actions.values():
             action.setVisible(offered)
         if offered:
@@ -947,11 +961,12 @@ class DataPane(QWidget):
             self.spectra_actions[self.spectra_view].setChecked(True)
 
     def show_comparison_views(self, offered: bool) -> None:
-        """Offer the three readings, or none of them.
+        """Show or hide the three readings of a comparison (curves,
+        error, lines).
 
         Only a specification with a measurement against it has three
-        readings; anything else has one, and a chooser with one choice
-        is a question with one answer.
+        readings. Anything else has one, and a choice of one is not
+        offered.
         """
         for action in self.comparison_actions.values():
             action.setVisible(offered)
@@ -960,11 +975,11 @@ class DataPane(QWidget):
             self.comparison_actions[self.comparison_view].setChecked(True)
 
     def show_scaling(self, text: str | None) -> None:
-        """Show the comparison scaling, or take it away with None.
+        """Show the comparison scaling field with `text`, or hide it
+        with None.
 
-        The field is restated on every drawing, so setting the text
-        must not read as the user typing it — hence the guard, the same
-        one the pair and event boxes need for the same reason.
+        The field is set again on every drawing, so setting it here does
+        not count as an edit and does not emit `scaling_edited`.
         """
         self.scaling_action.setVisible(text is not None)
         if text is None:
@@ -981,9 +996,32 @@ class DataPane(QWidget):
         self.srs_view = which
         self.srs_chosen.emit(which)
 
-    def show_srs_views(self, offered: bool) -> None:
-        """Offer the two readings of a shock-spectrum comparison."""
-        for action in self.srs_actions.values():
+    #: the two readings' names, by comparison: a shock spectrum against
+    #: its requirement, or sine levels against the tones they were
+    #: controlled to — the same pair of readings, said in each one's words
+    #: (the sine comparison read "SRS Error" until 2026-10-13)
+    SRS_LABELS: ClassVar[dict] = {
+        'srs': {'curves': ('Spectra',
+                           'The measured shock spectra against the one required'),
+                'error': ('SRS Error',
+                          ('How far each channel sits from the spectrum it had '
+                           'to meet, RMS across the band in dB'))},
+        'sine': {'curves': ('Levels',
+                            'The extracted levels against the levels required'),
+                 'error': ('Level Error',
+                           ('How far each channel sits from the level it had to '
+                            'reach, RMS across the sweep in dB'))},
+    }
+
+    def show_srs_views(self, offered: bool, kind: str = 'srs') -> None:
+        """Show or hide the two readings of a shock-spectrum
+        comparison, or, with `kind` 'sine', of sine levels against their
+        specification. While shown, the three comparison readings are
+        hidden."""
+        for key, action in self.srs_actions.items():
+            text, tip = self.SRS_LABELS[kind][key]
+            action.setText(text)
+            action.setToolTip(tip)
             action.setVisible(offered)
         if offered:
             for action in self.comparison_actions.values():
@@ -997,13 +1035,15 @@ class DataPane(QWidget):
         self.replication_chosen.emit(which)
 
     def show_replication_views(self, offered: bool) -> None:
-        """Offer the two readings of a replication, or neither.
+        """Show or hide the two readings of a transient replication
+        (overlay, waveform error).
 
         Only a transient specification with a record against it has
-        them. They hide the random three while they are up: both sets
-        are readings of "how did this compare", and a bar offering
-        seven of those invites reading a waveform error against an
-        abort band that does not exist.
+        them. While they are shown, the three readings of a random
+        comparison are hidden: both sets answer how the measurement
+        compared, and offering all five together would invite reading a
+        waveform error against an abort band that a transient does not
+        have.
         """
         for action in self.replication_actions.values():
             action.setVisible(offered)
@@ -1014,17 +1054,19 @@ class DataPane(QWidget):
             self.replication_actions[self.replication_view].setChecked(True)
 
     def show_events(self, labels: Sequence[tuple[str, int]]) -> None:
-        """Offer these repeats, keeping the one already chosen.
+        """Fill the event box with these repeats, keeping the one already
+        chosen.
 
-        Sticky by index, unlike the channel box beside it, because a
-        repeat *is* its index — the third playing of the waveform is
-        the third whatever else the record holds — where a channel is a
-        DOF that may arrive or leave.
+        `labels` is one label per repeat, in order. The choice is kept
+        by index, unlike the channel box beside it, because a repeat is
+        its index (the third playing of the waveform is the third
+        whatever else the record holds), while a channel is a DOF that
+        may come and go. The box is hidden for fewer than two repeats.
 
-        No repeat is marked out. Which one is the bad one depends on
-        which reading you care about and on what the article is for,
-        and naming one here would be putting a judgment in a list of
-        facts — the numbers beside the plot are what to decide with.
+        No repeat is marked as the worst. Which one is worst depends on
+        the reading and on what the test article is for, so the box
+        lists the repeats and the numbers beside the plot are what to
+        decide with.
         """
         wanted = list(labels)
         self.event_action.setVisible(len(wanted) > 1)
@@ -1043,15 +1085,15 @@ class DataPane(QWidget):
             self._loading_events = False
 
     def chosen_event(self) -> int | None:
-        """The repeat being looked at, or None."""
+        """The index of the repeat being shown, or None."""
         return self.event_box.currentData()
 
     def step_event(self, step: int) -> None:
         """Move the event box by `step`, stopping at either end.
 
-        Stopping rather than wrapping: the repeats are in time order,
-        and running off the last one back to the first would read as
-        having gone forwards.
+        It stops rather than wrapping because the repeats are in time
+        order, and going from the last one back to the first would look
+        like a step forward.
         """
         count = self.event_box.count()
         if count < 2:
@@ -1086,74 +1128,74 @@ class DataPane(QWidget):
         self.reread.emit()
 
     def reset_plot_mode(self) -> None:
-        """Back to letting the data choose. Called when the selection
-        changes, so an override applies to the thing being looked at and
-        not for ever."""
+        """Clear the plot mode chosen on the bar, so the data chooses
+        again. Called when the selection changes, so a choice applies to
+        the object it was made for and not to every later one."""
         self.plot_mode = None
 
     # ---- what the pane is showing ----------------------------------------
 
     @property
     def showing_averaging(self) -> bool:
-        """Is the averaging view asked for? Only meaningful for a time
-        history, which is why the caller checks that first."""
+        """Whether the averaging view is checked. It applies only to
+        a time history, so the caller checks that first."""
         return self.averaging_action.isChecked()
 
     @property
     def showing_filter(self) -> bool:
-        """Is the filter view asked for? Only meaningful for a time
-        history, which is why the caller checks that first."""
+        """Whether the filter view is checked. It applies only to a
+        time history, so the caller checks that first."""
         return self.filter_action.isChecked()
 
     @property
     def showing_sine(self) -> bool:
-        """Is the sine view asked for? Only meaningful for a time
-        history beside a sweep specification, which is why the caller
-        checks that first."""
+        """Whether the sine view is checked. It applies only to a
+        time history beside a sweep specification, so the caller checks
+        that first."""
         return self.sine_action.isChecked()
 
     @property
     def showing_octave(self) -> bool:
-        """Is the octave-band view asked for? Only meaningful for a
-        plain PSD or CPSD, which is why the caller checks that
-        first."""
+        """Whether the octave-band view is checked. It applies only to
+        a plain PSD or CPSD, so the caller checks that first."""
         return self.octave_action.isChecked()
 
     @property
     def showing_truncate(self) -> bool:
-        """Is the truncate view asked for? Only meaningful for a time
-        history, which is why the caller checks that first."""
+        """Whether the truncate view is checked. It applies only to a
+        time history, so the caller checks that first."""
         return self.truncate_action.isChecked()
 
     @property
     def showing_shocks(self) -> bool:
-        """Is the shock view asked for? Only meaningful for a time
-        history, which is why the caller checks that first."""
+        """Whether the shock view is checked. It applies only to a
+        time history, so the caller checks that first."""
         return self.shocks_action.isChecked()
 
     @property
     def showing_cmif(self) -> bool:
-        """Is the singular-value reading asked for? Only meaningful for
-        FRFs, which is why the caller checks that first."""
+        """Whether the singular-value reading (CMIF) is checked. It
+        applies only to FRFs, so the caller checks that first."""
         return self.cmif_action.isChecked()
 
     @property
     def showing_waterfall(self) -> bool:
-        """Is the 3-D reading asked for? Only meaningful where the
-        window offered it, which is why the caller checks that first.
+        """Whether the 3-D form is checked. It applies only where the
+        window offered it, so the caller checks that first.
 
-        The filter view used to outrank this and force the drawing
-        flat — my judgment that two overlaid ribbons would occlude
-        each other, made without drawing them. Wrong twice over
-        (Brandon, 2026-08-25): the stage already draws paired data at
-        one station, and a view choice that silently overrides another
-        view choice is exactly what this interface does not do. The
-        preview is stage geometry now, so both readings stand.
-
-        Except while the specification sheet is open: its handles
-        live on the flat plot, so `flat_only` holds the drawing flat
-        whatever the toggle says (Brandon, 2026-09-06).
+        The filter view does not change this; its preview is drawn in
+        3-D too. While the specification sheet is open, `flat_only`
+        keeps the drawing flat whatever the toggle says, because the
+        sheet's handles are on the flat plot.
         """
+        # The filter view used to outrank this and force the drawing
+        # flat: my judgment that two overlaid ribbons would occlude each
+        # other, made without drawing them. Wrong twice over (Brandon,
+        # 2026-08-25): the stage already draws paired data at one
+        # station, and a view choice that silently overrides another
+        # view choice is exactly what this interface does not do. The
+        # preview is stage geometry now, so both readings stand.
+        # `flat_only` for the specification sheet: Brandon, 2026-09-06.
         return self.waterfall_action.isChecked() and not self.flat_only
 
     #: the flat plot only, whatever the 3D toggle says — set by the
@@ -1162,43 +1204,45 @@ class DataPane(QWidget):
     flat_only: bool = False
 
     def offer_waterfall(self, offered: bool) -> None:
-        """Show the 2D/3D toggle, raised by the plain-curves path
-        itself, like `show_pairs`: `show_controls` runs before the
-        window knows whether this drawing ends as plain curves.
+        """Show or hide the 2D/3D toggle.
 
-        Offered whenever the current reading has both forms, and
-        withheld only where one of them does not exist — the kurtosis
-        bars are a flat picture and a depth axis would have nothing to
-        put along it. That is the *setting* half of principle 3, and
-        the half that survives: it is the readings that stay offered
-        whichever one is chosen (Brandon, 2026-08-27).
-
-        The scalogram has both, and opens in 3-D: it is already a
-        function of two variables, so a surface is its natural form.
+        Called by the code that draws plain curves, like `show_pairs`,
+        because `show_controls` runs before the window knows whether
+        the drawing will be plain curves. The toggle is offered whenever
+        the current reading has both forms, and hidden only where one
+        does not exist: the kurtosis bars are flat, with nothing to put
+        along a depth axis, and while `flat_only` is set. The scalogram
+        has both forms, and in 3-D it is drawn as a surface.
         """
+        # Offering the toggle wherever both forms exist is the *setting*
+        # half of principle 3, and the half that survives: it is the
+        # readings that stay offered whichever one is chosen (Brandon,
+        # 2026-08-27).
         flat = self.kurtosis_wanted or self.flat_only
         self.waterfall_action.setVisible(offered and not flat)
         if offered and not flat:
             self.toolbar.setVisible(True)
 
     def offer_frequency_axis(self, offered: bool, log: bool) -> None:
-        """Show the decades/hertz toggle for data drawn over frequency,
-        reading `log`, the axis as it stands — the class's convention
-        until the viewer chooses (`core.data.frequency_axis`)."""
+        """Show or hide the decades/hertz toggle for data drawn over
+        frequency. `log` is the axis as it is now drawn: the data
+        class's default until the viewer chooses
+        (`core.data.frequency_axis`)."""
         self.log_frequency_action.setVisible(offered)
         self.log_frequency_action.setChecked(offered and log)
         if offered:
             self.toolbar.setVisible(True)
 
     def show_quantities(self, entries: Sequence[tuple[str, Any]]) -> None:
-        """Offer a mixed object's quantity groups, keeping the choice.
+        """Fill the quantity box with a mixed object's quantity groups,
+        keeping the one already chosen.
 
-        `entries` is [(label, key)], largest group first — index 0 is
-        the default the waterfall draws unasked. Sticky by key, not by
-        position, like the pair box: the list is rebuilt on every
-        drawing, and a choice that moved with the index would jump to
-        another quantity whenever a record pick changed the counts.
-        Hidden below two entries — one quantity is not a choice.
+        `entries` is a list of `(label, key)`, largest group first, and
+        the first is the one the 3-D view draws by default. The choice
+        is kept by key, not by position, like the pair box: the list is
+        rebuilt on every drawing, and a choice kept by index would jump
+        to another quantity whenever picking records changed the
+        counts. The box is hidden for fewer than two entries.
         """
         self._loading_quantities = True
         try:
@@ -1218,12 +1262,13 @@ class DataPane(QWidget):
             self.toolbar.setVisible(True)
 
     def show_pages(self, page: int, pages: int) -> None:
-        """Offer the page stepper, or put it away for a single page.
+        """Show the page stepper at `page` of `pages`, or hide it for a
+        single page.
 
-        `page` is zero-based, as the scene counts them; the box shows
-        one-based with the total as its suffix, so it reads
-        `[<] 2 / 3 [>]`. Restated on every drawing, so the guard keeps
-        that from reading as the user turning a page.
+        `page` is zero-based, as the scene counts pages. The box shows
+        it one-based with the total after it, so it reads
+        `[<] 2 / 3 [>]`. It is set again on every drawing, and setting
+        it here does not count as turning a page.
         """
         self._loading_page = True
         try:
@@ -1238,7 +1283,7 @@ class DataPane(QWidget):
             self.toolbar.setVisible(True)
 
     def chosen_page(self) -> int:
-        """The page on the stage, zero-based."""
+        """The page shown in the 3-D view, zero-based."""
         return self.page_box.value() - 1
 
     def chosen_quantity(self) -> Any:
@@ -1246,10 +1291,10 @@ class DataPane(QWidget):
         return self.quantity_box.currentData()
 
     def create_waterfall_plotter(self) -> Any:
-        """Build the 3-D data surface, on first use.
+        """Build the 3-D data view the first time it is needed.
 
-        The same deferral as `ScenePane.create_plotter` and for the
-        same macOS reason — and safe here without a callback, because
+        It is built late for the same macOS reason as
+        `ScenePane.create_plotter`. No callback is needed here, because
         the only thing that asks for it is a toggle on this pane's own
         bar, which cannot be clicked before the pane is on screen.
         Returns the plotter, or None when it was already built.
@@ -1285,20 +1330,22 @@ class DataPane(QWidget):
     def reserve_bottom(self, pixels: int) -> None:
         """Keep the bottom `pixels` of the plot area empty.
 
-        The console tab floats over the views' bottom edge rather than
-        claiming a strip, and it landed on the legend row and the
-        bottom axis (Brandon, 2026-09-01). A layout margin is the
-        clearance: every plot, legend and axis ends above it, and the
-        margin survives `clear()`, so one call at construction holds.
+        The console tab sits over the bottom edge of the views. The
+        space is a layout margin, so every plot, legend and axis ends
+        above it, and the margin is kept through `clear()`, so one call
+        when the window is built is enough.
         """
+        # The console tab landed on the legend row and the bottom axis
+        # (Brandon, 2026-09-01).
         left, top, right, _ = self.graphics.ci.layout.getContentsMargins()
         self.graphics.ci.layout.setContentsMargins(left, top, right, pixels)
 
     def show_waterfall(self, wanted: bool) -> None:
-        """Swap the plot surface: the 2-D graphics or the 3-D view.
+        """Show the 3-D view (`wanted` True) or the 2-D plot.
 
-        Both stay children of the pane; only visibility moves, so the
-        toggle costs no layout work and the hidden one keeps its state.
+        Both stay in the pane and only their visibility changes, so the
+        switch needs no layout work and the hidden one keeps its state.
+        The 3-D view is built the first time it is wanted.
         """
         if wanted:
             self.create_waterfall_plotter()
@@ -1308,28 +1355,30 @@ class DataPane(QWidget):
         self._waterfall_page.setVisible(wanted)
 
     def component(self) -> str:
-        """Which part of a complex ordinate to draw."""
+        """Which part of a complex ordinate to draw: 'magnitude',
+        'real', 'imag' or 'phase'."""
         return self.component_box.currentData()
 
     def show_pairs(self, pairs: Sequence[tuple[str, str]]) -> None:
-        """Offer these comparisons, keeping the one already chosen.
+        """Fill the comparison box with these DOF pairs, keeping the one
+        already chosen.
 
-        Sticky by DOF and not by position: the list is rebuilt on every
-        drawing, and a selection that moved with the index would jump to
-        another channel whenever one arrived or left.
+        The choice is kept by DOF pair, not by position: the list is
+        rebuilt on every drawing, and a choice kept by index would jump
+        to another channel whenever one came or went. The box is hidden
+        for fewer than two pairs.
 
-        This raises the bar itself, and has to. `show_controls` decides
-        whether there is a bar from the controls *it* knows about, and
-        it runs before this does — so a drop-down put up afterwards
-        landed in a bar that had already been hidden. It went unnoticed
-        because a specification used to be complex, which offered the
-        component box, which kept the bar up for its own reasons;
-        storing PSDs real took that away and the drop-down went with it.
-
-        A QAction's `isVisible` is its own flag and stays true inside a
-        hidden toolbar, so anything checking that alone will agree the
-        box is up while the screen shows nothing.
+        This shows the bar itself, because `show_controls` has already
+        run and set the bar from the controls it knows about. A QAction's
+        `isVisible` is its own flag and stays True inside a hidden
+        toolbar, so a check of that alone can report the box as shown
+        while nothing is on screen.
         """
+        # A drop-down put up after `show_controls` landed in a bar that
+        # had already been hidden. It went unnoticed because a
+        # specification used to be complex, which offered the component
+        # box, which kept the bar up for its own reasons; storing PSDs
+        # real took that away and the drop-down went with it.
         from ..plot import pair_label
 
         wanted = list(pairs)
@@ -1349,15 +1398,17 @@ class DataPane(QWidget):
             self._loading_pairs = False
 
     def chosen_pair(self) -> tuple[str, str] | None:
-        """The comparison being looked at, or None."""
+        """The DOF pair of the comparison being shown, or None."""
         return self.pair_box.currentData()
 
     def select_pair_label(self, label: str) -> bool:
-        """Show the comparison this label names. True if it moved.
+        """Choose the comparison whose label is `label`. Returns True if
+        the choice changed.
 
-        By label rather than by DOF pair, because the table names its
-        rows the way the box does and matching the text is what keeps
-        the two agreeing without either learning the other's model.
+        It matches by label rather than by DOF pair because the table
+        labels its rows the way the box does, so the two agree without
+        either one reading the other's data. The change does not emit
+        `pair_chosen`.
         """
         from ..plot import pair_label
 
@@ -1375,11 +1426,10 @@ class DataPane(QWidget):
         return False
 
     def step_pair(self, step: int) -> None:
-        """Move to the next comparison, or the previous one.
+        """Move the comparison box by `step`, stopping at either end.
 
-        Stops at the ends rather than wrapping: running off the bottom
-        of a channel list and arriving back at the top reads as nothing
-        having happened.
+        It stops rather than wrapping because going from the bottom of a
+        channel list back to the top looks as if nothing happened.
         """
         if not self.pair_action.isVisible():
             return
@@ -1388,23 +1438,23 @@ class DataPane(QWidget):
             self.pair_box.setCurrentIndex(wanted)
 
     def sync_toolbar(self) -> None:
-        """The bar shows exactly when something on it does.
+        """Show the bar exactly when something on it is shown.
 
-        Derived, never decided by a caller. Five methods put controls
-        on this bar and each knows only its own slice, so any one of
-        them setting the bar's visibility from its own slice hides
-        another's controls — which is exactly what happened: the
-        fitting screen's `show_pair_controls` hid the whole bar
-        whenever no shape set was co-selected, and once Residual moved
-        onto that bar, a fit started from the FRF's own act lost
-        it. An action's `isVisible` is its own property and does not
-        follow the bar's, so the bar can be read back off its contents.
-
-        The dividers settle first and are then discounted: a separator
-        is visible whether or not anything is around it, so a bar of
-        nothing but dividers passes a plain `any(isVisible)` and stays
-        up — which is what the first fenced group did.
+        The bar's visibility is read from its contents, never set by a
+        caller. Several methods put controls on this bar and each knows
+        only its own, so any one of them setting the bar's visibility
+        would hide the others' controls. An action's `isVisible` is its
+        own flag and does not follow the bar's, which is what makes the
+        contents readable. Separators are tidied first and then not
+        counted, because a separator is visible whether or not anything
+        is around it.
         """
+        # What happened: the fitting screen's `show_pair_controls` hid
+        # the whole bar whenever no shape set was co-selected, and once
+        # Residual moved onto that bar, a fit started from the FRF's own
+        # act lost it. And a bar of nothing but dividers passes a plain
+        # `any(isVisible)` and stays up, which is what the first fenced
+        # group did.
         tidy(self.toolbar)
         self.toolbar.setVisible(shows_anything(self.toolbar))
 
@@ -1415,14 +1465,20 @@ class DataPane(QWidget):
                       residual: bool = False,
                       octave: bool = False, sine: bool = False) -> None:
         """Show exactly the controls this data can use, and hide the bar
-        when that is none of them.
+        when there are none.
 
         `map_wanted` is True for a map, False for curves and None when
-        the data has no such choice; `diagonal` is None when there is no
-        diagonal to filter to, else `(label, tooltip, already_filtered)`;
-        `cmif` offers the singular-value reading; `complex_data` offers
-        the component box; `pair` offers Edit Fit / Resynthesis;
-        `averaging` offers the frames a time history would be cut into.
+        the data has no such choice. `diagonal` is None when there is no
+        diagonal to filter to, else `(label, tooltip, already_filtered)`.
+        `cmif` offers the singular-value reading, `complex_data` the
+        component box, and `pair` Edit Fit and Resynthesis. `averaging`
+        offers the readings of a time history (averaging, filter,
+        truncate, kurtosis, scalogram), `sine` adds the sine reading to
+        them for a record with a sweep specification, and `shocks` offers
+        the shock view and kurtosis. `octave` offers the octave bands of a
+        plain density, and `residual` the fit's residual CMIF. The pair,
+        3-D, frequency-axis, quantity and page controls are hidden here;
+        the code that draws offers them afterwards.
         """
         # visibility is settled by `sync_toolbar` at the end, from what
         # is actually on the bar — see the note there
@@ -1530,19 +1586,22 @@ class DataPane(QWidget):
         self.sync_toolbar()
 
     def reset_controls(self) -> None:
-        """Nothing applies until something says otherwise.
+        """Hide the controls and acts on the bar.
+
+        This hides everything `show_controls` sets, and the event box,
+        the scaling field, the RMS toggle, the comparison, two-density,
+        replication and shock-spectrum readings, and the acts.
 
         Called before every render, so a drawing that has no use for the
-        bar — photos, a report — does not have to remember to put away
-        the controls the last one left up.
-
-        Which is a promise each control has to be registered here to
-        keep. The event box was added later and never was, so once a
-        transient comparison raised it, it stayed up over the record on
-        its own — where every event is on screen at once and there is
-        nothing to choose between — and over a channel table, which has
-        no events at all.
+        bar, such as photos or a report, does not have to put away the
+        controls the last one left up. A new control on the bar has to
+        be hidden here too.
         """
+        # The event box was added later and was not hidden here, so once
+        # a transient comparison showed it, it stayed up over the record
+        # on its own (where every event is on screen at once and there is
+        # nothing to choose between) and over a channel table, which has
+        # no events at all.
         self.show_controls(map_wanted=None, diagonal=None, cmif=False,
                            complex_data=False, pair=False, averaging=False,
                            shocks=False)
@@ -1551,12 +1610,20 @@ class DataPane(QWidget):
         self.rms_action.setVisible(False)
         self.show_replication_views(False)
         self.show_srs_views(False)
+        # the comparison's and two densities' readings too: they were
+        # left up under a hidden bar when a selection moved off them,
+        # for the next bar shown by another path to carry (2026-10-13,
+        # found by the docstring pass)
+        self.show_comparison_views(False)
+        self.show_spectra_views(False)
         # the acts too: the render that follows puts back the ones
         # the new selection can take
         self.show_acts([])
 
     def show_pair_controls(self, offered: bool) -> None:
-        """The bar as the fitting screen wants it: the pair choice alone."""
+        """Set the bar up for the fitting screen: hide the reading and
+        view controls, and show Edit Fit and Resynthesis when
+        `offered`."""
         for action in (self.curves_action, self.map_action,
                        self.drive_point_action, self.cmif_action,
                        self.averaging_action, self.kurtosis_action,
@@ -1602,13 +1669,16 @@ class DataPane(QWidget):
 
 
 class ScenePane(QWidget):
-    """The 3-D view: the scene, its camera, and how the scene is annotated.
+    """The 3-D view: the scene, its camera, and the annotations drawn
+    around it.
 
-    What is *in* the scene stays outside — geometry, deflection and the
-    picking that edits them all need the project, and none of them is a
-    view's business. The pane owns the render window, the annotations
-    drawn around whatever is in it, and the bar those annotations hang
-    from. Anyone placing the pane can add their own actions to that bar.
+    What is in the scene is decided outside the pane: the geometry, the
+    deflection and the picking that edits them all need the project.
+    The pane holds the render window, the annotations (the labeled axes
+    and the orientation triad), the bar with their toggles, and the
+    settings panels shown beside the view (rigid-body modes, meshing,
+    merging nodes, patterns). Whoever places the pane can add their own
+    actions to the bar.
     """
 
     #: what was copied to the clipboard, for the status line
@@ -1732,7 +1802,10 @@ class ScenePane(QWidget):
         return toolbar
 
     def copy_view(self) -> bool:
-        """The 3-D view as it stands, onto the clipboard as an image."""
+        """Copy the 3-D view, as it is now, to the clipboard as an image.
+
+        Emits `copied` with a line for the status bar, and returns False
+        when the view is not built yet."""
         from PySide6.QtWidgets import QApplication
 
         if self.plotter is None:
@@ -1745,7 +1818,8 @@ class ScenePane(QWidget):
         return True
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
-        """The acts the selection can take, on this bar (`offer_acts`)."""
+        """Put the acts the selection can take on this bar
+        (see `offer_acts`)."""
         offer_acts(self.toolbar, self.__dict__.setdefault('_acts', {}), acts)
 
     # ---- the rigid-body reading -------------------------------------------
@@ -1758,8 +1832,9 @@ class ScenePane(QWidget):
         self.rigid_toggled.emit(bool(checked))
 
     def offer_rigid(self, offered: bool) -> None:
-        """Show the toggle only while it applies — one whole geometry,
-        nothing riding it — checked if it was wanted last time."""
+        """Show or hide the rigid-body modes toggle. The window offers it
+        only when one whole geometry is selected with nothing drawn on
+        it, and it comes back checked if it was checked last time."""
         offered = bool(offered)
         self.rigid_action.setVisible(offered)
         self._rigid_fence.setVisible(offered)
@@ -1769,7 +1844,7 @@ class ScenePane(QWidget):
 
     @property
     def showing_rigid(self) -> bool:
-        """Whether the rigid-body reading is up."""
+        """Whether the rigid-body modes toggle is offered and checked."""
         return self.rigid_action.isVisible() and self.rigid_action.isChecked()
 
     # ---- the render window ------------------------------------------------
@@ -1777,8 +1852,10 @@ class ScenePane(QWidget):
     def create_plotter(self) -> Any:
         """Build the embedded VTK view, once the pane is on screen.
 
-        Returns the plotter, or None if it was already built — the caller
-        usually wants to draw into a view that has just appeared.
+        On macOS, building it before the window is shown leaves the
+        window with no size. Returns the plotter, or None if it was
+        already built (or is being built), so the caller knows whether
+        it has a new view to draw into.
         """
         if self.plotter is not None or self._creating_plotter:
             return None
@@ -1819,18 +1896,20 @@ class ScenePane(QWidget):
         return self.plotter
 
     def set_home_view(self, view: Any, owner: Any = None) -> None:
-        """The view Reset View returns to, and the geometry it is
-        `owner`'s; None hides it (a scene with no geometry in it has no
-        view of its own to return to)."""
+        """Set the view Reset View returns to, and `owner`, the geometry
+        it belongs to. None hides Reset View, because a scene with no
+        geometry in it has no view of its own to return to."""
         self.home_view = view
         self._home_owner = owner
         self.reset_view_action.setVisible(view is not None)
 
     def frame(self) -> None:
-        """Fit new content. Turned to the home view when its geometry is
-        new to the pane; otherwise only refitted, so a turn the user made
-        survives stepping from a geometry to the shapes drawn on it —
-        framing is for new content, and the view belongs to the user."""
+        """Fit the camera to new content.
+
+        When the home view's geometry is new to the pane, the camera
+        turns to the home view. Otherwise it is only refitted, so a turn
+        the user made is kept when stepping from a geometry to the
+        shapes drawn on it."""
         if self.plotter is None:
             return
         if self.home_view is not None and \
@@ -1858,17 +1937,18 @@ class ScenePane(QWidget):
     # ---- how the scene is dressed ----------------------------------------
 
     def set_bounds_visible(self, visible: bool) -> None:
-        """Toggle the labeled axes drawn around the geometry."""
+        """Show or hide the labeled axes drawn around the geometry."""
         self.bounds_visible = bool(visible)
         self.apply_annotations()
 
     def set_orientation_visible(self, visible: bool) -> None:
-        """Toggle the orientation triad in the corner."""
+        """Show or hide the orientation triad in the corner."""
         self.orientation_visible = bool(visible)
         self.apply_annotations()
 
     def apply_annotations(self) -> None:
-        """Re-apply annotations in place, so the camera keeps its position."""
+        """Draw the annotations again in place, so the camera keeps its
+        position."""
         if self.plotter is None:
             return
         annotate_scene(self.plotter, self.axis_unit,
@@ -1877,7 +1957,8 @@ class ScenePane(QWidget):
         self.plotter.render()
 
     def apply_background(self) -> None:
-        """An empty 3D view must match the theme, not VTK's white default."""
+        """Set the view's background to the theme's, so an empty 3-D
+        view matches the theme instead of VTK's white default."""
         if self.plotter is not None:
             colors = resolve_theme(self.theme_name)
             self.plotter.set_background(colors['scene_background'],

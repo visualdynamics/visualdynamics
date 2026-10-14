@@ -1,22 +1,19 @@
-"""The scalogram, drawn: time across, frequency up, magnitude as color.
+"""Drawing a scalogram: time across, frequency up, magnitude as color.
 
-One channel at a time, because the picture is dense — a second one
-beside it at this size reads as noise rather than as a second answer.
+One channel is drawn at a time, because the image is dense and a second
+one beside it at the same size is too hard to read.
 
-Two things here are not decoration and are the reason this is a module
-rather than four lines beside the coherence map.
+The frequency axis is logarithmic. A wavelet's bandwidth is a constant
+fraction of its frequency, so the rows are evenly spaced in log
+frequency, and drawing them evenly spaced in linear frequency would put
+them in the wrong place. The image is drawn in log space and the axis
+is labeled in Hz.
 
-**The frequency axis is logarithmic**, because a wavelet's bandwidth is
-a constant fraction of its frequency: the rows *are* evenly spaced in
-log frequency, so drawing them evenly spaced in linear frequency would
-put the image's own rows where they do not belong. The image is drawn
-in log space and the axis is labeled back in Hz.
-
-**The cone of influence is drawn over the picture**, shaded, because
-inside it a scalogram is an artifact of where the record was cut rather
-than a reading of the record. It looks exactly like data — that is the
-whole problem — and a reading that cannot be told from an artifact is
-worse than no reading.
+The cone of influence is shaded over the image. Near each end of the
+record, over a time that is longer at lower frequencies, the values
+depend on where the record was cut and not only on the record. They
+look the same as the rest of the image, so the shading is the only way
+to tell them apart.
 """
 
 from __future__ import annotations
@@ -40,32 +37,34 @@ def scalogram_image(plot: Any, magnitude: np.ndarray, times: np.ndarray,
     Parameters
     ----------
     plot : pyqtgraph.PlotItem
-        Where to draw. Cleared of nothing — the caller owns the layout.
+        Where to draw. Nothing on it is cleared; the caller owns the
+        layout.
     magnitude : numpy.ndarray
-        ``(frequencies, times)``, already the magnitude: this draws, it
-        does not transform.
+        ``(frequencies, times)``, already the magnitude. No transform
+        is computed here.
     times : numpy.ndarray
         The record's clock, in seconds, one per column.
     frequencies : numpy.ndarray
-        One per row, ascending, spaced evenly by octave.
+        One per row, ascending, evenly spaced in log frequency.
     colors : mapping
         The theme.
     label, units : str
-        What the color bar is of — the record's own quantity and unit,
-        which the amplitude normalization is what makes meaningful.
+        The color bar's quantity and unit: the record's own, which the
+        transform's amplitude normalization keeps.
     omega0 : float
-        The wavelet's width, for working out the cone.
+        The wavelet's width parameter, used to compute the cone of
+        influence.
     time_label : str
         The bottom axis's label, units included.
     levels : (float, float), optional
-        The color scale's ends. Zero to the largest magnitude by
-        default; a caller drawing the magnitude in decibels, which is
-        never above its reference, gives the range it means.
+        The color scale's ends. The default is zero to the largest
+        finite magnitude. A caller drawing the magnitude in decibels,
+        which is never above its reference, passes the range it wants.
 
     Returns
     -------
     pyqtgraph.ImageItem
-        The image, so a caller can adjust its levels.
+        The image, so the caller can change its levels.
     """
     import pyqtgraph as pg
 

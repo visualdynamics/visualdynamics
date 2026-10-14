@@ -1,21 +1,21 @@
-"""An animation, saved as a video anyone can play.
+"""Save an animation as a video that plays almost anywhere.
 
-MP4 holding H.264: the one pairing that opens with nothing installed in
+The file is an MP4 holding H.264, which opens with nothing installed in
 QuickTime, the Windows player, every browser, Keynote and PowerPoint,
-and on a phone. It is also small for what an animation is — a still
-background behind a smoothly moving mesh — where a GIF of the same five
-seconds measured seven times larger and bands the color map to 256
-levels (PLAN.md, "Saving an animation").
+and on a phone. It is also small for an animation, which is a still
+background behind a smoothly moving mesh: a GIF of the same five
+seconds measured seven times larger, and it limits the color map to 256
+levels.
 
-The encoder is Qt Multimedia's: the FFmpeg inside the PySide6 wheels is
-an LGPL build with no libx264, and it hands H.264 to the platform's own
-encoder — VideoToolbox on macOS, Media Foundation on Windows, a GPU's
-VAAPI or NVENC on Linux. That last is the catch. A Linux machine
-without a working GPU encoder has no H.264 at all, and Qt then records
-MPEG-4 Part 2 without a word — five times the size, and refused by
-browsers and Keynote. So the codec is asked for before anything is
-written, and a machine that cannot give it is told so rather than
-handed a file that will not play (`unavailable_reason`).
+The encoder is Qt Multimedia's. The FFmpeg inside the PySide6 wheels is
+an LGPL build without libx264, and it passes H.264 to the platform's own
+encoder: VideoToolbox on macOS, Media Foundation on Windows, and a GPU's
+VAAPI or NVENC on Linux. A Linux machine without a working GPU encoder
+has no H.264 at all, and Qt then records MPEG-4 Part 2 with no warning,
+a file five times the size that browsers and Keynote refuse. So the
+codec is checked before anything is written, and a machine that cannot
+provide it is told why (`unavailable_reason`) instead of being given a
+file that will not play.
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ import numpy as np
 from ..plot import _application
 from ..viz.animate import MOVIE_FPS
 
+# The format comparison and the encoder survey: PLAN.md, "Saving an
+# animation".
+
 #: frames sent ahead of what the file holds. The encoder answers after
 #: two or three (measured, VideoToolbox, Qt 6.12), so four never waits
 #: on a frame it has not been given, and Qt 6.12 keeps ten of a burst
@@ -42,7 +45,9 @@ STALL_MS = 10_000
 
 
 class MovieUnavailable(RuntimeError):
-    """This machine cannot encode H.264, so no movie is written."""
+    """Raised when this machine cannot write an H.264 movie (it has no
+    H.264 encoder, or Qt Multimedia does not load), so nothing is
+    written."""
 
 
 @cache
@@ -74,7 +79,11 @@ def _unloadable() -> str | None:
 
 
 def unavailable_reason() -> str | None:
-    """Why no movie can be saved here, or None when one can."""
+    """Why no movie can be saved on this machine, or None when one can.
+
+    The reasons are that Qt Multimedia does not load, or that there is
+    no H.264 encoder Qt can use.
+    """
     failure = _unloadable()
     if failure is not None:
         return (f'Qt Multimedia does not load on this computer '
@@ -106,13 +115,23 @@ def _image(frame: np.ndarray) -> Any:
 
 def write_movie(path: str | Path, frames: Iterable[np.ndarray],
                 fps: int = MOVIE_FPS) -> int:
-    """Encode `frames` — RGB or RGBA images, all one size — into an
-    H.264 MP4 at `path`, overwriting it.
+    """Encode `frames` into an H.264 MP4 at `path`, overwriting it.
 
-    Frames are pulled one at a time as the encoder asks for them, so a
-    long animation is never held in memory. Input to the window is held
-    off while it runs: the frames come from a scene a click could
-    rebuild underneath them.
+    Frames are taken one at a time as the encoder asks for them, so a
+    long animation is never held in memory. User input to the window is
+    held off while it runs, because a click could rebuild the scene the
+    frames come from. The file is read back afterward and its codec and
+    frame count are checked.
+
+    Parameters
+    ----------
+    path : str or Path
+        The file to write.
+    frames : iterable of ndarray
+        RGB or RGBA images, (height, width, 3 or 4) arrays read as
+        uint8, all the same size.
+    fps : int
+        Frames per second, `viz.animate.MOVIE_FPS` by default.
 
     Returns
     -------
@@ -122,7 +141,13 @@ def write_movie(path: str | Path, frames: Iterable[np.ndarray],
     Raises
     ------
     MovieUnavailable
-        When the machine has no H.264 encoder; nothing is written.
+        When the machine cannot encode H.264; nothing is written.
+    ValueError
+        When `frames` is empty.
+    RuntimeError
+        When the encoder reports an error or takes no frames for
+        `STALL_MS` (10 s), the frames change size partway through, or the
+        file read back is not H.264 holding every frame.
     """
     # asked before Qt Multimedia is imported: where it cannot load, the
     # reason is the answer, not an ImportError
@@ -291,16 +316,20 @@ def _box(data: bytes, path: tuple[bytes, ...], start: int = 0,
 
 
 def mp4_reading(path: str | Path) -> tuple[bytes | None, int]:
-    """(codec four-cc, frame count) read from an MP4's own boxes: the
-    sample description says what the frames were encoded as, the
-    sample-size table how many there are. `b'avc1'` is H.264; `b'mp4v'`
-    is the Part 2 file Qt writes when it has no H.264 to give.
+    """The codec's four-character code and the frame count, read from an
+    MP4's own boxes.
 
-    Walked as boxes, never searched as bytes: the encoded frames can
-    hold any four bytes, and once the index followed the frames (Qt
-    6.12 writes it last) a search for 'stsz' found one inside a frame
-    and read its count as 10 (2026-10-09).
+    The sample description says what the frames were encoded as, and
+    the sample-size table how many there are. `b'avc1'` is H.264, and
+    `b'mp4v'` is the MPEG-4 Part 2 file Qt writes when it has no H.264
+    encoder. Returns (None, 0) when the file has no sample table.
+
+    The file is walked box by box and never searched for bytes, because
+    the encoded frames can hold any four bytes.
     """
+    # Qt 6.12 writes the index after the frames, and a byte search for
+    # 'stsz' once found one inside a frame and read its count as 10
+    # (2026-10-09).
     data = Path(path).read_bytes()
     table = _box(data, (b'moov', b'trak', b'mdia', b'minf', b'stbl'))
     if table is None:
@@ -322,13 +351,19 @@ CHECK_FRAMES = MOVIE_FPS
 
 
 def check(path: str | Path) -> tuple[int, str]:
-    """Can this installation save an animation? Render a second of a
-    turning mesh off screen, encode it, and read the file back.
+    """Check that this installation can save an animation: render one
+    second of a turning mesh off screen, encode it to `path`, and read
+    the file back.
 
     `visualdynamics --check-movie out.mp4` runs this and exits with the
-    code: what a packaged build is tested with, since the files a
-    bundle carries say nothing about whether the encoder inside them
-    answers (the Windows release smoke test, the macOS build).
+    returned code. The packaged builds are tested with it (the Windows
+    release smoke test and the macOS build), because the files a bundle
+    carries do not show whether the encoder inside them works.
+
+    Parameters
+    ----------
+    path : str or Path
+        The movie to write.
 
     Returns
     -------

@@ -1,28 +1,26 @@
-"""The comparison as bar charts: a bar per control channel.
+"""Comparison readings as bar charts, one bar per control channel.
 
-A table of six channels is read; a table of sixty is scanned, and the
-one channel that matters is somewhere in it. A bar chart is the same
-numbers arranged so the answer is the shape rather than a row — which
-channel is worst, how many are out, and by how much, before anything
-is read at all.
+A table of six channels can be read row by row; a table of sixty has
+to be scanned to find the channel that matters. A bar chart shows the
+same numbers so that the worst channel, how many are out and by how
+much can be seen before any number is read.
 
-Two charts, because a random vibration run is judged two ways and they
-disagree often enough to be worth seeing apart. **RMS error** is the
-level: how far the whole channel sits from what was asked for, in dB.
-**Lines outside abort** is the shape: a channel can sit at exactly the
-right level and still be out of tolerance across half its band, and one
-that is 2 dB low everywhere may never cross an abort limit at all.
+A random vibration run is judged two ways, and the two often disagree,
+so there are two charts. RMS error is the level: how far the whole
+channel is from the specification, in dB. Lines outside abort is the
+shape: a channel can be at exactly the right level and still be out of
+tolerance across half its band, and one that is 2 dB low everywhere
+may never cross an abort limit at all.
 
-A threshold is drawn as shaded ground rather than as a line: what is
-being said is "past here is out", and a filled region says it where a
-line leaves it to be inferred — red past the upper, blue past the
-lower, the same two colors the specification plot shades its abort
-zones with. The shading is the handle, and dragging it snaps to a tenth
-of a dB or of a percent. A tolerance is a judgment — ±3 dB and a tenth
-of the band are where most specifications land, not where they all do —
-so those are a starting point, and everything reads off wherever they
-are put. In a report they are drawn and not moved: there is nobody on
-the other end of a drag in a file.
+A threshold is drawn as a shaded region instead of a line, red past the
+upper threshold and blue past the lower, the same two colors the
+specification plot uses for its abort zones. The shaded region is
+dragged to move the threshold, which snaps to a tenth of a dB or of a
+percent. The defaults (±3 dB, and a tenth of the band) are where many
+specifications set their tolerances, not all of them, so they are only
+a starting point and every count is computed from wherever the
+thresholds are placed. In a report the thresholds are drawn and cannot
+be moved.
 """
 
 from __future__ import annotations
@@ -82,12 +80,24 @@ ZOOM_MARGIN = 0.15
 
 
 class BarChart:
-    """A bar per channel, a threshold that can be dragged, and a count.
+    """A bar per channel, thresholds that can be dragged, and a count.
 
-    Owns its plot. `changed` is called with the thresholds whenever one
-    is moved, so whoever put the chart up can remember where they were
-    put — a threshold that reset on every redraw would be no threshold
-    at all.
+    The chart owns its plot. `rows` is [(label, value)], one per
+    channel. `low` and `high` are the thresholds: with both, a bar is
+    out below `low` or above `high`; with `high` None the chart has one
+    threshold, a ceiling or, with `side` 'under', a floor; with `low`
+    None there are no thresholds and no bar is colored. `changed` is
+    called with `(low, high)` whenever a threshold is moved, so the
+    caller can keep them and a redraw does not reset them.
+
+    `neutral` is the theme color of a bar inside the thresholds,
+    `baseline` the value the bars grow from (the nominal three for
+    kurtosis, zero otherwise), and `summary` where the count is written:
+    'over' the bars, 'title' above the plot, or 'none'. `label` and
+    `units` name the bottom axis.
+
+    Raises `ValueError` when `summary` or `side` is not one of its
+    values.
     """
 
     def __init__(self, plot: Any, rows: Sequence[tuple[str, float]], colors: Mapping[str, str],
@@ -148,13 +158,14 @@ class BarChart:
         return [value for _label, value in self.rows]
 
     def beyond(self, value: float) -> str | None:
-        """Which way this bar is out, or None.
+        """Which way a bar with this value is out: 'over', 'under' or None.
 
-        A one-sided chart has a ceiling and no floor — no amount of
-        staying inside the abort limits is a fault — or, with `side`
-        'under', a floor and no ceiling. On a floor chart a value with
-        no number (NaN) is under it: a signal-to-noise with no signal
-        above the noise is the worst a channel can read, not a blank.
+        A one-sided chart has a ceiling and no floor, and a value at or
+        above it is out; with `side` 'under' it has a floor and no
+        ceiling. On a floor chart a NaN value is under the floor,
+        because a signal-to-noise with no signal above the noise is the
+        worst a channel can read. On any other chart a NaN is not out.
+        A chart with no thresholds returns None for every value.
         """
         if self.low is None:
             return None
@@ -172,7 +183,7 @@ class BarChart:
         return None
 
     def share(self) -> float:
-        """The percentage of channels outside, wherever the lines are."""
+        """The percentage of channels out, at the thresholds' current positions."""
         if self.low is None:
             return 0.0
         if self.high is None and self.side == 'under':
@@ -331,10 +342,12 @@ class BarChart:
             view[1][0] + (view[1][1] - view[1][0]) * SUMMARY_HEIGHT)
 
     def summary_text(self) -> str:
-        """The count the chart states: how many channels are out, of how
-        many, and the share — or, with no thresholds, how many there are
-        and which is highest, the way a table's eye runs down its
-        column."""
+        """The count the chart shows, as text.
+
+        With thresholds, how many channels are out, of how many, and
+        the percentage. With none, how many channels there are and which
+        one is highest.
+        """
         if self.low is None:
             finite = [(v, label) for label, v in self.rows if np.isfinite(v)]
             top = max(finite, default=None)
@@ -351,11 +364,14 @@ class BarChart:
         return f'{out} of {len(self.rows)} channels {where} — {share:.0f}%'
 
     def key(self, legend: Any) -> None:
-        """What the colors mean, into `legend` (`plot.legend_below`): the
-        bars inside, over and under the thresholds, and the ground past
-        each — a figure read on its own had no key for any of it
-        (2026-09-26). A chart with no thresholds colors nothing, and
-        adds nothing."""
+        """Add a key for the colors to `legend` (from `plot.legend_below`).
+
+        The entries are the bar colors inside, over and under the
+        thresholds, and the shading past each threshold. A chart with no
+        thresholds colors nothing and adds no entries.
+        """
+        # added 2026-09-26: a figure read on its own had no key for any
+        # of its colors
         import pyqtgraph as pg
 
         if self.low is None:
@@ -446,11 +462,11 @@ class BarChart:
     # ---- dragging ---------------------------------------------------------
 
     def set_threshold(self, which: str, value: float) -> None:
-        """Move a threshold, snapped, and restate everything from it.
+        """Move a threshold, snapped to `SNAP`, and redraw the colors and count.
 
-        What dragging the shading does, and what a caller does to set
-        one outright — one path, so a dragged threshold and a stored one
-        cannot land on different numbers.
+        `which` is 'low' or 'high'. Dragging the shading calls this too,
+        so a dragged threshold and one set from code are snapped the
+        same way. Calls `changed` with `(low, high)`.
         """
         if self._moving:
             return
@@ -489,11 +505,14 @@ def error_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
                 high: float = ERROR_DB,
                 changed: Callable[..., None] | None = None,
                 **options: Any) -> BarChart:
-    """How far each channel's RMS sits from what was asked for, in dB.
+    """A chart of each channel's RMS error against the specification, in dB.
 
-    Two thresholds, moved independently: a specification is not always
-    written symmetrically, and over-testing and under-testing are not
-    the same fault.
+    `rows` is [(label, RMS error in dB, percent of lines outside
+    abort)]; only the RMS error is drawn. The two thresholds, -3 dB and
+    +3 dB by default, are moved independently, because a specification
+    is not always written symmetrically and over-testing and
+    under-testing are different faults. Other keyword arguments go to
+    `BarChart`.
     """
     return BarChart(plot, [(label, value) for label, value, _p in rows],
                     colors, low=low, high=high, changed=changed,
@@ -504,7 +523,13 @@ def lines_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
                 colors: Mapping[str, str], low: float = LINES_PERCENT,
                 changed: Callable[..., None] | None = None,
                 **options: Any) -> BarChart:
-    """How much of each channel's band fell outside its abort limits."""
+    """A chart of the percentage of each channel's lines outside its abort limits.
+
+    `rows` is [(label, RMS error in dB, percent of lines outside
+    abort)]; only the percentage is drawn. There is one threshold, a
+    ceiling at 10 % by default. Other keyword arguments go to
+    `BarChart`.
+    """
     return BarChart(plot, [(label, percent) for label, _v, percent in rows],
                     colors, low=low, high=None, changed=changed,
                     label='lines outside abort', units='%', **options)
@@ -512,12 +537,15 @@ def lines_chart(plot: Any, rows: Sequence[tuple[str, float, float]],
 
 def level_chart(plot: Any, rows: Sequence[tuple[str, float]],
                 colors: Mapping[str, str], units: str = '') -> BarChart:
-    """The RMS level each channel of a specification asks for, a bar
-    apiece — the table's column as a picture, so which channel is
-    loudest is seen before anything is read. No thresholds: a
-    specification on its own has nothing to be out of (Brandon,
-    2026-09-06: the RMS error reading without the ±3 dB coloring).
+    """A chart of the RMS level of each channel of a specification.
+
+    `rows` is [(label, RMS level)] and `units` labels the axis. The
+    chart shows the same values as the table's column, so the highest
+    channel can be seen at once. It has no thresholds, because a
+    specification on its own has nothing to be out of.
     """
+    # Brandon, 2026-09-06: the RMS error reading without the ±3 dB
+    # coloring.
     return BarChart(plot, list(rows), colors, low=None, high=None,
                     label='RMS level', units=units,
                     neutral='specification_curve')
@@ -527,16 +555,17 @@ def kurtosis_chart(plot: Any, rows: Sequence[tuple[str, float]],
                    colors: Mapping[str, str],
                    low: float = KURTOSIS_LOW, high: float = KURTOSIS_HIGH,
                    changed: Callable[..., None] | None = None) -> BarChart:
-    """How Gaussian each channel is: Pearson kurtosis, a bar apiece.
+    """A chart of each channel's Pearson kurtosis.
 
-    Two thresholds around the nominal three, because both directions
-    say something — above, peaks the spectrum never predicted; below,
-    a record that has been clipped or was never random. The ordinary
-    channels stand back in gray so the exceptions are the chart.
+    `rows` is [(label, kurtosis)]. The bars grow from the Gaussian
+    value of three, and there are two thresholds around it, because
+    both directions mean something: above, there are peaks the spectrum
+    does not predict; below, the record has been clipped or was never
+    random. Channels inside the thresholds are drawn gray so the ones
+    outside stand out.
 
-    Every channel whatever it measures: kurtosis is dimensionless, so
-    this is the one reading here where accelerations and forces share
-    an axis honestly.
+    Every channel is drawn on the same axis whatever it measures,
+    because kurtosis is dimensionless.
     """
     return BarChart(plot, list(rows), colors, low=low, high=high,
                     changed=changed, label='Pearson kurtosis', units='',
@@ -547,14 +576,15 @@ def snr_chart(plot: Any, rows: Sequence[tuple[str, float]],
               colors: Mapping[str, str], low: float | None = None,
               changed: Callable[..., None] | None = None,
               **options: Any) -> BarChart:
-    """How far each channel's signal stands above its noise: RMS
-    signal-to-noise in dB, a bar apiece (`core.snr`, 2026-10-03).
+    """A chart of each channel's RMS signal-to-noise ratio, in dB (`core.snr`).
 
-    One threshold, and it is a floor: a margin can be too small and
-    never too large. A channel with no signal above its noise (NaN)
-    has no bar and counts as under it — it is the worst reading there
-    is, not a missing one. The ordinary channels stand back in gray
-    so the weak ones are the chart, as on the kurtosis chart.
+    `rows` is [(label, signal-to-noise in dB)]. There is one threshold,
+    a floor, `core.snr.THRESHOLD_DB` (10 dB) unless `low` is given,
+    because a margin can be too small but never too large. A channel
+    with no signal above its noise (NaN) has no bar, is labeled as at
+    the noise floor, and counts as under the threshold. Channels above
+    the floor are drawn gray so the weak ones stand out. Other keyword
+    arguments go to `BarChart`.
     """
     from ..core.snr import THRESHOLD_DB, at_floor
 
@@ -578,11 +608,15 @@ def replication_chart(plot: Any, rows: Sequence[tuple[str, float]], colors: Mapp
                       which: str, low: float, high: float | None,
                       changed: Callable[..., None] | None = None,
                       **options: Any) -> BarChart:
-    """One reading of a transient replication, a bar per control channel.
+    """A chart of one reading of a transient replication, one bar per control channel.
 
-    `rows` is [(label, value)] already reduced to the reading wanted —
-    which repeat those values came from is the caller's business, and
-    on screen it is the one the event box is pointing at.
+    `which` picks the reading and its axis label: 'waveform' (waveform
+    error, %), 'srs' (worst SRS deviation, dB), 'level' (level error,
+    dB) or 'srs_rms' (SRS deviation, RMS across the band, dB). `rows` is
+    [(label, value)] for that reading. The caller chooses which repeat
+    the values come from; in the app it is the one selected in the
+    event box. `low` and `high` are the thresholds, as in `BarChart`.
+    Other keyword arguments go to `BarChart`.
     """
     label, units = REPLICATION_LABELS[which]
     return BarChart(plot, list(rows), colors, low=low, high=high,

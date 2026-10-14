@@ -28,42 +28,43 @@
 </div>
 <main>
   <header><h1>Examples</h1>
-    <p class="tagline">Turn them, play them, zoom into them.</p></header>
+    <p class="tagline">Figures you can turn, animate and zoom.</p></header>
 
   <p class="lede">
-    These are not pictures of the software. Each one is the figure
-    itself — the same payload, drawn by the same renderer, that a
-    report exported from Visual Dynamics carries. Drag to rotate,
-    scroll to zoom.
+    Each figure below is drawn by the same renderer, from the same
+    data, as the figures in a report exported from Visual Dynamics.
+    Drag to rotate, and scroll to zoom.
   </p>
   <p>
-    The first three follow one job: a modal survey of a rectangular
-    plate — the record as it was measured, the plant computed from it,
-    and the finite element model it was run against. The last is a
-    finite element model built from scratch, from the planes a shared
-    test article is made of.
+    The first three come from one modal survey of a rectangular plate:
+    the measured time data, the frequency response functions computed
+    from it, and the finite element model the test was compared with.
+    The rest are finite element models built from scratch in Visual
+    Dynamics: the BARC from planes and again from bricks, and the
+    Frame-Wing from solids.
   </p>
 
-  <h2>The measured record</h2>
+  <h2>The measured time data</h2>
   <div class="figure">
     <iframe src="examples/time.html" loading="lazy" scrolling="no"
             title="Measured time data on a three-dimensional stage"></iframe>
   </div>
   <p class="caption">
-    Time data from the survey, one channel per station receding into
-    the stage — six of the two hundred and twenty accelerometer
-    records, drag to turn it.
+    Time data from the survey, one channel per station, set one behind
+    another on a three-dimensional stage. Six of the 220 accelerometer
+    records are shown; drag to turn the stage.
   </p>
 
-  <h2>The measured plant</h2>
+  <h2>The measured frequency response functions</h2>
   <div class="figure">
     <iframe src="examples/frfs.html" loading="lazy" scrolling="no"
             title="Frequency response functions on a three-dimensional stage"></iframe>
   </div>
   <p class="caption">
     The frequency response functions computed from those records, ten
-    of twenty-two. Overlaid on a single axis they would be a band;
-    given depth, each channel keeps its own resonances.
+    of the 22. Drawn on one flat axis they would overlap into a band;
+    spread out in depth, each channel's resonances can be read on their
+    own.
   </p>
 
   <h2>Finite element modes</h2>
@@ -73,24 +74,23 @@
   </div>
   <p class="caption">
     The first six elastic modes of the plate, from a model of 169
-    nodes and 144 elements. Choose one from the list and it animates; drag to
-    turn it. The six rigid-body modes a free-free solution also
-    produces are left out — they show the whole plate moving and say
-    nothing about how it bends.
+    nodes and 144 elements. Choose a mode from the list to animate it,
+    and drag to turn it. The six rigid-body modes of the free-free
+    solution are left out, since they only show the whole plate moving.
   </p>
 
   <h2>A model from planes: the BARC</h2>
   <p>
-    The BARC — Box Assembly with Removable Component — is a small bolted
-    aluminum structure the structural dynamics community shares as a
-    common test article, its solid model, test data and finite element
-    models shared on the
+    The BARC (Box Assembly with Removable Component) is a small bolted
+    aluminum structure that the structural dynamics community shares
+    as a common test article. Its solid model, test data and finite
+    element models are shared on the
     <a href="https://wiki.sem.org/wiki/BARC">SEM Dynamic Substructuring
     Focus Group wiki</a>. Here it is built the way a simple plate model
     is built in Visual Dynamics: each part as the planes it is made of,
-    each given its material and thickness, each bolt a rigid tie from
-    the elements it clamps to the part below (four bolts join each
-    channel to the box and four join the beam to each channel), and
+    each given its material and thickness, and each bolt a rigid tie
+    from the elements it clamps to the part below. Four bolts join each
+    channel to the box and four join the beam to each channel. Then
     Solve Modes.
   </p>
   <div class="figure">
@@ -99,23 +99,27 @@
   </div>
   <p class="caption">
     The first eight elastic modes of the model, drawn from a quarter-inch
-    mesh of 1,445 nodes. Choose one from the list and it animates; drag
-    to turn it. The model was checked against the finite element models
-    shared on the <a href="https://wiki.sem.org/wiki/BARC">wiki</a>.
+    mesh of 1,445 nodes. Choose a mode from the list to animate it, and
+    drag to turn it. The model was checked against the finite element
+    models shared on the <a href="https://wiki.sem.org/wiki/BARC">wiki</a>.
     <a href="documentation/guide/workflows/fem-workflow/">The whole
-    workflow</a>, from the planes to these modes, and
-    <a href="downloads.html#examples">the project itself</a>, solved, to
-    open in the app.
+    workflow</a>, from the planes to these modes, is in the
+    documentation, and
+    <a href="downloads.html#examples">the project itself</a>, solved,
+    can be downloaded and opened in the app.
   </p>
   <h2>The BARC again, from bricks</h2>
   <p>
     The same structure built from solid bricks, the higher-fidelity
-    model: each part as the boxes it is made of, meshed apart where the
-    parts touch, and each bolt made by merging the nodes it clamps into
-    one with Merge Coincident Nodes, under a washer at the feet and at
-    four corners through the beam. Each bolt is a point mass at its
-    head. The removable component, the two channels and the beam, is a
-    model of its own beside it.
+    model. Each part is made from as few solids as it can be (the box a
+    block less its inside and its slot, each channel a block less the
+    inside of its C, the beam a block) and meshed into bricks with Mesh
+    Solids, each part on its own nodes where it touches the next. Each
+    bolt is made by merging the nodes it clamps with Merge Coincident
+    Nodes: under the washer at each foot, and at the four corners of
+    the brick it passes through at the beam. Each bolt's mass is a
+    point mass at its head. The removable component, the two channels
+    and the beam, is also a model of its own.
   </p>
   <div class="figure">
     <iframe src="examples/barc-bricks.html" loading="lazy" scrolling="no"
@@ -123,65 +127,70 @@
   </div>
   <p class="caption">
     The first eight elastic modes of the assembly, drawn from a
-    quarter-inch mesh of 3,170 nodes. Choose one from the list and it
-    animates; drag to turn it. Meshed at an eighth of an inch, its first
-    ten elastic modes land within 3.4 percent of the model checked
-    against the modes measured on the BARC and shared on the
-    <a href="https://wiki.sem.org/wiki/BARC">wiki</a>, its mode shapes
-    in the same order.
+    quarter-inch mesh of 3,170 nodes. Choose a mode from the list to
+    animate it, and drag to turn it. Meshed at an eighth of an inch,
+    the model's first ten elastic modes are within 3.4 percent of the
+    model that was checked against the modes measured on the BARC and
+    shared on the <a href="https://wiki.sem.org/wiki/BARC">wiki</a>,
+    with the mode shapes in the same order.
     <a href="documentation/guide/workflows/fem-workflow/#the-barc-from-bricks-bolted-by-merging-nodes">How
-    it is built</a>, and
-    <a href="downloads.html#examples">both models</a>, solved, to open in
-    the app.
+    it is built</a> is in the documentation, and
+    <a href="downloads.html#examples">both models</a>, solved, can be
+    downloaded and opened in the app.
   </p>
-  <h2>A model from blocks: the Frame-Wing</h2>
+  <h2>A model from solids: the Frame-Wing</h2>
   <p>
     The Frame-Wing is a small aluminum ladder frame and two rectangular
-    wings that screw across it, which the structural dynamics community
-    shares as a test article for substructuring; its solid models, finite
-    element models and test data are shared on the
+    wings that screw across it, shared by the structural dynamics
+    community as a test article for substructuring. Its solid models,
+    finite element models and test data are shared on the
     <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">SEM
     Dynamic Substructuring Focus Group wiki</a>. A half-inch bar spanning
-    a hundred-millimeter window is not a beam and not a plate, so this
-    one is built from solids: each part as the blocks it is made of,
-    meshed into bricks, the insert holes cut from them, the fillets kept,
-    each screw a rigid tie from the bricks its washer covers to the frame
-    under it, and Solve Modes.
+    a hundred-millimeter window is neither a beam nor a plate, so this
+    model is built from solids. The frame is a plate with its four
+    windows (their rounded corners leave the fillets) and its 41 holes
+    subtracted, the threaded inserts are cylinders in the tops of the
+    holes, and each wing is a plate less its eighteen holes. Pattern
+    copies the holes in rows, and Mesh Solids meshes the parts into
+    bricks. A wing is bolted on by merging nodes: the wing and the
+    washers under it are meshed apart from the frame, Align Meshes puts
+    the washers' undersides on the frame's nodes, and Merge Coincident
+    Nodes joins them. Then Solve Modes.
   </p>
   <div class="figure">
     <iframe src="examples/frame-wing.html" loading="lazy" scrolling="no"
             title="Animated finite element mode shapes of the Frame-Wing, the frame with its thick wing"></iframe>
   </div>
   <p class="caption">
-    The first eight elastic modes of the frame with its thick wing, drawn
-    as the skin of a mesh of bricks. Choose one from the list and it
-    animates; drag to turn it. The frame alone lands within a few percent
-    of the frames that were measured, and the brick element was checked
-    against the finite element model shared on the
+    The first eight elastic modes of the frame with its thick wing,
+    drawn as the outer surface of the brick mesh. Choose a mode from
+    the list to animate it, and drag to turn it. The frame alone is
+    within a few percent of the frames that were measured. The brick
+    element was checked against the finite element model shared on the
     <a href="https://wiki.sem.org/wiki/Round_Robin_Frame_Structure">wiki</a>:
-    solved here, mesh for mesh, its modes agree with MSC Nastran's to a
-    tenth of a percent.
+    solved here on the same mesh, its first ten elastic modes agree
+    with MSC Nastran's to within 0.1 percent.
     <a href="documentation/guide/workflows/fem-solids/">The whole
-    workflow</a>, from the blocks to these modes, and
-    <a href="downloads.html#examples">the projects themselves</a>, solved,
-    to open in the app.
+    workflow</a>, from the solids to these modes, is in the
+    documentation, and
+    <a href="downloads.html#examples">the projects themselves</a>,
+    solved, can be downloaded and opened in the app.
   </p>
   <h2>About these figures</h2>
   <p>
-    They are drawn by the report renderer rather than by anything
-    written for this website, which is deliberate: what you turn here
-    is what a report carries, and a second drawing path built for the
-    web would be free to drift from the first.
+    The figures are drawn by the report renderer, not by code written
+    for this website, so what you turn here is exactly what a report
+    contains.
   </p>
   <p class="note">
-    They are, however, smaller than a report's: a handful of channels
-    rather than every one, so the page arrives quickly and turns
-    smoothly. A report is held to a stricter rule — it must not reduce
-    the data it reports, since a thinned figure cannot answer a
-    question asked of it later — and wherever a figure has been
-    thinned at all it says so, in a note under its own caption.
+    They do carry less data than a report would: a handful of channels
+    instead of all of them, so that the page loads quickly and turns
+    smoothly. These figures are also limited to 20,000 points each,
+    where a report figure holds up to two million. Any figure that has
+    been thinned, on this page or in a report, says so in a note under
+    its caption, and the thinning keeps every peak.
     <a href="downloads.html">Download the application</a> to see the
-    whole of it.
+    full data.
   </p>
 </main>
 <script>

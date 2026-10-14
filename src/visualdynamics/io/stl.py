@@ -1,18 +1,19 @@
-"""STL triangle meshes, read and written with the standard library.
+"""Read and write STL triangle meshes, with the standard library only.
 
-An STL file is already tessellated — the CAD program did the hard work
-at export — so importing one is reading triangles and handing them to
-the geometry as face elements. The format carries **no units** (the
-object imports unit-less and the units pane asks, like any other
-undeclared source) and, in its binary form, **no part names**: a
-binary file arrives as one block named for the file. ASCII STL can
-hold several ``solid <name>`` sections, and each becomes its own
-named block — but CAD tools rarely write it, and 3MF (`threemf`) is
-the format that actually preserves an assembly's parts. This importer
-exists because *everything* exports STL.
+An STL file is already tessellated by the CAD program that exported
+it, so importing one is reading the triangles and giving them to the
+geometry as face elements. The format has no units, so the object
+imports unit-less and the units pane asks for them, as for any other
+source without units. The binary form also has no part names, so a
+binary file becomes one element group named for the file. ASCII STL
+can hold several ``solid <name>`` sections, and each becomes its own
+named group, but CAD programs rarely write it; 3MF (`threemf`) is the
+format that keeps an assembly's parts. STL is read because nearly
+every CAD program can export it.
 
-Vertices repeat per triangle in the file; identical coordinates are
-merged on import so shared edges share nodes.
+Vertices are repeated for each triangle in the file; identical
+coordinates are merged on import so that triangles with a shared edge
+share its nodes.
 """
 
 from __future__ import annotations
@@ -78,8 +79,13 @@ def _read_ascii(raw: bytes) -> list[tuple[str, np.ndarray]]:
 
 def mesh_geometry(parts: list[tuple[str, np.ndarray]],
                   length_unit: str | None = None) -> Geometry:
-    """A Geometry from [(name, (n, 3, 3) corner arrays)] — one named
-    block per part, vertices merged where coordinates are identical."""
+    """A Geometry of triangle face elements from [(name, (n, 3, 3) corner
+    arrays)]: one named element group per part, with vertices merged where
+    their coordinates are identical.
+
+    `length_unit` declares the unit of the coordinates; without it the
+    geometry is unit-less.
+    """
     seen: dict[bytes, int] = {}
     xyz: list[np.ndarray] = []
     elem_conn, elem_group = [], []
@@ -118,14 +124,21 @@ def load(path: str | os.PathLike,
     path : str or path-like
         The ``.stl`` file, binary or ASCII.
     length_unit : str, optional
-        What the file's numbers are in — STL cannot say. Undeclared,
-        the geometry imports unit-less and units are defined later.
+        The unit of the file's coordinates, which STL cannot state.
+        Without it the geometry imports unit-less and the units can be
+        defined later.
 
     Returns
     -------
     Geometry
-        Triangles as face elements; one block per ASCII ``solid``
-        (named), or a single block named for the file.
+        The triangles as face elements: one element group per ASCII
+        ``solid``, named as the file names it, or one group named for
+        the file. A ``solid`` with no name is also named for the file.
+
+    Raises
+    ------
+    ValueError
+        When the file holds no triangles.
     """
     with open(path, 'rb') as handle:
         raw = handle.read()
@@ -138,9 +151,11 @@ def load(path: str | os.PathLike,
 
 
 def faces_as_triangles(geometry: Geometry) -> list[tuple[int, np.ndarray]]:
-    """[(block id, (n, 3, 3) corners)] from the face elements — quads
-    split along a diagonal, higher-order faces read by their corner
-    nodes, lines and volumes left out."""
+    """[(element group id, (n, 3, 3) corners)] from the face elements.
+
+    Quads are split along a diagonal, higher-order faces are taken by
+    their corner nodes, and line and volume elements are left out.
+    """
     from ..core.geometry import ELEMENT_TYPES
 
     order = {int(i): position
@@ -168,13 +183,15 @@ def handles(obj: Any) -> bool:
 
 def save(obj: Geometry, path: str | os.PathLike,
          unit_system: Any = None) -> None:
-    """Write the geometry's face elements as binary STL.
+    """Write the geometry's face elements as binary STL (32-bit floats).
 
-    STL cannot name parts or declare units: the blocks flatten into
-    one solid, and the numbers are meters (the stored SI) unless a
-    `unit_system` says to write its own length unit instead. A
-    geometry with no face elements is refused — there is nothing an
-    STL can hold of it.
+    STL cannot name parts or declare units, so every element group is
+    written into one solid. Without `unit_system` the coordinates are
+    written as stored, which is meters when the geometry's units are
+    defined. With one, defined coordinates are converted from meters to
+    its length unit; undefined ones are written as they stand.
+    A geometry with no face elements is refused with ValueError, since
+    STL holds triangles and nothing else.
     """
     parts = faces_as_triangles(obj)
     triangles = (np.concatenate([corners for _block, corners in parts])
@@ -182,7 +199,11 @@ def save(obj: Geometry, path: str | os.PathLike,
     if not len(triangles):
         raise ValueError('this geometry has no face elements; '
                          'STL holds triangles and nothing else')
-    if unit_system is not None:
+    # undefined coordinates are not meters and are written as they stand,
+    # the rule `exporters.geometry_values` keeps for every other writer;
+    # they were scaled as if they were meters (2026-10-13, found by the
+    # docstring pass)
+    if unit_system is not None and obj.units_defined:
         from ..units import convert
         triangles = convert(triangles, 'm',
                             unit_system.coherent.unit('length'))

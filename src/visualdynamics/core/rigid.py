@@ -1,46 +1,47 @@
 """Rigid-body mode shapes of a geometry.
 
-Six shapes every free structure has: three translations and three
-rotations about a reference point. They are the start of the virtual
-point workflow (PLAN.md, "The virtual point arc"): responses measured
-at the control DOFs are transformed through them to the six motions
-of a point, and a specification is transformed the same way, so the
-two can be compared there.
+Every free structure has six rigid-body shapes: three translations and
+three rotations about a reference point. They are the first step of the
+virtual point workflow, where the responses measured at the control
+DOFs are transformed through them to the six motions of one point, and
+a specification is transformed the same way so the two can be compared
+at that point.
 
-**The shapes are kinematic; only the reference point shapes them.** A
-rigid translation moves every node one unit along an axis; a rotation
-of one radian about an axis `e` through the point `c` moves a node at
-`r` by `e × (r − c)`. No mass enters. The point is what a test
-engineer calls the CG, and the geometry's centroid is the default.
+The shapes depend only on the geometry and the reference point. A rigid
+translation moves every node one unit along an axis, and a rotation of
+one radian about an axis `e` through the point `c` moves a node at `r`
+by `e × (r − c)`. Mass does not enter. The point is usually the center
+of gravity (CG), and `Geometry.suggest_mass_properties` uses the
+centroid of the nodes.
 
-**Mass and inertia only scale.** `ShapeSet` holds mass-normalized
-shapes, `φᵀMφ = I`. A rigid body's 6×6 mass matrix about its CG is
-diagonal in its principal axes — the mass three times, then the three
-principal moments — so normalizing divides each translation by `√m`
-and each rotation by `√I` about its own axis. That is all the mass
-properties do, and it is why they come as one optional group: mass
-without inertia could scale three rows and not the other three, and a
-set normalized by halves carries modal masses nobody can read. Without
-them the set is exactly what a fit without a drive point is,
-`unscaled` — unit shapes, modal mass a convention.
+The mass and inertia only scale the shapes. `ShapeSet` holds
+mass-normalized shapes, `φᵀMφ = I`. A rigid body's 6×6 mass matrix
+about its CG is diagonal in its principal axes (the mass three times,
+then the three principal moments), so normalizing divides each
+translation by `√m` and each rotation by `√I` about its own axis. That
+is all the mass properties are used for, and it is why they are given
+together or not at all: mass without inertia would scale three shapes
+and not the other three, and the resulting modal masses would have no
+meaning. Without them the set is `unscaled`, the same as a fit without a
+drive point: unit shapes, with the modal mass only a convention.
 
-**The rotation axes are the inertia's principal axes.** Rotations
-about the global axes are mass-orthogonal only when the products of
-inertia vanish. With a coupled tensor the six orthonormal shapes
-rotate about its eigenvectors, and there is no choice about it, so the
-principal decomposition is always taken: a diagonal tensor's principal
-axes are the global axes and the user who typed three numbers gets X,
-Y and Z back; a coupled one gets its own axes, named in the mode
-descriptions. Taking the diagonal of a coupled tensor and calling the
-result mass-normalized is a wrong answer that looks right.
+The rotation axes are the principal axes of the inertia tensor.
+Rotations about the global axes are mass-orthogonal only when the
+products of inertia are zero. With a coupled tensor the six orthonormal
+shapes must rotate about its eigenvectors, so the principal
+decomposition is always used. A diagonal tensor's principal axes are
+the global axes, so three moments typed in give X, Y and Z back; a
+coupled tensor gives its own axes, which are named in the mode
+descriptions. Using only the diagonal of a coupled tensor would give
+shapes that look mass-normalized and are not.
 
-Mass normalization is only meaningful about the CG — about any other
-point the rigid mass matrix couples translation to rotation and the
-six are not orthogonal — so the mass properties, when given, are taken
-to be about the point. Unscaled shapes about *any* point span the same
-six-dimensional space, which is what the later transformation wants:
-it builds unscaled shapes about the virtual point, an interface
-location and not the CG at all, through this same function.
+Mass normalization only has meaning about the CG. About any other point
+the rigid mass matrix couples translation and rotation and the six
+shapes are not orthogonal, so the mass properties, when given, are
+taken to be about the reference point. Unscaled shapes about any point
+span the same six-dimensional space, which is what the virtual point
+transformation needs: it builds unscaled shapes about the virtual
+point, an interface location and not the CG, with this same function.
 """
 
 from __future__ import annotations
@@ -55,6 +56,9 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .geometry import Geometry
     from .shapes import ShapeSet
 
+# The virtual point workflow these shapes start is described in PLAN.md,
+# "The virtual point arc".
+
 #: the order the six inertia terms are stated in, and the tensor
 #: entries each one fills. `Ixy` is the product of inertia as a tensor
 #: entry — the negative of the integral ∫xy dm some handbooks tabulate
@@ -66,11 +70,13 @@ _TENSOR_SLOTS = ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2))
 AXIS_NAMES = ('X', 'Y', 'Z')
 
 def is_rigid_set(shapes: ShapeSet) -> bool:
-    """Whether a set is the six rigid-body shapes `rigid_body_shapes`
-    writes: six modes at exactly 0 Hz, described as such.
+    """Whether a set is the six rigid-body shapes `rigid_body_shapes` writes.
 
-    Read off the set rather than flagged on it, so a rigid set that
-    traveled through a file, a copy or a script is still one.
+    True for six modes at exactly 0 Hz whose descriptions start with
+    'Rigid translation' (the first three) and 'Rigid rotation' (the last
+    three). It is decided from the set's contents, not from a flag, so a
+    rigid set that was saved to a file, copied or built in a script is
+    still recognized.
     """
     return (shapes.num_shapes == 6
             and bool(np.all(shapes.frequency == 0.0))
@@ -84,18 +90,20 @@ def is_rigid_set(shapes: ShapeSet) -> bool:
 class MassProperties:
     """The reference point, and optionally the mass and inertia about it.
 
-    `point` is in meters, `mass` in kilograms, `inertia` in kg·m² —
-    SI, like every stored value here — and the six inertia terms are
-    the tensor's `Ixx, Iyy, Izz, Ixy, Ixz, Iyz` (`INERTIA_TERMS`).
+    `point` is in meters, `mass` in kilograms and `inertia` in kg·m²,
+    since every stored value is SI. The six inertia terms are the
+    tensor's `Ixx, Iyy, Izz, Ixy, Ixz, Iyz` (`INERTIA_TERMS`).
 
-    Frozen like `Averaging` and `Truncation`, and for the same reason:
-    the settings ride the geometry, the staleness fingerprint is their
-    fields, and a mutable setting would be a fingerprint that lies.
-    Validated at entry rather than at use: mass and inertia both or
-    neither, a positive mass, and a tensor a real body could have —
-    symmetric positive definite, which a typo in a product of inertia
-    breaks and which the triangle inequality (`Ixx + Iyy ≥ Izz` for a
-    real body) is a consequence of.
+    The object is frozen, like `Averaging` and `Truncation`, because it
+    is stored on the geometry and its fields are compared to tell when
+    shapes made from it are out of date; a value that could change in
+    place would make that comparison wrong. It is checked when it is
+    created: the point must be three finite numbers, mass and inertia
+    must be given together or not at all, the mass must be positive, and
+    the tensor must be one a real body could have (symmetric positive
+    definite, which a typo in a product of inertia usually breaks; the
+    triangle inequality `Ixx + Iyy ≥ Izz` follows from it). Any failure
+    raises ValueError.
     """
 
     point: tuple[float, float, float]
@@ -131,13 +139,13 @@ class MassProperties:
 
     @property
     def scaled(self) -> bool:
-        """Whether the shapes are mass-normalized (mass and inertia
-        given) or unit shapes."""
+        """True when mass and inertia are given and the shapes are
+        mass-normalized, False for unit shapes."""
         return self.mass is not None
 
     def tensor(self) -> np.ndarray:
-        """The 3×3 inertia tensor, or the identity when unscaled —
-        which is what makes the unscaled rotation axes X, Y and Z."""
+        """The 3×3 inertia tensor, or the identity when no inertia is
+        given, which makes the unscaled rotation axes X, Y and Z."""
         tensor = np.eye(3)
         if self.inertia is None:
             return tensor
@@ -146,16 +154,16 @@ class MassProperties:
         return tensor
 
     def principal_axes(self) -> tuple[np.ndarray, np.ndarray]:
-        """(moments, axes): the principal moments and the unit axis of
-        each, as the rows of `axes`, one per rotation mode.
+        """``(moments, axes)``: the principal moments, and the unit axis
+        of each as the rows of `axes`, one per rotation mode.
 
-        Ordered and signed so that mode 4 rotates about the principal
-        axis nearest X, 5 nearest Y, 6 nearest Z, each pointed to have
-        a positive component along its global axis — a diagonal tensor
-        gives exactly X, Y, Z, and a lightly coupled one gives axes a
-        reader can still call X, Y and Z. Each rotation shape is built
-        from its own axis, so the three need not form a right-handed
-        triad and are not forced into one.
+        They are ordered and signed so that mode 4 rotates about the
+        principal axis nearest X, mode 5 nearest Y and mode 6 nearest Z,
+        each with a positive component along its global axis. A diagonal
+        tensor gives exactly X, Y and Z, and a lightly coupled one gives
+        axes that are still close to X, Y and Z. Each rotation shape is
+        built from its own axis, so the three axes are not forced to form
+        a right-handed set.
         """
         moments, vectors = np.linalg.eigh(self.tensor())
         taken: list[int] = []
@@ -173,13 +181,14 @@ class MassProperties:
 
     def describe(self, unit_system: UnitSystem | None = None, *,
                  defined: bool = True) -> str:
-        """The settings in words, for the status line and the
-        staleness story alike: `'about (0.1, 0, 0.05) m, unit shapes'`.
+        """The settings as text, for example
+        `'about (0.1, 0, 0.05) m, unit shapes'`.
 
-        In SI by default — the journal's and the staleness story's
-        units — or in a unit system's display units when one is given.
-        `defined=False` says the geometry's coordinates are raw, so the
-        point is labeled as such rather than as meters.
+        Used by the status line and by the message that explains why
+        derived shapes are out of date. The values are in SI by default,
+        or in a unit system's display units when one is given.
+        `defined=False` means the geometry's coordinates have no units,
+        so the point is labeled 'units undefined' instead of meters.
         """
         import numpy as np
 
@@ -201,8 +210,11 @@ class MassProperties:
 
 
 def axis_name(axis: np.ndarray) -> str:
-    """`'X'` for a global axis, else the axis's components — what a
-    rotation mode's description says it turns about."""
+    """The name of an axis in a rotation mode's description.
+
+    `'X'`, `'Y'` or `'Z'` for a global axis, otherwise the axis's three
+    components to two decimals, as in `'(0.71, 0.71, 0.00)'`.
+    """
     for k, name in enumerate(AXIS_NAMES):
         unit = np.zeros(3)
         unit[k] = 1.0
@@ -216,14 +228,14 @@ def rigid_body_shapes(geometry: Geometry,
     """The six rigid-body mode shapes of a geometry about a point.
 
     Three translations, then three rotations, over the three
-    translational DOFs of every node, each coefficient expressed in
-    the node's own displacement frame — `deform.dof_directions` is the
-    one owner of a DOF's global direction, so the shapes and the
-    animation that draws them agree by construction. Rotational DOFs
-    are not carried: nothing here measures them.
+    translational DOFs of every node, with each coefficient in the
+    node's own displacement coordinate system. The DOF directions come
+    from `deform.dof_directions`, the same function the animation uses,
+    so the shapes and the animation of them agree. Rotational DOFs are
+    not included, because nothing measures them.
 
-    Frequencies are exactly 0.0, the convention the FRF synthesis
-    relies on to recognize a rigid mode, and damping is 0.0.
+    The frequencies are exactly 0.0, which is how the FRF synthesis
+    recognizes a rigid mode, and the damping is 0.0.
 
     Parameters
     ----------
@@ -231,15 +243,22 @@ def rigid_body_shapes(geometry: Geometry,
         The nodes the shapes are written over.
     properties : MassProperties
         The reference point and, optionally, the mass and inertia
-        that mass-normalize the set. Mass properties on a geometry
-        whose length unit is undeclared are refused: an inertia in
-        kg·m² against coordinates in nothing is not a number.
+        that mass-normalize the set. Mass properties are refused on a
+        geometry whose length unit has not been defined, because an
+        inertia in kg·m² cannot be combined with coordinates that have
+        no unit.
 
     Returns
     -------
     ShapeSet
         Six modes over `3 × nodes` DOFs, `unscaled` unless mass
         properties were given.
+
+    Raises
+    ------
+    ValueError
+        If the geometry has no nodes, or if mass properties are given
+        and the geometry's units are not defined.
     """
     from ..deform import dof_directions
     from .shapes import ShapeSet

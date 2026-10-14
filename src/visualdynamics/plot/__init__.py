@@ -1,14 +1,15 @@
-"""2D plotting, built on pyqtgraph.
+"""2D plotting with pyqtgraph.
 
-One renderer serves both the GUI and scripting, so the rules for how data is
-drawn — grouping by dimension, unit-aware labels, log magnitude in the
-frequency domain, legends — live here only.
+The application and scripts draw plots with the same functions, so the
+rules for how data is drawn (grouping by dimension, unit-aware labels,
+log magnitude in the frequency domain, legends) are written only here.
 
-Records are grouped by ordinate dimension, one stacked plot per dimension,
-so an object mixing accelerations, forces and voltages lands on comparable
-axes. Curves are clipped to the view and, on an evenly spaced axis,
-peak-downsampled — what keeps million-sample time histories interactive.
-In decades the spacing is not even and the downsampling stays off (see
+Records are grouped by their abscissa and ordinate dimensions, one
+stacked plot per group, so an object holding accelerations, forces and
+voltages is drawn on axes that can be compared. Curves are clipped to
+the view and, on an evenly spaced axis, peak-downsampled, which keeps
+time histories of a million samples interactive. On a log frequency axis
+the spacing is not even, so the downsampling is off there (see
 `_draw_shaped`).
 """
 
@@ -52,14 +53,16 @@ def fit_label_axis(axis: Any, labels: Iterable[str],
                    margin: int = LABEL_MARGIN) -> None:
     """Make a category axis wide enough for its widest label.
 
-    pyqtgraph draws no tick text that will not fit its axis, and says
-    nothing: left to size itself, a left axis settles on the width a
-    number needs, and a channel name or a label like "band-average,
-    update" simply vanishes while the shorter ones draw (the bar
-    charts found it first; the band-average paper again, 2026-09-26).
-    Measured with the axis's own font, the label that is there is the
-    label that is drawn.
+    pyqtgraph does not draw a tick label that does not fit its axis, and
+    gives no warning. Left to size itself, a left axis takes the width a
+    number needs, and a channel name or a label such as "band-average,
+    update" is not drawn while the shorter ones are. Here the width is
+    measured with the axis's own font, so every label is drawn. `margin`
+    is the room beyond the widest label in pixels, `LABEL_MARGIN` by
+    default.
     """
+    # Found first on the bar charts, and again in the band-average
+    # paper's figures (2026-09-26).
     from PySide6.QtGui import QFontMetrics
 
     metrics = QFontMetrics(axis.font())
@@ -71,22 +74,25 @@ def fit_label_axis(axis: Any, labels: Iterable[str],
 def legend_below(layout: Any, plot: Any, row: int,
                  colors: dict | None = None,
                  text_size: str | None = None) -> Any:
-    """A horizontal legend in its own layout row under the plot.
+    """Add a legend in its own layout row under the plot; return it.
 
-    pyqtgraph's default legend floats inside the view, anchored to a
-    corner, and on a plot with any real content it lands on top of the
-    data — a specification's bands, an FRF's peaks — and neither can be
-    read (Brandon, 2026-09-01). Outside is the honest place: the plot
-    keeps its whole area, the names line up beneath it in columns, and
-    the entries still register themselves through `plot.legend`, so
-    every ``name=`` a curve was drawn with arrives as before.
+    pyqtgraph's default legend is placed inside the view, in a corner,
+    and on a plot with much content it covers the data (a
+    specification's bands, an FRF's peaks) so that neither can be read.
+    Under the plot, the plot keeps its whole area, and the names are
+    laid out in rows no wider than the axes. The legend is set as
+    `plot.legend`, so every curve drawn with ``name=`` is added to it as
+    before.
 
-    Plots occupy the even rows of a layout (``2 * row``) and their
-    legends the odd ones — the window's row walker keys on
-    ``series_key``, which a legend does not carry, so it steps past.
+    Plots are placed in the even rows of a layout (``2 * row``) and
+    their legends in the odd rows. The window's row walker looks for
+    ``series_key``, which a legend does not have, so it skips them.
 
+    `colors` is a resolved theme, used for the label color, and
     `text_size` is the labels' size, `LEGEND_TEXT_SIZE` when omitted.
     """
+    # Brandon, 2026-09-01: the legend floating inside the view landed on
+    # the data, and neither could be read.
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
@@ -207,10 +213,12 @@ MODE_LABEL_EXTENT = 18
 def mac_frame_ratio(rows: int, columns: int) -> float:
     """Width over height for a MAC grid of this shape, clamped.
 
-    The frame outside the plot is sized by this and the aspect lock
-    inside it is decided by the same clamp, so the two cannot disagree
-    about whether cells are square — a frame narrower than the grid's own
-    shape plus a lock inside it scrolls columns off the screen.
+    The ratio is held between 1 / `MAC_ASPECT_CLAMP` and
+    `MAC_ASPECT_CLAMP`. The frame outside the plot is sized from this
+    value, and the aspect lock inside it uses the same clamp, so the two
+    agree on whether the cells are square. A frame narrower than the
+    grid's shape with an aspect lock inside it would push columns off
+    the screen.
     """
     ratio = float(columns) / float(rows) if rows else 1.0
     return min(max(ratio, 1.0 / MAC_ASPECT_CLAMP), MAC_ASPECT_CLAMP)
@@ -280,9 +288,10 @@ CURVE_COLORS_LIGHT = [
 
 
 def curve_colors(colors: Mapping[str, str] | None = None) -> list[str]:
-    """The curve palette for a theme's plot background: the light set
-    on a light background, the dark set on a dark one or with no theme
-    given."""
+    """The curve palette for a theme's plot background:
+    `CURVE_COLORS_LIGHT` on a light background, `CURVE_COLORS` on a dark
+    one or when no theme is given.
+    """
     if colors is None:
         return CURVE_COLORS
     background = str(colors['plot_background']).lstrip('#')
@@ -292,24 +301,26 @@ def curve_colors(colors: Mapping[str, str] | None = None) -> list[str]:
 
 
 def curve_color(index: int, colors: Mapping[str, str] | None = None) -> str:
-    """The nth curve's color, wrapping. The same cycle everywhere a
-    curve is drawn, so a record keeps its place in it between the app,
-    a standalone plot and the report; `colors` (a resolved theme) picks
-    the light or dark shade of it."""
+    """The color of the nth curve, wrapping around the palette.
+
+    The same cycle is used everywhere a curve is drawn, so a record has
+    the same color in the app, in a standalone plot and in the report.
+    `colors` (a resolved theme) picks the light or the dark palette.
+    """
     palette = curve_colors(colors)
     return palette[index % len(palette)]
 
 
 def axis_label(dimension: str, unit_system: UnitSystem,
                 hint: str | None = None) -> str:
-    """Axis label for a dimension: a typeset unit, or a note when undefined.
+    """Axis label for a dimension, or a note when units are undefined.
 
-    pyqtgraph renders label HTML, so a quotient dimension shows as a real
-    stacked fraction rather than '(in/s**2)/lbf'.
+    The unit is written as HTML, which pyqtgraph renders, so a quotient
+    dimension is shown as a stacked fraction and not as '(in/s**2)/lbf'.
 
-    A `hint` is what the source said the quantity was without saying what
-    scale it was on. The axis names it, since an unlabeled axis of
-    accelerations is less use than one that at least says 'acceleration'.
+    A `hint` is the quantity the source named without giving its units.
+    The label includes it, as in 'acceleration [units undefined]',
+    because that is more useful than an axis with no name at all.
     """
     if dimension == UNKNOWN:
         return f'{hint} [units undefined]' if hint else 'units undefined'
@@ -320,17 +331,21 @@ def build_plot(layout: Any, data: Any, unit_system: UnitSystem | None = None,
                theme: Any = None, max_records: int = MAX_RECORDS,
                records: Sequence[int] | None = None,
                component: str = 'magnitude') -> tuple[int, int]:
-    """Draw one data array. See `build_plots` for several at once."""
+    """Draw one data array (or its `records`) into `layout`.
+
+    This is `build_plots` with a single entry, and its other arguments
+    and its return value are the same.
+    """
     return build_plots(layout, [(None, data, records)],
                        unit_system=unit_system, theme=theme,
                        max_records=max_records, component=component)
 
 
 def background_brush(colors: Mapping[str, str]) -> Any:
-    """The plots' background: the same gradient the 3D view uses.
+    """The plot background: the same gradient as the 3D view.
 
-    Anchored to the device rather than the scene, so it stays put while the
-    data is panned and zoomed instead of sliding around behind it.
+    The gradient is anchored to the device and not to the scene, so it
+    does not move while the data is panned and zoomed.
     """
     from PySide6.QtCore import QPointF
     from PySide6.QtGui import QBrush, QColor, QLinearGradient
@@ -344,11 +359,11 @@ def background_brush(colors: Mapping[str, str]) -> Any:
 
 def display_limits(data: Any,
                    unit_system: UnitSystem) -> dict[str, np.ndarray]:
-    """A specification's limit curves in display units, or nothing.
+    """A specification's limit curves in display units, or an empty dict.
 
-    Anything else is not a specification and has none, which is why this
-    asks rather than testing the type: the plot does not need to know what a
-    Specification is, only that some data brings bounds with it.
+    Any object with `limits` brings bounds with it, and anything else
+    has none. The check is on the attribute and not on the type, so the
+    plot does not need to know about the Specification class.
     """
     limits = getattr(data, 'limits', None)
     if not limits:
@@ -357,16 +372,17 @@ def display_limits(data: Any,
 
 
 def curve_budget(limit: int, needs: Sequence[int]) -> list[int]:
-    """How many curves each plot may draw, sharing one limit between them.
+    """How many curves each plot may draw, sharing one limit among them.
 
-    First come, first served lets the first plot spend the whole budget and
-    leaves the next one empty — which is what selecting a spectrum and a
-    time history did: one plot drew 45 curves and the other drew five.
-
-    Plots wanting less than an equal share release the rest to the others,
-    so a two-channel plot beside a large one costs the large one almost
-    nothing.
+    The limit is divided evenly. A plot that needs less than an equal
+    share gives the rest to the others, so a two-channel plot beside a
+    large one costs the large one almost nothing. When fewer curves are
+    left than plots that want them, they are given one each, in order.
+    Returns one count per entry of `needs`.
     """
+    # First come, first served let the first plot spend the whole budget
+    # and left the next one empty: selecting a spectrum and a time
+    # history drew 45 curves in one plot and five in the other.
     shares = [0] * len(needs)
     remaining = min(limit, sum(needs))
     while remaining > 0:
@@ -395,30 +411,33 @@ def _pair(data, index):
 def bounded_by_specification(series: Sequence[tuple[str | None, Any, Sequence[int] | None]],
                              scales: dict[str, int] | None = None
                              ) -> tuple[Sequence[tuple[str | None, Any, Sequence[int] | None]], int]:
-    """Restrict PSDs to the records a selected specification actually bounds.
+    """Cut PSDs to the records a specification bounds, scaled to it.
 
-    A specification is normally written for autospectra only, while a measured
-    CPSD carries every cross term too. Drawn together, the 30 cross terms of a
-    6-channel CPSD are 30 curves with no limit anywhere near them — they are
-    not wrong, they are just not the comparison being asked for, and they bury
-    the six that are.
+    A specification is usually written for autospectra only, while a
+    measured CPSD has every cross term as well. Drawn together, the 30
+    cross terms of a 6-channel CPSD are 30 curves with no limit near
+    them. They are not wrong, but they are not the comparison asked for,
+    and they hide the six that are.
 
-    So when a specification is plotted alongside other PSDs, both are cut to
-    the pairs they have in common. Nothing else is touched: a specification
-    says nothing about a time history, and restricting one against it would
-    drop every record for no reason.
+    So when a specification is plotted with other PSDs, both are cut to
+    the records they have in common: the same DOF pair and the same
+    quantity, where a record with undefined units matches any quantity.
+    Anything that is not a PSD is left alone, since a specification says
+    nothing about a time history. When the two have nothing in common,
+    the series is returned unchanged, so the mismatch can be seen.
 
-    The measured spectra are also drawn **scaled to the specification**
-    when a scaling applies — the standard practice for a run captured
-    below the 0 dB requirement (`compliance.comparison_scale_db`; held
-    on the object, or detected in whole dB). The scaling exists only in
-    the comparison: it is applied to a throwaway copy, the object's own
-    values are never touched, and a scaled curve says so in its legend
-    name. `scales` lets a caller who resolved the number with more
-    context — the app, which knows an octave PSD and the PSD it was
-    banded from share one scale — say what each named entry gets.
+    The measured spectra are also drawn scaled to the specification when
+    a scaling applies, as is standard for a run captured below the 0 dB
+    level (`compliance.comparison_scale_db`, held on the object or
+    detected in whole dB). The scaling is applied only to a copy used
+    for the drawing. The object's own values are never changed, and a
+    scaled curve's legend name gives the scale, as in 'run (-6 dB)'.
+    `scales` maps an entry's name to its scale in dB, for a caller that
+    has worked the scale out with more information: the app knows that
+    an octave PSD and the PSD it was banded from share one scale.
 
-    Returns (series, dropped).
+    Returns (series, dropped): the restricted series, and the number of
+    records left out.
     """
     from ..core.compliance import comparison_scale_db
     from ..core.data import Psd, Specification
@@ -479,12 +498,12 @@ def bounded_by_specification(series: Sequence[tuple[str | None, Any, Sequence[in
 
 
 def scaled_for_comparison(data: Any, db: float) -> Any:
-    """A throwaway copy of a spectrum with the comparison scale applied.
+    """A copy of a spectrum with a comparison scale of `db` dB applied.
 
-    A shallow copy sharing everything but the values, because the whole
-    point is that the object itself is never changed — the scale exists
-    on the drawn comparison and nowhere else. The copy holds its scale
-    at 0 so nothing downstream scales it again.
+    The copy is shallow and shares everything except the values, because
+    the object itself must not change: the scale is applied to the drawn
+    comparison and nowhere else. The copy's `scale_db` is 0, so nothing
+    later scales it again.
     """
     import copy
 
@@ -499,18 +518,16 @@ def scaled_for_comparison(data: Any, db: float) -> Any:
 POWER_LAW_POINTS = 400
 
 def specification_pairs(series: Sequence[tuple[str | None, Any, Sequence[int] | None]]) -> list[tuple[str, str]]:
-    """The DOF pairs the plot draws one at a time, in the
-    specification's own order.
+    """The DOF pairs drawn one at a time, in the specification's order.
 
-    Where there is a measurement, these are the pairs both sides have:
-    a specification with its response is a comparison, and six of them
-    on one axis is a thicket with no comparison visible in it.
+    With a measurement, these are the pairs both have. A specification
+    with its response is a comparison, and six such comparisons on one
+    axis are too crowded to read.
 
-    A specification on its own is the same story without the second
-    curve. Six targets and their two dozen limit lines are exactly as
-    unreadable stacked together, so the channels are still offered one
-    at a time — every channel the specification carries, since there is
-    nothing to intersect them with.
+    A specification on its own is offered one channel at a time as well,
+    because six targets and their two dozen limit curves are just as
+    hard to read together. Then every pair the specification has is
+    returned.
     """
     from ..core.data import Psd, Specification
 
@@ -533,10 +550,11 @@ def specification_pairs(series: Sequence[tuple[str | None, Any, Sequence[int] | 
 
 def only_pairs(series: Sequence[tuple[str | None, Any, Sequence[int] | None]],
                pairs: Sequence[tuple[str, str]]) -> Sequence[tuple[str | None, Any, Sequence[int] | None]]:
-    """The series cut to these DOF pairs, leaving anything else alone.
+    """The series cut to these DOF pairs; other data is left alone.
 
-    The plural of `only_pair`, because a table under the plot can name
-    several channels at once where a drop-down names one.
+    Anything that is not a PSD is kept as it is. This is the plural of
+    `only_pair`, for a table under the plot that can select several
+    channels where a drop-down selects one.
     """
     from ..core.data import Psd
 
@@ -554,7 +572,10 @@ def only_pairs(series: Sequence[tuple[str | None, Any, Sequence[int] | None]],
 
 
 def only_pair(series: Sequence[tuple[str | None, Any, Sequence[int] | None]], pair: tuple[str, str]) -> Sequence[tuple[str | None, Any, Sequence[int] | None]]:
-    """The series cut to one DOF pair, leaving anything else alone."""
+    """The series cut to one DOF pair; other data is left alone.
+
+    Anything that is not a PSD is kept as it is.
+    """
     from ..core.data import Psd
 
     out = []
@@ -570,7 +591,11 @@ def only_pair(series: Sequence[tuple[str | None, Any, Sequence[int] | None]], pa
 
 
 def pair_label(pair: tuple[str, str]) -> str:
-    """How a DOF pair reads: the DOF alone when it is its own reference."""
+    """How a DOF pair is written in a label.
+
+    The DOF alone when it is its own reference, otherwise
+    'response/reference'.
+    """
     return pair[0] if pair[0] == pair[1] else f'{pair[0]}/{pair[1]}'
 
 
@@ -581,18 +606,22 @@ MAP_LABELS = 24
 def build_coherence_map(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[int] | None]],
                         unit_system: UnitSystem | None = None,
                         theme: Any = None) -> tuple[int, int]:
-    """Every channel's coherence at once: frequency across, channel down.
+    """Draw every channel's coherence as a map, frequency by channel.
 
-    A line plot answers "is this channel good"; there is no reading 339 of
-    them at once, and the curve budget means most are not even drawn. As a
-    map the same data answers "which channels are bad, and where" in one
-    look — a poor channel is a dark row, a poor band is a dark column.
+    Frequency runs across and channels run down.
 
-    Coherence is a bounded ratio, so the color scale is pinned to 0..1
-    rather than fitted to the data: a map whose scale moved with the
-    selection would make a good channel look bad next to a better one.
+    A line plot shows whether one channel is good, but 339 of them
+    cannot be read at once, and the curve budget means most would not be
+    drawn. As a map the same data shows which channels are poor and
+    where: a poor channel is a dark row, and a poor frequency band is a
+    dark column.
 
-    Returns (rows_drawn, rows_requested); nothing is dropped, so they match.
+    Coherence is a bounded ratio, so the color scale is fixed at 0 to 1
+    and not fitted to the data. A scale that changed with the selection
+    would make a good channel look poor beside a better one.
+
+    Returns (rows_drawn, rows_requested). Nothing is dropped, so the two
+    are equal.
     """
     import numpy as np
     import pyqtgraph as pg
@@ -667,13 +696,14 @@ def _map_ticks(labels):
 def cmif_curves(data: Any, records: Sequence[int] | None = None,
                 unit_system: UnitSystem | None = None
                 ) -> tuple[np.ndarray, np.ndarray]:
-    """(singular values (k, freqs), display abscissa) — the CMIF.
+    """The CMIF's singular values (k, frequencies) and display abscissa.
 
-    The records assemble into the response x reference matrix they are —
-    an absent pair is zero, the standard practical treatment of an
-    incomplete matrix — and every frequency line gets a singular value
-    decomposition. The largest singular value peaks at every mode; the
-    second one peaking too is how a repeated root shows itself.
+    The records are assembled into the response-by-reference matrix they
+    belong to, with a missing pair set to zero (the usual practical
+    treatment of an incomplete matrix), and a singular value
+    decomposition is taken at every frequency line. The largest singular
+    value peaks at every mode. A second singular value peaking at the
+    same frequency indicates a repeated root.
     """
     us = unit_system or DEFAULT_SYSTEM
     wanted = (list(range(data.num_records)) if records is None
@@ -788,15 +818,17 @@ def build_mac(view: Any, frequencies: ArrayLike, matrix: ArrayLike,
               theme: Any = None,
               column_frequencies: ArrayLike | None = None
               ) -> tuple[int, int]:
-    """A MAC matrix as a viridis grid.
+    """Draw a MAC matrix as a viridis grid; return the matrix's shape.
 
-    Rows and columns are modes, labeled by their frequencies; with
-    `column_frequencies` the grid is a cross-MAC — rows one set, columns
-    the other — and rectangular when the counts differ. The scale is
-    pinned 0..1 like the coherence map, because a MAC is a bounded
-    ratio. The color is the reading — per-cell numbers were tried and
-    made the grid too busy to read at a glance.
+    Rows and columns are modes, labeled by their frequencies. With
+    `column_frequencies` the grid is a cross-MAC, rows from one set and
+    columns from the other, and it is rectangular when the counts
+    differ. The color scale is fixed at 0 to 1, as in the coherence map,
+    because a MAC is a bounded ratio. The values are shown by color
+    only.
     """
+    # Numbers in each cell were tried and made the grid too busy to read
+    # at a glance.
     import pyqtgraph as pg
 
     colors = resolve_theme(theme)
@@ -924,14 +956,16 @@ class _Extents:
 
 def add_mode_markers(plot: Any, frequencies: ArrayLike,
                      foreground: str | None = None) -> None:
-    """Dashed bookmarks at each mode's frequency, labels staggered so
-    clusters stay readable — the fitting screen's markers, wherever a
-    modal synthesis is drawn.
+    """Draw a dashed marker, with a staggered label, at each mode.
 
-    The fitting screen keeps its subtle gray (the default); the
-    resynthesis overlays pass the theme foreground instead — white on
-    the dark theme, black on the light — so the markers read apart
-    from the grid."""
+    Each marker is at a mode's frequency, and the labels are at
+    staggered heights so clusters can be read. These are the fitting
+    screen's markers, drawn wherever a modal synthesis is plotted. With
+    no `foreground` they are gray, as on the fitting screen. The
+    resynthesis overlays pass the theme's foreground instead (white on
+    the dark theme, black on the light), so the markers can be told from
+    the grid.
+    """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
@@ -967,14 +1001,18 @@ def _synthesis_marks(series):
 def build_cmif(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[int] | None]],
                unit_system: UnitSystem | None = None,
                theme: Any = None) -> int:
-    """The Complex Mode Indicator Function of each selected FRF set.
+    """Draw the Complex Mode Indicator Function of each FRF set.
 
-    One curve per singular value, log magnitude over frequency. A
-    synthesized overlay's CMIF draws dashed in the measured set's colors,
-    singular value for singular value — the modal model's indicator
-    against the measurement's. Singular values that are numerically zero
-    (a synthesis truncated below the reference count is rank-deficient)
-    are dropped rather than drawn twenty decades down.
+    `series` is a list of (name, data, records), as for `build_plots`.
+
+    There is one curve per singular value, log magnitude against
+    frequency. A synthesized overlay's CMIF is drawn dashed in the
+    measured set's colors, singular value by singular value, so the
+    modal model's indicator can be compared with the measurement's.
+    Singular values that are numerically zero (a synthesis truncated
+    below the reference count is rank-deficient) are left out instead of
+    being drawn twenty decades down. The axes are set from the measured
+    curves only, and the mode frequencies of a synthesis are marked.
 
     Returns the number of curves drawn.
     """
@@ -1074,15 +1112,20 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
                 component: str = 'magnitude') -> tuple[int, int]:
     """Draw several data arrays into one pyqtgraph GraphicsLayout.
 
-    `series` is a list of (name, data, records); `records` may be None for
-    every record. Curves are grouped into a plot per (abscissa dimension,
-    ordinate dimension) pair, so selecting an FRF and a time history at once
-    stacks them on separate axes instead of nonsense-sharing one. Names
-    prefix the legend when more than one object is drawn.
+    `series` is a list of (name, data, records), with `records` None for
+    every record. Curves are grouped into one plot for each combination
+    of abscissa dimension, ordinate dimension and axis scale, so
+    selecting an FRF and a time history together stacks them on separate
+    axes instead of sharing one. Names prefix the legend entries when
+    more than one object is drawn. PSDs drawn with a specification are
+    first restricted and scaled by `bounded_by_specification`. At most
+    `max_records` curves are drawn in all, shared among the plots by
+    `curve_budget`.
 
-    `component` picks how complex frequency data is read: 'magnitude'
-    (log ordinate, the default), 'real', 'imag', or 'phase' (degrees,
-    axis pinned to ±180). Real data ignores it.
+    `component` picks how complex frequency data is drawn: 'magnitude'
+    (log ordinate, the default), 'real', 'imag', or 'phase' (degrees, on
+    an axis from -200 to 200 labeled every 90 degrees from -180 to 180).
+    Real data ignores it.
 
     Returns (curves_drawn, curves_requested).
     """
@@ -1446,10 +1489,13 @@ EXCEED_ALPHA = 150
 
 
 def display_factor(shown, raw):
-    """What one curve's SI values are multiplied by to be the shown
-    ones — a unit conversion is one factor, read off any written
-    point. One when nothing is written. The plot and the report's page
-    both scale a compliance verdict's level by it."""
+    """The factor that converts one curve's SI values to displayed ones.
+
+    A unit conversion is one factor, so it is read from the first point
+    where both values are finite and the SI value is positive. Returns 1
+    when there is no such point. The plot and the report page both scale
+    a compliance verdict's level by it.
+    """
     shown = np.asarray(np.real(shown), dtype=float)
     raw = np.asarray(np.real(raw), dtype=float)
     with np.errstate(invalid='ignore'):
@@ -1591,28 +1637,30 @@ def _draw_shaped(plot, x, y, shape, pen, widths=None, log_abscissa=False,
 
 
 def drawing_shape(data: Any, tagged: bool = False) -> str:
-    """'steps' | 'law' | 'line': how this object's curve is drawn.
+    """How this object's curve is drawn: 'steps', 'law' or 'line'.
 
-    **The hard rule, for every reading of the plot — 2-D and the 3-D
-    waterfall alike**: a density is drawn as the energy beneath it, so
-    the RMS is always the plain area under the curve on screen. A PSD,
-    a CPSD's terms and an octave-band PSD (`interpolation == 'bin'`)
-    draw flat across each bin — what is summed when the object is
-    integrated — and a specification (`'log_log'`) follows the power
-    law its breakpoints mean. Anything that is a value at a frequency
-    rather than an area — an FRF, a coherence, a linear spectrum, any
-    signed component — draws as the line it is; except a value that
-    belongs to a whole band, which draws flat across it, whatever
-    component is read: a banded coherence, or the phase of a banded
-    cross term, is one number for its band, not a sample at its center
-    (Brandon, 2026-09-27).
+    The rule, for the 2-D plot and the 3-D waterfall alike, is that a
+    density is drawn so that its RMS is the area under the curve on
+    screen. A PSD, a CPSD's terms and an octave-band PSD (`interpolation
+    == 'bin'`) are drawn flat across each bin ('steps'), which is what
+    is summed when the object is integrated, and a specification
+    (`interpolation == 'log_log'`) follows the power law between its
+    breakpoints ('law'). Anything that is a value at a frequency and not
+    an area, such as an FRF, a coherence, a linear spectrum or any
+    signed component, is drawn as a line ('line'). The exception is a
+    value that belongs to a whole band, which is drawn flat across the
+    band whatever component is read: a banded coherence, or the phase of
+    a banded cross term, is one number for its band and not a sample at
+    its center. Data that is not on a frequency axis is always a line.
 
-    One implementation, consulted by `build_plots` and by
-    `viz.waterfall`, because a picture that disagrees with
-    `Psd.area()` is a picture of a number nobody computed. `tagged`
-    says a signed component (real/imag/phase) is being read, which is
-    never a density — but of a banded array, still a band's value.
+    There is one implementation, used by `build_plots` and by
+    `viz.waterfall`, because a curve that disagrees with `Psd.area()`
+    shows a number nobody computed. `tagged` says a signed component
+    (real, imag or phase) is being drawn, which is never a density,
+    though for a banded array it is still a band's value.
     """
+    # Brandon, 2026-09-27: a banded value is one number for its band and
+    # is drawn flat across it, whatever component is read.
     if data.abscissa_dim != 'frequency':
         return 'line'
     banded = getattr(data, 'bandwidth', None) is not None
@@ -1630,12 +1678,13 @@ def step_outline(centers: ArrayLike, values: ArrayLike,
                  ) -> tuple[np.ndarray, np.ndarray]:
     """The flat-across-each-bin trace as explicit points.
 
-    What `stepMode='center'` has pyqtgraph draw for the 2-D plot, made
-    concrete for a renderer that only takes polylines — the 3-D
-    waterfall. Two points per bin on the bin's own edges (the same
-    `bin_edges`), values duplicated across, so the trapezoid under the
-    trace is exactly `sum(value * width)`: the RMS is the area drawn.
-    `values` may be (records, lines); the outline is per row.
+    This is what `stepMode='center'` has pyqtgraph draw in the 2-D plot,
+    written out for a renderer that only takes polylines, the 3-D
+    waterfall. There are two points per bin, on the bin's edges (from
+    `bin_edges`), with the value repeated, so the area under the trace
+    is exactly `sum(value * width)` and the RMS is the area drawn.
+    `values` may be (records, lines), in which case each row is
+    outlined. Returns (x, values).
     """
     centers = np.asarray(centers, dtype=float)
     values = np.atleast_2d(np.asarray(values))
@@ -1649,23 +1698,26 @@ def step_outline(centers: ArrayLike, values: ArrayLike,
 
 def bin_edges(centers: ArrayLike,
               widths: ArrayLike | None = None) -> np.ndarray:
-    """The boundaries of the bins a set of line centers stands for.
+    """The edges of the bins that a set of line centers represents.
 
-    A line of a discrete spectrum is a density over its own bin, so
-    without more to go on the bin runs to the midpoint of the gap
-    either side. Arithmetic midpoints, because FFT lines are evenly
-    spaced in frequency.
+    A line of a discrete spectrum is a density over its own bin, so with
+    no other information each bin runs to the midpoint of the gap on
+    either side, and the outer edges are as far beyond the end lines as
+    the nearest midpoints are inside them. Arithmetic midpoints are used
+    because FFT lines are evenly spaced in frequency.
 
-    `widths` is for a spectrum that knows better. An octave band's
-    center is the *geometric* mean of its own edges, so neither the
-    midpoints between neighbors nor the center plus and minus half a
-    width lands on them. Given the center and the width both, the edges
-    follow exactly: with `c = sqrt(l u)` and `w = u - l`,
+    `widths` is for a spectrum that knows its bins. One more value than
+    there are centers is taken as the edges themselves
+    (`Psd.bin_edges`). Otherwise `widths` is each band's width. An
+    octave band's center is the geometric mean of its edges, so neither
+    the midpoints between neighbors nor the center plus and minus half a
+    width gives them. From the center and the width the edges follow
+    exactly: with `c = sqrt(l u)` and `w = u - l`,
 
         u = (w + sqrt(w^2 + 4 c^2)) / 2,   l = u - w
 
-    which is the positive root and needs no assumption about the bands
-    tiling — though these do, so one edge array serves them all.
+    which is the positive root and does not assume the bands tile. These
+    bands do tile, so one array of edges serves them all.
     """
     centers = np.asarray(centers, dtype=float)
     if centers.size < 2:
@@ -1690,24 +1742,25 @@ def bin_edges(centers: ArrayLike,
 def as_power_law(frequencies: ArrayLike, values: ArrayLike,
                  per_decade: int = POWER_LAW_POINTS
                  ) -> tuple[np.ndarray, np.ndarray]:
-    """A breakpoint curve resampled onto enough points to draw as one.
+    """A breakpoint curve resampled densely enough to draw as a curve.
 
     A specification's segments are power laws, and the plot's frequency
-    axis is linear — so a straight line drawn between two breakpoints is
-    not the curve the breakpoints mean, and for a decade-wide segment it
-    runs well above it through the middle. Filled in, the polyline
-    follows the law closely enough that the difference is under a pixel.
+    axis is linear, so a straight line drawn between two breakpoints is
+    not the curve the breakpoints define. For a decade-wide segment it
+    runs well above that curve through the middle. Resampled at
+    `per_decade` points per decade (`POWER_LAW_POINTS` by default), the
+    polyline is within a pixel of the power law.
 
-    Left alone when the points are already dense: a controller writes
-    its specification on the same line grid as everything else, and
-    there is nothing between two adjacent lines to fill in.
+    Points already that dense are not resampled: a controller writes its
+    specification on the same line grid as everything else, and there is
+    nothing between two adjacent lines to fill in.
 
-    Only over the band the specification is written for. A controller
-    writes zero outside it, and zero is a value the curve cannot be
-    drawn at on a log axis — it maps to -inf — while filling in across
-    it gives NaN. Either way the curve comes back full of holes, and a
-    gapped array is the one thing pyqtgraph cannot build a path from
-    safely (see `gapless`).
+    Only the band the specification is written for is returned. A
+    controller writes zero outside it, and zero cannot be drawn on a log
+    axis (it maps to -inf), while interpolating across it gives NaN.
+    Either way the curve would have gaps, and pyqtgraph cannot safely
+    build a path from an array with gaps (see `gapless`). With fewer
+    than two points that can be drawn, the input is returned unchanged.
     """
     from ..core.compliance import log_interpolate
 
@@ -1729,22 +1782,29 @@ def as_power_law(frequencies: ArrayLike, values: ArrayLike,
 
 
 def gapless(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """One curve's points cut to the stretch it can be drawn over.
+    """One curve's points cut to the span of its finite points.
 
-    pyqtgraph builds a `QPainterPath` two ways. With no gaps it fills a
-    `QPolygonF`, which is Qt's own API. With gaps — more than 2% of the
-    points non-finite — it packs a byte buffer by hand and has Qt
-    deserialize it, against a private binary layout its own docstring
-    warns "may change in future versions of Qt". That is the path the
-    intermittent Bus error was raised from, and the only curve on the
-    plot taking it was a specification: 404 non-finite points in 1083,
-    because it is written to zero outside its band.
+    The span runs from the first finite point to the last.
 
-    So a curve is cut to the run of it that says something rather than
-    handed over with holes in. Nothing is bridged: the cut is the first
-    and last point that can be drawn, so a curve that stops is drawn
-    stopping.
+    pyqtgraph builds the path for a curve with more than 2 % of its
+    points non-finite by packing a byte buffer itself against a private
+    Qt binary layout, and that way of building a path is not reliable.
+    With no gaps it uses Qt's own API. A specification is written as
+    zero outside its band, so it is the curve most likely to have gaps.
+
+    So a curve is cut to the part of it that has values instead of being
+    passed with gaps. Nothing is bridged: the cut is at the first and
+    last points that can be drawn, so a curve that stops is drawn
+    stopping. Non-finite points between them are kept. Arrays of
+    different lengths, or with fewer than two finite points, are
+    returned unchanged.
     """
+    # With gaps pyqtgraph packs a byte buffer by hand and has Qt
+    # deserialize it, against a private binary layout its own docstring
+    # warns "may change in future versions of Qt". That is the path the
+    # intermittent Bus error was raised from, and the only curve on the
+    # plot taking it was a specification: 404 non-finite points in 1083,
+    # because it is written to zero outside its band.
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size != y.size:
@@ -1758,8 +1818,11 @@ def gapless(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def data_curves(plot: Any) -> list[Any]:
-    """The curves on a plot that are data, not the invisible edges the
-    limit shading is built from."""
+    """The data curves on a plot, without the limit shading's edges.
+
+    This leaves out the invisible curves the limit shading is built
+    from, and anything else marked `is_zone_edge`.
+    """
     return [item for item in plot.listDataItems()
             if not getattr(item, 'is_zone_edge', False)]
 
@@ -1869,15 +1932,18 @@ ZONE_ALPHA = 38
 
 
 def zone_colors(colors: Mapping[str, str]) -> dict:
-    """The fills of a specification's zones and of its exceedances, as
-    QColors — one place, so the legend's swatch is the plot's fill.
+    """The fills of a specification's zones and exceedances, as QColors.
 
-    Yellow between warning and abort; past abort, which way: red above,
-    blue below. Both were red once, which said "out of tolerance" and
-    left the direction to be read off the geometry — where every other
-    mark on the plot already says over in red and under in blue. The
-    exceedance boxes are the same hues, stronger (`EXCEED_ALPHA`).
+    Yellow between the warning and abort limits, and past the abort
+    limits red above and blue below. The exceedance boxes are the same
+    colors, more opaque (`EXCEED_ALPHA`). The plot and its legend both
+    take their colors from here, so a legend's swatch matches the fill.
+    Returns a dict with the keys 'warning', 'above', 'below',
+    'exceed_over' and 'exceed_under'.
     """
+    # Both sides past abort were red once, which said "out of tolerance"
+    # and left the direction to be read off the geometry, where every
+    # other mark on the plot already says over in red and under in blue.
     from PySide6.QtGui import QColor
 
     def shade(name, alpha):
@@ -1929,20 +1995,26 @@ def _signed_db(value: float) -> str:
 
 def zone_key(zones: set, exceeded: set, found: Mapping[str, Any]
              ) -> list[tuple[str, str]]:
-    """What a specification's shading is called in a legend: the warning
-    band, the zones above and below abort and the exceedance marks, each
-    only when drawn (`zones` of 'warning', 'above', 'below'; `exceeded`
-    of 'exceed_over', 'exceed_under'), with each band's decibels when the
-    specification holds it at one value (`found`, from `_zone_decibels`).
+    """The legend entries for a specification's shading.
 
-    One rule for every plot that shades them — the app's (`build_plots`)
-    and the report's, which must always match (Brandon, 2026-09-27).
+    The entries are the warning band, the zones above and below abort,
+    and the exceedance marks, each only when it was drawn: `zones` holds
+    any of 'warning', 'above' and 'below', and `exceeded` any of
+    'exceed_over' and 'exceed_under'. When the specification holds a
+    band at one value, its level in decibels is added to the name, as in
+    'warning band (±3 dB)'. `found` is the decibel values gathered by
+    `_zone_decibels`.
+
+    The app's plots (`build_plots`) and the report's both use this, so
+    their legends match.
 
     Returns
     -------
     list of (str, str)
         (zone, name), in the order a legend lists them.
     """
+    # Brandon, 2026-09-27: the app's legend and the report's must always
+    # match.
     def db_note(*bounds):
         values = [_uniform_db(found, bound) for bound in bounds]
         if any(v is None for v in values):
@@ -2010,15 +2082,16 @@ def octave_preview(items: Iterable[Any], steps: tuple[Any, Any, Any],
                    colors: Mapping[str, str],
                    records: Sequence[int] | None = None
                    ) -> list[tuple[Any, Any]]:
-    """The banded conversion as steps over the narrowband it
-    integrates, on each plot whose quantity matches — a mixed object's
-    forces never step across its accelerations' axes — and only for
-    `records` when given, so the steps say what the plot says. The
-    window's octave view and `plot_data(marks='octave')`; returns the
-    (plot, curve) pairs drawn.
+    """Draw an octave-band conversion as steps over its narrowband.
 
-    `steps` is `viz.marks.octave_steps`' answer, banded once by the
-    caller, which reads the band count off the same banding.
+    The steps are drawn over the narrowband spectrum they integrate, and
+    the (plot, curve) pairs drawn are returned. Steps are drawn only on
+    plots whose quantity matches, so a mixed object's force bands are
+    not drawn across its acceleration axes, and only for `records` when
+    given, so the steps match what the plot shows. `steps` is the result
+    of `viz.marks.octave_steps`, banded once by the caller, which reads
+    the band count from the same banding. The window's octave view and
+    `plot_data(marks='octave')` both use this.
     """
     import pyqtgraph as pg
 
@@ -2097,23 +2170,24 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
               marks: str | None = None,
               per_octave: int | None = None,
               **kwargs: Any) -> Any:
-    """Plot a data array in a window, or to a file with `path`.
+    """Plot a data array in a window, or save it to a file with `path`.
 
-    Returns the DataPane (or the path). Complex data gets the component
-    box over it — the same control the app offers — so which part is
-    drawn is a choice rather than an argument. With `show=True` and no
-    Qt event loop already running, this blocks until the window is
-    closed.
+    Returns the data pane, or the path written. Complex data is shown
+    with the component box above it, the same control as in the app, so
+    the part drawn is chosen there; a `component` keyword sets the one
+    drawn first. With `show=True` and no Qt event loop already running,
+    this blocks until the window is closed. Other keyword arguments go
+    to `build_plot`.
 
-    `marks` puts a reading over the trace, which is what the app's
-    toggles do: on a time history `'averaging'` brackets the frames a
-    spectrum is averaged over, `'shocks'` the events an SRS is computed
-    from, `'truncation'` grays the ends a cut would drop, and
-    `'filter'` draws the filtered twin over the record; on a PSD
-    `'octave'` steps the bands it would integrate to, `per_octave`.
-    Each is read from the object — whatever it carries, or what its
-    detector would suggest — and none can be dragged here, since there
-    is nothing on the other end of a drag in a file.
+    `marks` draws a reading over the plot, as the app's toggles do. On a
+    time history, 'averaging' shows the frames a spectrum is averaged
+    over, 'shocks' the events an SRS is computed from, 'truncation'
+    shades the ends a truncation would remove, and 'filter' draws the
+    filtered record over the original. On a PSD, 'octave' draws the
+    bands it would integrate to as steps, with `per_octave` bands per
+    octave. Each is read from the object: the setting it holds, or else
+    what its detector suggests. The frames and the shock windows are
+    drawn locked, since nothing here would receive a drag.
     """
     # the pane owns which part of a complex ordinate is drawn, so the
     # draw reads it back rather than being told once at the call
@@ -2141,7 +2215,10 @@ def save_plot(data: DataArray, path: str | os.PathLike,
               unit_system: UnitSystem | None = None, theme: Any = None,
               size: tuple[int, int] = (1200, 800),
               **kwargs: Any) -> Any:
-    """Render a data array to an image file (.png or .svg), no window."""
+    """Save a data array's plot to a .png or .svg without a window.
+
+    Returns the path. Other keyword arguments go to `plot_data`.
+    """
     return plot_data(data, unit_system=unit_system, theme=theme,
                      size=size, path=path, **kwargs)
 
@@ -2158,18 +2235,17 @@ LOGICAL_DPI = 96.0
 
 def render_image(widget: Any, ratio: float = 1.0,
                  background: Any = None) -> Any:
-    """A widget painted into an image at `ratio` device pixels per
-    logical pixel.
+    """Paint a widget into an image at a device pixel ratio of `ratio`.
 
-    The one way a plot becomes pixels. pyqtgraph's ImageExporter scales
-    the scene to a requested width, and not evenly: exported at three
-    times a plot's width, legend labels came out at a third of their set
-    size and QFont tick labels half again too large, while HTML titles
-    were right (the band-average paper's print figures, 2026-09-26).
-    Painted through a painter whose device carries the ratio, the scene
-    is laid out once, at its logical size, and every item — text, pens,
-    fills — is drawn scaled by the same factor, as a high-density screen
-    draws it.
+    This is the one way a plot is turned into pixels. The scene is laid
+    out once, at its logical size, and painted through a device that
+    carries the ratio, so every item (text, pens, fills) is drawn scaled
+    by the same factor, as a high-density screen draws it. pyqtgraph's
+    ImageExporter is not used, because it scales the scene to a
+    requested width unevenly and text comes out at the wrong size. For a
+    graphics view, cosmetic line pens are widened by `ratio` for the
+    render, and every data curve to at least `EXPORT_CURVE_WIDTH`, and
+    then put back.
 
     Parameters
     ----------
@@ -2184,6 +2260,10 @@ def render_image(widget: Any, ratio: float = 1.0,
     -------
     QImage
     """
+    # pyqtgraph's ImageExporter, at three times a plot's width: legend
+    # labels came out at a third of their set size and QFont tick labels
+    # half again too large, while HTML titles were right (the
+    # band-average paper's print figures, 2026-09-26).
     from PySide6.QtCore import QRectF, Qt
     from PySide6.QtGui import QColor, QImage, QPainter
     from PySide6.QtWidgets import QGraphicsView
@@ -2276,13 +2356,13 @@ def _widen_pens(scene: Any, ratio: float) -> list:
 
 def save_image(widget: Any, path: str | os.PathLike, *,
                dpi: float | None = None, theme: Any = None) -> str:
-    """A laid-out plot widget written to a .png, at `dpi` for print.
+    """Write a laid-out plot widget to a .png, at `dpi` for print.
 
     The widget is drawn at its logical size scaled by ``dpi / 96``
-    (`render_image`), on the theme's plot background, and the file says
-    its resolution, so a figure laid out at 3.42 in (328 logical pixels)
-    and saved at 300 dpi is 1026 pixels that print at 3.42 in, every
-    font at its set size.
+    (`render_image`), on the theme's plot background, and the file
+    records its resolution. A figure laid out at 3.42 in (328 logical
+    pixels) and saved at 300 dpi is 1026 pixels wide and prints at 3.42
+    in, with every font at its set size.
 
     Parameters
     ----------
@@ -2293,12 +2373,17 @@ def save_image(widget: Any, path: str | os.PathLike, *,
     dpi : float, optional
         Dots per inch; one pixel per logical pixel when omitted.
     theme : optional
-        Whose plot background to fill with.
+        The theme whose plot background the image is filled with.
 
     Returns
     -------
     str
         The path written.
+
+    Raises
+    ------
+    OSError
+        When the file cannot be written.
     """
     colors = resolve_theme(theme)
     ratio = 1.0 if dpi is None else float(dpi) / LOGICAL_DPI
@@ -2367,18 +2452,21 @@ def plot_mac(shapes: ShapeSet, other: ShapeSet | None = None, *,
              show: bool = True, title: str | None = None,
              size: tuple[int, int] | None = None, bars: bool = False,
              screenshot: str | None = None) -> Any:
-    """The MAC grid the GUI draws: `shapes` against itself, or the
-    cross-MAC against `other`.
+    """Draw the MAC of `shapes` against itself, or against `other`.
 
-    The picture defaults to 700 tall by the grid's own shape, clamped the
-    way the app clamps it, so a 139-against-8 cross-MAC renders as the
-    same tall panel it is on screen rather than being stretched into a
-    square. Pass `size` to say otherwise.
+    This is the grid the app draws; with `other` it is the cross-MAC.
+    The image is 700 pixels tall by default, and as wide as the grid's
+    shape gives, clamped as the app clamps it (`mac_frame_ratio`), so a
+    139-by-8 cross-MAC is drawn as the same tall panel as on screen and
+    not stretched into a square. `size` overrides this.
 
-    `bars=True` is the plot bar's 3-D reading: the matrix as bars,
-    height and color both the value. A scene renders through its own
-    plotter, so it takes `screenshot=` rather than `path=`, like every
-    other 3-D view.
+    `bars=True` draws the app's 3-D form: the matrix as bars, with
+    height and color both giving the value. A 3-D scene is rendered by
+    its own plotter, so it is saved with `screenshot=` instead of
+    `path=`, as every other 3-D view is.
+
+    Returns the pane or the path written, or with `bars` and
+    `screenshot` the screenshot image.
     """
     from ..core.shapes import cross_mac
 
@@ -2396,11 +2484,15 @@ def plot_mac_matrix(frequencies: ArrayLike, matrix: ArrayLike, *,
                     show: bool = True, title: str | None = None,
                     size: tuple[int, int] | None = None, bars: bool = False,
                     screenshot: str | None = None) -> Any:
-    """Draw a MAC matrix somebody else computed — `plot_mac` for two
-    sets that share DOF names, `Project.plot_mac` for the projected
-    comparison across geometries. One drawing, whoever did the sum.
-    `frequencies` label the rows; `column_frequencies` the columns
-    when they are another set's."""
+    """Draw a MAC matrix that was computed elsewhere.
+
+    `plot_mac` uses this for two sets that share DOF names, and
+    `Project.plot_mac` for the comparison projected across geometries,
+    so the drawing is the same whoever computed the matrix.
+    `frequencies` label the rows, and `column_frequencies` the columns
+    when they belong to another set. The other arguments and the return
+    value are as for `plot_mac`.
+    """
     if bars:
         from ..viz.mac_bars import mac_bars_scene
 
@@ -2437,8 +2529,13 @@ def plot_cmif(frf: Frf, shapes: ShapeSet | None = None, *,
               path: str | os.PathLike | None = None, show: bool = True,
               title: str | None = None,
               size: tuple[int, int] = (1000, 700)) -> Any:
-    """The CMIF the fitting screen draws: the measured indicator, and
-    with `shapes` the modal model's synthesis dashed over it."""
+    """Draw the CMIF as the fitting screen draws it.
+
+    The plot has the measured indicator and, with `shapes`, the modal
+    model's synthesis dashed over it. `modes` selects the modes used in
+    the synthesis, all of them by default. Returns the pane, or the path
+    written.
+    """
     from ..core.shapes import synthesize_overlay
 
     series = [('FRF', frf, None)]
@@ -2460,7 +2557,11 @@ def plot_coherence_map(coherence: _CoherenceBase, *,
                        path: str | os.PathLike | None = None,
                        show: bool = True, title: str | None = None,
                        size: tuple[int, int] = (1000, 700)) -> Any:
-    """The coherence map: frequency across, channel down, pinned 0..1."""
+    """Draw the coherence map: frequency across, channel down.
+
+    The color scale is fixed at 0 to 1 (`build_coherence_map`). Returns
+    the pane, or the path written.
+    """
     def build(widget: Any) -> Any:
         build_coherence_map(widget, [(None, coherence, None)],
                             unit_system=unit_system, theme=theme)
@@ -2472,12 +2573,13 @@ def plot_coherence_map(coherence: _CoherenceBase, *,
 def build_photos(layout: Any, photos: Photos,
                  picks: Sequence[int] | None = None,
                  start_row: int = 0) -> int:
-    """Photos stacked down a layout, each at its own aspect ratio with
-    its name as the title.
+    """Draw photos down a layout, each with its name as the title.
 
-    Drawing starts at `start_row` and the layout is not cleared, so
-    several sets can stack into one layout — which is what selecting
-    two Photos objects in the app does. Returns how many were drawn.
+    Each photo keeps its own aspect ratio. Drawing starts at `start_row`
+    and the layout is not cleared, so several sets can be stacked in one
+    layout, as when two Photos objects are selected in the app. `picks`
+    selects photos by index, drawn in ascending order, and an image that
+    cannot be decoded is skipped. Returns how many were drawn.
     """
     import pyqtgraph as pg
     from PySide6.QtGui import QImage
@@ -2509,7 +2611,11 @@ def plot_photos(photos: Photos, picks: Iterable[int] | None = None, *,
                 theme: Any = None, path: str | os.PathLike | None = None,
                 show: bool = True, title: str | None = None,
                 size: tuple[int, int] = (900, 700)) -> Any:
-    """The photos, as the app shows them."""
+    """Show the photos as the app shows them, or save them with `path`.
+
+    `picks` selects photos by index. Returns the pane, or the path
+    written.
+    """
     def build(widget: Any) -> Any:
         widget.clear()
         build_photos(widget, photos, picks)
@@ -2538,15 +2644,17 @@ def plot_series(items: Sequence[tuple[str | None, Any, Sequence[int] | None]], u
                 show: bool = True, title: str | None = None,
                 size: tuple[int, int] = (1000, 700),
                 component: str = 'magnitude', **kwargs: Any) -> Any:
-    """Several data arrays on one figure — what selecting more than one
-    object in the tree draws.
+    """Draw several data arrays on one figure.
 
         visualdynamics.plot.plot_series([frf, synthesized], path='both.png')
 
-    Each item is a data array, or `(name, data)`, or
-    `(name, data, records)` to draw only some of its records. Curves
-    group onto an axis per quantity, so an FRF and a time history stack
-    rather than sharing one, and names prefix the legend.
+    This is what selecting more than one object in the tree draws. Each
+    item is a data array, `(name, data)`, or `(name, data, records)` to
+    draw only some of its records. Curves are grouped onto one axis per
+    quantity, so an FRF and a time history are stacked instead of
+    sharing one, and the names prefix the legend entries. `component`
+    and the other keyword arguments are as for `build_plots`. Returns
+    the pane, or the path written.
     """
     series = _as_series(items)
 
@@ -2561,20 +2669,26 @@ def plot_series(items: Sequence[tuple[str | None, Any, Sequence[int] | None]], u
 def build_ratio(layout: Any, signal: Any, floor: Any,
                 records: Sequence[int] | None = None,
                 theme: Any = None) -> int:
-    """The signal-to-noise of the louder density over the quieter, in
-    decibels, one curve per shared channel — the reading of two
-    selected PSDs (Brandon, 2026-08-25). Returns how many channels
-    drew.
+    """Draw the signal-to-noise ratio of two sets of densities, in dB.
 
-    The signal's power is the louder density less the quieter, over
-    the quieter (`snr.signal_to_noise`, 2026-10-03), so a line where
-    the two are equal is not 0 dB but no signal at all, and is left
-    undrawn. Linear in dB on purpose, not a log axis of the linear
-    ratio: the number being read *is* the decibel. A dashed line at
-    0 dB marks where the signal's power equals the noise's.
-    `records` restricts to the named rows of the louder side, the
-    grid's own picks.
+    The ratio is `signal` over `floor`, one curve per shared channel.
+    This is the reading of two selected PSDs. The signal's power is the
+    louder density minus the quieter, divided by the quieter
+    (`snr.signal_to_noise`), so a line where the two are equal has no
+    signal at all and is not drawn, instead of being drawn at 0 dB. The
+    ordinate is decibels on a linear axis, not a log axis of the linear
+    ratio, because the decibel value is what is read. A dashed line at 0
+    dB marks where the signal's power equals the noise's. `records`
+    restricts the curves to those rows of `signal`, the rows picked in
+    the grid; when none of them is a shared channel, every channel is
+    drawn.
+
+    Returns the number of shared channels. A channel with no finite
+    value has no curve but is still counted.
     """
+    # The reading of two selected PSDs is Brandon's (2026-08-25); the
+    # signal's power is the louder less the quieter, over the quieter,
+    # since `snr.signal_to_noise` (2026-10-03).
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
@@ -2623,16 +2737,19 @@ def plot_ratio(signal: Any, floor: Any, *,
                path: str | os.PathLike | None = None,
                show: bool = True, title: str | None = None,
                size: tuple[int, int] = (1000, 700)) -> Any:
-    """The signal-to-noise of a driven density over its ambient one,
-    line by line, in decibels — the headless call for the toolbar's
-    Signal to noise reading of two selected PSDs.
+    """Draw the signal-to-noise ratio of driven over ambient densities.
 
         visualdynamics.plot.plot_ratio(driven_psds, noise_psds,
                                        path='snr.png')
 
-    The signal's power is the driven less the ambient, over the
-    ambient (`visualdynamics.core.snr`); a line with no signal above
-    the floor is not drawn.
+    The ratio is drawn line by line, in decibels. This is the script
+    form of the toolbar's Signal to noise reading of two selected PSDs.
+    The signal's power is the driven density minus the ambient, divided
+    by the ambient (`visualdynamics.core.snr`), and a line with no
+    signal above the noise is not drawn. `records` restricts the curves
+    to those rows of `signal`. `unit_system` is accepted and ignored,
+    since a ratio of densities has no units. Returns the pane, or the
+    path written.
     """
     del unit_system     # a ratio of densities converts to itself
 
@@ -2650,21 +2767,29 @@ def plot_comparison(measured: Any, specification: Any, *,
                     path: str | os.PathLike | None = None,
                     show: bool = True, title: str | None = None,
                     size: tuple[int, int] = (1000, 700)) -> Any:
-    """One control channel against its specification, shaded.
+    """Draw one control channel against its specification.
 
         visualdynamics.plot.plot_comparison(psds, spec, path='control.png')
 
-    The comparison the app draws when a specification and the PSDs it
-    bounds are selected together: the measurement stepped flat across
-    each bin, the requirement as the power law its breakpoints mean, and
-    the ground outside the abort limits shaded — red above the upper,
-    blue below the lower.
+    The limit zones are shaded. This is the comparison the app draws
+    when a specification and the PSDs it bounds are selected together:
+    the measurement drawn flat across each bin, the specification as the
+    power law between its breakpoints, the warning band shaded yellow,
+    and the regions outside the abort limits shaded red above the upper
+    limit and blue below the lower. A measurement captured below the
+    specification's level is drawn scaled to it, and the title gives the
+    scale.
 
-    One channel at a time, because six of them and their two dozen limit
-    lines on one axis is a thicket. `pair` names which, as the DOF pair
-    the dropdown lists (`('101Z+', '101Z+')`); the first the two have in
-    common by default. Band it first — `psds.to_octave(6)` — to compare
-    on proportional bands instead.
+    One channel is drawn at a time, because six channels and their two
+    dozen limit curves on one axis are too crowded to read. `pair` names
+    the channel as the DOF pair the drop-down lists, such as `('101Z+',
+    '101Z+')`; by default it is the first pair the two have in common.
+    To compare on proportional bands, band the measurement first with
+    `psds.to_octave(6)`.
+
+    Raises `ValueError` when the two have no channel in common, or when
+    `pair` is not one of the shared channels. Returns the pane, or the
+    path written.
     """
     series = _as_series([(None, measured), (None, specification)])
     series, _dropped = bounded_by_specification(series)
@@ -2695,15 +2820,20 @@ def plot_kurtosis(history: Any, *, records: Sequence[int] | None = None,
                   path: str | os.PathLike | None = None,
                   show: bool = True, title: str | None = None,
                   size: tuple[int, int] | None = None) -> Any:
-    """How Gaussian each channel of a record is, a bar apiece.
+    """Draw each channel's Pearson kurtosis as a bar chart.
 
         visualdynamics.plot.plot_kurtosis(history, path='kurtosis.png')
 
-    Pearson kurtosis, where 3 is Gaussian: above the band the record
-    carries peaks the spectrum does not predict, below it the record
-    is clipped or was never random. Every channel whatever it
-    measures — kurtosis is dimensionless — and the thresholds default
-    to one either side of nominal.
+    The kurtosis is 3 for a Gaussian record. Above the band between the
+    thresholds, the record has peaks the spectrum does not predict;
+    below it, the record has been clipped or was never random. Every
+    channel is drawn on one axis whatever it measures, since kurtosis is
+    dimensionless. The thresholds `low` and `high` default to one either
+    side of three (`core.kurtosis.LOW` and `HIGH`), and `records`
+    selects the channels. A channel with no finite kurtosis is left out,
+    and a `ValueError` is raised when none is left. `size` defaults to a
+    height that fits the channels. Returns the pane, or the path
+    written.
     """
     from ..core.kurtosis import HIGH, LOW, channel_kurtosis
     from .bars import ROW_HEIGHT, kurtosis_chart
@@ -2734,20 +2864,21 @@ def plot_snr(signal: Any, floor: Any, *,
              path: str | os.PathLike | None = None,
              show: bool = True, title: str | None = None,
              size: tuple[int, int] | None = None) -> Any:
-    """How far each channel's signal stands above its noise, a bar
-    apiece: RMS signal-to-noise in dB.
+    """Draw each channel's RMS signal-to-noise ratio as a bar chart.
 
         visualdynamics.plot.plot_snr(driven_psds, noise_psds,
                                      path='snr_bars.png')
 
-    The headless call for the toolbar's RMS signal to noise reading of
-    two selected PSDs. Each channel's power is the area under its
-    density over the band the two share, and the reading is
-    10 log10((P_driven - P_ambient) / P_ambient)
-    (`visualdynamics.core.snr`). `low` is the floor a channel is
-    judged against, `core.snr.THRESHOLD_DB` by default; a channel
-    with no signal above its noise has no bar and is named as at the
-    noise floor, and one whose ambient recorded nothing is left out.
+    The ratio is in dB. This is the script form of the toolbar's RMS
+    signal to noise reading of two selected PSDs. Each channel's power
+    is the area under its density over the band the two share, and the
+    reading is 10 log10((P_driven - P_ambient) / P_ambient)
+    (`visualdynamics.core.snr`). `low` is the floor a channel is judged
+    against, `core.snr.THRESHOLD_DB` (10 dB) by default. A channel with
+    no signal above its noise has no bar and is labeled as at the noise
+    floor, and one whose ambient recorded nothing is left out. When no
+    channel is left, a `ValueError` is raised. Returns the pane, or the
+    path written.
     """
     from ..core.snr import rms_signal_to_noise
     from .bars import ROW_HEIGHT, snr_chart
@@ -2777,44 +2908,45 @@ def plot_scalogram(history: Any, channel: int = 0, *,
                    path: str | os.PathLike | None = None,
                    show: bool = True, title: str | None = None,
                    size: tuple[int, int] | None = None) -> Any:
-    """Where one channel's frequencies are, moment by moment.
+    """Draw one channel's scalogram, its frequency content over time.
 
         from visualdynamics.plot import plot_scalogram
         plot_scalogram(history, path='scalogram.png')
 
-    The flat form of the app's wavelet reading: time across, frequency
-    up a logarithmic axis, magnitude as color in the record's own
-    units. The cone of influence is shaded, because inside it the
-    picture is an artifact of where the record was cut and looks
-    exactly like data. Time is held to `core.wavelet.COLUMNS` columns
-    by peak-hold — each column its slice's largest magnitude, the
-    reading `core.wavelet.scalogram_peaks` gives the app's own view —
-    so a long record draws in bounded memory; a script that wants the
-    transform itself calls `core.wavelet.scalogram`.
+    This is the flat form of the app's wavelet reading: time across,
+    frequency up a logarithmic axis, and magnitude as color in the
+    record's own units. The cone of influence is shaded, because there
+    the values depend on where the record was cut and look the same as
+    the rest of the data. Time is reduced to `core.wavelet.COLUMNS`
+    columns by peak-hold, each column the largest magnitude in its slice
+    (the reading `core.wavelet.scalogram_peaks` gives the app's own
+    view), so a long record is drawn in bounded memory. A script that
+    needs the transform itself calls `core.wavelet.scalogram`.
 
     Parameters
     ----------
     history : TimeHistory
         The record to read.
     channel : int, default 0
-        Which channel. One at a time: a scalogram is dense enough that
-        two side by side read as noise rather than as two answers.
+        Which channel. One is drawn at a time, because a scalogram is
+        dense enough that two side by side are hard to read.
     low, high : float, optional
-        The frequency range, in Hz. Defaults span from where a handful
+        The frequency range, in Hz. By default it runs from where a few
         of the longest wavelets still fit inside the record up to just
-        under Nyquist — a range the record can actually carry
-        (`core.wavelet.default_range`).
+        under Nyquist (`core.wavelet.default_range`).
     per_octave : int, optional
         Lines per octave. Defaults to `core.wavelet.PER_OCTAVE`.
     omega0 : float, optional
-        Cycles under the wavelet: the time-against-frequency trade.
-        Defaults to `core.wavelet.OMEGA0`.
+        Cycles under the wavelet, which trades resolution in time
+        against resolution in frequency. Defaults to
+        `core.wavelet.OMEGA0`.
     theme, path, show, title, size
-        As every other plot here.
+        As for every standalone plot.
 
     Returns
     -------
-    The pane, or the path written.
+    object
+        The pane, or the path written.
     """
     from ..core import wavelet as wavelet_math
     from .scalogram import scalogram_image
@@ -2845,9 +2977,7 @@ def plot_sine_tracking(history: Any, specification: Any, settings: Any, *,
                        path: str | os.PathLike | None = None,
                        show: bool = True, title: str | None = None,
                        size: tuple[int, int] = (1000, 700)) -> Any:
-    """One tone of a recording read through several tracking bands and
-    detectors, the levels overlaid against frequency over the
-    specification.
+    """Draw one tone's levels read with several tracking settings.
 
         from visualdynamics.core.sine_tracking import SineTracking
         visualdynamics.plot.plot_sine_tracking(
@@ -2857,12 +2987,12 @@ def plot_sine_tracking(history: Any, specification: Any, settings: Any, *,
              SineTracking(proportional=0.1)],
             path='tracking.png')
 
-    The readings are `core.sine_tracking.track_sine`'s, one per
-    setting, on one channel: `channel` names its DOF, the
-    specification's first control channel by default. Each reading
-    is drawn in its own color and with its own marker shape, named by
-    `SineTracking.describe`; the specification's target for the tone
-    stands behind them in gray.
+    The tone is read through several tracking bands and detectors, and
+    the levels are overlaid against frequency over the specification.
+    The readings come from `core.sine_tracking.track_sine`, one per
+    setting, on one channel. Each is drawn in its own color and with its
+    own marker shape and is named by `SineTracking.describe`, and the
+    specification's target for the tone is drawn in gray behind them.
 
     Parameters
     ----------
@@ -2871,14 +3001,15 @@ def plot_sine_tracking(history: Any, specification: Any, settings: Any, *,
     specification : SineSweepSpecification
         The sweep the drive followed.
     settings : SineTracking or sequence of SineTracking
-        The readings to overlay.
+        The tracking settings, one reading each.
     tone : str, optional
         Which tone; the specification's first by default.
     channel : str, optional
-        The DOF drawn; the first control channel by default.
+        The DOF drawn; the specification's first control channel by
+        default.
     onset : float, optional
-        Seconds into the recording where the tone's sweep begins;
-        found by matched filter when omitted.
+        Seconds into the recording where the tone's sweep begins; found
+        by matched filter when omitted.
     lines : int, optional
         Readings along the sweep, `core.sine_tracking.LINES` by default.
     unit_system, theme, path, show, title, size
@@ -2928,28 +3059,29 @@ def plot_tracking_filter(history: Any, specification: Any, setting: Any, *,
                          path: str | os.PathLike | None = None,
                          show: bool = True, title: str | None = None,
                          size: tuple[int, int] = (1100, 760)) -> Any:
-    """One tone's tracking band drawn on the record it reads: the
-    record and what the band passes, the record's time-frequency
-    picture with the band's corridor following the sweep, and the
-    band's shape at a cursor.
+    """Draw one tone's tracking band on the record it is applied to.
 
         from visualdynamics.core.sine_tracking import SineTracking
         visualdynamics.plot.plot_tracking_filter(
             history, spec, SineTracking(proportional=0.5),
             cursor_hz=100.0, path='band.png')
 
-    The passed waveform is `core.sine_tracking.track_waveform`'s, the
-    band `track_sine` reads its levels through; the picture is the
-    wavelet scalogram in dB below its largest, with the cone of
-    influence veiled; the corridor's edges are the drive plus and
-    minus half the bandwidth, so a proportional band runs parallel to
-    the tone up the log axis and a fixed one pinches toward the top.
-    Beside the picture, the band's magnitude at the cursor on the same
-    frequency axis, the drive marked inside it and each harmonic
-    outside; behind the cursor on the record, the band's weight on the
-    record before it, as long as the band takes to settle. Shown in a
-    window, the cursor drags. One setting per call; `plot_sine_tracking`
-    overlays the levels several settings read.
+    The plot shows the record and the band's output, the record's
+    time-frequency picture with the band's corridor following the sweep,
+    and the band's shape at a cursor. The passed waveform comes from
+    `core.sine_tracking.track_waveform`, through the same band
+    `track_sine` reads its levels with. The picture is the wavelet
+    scalogram in dB below its largest value, with the cone of influence
+    shaded. The corridor's edges are the drive frequency plus and minus
+    half the bandwidth, so a proportional band runs parallel to the tone
+    up the log axis and a fixed band narrows toward the top. Beside the
+    picture is the band's magnitude at the cursor on the same frequency
+    axis, with the drive marked inside it and each harmonic outside. On
+    the record, behind the cursor, the band's weight on the earlier
+    record is shaded over the time the band takes to settle. In a window
+    the cursor can be dragged; in a file it is fixed. One setting is
+    drawn per call; `plot_sine_tracking` overlays the levels read with
+    several settings.
 
     Parameters
     ----------
@@ -2958,20 +3090,22 @@ def plot_tracking_filter(history: Any, specification: Any, setting: Any, *,
     specification : SineSweepSpecification
         The sweep the drive followed.
     setting : SineTracking
-        The band, which must have one (proportional or fixed).
+        The tracking setting, which must have a band (proportional or
+        fixed).
     tone : str, optional
         Which tone; the specification's first by default.
     channel : str, optional
         The DOF drawn; the first control channel by default.
     onset : float, optional
-        Seconds into the recording where the tone's sweep begins;
-        found by matched filter when omitted.
+        Seconds into the recording where the tone's sweep begins; found
+        by matched filter when omitted.
     cursor : float, optional
-        Where the shape is read, seconds on the record's clock; the
+        Where the shape is read, in seconds on the record's clock; the
         middle of the tone's span by default.
     cursor_hz : float, optional
-        Or the instant the drive first reaches this frequency, Hz. Not
-        both.
+        Instead of `cursor`, a frequency in Hz: the cursor is placed
+        where the drive first reaches it. Giving both raises
+        `ValueError`.
     span : (float, float), optional
         The stretch of record the time axes show; the whole record by
         default.
@@ -2979,8 +3113,10 @@ def plot_tracking_filter(history: Any, specification: Any, setting: Any, *,
         The multiples of the drive marked, `(3,)` by default; empty to
         mark none.
     low, high : float, optional
-        The picture's frequency range, Hz: an octave under the sweep up
-        to half again past the highest harmonic marked by default.
+        The picture's frequency range, Hz. By default from an octave
+        below the sweep up to 1.5 times the highest harmonic marked, or
+        the band's top edge if that is higher
+        (`plot.tracking_filter.default_range`).
     omega0 : float, optional
         Cycles under the picture's wavelet,
         `plot.tracking_filter.OMEGA0` by default.
@@ -3026,25 +3162,29 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               show: bool = True, title: str | None = None,
               size: tuple[int, int] | None = None,
               summary: str = 'over') -> Any:
-    """The comparison as a bar per control channel.
+    """Draw a comparison as one bar per control channel.
 
         visualdynamics.plot.plot_bars(psds, spec, 'error', path='error.png')
 
-    `mode` picks the reading, which is the choice the app's toolbar
-    offers: `'error'` is the level — how far each channel's RMS sits
-    from what was asked for, in dB, over the band they share — and
-    `'lines'` is the shape — how much of each channel's band fell
-    outside an abort limit. A channel can sit at exactly the right level
-    and still be out of tolerance across half its band, which is why
-    both exist. `'srs'` is the shock reading: each channel's SRS
-    against its target, as a signed RMS deviation in dB.
+    `mode` picks the reading, as the app's toolbar does. 'error' is the
+    level: how far each channel's RMS is from the specification, in dB,
+    over the band they share. 'lines' is the shape: the percentage of
+    each channel's band outside an abort limit. A channel can be at
+    exactly the right level and still be out of tolerance across half
+    its band, which is why there are both. 'srs' is the shock reading:
+    each channel's SRS against its target, as a signed RMS deviation in
+    dB.
 
-    `low` and `high` are the thresholds, defaulting to +/-3 dB and 10%.
-    The chart grows with the channel count rather than squeezing them
-    in, so `size` defaults to whatever fits the channels there are.
-    Below it, a key to the colors. `summary` places the count: 'over'
-    the bars, in the plot's 'title' (what a narrow printed figure
-    wants), or 'none'.
+    `low` and `high` are the thresholds: -3 and +3 dB for 'error', 10 %
+    for 'lines' (which has only `low`), and -3 and +3 dB
+    (`core.compliance.SRS_ERROR_DB`) for 'srs'. The chart grows with the
+    number of channels, so `size` defaults to a height that fits them. A
+    key to the colors is drawn below the chart. `summary` places the
+    count: 'over' the bars, in the plot's 'title' (better for a narrow
+    printed figure), or 'none'.
+
+    Raises `ValueError` for an unknown `mode`, or when the two have no
+    channel in common. Returns the pane, or the path written.
     """
     from ..core.compliance import (
         ERROR_DB,
@@ -3117,26 +3257,35 @@ def plot_replication(measured: Any, specification: Any,
                      path: str | os.PathLike | None = None,
                      show: bool = True, title: str | None = None,
                      size: tuple[int, int] | None = None) -> Any:
-    """How closely a transient replicated the waveform it was asked for.
+    """Draw how closely a transient test reproduced its waveform.
 
         visualdynamics.plot.plot_replication(record, target, 'srs', path='srs.png')
 
-    `mode` picks the reading, the same four the app's bar offers:
-    `'overlay'` draws one repeat over the target it was aiming at, and
-    `'waveform'`, `'srs'` and `'level'` are the three numbers — the
-    difference between the waveforms as a share of the target, the
-    worst deviation of the shock response spectra, and the scale alone.
+    `mode` picks the reading, the same four as the app's bar. 'overlay'
+    draws one repeat over its target. 'waveform', 'srs' and 'level' are
+    bar charts of three numbers: the difference between the waveforms as
+    a percentage of the target, the worst deviation of the shock
+    response spectra in dB, and the level error alone in dB.
 
-    `event` is which repeat, counting from zero; left out, the bars
-    report every repeat and the overlay draws the first. No repeat is
-    singled out as the worst one — that is a judgment about what the
-    article is for, not a measurement, and the numbers are all returned
-    for the caller to make it with.
+    `event` is the repeat, counting from zero. When it is left out, the
+    bar charts have a bar for every repeat of every channel, and the
+    overlay draws the first repeat. No repeat is picked out as the
+    worst, because that is a judgment about what the test article is for
+    and not a measurement; every repeat is drawn, and
+    `core.replication.compare` returns the numbers for the caller to
+    decide.
 
-    `channel` is which control DOF the overlay draws, defaulting to the
-    first. One at a time and not all of them: six measured curves over
-    six targets share one set of colors, and nothing on the plot then
-    says which curve is the target.
+    `channel` is the control DOF the overlay draws, the first by
+    default. One channel is drawn at a time because six measured curves
+    over six targets share one set of colors, and nothing on the plot
+    would then show which curve is the target.
+
+    `low` and `high` are the bar chart's thresholds:
+    `core.replication.WAVEFORM_PERCENT` (20 %) and no upper threshold
+    for 'waveform', and -3 and +3 dB otherwise. Raises `ValueError` for
+    an unknown `mode`, a repeat that is not in the record, a channel
+    that is not a control channel, or when no channel can be scored.
+    Returns the pane, or the path written.
     """
     from ..core.compliance import ERROR_DB
     from ..core.replication import WAVEFORM_PERCENT, compare, event_slice

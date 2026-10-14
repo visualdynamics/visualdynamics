@@ -1,20 +1,21 @@
 """Plate meshes built from planes, and solid meshes built from blocks.
 
-A structure made of flat plates — a box, a channel, a bracket — is
-described most simply as the planes it is made of: each a rectangle at
-its mid-thickness, meshed into rectangular plate elements and put in an
-element group of its own. `plane` makes one; `assemble` joins them into one
-geometry and merges the nodes they share, so the plates are tied along
-the lines where their mid-surfaces meet (Brandon, 2026-09-26, for the
-BARC example). Where mid-surfaces do not meet — a bolted foot sitting on
-a wall — nothing is shared, and the join is a rigid link
-(`fem.RIGID`) between a node on each.
+A structure made of flat plates, such as a box, a channel or a bracket,
+is described most simply as the planes it is made of: each one a
+rectangle at its mid-thickness, meshed into rectangular plate elements
+and put in an element group of its own. `plane` makes one, and `block`
+makes a box of solid bricks the same way. `assemble` joins the pieces
+into one geometry and merges the nodes they share, so the plates are
+tied along the lines where their mid-surfaces meet. Where mid-surfaces
+do not meet, as with a bolted foot sitting on a wall, no node is shared,
+and the two are joined by rigid links (`fem.RIGID`) that `tie` adds.
 
 Each element group is then given a material and a thickness
-(`fem.GroupProperties`, or the Element Groups table) and `fem.Model.from_geometry` builds the model.
+(`fem.GroupProperties`, or the Element Groups table), and
+`fem.Model.from_geometry` builds the model.
 
-Nodes on a shared line coincide because both planes divide it the
-same way: give planes that meet the same element size.
+Nodes on a shared line coincide only because both planes divide it the
+same way, so planes that meet should be given the same element size.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from numpy.typing import ArrayLike
 
 from .geometry import Geometry
 
+# Planes joined by assemble were written for the BARC example (Brandon,
+# 2026-09-26); block followed for the Frame-Wing example (2026-09-30).
+
 __all__ = ['assemble', 'block', 'join', 'landing', 'plane', 'tie']
 
 
@@ -34,35 +38,35 @@ def plane(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
           size: float, name: str = '', *, unit: str | None = 'm') -> Geometry:
     """A rectangle meshed into four-node plate elements, in one element group.
 
-    Each edge is divided evenly into the whole number of elements that
-    comes nearest `size`, so the elements come out close to square and
-    close to that size (Brandon, 2026-09-26: even spacing, roughly square
-    elements, and nothing to lay out by hand). Planes that meet along a
-    line divide it the same way, since it is the same length in both, so
-    `assemble` ties them there.
+    Each edge is divided evenly into the whole number of elements nearest
+    `size`, so the elements come out close to square and close to that
+    size. Planes that meet along a line divide it the same way, since the
+    line has the same length in both, and `assemble` ties them there.
 
     Parameters
     ----------
     corner : array_like
         One corner, (x, y, z).
     edge_a, edge_b : array_like
-        The two edges from that corner, as vectors: their lengths are the
-        rectangle's sides. They must be perpendicular — the plate element
-        is a rectangle.
+        The two edges from that corner, as vectors; their lengths are the
+        rectangle's sides. They must be perpendicular, because the plate
+        element is a rectangle, and edges that are not are refused.
     size : float
-        The element size aimed at.
+        The element size aimed at, positive.
     name : str, optional
-        The element group's name — the part this plane is.
+        The element group's name, which is the part this plane is.
     unit : str or None, default 'm'
-        The unit every length given here is in. The geometry holds them
-        in SI, as any geometry with its units defined does, and remembers
-        this one; None leaves them as given, units undefined.
+        The unit every length given here is in. The geometry holds the
+        lengths in SI, as any geometry with its units defined does, and
+        remembers this unit; None leaves them as given, units undefined.
 
     Returns
     -------
     Geometry
         Nodes numbered from 1, one element group holding every element.
     """
+    # even spacing, roughly square elements and nothing to lay out by
+    # hand (Brandon, 2026-09-26)
     from ..units import si_transform
 
     scale = 1.0 if unit is None else si_transform(unit, 'length')[0]
@@ -105,51 +109,51 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     """A rectangular block meshed into eight-node bricks, in one element
     group.
 
-    `plane` one dimension up (2026-09-30, for the Frame-Wing
-    example): a corner and three perpendicular edges, each divided
-    evenly into the whole number of elements nearest `size`, so the
-    bricks come out close to cubes. Blocks that meet over a face divide
-    it the same way, since it is the same rectangle in both, so
-    `assemble` ties them there — give blocks that meet the same size.
+    This is `plane` in three dimensions: a corner and three perpendicular
+    edges, each divided evenly into the whole number of elements nearest
+    `size`, so the bricks come out close to cubes. Blocks that meet over a
+    face divide it the same way, since it is the same rectangle in both,
+    and `assemble` ties them there, so blocks that meet should be given
+    the same size.
 
-    Holes are cut the way a structured mesh can cut them: every brick
-    whose center lies within a hole's radius of its axis leaves the
-    block. A hole is (center, radius, axis) with the center a point on
-    the axis and the axis 0, 1 or 2 for the edge it runs along;
-    (center, radius, axis, depth) for a blind hole that depth from the
-    face the axis enters at; and a fifth item names the element group
-    its bricks go to instead of leaving — a threaded insert, given its
-    own material in the Element Groups table — or is None for a void. A hole with
-    no fifth item takes `hole_name`. Holes apply in order, a later one
-    over an earlier: a through hole, then an insert named to the same
-    radius part way down, then a void of the insert's bore, is a
-    threaded insert in a drilled hole. Every hole runs along the same
-    edge; one along another is refused, since the bricks are a grid
-    swept along it.
+    A hole is a cylinder along one of the block's edges, and every brick
+    whose center lies within the hole's radius of its axis is taken out
+    of the block. A hole is given as (center, radius, axis), with the
+    center a point on the hole's axis and `axis` 0, 1 or 2 for the edge it
+    runs along (`edge_a`, `edge_b` or `edge_c`); as (center, radius, axis,
+    depth) for a blind hole of that depth, measured from the end face
+    nearer the center point; and with a fifth item naming the element
+    group the hole's bricks go to instead of being removed (a threaded
+    insert, given its own material in the Element Groups table), or None
+    to remove them. A hole with no fifth item uses `hole_name`. Holes are
+    applied in order, a later one over an earlier, so a through hole, then
+    an insert of the same radius part way down, then a void the size of
+    the insert's bore, is a threaded insert in a drilled hole. Every hole
+    must run along the same edge, because the bricks are a grid swept
+    along it; holes along different edges are refused.
 
-    A hole is round, not stair-stepped — a stair-stepped hole in a
-    member six bricks wide was anywhere from three to four bricks across
-    as its center fell, and the frame's modes wandered by ten percent
-    with it (2026-09-30). Mesh Solids' mesher does it (`solids._mesh_grid`,
-    one rule for both, 2026-10-11): about a hole with room the grid is
-    replaced by a ring mesh, the circle's nodes on it and evenly spaced,
-    a core where an insert fills it; a hole without room has the grid's
-    nodes on its rim pulled onto the circle, sliding along the block's
-    face where it breaks out. A hole centered on the block's edge is a
-    round-over and keeps its steps: its corner brick cannot follow an
-    arc, and its area is within a few percent of the fillet's already.
+    A hole is meshed round, not stair-stepped, by the same mesher Mesh
+    Solids uses. Where there is room around the hole, the grid there is
+    replaced by a ring mesh with its nodes evenly spaced on the circle,
+    and a core of bricks where an insert fills it. Where there is not
+    room, the grid's nodes nearest the rim are moved onto the circle,
+    sliding along the block's face where the hole breaks out. A hole
+    whose center lies on the block's edge is a round-over and keeps its
+    steps, because its corner brick cannot follow an arc, and its area is
+    already within a few percent of the fillet's.
 
     Parameters
     ----------
     corner : array_like
         One corner, (x, y, z).
     edge_a, edge_b, edge_c : array_like
-        The three edges from that corner, as vectors: their lengths are
-        the block's sides. They must be perpendicular.
+        The three edges from that corner, as vectors; their lengths are
+        the block's sides. They must be perpendicular, and edges that are
+        not are refused.
     size : float
-        The element size aimed at.
+        The element size aimed at, positive.
     name : str, optional
-        The element group's name — the part this is.
+        The element group's name, which is the part this block is.
     unit : str or None, default 'm'
         The unit every length given here is in, as for `plane`.
     holes : sequence of tuple, optional
@@ -163,7 +167,19 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
     Geometry
         Nodes numbered from 1; one element group, and one more for each
         name the holes put bricks in.
+
+    Raises
+    ------
+    ValueError
+        If an edge has no length, the edges are not perpendicular, `size`
+        is not positive, the holes run along different edges, or the
+        holes leave no bricks.
     """
+    # A stair-stepped hole in a member six bricks wide was anywhere from
+    # three to four bricks across as its center moved, and the frame's
+    # modes changed by ten percent with it (2026-09-30), so a hole is
+    # meshed round. Mesh Solids and this share one mesher,
+    # `solids._mesh_grid` (2026-10-11).
     from ..units import si_transform
     from .solids import _mesh_grid
 
@@ -242,9 +258,11 @@ def block(corner: ArrayLike, edge_a: ArrayLike, edge_b: ArrayLike,
 def landing(geometry: Geometry, part: Geometry,
             tolerance: float | None = None,
             apart: bool = False) -> tuple[np.ndarray, np.ndarray]:
-    """Which of `part`'s nodes fall on a node of `geometry`, and which one
-    — what `join` does with them, asked without joining: Add Plane's
-    reading says how many nodes a plane would share before it is added.
+    """Which of `part`'s nodes fall on a node of `geometry`, and on which
+    one.
+
+    This is the matching `join` does, without the join, so Add Plane's
+    reading can say how many nodes a plane would share before it is added.
 
     Parameters
     ----------
@@ -291,8 +309,8 @@ def _own_group_rows(geometry: Geometry, part: Geometry) -> np.ndarray:
 
 
 def group_families(geometry: Geometry, group_id: int) -> set[str]:
-    """The element families an element group of `geometry` holds: empty for an
-    element group with no elements yet."""
+    """The element families an element group of `geometry` holds, empty
+    for an element group with no elements yet."""
     import numpy as np
 
     from .geometry import element_family
@@ -304,13 +322,14 @@ def group_families(geometry: Geometry, group_id: int) -> set[str]:
 def group_refusal(geometry: Geometry, part: Geometry) -> str | None:
     """Why `part` cannot join `geometry` by element group name, or None.
 
-    An element group holds one element family (`Geometry.mixed_groups`), and a
-    part whose element group is named like one already holding another family
-    would make it two at once: a plate added under the name of an element group
-    of bricks was one element group, deleted whole from either family's row in
-    the tree (Brandon, 2026-10-02). The one rule `join` refuses by and
-    the Add pane reads before it offers Add.
+    An element group holds one element family (`Geometry.mixed_groups`),
+    so a part whose element group has the name of one that already holds
+    another family is refused. This is the one rule `join` refuses by, and
+    the Add pane checks it before it offers Add.
     """
+    # A plate added under the name of an element group of bricks made one
+    # element group of two families, deleted whole from either family's
+    # row in the tree (Brandon, 2026-10-02).
     from .geometry import FAMILY_LABELS
 
     names = list(geometry.group_name)
@@ -340,9 +359,9 @@ def _solid_cells(geometry: Geometry) -> set[tuple]:
 
 def already_there(geometry: Geometry, part: Geometry,
                   tolerance: float | None = None, apart: bool = False) -> int:
-    """How many of `part`'s elements `join` would leave out for being
-    elements already there — every corner on a node already there, the
-    cell already filled — so a reading can say it before the Add."""
+    """How many of `part`'s solid elements `join` would leave out because
+    they are already there (every corner on a node already there and the
+    cell already filled), so a reading can say it before the Add."""
     import numpy as np
 
     on, nearest = landing(geometry, part, tolerance, apart)
@@ -361,18 +380,24 @@ def already_there(geometry: Geometry, part: Geometry,
 
 def join(geometry: Geometry, part: Geometry,
          tolerance: float | None = None, apart: bool = False) -> dict:
-    """Put `part` into `geometry`, in place: each of the part's nodes that
-    falls on a node already there becomes that node, the rest are added
-    after the highest id, and the part's elements follow them. The nodes
-    already there keep their ids — data linked to the geometry names
-    them — which is what makes this the way a plane is added to a model
-    under construction (Add Plane) as well as how `assemble` builds one.
+    """Put `part` into `geometry`, in place.
 
-    An element group of the part named like one already in the geometry joins it:
-    the five planes of a box, each named 'box', are one part, given its
-    material once. An unnamed element group is always an element group of its own. A
-    named element group holding another element family is refused
-    (`group_refusal`): an element group holds one family.
+    Each of the part's nodes that falls on a node already there becomes
+    that node, the rest are added after the highest id, and the part's
+    elements follow them. The nodes already there keep their ids, because
+    data linked to the geometry refers to them by id, so this is how a
+    plane is added to a model under construction (Add Plane) as well as
+    how `assemble` builds one. A solid element of the part that would fill
+    a cell already filled is left out, so the overlap of two crossing bars
+    is counted once.
+
+    An element group of the part with the same name as one already in the
+    geometry joins it, so the five planes of a box, each named 'box', are
+    one part and are given a material once. An unnamed element group is
+    always an element group of its own. A named element group holding a
+    different element family is refused (`group_refusal`), since an
+    element group holds one family, and so is a part whose length unit is
+    defined when the geometry's is not, or the other way round.
 
     Parameters
     ----------
@@ -387,20 +412,22 @@ def join(geometry: Geometry, part: Geometry,
         size of the two together.
     apart : bool, default False
         Land only on the nodes of the element group the part joins by
-        name, so a part meshed against another — a channel's foot on
-        the box it is bolted to — keeps nodes of its own where the two
-        touch, coincident and unjoined, until Merge Coincident Nodes
-        joins the places picked (Brandon, 2026-10-11: the BARC's bolts).
-        A plane of the box still joins the box's other planes.
+        name, so a part meshed against another (a channel's foot on the
+        box it is bolted to) keeps nodes of its own where the two touch,
+        coincident and not joined, until Merge Coincident Nodes joins the
+        places picked. A plane of the box still joins the box's other
+        planes.
 
     Returns
     -------
     dict
-        'added', the nodes added; 'shared', the part's nodes that fell on
-        nodes already there; 'elements', the elements added; 'duplicates', the part's
-        elements left out for being elements already there; 'groups',
-        the ids of the element groups they went into.
+        'added', the number of nodes added; 'shared', the number of the
+        part's nodes that fell on nodes already there; 'elements', the
+        number of elements added; 'duplicates', the number of the part's
+        solid elements left out because they were already there;
+        'groups', the ids of the element groups they went into.
     """
+    # apart is for the BARC's bolts (Brandon, 2026-10-11).
     if (geometry.num_nodes and part.num_nodes
             and geometry.units_defined != part.units_defined):
         raise ValueError('one has its length unit defined and the other '
@@ -451,21 +478,27 @@ def join(geometry: Geometry, part: Geometry,
 
 def assemble(*parts: Geometry, tolerance: float | None = None,
              apart: bool = False) -> Geometry:
-    """One geometry from several, joined in turn (`join`): nodes numbered
-    from 1 in the order they arrive, a node falling on one already there
-    becoming it — so planes meeting along a line are tied there — and
-    element groups of the same name one element group. Unnamed element groups stay apart.
+    """One geometry from several, joined in turn by `join`.
+
+    Nodes are numbered from 1 in the order they arrive, and a node that
+    falls on one already there becomes it, so planes meeting along a line
+    are tied there. Element groups of the same name become one element
+    group; unnamed element groups stay separate. Coincident nodes within
+    one part, which `join` does not look for, are merged as well (with
+    `apart`, only within each element group).
 
     Parameters
     ----------
     *parts : Geometry
-        The pieces, in the same length unit.
+        The pieces, at least one, all in the same length unit; parts in
+        different units are refused.
     tolerance : float, optional
-        How close nodes must be to be one, in meters (as the geometry
-        holds them). Defaults to a millionth of the assembly's size.
+        How close nodes must be to be one, in the units the geometry holds
+        them in (meters when the length unit is defined). Defaults to a
+        millionth of the assembly's size.
     apart : bool, default False
-        Join each piece only to its own element group's nodes (`join`):
-        the element groups touch without sharing a node.
+        Join each piece only to its own element group's nodes (`join`),
+        so the element groups touch without sharing a node.
 
     Returns
     -------
@@ -510,16 +543,17 @@ def _element_rows(geometry: Geometry, elements: Any) -> np.ndarray:
 
 def tie(geometry: Geometry, elements: Any, to: Any,
         group: str | None = None) -> dict:
-    """Tie a patch of elements rigidly to what lies under it (Tie): every
-    node of `elements` joined by a rigid, massless link to the nearest
-    node of `to`, the links added to a rigid element group. A bolted joint is the
-    use (Brandon, 2026-09-26): select the elements under a washer, tie
-    them to the part below — one step per bolt where two clicks per link
-    had been the only way.
+    """Tie a patch of elements rigidly to what lies under it (Tie).
 
-    A node the patch shares with the target is already joined and is
-    left alone. Each link runs from the target's node to the patch's, so
-    the patch follows the part it is bolted to.
+    Every node of `elements` is joined by a rigid, massless link to the
+    nearest node of `to`, and the links are added to a rigid element
+    group. The use is a bolted joint: select the elements under a washer
+    and tie them to the part below, one step per bolt.
+
+    A node the patch shares with the target is already joined and is left
+    alone, and a patch whose nodes are all shared with the target is
+    refused. Each link runs from the target's node to the patch's, so the
+    patch follows the part it is bolted to.
 
     Parameters
     ----------
@@ -528,11 +562,13 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     elements : sequence of int
         The patch, by element id.
     to : str, int or sequence of int
-        What to tie to: an element group, by name or id — its nearest nodes — or a
-        second patch, by element ids.
+        What to tie to: an element group, by name or id (its nodes nearest
+        the patch), or a second patch, by element ids.
     group : str, optional
-        The element group the links go into, by name, made rigid if new. Defaults
-        to the geometry's first rigid element group, or a new one named 'ties'.
+        The element group the links go into, by name. One that is new or
+        has no properties yet is made rigid; one with other properties is
+        refused. Defaults to the geometry's first rigid element group, or
+        else one named 'ties'.
 
     Returns
     -------
@@ -541,6 +577,8 @@ def tie(geometry: Geometry, elements: Any, to: Any,
         alone because the target holds them already; 'group', the id of
         the element group the links went into.
     """
+    # A bolted joint is the use (Brandon, 2026-09-26): before Tie, two
+    # clicks per link were the only way.
     from scipy.spatial import cKDTree
 
     from .fem import RIGID, GroupProperties

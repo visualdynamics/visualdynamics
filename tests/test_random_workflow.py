@@ -373,6 +373,15 @@ def test_a_folder_that_does_not_exist_yet_is_a_file_name(tmp_path):
     assert pathlib.Path(written).is_file()
 
 
+def test_a_name_ending_in_a_separator_is_a_folder_made_if_need_be(tmp_path):
+    """Taken as a folder, and then not found when the report was written
+    (2026-10-13): a name that says folder is made."""
+    written = visualdynamics.random_vibration_report(
+        fixture_path('plate', RUN), str(tmp_path / 'reports') + '/')
+    assert pathlib.Path(written).parent == tmp_path / 'reports'
+    assert pathlib.Path(written).is_file()
+
+
 def test_left_out_it_asks_once_and_reports_on_everything_chosen(tmp_path,
                                                                 monkeypatch):
     """No run given: a dialog, and one report per run chosen.

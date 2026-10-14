@@ -1,121 +1,111 @@
 """A swept sine read the way a controller's tracking filter reads it.
 
-`core.sine.extract_sine` is the best estimate of a tone's level there
-is: every tone solved jointly, debiased, its smoothing chosen from the
-data. That is the right number for a report and the wrong one for a
-question a test floor asks often — *why does the controller's level
-disagree with mine?* — because the controller did not read it that
-way. It read the response through a tracking filter, a band-pass that
-follows the drive frequency, of a fixed width in Hz or a width
-proportional to the drive, and turned what came out into a level with
-a detector: the peak, the RMS or the mean absolute value (the last two
-reported as the peak of the sine they would be), or the filter's own
-output. This module does that, so the readings can be laid side by
-side and the difference seen rather than argued.
+`core.sine.extract_sine` gives the best estimate of a tone's level:
+every tone solved jointly, debiased, with its smoothing chosen from the
+data. That is the right value for a report, but it does not answer a
+question often asked on a test floor, why the controller's level differs
+from the extracted one, because the controller did not read the level
+that way. A controller reads the response through a tracking filter, a
+band-pass that follows the drive frequency, with a fixed width in Hz or a
+width proportional to the drive frequency. A detector then turns the
+filter's output into a level: the peak, the RMS or the mean absolute
+value (the last two reported as the peak of the sine they correspond
+to), or the filter's own output. This module does the same, so the
+readings can be plotted side by side and the difference seen directly.
 
-What the readings show, and why the module exists: a harmonic or
-broadband noise moves the level by an amount that depends on the
-detector and on the filter. Read unfiltered, a peak detector counts
-the harmonic's peaks and an RMS detector counts its power; read
-through the filter, neither is seen. The filter's price is time: it
-settles in roughly one over its bandwidth, so a narrow band lags a
-change in level that a wide one follows. Which reading a controller
-used is a setting, and the same response record gives a different
-level curve for each.
+A harmonic or broadband noise changes the level by an amount that
+depends on the detector and on the filter. Read unfiltered, a peak
+detector includes the harmonic's peaks and an RMS detector includes its
+power; read through the filter, neither includes it. The cost of the
+filter is time: it settles in roughly one over its bandwidth, so a
+narrow band lags a change in level that a wide one follows. Which
+reading a controller used is a setting, and the same response record
+gives a different level curve for each.
 
-**Demodulation.** The record is multiplied by the complex exponential
-of the drive's own phase, which moves the drive frequency to zero; a
-low-pass of half the bandwidth there *is* the band-pass about the
-drive, and its magnitude is the tone's amplitude. A band-pass run on
-the raw record would have to be centered afresh at every frequency of
-the sweep; the low-pass only changes its corner.
+The record is demodulated: multiplied by the complex exponential of the
+drive's own phase, which moves the drive frequency to zero. A low-pass
+with its corner at half the bandwidth is then the band-pass about the
+drive, and its magnitude is the tone's amplitude. A band-pass run on the
+raw record would have to be centered again at every frequency of the
+sweep; the low-pass only changes its corner.
 
-**Causal, on purpose.** `core.filters.filtered` runs forward and
-backward for zero phase, which is right for a record and wrong here:
-the point of the reading is the lag a controller's filter has, and a
-zero-phase pass would spread it to both sides of a change and hide it.
-The filter runs forward only, starting settled on the tone's first
-cycle, the way a controller's filter has settled during the ramp-up
-before the sweep proper begins.
+The filter is causal. `core.filters.filtered` runs forward and backward
+for zero phase, which is right for a record and wrong here: the reading
+is meant to show the lag a controller's filter has, and a zero-phase
+pass would spread it to both sides of a change and hide it. The filter
+runs forward only, starting settled on the tone's first cycle, the way a
+controller's filter has settled during the ramp-up before the sweep
+begins.
 
-**One filter, integrated through every sample.** A proportional
-band's corner moves with the drive, so no fixed digital design fits
-it. The first cut redesigned `core.filters.design`'s Butterworth each
-time the corner had moved one percent and carried the state across,
-and it measured wrong two ways (2026-10-05). Carried raw, the state of
-a narrow section rang at each redesign: 5.7 % of error on a clean log
-sweep read at 10 %. Carried as its settled part plus the transient in
-flight, the redesigns still came at a steady rate along a log sweep,
-and the demodulation's image (below) mixed down against that rate: at
-50 % the image got through ten times stronger than the filter allows,
-and a step a third the size moved the mixing frequency without curing
-the leak. So the filter is the same Butterworth — scipy's analog
-prototype, the one `design`'s `butter` maps to a digital filter — split
-into its first-order modes, and each mode is integrated exactly across
-each sample at the corner that sample has, the input held over the
-sample. Nothing is redesigned; a constant input stays constant to
-rounding whatever the corner does, because a mode's settled state does
-not depend on its corner; and the image gets through at the filter's
-own response, measured equal to it. A fixed band is the same code with
-a corner that does not move. Against `design`'s bilinear filter at a
-fixed corner well below Nyquist it differs by 0.3 % RMS on white
-noise, the hold against the bilinear map, which no level reads.
+One filter is integrated through every sample. A proportional band's
+corner moves with the drive, so no fixed digital design fits it. The
+filter is the Butterworth low-pass from scipy's analog prototype (the
+one `core.filters.design` maps to a digital filter through `butter`),
+split into its first-order modes, and each mode is integrated exactly
+across each sample at that sample's corner, with the input held over
+the sample. Nothing is redesigned along the sweep. A constant input
+stays constant to rounding whatever the corner does, because a mode's
+settled state does not depend on its corner, and the demodulation's
+image (below) is attenuated by the filter's own response, as measured.
+A fixed band is the same code with a corner that does not move. Against
+`design`'s bilinear filter at a fixed corner well below Nyquist, the
+output differs by 0.3 % RMS on white noise (the held input against the
+bilinear map), which is too small to change a level.
 
-**Fourth order by default, because of the image.** Demodulating a real
-record moves the tone to zero and also leaves its mirror image at
-twice the drive frequency, which the low-pass attenuates by its
-response there, about (bandwidth / (4 x drive)) to the power of the
-order; what gets through is a ripple at twice the drive. At second
-order that is 1.6 % at 50 % proportional and 6.2 % at 100 %, a
-demodulator's artifact rather than a reading; at fourth order, 0.02 %
-and 0.4 %. A wide fixed band at the bottom of a sweep — half the
-bandwidth near or past the drive frequency — is the case where the
-band is no longer about the drive at all, and there the ripple is what
-the reading shows.
+The order is four by default because of that image. Demodulating a real
+record moves the tone to zero and also leaves its mirror image at twice
+the drive frequency, which the low-pass attenuates by its response
+there, about (bandwidth / (4 x drive)) to the power of the order. What
+gets through is a ripple at twice the drive frequency. At second order
+it is 1.6 % at 50 % proportional and 6.2 % at 100 %, an error from the
+demodulation and not part of the reading; at fourth order it is 0.02 %
+and 0.4 %. A wide fixed band at the bottom of a sweep, with half the
+bandwidth near or above the drive frequency, is no longer a band about
+the drive, and there the reading shows the ripple.
 
-**A peak is the peak of the samples**, as a sampled detector reads
-it: it under-reads a sine by at most cos(pi x drive / sample rate),
-0.3 % at a fortieth of the sample rate. RMS and mean read over the
-same span, a whole number of the drive's cycles (`DETECTOR_CYCLES`
-by default), where a pure sine's RMS times the square root of two and
-its mean absolute value times pi/2 are its peak exactly.
+A peak is the peak of the samples, as a sampled detector reads it. It
+under-reads a sine by at most a factor of cos(pi x drive / sample rate),
+0.3 % at a fortieth of the sample rate. RMS and mean are read over a
+span of the drive's cycles (one, `DETECTOR_CYCLES`, by default). Over a
+whole number of cycles a pure sine's RMS times the square root of two,
+and its mean absolute value times pi/2, equal its peak exactly.
 
-They are exact only if the span really is a whole number of cycles
-and the waveform between the samples is seen. Read off the samples
-alone, neither holds when a cycle is a few samples long: the span
-snapped to whole samples, and |x| has a corner at every zero crossing
-that a handful of samples cannot place. On a clean 2 m/s**2 tone
-sampled at 4096 Hz, one cycle, RMS read 3.6 % off at 400 Hz (10
-samples a cycle) and mean 9 % at 750 Hz (5.5) (2026-10-05, found in
-review; the tests here run at 51 samples a cycle and never saw it).
-So the two are read from the band-limited waveform: the samples
-around each span upsampled until a cycle has `FINE_POINTS` points
-(`scipy.signal.resample_poly`), and averaged over exactly the span's
-phase, its first point interpolated at the span's start. Measured
-the same way, a clean sweep to 780 Hz: RMS within 0.005 % and mean
-within 0.08 % sampled at 4096 Hz (5.3 samples a cycle at the top),
-both within 0.09 % at 2048 Hz (2.6). The reconstruction leans on `MARGIN` samples
-either side of a span, so a reading looks that far past its instant:
-interpolation, not a lag. The peak stays the peak of the samples, by
-design: that is how a sampled controller reads it.
+That is exact only if the span really is a whole number of cycles and
+the waveform between the samples is included. Read from the samples
+alone, neither holds when a cycle is only a few samples long: the span
+is rounded to whole samples, and |x| has a corner at every zero crossing
+that a few samples cannot locate. On a clean 2 m/s**2 tone sampled at
+4096 Hz, over one cycle, RMS read 3.6 % off at 400 Hz (10 samples a
+cycle) and mean 9 % off at 750 Hz (5.5 samples a cycle). So both are
+read from the band-limited waveform: the samples around each span are
+upsampled until a cycle has `FINE_POINTS` points
+(`scipy.signal.resample_poly`) and averaged over exactly the span's
+phase, with its first point interpolated at the span's start. Measured
+the same way on a clean sweep to 780 Hz, RMS is within 0.005 % and mean
+within 0.08 % sampled at 4096 Hz (5.3 samples a cycle at the top), and
+both are within 0.09 % at 2048 Hz (2.6 samples a cycle). The
+reconstruction uses `MARGIN` samples on either side of a span, so a
+reading looks that far past its instant; that is interpolation, not a
+lag. The peak is still the peak of the samples, because that is how a
+sampled controller reads it.
 
-**The waveform, the shape and the weight, from the same filter.** A
-level is what a controller reports; the view that explains it draws
-the record through the band, the band's magnitude about the drive and
-the band's weight on the record behind any instant
-(`plot.tracking_filter`). All three come from here, so the picture
-cannot describe a different filter from the one that read the level:
-`track_waveform` is `track_sine`'s own band run over every sample of
-the span, and `SineTracking.response` and `SineTracking.weighting` are
-the frequency and impulse responses of the same Butterworth modes the
-band is integrated with — at the corner a given drive frequency has,
-since a proportional band has a different one at every instant.
+The waveform, the band's shape and its weighting all come from the same
+filter. A controller reports a level; the view that explains it draws
+the record through the band, the band's magnitude about the drive, and
+the band's weighting of the record before any instant
+(`plot.tracking_filter`). All three come from here, so the plot cannot
+describe a different filter from the one that read the level.
+`track_waveform` runs `track_sine`'s own band over every sample of the
+span, and `SineTracking.response` and `SineTracking.weighting` are the
+frequency and impulse responses of the same Butterworth modes the band
+is integrated with, at the corner a given drive frequency has, since a
+proportional band has a different corner at every instant.
 
-**Memory.** One channel's span of the tone is held at a time, with
-its phase, the demodulated record, the filter's output and one mode's
-working arrays beside it — about a hundred bytes a sample. The extraction streams where this does
-not; a recording of tens of millions of samples per channel wants
-the extraction's chunking, which this first cut does not have.
+One channel's span of the tone is held in memory at a time, with its
+phase, the demodulated record, the filter's output and one mode's
+working arrays, about a hundred bytes a sample. The extraction streams
+its record in chunks and this module does not, so a recording of tens
+of millions of samples per channel is better read with the extraction.
 
 References
 ----------
@@ -156,6 +146,22 @@ from .sine import (
     _control_rows,
     find_environment,
 )
+
+# Why the filter is integrated mode by mode (2026-10-05). The first cut
+# redesigned `core.filters.design`'s Butterworth each time the corner had
+# moved one percent and carried the state across, and it measured wrong
+# two ways. Carried raw, the state of a narrow section rang at each
+# redesign: 5.7 % of error on a clean log sweep read at 10 %. Carried as
+# its settled part plus the transient in flight, the redesigns still came
+# at a steady rate along a log sweep, and the demodulation's image mixed
+# down against that rate: at 50 % the image got through ten times
+# stronger than the filter allows, and a step a third the size moved the
+# mixing frequency without curing the leak.
+#
+# Why RMS and mean read the band-limited waveform (2026-10-05, found in
+# review): the 3.6 % and 9 % errors in the module docstring were read off
+# the samples alone, and the tests here, at 51 samples a cycle, never saw
+# them.
 
 #: the detectors, by the name a setting takes: the filter's own
 #: output, and the three that read a waveform over a span of cycles
@@ -213,27 +219,29 @@ LINES = 400
 class SineTracking:
     """How a tone is read: through which band, by which detector.
 
-    `proportional` is the band's width as a fraction of the drive
-    frequency (0.5 is 50 %); `fixed` is a width in Hz. Neither is an
-    unfiltered reading, where the detector reads the record as it
-    stands. Both at once is refused — a band is one or the other — and
-    so is the filter's own output with no filter. Which band this is
-    follows from which width exists (`kind`), the way
+    `proportional` is the band's full width as a fraction of the drive
+    frequency (0.5 is 50 %); `fixed` is a width in Hz. With neither, the
+    reading is unfiltered and the detector reads the record as it is.
+    Both at once raises ValueError, since a band is one or the other, and
+    so does the filter's own output with no filter. Which band this is
+    follows from which width is set (`kind`), the way
     `core.filters.Filtering` derives low- or high-pass from its edges,
     so no setting can contradict its numbers.
 
-    `detector` is 'filtered' (the band's own output: the demodulated
-    amplitude at the instant of the reading), 'peak', 'rms' or 'mean'
-    — the last two reported as the peak of the sine they would be
-    (`TO_PEAK`). The three waveform detectors read over the last
-    `cycles` cycles of the drive; the filter's output ignores it.
-    `order` is the low-pass's design order (`ORDER`).
+    `detector` is 'filtered' (the default: the band's own output, the
+    demodulated amplitude at the instant of the reading), 'peak', 'rms'
+    or 'mean', the last two reported as the peak of the sine they
+    correspond to (`TO_PEAK`). The three waveform detectors read over the
+    last `cycles` cycles of the drive (default `DETECTOR_CYCLES`, more
+    than zero); the filter's output does not use it. `order` is the
+    low-pass's design order (default `ORDER`, at least one).
 
-    A proportional band must sit under twice the drive frequency: past
-    that, half of it reaches below zero frequency at every point of the
-    sweep, and the band is not about the drive anywhere. Frozen like
-    `Filtering`, so a setting cannot change under the levels read with
-    it.
+    A proportional band must be narrower than twice the drive frequency
+    (a fraction between zero and two): wider, half of it reaches below
+    zero frequency at every point of the sweep, and the band is not
+    about the drive anywhere. A fixed band must be wider than zero. The
+    setting is frozen like `Filtering`, so it cannot change under the
+    levels read with it.
     """
 
     detector: str = 'filtered'
@@ -274,8 +282,8 @@ class SineTracking:
 
     @property
     def kind(self) -> str:
-        """'unfiltered', 'proportional' or 'fixed' — derived from which
-        width exists, never stored beside it."""
+        """'unfiltered', 'proportional' or 'fixed', derived from which
+        width is set rather than stored beside it."""
         if self.proportional is not None:
             return 'proportional'
         if self.fixed is not None:
@@ -284,6 +292,8 @@ class SineTracking:
 
     def bandwidth(self, frequency: Any) -> np.ndarray:
         """The band's full width in Hz at drive frequency `frequency`.
+
+        Raises ValueError on an unfiltered reading, which has no band.
 
         Parameters
         ----------
@@ -304,10 +314,12 @@ class SineTracking:
 
     def settling(self, frequency: Any) -> np.ndarray:
         """Roughly how long the band takes to follow a change of level,
-        in seconds: one over its width. A rule of thumb rather than a
-        bound — the fourth-order filter reaches half of a step in level
-        at about 0.9 of it and nine tenths at about 1.3, the same at
-        every width, measured on a step in a swept tone (2026-10-05).
+        in seconds: one over its width.
+
+        A rule of thumb rather than a bound. On a step in level in a
+        swept tone, the fourth-order filter reaches half of the step at
+        about 0.9 of this time and nine tenths at about 1.3, the same at
+        every width.
 
         Parameters
         ----------
@@ -319,6 +331,7 @@ class SineTracking:
         ndarray
             Seconds, the shape of `frequency`.
         """
+        # the 0.9 and 1.3 measured on a step in a swept tone (2026-10-05)
         return 1.0 / self.bandwidth(frequency)
 
     def response(self, drive: float, frequencies: Any) -> np.ndarray:
@@ -327,14 +340,14 @@ class SineTracking:
         instant.
 
         The low-pass's response at the offset from the drive, which is
-        what a band-pass about the drive is after demodulation; −3 dB
-        at the drive plus and minus half the bandwidth, by the
-        Butterworth's definition. What the image at twice the drive
-        adds (the module docstring's ripple) is not in it: that is the
-        demodulator's artifact, not the band's shape. The analog
-        prototype's response, the one each mode is integrated from;
-        the held input moves it by nothing a picture shows this far
-        below the sample rate.
+        the band-pass about the drive after demodulation. It is -3 dB at
+        the drive plus and minus half the bandwidth, by the Butterworth's
+        definition. The ripple from the image at twice the drive (see
+        the module docstring) is not included, since it comes from the
+        demodulation, not from the band's shape. This is the analog
+        prototype's response, the one each mode is integrated from; well
+        below the sample rate, the held input changes it by less than a
+        plot can show.
 
         Parameters
         ----------
@@ -363,10 +376,10 @@ class SineTracking:
 
         It integrates to one (a settled band reads a steady tone at its
         amplitude), rises from zero, peaks and has a small negative
-        lobe — the overshoot a fourth order has on a step. Its running
-        integral is the band's step response, half way at about 0.9 of
-        one over the bandwidth (`settling`). Zero at negative lags: the
-        band cannot see ahead.
+        lobe, the cause of the overshoot a fourth-order filter has on a
+        step. Its running integral is the band's step response, half way
+        at about 0.9 of one over the bandwidth (`settling`). It is zero
+        at negative lags, since the filter is causal.
 
         Parameters
         ----------
@@ -391,9 +404,10 @@ class SineTracking:
         return np.where(lags >= 0.0, total.real, 0.0)
 
     def describe(self) -> str:
-        """The reading in words — 'rms as peak, 10 % proportional'. One
-        implementation: a legend, the levels' comments and the guide
-        all say it this way."""
+        """The reading in words, such as 'rms as peak, 10 % proportional'.
+
+        The legend, the levels' comments and the guide all use this
+        wording."""
         if self.proportional is not None:
             band = f'{self.proportional * 100.0:g} % proportional'
         elif self.fixed is not None:
@@ -637,15 +651,19 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     """Read one tone through a tracking filter and detector, one level
     per setting.
 
-    The tone's sweep is rebuilt from the specification and laid on the
+    The tone's sweep is rebuilt from the specification and placed on the
     recording where its sweep begins (found by matched filter, as the
-    extraction finds it, or at `onset` seconds into the recording);
-    each channel is demodulated against the sweep's phase once, and
-    each setting reads it: through its band, if it has one, then by
-    its detector. Every setting is read at the same `lines` instants,
-    evenly spaced through the tone's span from the first instant every
-    detector has a whole span behind it, so the levels overlay line for
-    line.
+    extraction finds it, or at `onset` seconds into the recording). Each
+    channel is demodulated against the sweep's phase once, and each
+    setting reads it through its band, if it has one, then by its
+    detector. Every setting is read at the same instants, up to `lines`
+    of them, evenly spaced from the first instant at which every
+    detector has a whole span behind it to the end of the tone's span,
+    so the levels overlay line for line.
+
+    Raises ValueError when no setting is given, when the recording is not
+    evenly sampled, when a channel to be read is not in it, or when it holds
+    less of the tone than the longest detector span.
 
     Parameters
     ----------
@@ -654,8 +672,8 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     specification : SineSweepSpecification
         The sweep the drive followed.
     settings : SineTracking or sequence of SineTracking
-        The readings to take. Several from one record is the point:
-        the same response through different bands and detectors.
+        The readings to take: usually several, the same response
+        through different bands and detectors.
     tone : str, optional
         Which tone, by name; the specification's first by default.
     onset : float, optional
@@ -664,19 +682,19 @@ def track_sine(history: Any, specification: SineSweepSpecification,
     channels : sequence of str, optional
         The DOFs to read; the specification's control channels by
         default. Any channel of the recording may be named.
-    lines : int
-        How many readings along the sweep.
+    lines : int, default `LINES`
+        How many readings along the sweep, at most.
 
     Returns
     -------
     list of SineLevel
         One per setting, in order: the level against frequency on
         every channel read, ascending in frequency whichever way the
-        tone swept, in the recording's own units, each line stamped
-        with the second it was read (`SineLevel.seconds`). Each
-        channel's comment names the tone and the reading
-        (`SineTracking.describe`); the phase is not kept, since a peak
-        or an RMS has none.
+        tone swept, in the recording's own units, each line with the
+        second it was read (`SineLevel.seconds`). Each channel's
+        comment names the tone and the reading
+        (`SineTracking.describe`). The levels are real: a peak or an
+        RMS has no phase.
     """
     if isinstance(settings, SineTracking):
         settings = [settings]
@@ -740,13 +758,14 @@ class TrackedWaveform:
     """One channel's span of a tone as a tracking band passes it,
     sample by sample: what `track_waveform` returns.
 
-    `time` is the record's own clock over the span; `drive` the drive
-    frequency at each of those samples; `passed` the record through
-    the band, in the record's units — the waveform a detector after
-    the band reads — and `level` the band's output amplitude, the
-    'filtered' reading at every sample rather than at a reading's
-    lines. Not compared by value (arrays do not have one), and frozen
-    like the setting it was read with.
+    `time` is the record's own clock over the span, in seconds; `drive`
+    the drive frequency in Hz at each of those samples; `passed` the
+    record through the band, in the record's units, which is the
+    waveform a detector after the band reads; and `level` the band's
+    output amplitude, the 'filtered' reading at every sample rather
+    than at a reading's lines. Two of these compare equal only if they
+    are the same object, since the arrays have no single truth value,
+    and they are frozen like the setting they were read with.
     """
 
     setting: SineTracking
@@ -762,8 +781,11 @@ class TrackedWaveform:
 
     def instant(self, frequency: float) -> float:
         """The first second, on the record's clock, at which the drive
-        reaches `frequency` — where a cursor goes to look at the band
-        as the tone passes a frequency.
+        reaches `frequency`: where a cursor is placed to show the band
+        as the tone passes that frequency.
+
+        Interpolated linearly between samples. Raises ValueError when
+        the drive never reaches `frequency`.
 
         Parameters
         ----------
@@ -798,10 +820,10 @@ def track_waveform(history: Any, specification: SineSweepSpecification,
     sample: the waveform the band passes and its output amplitude.
 
     The same band `track_sine` reads its levels through, run the same
-    way — the tone laid on the recording where its sweep begins,
-    demodulated against its phase, low-passed causally from settled —
-    and kept at every sample instead of read at lines, so the band can
-    be drawn on the record it was applied to.
+    way: the tone placed on the recording where its sweep begins,
+    demodulated against its phase, and low-passed causally from a
+    settled start. The output is kept at every sample instead of read at
+    lines, so the band can be drawn on the record it was applied to.
 
     Parameters
     ----------
@@ -810,8 +832,8 @@ def track_waveform(history: Any, specification: SineSweepSpecification,
     specification : SineSweepSpecification
         The sweep the drive followed.
     setting : SineTracking
-        The band. One with no band is refused: there is nothing to
-        pass the record through.
+        The band. An unfiltered setting raises ValueError, since there
+        is no band to pass the record through.
     tone : str, optional
         Which tone; the specification's first by default.
     onset : float, optional

@@ -1,18 +1,21 @@
-"""Averaging frames and shock windows on the waterfall stage.
+"""Readings drawn over the waterfall stage: averaging frames, shock
+windows, the truncation, the filter and octave previews, and a decade
+axis.
 
-The 3-D counterpart of `plot/averaging.py` and `plot/shocks.py`: the
-same numbers — `Averaging.frame_bounds`, `.levels`, `window_shape`,
-the shocks' own windows — drawn as stage geometry instead of plot
-items, so the two views cannot disagree about where a frame is.
+The 3-D counterpart of `plot/averaging.py` and `plot/shocks.py`. The
+numbers are the same ones (`Averaging.frame_bounds`, `.levels`,
+`window_shape`, the shocks' own windows), drawn as stage geometry
+instead of plot items, so the two views cannot disagree about where a
+frame is.
 
-Read-only on purpose (Brandon, 2026-08-23): the side panel is the
-editor in both views, and the 2-D overlays keep their drag handles.
-A span edge here is a translucent plane where the flat plot draws a
-draggable line; the window rail draws on the back wall, above the
-stage ceiling, because every channel shares one time axis — one rail
-serves all of them, exactly as it does in 2-D.
-
-Kept free of Qt, like the rest of `viz`.
+A span edge is a rimmed plane where the flat plot draws a line, and an
+analyzed stretch is a translucent slab through every channel. The
+averaging's window rail is drawn on the back wall, above the stage's
+top, because every channel shares one time axis, so one rail serves all
+of them as it does in 2-D. The averaging span, the truncation and the
+shock windows carry grab disks on their front edge; this module only
+draws them, and the window's dragging is `gui.stage_drag`. Nothing
+here uses Qt, like the rest of `viz`.
 """
 
 from __future__ import annotations
@@ -25,6 +28,10 @@ import numpy as np
 from ..core.averaging import Averaging, window_shape
 from ..theme import theme as resolve_theme
 from .waterfall import STAGE, _finite_runs
+
+# The marks began read-only (Brandon, 2026-08-23), with the side panel
+# as the editor in both views; the grab disks and gui/stage_drag.py were
+# added later.
 
 #: the rail's proportions, in fractions of the stage height — the same
 #: shape as the 2-D rail's view fractions, restated for a stage whose
@@ -250,17 +257,21 @@ def _edge_rim(plotter, xn, color, name):
 def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
                              extents: Sequence[float],
                              origin: float = 0.0) -> dict[str, Any]:
-    """The averaging as plain stage geometry — no VTK, no Qt.
+    """The averaging as plain stage geometry, with no VTK and no Qt.
 
-    The numbers `add_averaging_marks` puts into a plotter and the
-    report's canvas figure draws for itself: the analyzed span, and
-    per frame the rail's baseline, the window's sampled weights, the
-    glyph height at each and the two end caps. Extracted so the two
-    views cannot disagree about where a frame is, which is the whole
-    reason this module exists.
+    These are the numbers that `add_averaging_marks` puts into a plotter
+    and that the report's canvas figure draws for itself: the analyzed
+    span, and for each frame the rail's baseline, the stage x of the
+    window's sampled points, their weights, the glyph height at each,
+    and the x of the two end caps. They are computed in one place so the
+    two views cannot disagree about where a frame is.
 
-    Everything is in stage coordinates already — x across, `wall` for
-    the back wall the rail draws on, z up.
+    `extents` are the stage's real ranges (x0, x1, z0, z1), and
+    `origin` is the record's start time in seconds, since frames are
+    placed on the record's own clock. Everything returned is in stage
+    coordinates: x across, ``wall`` for the depth of the back wall the
+    rail is drawn on, z up. Returns ``span``, ``wall``, ``cap`` (the end
+    caps' half height), ``fade`` (`FADE_OPACITY`) and ``frames``.
     """
     to_x = _mapper(extents)
     _sx, sy, sz = STAGE
@@ -298,10 +309,12 @@ def averaging_stage_geometry(averaging: Averaging, sample_rate: float,
 def shock_stage_geometry(shocks: Sequence[Any],
                          extents: Sequence[float],
                          origin: float = 0.0) -> dict[str, Any]:
-    """Each event's analysis window as plain stage geometry — the
-    slab's span and the number it wears. The 3-D counterpart of
-    `plot/shocks.py`'s regions, shared by the app's stage and the
-    report's canvas the way the averaging's geometry is."""
+    """Each shock's analysis window as plain stage geometry: a dict whose
+    ``windows`` each hold the slab's ``span`` in stage x and its
+    ``label``, the event's number counted from 1. The 3-D counterpart of
+    the regions in `plot/shocks.py`, used by both the app's stage and
+    the report's canvas, as the averaging's geometry is. The shocks'
+    times are measured from `origin`, the record's start."""
     to_x = _mapper(extents)
     return {'windows': [
         {'span': [float(to_x(origin + shock.start)),
@@ -314,15 +327,20 @@ def add_averaging_marks(plotter: Any, averaging: Averaging,
                         sample_rate: float, extents: Sequence[float],
                         theme: Any = None,
                         origin: float = 0.0) -> dict[str, int]:
-    """The averaging as stage geometry: the span, bands, windows.
+    """Draw the averaging on the stage: the span, and each frame's band
+    and window on the rail.
 
-    The analysis span is one filled slab with rimmed edges — the same
-    reading as a shock's window, because both answer 'which stretch of
-    the record is analyzed' (Brandon, 2026-08-24; two lone edge
-    planes read as different objects). Returns counts a test can
-    hold: ``frames`` drawn on the rail and ``edges`` (always two —
-    the span's start and stop rims).
+    The analyzed span is one translucent slab with rimmed edges and grab
+    disks, drawn the same way as a shock's window, because both show
+    which stretch of the record is analyzed. On the back wall each
+    frame has a band shaded by the window's weight, the window's shape,
+    and a tick at each end. Arguments are those of
+    `averaging_stage_geometry`. Returns counts for a test to check:
+    ``frames`` drawn on the rail, and ``edges``, always two (the span's
+    start and stop rims).
     """
+    # One slab like a shock window (Brandon, 2026-08-24): two lone edge
+    # planes read as different objects.
     import pyvista as pv
 
     colors = resolve_theme(theme)
@@ -419,15 +437,16 @@ def add_truncation_marks(plotter: Any, truncation: Any,
                          first: float, last: float,
                          extents: Sequence[float],
                          theme: Any = None) -> dict[str, int]:
-    """The truncation as stage geometry: the discarded ends grayed,
-    the kept stretch clear, handles on its edges.
+    """Draw the truncation on the stage: the discarded ends gray, the
+    kept stretch clear, with grab disks on its edges.
 
-    The graying is a slab over each end that will be cut — gray
-    because cut-away data is reference, not subject, the flat
-    overlay's own reading — with a rim at each cut instant and the
-    span-editing handles on the kept stretch (`_handles`, the same
-    resize-move-resize grammar as the averaging slab). Returns the
-    rim count a test can hold.
+    Each end that will be cut gets a gray translucent slab, gray as in
+    the flat overlay because the data cut away is only for reference.
+    There is a rim at each cut time, and the kept stretch has the same
+    three grab disks as the averaging span (resize, move, resize).
+    `first` and `last` are the record's first and last times, and an
+    end with nothing cut gets no slab. Returns ``shaded``, how many end
+    slabs were drawn, and ``edges``, always two.
     """
     import pyvista as pv
 
@@ -466,13 +485,14 @@ def add_shock_marks(plotter: Any, shocks: Sequence[Any],
                     theme: Any = None,
                     locked: bool = False,
                     origin: float = 0.0) -> dict[str, int]:
-    """Each event's analysis window as a translucent slab, numbered.
+    """Draw each shock's analysis window as a numbered translucent slab.
 
-    The flat plot brackets a window with a region; here the bracket
-    has depth — the slab spans every channel, because the window does.
-    `locked` leaves the grab handles off, exactly as the 2-D regions
-    go immovable: a record the controller already cut into frames is
-    not the user's to re-window.
+    The flat plot marks a window with a region. Here the slab spans
+    every channel, because the window does. `locked` leaves off the grab
+    disks, as the 2-D regions become fixed, for a record the controller
+    already cut into frames, whose windows are not to be changed.
+    `origin` is the record's start time. Returns ``windows``, how many
+    were drawn.
     """
     import pyvista as pv
 
@@ -511,34 +531,33 @@ def add_shock_marks(plotter: Any, shocks: Sequence[Any],
 def add_filter_preview(plotter: Any, arrays: dict[str, Any],
                        extents: Sequence[float], stations: int,
                        theme: Any = None) -> dict[str, int]:
-    """The low-pass previewed on the stage: each record's filtered
-    twin, drawn over the raw ribbon at that record's own station.
+    """The filter previewed on the stage: each record's filtered copy,
+    drawn over the raw curve at that record's own station.
 
-    **The filtered data is what carries the color** — the level
-    colormap, exactly as an unfiltered stage draws — and the raw
-    record stands back in gray behind it (`add_waterfall`'s `color`).
-    That is the way round the paired stage already reads: the thing
-    being decided takes the ink and its reference stands back. The
-    first pass here had it inverted, raw in viridis and the twin in
-    one flat color, which asked the reader to judge the filtered
-    record from the drabber of the two lines (Brandon, 2026-08-25).
+    The filtered data is drawn on the level colormap, as an unfiltered
+    stage is, and the raw record is drawn in gray behind it
+    (`add_waterfall`'s `color`). That is the order the paired stage
+    uses: the curve being judged is in color and its reference is gray.
 
-    **Normalized against the raw stage's own extents**, passed in
-    rather than recomputed, which is the whole of the correctness
-    here: the filtered curves come from a second `waterfall_arrays`
-    call and would otherwise be scaled to their own range — a
-    filtered record is quieter than its raw one, so it would draw
-    stretched to the same height as what it is being compared against
-    and the comparison would say nothing. The banded stage taught
-    this the hard way (Brandon, 2026-08-25): two things drawn
-    together must be normalized together. The color scale is pinned
-    to those extents for the same reason, so a level means the same
-    height and the same hue whichever ribbon it is on.
+    `arrays` is the filtered data's `waterfall_arrays`. It is
+    normalized against the raw stage's `extents`, passed in and not
+    recomputed, because the filtered curves would otherwise be scaled to
+    their own range: a filtered record is quieter than the raw one, and
+    stretched to the same height the comparison would show nothing. The
+    color scale is fixed to those extents for the same reason, so a
+    level has the same height and color on either curve. `stations` is
+    how many stations the raw stage has, so each copy lands at the same
+    depth even when the filter turns every sample of a record into a
+    gap.
 
-    `stations` is how many the raw stage laid out, so the twins land
-    at the same depths even when the filter drops a record's every
-    sample to a gap.
+    Returns ``runs``, the polylines drawn, and ``points``, their
+    vertices.
     """
+    # The first version had it the other way round, raw in viridis and
+    # the filtered copy in one flat color, which asked the reader to
+    # judge the filtered record from the duller of the two lines; and
+    # the banded stage showed the same day that two things drawn
+    # together must be normalized together (Brandon, 2026-08-25).
     import pyvista as pv
 
     x0, x1, z0, z1 = (float(v) for v in extents)
@@ -574,8 +593,9 @@ def add_filter_preview(plotter: Any, arrays: dict[str, Any],
 
 
 def decade_labels(x0: float, x1: float) -> list[tuple[float, str]]:
-    """The decades inside a log10 range, each with the label the 2-D
-    plot gives it: `1` for 10⁰, `10¹`, `10²` … otherwise."""
+    """The decades inside a log10 range [`x0`, `x1`], as (exponent,
+    label) pairs, each labeled as the 2-D plot labels it: ``1`` for
+    10⁰, and ``10¹``, ``10²`` and so on otherwise."""
     from ..units import _superscript
 
     low, high = int(np.ceil(float(x0) - 1e-9)), int(np.floor(float(x1) + 1e-9))
@@ -585,21 +605,24 @@ def decade_labels(x0: float, x1: float) -> list[tuple[float, str]]:
 
 def add_decade_axis(plotter: Any, extents: Sequence[float],
                     theme: Any = None) -> dict[str, Any]:
-    """The frequency axis in decades, drawn the way the 2-D plot
-    draws it: a grid line and a label at every power of ten, and
-    nothing at the even divisions of the range.
+    """The frequency axis in decades, drawn as the 2-D plot draws it: a
+    grid line and a label at every power of ten, and nothing at the even
+    divisions of the range.
 
-    The cube axes can only label even divisions of a range — asked
-    for a log axis they printed the exponents at −0.6, 0.45, 1.5 …,
-    which matched nothing on the flat plot (Brandon, 2026-09-05). So
-    their frequency labels, ticks and grid lines are stood down and
-    the decades go on as stage geometry: a line up the back wall and
-    across the floor at each, the label under the front edge, exactly
-    as the depth axis already carries the channel names instead of
-    numbers. `extents` are the stage's `(x0, x1, z0, z1)` in log10.
+    The cube axes can only label even divisions of a range, so on a log
+    axis they would print exponents such as -0.6, 0.45 and 1.5, which
+    match nothing on the flat plot. Their frequency labels, ticks and
+    grid lines are turned off, and the decades are drawn as stage
+    geometry: a line up the back wall and across the floor at each, with
+    its label below the front edge, in the same way the depth axis shows
+    channel names instead of numbers. `extents` are the stage's
+    ``(x0, x1, z0, z1)``, with the x range in log10.
 
-    Returns the labels drawn, for the tests and the status line.
+    Returns ``labels``, the labels drawn, and ``exponents``, their
+    decades; with no decade in the range, only an empty ``labels``.
     """
+    # Brandon, 2026-09-05: the cube axes' exponents at -0.6, 0.45, 1.5
+    # matched nothing on the flat plot.
     import pyvista as pv
 
     colors = resolve_theme(theme)
@@ -649,15 +672,18 @@ def add_decade_axis(plotter: Any, extents: Sequence[float],
 def add_octave_preview(plotter: Any, curves: Sequence[tuple[Any, Any]],
                        extents: Sequence[float], stations: int,
                        theme: Any = None) -> dict[str, int]:
-    """The banded conversion previewed on the stage: each drawn
-    record's steps at that record's own station, in the preview
-    color the flat plot uses — one flat color, because the steps
-    are a proposal over the data rather than data.
+    """The octave-band conversion previewed on the stage: each drawn
+    record's steps at that record's own station, in the flat plot's
+    preview color. It is one flat color because the steps are a proposed
+    result drawn over the data, not data.
 
     `curves` is one ``(x, z)`` pair per drawn record, already in the
-    stage's own reading (log10 where the axes are), and the
-    normalization is against the raw stage's extents — the filter
-    preview's rule: two things drawn together are normalized together.
+    stage's own values (log10 where the axes are; `octave_steps` with
+    `stage`). They are normalized against the raw stage's `extents`, as
+    the filter preview is, because two things drawn together must be
+    normalized together, and `stations` is how many stations the raw
+    stage has. Returns ``runs``, the polylines drawn, and ``points``,
+    their vertices.
     """
     import pyvista as pv
 
@@ -699,10 +725,12 @@ READINGS = ('averaging', 'shocks', 'truncation', 'filter', 'octave')
 
 
 def held_reading(data: Any, reading: str) -> Any:
-    """What `reading` draws for `data`, the way the window opens on it:
-    the setting the object carries, or what its detector would suggest
-    — the frames (`TimeHistory.default_averaging`), the shock windows,
-    the cut, the filter. 'octave' reads a PSD and has no setting here.
+    """What `reading` (one of `READINGS`) draws for `data`, as the window
+    opens on it: the setting the object carries, or else what its
+    detector suggests. That is the averaging frames
+    (`TimeHistory.default_averaging`), the shock windows, the
+    truncation or the filter of a time history. 'octave' reads a PSD and
+    has no setting here, so it returns None.
 
     Raises
     ------
@@ -738,12 +766,16 @@ def held_reading(data: Any, reading: str) -> Any:
 def octave_steps(psd: Any, per_octave: int | None = None,
                  unit_system: Any = None, *, stage: bool = False
                  ) -> tuple[Any, np.ndarray, np.ndarray]:
-    """The banded conversion as step outlines over the narrowband it
-    integrates: (banded, x, rows), the rows in display units and
-    magnitude. `stage` transforms them the way `waterfall_arrays`
-    transforms the stage they land on — log10 of the frequency and of
-    the level where those axes are logarithmic. The window's flat and
-    3-D previews and a script's draw these same steps.
+    """The octave-band conversion of `psd` as step outlines, to draw over
+    the narrowband spectrum it integrates.
+
+    Returns (banded, x, rows): the banded PSD (`Psd.to_octave` with
+    `per_octave`), and the outline's abscissa and rows, the rows as
+    magnitudes in the display units of `unit_system`. With `stage` they
+    are transformed the way `waterfall_arrays` transforms the stage they
+    are drawn on: log10 of the frequency and of the level where those
+    axes are logarithmic. The window's flat and 3-D previews and a
+    script all draw these same steps.
 
     Raises
     ------
@@ -768,9 +800,11 @@ def octave_steps(psd: Any, per_octave: int | None = None,
 def stage_filter_preview(plotter: Any, data: Any, filtering: Any,
                          info: dict[str, Any], unit_system: Any = None,
                          theme: Any = None) -> None:
-    """The filtered twin of a staged record, drawn against the raw
-    stage's extents at the same records' stations (`add_filter_preview`)
-    — the window's 3-D filter view, and `plot_waterfall(marks='filter')`.
+    """Filter a staged record with `filtering` and draw the filtered copy
+    over its stage (`add_filter_preview`), against the raw stage's
+    extents and at the same records' stations. `info` is what
+    `add_waterfall` returned for the raw stage. This is the window's 3-D
+    filter view, and `plot_waterfall(marks='filter')`.
 
     Raises
     ------
@@ -790,10 +824,12 @@ def stage_filter_preview(plotter: Any, data: Any, filtering: Any,
 def add_stage_reading(plotter: Any, data: Any, info: dict[str, Any],
                       reading: str, *, per_octave: int | None = None,
                       unit_system: Any = None, theme: Any = None) -> None:
-    """One reading of a staged record drawn over its stage, as the
-    window's toggles draw it (`held_reading`); nothing here can be
-    dragged. `info` is what `add_waterfall` returned for the stage.
-    'octave' is banded `per_octave`.
+    """Draw one reading (one of `READINGS`) of a staged record over its
+    stage, as the window's toggles draw it, with the setting from
+    `held_reading`. `info` is what `add_waterfall` returned for the
+    stage, and 'octave' is banded `per_octave`. The grab disks are drawn
+    as in the window, but nothing here makes them draggable (that is
+    `gui.stage_drag`).
     """
     held = held_reading(data, reading)
     extents = info['extents']

@@ -1,49 +1,48 @@
-"""How closely a transient replicated the waveform it was controlled to.
+"""How closely a transient test reproduced the waveform it was
+controlled to.
 
 A random test is judged against a specification that is already a
-statistic: the PSD is an average, and comparing it to another average is
-comparing like with like. A transient specification is not a statistic.
-It is one waveform, and the controller played it over and over, so the
-comparison is a different shape — the record has to be cut back into the
-repeats first, and then each repeat is compared against the same target.
+statistic: the PSD is an average, and it is compared with another
+average. A transient specification is one waveform, which the
+controller played over and over, so the record is first cut back into
+its repeats and each repeat is compared with the same target.
 
-Where the frames are is not guesswork and not a convention. Each repeat
-plays exactly the control signal, so the frame *is* the specification's
-length, the repeats are back to back, and the window is rectangular
-because any taper distorts the very thing being replicated. The one
-number that has to be measured rather than derived is how many repeats
-the record holds, and that is division.
+The frames follow from the specification. Each repeat plays exactly the
+control signal, so a frame is the specification's length, the repeats
+are back to back, and the window is rectangular, because any taper
+would change the waveform being compared. The one number that is
+measured rather than derived is how many repeats the record holds, the
+record's length divided by the frame's.
 
-None of this can be read out of the file. Rattlesnake's transient
+None of this can be read from the file. Rattlesnake's transient
 environment saves the control signal, the channel indices, the ramp
-time and the control-law wiring, and nothing about repeats at all —
-`repeat` is a runtime instruction that never reaches the netCDF. What
-the file *does* carry is a trap: a shelf of `sysid_*` attributes giving
-a Hann window, half overlap and a 2048-sample frame. Those describe the
-random excitation Rattlesnake runs beforehand to measure the FRF it
-inverts. Read as the averaging parameters they are wrong three ways.
+time and the control-law wiring, and nothing about repeats: `repeat` is
+a runtime instruction that never reaches the netCDF file. The file does
+carry a set of `sysid_*` attributes giving a Hann window, half overlap
+and a 2048-sample frame. Those describe the random excitation run
+beforehand to measure the FRF the controller inverts, and as averaging
+parameters for the transient all three are wrong.
 
-Three metrics, and they answer different questions:
+Three metrics are reported, and they answer different questions:
 
-`waveform` is ||m - s|| / ||s||, and it is the honest one. Amplitude,
-phase and shape all move it, it is what the controller is minimizing,
-and it has no way to look good by accident.
+- `waveform` is ||m - s|| / ||s||, in percent. Amplitude, phase and
+  shape all change it, it is what the controller minimizes, and it
+  cannot look good by accident.
+- `srs` is the largest deviation of the measured SRS from the target's,
+  in dB, signed. It asks whether the shock is equivalent: two
+  transients with the same SRS damage the same hardware however little
+  they resemble each other.
+- `level` is the scale alone, in dB, with shape and phase left out. It
+  is the ratio of the mean squares, which by Parseval is the ratio of
+  the two PSDs' totals, so it reads as a PSD level. Paired with
+  `waveform` it tells "too small" from "wrong", which one number
+  cannot do.
 
-`srs` asks whether the shock is equivalent, which is the question the
-shock community actually asks. Two transients with the same SRS damage
-the same hardware however little they resemble each other.
-
-`level` is the scale on its own, in dB, with shape and phase divided
-out. By Parseval it is the ratio of RMS values whether it is worked out
-from the PSD or from the samples; it is stated as a PSD level because
-that is how a level is read. Paired with `waveform` it separates "too
-small" from "wrong", which one number cannot do.
-
-TRAC and a complex-spectrum FRAC are deliberately absent. They are the
+TRAC and a complex-spectrum FRAC are left out on purpose. They are the
 same number: both are normalized inner products and the DFT is unitary,
-so Parseval makes a complex FRAC equal to TRAC to within the half-bin
-the real FFT keeps at DC and Nyquist. Reporting both would present one
-measurement as two pieces of evidence.
+so by Parseval a complex FRAC equals TRAC to within the half-bin the
+real FFT keeps at DC and Nyquist. Reporting both would present one
+measurement as two.
 """
 
 from __future__ import annotations
@@ -95,16 +94,20 @@ SRS_FLOOR_DB = 40.0
 
 def averaging_for(measured: TimeHistory,
                   specification: DataArray) -> Averaging | None:
-    """The averaging a transient run implies, or None if it cannot.
+    """The averaging a transient run implies, or None if there is none.
 
     Everything but the count follows from the specification: the frame
-    is its length, the repeats are back to back, and the window is
-    rectangular. The count is how many whole ones the record holds.
+    is its length, the repeats are back to back with no overlap, and
+    the window is rectangular. The count is how many whole repeats the
+    record holds. A record that stops partway through a repeat (a
+    profile whose stop lands near a frame boundary does this) leaves
+    that fraction out, since a fraction of a frame is not an average.
 
-    Whole ones only. A record that stops part way through a repeat —
-    which is what a profile whose stop lands near a frame boundary
-    produces — carries that fraction, and a fraction of a frame is not
-    an average. `Averaging` will not hold it either, by design.
+    When the record already carries an averaging with the
+    specification's frame length, such as one set in the averaging
+    panel, that averaging is used instead, so narrowing the analysis
+    there narrows the comparison too. None when the specification has
+    fewer than two samples or the record is shorter than one repeat.
     """
     frame = int(specification.ordinate.shape[1])
     samples = int(measured.ordinate.shape[1])
@@ -131,27 +134,28 @@ def averaging_for(measured: TimeHistory,
 def playings(measured: TimeHistory, specification: DataArray,
              averaging: Averaging | None = None,
              lag: int | None = None) -> list[dict[str, int]]:
-    """Where each whole playing of the waveform sits.
+    """Where each whole playing of the waveform sits in the record.
 
-    One list that everything else reads, so the plot, the grid, the
-    numbers and the shading on the time history cannot disagree about
-    how many playings there are or where they start. They did: an
-    earlier version counted a part-played one as a seventh event while
-    the shading, which comes from `Averaging.frame_bounds`, knew only
-    about whole frames. Two views of one record, giving two answers.
+    Returns one dict per playing: `frame` (its index), `start` (its
+    first sample, with the alignment `lag` applied) and `samples` (its
+    length). The plot, the grid, the numbers and the shading on the
+    time history all read this list, so they agree on how many playings
+    there are and where they start. `averaging` defaults to
+    `averaging_for`, and `lag` to `lag_of`.
 
-    Whole ones only. A record rarely stops on a boundary — Rattlesnake
-    repeats until it is told to stop, and streaming often ends before
-    the environment does — so there is usually a fragment on the end.
-    It is not analyzed: a waveform error over part of a window is taken
-    against a different stretch of the target and is not the same
-    measurement as the ones beside it, which makes a column of them an
-    invitation to compare things that do not compare.
-
-    Not analyzed is not the same as not mentioned, which is where this
-    started. `leftover` says what was recorded past the last whole
-    playing so it can be reported rather than quietly dropped.
+    Only whole playings are listed. A record rarely stops on a
+    boundary, since Rattlesnake repeats until it is told to stop and
+    streaming often ends before the environment does, so there is
+    usually a fragment at the end. The fragment is not analyzed: a
+    waveform error over part of a frame is taken against a different
+    stretch of the target, and does not compare with the ones beside
+    it. `leftover` reports what was recorded past the last whole
+    playing.
     """
+    # One list for every view because they disagreed once: an earlier
+    # version counted a part-played repeat as a seventh event while the
+    # shading, which comes from `Averaging.frame_bounds`, knew only
+    # whole frames. Two views of one record gave two answers.
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:
         return []
@@ -175,13 +179,15 @@ def playings(measured: TimeHistory, specification: DataArray,
 def leftover(measured: TimeHistory, specification: DataArray,
              averaging: Averaging | None = None,
              lag: int | None = None) -> tuple[int, float] | None:
-    """What the record holds past the last whole playing.
+    """What the record holds past the last whole playing, as
+    `(samples, fraction of a playing)`, or None when it ends on a
+    boundary.
 
-    `(samples, share of a playing)`, or None when it ends on a
-    boundary. Nothing is scored from it — see `playings` — but a run
-    that recorded two and a half seconds of a further event should say
-    so rather than have it vanish between a frame count and a file
-    size.
+    Nothing is scored from it (see `playings`), but a run that recorded
+    two and a half seconds of a further event should say so. The
+    fragment is measured against how many whole playings the record
+    could hold, not how many are being analyzed. `averaging` and `lag`
+    default as in `playings`.
     """
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:
@@ -216,14 +222,17 @@ def _rows_by_dof(data: DataArray, dofs: Sequence[str],
 
 def lag_of(measured: TimeHistory, specification: DataArray,
            averaging: Averaging | None = None) -> int:
-    """One integer sample shift aligning the record to the target.
+    """One integer sample shift aligning the record to the target,
+    used for every channel and every repeat.
 
-    One, for every channel and every repeat together. The delay is a
-    property of the acquisition, not of a channel, and letting each
-    channel choose its own shift would let a poorly replicated one hunt
-    for its most flattering alignment and report the error it found
-    there. Estimated on the first repeat, over every control channel at
-    once, by the shift that minimizes total squared difference.
+    The delay belongs to the acquisition, not to a channel, and letting
+    each channel choose its own shift would let a poorly replicated one
+    find its most favorable alignment and report the error there. The
+    shift is the one that minimizes the total squared difference over
+    the record's first frame, across every control channel at once. It
+    is searched from 0 up to `LAG_FRACTION` of a frame (2 %), since the
+    record cannot be shifted before its first sample. 0 when there is
+    nothing to align.
     """
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:
@@ -326,27 +335,32 @@ def compare(measured: TimeHistory, specification: DataArray,
     """One row per control channel per repeat: how well each was
     replicated, and which playing of the waveform it was.
 
-    Every repeat is reported and none is singled out. An earlier
-    version reduced these to the worst repeat per channel and labeled
-    it so, which is a judgment rather than a measurement — what counts
-    as the bad event depends on which reading you care about and on
-    what the article is for, and the numbers are all here for the
-    reader to decide with. `frame` narrows the answer to one repeat
-    when the caller already knows which one it is asking about.
+    Each row is a dict with `label` (the channel's DOF), `frame` (the
+    playing's index), `zero_target`, and one entry per metric asked
+    for: `waveform` in percent, `srs` and `level` in dB. Every repeat is
+    reported and none is singled out, because which event counts as the
+    bad one depends on which reading matters and on what the article is
+    for. `frame` narrows the answer to one repeat.
 
-    `metrics` narrows *which* readings are taken, and a row carries
-    only the ones asked for. This is not a micro-optimization: the SRS
-    costs a ramp-invariant filter per band per cell, and a screen
-    showing a grid of waveform errors was spending two seconds an
-    update on sixty shock spectra nobody had asked to see.
+    `metrics` picks which readings are taken (any of `METRICS`), and a
+    row carries only those; an unknown name raises ValueError. The SRS
+    costs a ramp-invariant filter per band per cell, about 70 ms against
+    under 1 ms for the other two, so a caller that does not need it
+    should leave it out. `q` is the SRS quality factor (`srs.DEFAULT_Q`
+    when None), and `averaging` and `lag` default as in `playings`.
 
-    Whole playings only — see `playings`. A fragment on the end of the
-    record is reported by `leftover` and scored by nobody.
-
-    A channel whose target is nothing — see `ZERO_TARGET_DB` — gets
-    NaN rather than a number, because every one of these metrics is a
-    ratio against that target.
+    Only whole playings are scored (see `playings`); a fragment at the
+    end of the record is reported by `leftover`. A channel whose target
+    is more than `ZERO_TARGET_DB` (120 dB) below the loudest control
+    channel's gets NaN for every metric, with `zero_target` True,
+    because every metric is a ratio against the target. A control
+    channel with no matching record is left out.
     """
+    # Every repeat is reported: an earlier version reduced these to the
+    # worst repeat per channel and labeled it so, which is a judgment
+    # and not a measurement. `metrics` exists because a screen showing a
+    # grid of waveform errors was spending two seconds an update on
+    # sixty shock spectra nobody had asked to see.
     from .srs import DEFAULT_Q, maximax
 
     metrics = tuple(metrics)
@@ -412,16 +426,16 @@ def compare(measured: TimeHistory, specification: DataArray,
 def event_slice(measured: TimeHistory, specification: DataArray,
                 frame: int, averaging: Averaging | None = None,
                 lag: int | None = None) -> TimeHistory | None:
-    """One repeat of the control channels, on the target's own clock.
+    """One repeat of the control channels, on the target's own clock,
+    as a TimeHistory.
 
-    Rebased onto the specification's abscissa rather than kept at its
-    place in the record, because the comparison is with the target and
-    the target starts at zero. The alignment is applied here, so the
-    two are drawn where they are compared rather than a sample apart.
-
-    Only the control channels, in the specification's order, so the two
-    line up record for record. None if that repeat is not in the
-    record.
+    The repeat is moved onto the specification's abscissa, which starts
+    at zero, instead of keeping its place in the record, and the
+    alignment (`lag`) is applied, so the two are drawn where they are
+    compared. Only the control channels are kept, in the
+    specification's order, so the two line up record for record. None
+    when that repeat is not in the record, or none of the control
+    channels is.
     """
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:

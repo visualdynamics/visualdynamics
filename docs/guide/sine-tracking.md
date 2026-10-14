@@ -1,11 +1,11 @@
 # How a tracking filter reads a sweep
 
-A swept-sine controller does not measure the response the way
-**Extract Sine Levels** does. It reads the response at the drive
-frequency through a *tracking filter*, a band-pass centered on the
-drive frequency that follows it along the sweep, and it turns what
-comes out into a level with a *detector*. Both are settings, and the
-same response record gives a different level curve for each. When a
+A swept-sine controller measures the response differently from
+*Extract Sine Levels*. It reads the response at the drive frequency
+through a *tracking filter*, a band-pass centered on the drive
+frequency that follows it along the sweep, and turns the filter's
+output into a level with a *detector*. Both are settings, and the same
+response record gives a different level curve for each. When a
 controller's level and an extracted one disagree, the reason is
 usually in those two settings, and
 `visualdynamics.core.sine_tracking` reads a record each way so the
@@ -13,12 +13,13 @@ difference can be seen.
 
 ## The band and the detector
 
-The band has a **fixed** width in Hz, or a width **proportional** to
-the drive frequency, as a fraction of it. A common setting on the
-test floor is proportional, around half the drive frequency; the
-ranges offered run from a few percent to the whole drive
-frequency proportional, or from about one hertz to several hundred
-fixed. With no band, the detector reads the record as it stands.
+The band has a fixed width in Hz (`fixed=`), or a width proportional
+to the drive frequency, given as a fraction of it (`proportional=`).
+A common setting on the test floor is proportional, around half the
+drive frequency. A proportional band must be narrower than twice the
+drive frequency, and a band is one kind or the other, never both.
+With no band, the detector reads the record as it stands, and the
+filter-output detector needs a band.
 
 The detector is one of four:
 
@@ -30,8 +31,10 @@ The detector is one of four:
 | Mean | `'mean'` | the mean absolute value over the last cycle | times π/2 |
 
 The last two are reported as the peak of the sine they would be, so
-for a clean tone all four read its amplitude. For anything else they
-differ, and that is the point.
+for a clean tone all four read its amplitude. For any other waveform
+they read differently. The waveform detectors read over the last
+cycle of the drive by default (`cycles=`), and the filter is fourth
+order by default (`order=`).
 
 ## What a harmonic does
 
@@ -40,13 +43,12 @@ without a filter, a peak detector counts the harmonic's peaks: a
 harmonic of 30 % in phase with its tone reads 30 % high. An RMS
 detector counts its power instead: the same harmonic reads
 √(1 + 0.3²), about 4.4 % high. Through the band, neither is seen: the
-harmonic sits at three times the drive frequency, outside any band
-narrower than four times the drive. (A mean detector on the same
-record reads about 10 % *low*: the harmonic in phase sharpens the
-peaks and hollows the shoulders, and the shoulders hold more of the
-area.) Broadband noise behaves the same way: an
-unfiltered RMS reading counts all of its power, and a band counts its
-own share.
+harmonic is at three times the drive frequency, outside any band
+narrower than four times the drive. A mean detector on the same
+record reads about 10 % low: the harmonic in phase sharpens the peaks
+and lowers the shoulders, and the shoulders hold more of the area.
+Broadband noise behaves the same way: an unfiltered RMS reading counts
+all of its power, and a band counts only the part inside it.
 
 ![A 10 m/s² log sweep with a 30 % third harmonic, read four ways: the
 unfiltered peak at 13, the unfiltered RMS at about 10.4, and both
@@ -69,34 +71,36 @@ different widths: the wide band follows the step at once, the 5 Hz
 fixed band lags it by tens of hertz and
 overshoots](images/sine-tracking-step.png)
 
-So the trade is settling time against rejection: a narrow band holds
-out harmonics and noise and lags a change in level, such as a
-resonance passed through quickly; a wide band follows the change and
-counts more of what is not the tone.
+The choice of width is a trade between settling time and rejection.
+A narrow band rejects harmonics and noise and lags a change in level,
+such as a resonance passed through quickly; a wide band follows the
+change and includes more of what is not the tone.
 
 ## Seeing the band on the record
 
-A level curve says what the band read and hides why. The band is
-easier to understand drawn where it was applied, so
-`plot_tracking_filter` draws one setting on one tone of the record:
+A level curve shows what the band read but not why. The band is
+easier to understand drawn on the record it was applied to, so
+`plot_tracking_filter` draws one setting on one tone of the record,
+in four parts:
 
-- **The record and what the band passes**, the record in gray and the
-  band's output over it in magenta. The tone comes out of the
-  harmonic and the noise at its own amplitude, sample by sample.
-- **The record's scalogram**, time across and frequency up a log
-  axis, colored in dB below its loudest point so the noise floor is
-  visible, with the cone of influence veiled as in the
+- The record and what the band passes: the record in gray and the
+  band's output over it in magenta. The band's output is the tone at
+  its own amplitude, sample by sample, with the harmonic and the noise
+  removed.
+- The record's scalogram, time across and frequency up a log axis,
+  colored in dB below its largest value so the noise floor is
+  visible, with the cone of influence shaded as in the
   [wavelet guide](wavelet.md). Over it, the band is drawn as a
-  **corridor** that follows the sweep: two dashed lines at the drive
+  corridor that follows the sweep: two dashed lines at the drive
   frequency plus and minus half the bandwidth, the band's −3 dB edges.
   The tone runs up the middle of the corridor, the third harmonic runs
   parallel to it outside, and the noise fills the rest of the picture.
-- **The band's shape at a cursor**, beside the picture on the same
+- The band's shape at a cursor, beside the picture on the same
   frequency axis: its magnitude in dB, with the drive marked inside the
   band by a circle and the harmonic outside it by a triangle. A readout
   gives the drive frequency, the band's edges, the settling time (one
   over the bandwidth) and how far down the band holds the harmonic.
-- **The band's weight on the record**, shaded behind the cursor. The
+- The band's weight on the record, shaded behind the cursor. The
   band's output at an instant is the record before that instant,
   weighted by the filter's impulse response, so the shading shows how
   far back the reading reaches. That distance is the settling time.
@@ -122,10 +126,10 @@ fifth of a second back](images/sine-tracking-band-fixed.png)
 The picture's wavelet resolves frequency to about 7 % either side of
 the tone, so a band narrower than that, such as a 10 % proportional
 band or a few hertz fixed, draws as a corridor inside the tone's
-ridge. That is a limit of any picture of a moving tone, not a fault in
-the band. Shown in a window, the cursor can be dragged along either
-time axis, and the shape, the marks, the weight and the readout follow
-it.
+ridge. That is a resolution limit of the time-frequency picture, and
+the band itself is still as narrow as set. Shown in a window, the
+cursor can be dragged along either time axis, and the shape, the
+marks, the weight and the readout follow it.
 
 ## In a script
 
@@ -161,43 +165,45 @@ at a given drive frequency.
 `track_waveform` runs the same band over every sample of the tone's
 span and keeps the passed waveform (`passed`) and the band's output
 amplitude (`level`), with the drive frequency at each sample;
-`instant(frequency)` finds when the drive passes a frequency.
+`instant(frequency)` returns the time the drive passes a frequency.
 `SineTracking.response(drive, frequencies)` is the band's shape in dB
 at a given drive frequency, and `SineTracking.weighting(drive, lags)`
 its weight on the record before an instant. `plot_tracking_filter`
 draws all of them for one setting. Its cursor is placed by `cursor=`
-in seconds or `cursor_hz=` in hertz, `span=` zooms the time axes, and
-`harmonics=` names the multiples of the drive to mark (the third by
-default).
+in seconds or `cursor_hz=` in hertz (not both), `span=` sets the
+stretch of record the time axes show, `harmonics=` names the multiples
+of the drive to mark (the third by default), `channel=` picks the DOF
+drawn (the first control channel by default), and `low=` and `high=`
+set the scalogram's frequency range.
 
-The plot draws one channel, each reading in its own color and with
-its own marker shape, and the specification's target behind them in
-gray.
+`plot_sine_tracking` draws one channel (`channel=`), each reading in
+its own color and with its own marker shape, and the specification's
+target behind them in gray.
 
 ## Where judgment lives
 
-- **This is a reading for understanding a controller, not a better
-  level.** The extraction solves every tone jointly, debiases the
-  amplitude and chooses its smoothing from the data; a report should
-  use it. A tracking filter reads one tone at a time and carries
-  whatever its band lets through.
-- **The filter runs forward only.** A controller's filter cannot see
-  ahead, so neither does this one: the lag is the measurement. It
-  starts settled on the tone's first cycle, as a controller's has
-  settled during its ramp-up.
-- **A wide fixed band at the bottom of a sweep is not about the drive
-  frequency.** Where half the band reaches past the drive frequency
-  toward zero, the band includes everything below the drive as well,
-  and the reading shows a ripple at twice the drive.
-- **A peak is the peak of the samples.** It reads low by at most
+- These readings are for understanding what a controller reported.
+  For a report, use the extraction: it solves every tone jointly,
+  removes the amplitude bias and chooses its smoothing from the data.
+  A tracking filter reads one tone at a time and includes whatever its
+  band lets through.
+- The filter runs forward only. A controller's filter cannot see
+  ahead, so this one does not either, and its lag is part of what it
+  reads. It starts settled on the tone's first cycle, as a
+  controller's filter has settled during its ramp-up.
+- A wide fixed band at the bottom of a sweep no longer isolates the
+  drive frequency. Where half the band reaches past the drive
+  frequency toward zero, the band includes everything below the drive
+  as well, and the reading shows a ripple at twice the drive.
+- A peak is the peak of the samples. It reads low by at most
   cos(π × drive / sample rate): 0.3 % at a fortieth of the sample
   rate, more on a harmonic near the top of the band.
-- **RMS and mean read the waveform between the samples.** Near the
-  top of a band a cycle can be a few samples long, and an average of
-  the samples alone misses the span by part of a sample and the
-  waveform's shape between them. So the two are read from the record
-  upsampled until a cycle has 64 points, over exactly the span's
-  phase: a clean tone reads within 0.1 % down to under three samples
-  a cycle.
-- **No view in the application yet.** The readings and both plots
-  are scripting calls; the window does not offer them.
+- RMS and mean read the waveform between the samples. Near the top of
+  a band a cycle can be a few samples long, and an average of the
+  samples alone misses part of a sample at the ends of the span and
+  the waveform's shape between samples. So the two are read from the
+  record upsampled until a cycle has 64 points, over exactly the
+  span's phase: a clean tone reads within 0.1 % down to under three
+  samples a cycle.
+- The readings and both plots are scripting calls only; the
+  application has no view for them yet.

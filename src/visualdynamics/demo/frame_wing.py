@@ -2,28 +2,28 @@
 
 The Frame-Wing is a small aluminum frame and two wings the structural
 dynamics community shares as a common test article for substructuring:
-a 16 by 6 in ladder cut from half-inch plate, two rails and five uprights half
-an inch wide, with 41 threaded steel inserts for bolting things to, and
-two rectangular 22 by 4.4 in wings, thin (1/8 in) and thick (1/4 in),
-that screw across two of the frame's uprights. Its solid models, finite element
-models and test data are shared on the SEM Dynamic Substructuring
-Focus Group wiki, https://wiki.sem.org/wiki/Round_Robin_Frame_Structure.
+a 16 by 6 in ladder cut from half-inch plate, two rails and five
+uprights half an inch wide, with 41 threaded steel inserts for bolting
+things to, and two rectangular 22 by 4.4 in wings, thin (1/8 in) and
+thick (1/4 in), that screw across two of the frame's uprights. Its solid
+models, finite element models and test data are shared on the SEM
+Dynamic Substructuring Focus Group wiki,
+https://wiki.sem.org/wiki/Round_Robin_Frame_Structure.
 
-Here it is built the way a person builds it in the app (Brandon,
-2026-10-11: students should be able to follow the documentation and
-make it themselves), every step a project verb the app records: each
-part as solids — the frame a plate with its four windows (rounded
-corners, which leave the fillets) and its 41 holes subtracted, the
-inserts a union of cylinders in the holes' tops, each wing a plate less
-its eighteen holes — copied in rows with Pattern, meshed into bricks
-with Mesh Solids. A wing is bolted on the way the BARC's bricks are,
-by merging nodes: the wing and the washers under it meshed apart from
-the frame, Align Meshes putting the washers' undersides on the frame's
-nodes, Merge Coincident Nodes joining them. The screws are steel,
-threaded into the four inserts they pass through (a steel cylinder
-over each, the later part taking the bricks), with the rest of each
-screw's grams on the wing's top. Every dimension below is read off the
-shared finite element models, in inches:
+Here it is built the way a person builds it in the app, every step a
+project verb the app records. Each part is made as solids: the frame a
+plate less its four windows (with rounded corners, which leave the
+fillets) and its 41 holes, the inserts a union of cylinders in the tops
+of the holes, and each wing a plate less its eighteen holes. The holes
+are copied in rows with Pattern, and the solids are meshed into bricks
+with Mesh Solids. A wing is bolted on the way the BARC's bricks are, by
+merging nodes: the wing and the washers under it are meshed apart from
+the frame, Align Meshes puts the washers' undersides on the frame's
+nodes, and Merge Coincident Nodes joins them. The screws are steel,
+threaded into the four inserts they pass through (a steel cylinder over
+each, made last so it takes those bricks), with the rest of each screw's
+mass as a point mass on the wing's top. Every dimension below is read
+from the shared finite element models, in inches:
 
     from visualdynamics.demo import frame_wing
 
@@ -31,19 +31,19 @@ shared finite element models, in inches:
     shapes = model.eigensolution(maximum_frequency=2000)
     both = frame_wing.build('thick wing')         # the frame with a wing on it
 
-**The solid elements are the model.** Beams describe a half-inch bar
-spanning a hundred-millimeter window poorly and plates not at all, so
-this example is what the eight-node brick with incompatible modes was
-written for. The element was checked against the mesh the wiki
-shares: solved here node for node, its first ten elastic modes land
-within 0.1 % of the frequencies MSC Nastran gives the same mesh. The
-model built *here* is coarser — one brick in twelve of an inch, 33,000
-nodes for the frame where the shared mesh has ninety thousand — and it
-lands within a few percent of the frames that were measured, which
-vary by as much among themselves.
+The model is made of solid elements. Beams describe a half-inch bar
+spanning a window of about a hundred millimeters poorly, and plates
+cannot describe it at all, so this example is what the eight-node brick
+with incompatible modes was written for. The element was checked against
+the mesh the wiki shares: solved here node for node, its first ten
+elastic modes are within 0.1 % of the frequencies MSC Nastran gives for
+the same mesh. The model built here is coarser than the shared mesh, a
+brick a twelfth of an inch across and 45,087 nodes for the frame, and it
+is within a few percent of the measured frames, which differ from each
+other by as much.
 
-What the frames were measured to is on the wiki, and the wings'
-frequencies here were fitted from the shared test FRFs with
+The measured frequencies of the frames are on the wiki, and the wings'
+measured frequencies were fitted from the shared test FRFs with
 `Project.fit_modes`. The assemblies were checked against the finite
 element models of the frame with each wing shared on the wiki (A.
 Linderholt, Linnaeus University, 2024), tuned there to test: within
@@ -62,6 +62,9 @@ from typing import Any
 import numpy as np
 
 from visualdynamics import View, fem
+
+# Built with the app's verbs so that students can follow the
+# documentation and make it themselves (Brandon, 2026-10-11).
 
 #: element size aimed at, inches: six bricks across a half-inch member
 #: and three across an insert hole, which converges the frame's first
@@ -270,21 +273,25 @@ def _model(project: Any, name: str, choice: str, size: float,
 def geometry(wing: str | None = None, size: float = SIZE,
              wing_size: float = WING_SIZE) -> Any:
     """The frame, a wing, or the frame with a wing screwed on, as a
-    geometry of bricks and point masses built from solids, every element
-    group given what it is made of — ready for `fem.Model.from_geometry`,
-    or for the app's Solve Modes. The solids it was built from ride
-    along, to mesh again.
+    geometry of bricks and point masses built from solids.
+
+    Every element group is given its material or mass, so the geometry
+    is ready for `fem.Model.from_geometry` or for the app's Solve Modes.
+    The geometry keeps the solids it was meshed from, so it can be meshed
+    again. Any other `wing` raises ValueError.
 
     Parameters
     ----------
-    wing : {None, 'thin wing', 'thick wing', 'frame'}, optional
+    wing : {None, 'frame', 'thin wing', 'thick wing', 'thin wing alone', 'thick wing alone'}, optional
         None or 'frame' for the frame alone; a wing's name for the
         frame with that wing; 'thin wing alone' or 'thick wing alone'
         for the wing by itself.
     size : float
-        The frame's element size aimed at, in inches.
+        The frame's target element size, in inches; `SIZE`, 1/12 in, by
+        default.
     wing_size : float
-        The wing's, in inches.
+        The wing's target element size, in inches; `WING_SIZE`, 1/8 in,
+        by default.
 
     Returns
     -------
@@ -306,7 +313,7 @@ def geometry(wing: str | None = None, size: float = SIZE,
 
 def build(wing: str | None = None, size: float = SIZE,
           wing_size: float = WING_SIZE) -> fem.Model:
-    """The finite element model (`geometry` built).
+    """The finite element model, built from `geometry`.
 
     Parameters
     ----------
@@ -332,22 +339,24 @@ MODELS = {'Frame': 'frame', 'Thin Wing': 'thin wing alone',
 
 def project(solved: bool = False, size: float = SIZE,
             wing_size: float = WING_SIZE) -> Any:
-    """A project to open in the app: the frame, each wing alone, and
-    the frame with each wing, built by the verbs the app records — its
-    journal is the workflow — their element groups given their
-    properties. Solve Modes on any of them gives its modes.
+    """A project to open in the app with five geometries: the frame, each
+    wing alone, and the frame with each wing (`MODELS`).
+
+    They are built by the verbs the app records, so the project's
+    journal is the workflow, and their element groups are given their
+    properties, so Solve Modes on any of them gives its modes.
 
         frame_wing.project().save('frame-wing.vdyn')
 
-    With `solved`, every model's modes are solved to `SOLVE_TO`
-    already: the example project the downloads page offers.
+    With `solved`, every model's modes are already solved to `SOLVE_TO`
+    (1500 Hz). That is the example project the downloads page offers.
 
     Parameters
     ----------
     solved : bool, default False
         Solve the modes as well.
     size, wing_size : float
-        The element sizes aimed at, in inches.
+        The target element sizes of the frame and the wings, in inches.
 
     Returns
     -------
@@ -364,7 +373,8 @@ def project(solved: bool = False, size: float = SIZE,
 
 
 def describe(size: float = SIZE, modes: int = 9) -> None:
-    """Print each model and its first elastic modes."""
+    """Print each of the five models with its size, its mass and its
+    first `modes` elastic frequencies (those above 1 Hz)."""
     for name in MODELS.values():
         model = build(name, size)
         shapes = model.eigensolution(maximum_frequency=SOLVE_TO)

@@ -133,6 +133,27 @@ def test_shapes_round_trip_through_sdynpy_npy(tmp_path):
                        np.real(source.shape_matrix))
 
 
+def test_complex_shapes_keep_their_phase_through_sdynpy_npy(tmp_path):
+    """The layout has a complex form; only the real part was written,
+    the phase of every mode dropped without a word (2026-10-13)."""
+    from visualdynamics.core.shapes import ShapeSet
+
+    source = ShapeSet(frequency=[10.0], damping=[0.01],
+                      coordinate=['1X+', '2X+'],
+                      shape_matrix=[[1 + 2j, 3 - 1j]], modal_mass=[2 + 1j])
+    path = str(tmp_path / 'complex.npy')
+    visualdynamics.export_file(source, path, format='sdynpy_shapes')
+    back = visualdynamics.import_file(path)
+    assert back.is_complex
+    assert back.shape_matrix == pytest.approx(source.shape_matrix)
+    assert back.modal_mass == pytest.approx(source.modal_mass)
+    real = ShapeSet(frequency=[10.0], damping=[0.01], coordinate=['1X+'],
+                    shape_matrix=[[1.0]], modal_mass=[2 + 1j])
+    with pytest.raises(ValueError, match='complex modal mass'):
+        visualdynamics.export_file(real, str(tmp_path / 'mixed.npy'),
+                                   format='sdynpy_shapes')
+
+
 def test_a_typed_description_survives_as_the_files_comment(tmp_path):
     """The formats have one comment field where visualdynamics has two."""
     source = visualdynamics.import_file(survey('shapes.npy'))

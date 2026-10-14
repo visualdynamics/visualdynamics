@@ -279,3 +279,17 @@ def test_the_limits_follow_the_ordinate_into_other_units():
     upper = spec.display_limit('abort_upper', visualdynamics.IN_LBF_S)
     assert np.allclose(upper, shown * 2.0)
     assert not np.allclose(shown, spec.ordinate), 'and it did convert'
+
+
+def test_averaging_frames_are_windows_a_frame_long():
+    """With no shocks, an SRS is read over the record's averaging frames.
+    Each frame's stop went in as the window's duration, so every frame
+    but the first ran long by its own start (2026-10-13)."""
+    from visualdynamics.core.averaging import Averaging
+
+    rate = 1000.0
+    history = TimeHistory(np.arange(5000) / rate, np.zeros((1, 5000)), ['1X+'])
+    history.averaging = Averaging(frame_length=1000, frames=3, start=0.5)
+    windows = history.srs_windows()
+    assert [w.start for w in windows] == pytest.approx([0.5, 1.5, 2.5])
+    assert [w.duration for w in windows] == pytest.approx([1.0, 1.0, 1.0])

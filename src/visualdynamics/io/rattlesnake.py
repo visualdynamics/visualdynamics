@@ -1,49 +1,63 @@
-"""Importer for Rattlesnake vibration controller output files (.nc4).
+"""Reader for Rattlesnake vibration controller output files (.nc4).
 
-Rattlesnake streams results to netCDF4 with a channel table that includes
-engineering units (read in whatever case they were typed), so imports
-are fully unit-aware — no unit declaration
-needed. Layout (file_version 3.x):
+Rattlesnake writes its results to netCDF4 with a channel table that
+includes each channel's engineering unit (read in whatever case it was
+typed), so an import is unit-aware with no unit declaration needed.
+Values are converted to SI as they are read, and each record keeps the
+unit the file named. The layout, for file_version 3.x:
 
-- root attrs: sample_rate, hardware, file_version, ...
-- time_data (response_channels, time_samples), in channel engineering units
-- channels group: node_number, node_direction, unit, channel_type, and other
-  per-channel metadata
-- one group per environment (e.g. 'Random') that may carry a specification
-  CPSD matrix (specification_frequency_lines, specification_cpsd_matrix_*)
-  and the bands around it (specification_warning_matrix,
-  specification_abort_matrix, each (2, lines, channels), lower first)
+- root attributes: sample_rate, hardware, file_version and others
+- time_data (response_channels, time_samples), in each channel's
+  engineering unit
+- a channels group: node_number, node_direction, unit, channel_type
+  and the other per-channel fields
+- one group per environment (for example 'Random'), which may hold a
+  specification CPSD matrix (specification_frequency_lines,
+  specification_cpsd_matrix_*) and its limits
+  (specification_warning_matrix and specification_abort_matrix, each
+  (2, lines, channels), lower first)
 
-A run saves twice and the two files share nothing: streaming writes the time
-histories, and a separate save writes what the environment computed from
-them. Both are read here.
+A run is saved to two files that share no data: streaming writes the
+time histories, and a separate save writes what the environment
+computed from them. Both are read here, and so is a saved system-ID
+package.
 
-Returns a dict: 'channel_table' -> ChannelTable, and whichever of these the
-file holds — 'time_data' -> TimeHistory, '<env>_specification' ->
-Specification (diagonal ASDs with their warning and abort limits;
-full_cpsd=True for the whole matrix as cross-PSD records), '<env>_frf' ->
-Frf, '<env>_coherence' -> MultipleCoherence, '<env>_response_cpsd'
-and
-'<env>_drive_cpsd' -> Psd.
+`load` returns a dict: 'channel_table' -> ChannelTable, and whichever
+of these the file holds: 'time_data' -> TimeHistory (with
+'time_data_2' and so on for later streams); '<env>_specification' ->
+Specification (the auto-spectra with their warning and abort limits,
+plus the cross terms when the file holds values for them or
+`full_cpsd` is set), or a SineSweepSpecification or
+TransientSpecification for a sine or transient environment;
+'<env>_frf' -> Frf; '<env>_coherence' -> MultipleCoherence; and
+'<env>_response_cpsd' and '<env>_drive_cpsd' -> Psd. A system-ID
+package has no channel table and gives '<env>_frf',
+'<env>_coherence', '<env>_excitation_psds' and '<env>_noise_psds'.
 
-A modal environment counts every enabled channel as a response and never
-excludes its references, so the drives appear among them and the saved
-matrix carries each drive against the drives. Those rows are identity and
-cross-talk by construction — |H| exactly 1 against itself, numerically zero
-against the other, coherence exactly 1 — so they are dropped: they are
-arithmetic rather than measurement, and would put a force-per-force axis on
-the plot beside the real one.
+A modal environment counts every enabled channel as a response and
+never excludes its references, so the drives appear among the
+responses and the saved matrix includes each drive against the
+drives. Those rows are identity and cross-talk by construction (|H|
+exactly 1 against itself, numerically zero against the others,
+coherence exactly 1), so they are dropped: they come from the
+arithmetic, not from a measurement, and would add a force-per-force
+axis to the plot.
 
-A spectral file carries neither time data nor, once rattlesnake's own random
-save has been through it, the root attributes — so the sample rate may be
-missing and the frequency axis has to come from the specification's own
-lines. The noise cross spectra a random save also writes are deliberately
-left alone: they describe the measurement's noise floor and would double the
-object count for something rarely looked at.
+A spectral file has no time data and, after Rattlesnake's own random
+save, no root attributes either, so the sample rate may be missing.
+The frequency axis then comes from the specification's lines, or with
+no specification the lines are numbered by index. The noise cross
+spectra a random save also writes are not read: they describe the
+measurement's noise floor and would double the number of objects for
+something rarely looked at.
 
-Reading only, and deliberately: a `.nc4` records a controller run — hardware
-settings, environments, the lot — that visualdynamics does not hold, so a file written
-from here would describe a test that never happened. See docs/export.md.
+The reader does not write `.nc4` files. A `.nc4` records a controller
+run, including hardware settings and environments, that Visual
+Dynamics does not hold, so a file written from here would describe a
+test that never happened (see docs/export.md). The one exception adds
+nothing of its own: `save_window` copies a run with its streams cut to
+a time window, and every other attribute, dimension and variable as
+the file has it.
 """
 
 from __future__ import annotations
@@ -67,6 +81,10 @@ from ..core.data import (
 )
 from ..core.sine import SineSweepSpecification, SineTone
 from ..units import UNKNOWN, dimension_of, fold_unit_case, si_factor
+
+# save_window, the one writer here, makes the same run shorter and
+# nothing else (Brandon, 2026-10-13: truncate a run and write it back
+# out).
 
 #: how much of each stream the system-ID sniff reads to compare the
 #: two levels: a quarter of a million samples a channel, a few seconds
@@ -92,11 +110,13 @@ PREVIEW_POINTS = 4096
 
 
 def machine_memory() -> int:
-    """The machine's physical memory in bytes, or 0 when it cannot be asked.
+    """The machine's physical memory in bytes, or 0 when it cannot be
+    found.
 
-    The one system question this package asks: whether a stream about
-    to be imported would take a large share of it. POSIX answers
-    through `sysconf`; Windows through `GlobalMemoryStatusEx`.
+    This is the one query of the operating system this package makes,
+    used to tell whether a stream about to be imported would take a
+    large share of memory. POSIX systems are read through `sysconf`,
+    Windows through `GlobalMemoryStatusEx`.
     """
     try:
         if hasattr(os, 'sysconf'):
@@ -268,13 +288,15 @@ def _streams(ds) -> list[tuple[str, str, str]]:
 
 
 def last_window(seconds: float, last: float) -> float | None:
-    """Where a window of the last `last` seconds of a run opens.
+    """The start time of a window holding the last `last` seconds of a
+    run.
 
-    The one rule behind the import dialog's *Last* field and a
-    script's `last=` (Brandon, 2026-09-19): a run `seconds` long is
-    read from `seconds - last` to its end — and a run no longer than
-    that is taken whole, which is what `None` says. Asking for the last
-    100 s of a 28 s run is not a mistake to refuse; it is all of it.
+    The import dialog's Last field and a script's `last=` both use
+    this function. A run `seconds` long is read from `seconds - last`
+    to its end, and a run no longer than `last` is read whole, which
+    the None result means. Asking for the last 100 s of a 28 s run is
+    not an error; it is the whole run. Raises ValueError unless `last`
+    is positive.
 
     Parameters
     ----------
@@ -288,6 +310,8 @@ def last_window(seconds: float, last: float) -> float | None:
     float or None
         The `start` to import from, or None for the whole run.
     """
+    # One rule for the dialog's Last field and a script's last=
+    # (Brandon, 2026-09-19).
     if not last > 0:
         raise ValueError(f'last must be a positive number of seconds, not {last!r}')
     if last >= seconds:
@@ -295,12 +319,176 @@ def last_window(seconds: float, last: float) -> float | None:
     return float(seconds - last)
 
 
-def stream_summary(path: str | os.PathLike) -> dict[str, Any]:
-    """What a run's streams would cost to import, read without reading one.
+def window_name(path: str | os.PathLike, start: float | None,
+                stop: float | None) -> str:
+    """The file name for a copy of a run cut to a window: the run's own
+    name with the window added, for example `random_30-60s.nc4`.
 
-    The import dialog's first question — is this stream a large share
-    of the machine? — answered from the file's dimensions alone, so
-    asking it costs nothing on a 22 GB run.
+    The copy's time starts at zero again and nothing in the file says
+    where the window began, so the name records it. An open start is
+    written as 0 and an open stop as `end` (`random_30s-end.nc4`).
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The run.
+    start, stop : float or None
+        The window, in seconds on the run's time axis; None for the
+        run's start or end.
+
+    Returns
+    -------
+    str
+        A path in the same folder as the run.
+    """
+    stem, suffix = os.path.splitext(os.fspath(path))
+    first = 0.0 if start is None else float(start)
+    span = f'{first:g}s-end' if stop is None else f'{first:g}-{float(stop):g}s'
+    return f'{stem}_{span}{suffix or ".nc4"}'
+
+
+def save_window(path: str | os.PathLike, target: str | os.PathLike,
+                start: float | None = None, stop: float | None = None,
+                progress: Callable[[int, int], None] | None = None) -> dict[str, int]:
+    """Copy a run with its time data cut to a window, and nothing else
+    changed.
+
+    Every group, attribute, dimension and variable is written as the
+    file has it (the hardware settings, the channel fields, each
+    environment's control settings and specification) except the
+    streams and their `time_samples` dimensions. Each stream is cut to
+    the samples the window holds, the same samples an import of that
+    window reads. A stream the window misses is written with no
+    samples, as a spectral file's is. Nothing is added: the file has no
+    attribute for where the window began, so the copy's time starts at
+    zero again (`window_name` puts the window in the file name
+    instead). All channels are kept, because leaving one out would
+    mean rewriting the channel table, each environment's active
+    channels and its control indices.
+
+    Raises ValueError when `target` is the run itself, when the run has
+    no time data, when the window runs backward, or when it holds fewer
+    than two samples of every stream.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The run, a Rattlesnake `.nc4` with time data.
+    target : str or os.PathLike
+        Where the copy goes; not the run itself.
+    start, stop : float, optional
+        The window, in seconds on the run's time axis, both ends
+        included; the run's start and end when not given.
+    progress : callable, optional
+        Called with `(done, total)` samples as the streams are copied.
+        An exception it raises stops the copy, and the partly written
+        copy is deleted.
+
+    Returns
+    -------
+    dict
+        {stream variable: samples kept}.
+    """
+    import netCDF4
+
+    if os.path.exists(target) and os.path.samefile(path, target):
+        raise ValueError('the copy cannot be written over the run it is cut from')
+    with netCDF4.Dataset(path) as ds:
+        streams = {variable: dimension for variable, dimension, _key in _streams(ds)}
+        if not streams:
+            raise ValueError(f'{os.path.basename(path)} holds no time data to cut')
+        rate = float(ds.sample_rate)
+        windows = {}
+        for dimension in streams.values():
+            found = _sample_window(start, stop, len(ds.dimensions[dimension]), rate)
+            windows[dimension] = found if found is not None else (0, 0)
+        if all(b - a < 2 for a, b in windows.values()):
+            raise ValueError('the window holds fewer than two samples of any stream')
+        from ..core.progress import Ticker
+
+        ticker = Ticker(progress)
+        ticker.add(sum(b - a for a, b in windows.values()))
+        try:
+            with netCDF4.Dataset(target, 'w', format=ds.data_model) as out:
+                _copy_group(ds, out, windows, ticker)
+        except BaseException:
+            # a copy stopped part way is not a shorter run
+            if os.path.exists(target):
+                os.remove(target)
+            raise
+    return {variable: windows[dimension][1] - windows[dimension][0]
+            for variable, dimension in streams.items()}
+
+
+def _copy_group(source, out, windows, ticker) -> None:
+    """One group, and the groups in it, copied as they are but for the
+    dimensions in `windows`, {dimension: (first, last)}: a variable
+    along one of them keeps only those samples."""
+    out.setncatts({name: source.getncattr(name) for name in source.ncattrs()})
+    for name, dimension in source.dimensions.items():
+        size = (None if dimension.isunlimited() else
+                (windows[name][1] - windows[name][0]) if name in windows
+                else len(dimension))
+        out.createDimension(name, size)
+    for name, variable in source.variables.items():
+        variable.set_auto_maskandscale(False)
+        filters = variable.filters() or {}
+        chunking = variable.chunking()
+        if chunking == 'contiguous' and any(_dimension(out, d).isunlimited()
+                                            for d in variable.dimensions):
+            # a stream the window misses, on a dimension of fixed size: a
+            # dimension of none is unlimited in netCDF, and an unlimited
+            # one cannot be stored contiguously
+            chunking = None
+        fill = (variable.getncattr('_FillValue')
+                if '_FillValue' in variable.ncattrs() else None)
+        made = out.createVariable(
+            name, variable.datatype, variable.dimensions,
+            zlib=bool(filters.get('zlib')), complevel=filters.get('complevel', 4),
+            shuffle=bool(filters.get('shuffle')),
+            fletcher32=bool(filters.get('fletcher32')),
+            contiguous=chunking == 'contiguous',
+            chunksizes=None if chunking in (None, 'contiguous') else chunking,
+            endian=variable.endian(), fill_value=fill)
+        made.set_auto_maskandscale(False)
+        made.setncatts({key: variable.getncattr(key) for key in variable.ncattrs()
+                        if key != '_FillValue'})
+        cut = [(axis, windows[dim]) for axis, dim in enumerate(variable.dimensions)
+               if dim in windows]
+        if not cut:
+            if variable.size:
+                made[...] = variable[...]
+            continue
+        # a stream, slab by slab along its samples: a 22 GB run is never
+        # held whole
+        (axis, (first, last)), = cut
+        for begin in range(first, last, READ_SAMPLES):
+            end = min(begin + READ_SAMPLES, last)
+            at = [slice(None)] * variable.ndim
+            to = [slice(None)] * variable.ndim
+            at[axis], to[axis] = slice(begin, end), slice(begin - first, end - first)
+            made[tuple(to)] = variable[tuple(at)]
+            ticker.tick(end - begin)
+    for name, group in source.groups.items():
+        _copy_group(group, out.createGroup(name), windows, ticker)
+
+
+def _dimension(group, name):
+    """A dimension by name, from the group or the nearest one above it
+    that defines it — a channel field in the channels group runs along
+    the root's response_channels."""
+    while name not in group.dimensions:
+        group = group.parent
+    return group.dimensions[name]
+
+
+def stream_summary(path: str | os.PathLike) -> dict[str, Any]:
+    """The size of each of a run's streams and the memory an import of
+    it would take, without reading the stream data.
+
+    The import dialog uses this to ask whether a stream is a large
+    share of the machine's memory. It is read from the file's
+    dimensions alone, so it is fast even on a 22 GB run.
 
     Parameters
     ----------
@@ -314,9 +502,10 @@ def stream_summary(path: str | os.PathLike) -> dict[str, Any]:
         order; 'units', their units as the file spells them;
         'streams', one dict per stream with 'key' (the name the
         import gives it), 'variable', 'channels', 'samples',
-        'seconds' and 'bytes' (as float64, what the import holds);
-        'memory', `machine_memory()`. A system-ID package has no
-        streams and says so with an empty list.
+        'seconds' and 'bytes' (as float64, the size the import holds);
+        'memory', `machine_memory()`. A file with no channel table (a
+        system-ID package) gives a 'sample_rate' of None and empty
+        lists.
     """
     import netCDF4
 
@@ -342,13 +531,14 @@ def stream_preview(path: str | os.PathLike, channel: int | str = 0,
                    points: int = PREVIEW_POINTS) -> dict[str, Any]:
     """One channel's envelope over a whole stream, read in slabs.
 
-    The picture an import window is chosen from: where the run
-    reaches level, where it stops, the false start at the front. Each
-    of `points` buckets keeps its least and greatest sample — the
-    stage's peak thinning, applied as the channel is read — so the
-    preview of a 22 GB run holds a slab at a time and comes back as a
-    few thousand points. The file's chunks run along one channel at a
-    time, so one channel is a sequential read of its own bytes.
+    This is the plot an import window is chosen from: it shows where
+    the run reaches level, where it stops, and any false start at the
+    front. Each of `points` buckets keeps its smallest and largest
+    sample (the same peak thinning the stage applies, done as the
+    channel is read), so the preview of a 22 GB run holds one slab at
+    a time in memory and returns a few thousand points. The file's
+    chunks run along one channel at a time, so reading one channel is
+    a sequential read.
 
     Parameters
     ----------
@@ -364,11 +554,11 @@ def stream_preview(path: str | os.PathLike, channel: int | str = 0,
     Returns
     -------
     dict
-        'times', the bucket centers in seconds on the run's clock;
-        'low' and 'high', each bucket's least and greatest value as
-        the file holds them, NaN where a bucket holds nothing else;
-        'dof', 'unit', 'dim' of the channel; and
-        'samples', 'sample_rate' of the stream.
+        'times', the bucket centers in seconds on the run's time axis;
+        'low' and 'high', each bucket's smallest and largest value in
+        the file's own unit, not converted, and NaN where a bucket
+        holds only NaN; 'dof', 'unit' and 'dim' of the channel; and
+        'samples' and 'sample_rate' of the stream.
     """
     import netCDF4
 
@@ -412,6 +602,9 @@ def stream_preview(path: str | os.PathLike, channel: int | str = 0,
 
 
 def sniff(path: str | os.PathLike) -> bool:
+    """Whether `path` is a Rattlesnake `.nc4` or `.nc` file this module
+    can read: a streamed run, a spectral save or a system-ID package.
+    Never raises; a file that cannot be opened is not one."""
     if not str(path).lower().endswith(('.nc4', '.nc')):
         return False
     try:
@@ -570,10 +763,13 @@ def _environment_kinds(ds):
 
 
 def environment_kinds(path: str | os.PathLike) -> dict[str, str]:
-    """{environment name: kind} the file says it holds.
+    """{environment name: kind} for the environments the file holds.
 
-    Empty for a file that does not say — an nc4 assembled by hand, or an
-    older save from before the controller wrote its types down.
+    The kinds are 'random', 'transient', 'sine', 'time' and 'modal',
+    read from the file's environment type codes, or from what each
+    environment group holds when the file has no codes. The result is
+    empty when the file identifies none, for example an nc4 put
+    together by hand.
     """
     import netCDF4
 
@@ -595,25 +791,28 @@ def _run_kind(kinds: Iterable[str]) -> str | None:
 
 
 def run_kind(path: str | os.PathLike) -> str | None:
-    """What kind of test the file holds, by its own account.
+    """The kind of test the file holds, as the file states it.
 
     'modal', 'random', 'transient', 'sine' or 'time' for a run of one
-    kind; 'mixed' when more than one environment drove the article at
-    once, which is what a random-plus-sine-sweep run is; None when the
-    file does not say.
+    kind; 'mixed' when more than one environment drove the article (a
+    random run with a sine sweep, for example); None when the file
+    does not say. An environment that only records ('time') does not
+    make a run mixed.
     """
     return _run_kind(environment_kinds(path).values())
 
 
 def project_type(path: str | os.PathLike) -> str | None:
-    """The visualdynamics project this file is a run of, or None if visualdynamics has no
-    project of that kind — or the file never said what kind it was.
+    """The Visual Dynamics project type this file is a run of, or None
+    when there is no project type for that kind of run or the file does
+    not say what kind it is.
 
-    A random run with a sine sweep under it is a 'Random and Sine'
-    project (`MIXED_PROJECTS`), whose report holds both halves. Any
-    other mixed run answers with its leading half (`MIXED_PRECEDENCE`):
-    every environment's specification imports regardless, so the type
-    only chooses which workflow the tree leads with.
+    A saved system-ID package is a 'System ID' project. A random run
+    with a sine sweep is a 'Random and Sine' project
+    (`MIXED_PROJECTS`), whose report covers both. Any other mixed run
+    takes the type of its first kind in `MIXED_PRECEDENCE`. Every
+    environment's specification is imported either way, so the type
+    only decides which workflow the tree shows first.
     """
     import netCDF4
 
@@ -637,18 +836,20 @@ def project_type(path: str | os.PathLike) -> str | None:
 
 
 def streamed_sysid_candidate(path: str | os.PathLike) -> bool:
-    """Whether a streamed save has the shape a system ID leaves:
-    exactly two streams, a quiet one then a loud one — the ambient
-    measurement and the driven excitation.
+    """Whether a streamed save looks like a system ID: exactly two
+    streams, a quiet one and then a loud one (the ambient measurement
+    and the driven excitation).
 
-    The file itself cannot settle the question (a run of the
-    environment that stopped and restarted its stream once looks the
-    same on paper), so this is grounds to *ask the person*, never to
-    decide. The quiet-then-loud check is what keeps the question from
-    being asked about every two-stream file: a restarted run's halves
-    play at one level, a system ID's differ by the whole test. Ten
-    decibels is well under any real ambient-to-driven gap and well
-    over a level change within one run.
+    The file cannot answer this by itself, because a run whose stream
+    was stopped and restarted once has the same layout. So a True
+    result is a reason to ask the person, not to decide. The level
+    check keeps the question from being asked about every two-stream
+    file: a restarted run's two streams are at the same level, while a
+    system ID's differ by the whole test. The driven stream must be
+    more than 10 dB above the quiet one (standard deviation of the
+    first `SNIFF_SAMPLES` samples of each), which is well under any
+    real ambient-to-driven difference and well over a level change
+    within one run. Never raises; False for a file that cannot be read.
     """
     if not str(path).lower().endswith(('.nc4', '.nc')):
         return False
@@ -1135,32 +1336,39 @@ def load(path: str | os.PathLike, full_cpsd: bool = False,
          start: float | None = None, stop: float | None = None,
          channels: Iterable[int | str] | None = None,
          progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
-    """Everything a Rattlesnake `.nc4` holds, keyed the way the tree names it.
+    """Everything a Rattlesnake `.nc4` holds, keyed by the names the
+    tree shows.
 
     The streamed time data, the channel table, and each environment's
-    specification, FRF, coherence and spectra; a saved system-ID
-    package on its own. `start`, `stop` and `channels` import a part
-    of the streams — the window a long run is read through when the
-    whole would not fit the machine (the import dialog asks; a script
-    says). The window is inclusive at both instants on the run's own
-    clock, which the records keep, and a stream the window misses
-    entirely is left out. A part is a recording, so a windowed stream
-    is not split into a spectral save's frames.
+    specification, FRF, coherence and spectra; or a saved system-ID
+    package on its own. `start`, `stop` and `channels` import part of
+    the streams, for a long run that would not fit in memory whole
+    (the import dialog asks for them; a script passes them). The
+    window includes both ends, on the run's time axis, and the records
+    keep those times. A stream the window misses entirely is left out,
+    and each windowed record's comment says which part of which file
+    it is. A part of a stream is imported as one recording, so it is
+    never split into frames the way a spectral save's stack of
+    captures is.
 
     Parameters
     ----------
     path : str or os.PathLike
         The file.
     full_cpsd : bool
-        Import every cross term of the environment's CPSDs, not only
-        the autos.
+        Import the cross terms of a random specification's CPSD matrix
+        even when its off-diagonal holds only zeros. Cross terms that
+        hold values are imported either way, and a pair the file never
+        wrote (all NaN) never is.
     start, stop : float, optional
         The window in seconds; either end open when omitted.
     channels : iterable of int or str, optional
         Which channels of the streams to import, by table row or by
         coordinate ('101Z+'). All of them when omitted. An
-        environment's virtual responses come along only when every
-        control channel they are computed from is among them.
+        environment's virtual responses are included only when every
+        control channel they are computed from is selected.
+    progress : callable, optional
+        Called with `(done, total)` samples as the streams are read.
 
     Returns
     -------

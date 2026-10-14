@@ -1,20 +1,17 @@
-"""A report saved on its own, as a template another project can use.
+"""Save a report on its own, as a template another project can use.
 
-A report is a block model with symbolic bindings — `@basis:Frf`,
-`@other:ShapeSet` — so written without its project it is a template:
-the same figures and text, bound afresh to whatever project loads it
-(Brandon, 2026-09-08: "Is there a way for the user to save a report
-template or load a saved report template?"). The file is JSON with one
-marker key, the same four fields the project file keeps (`native.py`,
-`save_report`), under its own suffix so a folder of them reads as what
-it is. A block whose binding does not resolve in the new project is an
-unbound card there, to be repointed in the editor's pane, exactly as an
-unbound template block already is.
+A report is a list of blocks with symbolic bindings, such as
+`@basis:Frf` or `@other:ShapeSet`, so a report written without its
+project is a template: the same figures and text, bound again to
+whatever project loads it. The file is JSON with one marker key and the
+same four fields the project file keeps for a report (title, marking,
+marking color and blocks; see `native.save_report`), under its own
+suffix, `.vdreport`. A block whose binding does not resolve in the new
+project is an unbound card there, to be pointed at an object in the
+editor's pane, as an unbound block of a built-in template is.
 
-Templates saved into `templates_folder()` — the application's own
-folder under the user's application data — are offered by Generate
-Report beside the built-in ones, so a house template is one click away
-in every new project.
+Templates saved in `templates_folder()` are offered by Generate Report
+beside the built-in ones in every project.
 """
 
 from __future__ import annotations
@@ -27,6 +24,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.report import Report
+
+# Brandon, 2026-09-08: "Is there a way for the user to save a report
+# template or load a saved report template?"
 
 SUFFIX = '.vdreport'
 MARKER = 'visualdynamics_report_template'
@@ -53,9 +53,12 @@ def sniff(path: str | os.PathLike) -> bool:
 
 def save(report: Report, path: str | os.PathLike, unit_system: Any = None,
          **_ignored: Any) -> None:
-    """Write the report as a template. `unit_system` is taken for the
-    exporter's uniform signature and unused: a template carries no
-    values, only what to draw and how to bind it."""
+    """Write the report as a template (JSON).
+
+    `unit_system` is accepted because every exporter takes it, and is not
+    used: a template holds no values, only what to draw and how to bind
+    it.
+    """
     out = {MARKER: 1, 'title': report.title, 'marking': report.marking,
            'marking_color': report.marking_color,
            'blocks': [dict(block) for block in report.blocks]}
@@ -78,9 +81,15 @@ def load(path: str | os.PathLike, **_ignored: Any) -> Report:
 
 
 def templates_folder() -> Path:
-    """Where saved templates live: the application's folder under the
-    user's application data, as the platform lays it out. Created on
-    demand by whoever writes there, not here."""
+    """The folder saved templates are kept in.
+
+    It is `Visual Dynamics/Report Templates` in the user's application
+    data folder for the platform (`~/Library/Application Support` on
+    macOS, `APPDATA` on Windows, `XDG_DATA_HOME` or `~/.local/share`
+    elsewhere), or the folder `VISUALDYNAMICS_TEMPLATES` names when that
+    environment variable is set. The folder is not created here; whatever
+    writes to it creates it.
+    """
     override = os.environ.get('VISUALDYNAMICS_TEMPLATES')
     if override:
         return Path(override)
@@ -94,7 +103,8 @@ def templates_folder() -> Path:
 
 
 def saved_templates() -> list[tuple[str, Path]]:
-    """(name, path) for every template in the folder, by name."""
+    """(name, path) for every `.vdreport` file in `templates_folder()`,
+    sorted by name; empty when the folder does not exist."""
     folder = templates_folder()
     if not folder.is_dir():
         return []

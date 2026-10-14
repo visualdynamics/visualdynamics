@@ -1,4 +1,5 @@
-"""Main application window: project tree, 3D/plot/table views, unit selector."""
+"""The main application window: the project tree, the 3-D, plot and
+table views beside it, and the display unit system."""
 
 from __future__ import annotations
 
@@ -707,25 +708,29 @@ class _InputGate(QObject):
 
 
 class MainWindow(QMainWindow):
-    """The app: a project tree, and panes that read whatever is picked.
+    """The application window: a project tree, and panes that show
+    whatever is selected in it.
 
-    The window holds a `Project` and nothing else — the same object a
-    script builds, with the same verbs on it — so a project built by
-    clicking and one built by calling are the same project and open in
-    each other. Every button here is one of those verbs plus a sentence
-    in the status bar; nothing is computed in this file that a script
-    cannot compute without it.
+    The window holds a `Project`, the same object a script builds, with
+    the same verbs on it, so a project built in the window and one built
+    by a script are the same project and each opens the other's files.
+    Every button runs one of those verbs and writes a line in the status
+    bar. Nothing is computed in this file that a script cannot compute
+    without it.
 
-    What it adds is the reading: which pane suits what is selected,
-    which of several ways to read it is wanted, and the editing of the
-    things that are edited rather than computed — units, channel
-    tables, geometry, the report.
+    What the window adds is the display: which pane suits what is
+    selected, which reading of it is wanted, and the editing of the
+    things that are edited rather than computed, such as units, channel
+    tables, geometry and reports.
     """
 
     def __init__(self, offscreen_3d: bool = False) -> None:
-        """offscreen_3d replaces the embedded VTK view with an off-screen
-        plotter — VTK's Qt widget cannot run under Qt's offscreen platform,
-        so headless tests use this to exercise the full render path."""
+        """Build the window, with an empty project.
+
+        `offscreen_3d` replaces the embedded VTK views with off-screen
+        plotters. VTK's Qt widget cannot run under Qt's offscreen
+        platform, so the headless tests use this to run the full render
+        path."""
         super().__init__()
         from .project_tree import start_trace
 
@@ -1540,6 +1545,9 @@ class MainWindow(QMainWindow):
         # the one-call reports over a batch of controller runs, the
         # same `run_report` a script calls (Brandon, 2026-10-04)
         file_menu.addAction('Reports from R&uns…', self.reports_from_runs)
+        # a run cut to a stretch and written back, nothing else changed
+        # (Brandon, 2026-10-13)
+        file_menu.addAction('&Truncate Rattlesnake File…', self.truncate_rattlesnake_file)
         file_menu.addSeparator()
         # light, dark, or the platform's choice, remembered between
         # launches: a Linux desktop Qt could not read left a friend of
@@ -2356,8 +2364,9 @@ class MainWindow(QMainWindow):
         self.apply_theme()
 
     def choose_appearance(self, choice: str) -> None:
-        """File → Appearance: remember the choice and wear it now.
-        'system' means follow the platform again."""
+        """File → Appearance: remember `choice` ('light', 'dark' or
+        'system') and apply it now. 'system' follows the platform's
+        appearance again."""
         remember_appearance(choice)
         for name, action in self.appearance_actions.items():
             action.setChecked(name == choice)
@@ -2371,8 +2380,9 @@ class MainWindow(QMainWindow):
             else f'{choice.capitalize()} appearance, remembered')
 
     def apply_theme(self, name: str | None = None) -> None:
-        """Adopt a light/dark theme (default: the one chosen — this
-        launch's flag, the remembered appearance, or the OS)."""
+        """Apply the light or dark theme `name` to every part of the
+        window. By default it is the chosen one: this launch's flag, the
+        remembered appearance, or the platform's."""
         import pyqtgraph as pg
 
         self.theme_name = name or chosen_scheme()
@@ -2434,15 +2444,17 @@ class MainWindow(QMainWindow):
             self.layout().activate()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """Shut every VTK view down before Qt destroys the widgets.
+        """Close every VTK view (the scene, the 3-D data view and the MAC
+        bars) before Qt destroys the widgets.
 
-        Without this, closing the window after a 3D view has rendered
-        segfaults: the render window is torn down with its GL context
-        still live. All three of them, not just the scene — the stage
-        and the MAC bars have the same interactor, the same GL context
-        and the same timers, and the scene-only version left them to
-        take their chances (Brandon's crash report, 2026-08-30).
+        Without this, closing the window after a 3-D view has rendered
+        crashes: the render window is torn down with its GL context still
+        live.
         """
+        # All three of them, not just the scene: the stage and the MAC
+        # bars have the same interactor, the same GL context and the same
+        # timers, and the scene-only version left them to take their
+        # chances (Brandon's crash report, 2026-08-30).
         self.set_playing(False)
         # and the report page: a navigation in flight when the view is
         # destroyed is the gate's stall (ReportEditor.stand_down)
@@ -2464,11 +2476,13 @@ class MainWindow(QMainWindow):
     def add_object(self, name: str, obj: Any, alternate: str | None = None,
                    source: str | None = None,
                    key: Any = None) -> str:
-        """Add an object, keeping names unique.
+        """Add `obj` to the project under a unique name, give it a row in
+        the tree, and return the name used.
 
-        `alternate` is tried first on a clash. `source` is the file it was
-        read from and `key` what that file's reader called it; both go on the
-        tooltip, because the name carries neither.
+        When `name` is taken, `alternate` is tried first, and a name
+        still taken is numbered. `source` is the file the object was read
+        from and `key` what that file's reader called it; both go in the
+        row's tooltip, because the name says neither.
         """
         if name in self.objects and alternate:
             name = alternate
@@ -2477,11 +2491,13 @@ class MainWindow(QMainWindow):
 
     def show_object(self, name: str, source: str | None = None,
                     key: Any = None, select: bool = True) -> str:
-        """Give an object already in the project its row in the tree.
+        """Give an object already in the project its row in the tree, and
+        return its name.
 
-        The store and the showing are separate: a project verb — a
-        computation, a fit, a projection — puts the result in the
-        project, and this is how the window catches up with it.
+        A project verb (a computation, a fit, a projection) puts its
+        result in the project, and this adds the row for it. `source`
+        and `key` go in the tooltip, as in `add_object`. With `select`,
+        the new row is selected.
         """
         obj = self.objects[name]
         item = QTreeWidgetItem([name])
@@ -2705,29 +2721,30 @@ class MainWindow(QMainWindow):
         return acts
 
     def add_solid_block_act(self) -> None:
-        """A solid block typed into the selected geometry's solids, in the
-        add pane: a center, three widths, three angles, a name; each Add
+        """Open the add pane for a solid block in the selected geometry:
+        a center, three widths, three angles and a name. Each Add runs
         the project's `add_solid_block`."""
         self._open_mesh_pane('solid_block')
 
     def add_solid_cylinder_act(self) -> None:
-        """A cylinder typed into the selected geometry's solids: a center,
-        a radius, a length along its own Z, three angles, a name; each Add
-        the project's `add_solid_cylinder`."""
+        """Open the add pane for a solid cylinder in the selected
+        geometry: a center, a radius, a length along its own Z, three
+        angles and a name. Each Add runs the project's
+        `add_solid_cylinder`."""
         self._open_mesh_pane('solid_cylinder')
 
     def add_solid_section_act(self) -> None:
-        """A section typed into the selected geometry's solids: an I-beam,
-        a channel, a tee, an angle or a tube picked, its dimensions, a
-        length along its own Z, a center, three angles, a name; each Add
-        the project's `add_solid_section`."""
+        """Open the add pane for a solid section in the selected
+        geometry: an I-beam, channel, tee, angle or tube, its dimensions,
+        a length along its own Z, a center, three angles and a name. Each
+        Add runs the project's `add_solid_section`."""
         self._open_mesh_pane('solid_section')
 
     def add_solid_hole_act(self) -> None:
-        """A hole typed into the selected geometry's solids, to subtract
-        from a part: where it enters, a diameter, a depth or Through, a
-        counterbore when asked for; each Add the project's
-        `add_solid_hole`."""
+        """Open the add pane for a hole in the selected geometry, to
+        subtract from a part: where it enters, a diameter, a depth or
+        Through, and a counterbore when one is wanted. Each Add runs the
+        project's `add_solid_hole`."""
         self._open_mesh_pane('solid_hole')
 
     def _solids_changed(self, name: str, pick=()) -> None:
@@ -2761,9 +2778,13 @@ class MainWindow(QMainWindow):
                                      QItemSelectionModel.SelectionFlag.NoUpdate)
 
     def combine_solids_act(self, operation: str) -> None:
-        """The picked parts made one by `operation`: the project's
-        `combine_solids`, the first in the tree first — the body a
-        subtraction cuts — and the new solid picked."""
+        """Combine the picked solids into one by `operation` ('union',
+        'subtract' or 'intersect'), with the project's `combine_solids`,
+        and select the new solid.
+
+        The solids are passed in tree order, so the first in the tree is
+        the body a subtraction cuts. A refusal is shown in the status
+        bar."""
         chosen = self._selected_solids()
         if chosen is None:
             return
@@ -2778,8 +2799,9 @@ class MainWindow(QMainWindow):
                           f'{SOLID_LABELS[operation].lower()}')
 
     def separate_solids_act(self) -> None:
-        """The picked booleans taken apart: the project's
-        `separate_solids`, and the solids they freed picked."""
+        """Take the picked booleans and patterns apart, with the
+        project's `separate_solids`, and select the solids they were made
+        of."""
         from ..core import solids
 
         chosen = self._selected_solids()
@@ -2796,10 +2818,12 @@ class MainWindow(QMainWindow):
         self._show_status(f'{name}: taken apart into {len(freed)} solids')
 
     def mesh_solids_act(self) -> None:
-        """Open Mesh Solids on the picked parts (Brandon, 2026-10-11):
-        the element size in a pane beside the view, opening on half the
-        thinnest feature, the bricks it makes drawn as it is typed, and
-        Mesh — the project's `mesh_solids`."""
+        """Open the Mesh Solids pane on the picked solids.
+
+        The pane beside the view has the element size, starting at half
+        the thinnest feature, and the bricks it would make are drawn as
+        it is typed. Mesh runs the project's `mesh_solids`."""
+        # Brandon, 2026-10-11.
         from ..core import solids
 
         chosen = self._selected_solids()
@@ -2896,7 +2920,8 @@ class MainWindow(QMainWindow):
             f'the geometry; {obj.num_nodes:,} nodes in all')
 
     def close_mesh_solids_pane(self, redraw: bool = True) -> None:
-        """Put the pane away, with its preview."""
+        """Close the Mesh Solids pane and remove its preview. With
+        `redraw`, the view is drawn again."""
         self.scene.mesh_solids_panel.hide()
         if self.__dict__.get('_meshing') is None:
             return
@@ -2906,10 +2931,12 @@ class MainWindow(QMainWindow):
             self.render_current()
 
     def pattern_solids_act(self) -> None:
-        """Open Pattern on the picked solids: how many along X, Y and Z and
-        how far apart, the copies drawn as they are typed, and Pattern —
-        the project's `pattern_solids`, one solid made of them (Brandon,
-        2026-10-11)."""
+        """Open the Pattern pane on the picked solids.
+
+        The pane has how many copies along X, Y and Z and how far apart,
+        and the copies are drawn as they are typed. Pattern runs the
+        project's `pattern_solids`, which makes one solid of them."""
+        # Brandon, 2026-10-11.
         chosen = self._selected_solids()
         if chosen is None:
             return
@@ -3028,7 +3055,8 @@ class MainWindow(QMainWindow):
                           f' — {copies:,} copies, solid {made}')
 
     def close_pattern_pane(self, redraw: bool = True) -> None:
-        """Put the pane away, with its preview."""
+        """Close the Pattern pane and remove its preview. With `redraw`,
+        the view is drawn again."""
         self.scene.pattern_panel.hide()
         patterning = self.__dict__.get('_patterning')
         if patterning is None:
@@ -3259,7 +3287,9 @@ class MainWindow(QMainWindow):
         self.render_current()
 
     def current_reference(self) -> tuple[str | None, Any, Any]:
-        """(kind, object, index-or-component) for the selected tree item."""
+        """`(kind, object, detail)` for the current tree item, where
+        `detail` is an index or a component; all None when there is
+        none."""
         item = self.tree.currentItem()
         if item is None:
             return None, None, None
@@ -3270,11 +3300,16 @@ class MainWindow(QMainWindow):
         return kind, self.objects.get(name), detail
 
     def current_object(self) -> Any:
-        """The object owning the selection (a child resolves to its parent)."""
+        """The object the current tree item belongs to (a sub-item gives
+        its object), or None."""
         return self.current_reference()[1]
 
     def selected_references(self) -> list[tuple[str, str, Any, Any]]:
-        """[(kind, name, object, detail)] for every selected tree item."""
+        """`(kind, name, object, detail)` for every selected tree item.
+
+        The project row stands for every object in the project, records
+        picked in an object's grid stand for themselves, and gray slots
+        are left out."""
         out = []
         for item in self.tree.selectedItems():
             reference = item.data(0, ROLE_REFERENCE)
@@ -3304,7 +3339,8 @@ class MainWindow(QMainWindow):
     def object_item(self,
                     item: QTreeWidgetItem | None = None
                     ) -> QTreeWidgetItem | None:
-        """The object-level item for a selection (walks up to the test)."""
+        """The object's row for `item` (the current item by default),
+        found by walking up the tree; None for the project row."""
         item = item or self.tree.currentItem()
         if item is self.test_item:
             return None
@@ -3316,8 +3352,14 @@ class MainWindow(QMainWindow):
     top_level_item = object_item
 
     def delete_selected(self) -> None:
-        """Remove what is selected: entities while editing or when entity
-        rows are picked in the tree, whole objects otherwise."""
+        """Delete what is selected.
+
+        While a geometry's table is being edited, its selected rows are
+        deleted. Otherwise, picked solids, entities (nodes, elements and
+        the like) or components are deleted from their geometry, and
+        picked records, modes, channels or photos from their object. Only
+        when no sub-item is picked are whole objects deleted, so an object
+        selected beside a sub-item is not deleted with it."""
         if self.editing is not None:
             return self.delete_entity_rows()
         chosen = self._selected_solids()
@@ -3648,12 +3690,12 @@ class MainWindow(QMainWindow):
                                                  'align_meshes'})
 
     def acts_for(self, names=None):
-        """[(verb, label, icon, handler, tooltip)] the selection can
-        take, in the bar's order.
+        """The acts the selection can take, as a list of `(verb, label,
+        icon, handler, tooltip)` in the bar's order.
 
-        `names` is the selection; left out, it is read from the tree,
-        a record pick counting as its object. The project row selected
-        offers the one act the project itself has, its report; a stale
+        `names` is the selection. When it is left out, it is read from the
+        tree, a record pick counting as its object. With the project row
+        selected, the one act offered is the project's report. A stale
         object offers Recompute first, ahead of anything else it can do.
         """
         if names is None:
@@ -3775,16 +3817,17 @@ class MainWindow(QMainWindow):
                   'from the view it is playing in'))]
 
     def save_animation(self, path: str | None = None) -> str | None:
-        """The 3-D view's animation, saved as an MP4 the way it plays:
-        this camera, scale and speed. A swept phase is whole cycles to
-        six seconds, a record or a sweep of lines is once through
-        (`viz.animate.cycle_parameters` / `sweep_parameters`, the rule a
-        script's `movie=` uses too).
+        """Save the 3-D view's animation as an MP4, the way it plays: this
+        camera, scale and speed. Returns the path, or None when there is
+        no animation or the save was canceled or failed.
 
-        Frames go through the window's own path — `_draw_frame` for a
-        phase, the plot cursor for a record — so the caption an envelope
-        rewrites per line is in every frame; then playback is put back
-        where it was. `path` skips the dialog (scripts, tests).
+        A mode shape's phase is saved as whole cycles lasting at least six
+        seconds, and a record or a sweep of lines is saved once through
+        (`viz.animate.cycle_parameters` and `sweep_parameters`, the same
+        rule a script's `movie=` uses). Each frame is drawn the way the
+        window draws it, so the caption an envelope writes for each line
+        is in every frame, and playback is put back where it was
+        afterwards. With `path`, no dialog is shown.
         """
         from ..viz.animate import (
             cycle_parameters,
@@ -3843,17 +3886,20 @@ class MainWindow(QMainWindow):
         return path
 
     def refresh_selected(self) -> None:
-        """Recompute the selected stale object — the bar's Recompute,
-        the same act as the badge's click."""
+        """Recompute the selected stale object. This is the bar's
+        Recompute, the same act as a click on the object's badge."""
         item = self.object_item()
         if item is not None:
             self.refresh_object(item.text(0))
 
     def generate_report_act(self) -> None:
-        """The bar's Generate Report: the typed report at once, or the
-        choice of templates for an untyped project — and the templates
-        the user has saved, beside the built-in ones, whenever there
-        are any (2026-09-08)."""
+        """The bar's Generate Report.
+
+        A project with a type gets its report at once. A project without
+        one gets a menu of the built-in templates. Whenever there are
+        saved templates, the menu is shown in both cases, with the saved
+        templates listed after the built-in ones."""
+        # Saved templates in the menu: 2026-09-08.
         from ..io.report_template import saved_templates
 
         saved = saved_templates()
@@ -3916,7 +3962,8 @@ class MainWindow(QMainWindow):
         self.console.refresh(self.project.journal)
 
     def refresh_object(self, name: str) -> None:
-        """Recompute a stale object in place — the badge's click."""
+        """Recompute the stale object `name` in place, as a click on its
+        badge does. A refusal is shown in the status bar."""
         reason = self._stale.get(name, '')
         try:
             self.project.refresh(name)
@@ -4110,21 +4157,28 @@ class MainWindow(QMainWindow):
                      if name in group['members']), None)
 
     def linked_group(self, name: str) -> list[str] | None:
-        """The linked member names beside `name`, or None."""
+        """The names in `name`'s object group, `name` included, or None
+        when it is not linked."""
         group = self._group_of(name)
         return None if group is None else group['members']
 
     def link_role(self, name: str) -> str | None:
-        """The role of `name`'s object group — 'Basis', or None for an
-        unroled or unlinked object. The Basis group defines the DOF
-        space comparisons happen in: other sets project onto its DOFs,
-        its modes are the MAC rows and the frequency-error baseline."""
+        """The role of `name`'s object group: 'Basis', or None for an
+        object without a role or not linked.
+
+        The Basis group sets the DOFs comparisons are made in: other
+        sets are projected onto its DOFs, and its modes are the MAC's
+        rows and the baseline of the frequency error."""
         group = self._group_of(name)
         return None if group is None else group['role']
 
     def set_link_role(self, name: str, role: str | None) -> None:
-        """Declare an object group the Basis of comparisons — explicit,
-        so nothing downstream has to guess which group is which."""
+        """Give `name`'s object group the role `role` ('Basis'), or clear
+        it with None.
+
+        Only one group has a role at a time, so giving it to this group
+        takes it from any other. It is set explicitly so that nothing
+        later has to guess which group is which."""
         group = self._group_of(name)
         if group is None:
             return
@@ -4143,8 +4197,8 @@ class MainWindow(QMainWindow):
 
     def linked_geometry(self,
                         name: str) -> tuple[str, Geometry] | None:
-        """(geometry name, geometry) linked with `name`, or None —
-        explicit knowledge, never a guess."""
+        """`(geometry name, geometry)` for the geometry in `name`'s object
+        group, or None. Only a link counts; no geometry is guessed."""
         members = self.linked_group(name)
         if members is None:
             return None
@@ -4192,8 +4246,8 @@ class MainWindow(QMainWindow):
         return True
 
     def unlink_selected(self) -> None:
-        """Take the selected objects out of their groups; a group left
-        with one member dissolves."""
+        """Take the selected objects out of their object groups. A group
+        left with one member is removed."""
         names = self._selected_object_names()
         if not names:
             return
@@ -4607,12 +4661,14 @@ class MainWindow(QMainWindow):
             any(self.linked_group(name) is not None for name in names))
 
     def set_project_type(self, project_type: str | None) -> None:
-        """Declare what kind of test this project is — the tree then
-        shows a gray slot for everything that kind of report expects.
+        """Set the project type, or clear it with None.
 
-        The type never pre-selects a reading: a time history opens
-        plain whatever the project is (Brandon, 2026-08-30).
+        The tree then shows a gray slot for everything that type's report
+        expects, and the status bar says how many are missing. The type
+        does not choose a reading: a time history opens plain whatever
+        the project type is.
         """
+        # A plain time history whatever the type: Brandon, 2026-08-30.
         self.project_type = project_type or None
         # an act like any other, journaled as the assignment a script
         # makes — settling in place, since imports may restate it
@@ -4641,9 +4697,11 @@ class MainWindow(QMainWindow):
         return self.project.sides()
 
     def work_up(self) -> None:
-        """The tree bar's Automatic: the project verb, with every
-        object it made given its row and the report — the last thing
-        made — opened."""
+        """The tree bar's Automatic: run the project's `work_up`, give
+        every object it made a row, and select the last one made.
+
+        It needs a project type, and says so when there is none. The
+        status bar lists what was added and what is still missing."""
         if not self.project_type:
             self._show_status('Set a project type first — Automatic fills '
                               'the slots the type expects')
@@ -4855,7 +4913,7 @@ class MainWindow(QMainWindow):
             for kind, count in report.items() if count) or 'Nothing to remove')
 
     def delete_entity_rows(self) -> None:
-        """Delete the rows selected in the edit table."""
+        """Delete the rows selected in the geometry table being edited."""
         if self.editing is None:
             return
         name, component = self.editing
@@ -4884,10 +4942,13 @@ class MainWindow(QMainWindow):
         self._begin_picking(geometry, self._picking_component())
 
     def define_units(self) -> None:
-        """Declare units for what is selected.
+        """Open the units pane for what is selected.
 
-        With individual records selected, only those get units; selecting an
-        object (or its category) covers all of its records.
+        With individual records selected, only those are given units;
+        selecting an object (or its category) covers all of its records.
+        Channel tables are skipped. The pane shows one object; with
+        several selected, it opens on the first and the status bar says
+        to select the others one at a time.
         """
         targets = {}
         for kind, name, obj, detail in self.selected_references():
@@ -4923,7 +4984,8 @@ class MainWindow(QMainWindow):
         self.render_current()
 
     def set_active_geometry(self, name: str | None = None) -> None:
-        """Choose the geometry every other object is checked against."""
+        """Make `name` (the selected object by default) the active
+        geometry, the one every other object is checked against."""
         if name is None:
             item = self.object_item()
             name = item.text(0) if item is not None else None
@@ -4941,10 +5003,12 @@ class MainWindow(QMainWindow):
         self._show_status(f'{name} is now the active geometry')
 
     def refresh_compatibility(self) -> None:
-        """Re-check the test and repaint the tree.
+        """Check the project's objects against the active geometry again,
+        and repaint the tree.
 
-        Runs when the project changes — import, delete, rename, or a new
-        active geometry — not on selection or render.
+        It runs when the project changes (an import, a delete, a rename
+        or a new active geometry), not on a selection or a render. With
+        no active geometry, the first geometry in the project is used.
         """
         if self.active_geometry not in self.objects:
             self.active_geometry = next(
@@ -5062,11 +5126,13 @@ class MainWindow(QMainWindow):
 
     def show_units_panel(self, name: str, obj: Any,
                          records: Sequence[int] | None = None) -> None:
-        """Open the units pane on one data object, leaving the plot up.
+        """Open the units pane on the object `name`, beside the plot.
 
-        An FRF gets two tables — its response channels and its reference
-        channels — because a matrix of N×M records has only N+M channel
-        units to name. Everything else fills the first table alone.
+        `records` limits the table to those records (all of them when
+        None). An FRF gets two tables, one for its response channels and
+        one for its reference channels, because a matrix of N×M records
+        has only N+M channel units to declare. Everything else uses the
+        first table alone.
         """
         two_sided = isinstance(obj, DataArray) and obj.needs_reference
         if two_sided:
@@ -5304,14 +5370,15 @@ class MainWindow(QMainWindow):
         item.setExpanded(expanded)
 
     def rename_selected(self) -> None:
-        """Start inline editing of the selected name.
+        """Start editing the selected object's name in the tree.
 
-        The project's own row included. `top_level_item` walks *up* to
-        the project and answers None when it is already there — which is
-        right for finding an object's row and wrong here, and left
-        Rename silently doing nothing on the one row that carries the
-        project's name.
+        The project's own row can be renamed too, and a photo picked in
+        its grid is renamed itself rather than the object holding it.
         """
+        # `top_level_item` walks *up* to the project and answers None when
+        # it is already there, which is right for finding an object's row
+        # and wrong here, and left Rename silently doing nothing on the
+        # one row that carries the project's name.
         current = self.tree.currentItem()
         item = (self.test_item if current is self.test_item
                 else self.top_level_item())
@@ -5390,8 +5457,9 @@ class MainWindow(QMainWindow):
         self.refresh_compatibility()
 
     def rename_object(self, old: str, new: str) -> str:
-        """Rename an object from code, numbering a taken name the way
-        `Project.add` does; returns the name used."""
+        """Rename the object `old` to `new` from code, and return the name
+        used. A name already taken is numbered the way `Project.add`
+        numbers it."""
         unique, n = new, 1
         while unique in self.objects:
             n += 1
@@ -5452,10 +5520,11 @@ class MainWindow(QMainWindow):
 
     @property
     def editing_family(self) -> str | None:
-        """The element family being added to, read off the editing
-        scope: the family row's own, an element group row's from what the element group
-        holds, an element row's from the element. None outside the
-        elements table."""
+        """The element family being added to, read from what the table
+        is being edited for: a family row's own family, or for element
+        group rows the family of the first element they hold. None outside
+        the elements and element groups tables, or for groups that hold
+        no elements."""
         if self.editing is None or self.editing[1] not in ('elements', 'groups'):
             return None
         geometry = self.objects.get(self.editing[0])
@@ -5470,8 +5539,9 @@ class MainWindow(QMainWindow):
         return None
 
     def edit_entities(self) -> None:
-        """Edit a geometry's nodes, coordinate systems, a family of its
-        elements or one of its element groups in a table beside the model."""
+        """Edit the selected part of a geometry in a table beside the 3-D
+        view: its nodes, its coordinate systems, a family of its elements,
+        or its element groups."""
         kind, obj, detail = self.current_reference()
         item = self.tree.currentItem()
         reference = (kind, item.data(0, ROLE_REFERENCE)[1] if kind else None,
@@ -5573,7 +5643,11 @@ class MainWindow(QMainWindow):
     # ---- add mode -----------------------------------------------------------
 
     def set_add_mode(self, enabled: bool) -> None:
-        """Toggle creating things by clicking in the 3D view."""
+        """Turn on or off adding entities by clicking in the 3-D view,
+        while a geometry's table is being edited.
+
+        In the element groups table there is nothing to click, so the
+        button adds one element group and comes back up."""
         enabled = bool(enabled) and self.editing is not None
         if enabled and self.editing[1] == 'groups':
             # Nothing to click: an element group is a name over elements, not a
@@ -5693,7 +5767,9 @@ class MainWindow(QMainWindow):
             self.merge_groups_act(*picked)
 
     def merge_groups_act(self, name, groups):
-        """The project's `merge_groups`, and what it did, said."""
+        """Merge element groups `groups` of geometry `name` with the
+        project's `merge_groups`, and say in the status bar what was
+        merged, or why it was refused."""
         geometry = self.objects.get(name)
         try:
             found = self.project.merge_groups(name, groups)
@@ -5715,9 +5791,9 @@ class MainWindow(QMainWindow):
         self._update_tie_action()
 
     def tie_selected(self) -> None:
-        """Tie the selected elements: to the nearest nodes of an element group,
-        chosen from a menu, or to a second selection — picked next, and
-        tied on the second press."""
+        """Tie the selected elements, either to the nearest nodes of an
+        element group chosen from a menu, or to a second selection of
+        elements, picked next and tied on the second press."""
         self.tie_action.setChecked(self._tie_patch is not None)
         if self.editing is None or self.editing[1] != 'elements':
             return
@@ -5789,7 +5865,8 @@ class MainWindow(QMainWindow):
     # ---- turning a coordinate system ---------------------------------------
 
     def set_rotate_mode(self, enabled: bool) -> None:
-        """Show the rings, and take over the mouse while one is dragged."""
+        """Turn on or off the rings for turning the coordinate system
+        being edited. While a ring is dragged, it has the mouse."""
         enabled = bool(enabled) and self._turnable_row() is not None
         self._rotating = None
         self._sliding = None
@@ -6291,7 +6368,8 @@ class MainWindow(QMainWindow):
         self.table.model().refresh_row(row)
 
     def reset_rotation(self) -> None:
-        """Put the frame back to no rotation, keeping where it sits."""
+        """Set the coordinate system being turned back to no rotation,
+        keeping its origin."""
         row, matrix = self._rotating_frame()
         if matrix is None:
             return
@@ -6389,9 +6467,9 @@ class MainWindow(QMainWindow):
 
     @property
     def element_type(self) -> tuple[int, int]:
-        """(type code, node count) a click builds: the family being
-        edited says what, and an element group that holds nothing yet takes a
-        triangle, the smallest face."""
+        """`(type code, node count)` of the element the clicks build. The
+        family being edited decides it, and an element group with no
+        elements yet gets a triangle, the smallest face."""
         return FAMILY_ADD_TYPES.get(self.editing_family or 'triangles')
 
     def _add_mode_hint(self):
@@ -6564,7 +6642,8 @@ class MainWindow(QMainWindow):
         self.hover_at(*position)
 
     def hover_at(self, x: float, y: float) -> int | None:
-        """Light up whatever is under this pixel; returns the entity."""
+        """Light up the entity under the pixel `(x, y)`, and return it
+        (None when there is none)."""
         entity = self._picker.pick(x, y, pixel_ratio=self.devicePixelRatioF())
         if entity == self._hovered:
             return entity        # nothing changed, so nothing to redraw
@@ -6682,11 +6761,14 @@ class MainWindow(QMainWindow):
 
     def select_entity(self, entity: int | None,
                       extend: bool = False) -> int | None:
-        """Select the table row for an entity picked in the 3D view.
+        """Select the table row for an entity picked in the 3-D view, and
+        return the row (None when the entity has none, or when no table
+        is being edited).
 
-        The same rule for every kind of entity: a plain click selects only
-        what was clicked, the modifier adds to the selection, and clicking
-        something already selected takes it back out.
+        The same rule applies to every kind of entity. A plain click
+        selects only what was clicked; with `extend` (the modifier key),
+        a click adds to the selection, and clicking something already
+        selected takes it back out.
         """
         if self.editing is None or entity is None:
             return None
@@ -6943,9 +7025,11 @@ class MainWindow(QMainWindow):
     _update_answer = Signal(object)
 
     def about(self) -> None:
-        """The version and what it is: an alpha, to be checked, with
-        the contact address. The one place a user can read the version
-        without the network or a relaunch."""
+        """Show the About box: the version, the copyright, and the alpha
+        notice with the contact address.
+
+        It is the one place to read the version without the network or a
+        relaunch."""
         from .. import __version__
         from .disclaimer import TEXT
 
@@ -6964,33 +7048,30 @@ class MainWindow(QMainWindow):
         self.about_box: QMessageBox | None = box
 
     def check_for_updates(self) -> None:
-        """File → Check for Updates: ask visualdynamics.org for the
-        latest version and say what it found.
+        """File → Check for Updates.
 
-        A check, never an update — `update.py` explains the line: an
-        updater that runs what it fetched without verifying a
-        signature is remote code execution with a friendly name, and
-        there is no signing identity yet. So a newer version is
-        offered as a page to open, in the browser, where the release
-        is (and where a private release wants the user's own login).
-        The fetch runs off the main thread: the check is the least
-        important thing the application does and must never be why it
-        is slow.
+        In the packaged macOS app, Sparkle does the whole job in its own
+        window (`gui/updater.py`): it checks, downloads, verifies the
+        update's signature and replaces the app.
 
-        It is patient (`ASKED_TIMEOUT`) and it reports **why** it
-        failed. Somebody who chose this menu item is waiting on news,
-        and "could not reach visualdynamics.org" is not news — a proxy,
-        a filtered domain, an unverifiable certificate and a slow
-        network all read the same, and none can be told apart from
-        outside the program (Brandon, 2026-09-23: a work machine that
-        could not check, and an afternoon of commands to find out why).
-        This menu item is the only place the application checks; there
-        is no check on startup.
-
-        The packaged macOS app hands the whole job to Sparkle instead
-        (`updater.py`, 2026-09-28): it checks, downloads, verifies the
-        update's signature and replaces the app, in its own window.
+        Everywhere else, the window reads the release manifest from
+        visualdynamics.org (`update.attempt`) and says what it found. A
+        newer version is shown in a dialog with the page to open in the
+        browser, or for a pip install the command to run; nothing is
+        downloaded or run. The request runs off the main thread, waits
+        `update.ASKED_TIMEOUT`, and when it fails the status bar says
+        why (a proxy, a filtered domain, a certificate that cannot be
+        verified, a slow network). This menu item is the only place the
+        application checks; there is no check at startup.
         """
+        # Outside Sparkle this stays a check, never an update (`update.py`
+        # explains the line): an updater that runs what it fetched without
+        # verifying a signature is remote code execution with a friendly
+        # name, and only the Sparkle build verifies one (since 2026-09-28).
+        # The reason a failure is reported: someone who chose this menu
+        # item is waiting on news, and "could not reach visualdynamics.org"
+        # is not news (Brandon, 2026-09-23: a work machine that could not
+        # check, and an afternoon of commands to find out why).
         import threading
 
         from .. import update
@@ -7083,14 +7164,11 @@ class MainWindow(QMainWindow):
         return dropped_files(mime)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Anywhere on the window will do.
+        """Accept a drag of files anywhere on the window.
 
-        Dropping on the tree alone made a target of whatever the tree
-        happened to be that moment — and on a fresh window it is sized to
-        no content at all, a strip about 90 px wide. Missing it does
-        nothing at all, which reads as the drop being ignored, so the
-        file gets dragged over again. The window is the thing being
-        aimed at; let it take the file.
+        On a fresh window the tree is a strip about 90 px wide, and a
+        drop that missed it would do nothing at all, which reads as the
+        drop being ignored. So the whole window takes files.
         """
         from .project_tree import trace_drag
 
@@ -7109,35 +7187,36 @@ class MainWindow(QMainWindow):
             super().dragMoveEvent(event)
 
     def event(self, found: QEvent) -> bool:
-        """Keyboard focus is parked while the window is inactive.
+        """Move keyboard focus to a hidden widget while the window is
+        inactive, and give it back when the window is active again.
 
         macOS 26 with Qt 6.11 discards a Finder drop released over the
-        rect of the widget that held focus when the app deactivated:
-        draggingEntered and draggingUpdated are answered Copy, and the
-        release still arrives as draggingExited — no drop, no error,
-        nothing. The tree is the first focusable widget, so on a fresh
-        window it held focus and the one dead spot in the window was
-        the very widget whose status line says "drag files onto the
-        tree". Proven by swizzling the NSView's dragging methods and
-        toggling nothing but focus; the full hunt is in the log for
-        commit that introduced this.
-
-        Three shapes of this fix failed first, each for a reason worth
-        keeping:
-
-        - Parking when the drag *enters* is too late. The drag's source
-          deactivated the app before the first enter, and the platform
-          state that kills the drop is set by then.
-        - `clearFocus()` at deactivation is in time but does nothing:
-          focus-to-nobody leaves the platform's input state armed. Only
-          a genuine handoff to another widget runs the full teardown.
-        - Disabling input methods on the tree changes nothing — the
-          poison is the focus itself, not the input context.
-
-        So focus is *handed* to a zero-size widget whose rect nothing
-        can hit, and handed back on activation. An inactive window has
-        no keyboard, so nothing is lost in between.
+        widget that had focus when the application was deactivated. The
+        focus is moved to a zero-size widget that no drop can land on,
+        and an inactive window has no keyboard, so nothing is lost in
+        between. Focus is not moved while one of the application's own
+        popups is open.
         """
+        # The drop is discarded without an error: draggingEntered and
+        # draggingUpdated are answered Copy, and the release still arrives
+        # as draggingExited. The tree is the first focusable widget, so on
+        # a fresh window it held focus and the one dead spot in the window
+        # was the very widget whose status line says "drag files onto the
+        # tree". Proven by swizzling the NSView's dragging methods and
+        # toggling nothing but focus; the full hunt is in the log for the
+        # commit that introduced this.
+        #
+        # Three shapes of this fix failed first, each for a reason worth
+        # keeping:
+        #
+        # - Parking when the drag *enters* is too late. The drag's source
+        #   deactivated the app before the first enter, and the platform
+        #   state that kills the drop is set by then.
+        # - `clearFocus()` at deactivation is in time but does nothing:
+        #   focus-to-nobody leaves the platform's input state armed. Only
+        #   a genuine handoff to another widget runs the full teardown.
+        # - Disabling input methods on the tree changes nothing: the
+        #   poison is the focus itself, not the input context.
         if found.type() == QEvent.Type.WindowDeactivate:
             if QApplication.activePopupWidget() is not None:
                 # deactivated by one of our own popups — a combo's
@@ -7395,7 +7474,49 @@ class MainWindow(QMainWindow):
         from .stream_window import ask_stream_window
 
         return ask_stream_window(self, path, summary,
-                                 resolve_theme(self.theme_name))
+                                 resolve_theme(self.theme_name),
+                                 save=self._save_rattlesnake_window)
+
+    def _save_rattlesnake_window(self, path: str, target: str, start: float,
+                                 stop: float) -> dict:
+        """A run cut to a window and written as a `.nc4` of its own, on the
+        worker with the strip's bar and Cancel, and journaled as the call
+        a script makes (`io.rattlesnake.save_window`)."""
+        from ..io import rattlesnake
+
+        kept = self._run_long(f'Saving {os.path.basename(target)}…',
+                              rattlesnake.save_window, path, target, start, stop)
+        self.project.journal.append(
+            f'visualdynamics.io.rattlesnake.save_window({path!r}, {target!r}, '
+            f'{start!r}, {stop!r})')
+        self._show_status(f'Saved {os.path.basename(target)}: '
+                          f'{start:.4g} to {stop:.4g} s of {os.path.basename(path)}')
+        return kept
+
+    def truncate_rattlesnake_file(self) -> None:
+        """File → Truncate Rattlesnake File.
+
+        A run (`.nc4`) is picked in a file dialog and shown in the
+        stream window dialog without its Import button. Save Truncated
+        Copy writes the run cut to the stretch chosen. It works on any
+        run, not only one large enough to be asked about on import, and
+        refuses a file with no streamed time data."""
+        from ..io import rattlesnake
+        from .stream_window import StreamWindowDialog
+
+        path, _filter = QFileDialog.getOpenFileName(
+            self, 'Truncate Rattlesnake File', '', 'Rattlesnake run (*.nc4)')
+        if not path:
+            return
+        summary = rattlesnake.stream_summary(path) if rattlesnake.sniff(path) else None
+        if not summary or not summary['streams']:
+            self._show_status(f'{os.path.basename(path)} holds no streamed time '
+                              'data to cut')
+            return
+        dialog = StreamWindowDialog(path, summary, resolve_theme(self.theme_name),
+                                    self, save=self._save_rattlesnake_window,
+                                    importing=False)
+        dialog.exec()
 
     def _exodus_import_choices(self, path):
         """How an exodus file's results should be read, asked as needed.
@@ -7451,10 +7572,12 @@ class MainWindow(QMainWindow):
         return options
 
     def import_paths(self, paths: Sequence[str]) -> list[str]:
-        """Import several files, reporting any failures once at the end.
+        """Import several files, report any failures once at the end, and
+        return the names of the objects added.
 
-        Dropped images are not their own objects: they land together in
-        the project's Photos object, created on first use.
+        Images are not objects of their own: they are added together to
+        the project's Photos object, which is created on first use. Paths
+        that arrive while an import is running wait for it to finish.
         """
         if self._importing:
             # the progress ticks flush paints by pumping the queue, and
@@ -7888,7 +8011,9 @@ class MainWindow(QMainWindow):
         return imported
 
     def save_test(self) -> None:
-        """Save the whole project — every object, under its name — one file."""
+        """Save the whole project, every object under its name, as one
+        file: a `.vdyn`, a MATLAB `.mat`, or an ESCDF `.h5`, chosen in the
+        save dialog."""
         name = self.test_item.text(0)
         path, chosen = QFileDialog.getSaveFileName(
             self, 'Save Project', f'{name}.vdyn',
@@ -7944,8 +8069,9 @@ class MainWindow(QMainWindow):
         return f'{safe}.vdyn'
 
     def copy_selected(self) -> None:
-        """Cmd/Ctrl+C in the tree: the selected objects onto the
-        clipboard, as objects and as files."""
+        """Cmd/Ctrl+C in the tree: copy the selected objects to the
+        clipboard, as objects and as files, and say so in the status
+        bar."""
         names = self.tree.copy_selected()
         if names == [PROJECT_ROW]:
             self._show_status('Copied the project — paste into a folder '
@@ -7958,8 +8084,8 @@ class MainWindow(QMainWindow):
             self._show_status('Select objects in the tree to copy them')
 
     def paste_objects(self) -> None:
-        """Cmd/Ctrl+V in the tree: whatever the clipboard holds that
-        this tree can take."""
+        """Cmd/Ctrl+V in the tree: paste whatever the clipboard holds
+        that the tree can take (objects copied from a tree, or files)."""
         if not self.tree.paste():
             self._show_status('Nothing on the clipboard to paste here')
 
@@ -8050,20 +8176,19 @@ class MainWindow(QMainWindow):
         return [path]
 
     def save_selected(self) -> None:
-        """Write the selected object, in whichever form is asked for.
+        """Save the selected object, in the format chosen in the save
+        dialog. With the project row selected, the whole project is saved
+        (`save_test`).
 
-        One verb, because *Save As* and *Export* were the same act with
-        two names — pick an object, pick a file, write it — and a user
-        who wanted a UNV had to know that the second menu entry existed
-        and that the first would not offer it.
-
-        The format is the dialog's file-type list, which is where a save
-        dialog has always asked. `.vdyn` is first because it is the only
-        form that comes back whole; the rest are what this particular
-        object can be written as, so a mode shape is never offered a
-        format that cannot hold one — said in the list rather than in an
-        error afterwards.
+        The format is picked from the dialog's file-type list. `.vdyn` is
+        first because it is the only format that reads back complete; the
+        rest are the formats this object can be written in, so a mode
+        shape is never offered a format that cannot hold one.
         """
+        # One verb, because *Save As* and *Export* were the same act with
+        # two names (pick an object, pick a file, write it), and a user who
+        # wanted a UNV had to know that the second menu entry existed and
+        # that the first would not offer it.
         if self.tree.currentItem() is self.test_item:
             self.save_test()
             return
@@ -8132,11 +8257,12 @@ class MainWindow(QMainWindow):
         except (ValueError, OSError) as e:
             QMessageBox.warning(self, 'Could not save', str(e))
             return
-        # name the units: two of the three formats cannot record them, so
-        # this line is the only place they are ever stated.
-        # The coherent system, not the display one: reading in g does not
-        # put g in the file, and the status line must say what did
-        written = (f' in {self.unit_system.coherent.name}'
+        # name the units: most formats cannot record them, so this line
+        # is the only place they are stated, and it says what the format
+        # wrote, which is not always the display system
+        from ..io.exporters import units_written
+
+        written = (f' in {units_written(exporter.name, self.unit_system)}'
                    if getattr(obj, 'units_defined', False)
                    else ' — units undefined, written as they stand')
         self._show_status(
@@ -8317,7 +8443,8 @@ class MainWindow(QMainWindow):
         self.report_editor.report = None
 
     def render_current(self) -> None:
-        """Render everything selected: geometries overlay, curves share axes."""
+        """Draw everything selected: geometries are drawn together, and
+        curves share axes."""
         self._update_toolbar_actions()
         # the frames and the shock windows belong to the plot that was
         # up; whatever is drawn next puts its own back if it wants them
@@ -8780,9 +8907,10 @@ class MainWindow(QMainWindow):
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def name_object_group(self, member: str, name: str | None = None) -> None:
-        """Name the object group `member` is in — asked in a dialog when
-        `name` is not given — and paint it on the bracket. The name is
-        what an ESCDF activity is called on export."""
+        """Name the object group `member` is in, and show the name on its
+        bracket. When `name` is not given, it is asked for in a dialog,
+        and a blank name removes it. The name is what the group's ESCDF
+        activity is called on export."""
         from PySide6.QtWidgets import QInputDialog
 
         current = self.project.object_group_of(member)
@@ -8830,11 +8958,13 @@ class MainWindow(QMainWindow):
             None)
 
     def add_matches(self) -> None:
-        """Commit the selected MAC squares to the matched modes for
-        this pair of sets — the project creates or extends the object,
-        links it to the Basis group, and keeps the MAC values that were
-        displayed (a name-matched recompute would not reproduce a
-        projected comparison)."""
+        """Add the selected MAC squares to the matched modes of this pair
+        of mode sets.
+
+        The project creates the MatchedModes object or adds to it, links
+        it to the Basis group, and keeps the MAC values as they were
+        displayed, because computing them again by name would not give
+        the same values for a projected comparison."""
         if self._compare is None or not self._compare.get('pairs'):
             return
         a_name, b_name = self._compare['pair']
@@ -11845,8 +11975,8 @@ class MainWindow(QMainWindow):
         return name, obj, added
 
     def compute_spectra(self) -> None:
-        """Averaged spectra from the selected time history, one record
-        per channel, added to the project beside it."""
+        """Compute averaged spectra from the selected time history, one
+        record per channel, and add them to the project, linked to it."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to compute spectra',
@@ -11898,8 +12028,12 @@ class MainWindow(QMainWindow):
         return {'basis': paired[0], 'other': paired[1]}
 
     def project_onto_basis(self) -> None:
-        """The other set sampled at the Basis set's DOFs, added as a
-        new object — the project does the projection and the linking."""
+        """Project the other selected mode set onto the Basis set's DOFs,
+        and add the result as a new object.
+
+        A node match tolerance, in percent of the basis model's size, is
+        asked for first. The project does the projection and the
+        linking."""
         candidates = self._correlation_candidates()
         if candidates is None:
             return
@@ -11971,12 +12105,14 @@ class MainWindow(QMainWindow):
             None if records is None else sorted(set(records)))
 
     def transform_selection(self) -> None:
-        """The selected record through the selected shape set — modal
-        responses from physical, or physical from modal — added to the
-        project by the verb a script calls. No pane and no preview: a
-        transform has no settings (Brandon, 2026-09-04), so it is an
-        act like Integrate, and the account it leaves is on the status
-        line and on the object's `transform_report`."""
+        """Transform the selected data through the selected shape set,
+        modal responses from physical or physical from modal, and add the
+        result to the project with the verb a script calls.
+
+        A transform has no settings, so there is no pane and no preview,
+        as with Integrate. What was done is said in the status bar and
+        kept on the new object's `transform_report`."""
+        # No settings pane: Brandon, 2026-09-04.
         candidates = self._transform_candidates()
         if candidates is None:
             self._show_status('Select a data object and a shape set '
@@ -12000,9 +12136,9 @@ class MainWindow(QMainWindow):
         self._show_status(f'{added}: {report.describe()}, through {shapes}')
 
     def generate_typed_report(self) -> None:
-        """Generate the reports the project's declared type calls for:
-        one, or for a random-and-sine project a random report and a
-        sine report (2026-10-05, when the combined report retired)."""
+        """Generate the reports the project's type calls for: one, or for
+        a random-and-sine project a random report and a sine report."""
+        # Two reports since the combined report was retired, 2026-10-05.
         for template in PROJECT_TEMPLATES[self.project_type]:
             self.generate_report(template)
 
@@ -12061,9 +12197,11 @@ class MainWindow(QMainWindow):
             self.compute_spectra()
 
     def extract_sine_levels(self, time_name=None) -> None:
-        """Each specification tone's level, read out of the recording
-        and added beside it — the project verb, with the tree kept in
-        step and the result selected so the comparison is one click."""
+        """Extract each specification tone's level from the time history
+        `time_name` (the selected one by default), and add the levels to
+        the project beside it.
+
+        The result is selected, so the comparison is one click away."""
         if time_name is None:
             obj = self.current_object()
             if not isinstance(obj, TimeHistory):
@@ -12094,8 +12232,9 @@ class MainWindow(QMainWindow):
                else f'{levels.cycles:g} cycles of smoothing'))
 
     def compute_psds(self) -> None:
-        """Averaged auto-power spectral densities from the selected
-        time history, one record per channel, added beside it."""
+        """Compute averaged auto-power spectral densities from the
+        selected time history, one record per channel, and add them to
+        the project, linked to it."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to compute PSDs',
@@ -12131,9 +12270,12 @@ class MainWindow(QMainWindow):
         return per * averaging.frames, f' ({low:.1f}–{high:.1f} s)'
 
     def compute_octave(self) -> None:
-        """A spectrum on proportional bands, added beside it — the
-        Octave Bands panel's own act, making exactly the steps its
-        preview draws with the spacing set beside them."""
+        """Compute the selected PSD, CPSD or specification on proportional
+        bands, and add the result beside it.
+
+        This is the Octave Bands panel's apply button, and it uses the
+        bands per octave set in the panel, so it makes exactly the bands
+        its preview draws."""
         # the spacing is the panel's — the very steps being previewed
         # are what the button makes, which is the whole contract
         per_octave = self.data_pane.octave_panel.per_octave()
@@ -12159,15 +12301,15 @@ class MainWindow(QMainWindow):
             f'record{"s" * (banded.num_records != 1)} — linked to {name}')
 
     def compute_frfs(self) -> None:
-        """FRFs from the selected time history, added beside it.
+        """Compute FRFs from the selected time history, and add them
+        beside it.
 
-        Asks which estimator first. The three differ in where they
-        assume the noise is — on the response, on the reference, or on
-        both — and that is not something the data can say; it is a
-        statement about the instrumentation, which the person who ran
-        the test is the one holding.
+        It asks for the estimator first. The three assume the noise is in
+        different places (on the response, on the reference, or on both),
+        and the data cannot say which; that depends on the
+        instrumentation, which the person who ran the test knows.
 
-        The drives are the history's own excitation channels and the
+        The references are the history's own excitation channels and the
         frames are the ones a PSD would use, so the FRFs, the PSDs and
         the multiple coherence beside them all describe one measurement.
         """
@@ -12203,18 +12345,16 @@ class MainWindow(QMainWindow):
             f'averages{" (detected)" if seeded else ""} — linked to {name}')
 
     def compute_multiple_coherence(self) -> None:
-        """Multiple coherence from the selected time history.
+        """Compute the multiple coherence of the selected time history,
+        and add it beside it.
 
-        Over the same frames a PSD would be averaged from, so the two
-        describe one measurement — the averaging view sets both.
-
-        With no averaging set at all, `Project.compute_multiple_coherence`
-        works one out and *stores it on the history*, the way the shock
-        calculator stores the events it detects. Storing it is the
-        point: a coherence that quietly averaged differently from the
-        PSD beside it would describe a different measurement, and the
-        whole reason it follows the averaging is so that it does not.
-        This says which of the two happened.
+        It is averaged over the same frames a PSD would be, so the two
+        describe one measurement; the averaging view sets both. With no
+        averaging set, `Project.compute_multiple_coherence` works one out
+        and stores it on the history, the way the shock calculator stores
+        the events it detects, so a PSD computed later uses the same
+        frames. The status bar says whether the averaging was set or
+        detected.
         """
         obj = self.current_object()
         if not isinstance(obj, TimeHistory):
@@ -12239,14 +12379,14 @@ class MainWindow(QMainWindow):
             f'{" (detected)" if seeded else ""} — linked to {name}')
 
     def compute_srs(self) -> None:
-        """Shock response spectra from the selected time history — one
-        curve per channel per shock, added beside it.
+        """Compute shock response spectra from the selected time history,
+        one curve per channel per shock, and add them beside it.
 
-        The shocks come from the history itself, the way averaging does:
-        whatever the shock view has on it at the time. With none,
-        `Project.compute_srs` runs the detector first, so the calculator
-        answers rather than asking the user to go and find the events by
-        hand.
+        The shocks are the ones stored on the history, those the shock
+        view shows at the time, and the spectrum's settings come from the
+        shock panel. With no shocks stored, `Project.compute_srs` runs
+        the detector first, so the user does not have to find the events
+        by hand.
         """
         settings = self.data_pane.shock_panel.srs_settings()
         acted = self._act_on(
@@ -12275,10 +12415,11 @@ class MainWindow(QMainWindow):
             f'at Q={spectra.q:g} — linked to {name}')
 
     def filter_data(self) -> None:
-        """The selected time history through its filter, every
-        channel, added beside it. The settings are the history's own;
-        with none set, the suggestion is adopted — same contract as
-        `Project.filter_data`."""
+        """Filter every channel of the selected time history and add the
+        result beside it.
+
+        The settings are the history's own; with none set, the suggested
+        filter is used, as in `Project.filter_data`."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to filter',
@@ -12293,11 +12434,13 @@ class MainWindow(QMainWindow):
             f'{filtering.order}, zero phase — linked to {name}')
 
     def truncate_data(self) -> None:
-        """The selected time history cut to its span, every channel,
-        added beside it. The span is the history's own; with none
-        set, this refuses and says where to set one — keeping the
-        whole record is not an act, so there is no suggestion to
-        adopt the way Filter Data adopts one."""
+        """Cut every channel of the selected time history to its span, and
+        add the result beside it.
+
+        The span is the history's own. With none set, it refuses and says
+        where to set one: there is no suggested span to use, the way
+        Filter Data uses a suggested filter, because keeping the whole
+        record is not a truncation."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to truncate',
@@ -12314,10 +12457,13 @@ class MainWindow(QMainWindow):
             f'samples, linked to {name}')
 
     def generate_rigid_body_modes(self) -> None:
-        """The six rigid-body mode shapes of the selected geometry,
-        about the point the rigid-body pane shows, added to its group
-        — the same verb a script calls, so provenance and the badge
-        follow."""
+        """Make the six rigid-body mode shapes of the selected geometry,
+        about the point the rigid-body pane shows, and add them to its
+        object group.
+
+        It runs the same verb a script calls, so the new object records
+        where it came from and is marked stale when its settings
+        change."""
         acted = self._act_on(
             Geometry,
             'Select a geometry to make rigid body ' 'modes of',
@@ -12332,21 +12478,27 @@ class MainWindow(QMainWindow):
             f'linked to {name}')
 
     def merge_nodes_act(self, name: str, groups) -> None:
-        """Open Merge Coincident Nodes on geometry `name`'s element groups
-        `groups`: every place their nodes coincide marked in the view,
-        the tolerance in the pane, a click on a mark to leave that place
-        out or put it back, and Merge to make the marked places one node
-        each (Brandon, 2026-10-11: select, see, set, apply, so a joint
-        can be built a place at a time)."""
+        """Open the Merge Coincident Nodes pane on element groups
+        `groups` of geometry `name`.
+
+        Every place where their nodes coincide is marked in the view, and
+        the tolerance is set in the pane. A click on a mark leaves that
+        place out of the merge or puts it back, and Merge makes each
+        marked place one node, so a joint can be built a place at a
+        time."""
+        # Select, see, set, apply: Brandon, 2026-10-11.
         self._open_places(name, groups, 'merge')
 
     def align_meshes_act(self, name: str, groups) -> None:
-        """Open Align Meshes on geometry `name`'s element groups `groups`:
-        the same pane, a move marked at each node of the coarser mesh that
-        would go onto the finer's, with a line to where it goes, the
-        reach in the pane, a click to leave a move out, and Align
-        (Brandon, 2026-10-11: the step before the merge, where parts
-        meshed apart do not match)."""
+        """Open Align Meshes, in the same pane as the merge, on element
+        groups `groups` of geometry `name`.
+
+        It is the step before a merge, for parts meshed separately whose
+        nodes do not match. Each node of the coarser mesh that would move
+        onto a node of the finer one is marked, with a line to where it
+        goes, and the reach is set in the pane. A click on a mark leaves
+        that move out, and Align makes the moves."""
+        # Brandon, 2026-10-11.
         self._open_places(name, groups, 'align')
 
     def _open_places(self, name: str, groups, kind: str) -> None:
@@ -12603,8 +12755,8 @@ class MainWindow(QMainWindow):
             plotter.render()
 
     def toggle_merge_place(self, index: int) -> None:
-        """Leave the `index`th place out of the merge, or put it back —
-        what a click on its mark does."""
+        """Leave place `index` out of the merge, or put it back, as a
+        click on its mark does."""
         merging = self._merging
         if merging is None or not 0 <= index < len(merging['spots']):
             return
@@ -12613,7 +12765,8 @@ class MainWindow(QMainWindow):
         self._merge_refresh()
 
     def merge_place_at(self, x: float, y: float) -> int | None:
-        """The place whose mark is under this pixel, or None."""
+        """The index of the place whose mark is under the pixel
+        `(x, y)`, or None."""
         from ..viz.pick import ScreenProjector, _nearest_candidate
 
         if self._merging is None or not self._merging['spots']:
@@ -12782,9 +12935,9 @@ class MainWindow(QMainWindow):
                                      QItemSelectionModel.SelectionFlag.NoUpdate)
 
     def close_merge_pane(self, redraw: bool = True) -> None:
-        """Put the pane away, with its marks and its watch on clicks;
-        `redraw` draws the groups opaque again, which a caller about to
-        render anyway leaves to itself."""
+        """Close the merge pane, removing its marks and its handling of
+        clicks. With `redraw`, the view is drawn again with the groups
+        opaque; a caller about to draw anyway passes False."""
         self.scene.merge_panel.hide()
         if self._merging is None:
             return
@@ -12800,8 +12953,9 @@ class MainWindow(QMainWindow):
             self._draw_merge_marks()
 
     def new_geometry_act(self) -> None:
-        """An empty geometry in the project, in the display length unit,
-        selected, its Quads row the one that offers Add Plane."""
+        """Add an empty geometry to the project, in the display length
+        unit, and select it. Its Quads row offers Add Plane and its Hexes
+        row Add Block."""
         unit = self.unit_system.unit('length')
         name = self.project.new_geometry('Geometry', unit=unit)
         self.show_object(name)
@@ -12809,15 +12963,17 @@ class MainWindow(QMainWindow):
                           'select its Quads to Add Plane, its Hexes to Add Block')
 
     def add_plane_act(self) -> None:
-        """Plates typed into the selected geometry, in the pane beside
-        the view (`MeshPanel`, 2026-10-02): a center, widths with one at
-        zero, an element size; each Add the project's `add_plane`."""
+        """Open the add pane (`MeshPanel`) beside the view for a plane of
+        plates in the selected geometry: a center, widths with one of
+        them zero, and an element size. Each Add runs the project's
+        `add_plane`."""
+        # The pane beside the view: 2026-10-02.
         self._open_mesh_pane('plane')
 
     def add_block_act(self) -> None:
-        """Bricks typed into the selected geometry, in the same pane: a
-        center, three widths, an element size; each Add the project's
-        `add_block`."""
+        """Open the same pane for a block of bricks in the selected
+        geometry: a center, three widths and an element size. Each Add
+        runs the project's `add_block`."""
         self._open_mesh_pane('block')
 
     def _open_mesh_pane(self, kind: str, editing=None) -> None:
@@ -12860,13 +13016,16 @@ class MainWindow(QMainWindow):
             self._mark_pencils([self._item_for_object(editing[0])])
 
     def edit_solid_pane(self, name: str, solid_id: int) -> None:
-        """The add pane opened on a solid already made, by its row's
-        pencil (Brandon, 2026-10-11: move it, size it, reshape it): its
-        numbers in the fields, the gizmo on it to slide and turn it, its
-        preview drawn as it is typed, and Apply the project's
-        `edit_solid`. A boolean has no size of its own, so its pane moves
-        and turns it whole, every solid it is made of with it
-        (`move_solids`)."""
+        """Open the add pane on solid `solid_id` of geometry `name`, as its
+        row's pencil does, to move, size or reshape it.
+
+        Its values are in the fields, the gizmo on it slides and turns
+        it, and its preview is drawn as it is typed. Apply runs the
+        project's `edit_solid`. A boolean has no size of its own, so its
+        pane moves and turns it whole, with every solid it is made of
+        (`move_solids`). A pattern opens the Pattern pane on its counts
+        and spacing instead."""
+        # Brandon, 2026-10-11.
         from ..core import solids
 
         item = solids.solid(self.objects[name], solid_id)
@@ -12927,7 +13086,7 @@ class MainWindow(QMainWindow):
         return name
 
     def close_mesh_pane(self) -> None:
-        """Put the pane away, with the preview and the gizmo."""
+        """Close the add pane, removing its preview and the gizmo."""
         if self._mesh is None:
             self.scene.mesh_panel.hide()
             return
@@ -13440,8 +13599,9 @@ class MainWindow(QMainWindow):
         plotter.render()
 
     def set_creator_name(self) -> None:
-        """File → Creator Name…: the name an exported ESCDF file records
-        as its creator, remembered between launches."""
+        """File → Creator Name…: set the name an exported ESCDF file
+        records as its creator, remembered between launches. Blank means
+        the login name."""
         from PySide6.QtWidgets import QInputDialog
 
         name, ok = QInputDialog.getText(
@@ -13453,9 +13613,13 @@ class MainWindow(QMainWindow):
                               'as their creator')
 
     def set_view_act(self) -> None:
-        """Keep the view on screen as the selected geometry's default:
-        how it and everything drawn on it open, in the app, the report
-        and exported figures (Brandon, 2026-09-27)."""
+        """Make the view on screen the selected geometry's default view.
+
+        The geometry and everything drawn on it then open on this view,
+        in the window, in reports and in exported figures, and Reset View
+        returns to it. Only the camera's direction and up vector are
+        kept, not its distance."""
+        # Brandon, 2026-09-27.
         from ..core.geometry import View
 
         obj = self.current_object()
@@ -13476,9 +13640,13 @@ class MainWindow(QMainWindow):
                           'now — Reset View returns to it')
 
     def solve_modes_act(self) -> None:
-        """The normal modes of the selected geometry, built from its
-        element groups' properties: the two numbers the solution takes are asked
-        for once, and the shapes land in the geometry's group."""
+        """Solve the normal modes of the selected geometry, from its
+        element groups' properties, and add the mode set to the
+        geometry's object group.
+
+        Two values are asked for: the highest frequency to solve for, in
+        Hz (2000 by default), and the damping to give every mode, in
+        percent of critical (2 by default)."""
         obj = self.current_object()
         if not (isinstance(obj, Geometry) and obj.group_properties):
             self._show_status('Select a geometry whose element groups carry their '
@@ -13513,8 +13681,9 @@ class MainWindow(QMainWindow):
             f'rigid, {percent:g}% damping — linked to {name}')
 
     def read_as_specification_act(self) -> None:
-        """The bar's Read as Specification: the selected PSD becomes the
-        requirement it is, in place (`Project.read_as_specification`)."""
+        """The bar's Read as Specification: the selected PSD is made a
+        specification, in place and under the same name
+        (`Project.read_as_specification`)."""
         self._read_as('read_as_specification',
                       'Select a PSD to read as a specification',
                       self.project.read_as_specification,
@@ -13522,8 +13691,9 @@ class MainWindow(QMainWindow):
                       'against it by selecting both')
 
     def read_as_psd_act(self) -> None:
-        """The bar's Read as PSD: the selected specification is plain
-        data again, in place (`Project.read_as_psd`)."""
+        """The bar's Read as PSD: the selected specification, which must
+        have no limits, is made a plain PSD again, in place and under the
+        same name (`Project.read_as_psd`)."""
         self._read_as('read_as_psd',
                       'Select a specification without limits to read as a PSD',
                       self.project.read_as_psd, 'read as a PSD')
@@ -13549,8 +13719,12 @@ class MainWindow(QMainWindow):
         self._show_status(f'{name} {said}')
 
     def integrate_history(self) -> None:
-        """One integration of the selected time history — acceleration
-        to velocity, velocity to displacement — added beside it."""
+        """Integrate the selected time history once (acceleration to
+        velocity, velocity to displacement), and add the result beside
+        it.
+
+        The drift is high-passed out, and records of other quantities are
+        left out, as the status bar says."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to integrate',
@@ -13569,9 +13743,9 @@ class MainWindow(QMainWindow):
         self.show_object(added)
 
     def differentiate_history(self) -> None:
-        """One differentiation of the selected time history —
-        displacement to velocity, velocity to acceleration — added
-        beside it."""
+        """Differentiate the selected time history once (displacement to
+        velocity, velocity to acceleration), and add the result beside
+        it."""
         acted = self._act_on(
             TimeHistory,
             'Select a time history to differentiate',
@@ -13587,8 +13761,8 @@ class MainWindow(QMainWindow):
         self.show_object(added)
 
     def compute_cpsds(self) -> None:
-        """The full cross-spectral matrix from the selected time
-        history — every channel against every channel — added beside
+        """Compute the full cross-spectral matrix of the selected time
+        history, every channel against every channel, and add it beside
         it."""
         acted = self._act_on(
             TimeHistory,
@@ -13843,12 +14017,15 @@ class MainWindow(QMainWindow):
                 f'block{"s" * (report.num_blocks != 1)}{note}')
 
     def generate_report(self, template: str = 'empty') -> str:
-        """A new Report object from a starter template, opened to edit.
+        """Add a new Report object from a starter template, select it to
+        edit, and return its name.
 
-        Templates bind symbolically — '@basis:Frf' and friends,
-        resolved against the object groups at render time — so the
-        report depends on the project's structure, never on what
-        anyone named their objects.
+        `template` is a built-in template's name ('modal', 'random',
+        'transient', 'shock', 'sine', 'sysid' or 'empty') or the path of
+        a saved template. Templates refer to objects by role, such as
+        '@basis:Frf', resolved against the object groups when the report
+        is drawn, so the report depends on the project's structure and
+        not on what the objects are named.
         """
         name = self.show_object(self.project.generate_report(
             template, name=display_name('Report')))
@@ -13858,9 +14035,9 @@ class MainWindow(QMainWindow):
         return name
 
     def export_report_template(self) -> None:
-        """Write the selected report on its own, as a template another
-        project can load — into the templates folder by default, which
-        is where Generate Report looks."""
+        """Save the selected report on its own, as a template another
+        project can load. The save dialog opens in the templates folder,
+        which is where Generate Report looks for saved templates."""
         import pathlib
 
         from ..io.report_template import SUFFIX, templates_folder
@@ -13885,15 +14062,15 @@ class MainWindow(QMainWindow):
         self._show_status(f'Saved template {os.path.basename(path)}{where}')
 
     def reports_from_runs(self) -> None:
-        """File → Reports from Runs…: `visualdynamics.run_report` over a
-        batch of controller runs, asked in a dialog and run with the
-        bar and Cancel.
+        """File → Reports from Runs…: run `visualdynamics.run_report` over
+        a batch of controller runs.
 
-        Nothing in the open project is touched: each run is worked up
-        in a project of its own, exactly as the script does it, and its
-        report written to disk. The window's unit system is the one
-        the reports are written in, so they read the way the window
-        does.
+        The runs and the options are asked for in dialogs, and the work
+        runs with a progress bar and Cancel; reports already written when
+        it is canceled are kept. The open project is not changed: each
+        run is worked up in a project of its own, as the script does it,
+        and its report is written to disk. The reports use the window's
+        unit system.
         """
         from ..core.progress import Cancelled
         from ..project import run_report
@@ -13930,7 +14107,7 @@ class MainWindow(QMainWindow):
             f'Wrote {len(written)} report{"s" * (len(written) != 1)} {where}')
 
     def export_report(self) -> None:
-        """Write the selected report as one self-contained HTML file."""
+        """Export the selected report as one self-contained HTML file."""
         from ..report import render_html
 
         obj = self.current_object()
@@ -13973,7 +14150,8 @@ class MainWindow(QMainWindow):
         return chosen
 
     def merge_selected(self) -> None:
-        """Replace the selected objects with their combination."""
+        """Replace the selected objects with one object that combines
+        them (`Project.merge`)."""
         chosen = self._merge_candidates()
         if chosen is None:
             return
@@ -13993,18 +14171,20 @@ class MainWindow(QMainWindow):
         self._show_status(f'Merged {what} into {merged_name}')
 
     def start_modal_fit(self) -> None:
-        """Fit real normal modes to the selected FRFs, one mode at a time.
+        """Start fitting real normal modes to the selected FRF object, one
+        mode at a time.
 
-        The measured CMIF stays solid while the fit's synthesis climbs
-        onto it dashed. A cursor sits on the largest residual peak, and
-        the frequencies on screen are what narrow the search — zoom to
-        say where to look, and the cursor rides the zoom rather than
-        being left off-screen; the table beside the plot lists the
-        fitted modes plus the pending one; Find Mode previews a fit at the
-        cursor, Confirm Mode adopts it and moves to the next residual
-        peak — the natural next mode, since a confirmed peak collapses.
-        A co-selected shape set seeds the session and receives every
-        change in place.
+        The measured CMIF is drawn solid and the fit's synthesis dashed
+        over it. A cursor is placed on the largest residual peak. The
+        search is limited to the frequencies on screen, so zooming says
+        where to look, and the cursor moves with the zoom rather than
+        being left off screen. The table beside the plot lists the fitted
+        modes and the pending one. Find Mode moves the cursor to the
+        largest residual peak in view, and Confirm Mode adds the pending
+        mode and moves to the next residual peak, since a confirmed peak
+        is removed from the residual. A shape set selected with the FRFs
+        starts the session with its modes and receives every change in
+        place. Only one FRF object can be fitted at a time.
         """
         # a fresh session, and the previous one's drag budget is no part
         # of it
@@ -14428,8 +14608,10 @@ class MainWindow(QMainWindow):
             f'of the plot to {proposed[1] * 100.0:g} % at the bottom')
 
     def refine_all_modes(self) -> None:
-        """Re-fit every confirmed mode's residues together, poles held —
-        see ModalFitSession.refine_residues for what this repairs."""
+        """Fit the residues of every confirmed mode again, together, with
+        the frequencies and dampings held. It needs at least two
+        confirmed modes; `ModalFitSession.refine_residues` explains what
+        it corrects."""
         if self.fit is None or len(self.fit.modes) < 2:
             return
         before = [mode['shape'].copy() for mode in self.fit.modes]
@@ -14778,12 +14960,12 @@ class MainWindow(QMainWindow):
         return tuple(self._fit_plot.viewRange()[0])
 
     def find_next_mode(self) -> None:
-        """Put the cursor on the next mode worth fitting.
+        """Move the cursor to the next mode to fit: the largest CMIF peak
+        left in the residual, within the frequencies the plot shows.
 
-        The largest CMIF peak left in the residual, inside what the plot
-        is showing — which is what Confirm already moves to once a mode
-        is taken. This is that on its own, for hunting before committing
-        to anything.
+        Confirm Mode moves there too once a mode is added; this does it
+        alone, to look before confirming anything. This is the Find Mode
+        button.
         """
         if self.fit is None:
             return
@@ -14812,18 +14994,17 @@ class MainWindow(QMainWindow):
             f'(searched {low:.4g} to {high:.4g} Hz)')
 
     def fit_pending_mode(self) -> None:
-        """Fit at the cursor without confirming, and restate everything.
+        """Fit the pending mode at the cursor without confirming it, and
+        draw the table and the plot again.
 
-        There is no button for this any more. Dragging fits as it goes
-        and the MAC follows a moment after the cursor stops, so by the
-        time anyone reached for Fit Mode the work was already done —
-        the button was asking for something it had.
-
-        It stays as a method because it is the whole view restated at
-        once, which a caller that changed something out of band still
-        wants: a damping typed into the table, or a script driving the
+        There is no button for this, because dragging the cursor fits as
+        it goes. It is for a caller that changed something another way,
+        such as a damping typed into the table or a script driving the
         fit with no cursor to drag.
         """
+        # The Fit Mode button was removed: dragging fits as it goes and
+        # the MAC follows a moment after the cursor stops, so by the time
+        # anyone reached for the button the work was already done.
         if self.fit is None:
             return
         self.fit.fit_pending()
@@ -15968,7 +16149,7 @@ class MainWindow(QMainWindow):
         known = {tone.name for tone in spec.tones}
         matched = [level for level in measured if level.tone in known]
         tones = [tone.name for tone in spec.tones]
-        self.data_pane.show_srs_views(bool(matched))
+        self.data_pane.show_srs_views(bool(matched), kind='sine')
         showing_bars = matched and self.data_pane.srs_view != 'curves'
         if not showing_bars:
             tone = pick_tone(tones)

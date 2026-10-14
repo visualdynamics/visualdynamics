@@ -1,30 +1,31 @@
-"""How a measured response compares with what it was controlled to.
+"""How a measured response compares with the specification it was controlled to.
 
-A specification and the PSD that answered it are the comparison a random
-vibration test exists to make, and looking at the two curves says only
-so much. What a report needs is numbers: how much energy was asked for,
-how much arrived, and how much of the band strayed outside the bands the
-controller was told to warn and abort on.
+A random vibration test is judged by comparing the response PSD with its
+specification, and a report needs numbers from that comparison: the
+power specified, the power measured, and how much of the band fell
+outside the warning and abort limits.
 
-The two rarely share a frequency axis. A specification is written at a
-handful of breakpoints, or on the controller's lines rather than the
-analysis's, so it is interpolated onto the measurement's lines — in
-log-log, because a specification is drawn that way and read that way,
-and a straight line between two breakpoints on log axes is a power law.
-Interpolated linearly instead, a decade-wide segment runs several dB
-above the specification through the middle of its own span.
+The two rarely share a frequency axis. A specification is often written
+at a few breakpoints, or on the controller's lines rather than the
+analysis lines. A specification written at breakpoints is read log-log,
+the way it is drawn, so the curve between two breakpoints is the
+straight line on log axes, a power law. Interpolated linearly instead, a
+segment one decade wide reads several dB above the specification through
+the middle of the segment.
 
-Only the measurement's own lines are counted, and only those inside the
-specification's band. Outside it the specification says nothing, and a
-response there is neither passing nor failing.
+The comparison is made cell by cell (`cells`): on the measurement's lines
+against a breakpoint curve, and on the coarser of the two grids when both
+are densities on bins. Only frequencies both objects are written over are
+judged. Outside the specification's band nothing is specified, and a
+response there neither passes nor fails.
 
-At the two ends of that band a line is usually half in and half out,
-and neither answer is right: counted whole it credits the response with
-power the specification never asked for, dropped it throws away power
-that was asked for. So a line at an end is compared over the part of
-its own bin that the specification covers — the same half-bin the plot
-shades — which is also what makes an RMS error the comparison of two
-areas over exactly the same stretch of frequency.
+At the two ends of that band a line's bin is usually partly inside and
+partly outside. Counting the whole bin credits the response with power
+the specification did not ask for, and dropping it loses power that was
+asked for. So a line at an end is compared over the part of its bin that
+the specification covers, the same part the plot shades. Both sides of
+the comparison are then areas over the same range of frequency, which is
+what an RMS error needs.
 """
 
 from __future__ import annotations
@@ -44,10 +45,12 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
                     spec_values: ArrayLike) -> np.ndarray:
     """A specification's values at `frequencies`, interpolated log-log.
 
-    NaN wherever the specification does not reach. Outside its band it
-    says nothing, and extending the end segments would invent a
-    requirement nobody wrote; a line written at zero — which is how a
-    controller writes one outside its band — says nothing either.
+    Points that are zero, negative or NaN are dropped first (a controller
+    writes zero on the lines outside its band), and the result is NaN
+    below the lowest and above the highest remaining point: extending the
+    end segments would add a requirement nobody wrote. A dropped point
+    between two remaining ones is bridged by the line between them. Fewer
+    than two remaining points gives NaN everywhere.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     spec_frequencies = np.asarray(spec_frequencies, dtype=float)
@@ -73,28 +76,29 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
 
 def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
                   lows: ArrayLike, highs: ArrayLike) -> np.ndarray:
-    """The area under the power law through these points over each of
-    several bands at once, exactly — `log_log_area`, vectorized.
+    """The exact area under the log-log curve through these points, over
+    each of several bands at once: `log_log_area` for many bands.
 
-    A specification's points are breakpoints of a continuous curve, and
-    the curve between two of them is the straight line they make on log
-    axes — which is a power law, W = C f**n. Its integral has a closed
-    form, so there is nothing to approximate: no grid, no rule, and no
-    dependence on how finely anything else happened to be measured.
-    For a segment from (f1, W1) to (f2, W2), n is the slope in log-log
-    and the area is
+    The points are breakpoints of a continuous curve, and between two of
+    them the curve is the straight line they make on log axes, a power
+    law W = C f**n. Its integral has a closed form, so the area does not
+    depend on a grid or on how finely anything else was measured. For a
+    segment from (f1, W1) to (f2, W2), with n the slope in log-log, the
+    area is
 
-        W1 f1 ln(f2/f1)                      when n is -1
-        W1 / f1**n * (f2**(n+1) - f1**(n+1)) / (n + 1)   otherwise
+        W1 f1 ln(f2/f1)                                   when n is -1
+        W1 / f1**n * (f2**(n+1) - f1**(n+1)) / (n + 1)    otherwise
 
-    The cumulative area at every breakpoint is taken once, and each
-    band's answer is the cumulative area at its high edge less that at
-    its low edge, the partial segment at either end taken from the
-    same power law — so a thousand cells cost what one did (the
-    comparison is judged cell by cell, 2026-09-19). A band reaching
-    past the written points is cut at them; one wholly outside is
-    zero; too few points to make a curve is NaN.
+    The cumulative area at every breakpoint is computed once, and each
+    band's area is the cumulative area at its high edge less that at its
+    low edge, with the partial segments at the two ends taken from the
+    same power law. A thousand bands cost about what one does. Only
+    positive, finite points are used. A band that reaches past them is
+    cut at them, a band wholly outside them is zero, and fewer than two
+    points gives NaN for every band.
     """
+    # vectorized because the comparison is judged cell by cell
+    # (2026-09-19), and a thousand cells must cost what one did
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     lows = np.atleast_1d(np.asarray(lows, dtype=float))
@@ -145,10 +149,12 @@ def log_log_areas(frequencies: ArrayLike, values: ArrayLike,
 def log_log_area(frequencies: ArrayLike, values: ArrayLike,
                  low: float | None = None,
                  high: float | None = None) -> float:
-    """The area under the power law through these points, exactly —
-    one band of `log_log_areas`, the whole curve when no band is
-    given. Zero when the band is empty, NaN when fewer than two points
-    are written."""
+    """The exact area under the log-log curve through these points, over
+    one band, or over the whole curve when no band is given.
+
+    One band of `log_log_areas`, cut to the written points. Zero when
+    the band is empty, NaN when fewer than two points are positive and
+    finite."""
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     usable = (np.isfinite(frequencies) & (frequencies > 0.0)
@@ -165,7 +171,8 @@ def log_log_area(frequencies: ArrayLike, values: ArrayLike,
 
 def written_band(frequencies: ArrayLike,
                  values: ArrayLike) -> tuple[float, float] | None:
-    """(low, high) one written curve actually says something over."""
+    """(low, high), the range one written curve covers: its lowest and
+    highest positive, finite points. None when there are fewer than two."""
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
     usable = (np.isfinite(frequencies) & (frequencies > 0.0)
@@ -176,18 +183,22 @@ def written_band(frequencies: ArrayLike,
 
 
 def coverage(spectrum: Any, record: int = 0) -> list[tuple[float, float]]:
-    """The stretches one record of a spectrum speaks for, merged.
+    """The frequency ranges one record of a spectrum is written over,
+    merged.
 
-    A density's written bins — a controller's zero and NaN lines are
-    holes, not a requirement of nothing — or the segments between a
-    curve's consecutive written breakpoints; either way as (low,
-    high) pairs in order, neighbors joined. What a comparison is
-    judged over: the part of a cell inside these, and nothing else.
+    For a density on bins, the bins of the lines the object counts as
+    written (`written`). For a specification, that is finite and
+    positive, so a controller's zero and NaN lines are gaps, not a
+    requirement of zero. For a curve between breakpoints, the segments
+    between consecutive written breakpoints. Either way the result is
+    (low, high) pairs in ascending order, with touching ranges joined. A
+    comparison is judged only over the part of a cell inside these
+    ranges.
 
     Parameters
     ----------
     spectrum : Psd or Specification
-        The object.
+        The spectrum.
     record : int, default 0
         Which record.
 
@@ -232,14 +243,13 @@ def _pieces(low: float, high: float,
 def comparable(specification: Specification, measured: DataArray) -> str | None:
     """Why this pair cannot be compared, or None when it can.
 
-    A requirement on octave bands compares only with a response on
-    the same bands, same fraction, and a response on octave bands
-    only with such a requirement (Brandon, 2026-09-19): a band's
-    power cannot be attributed to part of its width, and a
-    requirement on bands says nothing about the lines under them. A
-    narrowband response compares with a curve at breakpoints or a
-    requirement on lines. Anything else is not judged, and this says
-    so in words the table and the status bar can show.
+    A specification on octave bands compares only with a response on
+    bands of the same fraction, and a response on octave bands only with
+    such a specification: a band's power cannot be assigned to part of
+    its width, and a requirement on bands says nothing about the lines
+    under them. A narrowband response compares with a curve at
+    breakpoints or with a specification on lines. The reason is a phrase
+    the table and the status bar can show.
 
     Parameters
     ----------
@@ -251,6 +261,8 @@ def comparable(specification: Specification, measured: DataArray) -> str | None:
     str or None
         The reason, or None.
     """
+    # bands pair only with bands of the same fraction (Brandon,
+    # 2026-09-19)
     from .octave import per_octave_of
 
     on_bands = getattr(specification, 'bandwidth', None) is not None
@@ -276,19 +288,20 @@ def cells(specification: Specification, measured: DataArray,
           ) -> list[dict[str, Any]]:
     """The cells one comparison is judged over.
 
-    A comparison happens on the coarser of the two grids — a
-    requirement written per octave band is a requirement on the
-    band's power, not on every line under it, and a banded
-    measurement against a breakpoint curve is judged band by band —
-    and each cell is cut to what both objects speak for: the
-    specification's written stretches (`coverage`; a controller's
-    zeros are holes) and the measurement's. A cell nothing is written
-    in is not judged at all, and one written over part of its width
-    is judged over that part, both sides integrated over the same
-    stretch. That is the one rule at the ends and in the middle
-    alike (Brandon, 2026-09-19; PLAN.md "A comparison is an area
-    against an area"). A pair that cannot be compared (`comparable`)
-    has no cells at all.
+    Against a curve at breakpoints, the cells are the measurement's own
+    lines. When both are densities on bins, the cells are the bins of the
+    coarser grid, by median bin width: a requirement written per octave
+    band is a requirement on the band's power, not on every line under
+    it. A banded measurement compares only with a specification on bands
+    of the same fraction, never with a breakpoint curve (`comparable`),
+    and a pair that cannot be compared has no cells.
+
+    Each cell is cut to what both objects are written over: the
+    specification's ranges (`coverage`, where a controller's zero lines
+    are gaps) and the measurement's. A cell with nothing written in it is
+    not judged, and a cell written over part of its width is judged over
+    that part, both sides integrated over the same range. The same rule
+    applies at the ends of the band and in the middle.
 
     Parameters
     ----------
@@ -304,6 +317,8 @@ def cells(specification: Specification, measured: DataArray,
         (the stretches judged, inside it), 'width' (their sum) and
         'span' (the whole bin it came from, judged or not).
     """
+    # one rule at the ends and in the middle alike (Brandon,
+    # 2026-09-19; PLAN.md "A comparison is an area against an area")
     if comparable(specification, measured) is not None:
         return []
     asked = coverage(specification, spec_record)
@@ -340,41 +355,44 @@ def judge(specification: Specification, measured: DataArray,
           spec_record: int = 0, measured_record: int = 0,
           limit: str | None = 'abort_upper', over: bool = True,
           scale_db: float | None = None) -> dict[str, Any]:
-    """Which cells of a comparison fell outside one limit, and where.
+    """Which cells of a comparison fall outside one limit, and where.
 
-    Over each cell the measurement's power — its area, read as it is
-    drawn, times the comparison's scale — against the power the limit
-    asks for over the very same stretch, the limit read the way its
-    specification is: the exact area under a power law between
-    breakpoints, a density per line or per band otherwise. A cell is
-    out when it holds more than the upper limit asks (`over`) or less
-    than the lower one (not `over`). `limit` None judges against the
-    target itself.
+    For each cell, the measurement's power (its area, integrated the way
+    it is drawn, times the comparison's scale) is compared with the
+    limit's power over the same range. The limit is integrated the way
+    its specification is: the exact area under the power law between
+    breakpoints, or a density per line or per band. A cell is out when
+    it holds more than an upper limit (`over` True) or less than a lower
+    one (`over` False). `limit` None judges against the target itself.
 
     Parameters
     ----------
     specification, measured : Specification, DataArray
         The pair.
-    spec_record, measured_record : int
+    spec_record, measured_record : int, default 0
         Which record of each.
-    limit : str or None
+    limit : str or None, default 'abort_upper'
         The limit curve, one of `Specification.LIMITS`, or None for
         the target.
-    over : bool
-        Whether holding more than the curve asks is what is out.
+    over : bool, default True
+        True when holding more than the curve is out, False when
+        holding less is.
     scale_db : float, optional
-        The comparison's scale; resolved through `comparison_scale_db`
-        when omitted.
+        The comparison's scale in dB, added to the measurement;
+        resolved through `comparison_scale_db` when omitted.
 
     Returns
     -------
     dict
-        'cells' (as `cells` gives them), 'asked' and 'held' (the two
-        powers per cell), 'judged' and 'out' (a bool per cell each),
-        and on the measurement's own lines: 'lines' (a bool per line, True where
-        its cell is out), 'level' (the limit's mean density over that
-        cell, NaN elsewhere — where a mark is drawn), 'start' and
-        'stop' (the judged stretch within each marked line's bin).
+        Per cell: 'cells' (as `cells` gives them), 'asked' and 'held'
+        (the limit's and the measurement's power), 'judged' (True where
+        both are finite and the limit's power is positive) and 'out'.
+        Per line of the measurement: 'lines' (True where the line's cell
+        is out), 'level' (the limit's mean density over that cell on the
+        marked lines, NaN on the others; where the plot draws a mark),
+        'start' and 'stop' (the judged range within each marked line's
+        bin, the bin's own edges elsewhere). And 'scale_db', the scale
+        used.
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
@@ -426,14 +444,16 @@ def judge(specification: Specification, measured: DataArray,
 def covered(lines: ArrayLike, low: float, high: float,
             widths: ArrayLike | None = None
             ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Each measured bin cut to the part of it a band covers.
+    """Each measured bin cut to the part of it inside the band from `low`
+    to `high`.
 
     A line stands for its whole bin, and at the ends of a specification
-    a bin hangs over the edge. Returns (start, stop, width, cut): where
-    each bin lies inside the band, how wide that is, and which bins the
-    edge went through. A bin wholly outside has zero width and is
-    neither cut nor covered. With widths given, a bin is its own
-    geometric edges; without, the midpoints between neighbors.
+    a bin extends past the edge. Returns (start, stop, width, cut): where
+    each bin lies inside the band, how wide that part is, and which bins
+    the band's edge cuts. A bin wholly outside has zero width and is not
+    cut. With `widths` given, the bins are proportional bands with edges
+    from `octave.bin_bounds`; without, the bins end at the midpoints
+    between neighbors. Fewer than two lines gives arrays of zeros.
     """
     lines = np.asarray(lines, dtype=float)
     if lines.size < 2:
@@ -458,12 +478,17 @@ def outside(lines: ArrayLike, values: ArrayLike,
             over: bool = True, reading: str = 'log_log',
             spec_widths: ArrayLike | None = None,
             widths: ArrayLike | None = None) -> np.ndarray:
-    """Which measured lines fell outside one written limit curve — the
-    array form of `judge`, for a limit and a measurement held as
-    arrays: the limit is read as `reading` ('log_log' between its
-    points, 'bin' as a density per bin of `spec_widths`), the
-    measurement as a density per bin of `widths` (midpoints between
-    neighbors when None), and the two go through the one cell rule.
+    """Which measured lines fall outside one limit curve, for a limit and
+    a measurement held as plain arrays: the array form of `judge`.
+
+    The limit is read as `reading`: 'log_log' between its points, or
+    'bin' as a density per bin of `spec_widths`. The measurement is a
+    density per bin of `widths` (bins ending at the midpoints between
+    neighbors when None). The two go through the same cell rule as every
+    other comparison, against the limit itself with no scale. Returns a
+    bool per line, all False when there are fewer than two lines or
+    limit points, or when only one of the two widths is given (a banded
+    object does not compare with an unbanded one).
     """
     from .data import Psd, Specification
 
@@ -486,8 +511,8 @@ def outside(lines: ArrayLike, values: ArrayLike,
 
 def band_of(specification: Specification,
             record: int = 0) -> tuple[float, float] | None:
-    """(low, high) the specification actually says something over: the
-    outer ends of its `coverage`."""
+    """(low, high), the range the specification is written over: the
+    outer ends of its `coverage`. None when nothing is written."""
     stretches = coverage(specification, record)
     if not stretches:
         return None
@@ -499,33 +524,36 @@ def specification_rms(specification: Specification, record: int = 0,
                       high: float | None = None) -> float:
     """A specification's RMS, from its own points and nothing else.
 
-    Not from whatever grid a measurement happened to be computed on:
-    the level a specification asks for is a property of the
-    specification, and it should not move in the fourth decimal because
-    somebody changed a frame length.
+    It is not computed on a measurement's frequency grid. The level a
+    specification asks for belongs to the specification, and it should
+    not change in the fourth decimal place because a frame length
+    changed.
 
-    The integral is the object's, so it is taken the way the object is
-    drawn. This used to reach straight for `log_log_area`, which is
-    right for a specification written at breakpoints and wrong for one
-    computed from a record — and the second kind exists: the PSD of a
-    transient target is a `Specification` of four thousand density
-    lines.
+    The integral is the specification's own `area`, taken the way the
+    object is drawn: the exact power-law area for a specification
+    written at breakpoints, the sum over bins for one computed from a
+    record (the PSD of a transient target is a `Specification` of
+    thousands of density lines). `low` and `high`, in Hz, limit the band.
     """
+    # This used to call `log_log_area` directly, which is right for a
+    # specification written at breakpoints and wrong for one computed
+    # from a record.
     return float(np.sqrt(specification.area(record, low, high)))
 
 
 def rms(frequencies: ArrayLike, values: ArrayLike) -> float:
-    """The RMS a PSD carries over the lines given: sqrt of its total.
+    """The RMS a PSD carries over the lines given: the square root of
+    its total.
 
     Each line times the width of its own bin, summed. A discrete
-    spectrum is a density per bin, so this is the total the lines
-    actually hold — Parseval's, exactly — where a trapezoid halves the
-    two end bins and reads a little under.
+    spectrum is a density per bin, so this is the total the lines hold,
+    exactly as Parseval's theorem gives it, where the trapezoid rule
+    halves the two end bins and reads a little low.
 
     The widths come from the whole axis before any line is dropped, so
-    a line that says nothing contributes nothing rather than having its
-    bin quietly widened onto its neighbors. Bridging a gap would be
-    assuming what is in it.
+    a NaN or negative line contributes nothing and its bin is not added
+    to its neighbors'; bridging a gap would assume what is in it. NaN
+    when there are fewer than two lines or no usable one.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.asarray(np.real(values), dtype=float)
@@ -543,10 +571,11 @@ def rms(frequencies: ArrayLike, values: ArrayLike) -> float:
 def bounds(specification: Specification, record: int, pair: str,
            frequencies: ArrayLike
            ) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """(lower, upper) of one pair of limits, on `frequencies`.
+    """(lower, upper) of one pair of limits, interpolated log-log onto
+    `frequencies`.
 
-    None for a limit the specification does not carry — nothing was
-    exceeded there because nothing was asked.
+    `pair` is 'warning' or 'abort'. None for a limit the specification
+    does not carry: nothing can be exceeded where nothing was specified.
     """
     out = []
     for edge in (f'{pair}_lower', f'{pair}_upper'):
@@ -573,12 +602,13 @@ DETECTION_RANGE_DB = 40.0
 
 
 def significant_band(want: np.ndarray, good: np.ndarray) -> np.ndarray:
-    """`good`, narrowed to where the specification has real content.
+    """`good`, narrowed to the lines where the specification has real
+    content.
 
-    Lines within `DETECTION_RANGE_DB` of this channel's own peak. The
-    peak rather than a fixed level, because a specification's units
-    and size are its own; per channel rather than across them, because
-    channels are bounded at their own levels.
+    Lines within `DETECTION_RANGE_DB` of this channel's own peak in
+    `want`. Relative to the peak rather than a fixed level, because a
+    specification's units and size are its own; per channel, because
+    each channel is specified at its own level.
     """
     if not good.any():
         return good
@@ -610,9 +640,10 @@ DETECTION_MAX_DB = 24
 
 
 class ScaleWarning(UserWarning):
-    """A comparison scaled the measurement by a level it detected from
-    the data rather than one it was given — said aloud, because the
-    charts built from `channel_errors` do not carry the scale."""
+    """Warned when a comparison scaled the measurement by a level it
+    detected from the data rather than one it was given. The charts
+    built from `channel_errors` do not show the scale, so the warning
+    does."""
 
 
 #: how tightly the bands must agree before their mode is read as a
@@ -640,65 +671,69 @@ def detect_scale_db(specification: Specification, measured: DataArray,
                     spec_records: Sequence[int] | None = None,
                     measured_records: Sequence[int] | None = None,
                     controls: Sequence[str] | None = None) -> int:
-    """The offset, on the 3 dB ladder from zero, that best lays the
-    measurement on the specification — what a run captured at -6 dB
-    needs added to be compared against the 0 dB requirement — or zero
-    when the data does not say so plainly.
+    """The offset in dB, a multiple of 3 dB, that best lays the
+    measurement on the specification, or zero when the data does not
+    show one clearly.
 
-    **The mode of the band levels, when the bands agree on it**
-    (Brandon, 2026-09-26). Both are banded to sixth octaves (`octave.
-    PER_OCTAVE`; a pair already banded is used as it is). Every band of
-    every compared channel gives the dB it would need added, each
-    snapped to its nearest multiple of `SCALE_STEP_DB`; the most common
-    rung is the candidate. It is read as the test's level only if
+    A run captured at -6 dB needs +6 dB added before it is compared with
+    the 0 dB specification. Both objects are banded to sixth octaves
+    (`octave.PER_OCTAVE`); a pair already banded is used as it is. Every
+    band of every compared channel gives the dB it would need added,
+    rounded to the nearest multiple of `SCALE_STEP_DB`, and the most
+    common value (the mode) is the candidate. It is taken as the test's
+    level only if all of these hold:
 
-    - it lies within `DETECTION_MIN_DB` to `DETECTION_MAX_DB` — a level
-      a controller would command (a run 50 dB hot is a failure, not a
+    - it lies within `DETECTION_MIN_DB` to `DETECTION_MAX_DB`, a level a
+      controller would command (a run 50 dB hot is a failure, not a
       level);
-    - at least `DETECTION_AGREEMENT` of the bands sit within half a step
-      of it, and their median is within `DETECTION_RUNG_DB` of it — the
-      bands agree on one level, and it is a rung;
-    - the pooled energy agrees with it within `ERROR_DB` — a level moves
-      the band median and the total power together. A run low between
-      its resonances and hot at them has most bands agreeing tightly on
-      a low level while its power sits at the peaks; the bands' share
-      does not see the peaks, being a minority, and the energy does.
+    - at least `DETECTION_AGREEMENT` of the bands lie within half a step
+      of it, and their median is within `DETECTION_RUNG_DB` of it, so the
+      bands agree on one level and that level is on a step;
+    - the total power agrees with it within `ERROR_DB`. A change of level
+      moves the band median and the total power together. A run that is
+      low between its resonances and hot at them has most bands agreeing
+      on a low level while its power is at the peaks; the agreement test
+      does not see the peaks, which are a minority of the bands, and the
+      total power does.
 
-    Otherwise zero, and the comparison is shown as measured: scaling a
-    comparison silently on doubtful evidence is worse than showing the
-    mismatch, and a wrong scale can turn a failed test into a passed
-    one. The Scaling field is there to type the truth.
+    Otherwise the result is zero and the comparison is shown as
+    measured. Scaling on doubtful evidence is worse than showing the
+    mismatch, because a wrong scale can turn a failed test into a passed
+    one. The Scaling field is where the true level is typed.
 
-    **Why the mode, and why bands.** A controller scales every channel
-    together, so the level is one number for the whole test; the controls
-    pile into its rung while monitors, each its own distance under its
-    envelope, scatter across many — so the mode finds the controls where
-    a median of everything finds wherever the monitors pile up. In
-    narrowband each line is a noisy estimate, most lines sit in the top
-    decade, and many in anti-resonances no controller holds: runs at full
-    level read +14, +9 and +4 dB there and 0 in sixth-octave bands (a
-    22-run campaign scored in another session). The verdict is read off
-    the octave comparison, too, so the level and the verdict come from
-    the same bands.
+    The mode is used because a controller scales every channel together,
+    so the level is one number for the whole test. The control channels
+    fall on the same step, while monitor channels, each its own distance
+    under its envelope, spread over many; the mode finds the controls,
+    where a median of all the bands finds wherever the monitors happen
+    to fall. Bands are used because in narrowband each line is a noisy
+    estimate and many lines are at anti-resonances no controller holds:
+    runs at full level read +14, +9 and +4 dB on lines and 0 dB in
+    sixth-octave bands.
 
-    **What no rule can see.** A full-level test the controller held 3 dB
-    low everywhere is, in the data, a test commanded at -3 dB: tight,
-    on a rung, and read as one. The commanded level is not in a
-    Rattlesnake file, so a detected level is always said where it is
-    used — the report's test-level box, the captions, `ScaleWarning`.
+    A full-level test the controller held 3 dB low everywhere looks the
+    same in the data as a test commanded at -3 dB, and is read as one.
+    The commanded level is not in a Rattlesnake file, so a detected level
+    is always reported where it is used: the report's test-level box,
+    the captions and `ScaleWarning`.
 
-    This replaced, the same day, a per-channel vote with a floor veto and
-    gates (three hot controls outvoted twenty-one), then a pooled median
-    (monitors outvoted the controls). A specification bounding many
-    monitors now spreads its bands and reads zero; `controls` names the
-    control channels (by DOF, or by the label `matched_records` gives)
-    for a caller that knows them, and only they are counted.
-
-    The bands are those where the specification has real content
-    (`significant_band`, per channel): a waveform's spectrum ending at
-    2 kHz left half a transient's bands 40 dB apart saying nothing about
-    level.
+    `controls` names the control channels (by DOF, or by the label
+    `matched_records` gives) when the caller knows them, and only those
+    are counted. Without it, a specification that also bounds many
+    monitor channels spreads its bands and reads zero. Only the bands
+    where the specification has real content are used
+    (`significant_band`, per channel).
     """
+    # The mode of the band levels, when the bands agree on it (Brandon,
+    # 2026-09-26). It replaced, the same day, a per-channel vote with a
+    # floor veto and gates (three hot controls outvoted twenty-one), then
+    # a pooled median (monitors outvoted the controls). The +14, +9 and
+    # +4 dB narrowband readings are from a 22-run campaign scored in
+    # another session. Banding also matches the verdict, which is read
+    # off the octave comparison, so the level and the verdict come from
+    # the same bands. `significant_band` is there because a waveform's
+    # spectrum ending at 2 kHz left half a transient's bands 40 dB apart,
+    # saying nothing about level.
     from .octave import PER_OCTAVE
 
     if comparable(specification, measured) is not None:
@@ -757,11 +792,12 @@ def comparison_scale_db(specification: Specification, measured: DataArray,
                         spec_records: Sequence[int] | None = None,
                         measured_records: Sequence[int] | None = None,
                         controls: Sequence[str] | None = None) -> int:
-    """The decibels every comparison adds to `measured`: the value the
-    user holds on the object (`scale_db`, 0 included), or the detected
-    one when nothing is held — `controls`, when known, naming the
-    channels the detection pools. The one resolver, so the drawn
-    curves, the error metrics and the report cannot disagree."""
+    """The dB every comparison adds to `measured`: the value set on the
+    object (`scale_db`, zero included), or the detected one
+    (`detect_scale_db`) when none is set. `controls`, when known, names
+    the channels the detection uses. Every comparison gets its scale
+    here, so the drawn curves, the error metrics and the report cannot
+    disagree."""
     held = getattr(measured, 'scale_db', None)
     if held is not None:
         return int(held)
@@ -774,9 +810,14 @@ def matched_records(specification: Specification, measured: DataArray,
                     measured_records: Sequence[int] | None = None
                     ) -> list[tuple[str, int, int]]:
     """[(label, spec record, measured record)] for the channels the two
-    have in common, paired by DOF in the specification's own order —
-    the pairing `compare_all` has always used, named so the scale
-    detection walks exactly the channels the comparison will."""
+    have in common.
+
+    Records are paired by response and reference DOF and by quantity, in
+    the specification's order. A record of unknown quantity pairs with
+    any quantity, and an exact match is preferred. The label is the DOF,
+    or 'response/reference' for a cross term. `compare_all` and the
+    scale detection both pair channels here, so the detection uses
+    exactly the channels the comparison compares."""
     def pairs(data: DataArray,
               records: Sequence[int] | None) -> dict[tuple, int]:
         # keyed by DOF pair *and* quantity: a drive point's force
@@ -817,13 +858,15 @@ def exceedances(specification: Specification, measured: DataArray,
                 spec_record: int = 0, measured_record: int = 0,
                 pair: str = 'abort',
                 scale_db: float | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """(over, under): which lines went outside a pair of limits, and how.
+    """(over, under): which measured lines are above the upper and below
+    the lower limit of one pair.
 
-    What the plot marks, so a line out of tolerance is found by looking
-    rather than by reading a percentage and hunting for it. The lines
-    judged are the *scaled* measurement — the same curve the comparison
-    draws — resolved through `comparison_scale_db` unless the caller
-    already did.
+    `pair` is 'warning' or 'abort'. These are the lines the plot marks,
+    so a line out of tolerance can be found by looking at the plot. The
+    lines judged are those of the scaled measurement, the same curve
+    the comparison draws; `scale_db` is resolved through
+    `comparison_scale_db` unless given. A limit the specification does
+    not carry gives all False.
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
@@ -841,19 +884,28 @@ def compare(specification: Specification, measured: DataArray,
             spec_record: int = 0,
             measured_record: int = 0,
             scale_db: float | None = None) -> dict[str, Any]:
-    """How one measured record answers one record of a specification.
+    """How one measured record compares with one record of a
+    specification.
 
-    The two RMS levels and the difference between them as a percentage,
-    how many lines were compared and over what band, and for each pair
-    of limits how many of those lines fell outside it. A limit the
-    specification does not carry is absent rather than zero. A pair
-    that cannot be compared (`comparable`) answers with no lines and
-    'refused', the reason in words.
+    Returns a dict: 'lines' (how many cells were judged), 'band' (low
+    and high, Hz), 'scale_db', 'specification_rms' and 'measured_rms',
+    'difference_percent' and 'difference_db' (the measured RMS against
+    the specification's; 20 log10 for the dB), and for each pair of
+    limits the specification carries, 'warning_lines' and
+    'warning_percent' or 'abort_lines' and 'abort_percent': how many
+    judged cells fell outside the pair and their share of the
+    comparison. A pair the specification does not carry is absent
+    rather than zero. The share counts cells, each weighted by the
+    fraction of its bin that was judged, so a band at the top of the
+    range counts the same as one at the bottom.
 
-    Every number is of the **scaled** measurement — `scale_db` resolved
-    through `comparison_scale_db` unless the caller already did — and
-    `scale_db` is echoed in the result so a table can say what was
-    compared.
+    A pair of objects that cannot be compared (`comparable`) returns
+    {'lines': 0, 'refused': reason}, and one with nothing to compare
+    returns {'lines': 0}.
+
+    Every number is of the scaled measurement: `scale_db` is resolved
+    through `comparison_scale_db` unless given, and is returned so a
+    table can say what was compared.
     """
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
@@ -955,16 +1007,15 @@ RMS_CHANNELS_FAIL_PERCENT = 10.0
 
 
 def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
-    """Whether a run passed, read off its octave-band comparison.
+    """Whether a run passed, from the rows `compare_all` returned.
 
-    Two readings across the control channels `compare_all` judged:
-    the share of them with more than `LINES_PERCENT` of their band
-    outside the abort limits, and the share more than `ERROR_DB` off
-    in RMS. The run passes when the first is under
-    `LINES_CHANNELS_FAIL_PERCENT` and the second under
-    `RMS_CHANNELS_FAIL_PERCENT`; either at or past its number fails
-    it (Brandon, 2026-09-20). Channels with nothing to compare are
-    not counted. No channels at all is no verdict: 'passed' None.
+    Two shares of the channels judged: those with more than
+    `LINES_PERCENT` of their band outside the abort limits, and those
+    more than `ERROR_DB` off in RMS. The run passes when the first is
+    under `LINES_CHANNELS_FAIL_PERCENT` and the second under
+    `RMS_CHANNELS_FAIL_PERCENT`; either one at or over its threshold
+    fails it. Channels with nothing to compare are not counted, and with
+    no channels at all there is no verdict ('passed' None).
 
     Parameters
     ----------
@@ -978,7 +1029,8 @@ def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
         judged), 'lines_percent' and 'rms_percent' (the two shares),
         and the four thresholds they were read against.
     """
-    judged = [result for _label, result in rows if result.get('lines')]
+    # the pass rule (Brandon, 2026-09-20)
+    judged =[result for _label, result in rows if result.get('lines')]
     out = {'channels': len(judged),
            'lines_limit': LINES_PERCENT, 'rms_limit': ERROR_DB,
            'lines_fail_percent': LINES_CHANNELS_FAIL_PERCENT,
@@ -1002,10 +1054,9 @@ def channel_errors(rows: Sequence[tuple[str, dict[str, Any]]]
                    ) -> list[tuple[str, float, float]]:
     """[(label, dB out, percent of lines outside abort)] for a bar chart.
 
-    A row per control channel, in the specification's own order, from
-    whatever `compare_all` returned. Channels with nothing to compare
-    are left out rather than drawn at zero, which would read as a
-    channel that matched.
+    One row per channel, in the specification's order, from the rows
+    `compare_all` returned. Channels with nothing to compare are left
+    out, since a bar at zero would read as a channel that matched.
     """
     out = []
     for label, result in rows:
@@ -1018,11 +1069,13 @@ def channel_errors(rows: Sequence[tuple[str, dict[str, Any]]]
 
 def outside_fraction(values: Sequence[float], low: float,
                      high: float | None = None) -> float:
-    """What share of these fell outside the threshold, as a percentage.
+    """The percentage of these values outside the threshold.
 
-    One-sided when `high` is None — the lines-out chart has a ceiling
-    and no floor, because no amount of *staying inside* the abort
-    limits is a fault.
+    With `high` None the test is one-sided, values at or above `low`:
+    the lines-out chart has a ceiling and no floor, because staying
+    inside the abort limits is never a fault. Otherwise a value is
+    outside when it is above `high` or below `low`. Values that are not
+    finite are ignored, and none left gives zero.
     """
     values = [v for v in values if np.isfinite(v)]
     if not values:
@@ -1039,29 +1092,29 @@ def compare_all(specification: Specification, measured: DataArray,
                 measured_records: Sequence[int] | None = None,
                 scale_db: float | None = None
                 ) -> list[tuple[str, dict[str, Any]]]:
-    """[(label, result)] for every channel the two have in common.
+    """[(label, result)] for every channel the two have in common, each
+    result from `compare`.
 
-    A specification bounds control channels, and a measurement holds
-    those and usually many more. Pairing is by DOF — the response, and
-    the reference where there is one — so a cross spectrum is compared
-    against the cross term of the specification if it carries one, and
-    against nothing if it does not.
+    A specification bounds the control channels, and a measurement
+    usually holds those and many more. Channels are paired by DOF, the
+    response and the reference where there is one (`matched_records`),
+    so a cross spectrum is compared with the specification's cross term
+    if it has one and is left out if it does not.
 
-    In the specification's own order, which is the order a control room
-    reads its channels in. The scale is resolved once for the whole
-    set — one measurement gets one scaling, never a different number
-    per channel — and a caller comparing a *derived* form of the data
-    (the report's own octave banding) passes the scale it resolved on
-    the original, so the two gridings cannot round to different
-    decibels.
+    Rows are in the specification's order, the order a control room
+    reads its channels in. The scale is resolved once for the whole set,
+    so one measurement gets one scale, never a different value per
+    channel. A caller comparing a derived form of the data (the report's
+    own octave banding) passes the scale it resolved on the original, so
+    the two cannot round to different values.
 
-    A scale *detected* here (nothing passed, nothing held on the
-    measurement) that is not zero is raised as a `ScaleWarning`: every
-    row carries it as `scale_db`, but `channel_errors` and the charts
-    built from it do not, and a whole campaign was once scored on
-    shifted numbers without a word (2026-09-26). Pass `scale_db=0` to
-    compare as measured.
+    A nonzero scale detected here (none passed and none set on the
+    measurement) is warned as a `ScaleWarning`: every row carries it as
+    'scale_db', but `channel_errors` and the charts built from it do
+    not. Pass `scale_db=0` to compare as measured.
     """
+    # the warning is there because a whole campaign was once scored on
+    # shifted numbers without a word (2026-09-26)
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured,
                                        spec_records, measured_records)
@@ -1090,39 +1143,40 @@ SRS_ERROR_DB = 3.0
 
 def srs_errors(specification: DataArray, measured: DataArray
                ) -> list[tuple[str, str | None, float]]:
-    """[(label, event, RMS dB deviation)] for a shock spectrum against
-    the one it was required to meet.
+    """[(label, event, RMS dB deviation)] for a shock response spectrum
+    against the one it was required to meet.
 
-    In **decibels**, and root-mean-square across the band. An SRS spans
-    decades and is read on log axes, so the obvious distance — the one
-    a time waveform gets, `||m - s|| / ||s||` — is dominated by whatever
-    bands happen to be loudest and goes blind to a large ratio error
-    anywhere the target is small. Measured on the airplane run that
-    reading passed every channel at 20% while one of them sat 25 dB
-    over: 99.5% of its norm came from the top two decades. In dB every
-    band counts the same, which is how a shock is judged and why the
-    threshold beside it is the same three decibels a level error gets.
+    The deviation is in dB, RMS across the band, and signed
+    (`signed_rms_db` on each channel's lines). An SRS spans decades and
+    is read on log axes. A relative norm, `||m - s|| / ||s||` as a time
+    waveform gets, is dominated by the loudest bands and does not see a
+    large ratio error where the target is small. In dB every band counts
+    the same, which is how a shock is judged, and the threshold beside it
+    (`SRS_ERROR_DB`) is the same 3 dB a level error gets.
 
     RMS rather than the worst band, because the worst band is one point
-    and one point can be noise; a curve that is 4 dB out everywhere and
-    a curve with a single 4 dB spike are not the same result and should
-    not read as one. The worst is still visible on the plot.
+    and one point can be noise: a curve 4 dB out everywhere and a curve
+    with a single 4 dB peak are different results. The worst band is
+    still visible on the plot.
 
-    **Signed**: the magnitude is the RMS, the sign is which side of the
-    requirement the spectrum predominantly sits — the sign of the mean
-    dB deviation. An unsigned RMS read an under-test as an over-test:
-    a spectrum 5 dB low everywhere reported +5, the bar chart shaded
-    it past the ceiling, and the reader concluded the shock was too
-    hard when the machine had under-hit (Brandon, on the drone stress
-    set, 2026-08-20). A curve genuinely astride the requirement — big
-    RMS, mean near zero — takes whichever side its mean leans, which
-    is honest: the magnitude is what convicts it, and either bound is
-    the same three decibels away.
+    The sign is the sign of the mean dB deviation, the side of the
+    requirement the spectrum is mostly on, so an under-test reads
+    negative. A curve on both sides of the requirement (a large RMS with
+    a mean near zero) takes the side its mean is on; the magnitude is
+    what fails it, and either bound is the same 3 dB away.
 
-    The specification is interpolated onto the measurement's own
-    frequencies, log-log, the way a written specification is — and only
-    where it reaches. Outside its band it says nothing.
+    The specification is interpolated log-log onto the measurement's own
+    frequencies, and only where it is written. Channels are paired by
+    response DOF, and the event is the measurement's block label for the
+    record, None when it has none.
     """
+    # Why dB: on the airplane run the relative norm passed every channel
+    # at 20 % while one of them was 25 dB over, 99.5 % of its norm coming
+    # from the top two decades. Why signed: an unsigned RMS read an
+    # under-test as an over-test. A spectrum 5 dB low everywhere reported
+    # +5, the bar chart shaded it past the ceiling, and the reader
+    # concluded the shock was too hard when the machine had under-hit
+    # (Brandon, on the drone stress set, 2026-08-20).
     wanted = {}
     for j in range(specification.num_records):
         wanted.setdefault(str(specification.response_dof[j]), j)
@@ -1150,10 +1204,11 @@ SINE_ERROR_DB = 3.0
 
 
 def signed_rms_db(got: np.ndarray, wanted: np.ndarray) -> float:
-    """The RMS of the line-by-line deviation in decibels, signed by
-    which way the mean falls: over is positive, under is negative.
-    The one metric the SRS and the sine readings share — a definition
-    written once, so the two cannot drift apart.
+    """The RMS of the line-by-line deviation in dB, signed by the mean
+    deviation: positive when over, negative when under.
+
+    The SRS and the sine comparisons both use this one definition, so
+    the two cannot come to differ.
 
     Parameters
     ----------
@@ -1174,13 +1229,17 @@ def sine_errors(specification, levels):
     """[(dof, tone, RMS dB deviation)] for extracted sine levels
     against the tones they were controlled to.
 
-    The same reading `srs_errors` gives a shock spectrum, for the same
-    reasons: decibels so every part of the sweep counts alike, RMS so
-    one noisy line does not convict a channel, **signed** by the mean
-    so an under-test reads under. The target is the tone's own
-    breakpoint interpolation (`SineTone.target` — linear in f on
-    linear segments, log-f on log ones), evaluated only where the
-    level actually swept: coverage is the comparison's, not assumed.
+    The same value `srs_errors` gives a shock spectrum, for the same
+    reasons: in dB so every part of the sweep counts alike, RMS so one
+    noisy line does not fail a channel, and signed by the mean so an
+    under-test reads negative. The target is the tone's own breakpoint
+    interpolation (`SineTone.target`: linear in frequency on linear
+    segments, linear in log frequency on log ones), read only at the
+    frequencies the level covers. Lines where the tone was under the
+    noise floor (`SineLevel.resolved` False) are not scored, and neither
+    are zero readings. `levels` is a `SineLevelSet` or a sequence of
+    `SineLevel`; a tone or channel the specification does not have is
+    skipped.
     """
     levels = getattr(levels, 'levels', levels)
     out = []

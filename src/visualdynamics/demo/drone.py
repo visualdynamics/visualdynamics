@@ -1,51 +1,44 @@
-"""The demonstration airframe: a quadcopter, built with visualdynamics.
+"""The demonstration airframe: a quadcopter, built with Visual Dynamics.
 
-This is the model every drone fixture comes from — the truth set, the reduced
-test geometry, and the plant the Rattlesnake runs fly against. It is built
-entirely with `visualdynamics.fem` — like every fixture model since the
-sdynpy demo articles left the repository: a demonstration of the
-toolset should be made by the toolset.
+Every drone fixture is made from this model: the truth shape set, the
+reduced test geometry, and the system the Rattlesnake controller runs
+are made on. It is built with `visualdynamics.fem` only, so the
+demonstration of the toolset is made by the toolset.
 
-It builds a model and returns it; it writes no files. `testdata/`'s
-`generate_drone.py`, in the visualdynamics-generators repository, is
-what turns it into fixtures on disk.
+This module builds a model and returns it; it writes no files.
+`generate_drone.py`, in the visualdynamics-generators repository, turns
+it into fixtures on disk.
 
     from visualdynamics.demo import drone
 
     model = drone.build()
     shapes = model.eigensolution(maximum_frequency=400, damping=0.01)
 
-Run it directly to print what it weighs and where its modes are:
+Run it directly to print its size, its mass and its modes:
 
     python3 -m visualdynamics.demo.drone
 
-**The geometry is the model.** Every surface is swept from a profile along a
-path, every edge of every face becomes a beam, and the mass is shared equally
-over the nodes. There is nothing derived and nothing tied: what you see is
-what is solved, node for node.
+The geometry is the model. Every surface is swept from a profile along a
+path, every edge of every face becomes a beam, and the mass is lumped at
+the nodes. Nothing is derived and nothing is tied: every node drawn is
+a node solved.
 
-That is the second design. The first was a beam skeleton with surfaces hung
-off it on rigid ties — nodes that were drawn but not solved, their motion
-extrapolated from the beam they rode. It worked, and it was cheap, and it was
-a picture of a fidelity the model did not have: the arm walls looked meshed
-and were carrying nothing. Letting the drawing be the structure is simpler to
-write, simpler to explain, and honest about what it is.
+The edges are beams, not springs. A spring on each edge leaves a quad
+free to shear and a flat panel free to fold, since neither changes any
+edge length, and the model is then a mechanism with a zero-frequency
+mode per panel. A beam carries moment, so the same wireframe is stable.
 
-**Beams on the edges, not springs.** A spring on each edge leaves a quad free
-to shear and a flat panel free to fold, since neither changes any edge length,
-and the model comes back a mechanism with a zero-frequency mode per panel. A
-beam carries moment, so the same wireframe stands up. Proved on a cube before
-anything else was built: six rigid-body modes, then 121.7 Hz.
+The members are massless and the nodes carry all of the mass, 1.1 kg
+(`TOTAL_MASS`). Each node's share is in proportion to the length of
+member it carries (`fem.Model.distribute_mass`), so the mass follows the
+material and not the number of nodes. Each node also gets a rotary
+inertia, without which the rotational degrees of freedom carry no mass
+and the mass matrix cannot be factored.
 
-**The members are massless and the nodes carry it all.** Equal shares of the
-total, so the mass follows the model rather than a section table — which also
-means it follows the *mesh*, and the mesh is kept roughly even for that
-reason. Each node also gets a rotary inertia, without which the rotational
-degrees of freedom carry nothing and the mass matrix will not factorize.
-
-**The numbers are plausible, not surveyed.** One section size sets the whole
-frame's stiffness, chosen to put the elastic modes in a band a shaker test
-would use. This is a demonstration article, not a drone anyone has weighed.
+The numbers are plausible, not measured. One section size (`MEMBER`)
+sets the stiffness of the whole frame, chosen to put the elastic modes
+in a band a shaker test would use. This is a demonstration article, not
+a drone anyone has weighed.
 """
 
 from __future__ import annotations
@@ -59,6 +52,19 @@ from numpy.typing import ArrayLike
 
 from visualdynamics import fem
 from visualdynamics.core.geometry import Geometry
+
+# This is the second design. The first was a beam skeleton with surfaces
+# hung off it on rigid ties: nodes that were drawn but not solved, their
+# motion extrapolated from the beam they rode. It worked and it was cheap,
+# but it drew a fidelity the model did not have: the arm walls looked
+# meshed and carried nothing. Letting the drawing be the structure is
+# simpler to write and to explain.
+#
+# Beams on the edges were checked on a cube before anything else was
+# built: six rigid-body modes, then 121.7 Hz.
+#
+# Every fixture model has been built with visualdynamics.fem since the
+# sdynpy demonstration articles left the repository.
 
 # ---- what it is made of ----------------------------------------------------
 
@@ -142,7 +148,9 @@ Profile = Sequence[tuple[float, float]]
 
 def ring(radius: float, sides: int,
          phase: float = 0.0) -> list[tuple[float, float]]:
-    """Points round a circle, in a sweep's own cross-section plane."""
+    """`sides` points evenly spaced on a circle of `radius`, as (a, b)
+    pairs in a sweep's own cross-section plane, starting at angle
+    `phase` in radians."""
     return [(radius * math.cos(phase + 2.0 * math.pi * s / sides),
              radius * math.sin(phase + 2.0 * math.pi * s / sides))
             for s in range(sides)]
@@ -182,11 +190,14 @@ def sweep(shape: Shape, path: Sequence[ArrayLike],
           profiles: Profile | Sequence[Profile], group: str, color: int,
           cap_start: bool = False,
           cap_end: bool = False) -> list[list[int]]:
-    """Sweep cross-sections along a path, as rings of nodes joined by quads.
+    """Sweep cross-sections along a path, as rings of nodes joined by
+    quads, into `shape`.
 
     `profiles` is one profile per station, so a tube can taper, swell or
-    change shape along its length; pass a single profile to keep it
-    uniform. Returns the rings.
+    change shape along its length; a single profile keeps it uniform.
+    `cap_start` and `cap_end` close an end with triangles onto a node at
+    the path's end point. Returns the rings, one list of node ids per
+    station.
     """
     if not isinstance(profiles[0], (list, tuple)) or isinstance(
             profiles[0][0], (int, float)):
@@ -217,13 +228,16 @@ def sweep(shape: Shape, path: Sequence[ArrayLike],
 def bar(shape: Shape, start: ArrayLike, end: ArrayLike, thick: float, depth: float,
         normal: ArrayLike, group: str,
         color: int) -> list[list[int]] | None:
-    """A flat rectangular member between two points, in a stated plane.
+    """A flat rectangular member between two points, `thick` across the
+    plane with normal `normal` and `depth` within it.
 
-    The frame is given rather than worked out, because a truss has members
-    at every angle and letting each pick its own reference direction lets
-    the sections twist relative to one another. `normal` is the plane the
-    truss lies in, so every bar in one arm is the same slab of material
-    seen from a different angle — which is what a plate truss is.
+    The plane is given, not worked out, because a truss has members at
+    every angle, and letting each pick its own reference direction lets
+    the sections twist relative to one another. With the plane of the
+    truss as `normal`, every bar in one arm is part of the same slab of
+    material, as in a truss cut from a plate. Each end is closed onto a
+    node at the end point, which the neighboring bars share. Returns the
+    two end rings of node ids, or None when the points coincide.
     """
     start = np.asarray(start, dtype=float)
     end = np.asarray(end, dtype=float)
@@ -258,12 +272,13 @@ def bar(shape: Shape, start: ArrayLike, end: ArrayLike, thick: float, depth: flo
 
 def blade_profile(chord: float, thick: float,
                   twist: float) -> list[tuple[float, float]]:
-    """A blade section: a thin cambered shape, rotated to its pitch.
+    """A blade section: a thin cambered shape `chord` long and `thick`
+    thick, rotated to its pitch, `twist` degrees.
 
-    Twist is applied to the profile rather than to the sweep, because the
-    path is a straight radial line and its frame does not turn — a blade
-    that is flat at the tip and coarse at the root is the whole reason a
-    propeller looks like one rather than like a paddle.
+    The twist is applied to the profile and not to the sweep, because the
+    path is a straight radial line and its frame does not turn. A blade
+    that is flat at the tip and steep at the root is what makes a
+    propeller look like a propeller and not a paddle.
     """
     points = ((-0.50, 0.00), (-0.30, -0.42), (0.10, -0.50), (0.42, -0.26),
               (0.50, 0.00), (0.30, 0.40), (-0.10, 0.46), (-0.38, 0.28))
@@ -328,7 +343,8 @@ def _propeller(shape, nlo, nhi, center, sides, name, blades=2, handed=1.0):
 
 def bridge(shape: Shape, lower: Sequence[int], upper: Sequence[int],
            color: int) -> None:
-    """Quads between two rings that already exist — a shared joint."""
+    """Quads between two rings of existing nodes, which joins the two
+    parts they belong to."""
     for s in range(len(lower)):
         t = (s + 1) % len(lower)
         shape.face([lower[s], lower[t], upper[t], upper[s]], color)
@@ -337,20 +353,23 @@ def bridge(shape: Shape, lower: Sequence[int], upper: Sequence[int],
 class Shape:
     """A drawing: nodes and faces, and nothing else.
 
-    No members, no mass, no elements of any kind — the whole airframe is
-    built into one of these, and `fem.Model.from_geometry` is what turns it
-    into a structure afterwards. Keeping the two apart is the point: the
-    geometry is authored once and the physics is derived from it, so there
-    is no second description to disagree with the first.
+    There are no members, no mass and no elements of any kind. The whole
+    airframe is drawn into one of these, and `fem.Model.from_geometry`
+    turns it into a structure afterwards. The geometry is written once
+    and the structure is derived from it, so there is no second
+    description to disagree with the first.
 
-    Anything landing on an existing node is welded to it. Parts are drawn
-    independently — a strut between two ring nodes, a nacelle standing on
-    an arm — and where two of them meet they put a node in the same place
-    twice. Drawn, that looks joined; solved, it is not, and each loose
-    piece brings six zero-frequency modes. The airframe came back with 210
-    against the six it should have before this was here: 24 truss struts,
-    4 nacelles, 4 legs and 2 camera mounts, every one a free body.
+    A node placed where a node already is, with the coordinates rounded
+    to `tolerance`, is that node. Parts are drawn independently, such as a strut
+    between two ring nodes or a nacelle standing on an arm, and where two
+    of them meet they each put a node in the same place. Drawn, that
+    looks joined; solved, it is not, and each loose piece adds six
+    zero-frequency modes. New node ids count up from `first`.
     """
+    # Before nodes were merged on arrival, the airframe had 210
+    # zero-frequency modes against the six it should have: 24 truss
+    # struts, 4 nacelles, 4 legs and 2 camera mounts, every one a free
+    # body.
 
     def __init__(self, first: int = 1000,
                  tolerance: float = 1e-6) -> None:
@@ -363,6 +382,8 @@ class Shape:
         self._next = first
 
     def node(self, point: ArrayLike, group: str = '') -> int:
+        """The id of the node at `point`: an existing node there, or a new
+        one in `group`."""
         point = np.asarray(point, dtype=float)
         key = tuple(round(float(v) / self.tolerance) for v in point)
         if key in self._at:
@@ -376,13 +397,16 @@ class Shape:
 
     def face(self, nodes: Sequence[int], color: int = 1,
              group: str = '') -> None:
+        """Add a face over `nodes` (three or four ids). It goes in `group`,
+        or in the group of its first node when `group` is empty."""
         # the part that drew it, not the part its first node happens to
         # belong to: a node on a seam belongs to two, a face to one
         self.faces.append(([int(n) for n in nodes], int(color)))
         self.face_group.append(group or self.group.get(int(nodes[0]), ''))
 
     def drop_face(self, nodes: Sequence[int]) -> bool:
-        """Remove a face by the nodes it spans, if it is there."""
+        """Remove a face by the nodes it spans, in any order. Returns
+        whether one was found."""
         wanted = set(nodes)
         for index, (existing, _color) in enumerate(self.faces):
             if set(existing) == wanted:
@@ -391,16 +415,18 @@ class Shape:
         return False
 
     def position(self, node: int) -> np.ndarray:
+        """The coordinates of a node."""
         return self.xyz[int(node)]
 
     def pieces(self) -> list[list[int]]:
-        """The drawing's disconnected parts, largest first.
+        """The drawing's disconnected parts, as lists of node ids, largest
+        first.
 
-        Asked of the drawing rather than of a solved model, because that is
-        when it can still be fixed cheaply. Two surfaces that touch are not
-        joined unless they share nodes or something spans them, and the
-        cost of finding out later is six zero-frequency modes per loose
-        piece with nothing on screen to say which.
+        This is checked on the drawing, before a model is solved, because
+        then a loose part is still easy to fix. Two surfaces that touch
+        are not joined unless they share nodes or a face spans them, and a
+        loose part found later is six zero-frequency modes with nothing on
+        screen to say which part it is.
         """
         neighbors: dict[int, set[int]] = {n: set() for n in self.xyz}
         for nodes, _color in self.faces:
@@ -411,21 +437,23 @@ class Shape:
         return fem.connected_pieces(neighbors)
 
     def orient(self) -> int:
-        """Wind every face the same way round, and turn the lot outward.
+        """Wind every face the same way round, with the normals pointing
+        out. Returns the number of faces reversed.
 
-        Windings were being corrected girder by girder — reverse if the
-        frame was flipped, reverse again if the rows ran the other way —
-        and it never came right, because a part's winding depends on how
-        it was *built* and the answer wanted is a property of the finished
-        surface. So this asks the surface instead: walk face to face over
-        shared edges, and where two neighbors traverse their shared edge
-        the same way round, one of them is inside out. Then check the
-        signed volume and turn everything over if the whole shell ended up
-        pointing in.
+        The finished surface is walked face to face over shared edges.
+        Where two neighbors traverse their shared edge in the same
+        direction, one of them is inside out and the neighbor is reversed.
+        Then, if the signed volume of the whole surface is negative, every
+        face is reversed.
 
         Faces whose normals point into the solid show as dark patches, and
-        would color by displacement from the wrong side.
+        would be colored by displacement from the wrong side.
         """
+        # Windings were first corrected girder by girder (reverse if the
+        # frame was flipped, reverse again if the rows ran the other way),
+        # and it never came out right, because a part's winding depends on
+        # how it was built, while the answer wanted is a property of the
+        # finished surface.
         edges: dict[frozenset, list[int]] = {}
         for index, (nodes, _color) in enumerate(self.faces):
             for k, node in enumerate(nodes):
@@ -477,13 +505,12 @@ class Shape:
         return flipped
 
     def prune(self) -> int:
-        """Drop nodes no face uses, and say how many there were.
+        """Remove the nodes no face uses, and return how many there were.
 
         A window more than one cell tall leaves the nodes strictly inside
-        it belonging to nothing: the edges between two hole cells get no
-        wall, and there is no face on either side. Rather than forbid tall
-        windows — which is what keeps a truss looking like a slotted plate
-        — the drawing simply forgets the nodes nothing referred to.
+        it in no face: the edges between two hole cells get no wall, and
+        there is no face on either side. Tall windows are allowed, and the
+        nodes nothing uses are removed instead.
         """
         used = {n for nodes, _color in self.faces for n in nodes}
         loose = [n for n in self.xyz if n not in used]
@@ -496,15 +523,16 @@ class Shape:
         return len(loose)
 
     def geometry(self, length_unit: str = 'm') -> Geometry:
-        """What was drawn, as a Geometry: quads and triangles, no lines.
+        """What was drawn, as a Geometry of quads and triangles, with no
+        lines, in `length_unit`.
 
-        Each face goes into the element group of the part that drew it, so the
-        geometry says by itself which region is which — and a saved file
-        can rebuild the structure without anything passed alongside it.
+        Each face goes into the element group of the part that drew it,
+        so the geometry says by itself which region is which, and a saved
+        file can rebuild the structure with nothing passed beside it.
+        Faces with no group go in 'body'.
 
-        Element groups are named for the whole part, sides and all ('arm front
-        left', not 'arm'). Collapsing them to the part alone reads more
-        tidily and loses the one thing the sensor set is picked by: which
+        Element groups are named for the whole part, side included ('arm
+        front left', not 'arm'), because the sensor set is picked by which
         of the four arms a node is on.
         """
         ids = sorted(self.xyz)
@@ -606,23 +634,26 @@ def girder(shape: Shape, left: Sequence[int], right: Sequence[int],
            ) -> tuple[list[list[int]], list[list[int]]]:
     """A hollow box swept along a path, with windows cut through it.
 
-    One closed surface: two flat sides, a strip along the top and bottom,
-    a cap at the far end, and a wall round every window joining one side to
-    the other. Nothing overlaps anything and there is no face inside the
-    solid — which is the whole point. Built as separate bars welded at
-    their centers, as this was first, a truss is a heap of interpenetrating
-    boxes with their end caps buried in the joints, and coloring it by
-    displacement shows the insides through the skin.
+    It is one closed surface: two flat sides, a strip along the top and
+    bottom, a cap at the far end (`cap_end`), and a wall around every
+    window joining one side to the other. Nothing overlaps and there is no
+    face inside the solid, so coloring it by displacement does not show
+    inner faces through the skin. `windows(k, j)` is true for each cell
+    to cut out, `k` the segment along the path and `j` the row.
 
     `left` and `right` are the rows of nodes the root starts from, so a
-    girder can grow out of a surface that already exists rather than being
-    parked against it; `end_left` and `end_right` do the same at the far
-    end, so a member can grow *into* something as well as out of it.
+    girder can start from a surface that already exists instead of being
+    placed against it. `end_left` and `end_right` do the same at the far
+    end, so a member can end on another part as well as start from one.
 
     `shear` leans the interior node rows alternately along the run, which
-    turns the openings from upright rectangles into a zigzag — the
-    difference between a slotted plate and a truss.
+    turns the openings from upright rectangles into a zigzag, so the
+    girder looks like a truss and not a slotted plate.
     """
+    # Built first as separate bars welded at their centers, a truss was a
+    # pile of interpenetrating boxes with their end caps buried in the
+    # joints, and coloring it by displacement showed the insides through
+    # the skin.
     rows = len(left) - 1
     lo = [list(left)]
     hi = [list(right)]
@@ -1068,13 +1099,16 @@ def _payload(shape, floor, belly, sides):
 
 def build(sides: int = 12, arm_stations: int = 9, leg_stations: int = 5,
           body_rings: int = 3, total_mass: float = TOTAL_MASS) -> fem.Model:
-    """The quadcopter, at whatever mesh density is asked for.
+    """The quadcopter's finite element model, at the mesh density asked
+    for.
 
-    `sides` is how many facets go round every swept tube and round the body,
-    and is what most of the node count comes from. The defaults are about a
-    thousand nodes, which the dense eigensolver clears in half a minute;
-    tests build it coarser, since what they check is the airframe and not
-    the mesh.
+    `sides` is how many facets go around every swept tube and around the
+    body, and most of the node count comes from it. `arm_stations`,
+    `leg_stations` and `body_rings` set the stations along the arms, the
+    legs and the body. The defaults give 1422 nodes (8532 DOF), which
+    solve in under a second; tests build it coarser, since what they
+    check is the airframe and not the mesh. `total_mass` is shared over
+    the nodes, in kg.
     """
     shape = draw(sides, arm_stations, leg_stations, body_rings)
     shape.prune()
@@ -1094,7 +1128,8 @@ def build(sides: int = 12, arm_stations: int = 9, leg_stations: int = 5,
 
 def draw(sides: int = 12, arm_stations: int = 9, leg_stations: int = 5,
          body_rings: int = 3) -> Shape:
-    """The airframe as a drawing — nodes and faces, no structure at all."""
+    """The airframe as a drawing (`Shape`): nodes and faces, with no
+    structure. `build` turns it into a model."""
     shape = Shape()
     rows = 5
     waist, _apex, floor, belly = _body(shape, sides, body_rings, rows)
@@ -1122,7 +1157,9 @@ PARTS = {'canopy': 'body', 'belly': 'body', 'waist': 'body',
 
 
 def part_of(model: fem.Model, node: int) -> str:
-    """Which part of the airframe a node belongs to."""
+    """Which part of the airframe a node belongs to: 'body', 'arm',
+    'leg', 'nacelle', 'prop', 'battery' or 'camera' (`PARTS`), read from
+    its element group. Anything not in `PARTS` is 'body'."""
     group = model.group(node)
     head = group.split()[0] if group else ''
     return PARTS.get(head, 'body')
@@ -1131,10 +1168,14 @@ def part_of(model: fem.Model, node: int) -> str:
 def instrumented(model: fem.Model) -> dict[str, list[int]]:
     """The nodes a modal survey of this airframe would put sensors on.
 
-    Found from the model rather than written down, because writing them
-    down has been wrong twice: the numbering moves whenever the mesh does,
-    and a generator holding stale ids produces a test of nowhere.
+    Returns a dict of node id lists: 'motors' (the top of each nacelle),
+    'arms' (each arm at 0.6 of its radius), 'feet', 'body' (four points
+    around the body), 'center' (the top of the body) and 'payload' (the
+    battery and the camera). They are found from the model, not written
+    down, because the numbering changes whenever the mesh does.
     """
+    # Written-down ids have been wrong twice, and a generator holding
+    # out-of-date ids produces a test of nowhere.
     def nearest(candidates: Sequence[int], point: ArrayLike) -> int:
         point = np.asarray(point, dtype=float)
         return min(candidates, key=lambda n: float(np.linalg.norm(
@@ -1177,7 +1218,9 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
 
 def describe(model: fem.Model, maximum_frequency: float = 500.0,
              damping: float = 0.01) -> None:
-    """What it weighs and where its modes are, by what moves in each."""
+    """Print the model's size and mass, and for each mode up to
+    `maximum_frequency` (Hz) its frequency and the share of its kinetic
+    energy in each part of the airframe."""
     shapes = model.eigensolution(maximum_frequency=maximum_frequency,
                                  damping=damping)
     mass, _ = model.matrices()

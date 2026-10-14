@@ -86,6 +86,17 @@ def test_something_that_is_not_a_comparison_offers_none(window, pump,
                    window.data_pane.comparison_actions.values())
 
 
+def test_moving_off_a_comparison_takes_its_readings_with_it(window, pump):
+    """Selected on to something drawn another way, a channel table or
+    the project row, the bar is hidden; its three readings were left up
+    under it for the next bar to carry (2026-10-13)."""
+    comparing(window, pump)
+    window.tree.setCurrentItem(window.test_item)
+    pump()
+    assert not any(a.isVisible() for a in
+                   window.data_pane.comparison_actions.values())
+
+
 def test_the_spectra_are_what_it_opens_on(window, pump):
     comparing(window, pump)
     assert window.data_pane.comparison_view == 'curves'

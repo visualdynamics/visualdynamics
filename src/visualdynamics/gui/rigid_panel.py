@@ -1,16 +1,17 @@
 """The rigid-body settings, as a table beside the 3-D view.
 
-The reference point the rotations pivot on, and — when the set is to
-be mass-normalized — the mass and the six terms of the inertia tensor
-about it. The view previews the six shapes on the geometry as they
-are set, and the button at the bottom makes the shape set: select,
-see, set, apply (principle 13), the truncate panel's shape moved from
-the plot to the scene.
+The settings are the reference point the rotations are about and, when
+the shape set is to be mass-normalized, the mass and the six terms of
+the inertia tensor about that point. The view previews the six shapes
+on the geometry as they are set, and the button at the bottom makes the
+shape set. This is select, see, set, apply (principle 13), laid out as
+in the truncate panel but with the preview in the 3-D view instead of
+on a plot.
 
-Nothing here computes anything. The panel says what the settings are
-in the display units, hands them over in SI as a `MassProperties`,
-and reports when they move; `generate_rigid_body_modes` is what makes
-the set, with whatever is set at that moment.
+The panel makes nothing itself. It shows the settings in the display
+units and emits them in SI as a `MassProperties` when they change, and
+`generate_rigid_body_modes` makes the set with whatever is set at that
+moment.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ INERTIA_DIMENSION = 'mass*length**2'
 
 
 class RigidBodyPanel(QWidget):
-    """The parameter table. Edits arrive as a whole `MassProperties`."""
+    """The settings table. Edits are emitted as a whole `MassProperties`."""
 
     #: a parameter moved; here are the settings that describe it now
     changed = Signal(object)
@@ -157,10 +158,11 @@ class RigidBodyPanel(QWidget):
         """Point the panel at a geometry and the settings on it, in the
         display units of `unit_system`.
 
-        A geometry whose length unit is undeclared shows its raw
-        coordinates with no unit, and cannot be mass-normalized — an
-        inertia in kg·m² against coordinates in nothing is not a number
-        — so the checkbox gives way to a note saying what to declare.
+        A geometry whose length unit is not declared shows its raw
+        coordinates with no unit and cannot be mass-normalized, since an
+        inertia in kg·m² means nothing against coordinates with no unit.
+        For such a geometry the checkbox is hidden and a note says to
+        declare the length unit.
         """
         self._geometry = geometry
         self._unit_system = unit_system
@@ -181,7 +183,7 @@ class RigidBodyPanel(QWidget):
         self.set_properties(properties)
 
     def set_properties(self, properties: MassProperties) -> None:
-        """Restate the panel from the settings, without re-emitting."""
+        """Show the settings in the panel without emitting `changed`."""
         self._loading = True
         try:
             for box, value in zip(self.point_boxes,
@@ -202,8 +204,8 @@ class RigidBodyPanel(QWidget):
     def properties(self) -> MassProperties:
         """The settings the editors currently describe, in SI.
 
-        Raises `ValueError` for a tensor no body could have — the one
-        state the boxes cannot refuse one at a time.
+        Raises `ValueError` for an inertia tensor no body could have,
+        the one problem the boxes cannot catch one value at a time.
         """
         point = self._si([box.value() for box in self.point_boxes], 'length')
         if not (self.scale_check.isVisible() and self.scale_check.isChecked()):

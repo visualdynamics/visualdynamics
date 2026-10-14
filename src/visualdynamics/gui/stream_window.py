@@ -1,25 +1,34 @@
-"""The import window for a long run, chosen on a preview.
+"""The dialog that chooses how much of a long Rattlesnake run to
+import, on a preview of the run.
 
-A stream that would take a large share of the machine — a quarter of
-its memory, `io.rattlesnake.LARGE_STREAM_SHARE` — is not imported
-whole without asking (Brandon, 2026-09-18: a 22.5 GB run fits a 64 GB
-machine and not a 32 GB one). This dialog is the question: one
-channel's envelope over the whole run to read the run by, the
-truncate reading's own span over it to choose the stretch, the
-channels to keep, and what the choice costs in samples and gigabytes
-against the machine's memory. Import reads exactly that — the same
-`import_file(path, start=, stop=, channels=)` a script says, so the
-journal replays the import as it was made.
+A stream that would take a quarter or more of the machine's memory
+(`io.rattlesnake.LARGE_STREAM_SHARE`) is not imported whole without
+asking, and this dialog asks. It shows one channel's envelope over the
+whole run, the truncation span over it to choose the stretch (dragged on
+the plot, typed in the panel, or set as the last so many seconds of the
+run), the channels to keep, and what the choice costs in samples and
+gigabytes against the machine's memory. Import then reads exactly that,
+with the same `import_file(path, start=..., stop=..., channels=...)`
+call a script makes, so the journal replays the import as it was made.
 
 The preview is one channel, and the window chosen on it applies to
-every channel: right for a run, and a trust that the run is
-stationary across channels, which the chooser is there to check.
+every channel. That suits a run, but it assumes the run is stationary
+across channels, which changing the preview channel lets a person check.
+
+Save Truncated Copy writes the run cut to the window as a `.nc4` file of
+its own, with every setting and every channel as the file has them
+(`io.rattlesnake.save_window`) and its clock starting at zero. It is
+offered once the window is less than the whole run. The same dialog,
+opened by File → Truncate Rattlesnake File, has a save-only mode: it
+works for any run whatever its size, and has no Import button and no
+channel list. The channels picked apply only to an import; the copy
+keeps them all.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import numpy as np
@@ -43,21 +52,39 @@ from ..plot import background_brush
 from ..plot.truncation import TruncationOverlay
 from .truncate_panel import TruncatePanel
 
+# Asking before a large import: Brandon, 2026-09-18 (a 22.5 GB run fits
+# a 64 GB machine and not a 32 GB one). Save Truncated Copy and the
+# save-only mode: Brandon, 2026-10-13.
+
 GB = 2 ** 30
 
 
 class StreamWindowDialog(QDialog):
     """How much of a run to import, chosen on one channel's envelope.
 
-    `options()` is the answer in the importer's own vocabulary: empty
-    for the whole run, `start`/`stop` for a window, `channels` for a
-    subset — only what differs from importing whole, so the journal
-    line stays the plain one when nothing was cut.
+    `path` is the run, `summary` its `io.rattlesnake.stream_summary`, and
+    `colors` the theme's colors. The preview opens on the largest stream.
+    `save`, when given, writes the truncated copy: it is called with the
+    run's path, the target path and the window's start and stop in
+    seconds, and returns the samples kept per stream. With None, no copy
+    is offered. `importing=False` is the save-only mode of File →
+    Truncate Rattlesnake File, with Close in place of Import and Cancel.
+
+    `options()` is the answer in the importer's own keywords: empty for
+    the whole run, `start` and `stop` for a window, `channels` for a
+    subset. Only what differs from importing the whole run is included,
+    so when nothing was cut the journal line is the plain one.
     """
 
     def __init__(self, path: str | os.PathLike, summary: Mapping[str, Any],
-                 colors: Mapping[str, str], parent: QWidget | None = None) -> None:
+                 colors: Mapping[str, str], parent: QWidget | None = None,
+                 save: Callable[[str, str, float, float], dict] | None = None,
+                 importing: bool = True) -> None:
         super().__init__(parent)
+        #: writes the copy — `save_window`'s arguments, the window's
+        #: runner around it — or None, no copy offered
+        self.save: Callable[[str, str, float, float], dict] | None = save
+        self.importing: bool = importing
         import pyqtgraph as pg
 
         self.path: str = str(path)
@@ -74,16 +101,19 @@ class StreamWindowDialog(QDialog):
         self._curves: list[Any] = []
 
         base = os.path.basename(self.path)
-        self.setWindowTitle(f'Import a part of {base}')
+        self.setWindowTitle(f'Import a part of {base}' if importing
+                            else f'Truncate {base}')
         memory = int(summary.get('memory') or 0)
         total = sum(s['bytes'] for s in streams)
         words = (f'{base} holds {len(summary["channels"])} channels for '
                  f'{self.stream["seconds"]:.4g} s at {self.rate:g} Hz: '
                  f'{total / GB:.2f} GB of time data')
-        if memory:
+        if memory and importing:
             words += f' on a machine with {memory / GB:.0f} GB'
         words += ('. Choose the stretch and the channels to import; the '
-                  'preview is one channel over the whole run.')
+                  'preview is one channel over the whole run.' if importing else
+                  '. Choose the stretch to keep; the copy keeps every channel '
+                  'and every setting, and its clock starts at zero.')
         self.header: QLabel = QLabel(words)
         self.header.setWordWrap(True)
 
@@ -141,7 +171,15 @@ class StreamWindowDialog(QDialog):
         buttons = QDialogButtonBox()
         self.import_button: Any = buttons.addButton(
             'Import', QDialogButtonBox.ButtonRole.AcceptRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self.import_button.setVisible(importing)
+        self.save_button: Any = buttons.addButton(
+            'Save Truncated Copy…', QDialogButtonBox.ButtonRole.ActionRole)
+        self.save_button.setToolTip(
+            'Write the run cut to this window as a .nc4 of its own: every '
+            'channel and every setting as the file has them')
+        self.save_button.clicked.connect(self._save_copy)
+        buttons.addButton(QDialogButtonBox.StandardButton.Cancel if importing
+                          else QDialogButtonBox.StandardButton.Close)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
@@ -158,8 +196,14 @@ class StreamWindowDialog(QDialog):
         side = QVBoxLayout()
         side.addWidget(self.panel)
         side.addLayout(last_row)
-        side.addWidget(QLabel('Channels'))
+        # the channels are the import's: a copy keeps them all
+        self.channels_label: QLabel = QLabel('Channels')
+        side.addWidget(self.channels_label)
         side.addWidget(self.channel_list, 1)
+        self.channels_label.setVisible(importing)
+        self.channel_list.setVisible(importing)
+        if not importing:
+            side.addStretch(1)
         middle = QHBoxLayout()
         middle.addWidget(self.plot, 1)
         middle.addLayout(side)
@@ -259,6 +303,8 @@ class StreamWindowDialog(QDialog):
         self.last_box.blockSignals(False)
 
     def truncation(self) -> Truncation:
+        """The window chosen, as a `Truncation` in seconds on the run's
+        clock."""
         return self.panel.truncation()
 
     def channels(self) -> list[str]:
@@ -277,6 +323,16 @@ class StreamWindowDialog(QDialog):
         """What the choice costs, said where it is being made."""
         first, last = self._window()
         samples = last - first
+        # a copy of the whole run is the run: offered once it is cut
+        self.save_button.setVisible(
+            self.save is not None and samples >= 2
+            and (first, last) != (0, int(self.stream['samples'])))
+        if not self.importing:
+            self.cost.setText(f'{samples:,} samples of each channel, '
+                              f'{samples / self.rate:.4g} s'
+                              + (' — the span holds fewer than two samples'
+                                 if samples < 2 else ''))
+            return
         kept = len(self.channels())
         size = samples * kept * 8
         words = f'{samples:,} samples × {kept} channels = {size / GB:.2f} GB'
@@ -290,8 +346,34 @@ class StreamWindowDialog(QDialog):
         self.cost.setText(words)
         self.import_button.setEnabled(kept > 0 and samples >= 2)
 
+    def _save_copy(self) -> None:
+        """The run cut to the window, written where the person says:
+        named for the window by default, since the copy's clock starts
+        at zero again. The dialog stays up, to import or cut again."""
+        from PySide6.QtWidgets import QFileDialog
+
+        span = self.truncation()
+        start, stop = float(span.start), float(span.stop)
+        target, _filter = QFileDialog.getSaveFileName(
+            self, 'Save Truncated Copy', rattlesnake.window_name(self.path, start, stop),
+            'Rattlesnake run (*.nc4)')
+        if not target:
+            return
+        try:
+            kept = self.save(self.path, target, start, stop)
+        except ValueError as refusal:
+            self.cost.setText(f'Not saved: {refusal}.')
+            return
+        samples = max(kept.values())
+        self.cost.setText(f'Saved {os.path.basename(target)}: {samples:,} samples of '
+                          f'each channel, {start:.4g} to {stop:.4g} s of the run, '
+                          'its clock starting at zero.')
+
     def options(self) -> dict[str, Any]:
-        """The import's keyword arguments: only what differs from whole."""
+        """The import's keyword arguments, holding only what differs from
+        importing the whole run: 'start' and 'stop' in seconds when the
+        window is less than the whole run, and 'channels' when some are
+        unchecked."""
         out: dict[str, Any] = {}
         first, last = self._window()
         span = self.truncation()
@@ -306,9 +388,13 @@ class StreamWindowDialog(QDialog):
 
 def ask_stream_window(parent: QWidget | None, path: str | os.PathLike,
                       summary: Mapping[str, Any],
-                      colors: Mapping[str, str]) -> dict[str, Any] | None:
-    """Put the dialog up; the import options chosen, or None to skip the file."""
-    dialog = StreamWindowDialog(path, summary, colors, parent)
+                      colors: Mapping[str, str],
+                      save: Callable[[str, str, float, float], dict] | None = None
+                      ) -> dict[str, Any] | None:
+    """Show the import dialog and return the import options chosen, or
+    None when it is cancelled and the file is skipped. `save`, when
+    given, writes a truncated copy, as for `StreamWindowDialog`."""
+    dialog = StreamWindowDialog(path, summary, colors, parent, save=save)
     if dialog.exec() == QDialog.DialogCode.Accepted:
         return dialog.options()
     return None

@@ -1,12 +1,13 @@
-"""Progress through a long computation, told to a callback.
+"""Progress through a long computation, reported to a callback.
 
-One shape for every long verb (2026-10-01): a callable told
-``(done, total)`` as the work advances. The window feeds its strip bar
-with it; a script prints it. Each stage of a computation adds its
-count as it is sized — a matched filter per tone, an assembly per
-element, a solve's pieces per channel — so the total grows by stage
-and a bar is determinate within one. Anything the callback raises
-propagates out of the computation: a cancel is the callback raising.
+Every long verb reports progress the same way: a callable is called
+with ``(done, total)`` as the work goes on. The window uses it to
+update its progress bar, and a script can print it. Each stage of a
+computation adds its count once that count is known (a matched filter
+per tone, an assembly per element, a solve's pieces per channel), so
+the total increases stage by stage and the bar is accurate within
+each stage. Anything the callback raises passes out of the
+computation, which is how a cancel works: the callback raises.
 """
 
 from __future__ import annotations
@@ -14,18 +15,27 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+# One progress callback shape for every long verb (2026-10-01).
+
 
 class Cancelled(Exception):
-    """Raised out of a computation by its progress callback when the
-    person asked for it to stop. The window's Cancel button sets a
-    flag the next tick reads; nothing in between catches this."""
+    """Raised by a progress callback to stop the computation it reports on.
+
+    The window's Cancel button sets a flag that the callback reads on
+    the next tick. Nothing between the callback and the caller of the
+    computation catches this exception.
+    """
 
 
 class Ticker:
-    """`add` a stage's count, `tick` as it goes; the callback hears
-    `(done, total)` at most every `interval` seconds and always on the
-    last tick, since a window pumps its events in it. A `Ticker(None)`
-    costs nothing and tells no one."""
+    """Counts progress and reports it to a callback.
+
+    Call `add` with a stage's count when it is known and `tick` as each
+    piece finishes. The callback is called with ``(done, total)`` at
+    most once every `interval` seconds (default 0.05 s), and always when
+    `done` reaches `total`, because a window processes its events
+    inside the callback. `Ticker(None)` does nothing.
+    """
 
     def __init__(self, callback: Callable[[int, int], None] | None,
                  interval: float = 0.05) -> None:
@@ -43,9 +53,12 @@ class Ticker:
         self._tell()
 
     def extend_to(self, count: int) -> None:
-        """A stage whose length is an estimate — the eigen iterations —
-        keeps the bar short of full: the total is raised to `count`
-        past what is done whenever it would be reached."""
+        """Raise the total to `count` past what is done, if it is lower.
+
+        Used for a stage whose length is only an estimate (the
+        eigenvalue iterations), so the bar does not reach full before
+        the stage ends.
+        """
         if self.done + int(count) > self.total:
             self.total = self.done + int(count)
             self._tell()

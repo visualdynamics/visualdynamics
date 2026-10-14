@@ -1,11 +1,11 @@
-"""Test/model geometry: nodes, coordinate systems, elements and element groups.
+"""Test and model geometry: nodes, coordinate systems, elements and element groups.
 
-Node coordinates are stored in SI meters once their units are known, resolved
-into the global cartesian frame. A geometry imported from a source that does
-not declare units (sdynpy .npz, exodus, a UNV without a 164) keeps the file's
-raw coordinates and reports `length_unit is None` until `define_units()` is
-called. Element types use the UFF dataset 2412 FE descriptor codes as the
-interchange vocabulary.
+Node coordinates are stored in the global cartesian frame, in meters once
+their unit is known. A geometry read from a file that does not declare
+units (an sdynpy .npz, an exodus file, a UNV file without dataset 164)
+keeps the file's coordinates as they are, and `length_unit` is None
+until `define_units()` is called. Element types are identified by the
+FE descriptor codes of UFF dataset 2412.
 """
 
 from __future__ import annotations
@@ -165,7 +165,7 @@ def element_family(code: int) -> str:
     Returns
     -------
     str
-        One of `FAMILIES`.
+        One of `FAMILIES`, or 'points' or 'pyramids' (`RARE_FAMILIES`).
     """
     _name, count, shape = ELEMENT_TYPES[int(code)]
     if shape == 'line':
@@ -179,13 +179,13 @@ def element_family(code: int) -> str:
 
 
 def placed(local: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
-    """One point written in a frame, as global cartesian.
+    """A point given in a coordinate system, converted to global cartesian.
 
-    `kind` is the frame's `CS_TYPES` code and `matrix` its `(4, 3)`
-    rows — three directions then the origin. A cylindrical frame
-    writes (r, theta, z) and a spherical one (r, theta from +z, phi),
-    both with the angles in **degrees**, which is what the universal
-    file, a Nastran CORD2C/S and sdynpy all mean by them.
+    `kind` is the system's `CS_TYPES` code and `matrix` its `(4, 3)`
+    rows: three directions, then the origin. A cylindrical system gives
+    (r, theta, z) and a spherical one (r, theta from +z, phi), with the
+    angles in degrees in both, which is the convention of the universal
+    file, Nastran's CORD2C and CORD2S, and sdynpy.
     """
     local = np.asarray(local, dtype=float)
     matrix = np.asarray(matrix, dtype=float)
@@ -203,9 +203,9 @@ def placed(local: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
 
 
 def written_in(point: ArrayLike, kind: int, matrix: ArrayLike) -> np.ndarray:
-    """The inverse of `placed`: a global cartesian point as the frame
-    would write it, so a file states its nodes the way it stated them
-    before."""
+    """The inverse of `placed`: a global cartesian point in the
+    coordinates of a system, so a file can be written with its nodes in
+    the systems they were read in."""
     point = np.asarray(point, dtype=float)
     matrix = np.asarray(matrix, dtype=float)
     local = (point - matrix[3]) @ matrix[:3].T
@@ -229,15 +229,14 @@ def _frames(cs_id, cs_type, cs_matrix):
 
 def to_global(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
               cs_type: ArrayLike, cs_matrix: ArrayLike) -> np.ndarray:
-    """Node coordinates, each written in the frame it is placed in, as
-    global cartesian — what `Geometry` stores.
+    """Node coordinates given in each node's own placement system,
+    converted to global cartesian, which is what `Geometry` stores.
 
-    A file states a node's position in whatever frame it was drawn in,
-    and the frame is the node's `def_cs`. Reading those numbers as if
-    they were global puts the node somewhere else entirely, which is
-    what a geometry with local placement frames looked like (Brandon,
-    2026-09-20). A node whose frame the file does not define, or which
-    names the global frame, is taken as written.
+    A file gives each node's position in the coordinate system the node
+    is placed in, its `def_cs`. Reading those numbers as global would put
+    the node in the wrong place. A node whose system is not among the
+    given systems, or is the global system, keeps its coordinates as
+    written.
 
     Parameters
     ----------
@@ -253,6 +252,9 @@ def to_global(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
     numpy.ndarray
         `(nodes, 3)` in the global cartesian frame.
     """
+    # A geometry with local placement systems drew with every node in
+    # the wrong place while the file's numbers were read as global
+    # (Brandon, 2026-09-20).
     xyz = np.asarray(node_xyz, dtype=float).reshape(-1, 3)
     frames = _frames(cs_id, cs_type, cs_matrix)
     out = xyz.copy()
@@ -265,8 +267,8 @@ def to_global(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
 
 def to_local(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
              cs_type: ArrayLike, cs_matrix: ArrayLike) -> np.ndarray:
-    """The inverse of `to_global`, for a writer that states each node
-    in the frame the geometry says it is placed in."""
+    """The inverse of `to_global`, for a writer that gives each node in
+    the coordinate system it is placed in."""
     xyz = np.asarray(node_xyz, dtype=float).reshape(-1, 3)
     frames = _frames(cs_id, cs_type, cs_matrix)
     out = xyz.copy()
@@ -278,22 +280,18 @@ def to_local(node_xyz: ArrayLike, node_def_cs: ArrayLike, cs_id: Ids,
 
 
 def reconcile_type(code: int, node_count: int) -> int:
-    """The descriptor that matches how many nodes an element really
-    has, when the two disagree.
+    """The descriptor that matches the number of nodes an element has,
+    when the file's descriptor and node count disagree.
 
-    A file states both, and they can contradict each other: one wrote
-    a four-node element as descriptor 41, a plane-stress *triangle*,
-    and it drew as a triangle with the fourth node dropped (Brandon,
-    2026-09-20). The count is the element; the descriptor is a label
-    on it. So a descriptor whose count is wrong is exchanged for the
-    one in its own family that carries that many nodes — 41 with four
-    nodes is 44, the plane-stress quadrilateral, keeping the family
-    the file chose and mending only what it got wrong.
-
-    2412 numbers a family in one decade, triangles before
-    quadrilaterals, which is what makes the sibling findable. When no
-    sibling fits, the descriptor stands: an element nobody can name is
-    better carried as written than renamed to a guess.
+    A file gives both, and they can contradict each other. The node
+    count is taken as correct, and a descriptor with the wrong count is
+    replaced by the one in the same family with that many nodes: 41 (a
+    plane-stress triangle) with four nodes becomes 44, the plane-stress
+    quadrilateral. Dataset 2412 numbers each family within one decade,
+    triangles before quadrilaterals, which is how the replacement is
+    found. When no descriptor in the family fits, the original is kept,
+    since an element that cannot be identified is better kept as written
+    than renamed to a guess.
 
     Parameters
     ----------
@@ -307,6 +305,8 @@ def reconcile_type(code: int, node_count: int) -> int:
     int
         The descriptor to use.
     """
+    # A file wrote a four-node element as descriptor 41, and it drew as a
+    # triangle with the fourth node dropped (Brandon, 2026-09-20).
     code = int(code)
     known = ELEMENT_TYPES.get(code)
     if known is None or node_count < 1 or known[1] == node_count:
@@ -320,12 +320,12 @@ def reconcile_type(code: int, node_count: int) -> int:
 
 def face_corners(code: int) -> int:
     """How many corners a face element is drawn with: three for a
-    triangle, four for a quadrilateral, whichever family its
-    descriptor names and however many nodes it carries.
+    triangle and four for a quadrilateral, whatever family its descriptor
+    names and however many nodes it has.
 
-    Read off the name in `ELEMENT_TYPES` rather than from the node
-    count, which cannot tell a nine-node cubic triangle from a
-    nine-node quadrilateral (Brandon, 2026-09-20).
+    It is read from the name in `ELEMENT_TYPES` and not from the node
+    count, because a nine-node cubic triangle and a nine-node
+    quadrilateral have the same count.
 
     Parameters
     ----------
@@ -337,6 +337,7 @@ def face_corners(code: int) -> int:
     int
         3 or 4.
     """
+    # by name, not node count (Brandon, 2026-09-20)
     name = ELEMENT_TYPES[int(code)][0]
     return 3 if name.startswith('tri') else 4
 
@@ -354,9 +355,11 @@ _SOLID_FACES = {
 
 
 def solid_faces(node_count: int) -> tuple[tuple[int, ...], ...]:
-    """The faces of a solid cell of this many corners, each as
-    positions into the cell's node list; a higher-order cell draws by
-    its corners, which come first.
+    """The faces of a solid cell with this many nodes, each face as
+    positions in the cell's node list.
+
+    A higher-order cell is drawn by its corner nodes, which come first
+    in its node list. An unknown node count gives an empty tuple.
 
     Parameters
     ----------
@@ -419,15 +422,16 @@ def _turned(code: int, before: NDArray, after: NDArray) -> bool:
 
 
 class View:
-    """The way a geometry opens in 3-D: where the eye is, seen from the
-    model's center, and which way is up on screen.
+    """The direction a geometry is viewed from in 3-D: where the eye is,
+    seen from the model's center, and which way is up on screen.
 
-    Only a direction: every view is fitted to what it shows, so there is
-    no distance or zoom to keep. Set once on a geometry, it is how the
-    app opens it and everything drawn on it, how Reset View returns, and
-    how the report's scenes and exported figures are drawn
-    (Brandon, 2026-09-27) — a model built Y-up opens upright without its
-    nodes being turned.
+    A view is only a direction. Every view is fitted to what it shows,
+    so there is no distance or zoom to store. Set on a geometry, it is
+    the view the app opens the geometry and everything drawn on it in,
+    the view Reset View returns to, and the view of the report's scenes
+    and exported figures. A model built with Y up then opens upright
+    without its nodes being rotated. Raises ValueError for a zero or
+    non-finite direction, or an `up` along the line of sight.
 
     Parameters
     ----------
@@ -445,6 +449,8 @@ class View:
     >>> geometry.view = View(eye=(1, 1, -1), up=(0, 1, 0))  # doctest: +SKIP
     """
 
+    # One view for the app, Reset View, the report and exported figures
+    # (Brandon, 2026-09-27).
     __slots__ = ('eye', 'up')
 
     def __init__(self, eye: ArrayLike = (1.0, 1.0, 1.0),
@@ -474,8 +480,11 @@ class View:
         return eye, up / np.linalg.norm(up)
 
     def basis(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
-        """(right, up) on screen, as unit vectors in the global frame —
-        the camera's own: right is the line of sight crossed with up."""
+        """``(right, up)`` on screen, as unit vectors in the global frame.
+
+        Right is the line of sight crossed with up, and up is `up` made
+        perpendicular to the line of sight.
+        """
         eye, up = self._unit()
         return (tuple(float(v) for v in np.cross(up, eye)),
                 tuple(float(v) for v in up))
@@ -506,52 +515,73 @@ DEFAULT_VIEW = View()
 class Geometry:
     """Nodes, coordinate systems, elements and element groups.
 
-    Parameters are array-likes; connectivity lists contain one integer array
-    of node ids per element. All coordinates in SI meters.
+    The parameters are array-likes with the names of the attributes
+    below; `elem_conn` holds one integer array of node ids per element.
+    Coordinates are in the global cartesian frame, in meters once
+    `length_unit` is declared. Without coordinate systems the geometry
+    gets one, the global cartesian system with id 1. An element whose
+    descriptor does not match its node count is corrected
+    (`reconcile_type`), and an element group holding more than one
+    element family is split (`split_groups_by_family`). Raises
+    ValueError when the result is not consistent (`validate`).
 
-    The arrays below are the storage; `nodes`, `coordinate_systems`,
-    `elements` and `groups` are **views** onto them, which
-    is how the tree lists a geometry and how a script should usually
-    reach one. A view is not a copy — writing through a row writes here.
+    The arrays below hold the data; `nodes`, `coordinate_systems`,
+    `elements` and `groups` are views of them, which is how the project
+    tree lists a geometry and usually the easiest way for a script to
+    use one. A view is not a copy, so writing through a row writes into
+    the geometry.
+
+    There are no separate tracelines. A line drawn through nodes is an
+    element group of two-node line elements with no properties:
+    `add_beams` creates one, and `drawn_lines` returns them for the file
+    formats that store tracelines separately. The same element group
+    becomes part of the structure once it is given a section.
 
     Attributes:
-        node_id: Every node's id. Unique, because connectivity and
-            placement refer to nodes by id.
+        node_id: Every node's id. Unique, because elements and placement
+            refer to nodes by id.
         node_xyz: `(nodes, 3)` coordinates, in meters once
-            `length_unit` is declared and the file's raw numbers before
+            `length_unit` is declared and the file's numbers before
             that.
-        node_def_cs: The coordinate system each node is *placed* in.
-        node_disp_cs: The system each node is *measured* in — the frame a
-            shape's values at that node are expressed in.
+        node_def_cs: The coordinate system each node is placed in.
+        node_disp_cs: The coordinate system each node is measured in,
+            which is the system a shape's values at that node are in.
         node_color: Palette index per node.
         cs_id: Coordinate system ids. Unique, for the same reason as
-            nodes.
+            node ids.
         cs_name: A name per system, often empty.
         cs_type: 0 cartesian, 1 cylindrical, 2 spherical (`CS_TYPES`).
-        cs_matrix: `(systems, 4, 3)` — three direction rows then the
-            origin, so `cs_matrix[i, 3]` is where system *i* sits.
-        (There are no tracelines (2026-09-30). A line drawn through
-        nodes is an element group of two-node line elements with no properties —
-        `add_beams` makes one, `drawn_lines` reads them back for the
-        formats that keep tracelines apart — and the same element group becomes
-        structure the moment its element group carries a section. One storage
-        for one drawn idea; PLAN.md "Geometry by element family".)
-        elem_id: Element ids. Labels — nothing refers to them.
+        cs_matrix: `(systems, 4, 3)`: three direction rows, then the
+            origin, so `cs_matrix[i, 3]` is the origin of system *i*.
+        elem_id: Element ids. They are only labels; nothing refers to
+            them.
         elem_type: UFF dataset 2412 descriptor code per element
             (`ELEMENT_TYPES` names them and says how each is drawn).
         elem_color: Palette index per element.
         elem_conn: One array of node ids per element.
-        elem_group: Which element group each element belongs to, by element group id.
-        group_id: The declared element groups. Unique, since elements name them.
-        group_name: A name per element group — `'wing'`, `'arm front left'`. This
-            is where a mesh records that a region is a different part
-            from its neighbor, and `fem.Model.from_geometry` reads a
-            member's section from it.
-        length_unit: What the coordinates are in, or `None` while that
-            has not been declared — in which case they are the file's own
+        elem_group: The id of the element group each element belongs to.
+        group_id: The declared element groups. Unique, since elements
+            refer to them by id.
+        group_name: A name per element group, such as `'wing'` or
+            `'arm front left'`. This is where a mesh records that a
+            region is a different part from its neighbor, and
+            `fem.Model.from_geometry` reads a member's section from it.
+        group_properties: `{element group id: fem.GroupProperties}`, the
+            material and thickness or section of each element group that
+            has them.
+        length_unit: The unit of the coordinates, or `None` while it has
+            not been declared, in which case they are the file's own
             numbers and nothing has been scaled.
+        mass_properties: The reference point, mass and inertia for the
+            rigid-body shapes (`core.rigid.MassProperties`), or None.
+        view: The direction the geometry opens in 3-D (`View`), or None
+            for `DEFAULT_VIEW`.
+        solids: The solid shapes of the parts before they are meshed
+            (`core.solids`).
     """
 
+    # No tracelines (2026-09-30): one storage for one drawn idea, PLAN.md
+    # "Geometry by element family".
     dimension = 'length'
 
     def __init__(self, node_id: Ids, node_xyz: ArrayLike,
@@ -665,8 +695,8 @@ class Geometry:
 
     @property
     def opening_view(self) -> View:
-        """The view it opens on in 3-D: its own `view`, else the default
-        isometric."""
+        """The view the geometry opens in 3-D: its own `view`, or
+        `DEFAULT_VIEW` (from +X+Y+Z, Z up) when it has none."""
         return self.view if self.view is not None else DEFAULT_VIEW
 
     @staticmethod
@@ -676,8 +706,15 @@ class Geometry:
         return np.arange(1, n + 1, dtype=np.int64) if arange else np.full(n, fill, np.int64)
 
     def validate(self) -> None:
-        """Check the geometry hangs together — every element's nodes
-        present, every identifier unique — and report what does not."""
+        """Check that the geometry is consistent, and raise ValueError
+        naming the first problem found.
+
+        Node, coordinate system and element group ids must be unique,
+        every element's nodes must exist, every element must name an
+        element group the geometry has, every element type must be in
+        `ELEMENT_TYPES`, and each element group must hold one element
+        family.
+        """
         # An id that other data points at has to mean one thing:
         # connectivity names nodes by id, and a node names the systems it
         # is placed and measured in. Element ids are labels — nothing
@@ -729,31 +766,38 @@ class Geometry:
 
     @property
     def nodes(self) -> EntityView:
-        """Every node: `ids`, `xyz`, `colors`, and the two systems."""
+        """Every node: `ids`, `xyz`, `colors`, `placement_systems` and
+        `displacement_systems` (an `EntityView`)."""
         return EntityView(self, 'nodes')
 
     @property
     def coordinate_systems(self) -> EntityView:
-        """Every coordinate system: `ids`, `names`, `types`, `matrices`."""
+        """Every coordinate system: `ids`, `names`, `types` and `matrices`
+        (an `EntityView`)."""
         return EntityView(self, 'coordinate_systems')
 
     @property
     def elements(self) -> EntityView:
-        """Every element: `ids`, `types`, `colors`, `nodes`."""
+        """Every element: `ids`, `types`, `colors`, `groups` and `nodes`
+        (an `EntityView`)."""
         return EntityView(self, 'elements')
 
     @property
     def groups(self) -> EntityView:
-        """Every element group: `ids` and `names`.
+        """Every element group: `ids` and `names` (an `EntityView`).
 
-        An element group groups elements rather than holding them — which elements
-        are in one is read off `elem_group` (`elements_in`), so moving an
-        element between element groups is an edit to the element.
+        An element group does not store its elements. Which elements are
+        in one is read from `elem_group` (`elements_in`), so moving an
+        element to another element group is an edit to the element.
         """
         return EntityView(self, 'groups')
 
     def node_index(self, node_ids: Ids) -> np.ndarray:
         """Positions of the given node ids in the node arrays.
+
+        Every id must be one the geometry has (`contains_nodes` checks);
+        an id that is not present gives a wrong position or an
+        IndexError, not a clear error.
 
         Parameters
         ----------
@@ -771,7 +815,7 @@ class Geometry:
 
     @property
     def extent(self) -> tuple[np.ndarray, np.ndarray]:
-        """(min_xyz, max_xyz), in meters once units are defined."""
+        """``(min_xyz, max_xyz)`` of the nodes, in meters once units are defined."""
         return self.node_xyz.min(axis=0), self.node_xyz.max(axis=0)
 
     def contains_nodes(self, node_ids: Ids) -> np.ndarray:
@@ -800,8 +844,9 @@ class Geometry:
         Returns
         -------
         list of str
-            Those the geometry has no node for — what makes a
-            data object incompatible with it.
+            The DOFs whose node the geometry does not have, including
+            any DOF that names no node. A data object with such DOFs
+            is not compatible with this geometry.
         """
         from .data import parse_dof
 
@@ -811,18 +856,19 @@ class Geometry:
 
     @property
     def units_defined(self) -> bool:
-        """Whether the geometry knows what its coordinates mean.
-        False until `define_units` names the length unit."""
+        """Whether the length unit of the coordinates has been declared.
+        False until `define_units` is called."""
         return self.length_unit is not None
 
     def suggest_mass_properties(self) -> MassProperties:
-        """The centroid of the nodes as the reference point, and no
-        mass — unit rigid-body shapes about the middle of the model.
+        """Mass properties with the centroid of the nodes as the reference
+        point and no mass, which give unit rigid-body shapes about the
+        middle of the model.
 
-        The seed the rigid-body pane opens with and what
-        `generate_rigid_body_modes` adopts when nothing was set: unlike
-        a whole-record truncation, this is a real answer, and the one
-        the virtual-point transformation wants most often.
+        The rigid-body panel opens with these values, and
+        `generate_rigid_body_modes` uses them when nothing has been set.
+        They are the settings the virtual point transformation needs most
+        often. Raises ValueError when the geometry has no nodes.
 
         Returns
         -------
@@ -837,10 +883,12 @@ class Geometry:
         return MassProperties(tuple(self.node_xyz.mean(axis=0)))
 
     def define_units(self, length_unit: str) -> Geometry:
-        """Declare what the coordinates are in, converting them to SI.
+        """Declare the length unit of the coordinates, converting them to SI.
 
-        Re-declaring reinterprets the original file values rather than
-        scaling twice, so a wrong guess can simply be corrected.
+        The node coordinates, the coordinate system origins and the
+        solids' lengths are converted. Declaring again reinterprets the
+        original values instead of scaling twice, so a wrong unit can be
+        corrected.
 
         Parameters
         ----------
@@ -868,7 +916,7 @@ class Geometry:
         return self
 
     def undefine_units(self) -> Geometry:
-        """Take the declaration back, restoring the file's raw coordinates."""
+        """Remove the length unit and restore the original coordinates; returns self."""
         if self.length_unit is None:
             return self
         self.node_xyz = from_si(self.node_xyz, self.length_unit, 'length')
@@ -885,14 +933,15 @@ class Geometry:
         return int(array.max()) + 1 if len(array) else 1
 
     def dof_direction(self, dof: str) -> np.ndarray | None:
-        """A DOF's direction in global coordinates, through the frame
-        its node is measured in.
+        """A DOF's direction in global coordinates, from the coordinate
+        system its node is measured in.
 
         '101X+' at a node whose `node_disp_cs` is rotated is not global
-        X. The report's grid of control channels reads which global
-        axis a channel is nearest and how far off it sits (Brandon,
-        2026-09-19), and this is where that is answered. A rotational
-        DOF points along its axis, as the DOF arrows draw it.
+        X. The report's table of control channels uses this to show which
+        global axis each channel is nearest and how far it is from it. A
+        rotational DOF points along its axis, as the DOF arrows draw it.
+        A node whose system is not in the geometry is taken to be in the
+        global system.
 
         Parameters
         ----------
@@ -903,11 +952,13 @@ class Geometry:
         -------
         numpy.ndarray or None
             A unit vector, or None when the DOF names no node this
-            geometry has, no axis (a node number alone), or a node
-            measured in a cylindrical or spherical frame — whose local
-            axes turn with the node's position, a reading this does
-            not attempt rather than half-answer.
+            geometry has, has no axis (a node number alone), or is at a
+            node measured in a cylindrical or spherical system, whose
+            local axes depend on the node's position and are not
+            computed here.
         """
+        # The report's control-channel table reads which global axis a
+        # channel is nearest and how far off it is (Brandon, 2026-09-19).
         from .data import parse_dof
 
         node, direction = parse_dof(dof)
@@ -936,20 +987,27 @@ class Geometry:
     def add_node(self, xyz: ArrayLike, node_id: int | None = None,
                  color: int = 1, def_cs: int | None = None,
                  disp_cs: int | None = None) -> int:
-        """Append a node at `xyz` (SI). Returns its id.
+        """Add a node at `xyz` and return its id.
+
+        Raises ValueError if a node with `node_id` already exists.
 
         Parameters
         ----------
         xyz : array_like
-            The node's coordinates.
+            The node's coordinates in the global cartesian frame, in
+            meters once units are defined. They are stored as given.
         node_id : int, optional
-            Its identifier. The next free one when omitted.
+            Its identifier. One more than the highest node id when
+            omitted.
         color : int, default 1
             Its display color index.
         def_cs : int, optional
-            The coordinate system the position is given in.
+            The coordinate system the node is placed in, which a writer
+            uses to give its position. `xyz` is not converted from it.
+            The first coordinate system when omitted.
         disp_cs : int, optional
-            The coordinate system displacements are measured in.
+            The coordinate system displacements at the node are
+            measured in. The first coordinate system when omitted.
 
         Returns
         -------
@@ -971,15 +1029,17 @@ class Geometry:
         return node_id
 
     def add_nodes(self, xyz: ArrayLike) -> np.ndarray:
-        """Append nodes at `xyz` (SI), numbered after the highest id —
-        `add_node` for many at once, one copy of each array rather than
-        one per node, which is what keeps a meshed plane of thousands of
-        nodes from costing seconds.
+        """Add nodes at `xyz`, numbered from one more than the highest id.
+
+        This is `add_node` for many nodes at once, with the defaults of
+        `add_node`. Each array is copied once instead of once per node,
+        so adding the thousands of nodes of a meshed plane is fast.
 
         Parameters
         ----------
         xyz : array_like
-            (n, 3) coordinates.
+            (n, 3) coordinates in the global cartesian frame, in meters
+            once units are defined.
 
         Returns
         -------
@@ -1006,16 +1066,19 @@ class Geometry:
                               rotation: ArrayLike | None = None,
                               cs_id: int | None = None, name: str = '',
                               cs_type: int = 0) -> int:
-        """Append a coordinate system. Returns its id.
+        """Add a coordinate system and return its id.
+
+        Raises ValueError if a system with `cs_id` already exists.
 
         Parameters
         ----------
         origin : array_like, default (0, 0, 0)
-            The system's origin.
+            The system's origin, in meters once units are defined.
         rotation : array_like, optional
-            A 3x3 rotation matrix. Identity when omitted.
+            A 3x3 matrix whose rows are the system's axes. Identity when
+            omitted.
         cs_id : int, optional
-            Its identifier. The next free one when omitted.
+            Its identifier. One more than the highest id when omitted.
         name : str, optional
             What to call it.
         cs_type : int, default 0
@@ -1041,24 +1104,27 @@ class Geometry:
                                 origin: ArrayLike | None = None,
                                 angles: ArrayLike | None = None,
                                 rotation: ArrayLike | None = None) -> None:
-        """Turn a coordinate system, move it, or both — what the 3-D
-        view's rings and arrows do to one, as a call.
+        """Rotate a coordinate system, move it, or both, as the 3-D
+        view's rings and arrows do.
+
+        Raises KeyError for an unknown `cs_id`, and ValueError when both
+        `angles` and `rotation` are given.
 
         Parameters
         ----------
         cs_id : int
             Which coordinate system.
         origin : array_like, optional
-            Where it sits, in the geometry's stored length unit (meters
-            once its units are declared). Kept when omitted.
+            The new origin, in the geometry's stored length unit (meters
+            once its units are declared). Unchanged when omitted.
         angles : array_like, optional
-            Its turn as degrees about the geometry's fixed X, then Y,
-            then Z axes (`rotate.frame_from_angles`) — the angles the
-            view's angle box and the box panel speak. (0, 0, 0) undoes
-            any turn. Kept when omitted.
+            The rotation as angles in degrees about the fixed global X,
+            then Y, then Z axes (`rotate.frame_from_angles`), the same
+            angles the view's angle box and the box panel use.
+            (0, 0, 0) removes any rotation. Unchanged when omitted.
         rotation : array_like, optional
-            Its turn as a 3x3 matrix whose rows are its axes, instead
-            of `angles`.
+            The rotation as a 3x3 matrix whose rows are the system's
+            axes, instead of `angles`.
 
         Returns
         -------
@@ -1082,29 +1148,35 @@ class Geometry:
 
     def add_beams(self, node_ids: Ids, group: int | None = None,
                   color: int = 1, elem_type: int = 21) -> int:
-        """A chain of two-node line elements through the given nodes, in
-        order — what a traceline was (2026-09-30), and a run of beams
-        once the element group carries a section. Returns the element group's id.
+        """Add a chain of two-node line elements through the given nodes,
+        in order, and return the element group's id.
+
+        This is how a drawn line (a traceline in some file formats) is
+        stored, and it becomes a run of beams once the element group is
+        given a section. Raises ValueError for fewer than two nodes, an
+        unknown node, or an `elem_type` that is not a two-node line.
 
         Parameters
         ----------
         node_ids : sequence of int
             The nodes the line runs through, in order; two at least.
         group : int, optional
-            The element group the segments join. A new, unnamed element group when
-            omitted — a drawn line is its own element group, named by what
-            the line was called.
+            The element group the segments are added to. A new, unnamed
+            element group when omitted; a drawn line is its own element
+            group, named for the line.
         color : int, default 1
-            The display color index, on every segment.
+            The display color index of every segment.
         elem_type : int, default 21
-            The two-node line code (`ELEMENT_TYPES`): a beam unless
-            the source says rod, pipe or rigid bar.
+            The two-node line code (`ELEMENT_TYPES`): a beam, unless the
+            source says rod, pipe or rigid bar.
 
         Returns
         -------
         int
             The element group the segments are in.
         """
+        # what a traceline was, before tracelines were stored as
+        # element groups (2026-09-30)
         nodes = [int(n) for n in node_ids]
         if len(nodes) < 2:
             raise ValueError('a line needs at least two nodes')
@@ -1122,8 +1194,10 @@ class Geometry:
         return group
 
     def mixed_groups(self) -> dict[int, list[str]]:
-        """{element group id: families} for every element group holding more than one
-        element family — none, in a geometry that keeps the rule.
+        """``{element group id: families}`` for every element group that
+        holds more than one element family.
+
+        It is empty for any geometry that passes `validate`.
 
         Returns
         -------
@@ -1140,19 +1214,22 @@ class Geometry:
         return {b: f for b, f in found.items() if len(f) > 1}
 
     def split_groups_by_family(self) -> dict[int, list[int]]:
-        """One element group, one family: an element group holding elements of more than
-        one family keeps its first family and each other family moves
-        into a new element group named for it beside the old name. What a
-        source without element groups — UNV 2412, the sdynpy layout — needs on
-        the way in (Brandon, 2026-09-30: split on import rather than
-        show one element group under two families and edit it twice).
+        """Split every element group that holds more than one element family.
+
+        The group keeps its first family, and each other family is moved
+        into a new element group named with the old name and the
+        family, such as 'wing quads'. A file without element groups (UNV
+        dataset 2412, the sdynpy layout) puts every element in one group,
+        so this is applied when such a file is read.
 
         Returns
         -------
         dict of int to list of int
-            {old element group: [the new element groups made from it]}, empty when
-            nothing was mixed.
+            ``{old element group: [the new element groups made from it]}``,
+            empty when no group was mixed.
         """
+        # Split on import rather than show one element group under two
+        # families and edit it twice (Brandon, 2026-09-30).
         made: dict[int, list[int]] = {}
         for group, families in self.mixed_groups().items():
             row = int(np.flatnonzero(self.group_id == group)[0])
@@ -1169,16 +1246,18 @@ class Geometry:
 
     def attach_drawn_lines(self, lines: Sequence[tuple[str, int, Sequence[Ids]]]
                            ) -> list[int]:
-        """Drawn lines from a format that keeps them apart from
-        elements, each as its own element group of two-node line elements with
-        no properties — the reader's half of `drawn_lines`.
+        """Add drawn lines read from a format that stores them separately
+        from elements, each as its own element group of two-node line
+        elements with no properties.
+
+        This is the reading side of `drawn_lines`.
 
         Parameters
         ----------
         lines : sequence of (name, color, chains)
-            One entry per line: what it was called, its color index,
-            and its runs, each a sequence of node ids in drawing order
-            (a UNV line that lifted the pen has several).
+            One entry per line: its name, its color index, and its runs,
+            each a sequence of node ids in drawing order (a UNV line that
+            lifts the pen has several).
 
         Returns
         -------
@@ -1194,10 +1273,11 @@ class Geometry:
         return groups
 
     def is_drawn_line(self, group: int) -> bool:
-        """Whether an element group is a drawn line: every element in it a
-        two-node line element, and no properties on the element group — the
-        one discriminator, on screen and in every file (PLAN.md
-        "Geometry by element family"). An empty element group is not one.
+        """Whether an element group is a drawn line.
+
+        It is when every element in it is a two-node line element and the
+        element group has no properties. The app and every file writer
+        use this one test. An empty element group is not a drawn line.
 
         Parameters
         ----------
@@ -1208,6 +1288,8 @@ class Geometry:
         -------
         bool
         """
+        # the one test, on screen and in every file (PLAN.md "Geometry by
+        # element family")
         group = int(group)
         if group in self.group_properties:
             return False
@@ -1219,14 +1301,17 @@ class Geometry:
                    for r in rows)
 
     def drawn_lines(self) -> list[dict[str, Any]]:
-        """The drawn lines, as the formats that keep tracelines apart
-        from elements write them: per drawn-line element group, in element group order,
-        `{'group', 'name', 'color', 'chains'}` — the chains the element group's
-        segments make when walked in element order, each a list of
-        node ids, a new chain wherever a segment does not start where
-        the last one ended. An element group read from one polyline gives that
-        polyline back; one from a UNV line that lifted the pen gives
-        its runs back under the one element group.
+        """The drawn lines, in the form used by file formats that store
+        tracelines separately from elements.
+
+        One dict `{'group', 'name', 'color', 'chains'}` per drawn-line
+        element group (`is_drawn_line`), in element group order. The
+        chains are the group's segments taken in element order, each a
+        list of node ids, with a new chain wherever a segment does not
+        start where the last one ended. An element group read from one
+        polyline gives that polyline back, and one read from a UNV line
+        that lifts the pen gives its runs back under the one element
+        group. The color is that of the group's first element.
 
         Returns
         -------
@@ -1251,7 +1336,8 @@ class Geometry:
         return out
 
     def group_of(self, elem_id: int) -> str:
-        """The name of the element group an element belongs to, or ''.
+        """The name of the element group an element belongs to, or '' when
+        that group is not declared.
 
         Parameters
         ----------
@@ -1269,7 +1355,10 @@ class Geometry:
         return self.group_name[int(where[0])] if len(where) else ''
 
     def elements_in(self, group: int | str) -> list[int]:
-        """The ids of the elements in an element group, named or numbered.
+        """The ids of the elements in an element group, given by id or name.
+
+        A name that no element group has gives an empty list; with two
+        groups of one name, the first is used.
 
         Parameters
         ----------
@@ -1291,8 +1380,9 @@ class Geometry:
                 for i in np.flatnonzero(self.elem_group == int(group))]
 
     def nodes_in(self, groups: Ids) -> list[int]:
-        """The ids of the nodes the elements of these element groups
-        use, ascending — what a merge scoped to them may touch.
+        """The ids of the nodes used by the elements of these element
+        groups, in ascending order. These are the nodes a merge limited to
+        those groups may change.
 
         Parameters
         ----------
@@ -1317,18 +1407,18 @@ class Geometry:
             np.isin(self.elem_group, groups)) for n in self.elem_conn[k]})
 
     def add_group(self, name: str = '', group_id: int | None = None) -> int:
-        """Declare an element group. Returns its id.
+        """Declare an element group and return its id.
 
-        An element group with nothing in it is legitimate — exodus files carry
-        empty ones, and an element group has to exist before an element can be put
-        in it.
+        An empty element group is allowed: exodus files contain empty
+        ones, and an element group has to exist before an element can be
+        put in it. Raises ValueError if `group_id` is already used.
 
         Parameters
         ----------
         name : str, optional
             What to call the element group.
         group_id : int, optional
-            Its identifier. The next free one when omitted.
+            Its identifier. One more than the highest id when omitted.
 
         Returns
         -------
@@ -1345,8 +1435,13 @@ class Geometry:
 
     def add_element(self, node_ids: Ids, elem_type: int | None = None,
                     color: int = 1, group: int | None = None) -> int:
-        """Append an element. Type defaults to whatever fits the node count:
-        2 nodes a beam, 3 a triangle, 4 a quadrilateral. Returns its index.
+        """Add an element and return its row index.
+
+        The element id is one more than the highest element id. Without
+        `elem_type`, the type is chosen from the node count: 2 nodes a
+        beam (21), 3 a triangle (41), 4 a quadrilateral (44); any other
+        count needs `elem_type`. Raises ValueError for an unknown node or
+        type, or for a group that holds a different element family.
 
         Parameters
         ----------
@@ -1358,16 +1453,18 @@ class Geometry:
         color : int, default 1
             Its display color index.
         group : int, optional
-            Which element group it belongs to. Left out, the first element group that
-            holds this element's family, else a new one: an element group holds
-            one family (2026-09-30), so a beam added to a mesh of
-            plates goes in an element group of its own rather than theirs.
+            The element group it belongs to, which is declared if it does
+            not exist yet. When omitted, the first element group that
+            holds this element's family (or is empty), otherwise a new
+            one. An element group holds one family, so a beam added to a
+            mesh of plates goes in an element group of its own.
 
         Returns
         -------
         int
-            The element's identifier.
+            The element's row index in the element arrays (not its id).
         """
+        # one element group, one family (2026-09-30)
         nodes = np.asarray([int(n) for n in node_ids], dtype=np.int64)
         unknown = set(nodes.tolist()) - set(self.node_id.tolist())
         if unknown:
@@ -1409,8 +1506,13 @@ class Geometry:
 
     def add_elements(self, connectivity: Sequence[Ids],
                      elem_types: Ids, groups: Ids) -> None:
-        """Append elements — `add_element` for many at once, the nodes
-        checked once for all of them.
+        """Add many elements at once, numbered from one more than the
+        highest element id, with color 1.
+
+        The nodes and types are checked once for all of them, and an
+        element group may hold only one element family, as in
+        `add_element`. If any check fails, ValueError is raised and
+        nothing is added.
 
         Parameters
         ----------
@@ -1419,7 +1521,8 @@ class Geometry:
         elem_types : sequence of int
             Each element's type code.
         groups : sequence of int
-            The element group each belongs to; an element group not declared yet is.
+            The element group each belongs to; an element group that does
+            not exist yet is declared, with no name.
 
         Returns
         -------
@@ -1470,10 +1573,11 @@ class Geometry:
     # ---- deletion -----------------------------------------------------------
 
     def renumber_node(self, row: int, node_id: int) -> None:
-        """Give a node a new id, carrying its elements over.
+        """Give a node a new id, and update the elements that use it.
 
-        Connectivity names nodes by id, so a rename that left it alone
-        would orphan every line and face touching the node.
+        Elements refer to nodes by id, so the connectivity is updated
+        too; otherwise every element at the node would lose it. Raises
+        ValueError if another node already has the id.
 
         Parameters
         ----------
@@ -1496,11 +1600,12 @@ class Geometry:
             conn[conn == old] = node_id
 
     def renumber_group(self, row: int, group_id: int) -> None:
-        """Give an element group a new id, carrying its elements over.
+        """Give an element group a new id, and update its elements.
 
-        An element names its element group by id, so a renumber that left them
-        alone would put every element of the element group in an element group that is no
-        longer there — which `validate` refuses, after the damage.
+        An element refers to its element group by id, so the elements are
+        updated too; otherwise they would refer to an element group that
+        no longer exists. Raises ValueError if another element group
+        already has the id.
 
         Parameters
         ----------
@@ -1522,7 +1627,10 @@ class Geometry:
         self.elem_group[self.elem_group == old] = group_id
 
     def renumber_coordinate_system(self, row: int, cs_id: int) -> None:
-        """Give a coordinate system a new id, repointing the nodes using it.
+        """Give a coordinate system a new id, and update the nodes that use it.
+
+        Both the placement and the displacement systems of the nodes are
+        updated. Raises ValueError if another system already has the id.
 
         Parameters
         ----------
@@ -1546,10 +1654,10 @@ class Geometry:
             references[references == old] = cs_id
 
     def delete_nodes(self, node_ids: Ids) -> dict[str, int]:
-        """Remove nodes, and anything that referenced them.
+        """Remove nodes, and the elements that use them.
 
-        An element naming a deleted node cannot survive, so it goes
-        too. Returns what was removed, for reporting.
+        An element that uses a deleted node is deleted too. Ids that are
+        not present are ignored.
 
         Parameters
         ----------
@@ -1559,8 +1667,7 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many of each kind were removed, including the
-            dependents that went with them.
+            'nodes' and 'elements', the number of each removed.
         """
         wanted = {int(node) for node in node_ids}
         keep = ~np.isin(self.node_id, list(wanted))
@@ -1581,25 +1688,28 @@ class Geometry:
 
     def coincident_nodes(self, tolerance: float,
                          nodes: Ids | None = None) -> dict[int, int]:
-        """{node: the node it coincides with}: every node within
-        `tolerance` of another, mapped to the lowest id among those it is
-        joined to — the one a merge keeps. Chains join: a within tolerance
-        of b and b of c are one point.
+        """``{node: the node it coincides with}`` for every node within
+        `tolerance` of another.
+
+        Each node is mapped to the lowest id in its group, which is the
+        node a merge keeps. Groups are chained: if a is within tolerance
+        of b and b of c, all three are one point.
 
         Parameters
         ----------
         tolerance : float
-            How close two nodes must be to be one point, as the
-            coordinates are held: meters once units are defined.
+            How close two nodes must be to be one point, in the stored
+            length unit: meters once units are defined.
         nodes : sequence of int, optional
-            Only these nodes are candidates, by id: a node outside them
-            is not merged, nor merged into, however close. Every node
-            when omitted.
+            Only these nodes are considered, by id; a node outside them
+            is not merged and nothing is merged into it, however close.
+            Every node when omitted.
 
         Returns
         -------
         dict of int to int
-            Only the nodes that would go, each to the node it becomes.
+            Only the nodes that would be removed, each mapped to the node
+            it becomes.
         """
         from scipy.spatial import cKDTree
 
@@ -1634,32 +1744,34 @@ class Geometry:
         return out
 
     def duplicate_elements(self, groups: Ids | None = None) -> dict[int, int]:
-        """{element id: the element it is} for every solid element on
-        exactly the nodes of an earlier one, of the same type — two
-        bricks filling one cell. The lowest id is the one that stays.
+        """``{element id: the element it duplicates}`` for every solid
+        element of the same type and on the same nodes as an earlier
+        element, such as two bricks filling one cell.
 
-        Solids only: two beams on one line can be two members, and a
-        plate on a plate's nodes is how a doubler or a layer is modeled,
-        but no two solids fill one cell on purpose.
-
-        Two element groups that overlap and share their nodes there — the bars
-        of an X cross-section — put two elements in every cell of the
-        overlap: the region counted twice, its stiffness and mass
-        doubled, and every face of each pair drawn as interior, so the
-        middle of the X vanished from the view (Brandon, 2026-10-02).
+        The earlier element (in element order) is the one that stays.
+        Only solids are checked: two beams on one line can be two
+        members, and a plate on another plate's nodes is how a doubler or
+        a layer is modeled, but two solids are never meant to fill one
+        cell. Two element groups that overlap and share their nodes in
+        the overlap (the bars of an X cross-section) put two elements in
+        every cell there, which doubles the stiffness and mass of the
+        region.
 
         Parameters
         ----------
         groups : sequence of int, optional
-            Keeps the search to these element groups' elements, by id;
-            every element when omitted.
+            Only the elements of these element groups, by id; every
+            element when omitted.
 
         Returns
         -------
         dict of int to int
-            Each element that fills a cell another already fills, to the
-            element it is.
+            Each element that fills a cell another element already
+            fills, mapped to that element.
         """
+        # The X cross-section's overlap drew every face of each pair as
+        # interior, so the middle of the X disappeared from the view
+        # (Brandon, 2026-10-02).
         wanted = None if groups is None else {int(g) for g in groups}
         first: dict[tuple, int] = {}
         out: dict[int, int] = {}
@@ -1677,14 +1789,15 @@ class Geometry:
         return out
 
     def merge_duplicate_elements(self, groups: Ids | None = None) -> int:
-        """Make elements that are one cell one element (`duplicate_elements`):
-        the later of each pair is removed, the earlier — and its element group —
-        stays.
+        """Remove duplicate solid elements (`duplicate_elements`).
+
+        The later element of each pair is removed, and the earlier one
+        stays in its element group.
 
         Parameters
         ----------
         groups : sequence of int, optional
-            Keeps it to these element groups' elements, by id; every
+            Only the elements of these element groups, by id; every
             element when omitted.
 
         Returns
@@ -1709,12 +1822,14 @@ class Geometry:
         return [int(n) for n in base if int(n) not in left_out]
 
     def node_spacing(self, groups: Ids | None = None) -> float | None:
-        """The mesh's finest spacing: the shortest distance between two
-        nodes of one element, zero-length elements passed over — a
-        brick's shortest edge, a quad8's half edge. What Merge Coincident
-        Nodes sizes its default tolerance from (a quarter of it, Brandon,
-        2026-10-11): parts meshed apart sit well inside it, and no two
-        nodes of one element do.
+        """The mesh's finest spacing: the shortest nonzero distance between
+        two nodes of one element, such as a brick's shortest edge or half
+        an edge of a quad8.
+
+        Merge Coincident Nodes sets its default tolerance to a quarter of
+        this value. Nodes of parts meshed separately are usually much
+        closer than that where the parts meet, and no two nodes of one
+        element are.
 
         Parameters
         ----------
@@ -1725,9 +1840,10 @@ class Geometry:
         Returns
         -------
         float or None
-            The spacing, as the coordinates are held; None when there is
-            no element with two distinct nodes.
+            The spacing, in the stored length unit; None when no element
+            has two nodes at different positions.
         """
+        # the quarter is Brandon's, 2026-10-11
         rows = (range(len(self.elem_conn)) if groups is None
                 else np.flatnonzero(np.isin(self.elem_group,
                                             [int(g) for g in groups])))
@@ -1753,28 +1869,32 @@ class Geometry:
 
     def coincident_spots(self, tolerance: float, groups: Ids | None = None,
                          exclude: Ids | None = None) -> list[list[int]]:
-        """The places a merge would make one node: each a list of the
-        node ids that coincide there, ascending, so the first is the one
-        that stays. What Merge Coincident Nodes marks in the view before
-        anything is merged, a place at a time, for a person to leave some
-        out (Brandon, 2026-10-11).
+        """The places where a merge would make one node.
+
+        Each place is a list of the node ids that coincide there, in
+        ascending order, so the first is the node that stays. Merge
+        Coincident Nodes marks these places in the view before anything
+        is merged, so some of them can be left out.
 
         Parameters
         ----------
         tolerance : float
-            How close two nodes must be to be one, as the coordinates are
-            held: meters once units are defined.
+            How close two nodes must be to be one, in the stored length
+            unit: meters once units are defined.
         groups : sequence of int, optional
-            Only the nodes these element groups' elements use, by id;
+            Only the nodes used by these element groups' elements, by id;
             every node when omitted.
         exclude : sequence of int, optional
-            Nodes left out, by id: neither merged nor merged into.
+            Nodes left out, by id: they are not merged and nothing is
+            merged into them.
 
         Returns
         -------
         list of list of int
-            One list per place, in the order of the node each keeps.
+            One list per place, sorted by the node each keeps.
         """
+        # marked a place at a time, for a person to leave some out
+        # (Brandon, 2026-10-11)
         mapping = self.coincident_nodes(
             tolerance, self._merge_candidates(groups, exclude))
         spots: dict[int, list[int]] = {}
@@ -1784,10 +1904,11 @@ class Geometry:
 
     def merge_folds(self, tolerance: float, groups: Ids | None = None,
                     exclude: Ids | None = None) -> str | None:
-        """Why this merge would be refused, or None: the sentence
-        `merge_coincident_nodes` raises when the tolerance would fold an
-        element onto itself — asked ahead, so a pane can say it before
-        its button is pressed.
+        """Why this merge would be refused, or None.
+
+        Returns the message `merge_coincident_nodes` raises when the
+        tolerance would fold an element onto itself, so a panel can show
+        it before the merge is applied.
 
         Parameters
         ----------
@@ -1807,11 +1928,12 @@ class Geometry:
 
     def merge_collapses(self, tolerance: float, groups: Ids | None = None,
                         exclude: Ids | None = None) -> list[int]:
-        """The links this merge would remove, by element id: the line
-        elements — a rigid link, a spring, a beam — whose nodes all become
-        one node, which then join nothing. A joint built with rigid
-        links and then merged takes them out, where the merge used to be
-        refused for folding them (Brandon, 2026-10-11).
+        """The ids of the line elements this merge would remove.
+
+        These are the line elements (a rigid link, a spring, a beam)
+        whose nodes would all become one node, so they no longer join
+        anything. Merging a joint built with rigid links removes the
+        links.
 
         Parameters
         ----------
@@ -1826,6 +1948,8 @@ class Geometry:
         -------
         list of int
         """
+        # The merge used to be refused for folding such links (Brandon,
+        # 2026-10-11).
         return self._collapsed(self.coincident_nodes(
             tolerance, self._merge_candidates(groups, exclude)))
 
@@ -1854,50 +1978,55 @@ class Geometry:
     def merge_coincident_nodes(self, tolerance: float,
                                groups: Ids | None = None,
                                exclude: Ids | None = None) -> dict[str, int]:
-        """Make nodes that are one point one node: every element and
-        element naming a node within `tolerance` of another is renamed
-        to the lowest id among them, and the rest are removed. Plates
-        connect only where they share nodes, so this is what ties a model
-        built from planes together at its corners.
+        """Merge nodes that are at one point into one node.
 
-        Refused, with the element named, when the tolerance would fold an
-        element onto itself — two of its own corners within it — since
-        that is a tolerance larger than the mesh, not a coincidence. A
-        line element whose nodes all become one — a rigid link across
-        the gap the merge closes — is removed instead
-        (`merge_collapses`).
-        Elements the merge leaves on exactly the same nodes are one cell
-        filled twice, and are made one (`merge_duplicate_elements`).
+        Nodes within `tolerance` of each other (`coincident_nodes`)
+        become the one with the lowest id: every element that uses one of
+        them is changed to use that node, and the others are removed.
+        Plates are only connected where they share nodes, so this is what
+        connects a model built from separate planes at its edges.
 
-        With `groups`, only what those element groups hold: the nodes
+        The merge is refused with ValueError, naming the element, when
+        the tolerance would fold an element onto itself (two of its own
+        nodes within the tolerance), since that means the tolerance is
+        larger than the mesh. A line element whose nodes would all become
+        one, such as a rigid link across the gap the merge closes, is
+        removed instead (`merge_collapses`). Solid elements the merge
+        leaves on exactly the same nodes fill one cell twice, and the
+        duplicates are removed (`merge_duplicate_elements`).
+
+        With `groups`, only those element groups are merged: the nodes
         their elements use are the candidates, so two groups picked
-        together are tied to each other and to nothing else, and only
-        their elements are made one where they fill a cell twice. A merge
-        over a whole geometry ties every part to every part it touches,
-        which is further than a person usually means (Brandon,
-        2026-10-11: the app offers the merge on element groups only).
+        together are joined to each other and to nothing else, and only
+        their duplicate elements are removed. A merge over the whole
+        geometry joins every part to every part it touches, which is
+        usually more than intended; the app offers the merge on element
+        groups only.
 
         Parameters
         ----------
         tolerance : float
-            How close two nodes must be to be one, as the coordinates are
-            held: meters once units are defined.
+            How close two nodes must be to be one, in the stored length
+            unit: meters once units are defined.
         groups : sequence of int, optional
             The element groups whose nodes are merged, by id. Every node
             of the geometry when omitted.
         exclude : sequence of int, optional
-            Nodes left out of the merge, by id: neither merged nor merged
-            into — the places a person unpicked in the app
-            (`coincident_spots`).
+            Nodes left out of the merge, by id: they are not merged and
+            nothing is merged into them. In the app, these are the
+            places that were unpicked (`coincident_spots`).
 
         Returns
         -------
         dict of str to int
-            'merged', the nodes removed, 'into', the nodes they became,
-            'duplicates', the elements removed for filling a cell another
-            already filled, and 'links', the line elements removed for
-            joining nodes that became one.
+            'merged', the number of nodes removed; 'into', the number of
+            nodes they became; 'duplicates', the number of elements
+            removed for filling a cell another already filled; and
+            'links', the number of line elements removed because their
+            nodes became one.
         """
+        # The app offers the merge on element groups only (Brandon,
+        # 2026-10-11).
         mapping = self.coincident_nodes(
             tolerance, self._merge_candidates(groups, exclude))
         if not mapping:
@@ -2003,10 +2132,13 @@ class Geometry:
         return float(np.median(shortest)) if shortest else None
 
     def align_reach(self, groups: Ids | None = None) -> float | None:
-        """How far Align Meshes reaches unless told: half the coarsest
-        piece's mesh size (`_typical_spacing`), so no node moves further
-        than half an element of the mesh it belongs to. Parts with a gap
-        between them want more: the gap as well.
+        """The default reach of Align Meshes: half the mesh size of the
+        coarsest piece.
+
+        A piece is a set of elements connected by shared nodes. With this
+        reach no node moves more than half an element of its own mesh.
+        Parts with a gap between them need a larger reach, by the size of
+        the gap.
 
         Parameters
         ----------
@@ -2016,7 +2148,8 @@ class Geometry:
         Returns
         -------
         float or None
-            As the coordinates are held; None with no spacing to read.
+            In the stored length unit; None when no element has a
+            nonzero size.
         """
         spacings = [self._typical_spacing(rows) for rows in self._parts(groups)]
         spacings = [s for s in spacings if s]
@@ -2024,40 +2157,46 @@ class Geometry:
 
     def align_moves(self, reach: float, groups: Ids | None = None,
                     exclude: Ids | None = None) -> list[list[int]]:
-        """The moves Align Meshes would make: each [node, onto], a node of
-        a coarser piece and the node of a finer piece it would move onto,
-        so the two are one point, ready for Merge Coincident Nodes.
+        """The moves Align Meshes would make, each ``[node, onto]``: a node
+        of a coarser piece and the node of a finer piece it would move
+        onto, so the two are at one point and can be merged with Merge
+        Coincident Nodes.
 
-        Two pieces meshed at different sizes cannot be made to match
-        node for node, since their counts differ, but the coarser one's
-        nodes can each be put on the finer one's nearest: none moves more
-        than half the finer spacing in-plane, plus whatever gap lies
-        between them, and each becomes a place to merge (Brandon,
-        2026-10-11, for the Frame-Wing, whose wing is meshed at an eighth
-        of an inch on a frame meshed at a twelfth). Only nodes on the
-        pieces' outsides move or are moved onto, a node moves once and
-        onto a node no other takes, a node already on another is a place
-        to merge rather than a move, and the nearest pairs are taken
-        first — so a washer's underside goes onto the frame under it, and
-        its top, whose nearest frame node is the underside's, stays.
-        Pieces of equal spacing: the later piece moves.
+        A piece is a set of elements connected by shared nodes. Two
+        pieces meshed at different sizes cannot be matched node for node,
+        since their node counts differ, but each node of the coarser
+        piece can be moved onto the nearest node of the finer one. No
+        node moves more than `reach`. The rules:
+
+        - Only nodes on the outside of the pieces move or are moved onto.
+        - A node moves once, and onto a node no other node moves onto.
+        - A node already at another node's position is a place to merge,
+          not a move.
+        - The nearest pairs are taken first. As a result, a washer's
+          lower face moves onto the frame under it, and its upper face,
+          whose nearest frame nodes are already taken, stays.
+        - Of two pieces with the same mesh size, the later piece moves.
+        - A move that would turn an element inside out is left out.
 
         Parameters
         ----------
         reach : float
-            How far a node may move, as the coordinates are held.
+            How far a node may move, in the stored length unit.
         groups : sequence of int, optional
             The element groups whose pieces are aligned, by id; every
             element when omitted.
         exclude : sequence of int, optional
-            Nodes left out, by id: neither moved nor moved onto — the
-            moves a person unpicked in the app.
+            Nodes left out, by id: they are not moved and nothing is
+            moved onto them. In the app, these are the moves that were
+            unpicked.
 
         Returns
         -------
         list of [int, int]
-            In the order of the node moved.
+            Sorted by the node moved.
         """
+        # Brandon, 2026-10-11, for the Frame-Wing, whose wing is meshed at
+        # an eighth of an inch on a frame meshed at a twelfth.
         from scipy.spatial import cKDTree
 
         parts = self._parts(groups)
@@ -2129,10 +2268,12 @@ class Geometry:
         return kept
 
     def align_folds(self, moves) -> str | None:
-        """Why these moves would be refused, or None: the sentence
-        `align_meshes` raises when one would turn an element inside out
-        — a solid's corner volume or a plate's facing changing sign —
-        asked ahead, so a pane can say it before its button is pressed.
+        """Why these moves would be refused, or None.
+
+        Returns the message `align_meshes` raises when a move would turn
+        an element inside out (a solid's corner volume or a plate's
+        normal changing sign), so a panel can show it before the moves
+        are applied.
 
         Parameters
         ----------
@@ -2178,20 +2319,23 @@ class Geometry:
 
     def align_meshes(self, reach: float, groups: Ids | None = None,
                      exclude: Ids | None = None) -> dict[str, float]:
-        """Move the coarser piece's nodes onto the finer's where they
-        meet (`align_moves`), so Merge Coincident Nodes can join them:
-        parts meshed apart at sizes that do not match, made coincident at
-        their mating faces or where they overlap. Nothing is merged, and
-        no node is removed. A move that would turn an element inside out
-        is not among the moves; refused, with the element named, only
-        when the moves a person left out make one of the rest fold
+        """Move the nodes of the coarser piece onto the nodes of the finer
+        piece where they meet (`align_moves`), so Merge Coincident Nodes
+        can join them.
+
+        This is for parts meshed separately at sizes that do not match:
+        it makes their nodes coincide at their mating faces or where they
+        overlap. Nothing is merged and no node is removed. A move that
+        would turn an element inside out is left out by `align_moves`;
+        the call raises ValueError, naming the element, only when the
+        nodes left out with `exclude` make one of the other moves do so
         (`align_folds`).
 
         Parameters
         ----------
         reach : float
-            How far a node may move, as the coordinates are held:
-            meters once units are defined.
+            How far a node may move, in the stored length unit: meters
+            once units are defined.
         groups : sequence of int, optional
             The element groups whose pieces are aligned, by id; every
             element of the geometry when omitted.
@@ -2202,7 +2346,7 @@ class Geometry:
         -------
         dict
             'moved', how many nodes moved; 'farthest', the longest move,
-            as the coordinates are held.
+            in the stored length unit.
         """
         moves = self.align_moves(reach, groups, exclude)
         if not moves:
@@ -2218,10 +2362,11 @@ class Geometry:
         return {'moved': len(moves), 'farthest': farthest}
 
     def delete_coordinate_systems(self, cs_ids: Ids) -> dict[str, int]:
-        """Remove coordinate systems, reassigning any node that used them.
+        """Remove coordinate systems, and move the nodes that used them to
+        the first remaining system.
 
-        The last coordinate system is never removed — nodes must reference
-        something.
+        Ids that are not present are ignored. Removing every coordinate
+        system is refused with ValueError, since every node needs one.
 
         Parameters
         ----------
@@ -2231,8 +2376,9 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many of each kind were removed, including the
-            dependents that went with them.
+            'coordinate_systems', the number removed, and
+            'nodes_reassigned', the number of node placement and
+            displacement references moved to the remaining system.
         """
         wanted = {int(cs) for cs in cs_ids}
         keep = ~np.isin(self.cs_id, list(wanted))
@@ -2264,15 +2410,13 @@ class Geometry:
                        if int(value) in wanted), reverse=True)
 
     def delete_groups(self, group_ids: Ids, keep: Ids = ()) -> dict[str, int]:
-        """Remove element groups with what they hold: their elements, and the
-        nodes no element outside them uses.
+        """Remove element groups with their elements, their properties, and
+        the nodes no element outside them uses.
 
-        Deleting a part deletes the part (Brandon, 2026-09-27). It used to
-        move a deleted element group's elements into the first element group left, which
-        made a delete a merge; merging is its own act now
-        (`merge_groups`). A node an element of another element group also uses
-        stays, so a neighboring part is not cut into along the line the
-        two share.
+        A node that an element of another element group also uses stays,
+        so a neighboring part is not cut along the nodes the two share.
+        Ids that are not present are ignored. To combine element groups
+        instead, use `merge_groups`.
 
         Parameters
         ----------
@@ -2284,8 +2428,11 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many element groups, elements and nodes went.
+            'groups', 'elements' and 'nodes', the number of each removed.
         """
+        # Deleting a part deletes the part (Brandon, 2026-09-27). It used
+        # to move a deleted element group's elements into the first
+        # element group left, which made a delete a merge.
         wanted = {int(group) for group in group_ids}
         staying = ~np.isin(self.group_id, list(wanted))
         removed = int((~staying).sum())
@@ -2302,11 +2449,12 @@ class Geometry:
                 'nodes': gone['nodes']}
 
     def merge_refusal(self, group_ids: Ids) -> str | None:
-        """Why these element groups cannot be one, or None when they can: they
-        must hold the same element types and carry the same properties.
-        A merged element group is given one material and one thickness or
-        section, so merging different ones would change the model
-        without saying so.
+        """Why these element groups cannot be merged, or None when they can.
+
+        There must be at least two, all in the geometry, holding the same
+        element types and with the same properties. A merged element group
+        has one material and one thickness or section, so merging groups
+        that differ would change the model without saying so.
 
         Parameters
         ----------
@@ -2334,9 +2482,13 @@ class Geometry:
         return None
 
     def merge_groups(self, group_ids: Ids) -> dict[str, int]:
-        """One element group from several (Merge Element Groups, Brandon 2026-09-27): the
-        elements of the rest moved into the first, the rest removed —
-        refused, with the reason, unless `merge_refusal` allows it.
+        """Merge several element groups into the first one (Merge Element
+        Groups).
+
+        The elements of the others are moved into the first group, and
+        the others are removed with their properties. Raises ValueError
+        with the reason from `merge_refusal` when the groups cannot be
+        merged.
 
         Parameters
         ----------
@@ -2346,9 +2498,10 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            'into', the element group kept; 'groups', how many were merged into
-            it; 'elements', how many elements moved.
+            'into', the id of the element group kept; 'groups', how many
+            were merged into it; 'elements', how many elements moved.
         """
+        # Merge Element Groups (Brandon, 2026-09-27)
         reason = self.merge_refusal(group_ids)
         if reason is not None:
             raise ValueError(reason)
@@ -2366,18 +2519,16 @@ class Geometry:
 
     def delete_elements(self, elem_ids: Ids, nodes: bool = False,
                         keep: Ids = ()) -> dict[str, int]:
-        """Remove elements by id. Ids that are not there are ignored.
+        """Remove elements by id. Ids that are not present are ignored.
 
-        With `nodes`, the nodes only these elements used go with them —
-        what deleting an element group does (`delete_groups`), and what
-        deleting elements in the app does: a part's bricks deleted from
-        the Hexes row left every node of the part standing (Brandon,
-        2026-10-12). A node another element uses stays, and so does one
-        in `keep`: the project keeps the nodes its data is measured or
-        solved at (`Project.delete_elements`), so a test geometry's
-        panels redrawn leave its measurement points. Off by default,
-        since the merge removes the links it collapses and remaps their
-        nodes after.
+        With `nodes`, the nodes used only by these elements are removed
+        too, which is what deleting an element group (`delete_groups`)
+        and deleting elements in the app do. A node another element uses
+        stays, and so does a node in `keep`: the project keeps the nodes
+        its data is measured or solved at (`Project.delete_elements`), so
+        redrawing a test geometry's panels leaves its measurement points.
+        `nodes` is off by default because the merge removes the links it
+        collapses and then remaps their nodes.
 
         Parameters
         ----------
@@ -2391,9 +2542,11 @@ class Geometry:
         Returns
         -------
         dict of str to int
-            How many of each kind were removed, including the
-            dependents that went with them.
+            'elements', the number removed, and with `nodes`, 'nodes',
+            the number of nodes removed.
         """
+        # Without `nodes`, a part's bricks deleted from the Hexes row left
+        # every node of the part in place (Brandon, 2026-10-12).
         if nodes:
             doomed = {int(e) for e in np.atleast_1d(elem_ids)}
             inside, outside = set(), set()
@@ -2458,6 +2611,11 @@ class Geometry:
 
     @classmethod
     def load(cls, path: str | os.PathLike) -> Geometry:
+        """Read a geometry written by `save`.
+
+        Raises TypeError when the file holds something other than a
+        geometry.
+        """
         from ..io import native
         obj = native.load(path)
         if not isinstance(obj, cls):
@@ -2466,7 +2624,7 @@ class Geometry:
 
     def plot(self, unit_system: UnitSystem | None = None,
              **kwargs: Any) -> Any:
-        """Draw the geometry: nodes and elements.
+        """Draw the geometry's nodes and elements.
 
         Parameters
         ----------
@@ -2486,8 +2644,8 @@ class Geometry:
     def plot_dofs(self, source: Any, quantity: str,
                   unit_system: UnitSystem | None = None,
                   **kwargs: Any) -> Any:
-        """This geometry with labeled arrows at every DOF `source`
-        measures as `quantity` — the GUI's DOF arrows.
+        """Draw this geometry with a labeled arrow at every DOF where
+        `source` has `quantity`, as the app's DOF arrows do.
 
         Parameters
         ----------

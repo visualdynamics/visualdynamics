@@ -1,15 +1,13 @@
-"""The alpha notice: read and acknowledged before the window takes input.
+"""The alpha notice, acknowledged before the window takes input.
 
-Brandon, 2026-09-11: this is an alpha release, and a user should have to
-acknowledge, every time the application loads, that its results are to
-be checked. So the launcher shows this dialog after the window is built
-and before the event loop takes anything else. One enabled button, Quit,
-and a checkbox that enables Continue; nothing in the window is reachable
-until Continue is pressed. Every launch, by decision — a few seconds,
-and the point stays in front of the user for as long as the release is
-an alpha. Not in `MainWindow`, so the API and the tests' window fixture
-never meet it; the launcher's `--no-disclaimer` flag is for a script
-that opens the window and has already read this.
+The launcher shows this dialog on every launch, after the window is
+built and before the event loop handles anything else. Quit is enabled
+from the start; Continue is enabled only once the checkbox is ticked,
+and nothing in the window can be reached until Continue is pressed.
+
+It is not part of `MainWindow`, so the API and the tests' window fixture
+never show it. The launcher's `--no-disclaimer` flag skips it, for a
+script that opens the window and has already read the notice.
 """
 
 from __future__ import annotations
@@ -26,6 +24,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+
+# Brandon, 2026-09-11: this is an alpha release, and a user should have
+# to acknowledge, every time the application loads, that its results are
+# to be checked. Every launch, by decision: a few seconds, and the point
+# stays in front of the user for as long as the release is an alpha.
 
 TITLE = 'Visual Dynamics — alpha release'
 
@@ -47,9 +50,9 @@ ACKNOWLEDGMENT = 'I understand that results are to be checked'
 
 
 class Disclaimer(QDialog):
-    """The notice as a modal dialog. `exec()` answers Accepted only
-    after the checkbox is ticked and Continue pressed; closing the
-    dialog any other way is Quit."""
+    """The notice as a modal dialog. `exec()` returns Accepted only
+    after the checkbox is ticked and Continue is pressed; closing the
+    dialog any other way counts as Quit."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -86,5 +89,6 @@ class Disclaimer(QDialog):
 
 
 def acknowledged(parent: QWidget | None = None) -> bool:
-    """Show the notice; True when the user read it and continued."""
+    """Show the notice. Returns True when the user ticked the checkbox
+    and pressed Continue, and False otherwise."""
     return Disclaimer(parent).exec() == QDialog.DialogCode.Accepted

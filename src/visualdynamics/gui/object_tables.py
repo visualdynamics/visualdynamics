@@ -1,9 +1,10 @@
-"""Table models for visualdynamics objects.
+"""Table models for Visual Dynamics objects.
 
-Each is a list of columns over an existing object — reading straight from it
-and, where editing makes sense, writing straight back. Results that a fit
-produced (frequency, damping) are read-only; the free-text description
-beside them is not.
+Each model is a list of columns over an existing object. It reads its
+cells from the object and, where editing makes sense, writes an edit
+straight back to it. In a mode table, the frequency and damping a fit
+produced are read-only, while the description beside them is free text
+to fill in.
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ LEFT = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
 def shape_table_model(shapes: ShapeSet,
                       parent: QObject | None = None) -> TableModel:
-    """Modes with their frequency, damping and a description to fill in."""
+    """A mode set as a table: each mode's frequency, damping and modal
+    mass, read-only, and a description to fill in."""
     columns = [
         Column('Mode', lambda s, r: r + 1),
         Column('Frequency [Hz]', lambda s, r: float(s.frequency[r]),
@@ -70,11 +72,12 @@ def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],
                         parent: QObject | None = None) -> TableModel:
     """A MatchedModes object as a table, in the mode table's format.
 
-    The referenced sets are read live by name — frequencies and
-    damping restate themselves as the sets change — while the MAC is
-    the object's own stored value (it came from the comparison as
-    displayed, possibly projected). A set gone from the project, or a
-    mode index past its end, shows dashes rather than guessing.
+    The frequencies and damping are read by name from the mode sets in
+    `objects` when the model is built, so they show the sets as they
+    are now. The MAC is the value stored on the object, as the
+    comparison computed it (possibly from projected shapes). A set
+    missing from the project, or a mode index past its end, shows
+    dashes.
     """
     from ..core.tables import MATCHED_DECIMALS, cell_text, matched_rows
 
@@ -113,31 +116,32 @@ def channel_table_model(table: ChannelTable, parent: QObject | None = None,
                         rows: Sequence[int] | None = None,
                         geometry: Geometry | None = None,
                         set_role: Callable | None = None) -> TableModel:
-    """A channel table: every column editable, every column typed.
+    """A channel table, with an editor of the right type for each
+    column.
 
-    With a `geometry`, the derived columns follow: each channel's
-    measured direction as a unit vector in the geometry's global
-    system, the nearest global axis and the angle to it (Brandon,
-    2026-09-20). Read from the geometry on every show and restated
-    with the row whenever the node or the direction is edited, so
-    they can never disagree with it; not editable, since they are not
-    the table's to hold.
+    The columns come from the table's own `COLUMNS` spec, so a schema
+    change reaches the interface without a second edit. A choice column
+    gets a drop-down, a date a calendar, a flag a check box, and the
+    unit column offers only the units that fit what the channel says it
+    measures.
 
-    The columns come from the table's own `COLUMNS` spec rather than
-    being listed again here, so a schema change reaches the interface
-    without a second edit — a choice column gets its drop-down, a date
-    gets a calendar, a flag gets a check box, and the unit column is
-    narrowed by what the channel says it measures.
+    With a `geometry`, derived columns are added after the table's own:
+    each channel's measured direction as a unit vector in the
+    geometry's global system, the nearest global axis, and the angle to
+    it. They are computed from the geometry each time they are shown,
+    and again whenever the node or the direction in that row is edited,
+    so they always agree with it. They are not editable, because the
+    table does not store them.
 
-    `rows` shows only those channels — picking cells in the tree's grid
-    is picking rows here too, so the table beside the model shows what
-    the selection says and nothing else.
+    `rows`, when given, shows only those channels, so the table shows
+    the rows picked in the tree's grid and nothing else.
 
-    `set_role(row, role)`, when given, takes the Role column's edits
-    instead of the table: a table linked with the time data it
-    describes shows that data's roles, and a change made here is the
-    data's (`Project.set_channel_role`), journaled there.
+    `set_role(row, role)`, when given, receives the Role column's edits
+    in place of the table. A table linked with the time data it
+    describes shows that data's roles, and a change made here goes to
+    the data (`Project.set_channel_role`), which journals it.
     """
+    # The derived direction columns: Brandon, 2026-09-20.
     rows = None if rows is None else [int(r) for r in rows]
     index = (lambda row: row) if rows is None else rows.__getitem__
     columns = []
@@ -208,11 +212,12 @@ def modal_fit_table_model(session: ModalFitSession,
                           parent: QObject | None = None) -> TableModel:
     """The modes fitted so far, plus the one the cursor is placing.
 
-    The last row is the pending mode: its frequency mirrors the cursor on
-    the CMIF, its damping is the half-power estimate until the user types
-    one, and Confirm Mode turns it into a fitted row. A fitted mode's
-    damping stays editable — the synthesis restates itself — and its
-    description is free text.
+    The last row, labeled "new", is the pending mode. Its frequency is
+    the cursor's on the CMIF, its damping is the half-power estimate
+    until a value is typed, and Confirm Mode makes it a fitted row. A
+    fitted mode's damping stays editable, in percent between 0 and 100
+    (exclusive), and the synthesis uses the new value.
+    The description is free text.
     """
     def pending(row: int) -> bool:
         return row == len(session.modes)
@@ -256,10 +261,16 @@ def modal_fit_table_model(session: ModalFitSession,
 
 def units_table_model(obj: Any, records: Sequence[int] | None = None,
                       parent: QObject | None = None) -> TableModel:
-    """One row per thing that needs a unit, whatever kind of object it is.
+    """A table with one row per item of `obj` that needs a unit.
 
-    A table rather than a dialog, so the plot or the model stays on screen
-    beside it and units copy, paste and clear like any other column.
+    A geometry has one row, for its coordinates, and a mode set one,
+    for its shapes. A data object has one row per channel among the
+    records in `records` (all of them when None); for a PSD with cross
+    records, a cross term's unit follows from its two channels'.
+
+    It is a table rather than a dialog so the plot or the model stays on
+    screen beside it, and units copy, paste and clear like any other
+    column.
     """
     from ..core.data import Psd
     from ..core.geometry import Geometry
@@ -526,14 +537,15 @@ def _channel_units_model(data, records=None, parent=None):
 def frf_units_models(data: DataArray, records: Sequence[int] | None = None,
                      parent: QObject | None = None
                      ) -> tuple[TableModel, TableModel]:
-    """Two tables for an FRF: response channels and reference channels.
+    """Two unit tables for an FRF: its response channels and its
+    reference channels.
 
-    An FRF matrix is N x M records but only N + M physical channels, and a
-    channel's unit is the channel's property — so each side is declared
-    once, and every record converts as soon as both of its channels are
-    named. The sides stay separate even where the DOF labels collide: a
-    drive point's accelerometer and its force gauge share a label and are
-    two different channels.
+    An FRF matrix of N x M records has only N + M physical channels,
+    and a unit belongs to a channel, so each channel's unit is declared
+    once and every record converts as soon as both of its channels have
+    one. The two sides stay separate even where the DOF labels are the
+    same: a drive point's accelerometer and its force gauge share a
+    label and are two different channels.
     """
     from ..core.unit_choices import (
         ALL_ORDINATE_UNITS,
@@ -874,14 +886,14 @@ def _set_connectivity(attribute, geometry_check=True):
 
 
 def id_runs_text(ids) -> str:
-    """Sorted ids as runs: `[1,2,3,7,9,10]` -> `'1-3 7 9-10'`.
+    """Ids as sorted runs, without repeats: `[1,2,3,7,9,10]` ->
+    `'1-3 7 9-10'`.
 
-    An element group's elements are not a handful like an element's nodes — the
-    demonstration drone puts 478 in one — and they come in runs,
-    because a mesh is built a part at a time. Written out one by one
-    the drone's 22 element groups need 21 731 characters; as runs they need
-    595, which is the difference between a cell you can read and one
-    you cannot.
+    An element group can hold hundreds of elements (478 in one group of
+    the demonstration drone), and they come in runs because a mesh is
+    built one part at a time. Written out one by one, the drone's 22
+    element groups take 21 731 characters; as runs they take 595, which
+    fits in a cell a person can read.
     """
     ids = np.unique(np.asarray(list(ids), dtype=np.int64))
     if not len(ids):
@@ -899,11 +911,11 @@ def id_runs_text(ids) -> str:
 
 
 def parse_id_runs(text: str) -> list[int]:
-    """The inverse: `'1-3, 7 9-10'` -> `[1, 2, 3, 7, 9, 10]`.
+    """The inverse of `id_runs_text`: `'1-3, 7 9-10'` ->
+    `[1, 2, 3, 7, 9, 10]`.
 
-    Commas or spaces, and a run either way round — `10-7` is the same
-    six elements as `7-10`, because someone typing a range backwards
-    means the range.
+    Runs are separated by commas or spaces, and a run can be written
+    either way round: `10-7` is the same four elements as `7-10`.
     """
     found: list[int] = []
     for part in str(text).replace(',', ' ').split():
@@ -1361,11 +1373,12 @@ _SI_LABELS = {'pressure': 'Pa', 'mass/length**3': 'kg/m³', 'length': 'm',
 
 
 def group_label(geometry: Geometry, row: int) -> str:
-    """How an element group reads in a list: its name, or its id when unnamed.
+    """An element group's label in a list: its name, or
+    `'element group N'` when it has none.
 
-    Exodus files often carry unnamed element groups, and 'element group 3' is what a
-    person calls that one — inventing a name for it would be putting
-    words in the file's mouth.
+    Exodus files often have unnamed element groups, and "element group
+    3" is what a person calls one. A made-up name would claim something
+    the file does not say.
     """
     name = geometry.group_name[row].strip()
     return name or f'element group {int(geometry.group_id[row])}'
@@ -1440,17 +1453,19 @@ def element_table_model(geometry: Geometry,
 def element_group_table_model(geometry: Geometry,
                       unit_system: UnitSystem | None = None,
                       parent: QObject | None = None) -> TableModel:
-    """The element groups: what the mesh is divided into.
+    """The element groups, which divide the mesh into parts.
 
-    Three columns, all editable. The elements are listed as runs
-    (`1-36 156-245`) and naming one here claims it for this element group —
-    the same gesture as typing a node into an element, with one
-    difference the model forces: a node can be in no element at all,
-    while an element is always in exactly one element group. So the list adds
-    and moves, and a removal that would orphan an element is refused
-    with the reason (see `_set_group_elements`). The Elements column
-    in the *elements* table moves them one at a time; this one moves
-    them by the hundred.
+    Every column is editable: the group's number, its name, its
+    elements, and the properties a model built from the geometry needs
+    (a material, and a thickness, section or mass by element type, shown
+    in the display units and blank until set). The elements are listed as runs
+    (`1-36 156-245`), and naming an element here moves it into this
+    group. A node can be in no element at all, but an element is always
+    in exactly one element group, so an edit can add and move elements,
+    and one that would leave an element in no group is refused with the
+    reason (see `_set_group_elements`). The Element group column of the
+    elements table moves elements one at a time; this one moves many at
+    once.
     """
     def set_name(geometry: Any, row: int, text: str) -> None:
         geometry.group_name[row] = text
@@ -1494,13 +1509,14 @@ ENTITY_TABLES = {
 
 
 class ComplianceRows:
-    """The comparison of a specification with a measurement, per channel.
+    """The comparison of a specification with a measurement, one row
+    per channel.
 
-    A plain holder so the table model has something to read: the rows
-    are computed once, when the selection settles, rather than per cell.
-
-    `plotted` is the row the plot is currently drawing, so the table can
-    say which of its channels is the one on screen.
+    `rows` is a list of `(channel, result)`, computed once when the
+    selection changes rather than once per cell. `unit_label` is the
+    level's unit for the column heading. `plotted` is the index of the
+    row the plot is drawing, so the table can mark the channel on
+    screen.
     """
 
     def __init__(self, rows: Sequence[tuple[str, Any]], unit_label: str = '',
@@ -1513,7 +1529,7 @@ class ComplianceRows:
         return len(self.rows)
 
     def row_of(self, label: str) -> int | None:
-        """Which row is this channel, or None."""
+        """The row of the channel named `label`, or None."""
         for row, (name, _result) in enumerate(self.rows):
             if name == label:
                 return row
@@ -1528,16 +1544,16 @@ def _pair_of(data, index):
 
 def specification_model(rows: Any,
                         parent: QObject | None = None) -> TableModel:
-    """A row per channel a specification carries: its name and its level.
+    """A specification's channels, one row each: the channel's name
+    and its RMS level.
 
-    What a specification says, in one number per channel. The plot draws
-    one channel at a time — six targets and their limits stacked
-    together are unreadable — so the table is where every channel is
-    still accounted for, and picking a row is how you get to one.
+    The plot draws one channel at a time, because six targets and their
+    limits drawn together cannot be read, so this table lists every
+    channel, and picking a row plots that one.
 
     The level is the specification's own, integrated from its own
-    breakpoints over its own band, so it does not move with whatever
-    happens to be measured against it.
+    breakpoints over its own band, so it does not change with the
+    measurement compared against it.
     """
     level = f' [{rows.unit_label}]' if rows.unit_label else ''
     return TableModel(rows, [
@@ -1553,18 +1569,18 @@ def _number(value):
 
 
 class ReplicationRows:
-    """Waveform error as a grid: a control channel per row, a playing of
-    the waveform per column.
+    """Waveform error as a grid: one control channel per row, one
+    playing of the waveform (an event) per column.
 
-    A transient record is many attempts at one target, so the numbers
-    are two-dimensional and the table is the only place that shows them
-    that way — the plot draws what is picked and the bar chart reduces
-    to one reading. Laid out this way a channel that is bad everywhere
-    and a repeat that was bad for everything look different at a
-    glance, which is the comparison a single column cannot make.
+    A transient record holds many attempts at one target, so its errors
+    have two dimensions. The plot draws only what is picked and the bar
+    chart reduces them to one value, so this grid is the one place that
+    shows both. In it, a channel that is poor in every event and an
+    event that was poor on every channel are easy to tell apart.
 
-    `plotted` is the set of (channel, event) pairs on screen, because
-    picking a cell picks both at once.
+    `values` maps `(channel, event)` to the error. `plotted` is the set
+    of `(channel, event)` pairs on screen, because picking a cell picks
+    both at once.
     """
 
     def __init__(self, channels: Sequence[str], events: Sequence[int],
@@ -1579,8 +1595,9 @@ class ReplicationRows:
         return len(self.channels)
 
     def value(self, row: int, column: int) -> float | None:
-        """The cell at (row, column-of-events), or None where the
-        channel cannot be scored against its target."""
+        """The value at a row and an event's column (counted from zero,
+        without the channel column), or None where there is no value
+        for that channel and event."""
         if not 0 <= row < len(self.channels):
             return None
         if not 0 <= column < len(self.events):
@@ -1589,11 +1606,10 @@ class ReplicationRows:
 
     def pairs_at(self, row: int,
                  column: int) -> list[tuple[str, int]]:
-        """The (channel, event) pairs one selected cell stands for.
+        """The `(channel, event)` pairs one selected cell picks.
 
-        Column zero is the channel's name rather than a reading of it,
-        so picking there asks for that channel across every playing —
-        the row as a whole, which is what clicking a name should mean.
+        Column zero holds the channel's name, so picking it picks that
+        channel in every event, the whole row.
         """
         if not 0 <= row < len(self.channels):
             return []
@@ -1607,16 +1623,15 @@ class ReplicationRows:
 
 def replication_model(rows: Any, parent: QObject | None = None,
                       units: str = '%') -> TableModel:
-    """A grid of channels down and repeats across.
+    """A table of a `ReplicationRows`: channels down, events across.
 
-    Two comparisons share it, because they have the same shape: the
-    waveform error against a target time history, in percent, and the
-    RMS dB deviation of a shock spectrum against the one it had to
-    meet. Only the unit in the heading differs.
+    Two comparisons have this shape and share it: the waveform error
+    against a target time history, in percent, and the RMS deviation in
+    dB of a shock spectrum from the one it had to meet. Only `units`, in
+    each column heading, differs.
 
-    Blank rather than zero for a channel whose target asks for nothing.
-    A zero would read as a channel that matched perfectly, which is the
-    opposite of what is known about it.
+    A cell with no value is blank, not zero, because a zero would read
+    as a channel that matched its target exactly.
     """
     columns = [Column('Channel', lambda h, r: h.channels[r], alignment=LEFT)]
     for index, event in enumerate(rows.events):
@@ -1636,13 +1651,16 @@ def _pair_text(pair):
 
 
 class ComplianceGrid:
-    """A control channel per row: how far it is from its specification.
+    """How far each control channel is from its specification, one
+    row per channel.
 
-    The same job the transient's grid does, for a comparison that has
-    no repeats to spread across — a PSD is already an average over
-    them, so there is one column of numbers and not a grid of them.
+    It does for a PSD comparison what `ReplicationRows` does for a
+    transient, with one set of numbers per channel instead of a grid,
+    because a PSD is already an average over the repeats.
 
-    `plotted` is the set of DOF pairs on screen.
+    `rows` is a list of `(DOF pair, RMS error in dB, percent of the
+    band outside the abort limits)`. `plotted` is the set of DOF pairs
+    on screen.
     """
 
     def __init__(self, rows: Sequence[tuple[str, Any]],
@@ -1662,12 +1680,13 @@ class ComplianceGrid:
 
 def compliance_grid_model(rows: Any,
                           parent: QObject | None = None) -> TableModel:
-    """Channel, how far its level is out, and how much of its band is.
+    """A table of a `ComplianceGrid`: each channel, its RMS error in
+    dB, and the percent of its band outside the abort limits.
 
-    Two readings and not one, because they disagree often enough to be
-    worth seeing together: a channel can sit at exactly the right level
-    and still be out of tolerance across half its band, and one that is
-    2 dB low everywhere may never cross an abort limit at all.
+    Both values are shown because they often disagree: a channel can
+    have exactly the right level and still be outside the limits across
+    half its band, and one that is 2 dB low everywhere may never cross
+    an abort limit.
     """
     return TableModel(rows, [
         Column('Channel', lambda h, r: _pair_text(h.rows[r][0]),

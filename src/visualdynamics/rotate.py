@@ -1,18 +1,19 @@
-"""Turning a coordinate system by dragging a ring around one of its axes.
+"""Turning and sliding a coordinate system by dragging it in the 3-D view.
 
-The geometry and the angle arithmetic live here, apart from Qt and VTK, so
-the fiddly part — which way a drag turns the frame, and by how much — can be
-tested without a window.
+The geometry and the angle arithmetic are kept here, apart from Qt and
+VTK, so which way a drag turns or moves the frame, and by how much, can
+be tested without a window.
 
-A coordinate system is stored as four rows: three orthonormal basis vectors
-and an origin. Rotation only ever touches the basis; the origin stays put.
+A coordinate system is stored as four rows: three orthonormal basis
+vectors and an origin. Dragging a ring around one of the frame's axes
+turns the frame about that axis; a rotation changes only the basis, and
+the origin stays where it is.
 
-Sliding is the other gesture (2026-10-02): an arrow along each axis of the
-frame, dragged, moves the origin along that axis and snaps it to a grid in
-the geometry's own axes — a tenth of an inch for the inch family of units,
-a centimetre for the metric one — so a frame or a block lands on round
-coordinates whichever way it is turned. The arrow arithmetic lives here
-beside the ring arithmetic, for the same reason.
+Dragging an arrow along one of the frame's axes slides the origin along
+that axis and snaps it to a grid in the geometry's own axes: a tenth of
+an inch for the inch family of units, a centimeter for the metric one.
+A frame or a block then lands on round coordinates whichever way it is
+turned.
 """
 
 from __future__ import annotations
@@ -22,14 +23,19 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import ArrayLike
 
+# Sliding was added beside turning on 2026-10-02, and its arithmetic is
+# here for the same reason.
+
 RING_STEPS = 96          # points around a ring: enough that picking is smooth
 
 
 def rotation_about(axis: ArrayLike, angle: float) -> np.ndarray:
-    """The 3x3 rotation of `angle` radians about a unit `axis`.
+    """The 3x3 rotation of `angle` radians about `axis`, by Rodrigues'
+    formula.
 
-    Rodrigues' formula, written out rather than pulled from a library:
-    scipy is not a dependency and this is four lines.
+    `axis` is normalized here, so it need not be a unit vector. A
+    positive angle turns counterclockwise looking down the axis toward
+    the origin (the right-hand rule).
     """
     axis = np.asarray(axis, dtype=np.float64)
     axis = axis / np.linalg.norm(axis)
@@ -42,10 +48,12 @@ def rotation_about(axis: ArrayLike, angle: float) -> np.ndarray:
 
 def ring_points(matrix: ArrayLike, axis: int, radius: float,
                 steps: int = RING_STEPS) -> np.ndarray:
-    """A closed ring of points around one principal axis of a frame.
+    """`steps` points evenly spaced on a circle of `radius` around one
+    principal axis of a frame, centered on its origin.
 
-    The ring for the X axis lies in the frame's own Y-Z plane, so it is the
-    circle you would sweep by turning about X.
+    The ring for the X axis lies in the frame's own Y-Z plane, so it is
+    the circle swept by turning about X. It starts on the next axis (Y
+    for X) and the first point is not repeated at the end.
     """
     matrix = np.asarray(matrix, dtype=np.float64)
     origin = matrix[3]
@@ -56,10 +64,12 @@ def ring_points(matrix: ArrayLike, axis: int, radius: float,
 
 
 def rotate_frame(matrix: ArrayLike, axis: int, angle: float) -> np.ndarray:
-    """A copy of `matrix` with its basis turned about one of its own axes.
+    """A copy of `matrix` with its basis turned `angle` radians about one
+    of its own axes.
 
-    The axis travels with the frame — turning about X twice by 45 degrees
-    is turning about that same X by 90, not about the world's X.
+    The axis moves with the frame, so turning about X twice by 45
+    degrees is turning about the frame's X by 90 degrees, not about the
+    world's X. The origin is unchanged.
     """
     matrix = np.array(matrix, dtype=np.float64)
     turned = np.array(matrix)
@@ -81,9 +91,9 @@ def angle_in_plane(matrix: ArrayLike, axis: int,
 
 
 def wrapped(angle: float) -> float:
-    """An angle folded into [-pi, pi), so a drag past the seam stays small.
-
-    A drag from 179 to -179 degrees is two degrees, not 358.
+    """An angle in radians folded into [-pi, pi), so a drag across the
+    +/-180 degree line stays small: from 179 to -179 degrees is 2
+    degrees, not 358.
     """
     return float((angle + np.pi) % (2.0 * np.pi) - np.pi)
 
@@ -91,18 +101,19 @@ def wrapped(angle: float) -> float:
 def ring_under_cursor(rings: Sequence[tuple[int, np.ndarray]],
                       cursor: ArrayLike,
                       tolerance: float = 14.0) -> int | None:
-    """Which ring a pixel is over, or None.
+    """The axis of the ring a pixel is over, or None.
 
-    `rings` is a list of (axis, screen points), each a polyline — a ring's
-    closed back on its first point. The nearest ring within the
-    tolerance wins; the rings cross each other, so ties go to whichever is
-    genuinely closer rather than to whichever was drawn first.
-
-    Distance is to the line, not to its points. It was to the points
-    until 2026-10-10, and a ring 400 pixels across drawn from 96 of them
-    has 26 pixels between neighbours — so a click on the ring itself,
-    midway between two, could miss a 14-pixel tolerance.
+    `rings` is a list of (axis, screen points), each a polyline; the
+    caller closes a ring by repeating its first point. The distance is
+    measured to the polyline's segments, not to its points. The rings
+    cross each other, so the nearest one closer than `tolerance` pixels
+    wins, not the first one listed. An arrow from `arrow_points` is
+    picked the same way.
     """
+    # Distance is to the line, not to its points. It was to the points
+    # until 2026-10-10, and a ring 400 pixels across drawn from 96 of
+    # them has 26 pixels between neighbors, so a click on the ring
+    # itself, midway between two, could miss a 14-pixel tolerance.
     from .viz.pick import segment_distances
 
     cursor = np.asarray(cursor, dtype=np.float64)
@@ -123,10 +134,12 @@ def ring_under_cursor(rings: Sequence[tuple[int, np.ndarray]],
 
 def plane_hit(origin: ArrayLike, normal: ArrayLike, eye: ArrayLike,
               direction: ArrayLike) -> np.ndarray | None:
-    """Where a ray meets the plane through `origin`, or None if parallel.
+    """Where the ray from `eye` along `direction` meets the plane
+    through `origin` with normal `normal`, or None when they are
+    parallel.
 
-    Dragging a ring means following the cursor around the plane the ring
-    lies in, which is what this finds.
+    Dragging a ring follows the cursor around the plane the ring lies
+    in, and this is the point on that plane.
     """
     normal = np.asarray(normal, dtype=np.float64)
     direction = np.asarray(direction, dtype=np.float64)
@@ -139,7 +152,8 @@ def plane_hit(origin: ArrayLike, normal: ArrayLike, eye: ArrayLike,
 
 
 def identity_frame(matrix: ArrayLike) -> np.ndarray:
-    """The frame with its rotation undone, keeping where it sits."""
+    """The frame with its rotation undone: the identity basis at the
+    same origin."""
     matrix = np.asarray(matrix, dtype=np.float64)
     reset = np.zeros_like(matrix)
     reset[:3] = np.eye(3)
@@ -158,7 +172,8 @@ ARROW_STEPS = 24         # points along an arrow's shaft, for picking
 
 def grid_step(unit: str) -> float:
     """The grid a slide lands on, in the display `unit`: a tenth of an
-    inch for the inch family, a centimetre for the metric one."""
+    inch for the inch family (`INCH_FAMILY`), a centimeter for every
+    other unit."""
     from .units import convert
 
     if unit in INCH_FAMILY:
@@ -168,17 +183,18 @@ def grid_step(unit: str) -> float:
 
 def arrow_points(matrix: ArrayLike, axis: int, length: float,
                  steps: int = ARROW_STEPS) -> np.ndarray:
-    """Points along the arrow for one principal axis of a frame, from
-    the origin out to `length` along it — a polyline the way a ring is,
-    so `ring_under_cursor` picks an arrow the same way."""
+    """`steps` points along the arrow for one principal axis of a frame,
+    from the origin out to `length` along it. It is a polyline like a
+    ring, so `ring_under_cursor` picks an arrow the same way."""
     matrix = np.asarray(matrix, dtype=np.float64)
     along = np.linspace(0.0, length, steps)[:, None]
     return matrix[3] + along * matrix[axis]
 
 
 def translate_frame(matrix: ArrayLike, axis: int, distance: float) -> np.ndarray:
-    """A copy of `matrix` with its origin slid `distance` along one of
-    its own axes; the basis stays put, the mirror of `rotate_frame`."""
+    """A copy of `matrix` with its origin moved `distance` along one of
+    its own axes. The basis is unchanged; `rotate_frame` is the
+    opposite case."""
     moved = np.array(matrix, dtype=np.float64)
     moved[3] = moved[3] + float(distance) * moved[axis]
     return moved
@@ -186,12 +202,13 @@ def translate_frame(matrix: ArrayLike, axis: int, distance: float) -> np.ndarray
 
 def axis_hit(origin: ArrayLike, direction: ArrayLike, eye: ArrayLike,
              ray: ArrayLike) -> np.ndarray | None:
-    """The point on the axis line nearest the cursor's ray, or None when
-    the two are parallel.
+    """The point on the axis line (through `origin` along `direction`)
+    nearest the cursor's ray (from `eye` along `ray`), or None when the
+    two are parallel.
 
-    Dragging an arrow means following the cursor along a line the cursor
-    can only ever be near, never on: the closest approach of the two
-    lines is where the drag is read, which is what this finds.
+    A ray from the cursor almost never meets the axis line exactly, so a
+    drag along an arrow is read at the point where the two lines come
+    closest.
     """
     origin = np.asarray(origin, dtype=np.float64)
     direction = np.asarray(direction, dtype=np.float64)
@@ -208,16 +225,17 @@ def axis_hit(origin: ArrayLike, direction: ArrayLike, eye: ArrayLike,
 
 
 def distance_along(matrix: ArrayLike, axis: int, world: ArrayLike) -> float:
-    """How far a world point sits from the frame's origin along one of
-    its axes: the drag's reading, before the snap."""
+    """How far a world point is from the frame's origin along one of
+    its axes: the distance a slide reads, before the snap."""
     matrix = np.asarray(matrix, dtype=np.float64)
     return float((np.asarray(world, dtype=np.float64) - matrix[3]) @ matrix[axis])
 
 
 def snapped(point: ArrayLike, step: float) -> np.ndarray:
-    """`point` moved to the nearest grid line in each coordinate — the
-    geometry's own axes, so a turned frame still lands on round
-    coordinates. A step of zero or less is no snap."""
+    """`point` moved to the nearest multiple of `step` in each
+    coordinate. The coordinates are the geometry's own, so a turned frame
+    still lands on round coordinates. A step of zero or less returns an
+    unchanged copy."""
     point = np.asarray(point, dtype=np.float64)
     if step <= 0.0:
         return point.copy()
@@ -229,10 +247,10 @@ def snapped(point: ArrayLike, step: float) -> np.ndarray:
 
 def frame_from_angles(angles: ArrayLike, origin: ArrayLike = (0.0, 0.0, 0.0)
                       ) -> np.ndarray:
-    """A frame turned by `angles`, in degrees about the geometry's fixed
-    X, then Y, then Z axes — the order a person types them in — at
-    `origin`. The rows are the frame's axes, as a coordinate system's
-    are."""
+    """A frame at `origin` turned by `angles`, in degrees, about the
+    geometry's fixed X, then Y, then Z axes, the order a person types
+    them in. The first three rows are the frame's axes and the fourth is
+    its origin, as in a coordinate system."""
     ax, ay, az = (np.radians(float(a)) for a in angles)
     turn = (rotation_about((0.0, 0.0, 1.0), az) @ rotation_about((0.0, 1.0, 0.0), ay)
             @ rotation_about((1.0, 0.0, 0.0), ax))
@@ -244,9 +262,10 @@ def frame_from_angles(angles: ArrayLike, origin: ArrayLike = (0.0, 0.0, 0.0)
 
 def angles_of(matrix: ArrayLike) -> tuple[float, float, float]:
     """The fixed-axis X, Y, Z angles in degrees that turn the geometry's
-    axes into the frame's (`frame_from_angles` undone), each in
-    (-180, 180]. At a quarter turn about Y the X and Z turns are one
-    turn, and it is said as Z with X at zero."""
+    axes into the frame's, the inverse of `frame_from_angles`. X and Z
+    are in (-180, 180] and Y in [-90, 90]. At a quarter turn about Y the
+    X and Z turns are about the same axis, and the angle is given as Z
+    with X at zero."""
     turn = np.asarray(matrix, dtype=np.float64)[:3].T
     ay = float(np.arcsin(np.clip(-turn[2, 0], -1.0, 1.0)))
     if abs(np.cos(ay)) > 1e-9:

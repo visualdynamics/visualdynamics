@@ -1,47 +1,55 @@
 # The random vibration workflow
 
-A controller run in, a compliance report out. A random test is judged
-against a band: the specification says what the control PSD must be,
-warning and abort lines say how far it may stray, and the report's job
-is to show where the run sat inside that band, channel by channel.
+This workflow takes a controller run in and writes a compliance report
+out. A random test is judged against a band: the specification gives
+the control PSD the run had to hold, the warning and abort lines say
+how far it was allowed to stray, and the report shows where the run
+sat inside that band, channel by channel.
 
-The walkthrough is the demonstration plate's own random test — eight
-control channels against four shakers, controlled to a shaped
-specification by a real Rattlesnake run — photographed at every step.
-The run ships with the repository (`testdata/plate/random.nc4`), so
-every step can be followed exactly.
+The walkthrough uses the demonstration plate's random test: eight
+control channels and four shakers, controlled to a shaped
+specification in a real Rattlesnake run, with a screenshot at every
+step. The run ships with the repository (`testdata/plate/random.nc4`),
+so every step can be followed exactly.
 
 | Step | In the app | In a script |
 |---|---|---|
 | Import the run | drag the controller's `.nc4` onto the window | `project = visualdynamics.random_vibration_run(path)` |
-| Say what it is for | (the run says — the type switches itself) | `project.project_type == 'Random Vibration'` |
-| Control PSDs | Compute PSDs in the averaging view | `project.compute_psds('Time History')` |
+| Say what it is for | nothing to do: the run sets the type | `project.project_type == 'Random Vibration'` |
+| Control PSDs | Compute PSDs in the Averaging view | `project.compute_psds('Time History')` |
 | The octave-band view | Octave Bands on the PSD's bar | `project.compute_octave('Time History PSDs')` |
-| Multiple coherence | Multiple Coherence in the averaging view | `project.compute_multiple_coherence('Time History')` |
+| Multiple coherence | Multiple Coherence in the Averaging view | `project.compute_multiple_coherence('Time History')` |
 | Compare against the spec | select PSD and specification together | `plot_comparison(psds, spec)` |
 | Geometry and photos | drag them in, link them | `project.add(...)`, `project.link(...)` |
-| Report | *Generate Report* on the bar, the project row selected | `project.generate_report('random')` |
-| Or all of it at once | **Automatic** on the tree bar, once the project has its type | `project.work_up()` |
-| Export | Export HTML… | `project.export_report(name, path)` |
-| Save | Save Project As… | `project.save('random.vdyn')` |
+| Report | Generate Report on the bar, with the project row selected | `project.generate_report('random')` |
+| Or all of it at once | Automatic on the tree bar, once the project has its type | `project.work_up()` |
+| Export | Export → HTML… | `project.export_report(name, path)` |
+| Save | File → Save Project As… | `project.save('random.vdyn')` |
 
 ## In the app, step by step
 
 ### 1. Import the run
 
 Drag the controller's save onto the window. A Rattlesnake random run
-brings the control time histories, the specification with its warning
-and abort lines, and the channel table in one file — and says which
-environment drove it, so the project type switches to *Random
-Vibration* by itself. The tree's gray slots then say what a finished
+carries the control time histories, the specification with its warning
+and abort lines, and the channel table in one file. It also records
+which environment drove it, so the project type is set to *Random
+Vibration* on import. The gray slots in the tree show what a finished
 report still needs.
 
-A run too long to hold whole asks first: the import window shows one
-channel's envelope over the whole run, and the stretch to import is
-chosen on it — dragged, typed as a start and a stop, or typed as the
-**Last** so many seconds of the run, which is the usual answer for a
-long run whose end is the stretch at level. A run shorter than that is
-imported whole.
+A run that would take a quarter or more of the machine's memory is not
+imported whole without asking. The import window shows one channel's
+envelope over the whole run, and you choose the stretch to import on
+it: drag the window's edges, type a start and a stop, or type a value
+in **Last** to import that many seconds from the end of the run. Last
+is the usual choice for a long run, because the end is the stretch at
+full level. A run shorter than the Last value is imported whole. The
+channel list beside the preview lets you leave channels out.
+
+**Save Truncated Copy…** in the same window writes the chosen stretch
+as a new `.nc4` with every channel and every setting of the original,
+its clock starting at zero. **File → Truncate Rattlesnake File…** opens
+the same window for any run, whatever its size, with no import.
 
 ![The imported run: the control time histories drawn, the
 specification and channel table beside them in the tree, and the
@@ -49,62 +57,61 @@ type's remaining slots in gray](../images/random-import.png)
 
 ### 2. Compute the control PSDs
 
-**Compute PSDs** in the time history's averaging view averages over
-the run's own frame length, overlap and window — the controller's,
-read from the file, not guessed — with the start and the count worked
-out from the record itself: where the run is at level and how many
-frames that stretch holds, the same answer the view's **Detect**
-button gives. The view shows exactly those frames before the button
-is pressed.
+Select the time history, open the **Averaging** view and press
+**Compute PSDs**. The averaging uses the frame length, overlap and
+window the controller used, read from the file. The start and the
+number of frames are worked out from the record: where the run is at
+level, and how many frames that stretch holds. This is the same answer
+the view's **Detect** button gives, and the view marks those frames on
+the trace before you press the button.
 
 ![The control PSDs: eight acceleration channels and the drive forces,
 averaged over the run's own frames](../images/random-psds.png)
 
 ### 3. Band onto sixth octaves
 
-The octave-band PSD is a standing deliverable of a random report, not
-an option, and so is the specification on the same bands. **Octave
-Bands** on the PSD's bar previews the banded steps over the
-narrowband as the spacing is set (a sixth is the usual answer) and the
-panel's own button bands conserving area — the octave PSD is still a
-PSD, drawn as bars because its `bandwidth` says so. The same button on
-the specification bands the requirement and its warning and abort
-limits together, and the report's octave section reads the banded
-measurement against that banded requirement rather than against the
-breakpoint curve.
+A random report always includes the octave-band PSD and the
+specification on the same bands. Select the PSD and choose **Octave
+Bands** on its bar. The view previews the banded steps over the
+narrowband as you set the **Spacing** (a sixth of an octave by
+default), and **Apply Octave Bands** makes the banded PSD. Banding
+conserves the area under the curve, so the octave PSD is still a PSD;
+it is drawn as bars because its `bandwidth` is set. Do the same with
+the specification selected: its requirement and its warning and abort
+limits are banded together, and the report's octave section compares
+the banded measurement with that banded requirement rather than with
+the breakpoint curve.
 
-The report opens on a pass/fail box under its title: **PASS** in
-green or **FAIL** in red, read off the octave-band comparison, with
-the two readings it was decided on beside it — the share of control
-channels that had more than a tenth of their band outside the abort
-limits, failing at a fifth of them, and the share more than 3 dB off
-in RMS, failing at a tenth. Left of it, a box of the same size gives
-the **test level** the comparison was judged at, in the same large
-bold — 0 dB for a run at full level, −6 dB for one captured 6 dB below
-the specification — and says whether it was detected from the data or
-set in the Scaling field. Someone opening the report knows whether
-the environment passed, and at what level, before reading a word. The
-octave-band
-figures read on a log frequency axis, the narrowband ones on a
-linear one.
+The report opens with a pass/fail box under its title, **PASS** in
+green or **FAIL** in red, read off the octave-band comparison. Beside
+it are the two numbers it was decided on: the share of control
+channels with more than a tenth of their band outside the abort limits
+(the test fails at a fifth of the channels), and the share more than
+3 dB off in RMS (the test fails at a tenth). To its left, a box of the
+same size gives the test level the comparison was judged at, 0 dB for
+a run at full level or −6 dB for one captured 6 dB below the
+specification, and says whether that level was detected from the data
+or set in the Scaling field. The octave-band figures in the report use
+a log frequency axis and the narrowband figures a linear one.
 
-The report draws the measured time histories flat, two dozen
-channels to a figure and as many figures as the run has channels,
-each figure an envelope of its channels on one shared time axis with
-the averaged frames marked. A 144-channel run at 16 kHz was a
-200 MB report when those figures were the stage; they are a few
-megabytes now, and every number on the page keeps seven significant
-digits, which draws a figure to a part in ten million.
+The report draws the measured time histories flat, one figure per
+quantity, up to two dozen channels to a page of the figure, each page
+an envelope of its channels on one shared time axis with the averaged
+frames marked. Every number in the report keeps seven significant
+digits, enough to draw a figure to a part in ten million. Together
+these keep the report of a large run (144 channels at 16 kHz, for
+example) to a few megabytes.
 
 ![The sixth-octave view of the same PSDs](../images/random-octave.png)
 
 ### 4. Multiple coherence
 
-How much of each response the drives account for — **Multiple
-Coherence**, beside the PSDs in the averaging view, so it reads the
-same frames. This is the figure that later separates
-"the article exceeded" from "the cable did" — a channel the drives
-explain (coherence near one) exceeded because the article did.
+Press **Multiple Coherence** in the same Averaging view, so it is
+computed over the same frames as the PSDs. It shows how much of each
+response the drives account for. This is the figure that later tells
+an exceedance of the article from an exceedance caused by the
+instrumentation: a channel the drives explain (coherence near one)
+exceeded because the article did.
 
 ![The multiple coherence map: frequency across, channel down,
 coherence as color](../images/random-coherence.png)
@@ -112,22 +119,22 @@ coherence as color](../images/random-coherence.png)
 ### 5. Compare against the specification
 
 Select the control PSDs and the specification together. One channel
-draws at a time — the drop-down reaches the rest — with the tolerance
-zones shaded and every line that went outside the abort band striped
-red or blue for which way it went. The table below the plot accounts
-for every channel at once; the plot shows the ones you pick in it.
-How a line or a band is judged in or out — an area against an area
-over each cell, whatever form the two objects take — is
+is drawn at a time, and the drop-down on the bar reaches the rest. The
+tolerance zones are shaded, and every line outside the abort band is
+striped red (above) or blue (below). The table below the plot lists
+every channel at once, and the plot shows the ones you pick in it. How
+a line or a band is judged in or out (an area against an area over
+each cell, whatever form the two objects take) is described on
 [its own page](../compliance.md).
 
-Two things to notice in the bar above the plot. The **Scaling** field
-is the comparison's dB offset — detected from the data to the nearest
-3 dB, the ladder runs are commanded on, for runs captured below the
-0 dB requirement; this run was
-at full level, so it reads 0. And the status bar notes the records
-that had no specification to answer to: the drive force PSDs share
-DOF names with control channels, and the comparison filters them out
-rather than judging newtons against an acceleration band.
+Two things on the bar above the plot are worth checking. The
+**Scaling** field is the comparison's dB offset. For a run captured
+below the 0 dB requirement it is detected from the data, to the
+nearest 3 dB, since runs are commanded in 3 dB steps. This run was at
+full level, so it reads 0. The status bar also lists the records that
+had no specification to compare against: the drive force PSDs share
+DOF names with the control channels, and the comparison leaves them
+out rather than judging newtons against an acceleration band.
 
 ![One control channel against the specification: zones shaded,
 exceedances striped, the Scaling field reading 0 dB, and the
@@ -136,27 +143,33 @@ channels](../images/random-comparison.png)
 
 ### 6. Geometry, photos, report
 
-Drag the article's geometry in and declare its units; drop the setup
-photographs beside it; link them into the group. Then the project's
-row's *Generate Report* builds the random report — the measured data, the
-specification comparison read three ways (spectra, RMS error bars,
-lines-out bars), the coherence beside the compliance so the reader
-can ask *why* a channel exceeded. The specification and the
-comparison are one figure per control channel — no drop-down
-anywhere in the report — narrowband and again on octave bands
-against the banded specification, each comparison opening on the specification's own
-frequency band with the measurement beyond it a zoom away; a banded
-specification is drawn on its own bands, steps against steps. Above
-four control channels the figures become a grid instead: a row per
-node, a column per direction — the global axes when the linked
-geometry can place the channels, with how far off its axis a channel
-sits noted in its cell, the DOF's own letter when it cannot — and
-each cell is the figure that channel alone would have had. The
-channel table keeps every row on one line, however long its
-comments. A section whose objects the project does not hold — the
-specification sections of a run imported without one, say — is left
-out of the report rather than standing as a heading over nothing.
-*Export → HTML…* writes one self-contained file.
+Drag the article's geometry in and declare its units, drop the setup
+photographs beside it, and link them into the group. Then select the
+project row and press **Generate Report** on the bar to build the
+random report. It holds the front matter (geometry, the DOF figures,
+photographs and channel table), the measured time histories, the
+control spectra against the specification, and the two compliance bar
+charts (RMS error and lines outside abort), then the same comparison
+and charts again on octave bands, and finally the multiple coherence
+and kurtosis figures that say whether an exceedance is the article or
+the measurement.
+
+The comparison is one figure per control channel, with no drop-down
+anywhere in the report. Each figure opens on the specification's own
+frequency band, and the measurement beyond it is a zoom away; a banded
+specification is drawn on its own bands, steps against steps. With
+more than four control channels the figures are laid out as a grid
+instead, a row per node and a column per direction. When the linked
+geometry can place the channels, the columns are the global axes and a
+channel's cell notes how far off that axis it sits; when it cannot, the
+columns are the DOF's own direction letters. Each cell is the figure
+that channel would have had on its own.
+
+The channel table keeps every row on one line, however long its
+comments. A section whose objects the project does not hold (the
+specification sections of a run imported without one, for example) is
+left out of the report. **Export → HTML…** on the report's bar writes
+one self-contained file.
 
 ![The exported report: control histories with the averaged frames
 shaded, the specification with its tolerance
@@ -164,10 +177,11 @@ zones](../images/random-report.png)
 
 ## The same run, headless
 
-And the script never has to be reconstructed by hand: the **console tab** along the bottom of the window writes it live as you click — every act of the session as the line that replays it. Expand it, copy the stretch you want, and it runs as-is.
+The **Console** tab along the bottom of the window shows the session
+as Python while you work: every act as the line that replays it.
+Expand it, copy the lines you want, and they run as they are.
 
-
-The whole thing is one call when the defaults are right:
+The whole workflow is one call when the defaults are right:
 
 ```python
 import visualdynamics
@@ -175,12 +189,12 @@ import visualdynamics
 visualdynamics.random_vibration_report('random.nc4', 'report.html')
 ```
 
-…and still one call when the report needs the rest of what the tree
-asks for. The geometry comes in as it stands — the report draws it as
-a shape and never states a coordinate or a scale, so it asks for no
-length unit — the photographs from a folder (or a list of files, in
-the order they should appear), and a run too long to hold is read from
-its last so many seconds, a shorter run taken whole:
+It is still one call when the report needs the rest of what the tree
+asks for. The geometry comes in as it is; the report draws it as a
+shape and never states a coordinate or a scale, so no length unit is
+needed. The photographs come from a folder (or a list of files, in the
+order they should appear), and `last` imports only that many seconds
+from the end of a long run, with a shorter run taken whole:
 
 ```python
 visualdynamics.random_vibration_report(
@@ -190,46 +204,45 @@ visualdynamics.random_vibration_report(
     last=100.0)
 ```
 
-…and it asks for what it is not given. Called with no run at all it
-opens a file dialog, takes as many runs as are chosen, and writes one
-report for each — a campaign is a folder of runs, and the answer to
-each is its own report. A run chosen that way is asked about its
-geometry too, where Cancel means none:
+Called with no run at all, it opens a file dialog, takes as many runs
+as you choose, and writes one report for each. A run chosen that way
+is also asked about its geometry, where Cancel means none:
 
 ```python
 visualdynamics.random_vibration_report()                # ask for both
 visualdynamics.random_vibration_report(path='reports/')  # ask, write here
 ```
 
-A list of runs is a batch too, for a script that already has them,
-and **File → Reports from Runs…** runs the same batch from the window
-through `visualdynamics.run_report`, which picks each run's report by
-its type ([the sine guide](sine-workflow.md#one-call) has the
-details).
+A list of runs is a batch too, for a script that already has them.
+**File → Reports from Runs…** runs the same kind of batch from the
+window through `visualdynamics.run_report`, which picks each run's
+report from its type ([the sine guide](sine-workflow.md#one-call) has
+the details).
 
-A run *named* in the call and left without a geometry means no
-geometry, as it always has, and nothing opens. `visualdynamics.ASK`
-in either place forces the question, so a script holding a run can
-still be asked for the geometry.
+A run named in the call with no geometry keyword gets no geometry, and
+no dialog opens. Pass `visualdynamics.ASK` for either one to force the
+question, so a script that names its run can still be asked for the
+geometry.
 
-`path` may be the file to write or a **folder** to write into, where
-each report takes its run's own name with an `.html` extension.
-Without a path it lands beside the run. Several runs need a folder, or
-no path at all. (A name that does not exist yet and does not end in a
-separator is a file: there is no telling a folder nobody has made from
-a file nobody has written.)
+`path` may be the file to write or a folder to write into, where each
+report takes its run's own name with an `.html` extension. A name
+ending in a separator (`reports/`) is a folder, and it is made if it
+does not exist yet. A name that does not exist and does not end in a
+separator is taken as a file, since a folder nobody has made cannot be
+told from a file nobody has written. Without a path, the report is
+written beside the run. Several runs need a folder, or no path at all.
 
-…and the same call written out when the project should live on. It
-is condensed from
+When the project should be kept, write the same call out step by
+step. This is condensed from
 [`examples/random_workflow.py`](https://github.com/visualdynamics/visualdynamics/blob/main/examples/random_workflow.py),
-which the test suite executes; the step numbers match the walkthrough.
+which the test suite runs; the step numbers match the walkthrough.
 
 ```python
 import visualdynamics
 from visualdynamics.plot import plot_bars, plot_coherence_map, plot_comparison
 
 # 1-4. import and work up: PSDs over the run's own frames, the
-# sixth-octave banding, the coherence — one verb does the sequence
+# sixth-octave banding, the coherence, all in one verb
 project = visualdynamics.random_vibration_run('random.nc4')
 assert project.project_type == 'Random Vibration'
 
@@ -237,7 +250,7 @@ history = project.time_history
 spec, octave_spec = project.specifications   # the requirement, and it on bands
 psds, octave = project.psds                  # the specifications are not among them
 
-# 5. the comparison, drawn headless — bands against bands
+# 5. the comparison, drawn headless: bands against bands
 plot_comparison(psds, spec, path='control.png', show=False)
 plot_comparison(octave, octave_spec, path='control_octave.png', show=False)
 plot_bars(psds, spec, 'error', path='error.png', show=False)
@@ -256,34 +269,34 @@ project.save('random.vdyn')
 
 ## Where judgment lives
 
-- **Whether an exceedance is the article or the instrumentation.**
-  The multiple coherence map answers it: a channel whose response the
+- Whether an exceedance is the article or the instrumentation.
+  The multiple coherence map answers it. A channel whose response the
   drives explain exceeded because the article did; a channel low on
-  coherence may be a mounting or a cable. The report puts the map
-  beside the compliance bars for exactly this reading.
-- **Whether the comparison scale is right.** A run captured below the
-  requirement is compared scaled up to the 0 dB specification —
-  standard practice — and the scale is detected only when the data
+  coherence may have a mounting or cable problem. The report places
+  the coherence map after the compliance charts for this reason.
+- Whether the comparison scale is right. A run captured below the
+  requirement is compared scaled up to the 0 dB specification, which
+  is standard practice, and the scale is detected only when the data
   supports it. A controller scales every channel together, so the
-  level is read once for the whole test, in sixth-octave bands: every
-  band of every compared channel votes for its nearest 3 dB step, and
-  the most common step is taken as the level only when the bands agree
-  on it — three quarters of them within 1.5 dB of it, their median
-  within 0.75 dB of the step — the total power agrees with it within
-  3 dB, and it is a level a controller would command (between 6 dB
-  over and 24 dB under the specification). A run that failed — a controller that went unstable
-  and ran hot, one that held its resonant peaks and little else, one
-  under-driven between steps — is shown as measured, not scaled to
-  look like a reduced-level run; so is a run whose specification bounds
-  monitors as well as controls, whose monitors spread the bands. One
-  failure no rule can see: a full-level test held 3 dB low everywhere
-  looks exactly like a run commanded at −3 dB, and is read as one —
-  which is why the report's test-level box says what was detected. Type a number in the Scaling
-  field to hold it (0 holds it unscaled), clear the field to detect
-  again. The data itself is never changed. A script that calls
-  `compare_all` without a scale is warned (`ScaleWarning`) when it
-  detected one.
-- **What the run was allowed to do.** The warning and abort lines
-  come from the specification; whether a brush against the warning
-  line matters is the test engineer's sentence to write in the
-  conclusions.
+  level is read once for the whole test, in sixth-octave bands. Every
+  band of every compared channel is assigned its nearest 3 dB step,
+  and the most common step is taken as the level only when all of the
+  following hold: three quarters of the bands are within 1.5 dB of it
+  and their median is within 0.75 dB of it, the total power agrees
+  with it within 3 dB, and it is a level a controller would command
+  (between 6 dB over and 24 dB under the specification). A run that
+  failed is shown as measured, not scaled to look like a reduced-level
+  run. That includes a controller that went unstable and ran hot, one
+  that held its resonant peaks and little else, and one under-driven
+  between steps. A run whose specification bounds monitor channels as
+  well as controls is also shown as measured, because the monitors
+  spread the bands. One case no rule can catch: a full-level test held
+  3 dB low everywhere looks exactly like a run commanded at −3 dB and
+  is read as one, which is why the report's test-level box says what
+  was detected. Type a number in the Scaling field to hold the scale
+  (0 holds it unscaled), and clear the field to detect it again. The
+  data itself is never changed. A script that calls `compare_all`
+  without a scale gets a `ScaleWarning` when a scale was detected.
+- What the run was allowed to do. The warning and abort lines come
+  from the specification. Whether a brush against the warning line
+  matters is for the test engineer to write in the conclusions.

@@ -1,21 +1,22 @@
-"""The filter parameters, as a table beside the time history.
+"""The filter settings, as a table beside the time history.
 
-The pass band is set here — its kind, its edges, the order — and the
-filter they make is drawn underneath them: its magnitude against
-frequency, so the shape is read where it is set rather than inferred
-from the numbers (Brandon, 2026-08-25). Beside it the figures that
-follow, all measured off that same curve.
+The pass band is set here (its kind, its edges and the order), and the
+response of the filter they make is drawn under the table, magnitude
+against frequency, so the shape is seen where it is set. Beside the
+settings are the values that follow from them, all read off that same
+curve: Nyquist, the level an octave beyond a single corner, and where
+the filter is at -3 dB.
 
-One kind at a time, chosen outright: a low-pass shows one corner, a
-high-pass one, a band-pass its two edges — only what applies is on
-screen (principle 3), and the kind cannot disagree with the numbers
-because `core.filters.Filtering` derives it from which edges exist.
+One kind is shown at a time: a low-pass shows one corner, a high-pass
+one, and a band-pass its two edges, so only what applies is on screen
+(principle 3). The kind cannot disagree with the numbers, because
+`core.filters.Filtering` derives it from which edges are set.
 
-The panel says what the settings are, reports when they move, and
-its Apply Filter button turns the history into a filtered one with
-whatever is set at that moment — the project verb a script calls,
-the same division of labor as the averaging panel, because it is the
-same kind of thing: parameters that ride the record.
+The panel shows the settings and reports when they change. Its Apply
+Filter button asks for a filtered copy of the history with the current
+settings, which the window makes with the same project verb a script
+calls. The averaging panel works the same way, because both hold
+settings that are stored with the record.
 """
 
 from __future__ import annotations
@@ -44,6 +45,9 @@ from .settings_panel import (
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.data import TimeHistory
 
+# The response drawn under the settings, so the shape is read where it
+# is set and not inferred from the numbers: Brandon, 2026-08-25.
+
 #: the kinds on offer, in the order the Type box lists them. The keys
 #: are `Filtering.kind`'s own words, so the two cannot drift.
 KINDS = ('low-pass', 'high-pass', 'band-pass')
@@ -55,19 +59,22 @@ EDGE_GAP = 0.1
 
 
 class FilterResponsePlot(PreviewPlot):
-    """The filter's magnitude against frequency: a small log-log plot,
-    whose corner lines are the corner controls.
+    """The filter's response: a small plot of magnitude in dB against log
+    frequency, whose dashed corner lines can be dragged to set the
+    corners.
 
-    **What the data sees**, which is `core.filters.response` — the
-    squared magnitude, because the filter runs forward and backward.
-    Drawn here rather than computed here, so the report could draw the
-    same curve from the same numbers.
+    It draws `core.filters.response`, the squared magnitude, because the
+    filter is run forward and backward and that is the response the data
+    gets. The curve is computed there and only drawn here, so the report
+    can draw the same curve from the same numbers.
 
-    Deliberately bare: no legend, no axis titles, decade grid lines
-    and a dashed mark at each corner — one for a low- or high-pass,
-    two for a band-pass. It sits in a 210-pixel column and answers one
-    question — what shape is this — where anything more would be a
-    second plot competing with the record beside it.
+    The plot has no legend and no axis titles, only decade grid lines
+    and a dashed line at each corner (one for a low- or high-pass, two
+    for a band-pass). It is in a 210-pixel column and shows only the
+    filter's shape, so that it does not compete with the record beside
+    it. `edge_moved` reports each move of a drag and `edge_settled` the
+    release, each with the edge ('low' or 'high') and its position in
+    Hz.
     """
 
     #: an edge was dragged; which one ('low' or 'high'), and where in
@@ -133,7 +140,8 @@ class FilterResponsePlot(PreviewPlot):
         self.edge_settled.emit(which, float(10.0 ** line.value()))
 
     def apply_theme(self, colors: Mapping[str, str]) -> None:
-        """Follow a theme change, like every other drawing here."""
+        """Redraw the axes, the curve and the corner lines in a new
+        theme's colors."""
         import pyqtgraph as pg
 
         super().apply_theme(colors)
@@ -145,19 +153,23 @@ class FilterResponsePlot(PreviewPlot):
 
     def show_response(self, frequencies: Any, magnitude: Any,
                       low: float | None, high: float | None) -> None:
-        """Draw one response. `frequencies` is in Hz, `magnitude` dB;
-        `low` and `high` are the pass-band edges, each shown as a
-        dashed line where it exists and hidden where it does not.
+        """Draw one response.
 
-        **The curve takes hertz and everything else takes log10**, and
-        the split is pyqtgraph's rather than ours: a log-mode plot
-        transforms its *data items* itself, but an `InfiniteLine` and
-        `setXRange` are positioned in view coordinates, which on that
-        axis already are the logarithms. Handing the curve log10 too
-        drew the decades twice over — the axis ran 0.01 to 3 Hz for a
-        record whose Nyquist is 1024 (Brandon, 2026-08-25, found by
-        pinning the passband).
+        `frequencies` is in Hz and `magnitude` in dB. Frequencies at or
+        below zero are left out, and the curve is clipped at `FLOOR`
+        (-80 dB). `low` and `high` are the pass-band edges in Hz, each
+        drawn as a dashed line when it is set and hidden when it is None.
+        A dragged line stays on the axis, stops short of Nyquist, and
+        keeps a band-pass's edges at least `EDGE_GAP` (0.1 Hz) apart.
+
+        The curve is given in Hz and everything else in log10. In log
+        mode pyqtgraph transforms its data items itself, but an
+        `InfiniteLine` and `setXRange` are placed in view coordinates,
+        which on that axis are already the logarithms.
         """
+        # Handing the curve log10 too drew the decades twice over: the
+        # axis ran 0.01 to 3 Hz for a record whose Nyquist is 1024
+        # (Brandon, 2026-08-25, found by pinning the passband).
         import numpy as np
 
         frequencies = np.asarray(frequencies, dtype=float)
@@ -193,7 +205,12 @@ class FilterResponsePlot(PreviewPlot):
 
 
 class FilterPanel(QWidget):
-    """The parameter table. Edits arrive as a whole `Filtering`."""
+    """The filter settings table.
+
+    Each edit is reported on `changed` as a whole `Filtering`, and the
+    Apply Filter button on `apply_asked`. A drag of a corner line
+    reports once, when the mouse is released.
+    """
 
     #: a parameter moved; here is the filtering that describes it now
     changed = Signal(object)
@@ -332,17 +349,18 @@ class FilterPanel(QWidget):
 
     def show_history(self, history: TimeHistory,
                      filtering: Filtering) -> None:
-        """Point the panel at a time history and the filtering set on it.
+        """Show a time history and the filtering set on it.
 
-        The Nyquist clamp comes from the history rather than being
-        guessed from the numbers already in the boxes.
+        The limit on the edges, just under Nyquist, comes from the
+        history's sample rate and not from the values already in the
+        boxes.
         """
         self._history = history
         self.sample_rate = history.sample_rate
         self.set_filtering(filtering)
 
     def set_filtering(self, filtering: Filtering) -> None:
-        """Restate the panel from a filtering, without re-emitting."""
+        """Show a filtering in the editors, without emitting `changed`."""
         kind = filtering.kind
         self._loading = True
         try:
@@ -380,7 +398,7 @@ class FilterPanel(QWidget):
         self._restate(self.filtering())
 
     def filtering(self) -> Filtering:
-        """The filtering the editors currently describe."""
+        """The filtering the editors show now."""
         kind = KINDS[self.kind_box.currentIndex()]
         order = self.order_box.value()
         if kind == 'low-pass':

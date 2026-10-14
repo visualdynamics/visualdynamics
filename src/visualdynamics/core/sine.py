@@ -1,42 +1,35 @@
-"""Sine sweep specifications: named tones, each its own time-boxed sweep.
+"""Sine sweep specifications: named tones, each with its own sweep and
+its own time.
 
-Phase B of the sine sweep arc (PLAN.md). A sine test's requirement is
-not a curve over one abscissa — it is a *set of tones*, each a
-breakpoint table with its own sweep law and its own start time, played
-simultaneously and only partially overlapping in the ordinary case
-(measured on the Phase A fixture: four tones playing 0-15, 2-13, 3-14
-and 1-8 s of one 15 s environment). That shape does not fit a
-DataArray, so it gets its own class rather than a forced one.
+A sine test's requirement is not a curve over one abscissa. It is a set
+of tones, each a breakpoint table with its own sweep law and its own
+start time, played at the same time and usually overlapping only in part
+(for example, four tones playing 0-15, 2-13, 3-14 and 1-8 s of one 15 s
+environment). That does not fit a DataArray, so it has its own class.
 
-The sweep law here is the one the Phase A runs pinned against the
-controller's own records, not assumed from documentation:
+The sweep law is the one checked against the controller's own records:
 
 - `segment_rate[i]` governs the segment from `frequency[i]` to
-  `frequency[i+1]` — the leading convention, matched to 0.0009 Hz
+  `frequency[i+1]` (the leading convention), which matched to 0.0009 Hz
   over a 14 s sweep.
-- A linear segment's rate is in Hz/s; a logarithmic segment's rate is
-  in **oct/min** (one octave at rate 10 transited in 5.87 s ~= 6 s;
-  the controller's own docstrings disagree with each other and the
-  measurement settled it).
+- A linear segment's rate is in Hz/s and a logarithmic segment's rate is
+  in oct/min: one octave at rate 10 was measured at 5.87 s, against the
+  6 s that unit gives.
 - A descending segment takes a negative rate. A rate whose sign
-  contradicts its breakpoints is refused by name here, because the
-  controller refuses the same thing as a negative sweep time — at
-  initialization, deep in its log.
+  contradicts its breakpoints raises ValueError here, naming the
+  segment; the controller also refuses it, as a negative sweep time.
 
-Amplitude between breakpoints interpolates linearly *in time*, which
-is linear in frequency on a linear segment and linear in log-frequency
-on a logarithmic one — `target()` interpolates that way per segment,
-so the compliance curve is the curve the controller was actually
-chasing.
+Amplitude between breakpoints is interpolated linearly in time, which is
+linear in frequency on a linear segment and linear in log frequency on a
+logarithmic one. `SineTone.target` interpolates that way per segment, so
+the comparison curve is the curve the controller was following.
 
-One more alignment fact for the extraction to lean on, measured on the
-Phase A fixture: the controller ramps each tone up for the
-environment's `ramp_time` before sweeping, so the recorded trajectory
-leaves its start frequency at `start_time + ramp_time` — all four
-fixture tones rebuilt against the controller's own record to 0.0000 Hz
-with exactly that lag.
+The controller ramps each tone up for the environment's `ramp_time`
+before sweeping, so the recorded sweep leaves its start frequency at
+`start_time + ramp_time`. Four tones rebuilt with exactly that lag
+matched the controller's own record to 0.0000 Hz.
 
-Everything is SI at rest, like every other object in core.
+Everything is stored in SI, like every other object in core.
 """
 
 from __future__ import annotations
@@ -50,18 +43,29 @@ import numpy as np
 from .data import NAMED_CLASSES, Bounded, Spectrum, _even_steps
 from .progress import Ticker
 
+# Phase B of the sine sweep arc (PLAN.md). The sweep law above was pinned
+# against the Phase A fixture's records rather than assumed from
+# documentation, the log rate's unit included, which only the measurement
+# settled. The controller reports a rate of the wrong sign as a negative
+# sweep time at initialization, in its log, which is why the sign is
+# checked by name here.
+
 LINEAR = 0
 LOG = 1
 
 
 class SineTone:
-    """One tone: breakpoints, a sweep law, and its own window in time.
+    """One tone: breakpoints, a sweep law, and its own span of time.
+
+    Raises ValueError when the shapes disagree, when a segment holds one
+    frequency (a dwell has no sweep time), or when a rate's sign does not
+    match its segment's direction.
 
     Attributes:
         name: What the controller called it ('Sine Tone 1').
         start_time: Seconds after the environment started that this
-            tone turns on. Tones are silent outside their own span —
-            never held at an end frequency.
+            tone turns on. A tone is silent outside its own span, not
+            held at an end frequency.
         frequency: Breakpoints, Hz, shape (n,). Ascending or descending
             per segment; each segment's rate sign must agree.
         amplitude: Target amplitude at each breakpoint per control
@@ -143,7 +147,8 @@ class SineTone:
     # ---- the sweep law ---------------------------------------------------
 
     def segment_seconds(self) -> np.ndarray:
-        """How long each segment takes, from its span and its rate."""
+        """How long each segment takes, in seconds, from its span and
+        its rate."""
         seconds = np.empty(len(self.segment_rate))
         for i in range(len(seconds)):
             f0, f1 = self.frequency[i], self.frequency[i + 1]
@@ -155,18 +160,23 @@ class SineTone:
         return seconds
 
     def duration(self) -> float:
+        """The tone's sweep time in seconds: the sum of
+        `segment_seconds`."""
         return float(self.segment_seconds().sum())
 
     def span(self) -> tuple[float, float]:
-        """When this tone plays, in environment time."""
+        """(start, end), when this tone plays, in environment seconds."""
         return (self.start_time, self.start_time + self.duration())
 
     def trajectory(self, dt: float) -> tuple[np.ndarray, np.ndarray]:
-        """Frequency versus time over the tone's own span.
+        """Frequency against time over the tone's own span, at steps of
+        about `dt`.
 
         Returns (t, f): t in seconds from the tone's start (add
-        `start_time` for environment time), f in Hz. This is the
-        rebuild that matched the controller's own record to 0.0009 Hz.
+        `start_time` for environment time), f in Hz. Each segment gets a
+        whole number of steps, at least one, so the step is `dt` only
+        approximately. This rebuild matched the controller's own record
+        to 0.0009 Hz.
         """
         seconds = self.segment_seconds()
         pieces_t: list[np.ndarray] = [np.array([0.0])]
@@ -187,10 +197,12 @@ class SineTone:
         return np.concatenate(pieces_t), np.concatenate(pieces_f)
 
     def argument(self, dt: float) -> np.ndarray:
-        """The cosine argument over the tone's span: 2*pi*integral(f),
-        at the sample times `trajectory` returns — `phase_at` on them,
-        so a slice of the sweep (`argument_slice`) is the same numbers
-        as the whole (2026-10-01)."""
+        """The cosine argument in radians over the tone's span,
+        2*pi*integral(f), at the sample times `trajectory` returns.
+
+        It is `phase_at` on those times, so a slice of the sweep
+        (`phase_at` on `grid`) gives the same numbers as the whole."""
+        # on phase_at since 2026-10-01, so a slice matches the whole
         t, _f = self.trajectory(dt)
         return self.phase_at(t)
 
@@ -206,8 +218,12 @@ class SineTone:
 
     def frequency_at(self, t: Any) -> np.ndarray:
         """The instantaneous frequency, Hz, at seconds `t` from the
-        tone's start — the same law `trajectory` lays on its grid,
-        evaluated anywhere, so a slice of a long sweep costs the slice.
+        tone's start.
+
+        The same law `trajectory` lays on its grid, evaluated at any
+        time, so a slice of a long sweep costs only the slice. Before
+        the start it is the first breakpoint's frequency and after the
+        end the last one's.
 
         Parameters
         ----------
@@ -217,6 +233,7 @@ class SineTone:
         Returns
         -------
         ndarray
+            Hz, the shape of `t`.
         """
         t = np.asarray(t, dtype=np.float64)
         f = np.full(t.shape, float(self.frequency[-1]))
@@ -230,9 +247,12 @@ class SineTone:
 
     def phase_at(self, t: Any) -> np.ndarray:
         """The cosine argument, radians, at seconds `t` from the
-        tone's start: 2*pi times the integral of the frequency law,
-        segment by segment in closed form — a linear sweep's chirp, a
-        log sweep's exponential.
+        tone's start.
+
+        2*pi times the integral of the frequency law, segment by segment
+        in closed form: a linear sweep's chirp, a log sweep's
+        exponential. It is zero at and before the start and holds its
+        final value after the end.
 
         Parameters
         ----------
@@ -242,6 +262,7 @@ class SineTone:
         Returns
         -------
         ndarray
+            Radians, the shape of `t`.
         """
         t = np.asarray(t, dtype=np.float64)
         phase = np.zeros(t.shape)
@@ -264,8 +285,8 @@ class SineTone:
 
     def grid(self, dt: float, first: int, last: int) -> np.ndarray:
         """The sample times `trajectory(dt)` lays down, from sample
-        `first` to `last` (exclusive): the whole grid's own numbers,
-        for a slice of it.
+        `first` to `last` (exclusive): the whole grid's numbers for a
+        slice of it, without building the whole grid.
 
         Parameters
         ----------
@@ -277,6 +298,7 @@ class SineTone:
         Returns
         -------
         ndarray
+            Seconds from the tone's start.
         """
         # the grid is one sample at t=0, then each segment's samples
         # evenly over its own length — rebuilt per segment so a slice
@@ -306,8 +328,8 @@ class SineTone:
 
     def grid_at(self, dt: float, samples: Any) -> np.ndarray:
         """The sample times `trajectory(dt)` lays down, at the given
-        sample indices — `grid` for a handful of samples picked out of
-        a long sweep, without laying the whole sweep down.
+        sample indices: `grid` for a few samples picked out of a long
+        sweep, without building the whole sweep.
 
         Parameters
         ----------
@@ -319,6 +341,7 @@ class SineTone:
         Returns
         -------
         ndarray
+            Seconds from the tone's start, the shape of `samples`.
         """
         samples = np.asarray(samples, dtype=np.int64)
         out = np.zeros(samples.shape)
@@ -332,14 +355,17 @@ class SineTone:
 
     def target(self, frequencies: Any,
                curve: str = 'amplitude') -> np.ndarray:
-        """The specified level at given frequencies, shape (len, m).
+        """The specified level at the given frequencies, shape
+        (len(frequencies), m).
 
-        `curve` is 'amplitude' or one of the limit names. Amplitude
-        interpolates linearly in time — linear in frequency on a
-        linear segment, linear in log-frequency on a logarithmic one —
-        because that is the target the controller chases. Frequencies
-        the tone never sweeps come back NaN: the specification says
-        nothing there, and NaN says so where zero would lie.
+        `curve` is 'amplitude' or one of the limit names (`LIMITS`); a
+        limit the tone does not carry raises ValueError. Values are
+        interpolated linearly in time between breakpoints, which is
+        linear in frequency on a linear segment and linear in log
+        frequency on a logarithmic one, because that is the target the
+        controller follows. Frequencies the tone never sweeps come back
+        NaN: nothing is specified there, and zero would read as a
+        requirement of zero.
         """
         values = (self.amplitude if curve == 'amplitude'
                   else self.limits.get(curve))
@@ -387,19 +413,21 @@ class SineTone:
 class SineSweepSpecification:
     """What a sine test was controlled to: tones over control channels.
 
-    One object per sine environment, mirroring the controller's file:
-    the tones (each with its own breakpoints, sweep law, bands and
+    One object per sine environment, matching the controller's file:
+    the tones (each with its own breakpoints, sweep law, limits and
     start time) and the control DOFs their amplitude columns belong
-    to. Simultaneous tones are the ordinary case, not a variant.
+    to. Simultaneous tones are the ordinary case, not a special one.
+    Raises ValueError when a tone's amplitude columns do not match the
+    control channels or when tone names repeat.
 
     Attributes:
         tones: The SineTone list, in the file's order.
-        response_dof: The control channel DOF strings — the columns of
+        response_dof: The control channel DOF strings, the columns of
             every tone's amplitude table, in order.
         ordinate_dim: What the amplitudes are ('acceleration' for a
             controller run on accelerometers).
         ordinate_unit: The SI unit the amplitudes are stored in, or
-            None while undeclared — the same convention every DataArray
+            None while undeclared, the same convention every DataArray
             follows.
         comment: One line about the set as a whole.
     """
@@ -425,6 +453,7 @@ class SineSweepSpecification:
         self.comment: str = comment
 
     def tone(self, name: str) -> SineTone:
+        """The tone named `name`; KeyError when there is none."""
         for tone in self.tones:
             if tone.name == name:
                 return tone
@@ -432,16 +461,18 @@ class SineSweepSpecification:
                        f'this specification holds {[t.name for t in self.tones]}')
 
     def span(self) -> tuple[float, float]:
-        """When any tone is playing: first start to last end."""
+        """(start, end), when any tone is playing, in environment
+        seconds: the first start to the last end."""
         starts, ends = zip(*(tone.span() for tone in self.tones))
         return (min(starts), max(ends))
 
     def tone_curve(self, name: str, lines: int = 400) -> SineTarget:
-        """One tone's requirement as a plottable, comparable curve.
+        """One tone's requirement as a `SineTarget`, a curve that can be
+        plotted and compared.
 
-        The abscissa follows the tone's own sweep — `lines` points
-        spaced the way the sweep dwells, ascending whichever way it
-        swept — and the bands ride along as Bounded limits.
+        The abscissa follows the tone's own sweep: about `lines` points
+        evenly spaced in time along it, sorted ascending whichever way it
+        swept. The tone's limits come with it as `Bounded` limit curves.
         """
         tone = self.tone(name)
         _t, f = tone.trajectory(tone.duration() / lines)
@@ -477,15 +508,15 @@ class SineSweepSpecification:
 
 
 class SineTarget(Bounded, Spectrum):
-    """One tone's requirement laid over frequency, as a curve.
+    """One tone's requirement over frequency, as a curve.
 
-    What `SineSweepSpecification.tone_curve` hands the plot and the
-    report: the tone's amplitude interpolated along its own sweep,
-    with the warning and abort bands as the four limit curves every
-    Bounded object carries — so the comparison against an extracted
-    level draws with the same zones, the same shading and the same
-    pairing a random specification gets, from the same machinery.
-    Derived on demand; the specification object stays the one source.
+    What `SineSweepSpecification.tone_curve` gives the plot and the
+    report: the tone's amplitude interpolated along its own sweep, with
+    the warning and abort limits as the four limit curves every Bounded
+    object carries. The comparison against an extracted level is then
+    drawn with the same zones, shading and pairing a random
+    specification gets, by the same code. It is derived when needed;
+    the specification remains the only source.
     """
 
     def __init__(self, *args: Any, tone: str = '', **kwargs: Any) -> None:
@@ -496,41 +527,41 @@ class SineTarget(Bounded, Spectrum):
 class SineLevel(Spectrum):
     """A sine sweep's measured level: amplitude against frequency.
 
-    What `extract_sine` reads out of a recording for one tone — the
+    What `extract_sine` reads out of a recording for one tone: the
     demodulated complex amplitude of that tone at each control channel,
-    sampled along the sweep and laid over frequency. The magnitude is
-    the tracked amplitude the controller was steering; the angle is the
-    phase relative to the reconstructed sweep argument, meaningful
-    between channels rather than absolutely.
+    sampled along the sweep and placed over frequency. The magnitude is
+    the tracked amplitude the controller was controlling; the angle is
+    the phase relative to the reconstructed sweep argument, meaningful
+    between channels rather than on its own. `sine_tracking.track_sine`
+    returns its readings in this class too, as real levels.
 
-    The frequency coverage is the coverage: a run stopped early, or a
+    The frequency coverage is what was run: a run stopped early, or a
     tone the instructions windowed, extracts fewer lines, and the
-    comparison against the specification sees exactly how much of the
-    required range was actually run rather than being told everything
-    was.
+    comparison against the specification shows how much of the
+    required range was run.
 
     Attributes:
         tone: The specification tone this level was extracted for.
-        onset: Seconds into the recording where the tone's sweep proper
-            was found (matched filter, or the caller's override) —
-            reported so the alignment is auditable.
-        seconds: When each line was measured, in recording seconds —
-            the sweep's own clock, one entry per abscissa line, which
-            is what lets the level stand on the 3-D stage without the
-            specification beside it. None on a level from before the
-            clock was kept.
+        onset: Seconds into the recording where the tone's sweep was
+            found (by matched filter, or the caller's override),
+            reported so the alignment can be checked.
+        seconds: When each line was measured, in recording seconds,
+            one entry per abscissa line. This is what places the level
+            on the 3-D stage without the specification beside it. None
+            on a level saved before the clock was kept.
         floor: The noise floor beside each reading, channels × lines,
             in the level's own units: the amplitude a tone would need
-            to stand clear of the noise the smoothing let through
-            (2026-09-30). None on a level from before it was kept.
+            to stand clear of the noise the smoothing let through. None
+            on a level saved before it was kept.
         below_floor: Channels × lines, True where the tone was under
-            its floor and the reading is reported *at* the floor
-            rather than at zero — a mark on the plot and a line the
-            comparison does not judge. None on an older level.
+            its floor and the reading is reported at the floor rather
+            than at zero. Such a line is marked on the plot and not
+            judged in the comparison. None on an older level.
         drift_hz: The sweep-clock correction applied at the end of the
             tone's sweep, in Hz, when the recording's sweep had
             drifted from the specification's; 0 when none was needed.
     """
+    # floor and below_floor kept since 2026-09-30
 
     def __init__(self, *args: Any, tone: str = '', onset: float = 0.0,
                  seconds: Any = None, floor: Any = None,
@@ -551,8 +582,8 @@ class SineLevel(Spectrum):
 
     @property
     def resolved(self) -> np.ndarray:
-        """Channels × lines, True where the tone stood above its floor
-        — every line, on a level that kept no floor."""
+        """Channels × lines, True where the tone was above its floor;
+        True on every line of a level that kept no floor."""
         if self.below_floor is None:
             return np.ones(np.shape(self.ordinate), dtype=bool)
         return ~self.below_floor
@@ -603,21 +634,22 @@ def _workers(wanted: int | None = None) -> int:
 
 
 class SineLevelSet:
-    """One extraction, one object: the tones' levels, grouped the way
-    the specification groups its tones (Brandon, 2026-08-22).
+    """One extraction as one object: the tones' levels, grouped the way
+    the specification groups its tones.
 
-    Each tone sweeps its own frequencies on its own clock, so the
-    levels stay separate `SineLevel`s inside — different abscissas
-    cannot share a DataArray — but the *project* holds one thing, it
-    expands into one row per tone, and picking rows plots a subset,
-    exactly as the specification does.
+    Each tone sweeps its own frequencies on its own clock, so the levels
+    stay separate `SineLevel` objects inside, since different abscissas
+    cannot share a DataArray. The project holds one object, which
+    expands into one row per tone, and selecting rows plots a subset, as
+    the specification does. Raises ValueError when tone names repeat.
 
     Attributes:
         levels: The per-tone SineLevels, in the specification's order.
         cycles: The smoothing the levels were read with, in cycles of
-            each tone's instantaneous frequency; None on a set from
+            each tone's instantaneous frequency; None on a set saved
             before it was kept.
     """
+    # grouped the way the specification is (Brandon, 2026-08-22)
 
     def __init__(self, levels: Sequence[SineLevel],
                  cycles: float | None = None) -> None:
@@ -629,13 +661,18 @@ class SineLevelSet:
 
     @property
     def tone_names(self) -> list[str]:
+        """The tones' names, in order."""
         return [level.tone for level in self.levels]
 
     @property
     def response_dof(self) -> list[str]:
+        """The channels, from the first level; empty when there is
+        none."""
         return list(self.levels[0].response_dof) if self.levels else []
 
     def tone(self, name: str) -> SineLevel:
+        """The level for the tone named `name`; KeyError when there is
+        none."""
         for level in self.levels:
             if level.tone == name:
                 return level
@@ -668,14 +705,18 @@ def _records(records: Any) -> list[np.ndarray]:
 
 def find_tone(records: np.ndarray, dt: float, tone: SineTone,
               search: tuple[float, float] | None = None) -> float:
-    """Where a tone's sweep begins in a recording, by matched filter.
+    """Where a tone's sweep begins in a recording, in seconds, by
+    matched filter.
 
-    Correlates the reconstructed sweep template against every record
-    and sums the correlation power across them — the processing gain
-    over a whole sweep is what finds a tone under a random excitation
-    much louder than it (measured: a clean find under +15.6 dB of
-    random). `search` bounds the onset in seconds when the caller
-    knows roughly where to look. Returns the onset in seconds.
+    The reconstructed sweep is correlated against every record and the
+    correlation power summed across them. The processing gain over a
+    whole sweep is what finds a tone under a much louder random
+    excitation (measured: a correct find under +15.6 dB of random).
+    `search`, (low, high) in seconds, limits the onset when the caller
+    knows roughly where to look. A recording shorter than the sweep is
+    correlated on the half of the sweep that fits; one holding less
+    than a second of it raises ValueError, as does a search window with
+    no candidates.
     """
     records = _records(records)
     score = _tone_score(records, dt, tone)
@@ -691,16 +732,19 @@ def find_tone(records: np.ndarray, dt: float, tone: SineTone,
 
 def find_environment(records: np.ndarray, dt: float,
                      tones: Sequence[SineTone], ticker=None) -> float:
-    """Where the tones' shared clock starts, by joint matched filter.
+    """Where the tones' shared clock starts in a recording, by joint
+    matched filter.
 
-    Every tone in one environment begins at its own `start_time` on
-    one clock, so there is one unknown — the clock's position in the
-    recording — and every tone's correlation votes on it at its own
-    lag. The sharp votes carry the ambiguous ones: a near-dwell or a
-    log sweep that mis-locks alone (measured: half a second off in a
-    four-tone mix) is pinned by the linear sweeps beside it. Returns
-    the clock origin in seconds; tone i's sweep begins at
-    `origin + start_time_i`.
+    Every tone in one environment begins at its own `start_time` on one
+    clock, so there is one unknown, the clock's position in the
+    recording, and each tone's correlation is added in at its own lag.
+    The tones that correlate sharply then place the ones that are
+    ambiguous alone: a near-dwell or a log sweep that locks in the wrong
+    place on its own (measured: half a second off in a four-tone mix) is
+    placed correctly by the linear sweeps beside it. Returns the clock
+    origin in seconds; tone i's sweep begins at `origin + start_time_i`.
+    `ticker`, when given, gets one tick per tone. Raises ValueError when
+    no tone fits the recording at its own start time.
     """
     records = _records(records)
     joint = None
@@ -819,34 +863,35 @@ PARALLEL_FLOOR = 4_000_000
 
 @dataclass(frozen=True)
 class SineExtraction:
-    """How a sweep's levels are read out of a recording — the settings
-    that ride the time history, the way `Averaging` and `Filtering`
-    do (the sine view sets them; Extract Sine Levels reads whatever is
-    there).
+    """How a sweep's levels are read out of a recording: settings kept
+    with the time history, as `Averaging` and `Filtering` are. The sine
+    view sets them, and Extract Sine Levels uses whatever is there.
 
     `cycles` is the smoothing: how many cycles of the tone's own
-    instantaneous frequency each reading averages over. Shorter
-    follows a resonance closely; longer holds the random environment
-    out of the reading. None means *automatic*: the extraction samples
-    the recording at `BASE_CYCLES`, measures how much noise the
-    smoothing lets through against the tone it finds, and climbs
+    instantaneous frequency each reading averages over. Fewer cycles
+    follow a resonance closely; more keep the random environment out of
+    the reading. None means automatic: the extraction samples the
+    recording at `BASE_CYCLES`, measures how much noise the smoothing
+    lets through against the tone it finds, and steps up
     `CYCLES_LADDER` until the predicted scatter of the readings is
-    under `target_db` (Brandon, 2026-09-30: a 0.5 g sweep under a
-    2.3 g RMS random environment read with a 17 dB spread and a fifth
-    of its points at zero at ten cycles; the lever is the smoothing,
-    and the data can say how much). `chosen` records what the
-    automatic picked, so the setting read back says what was used.
+    under `target_db` (default `TARGET_SCATTER_DB`, one standard
+    deviation in dB). `chosen` records what the automatic choice
+    picked, so the setting read back says what was used.
 
-    `refine` corrects the specification's sweep clock against the
-    recording: the envelope's residual phase is fitted and the sweep
-    argument moved by it, then solved again, so a controller whose
-    sweep drifted from the commanded rate over a long run does not
-    read low once the drift leaves the filter's bandwidth.
+    `refine` (default True) corrects the specification's sweep clock
+    against the recording: the envelope's residual phase is fitted, the
+    sweep argument is moved by it, and the solve is repeated, so a
+    controller whose sweep drifted from the specified rate over a long
+    run does not read low once the drift leaves the filter's bandwidth.
 
-    Frozen like the other settings, and for the same reason: the
-    staleness fingerprint is the fields, and a mutable setting would
-    be a fingerprint that lies.
+    Frozen like the other settings: whether a result is out of date is
+    decided by comparing these fields, and a mutable setting could
+    change without that comparison seeing it.
     """
+    # Automatic smoothing (Brandon, 2026-09-30): a 0.5 g sweep under a
+    # 2.3 g RMS random environment read with a 17 dB spread and a fifth
+    # of its points at zero at ten cycles; the smoothing is what changes
+    # that, and the data can say how much.
 
     cycles: float | None = None
     target_db: float = TARGET_SCATTER_DB
@@ -878,15 +923,31 @@ def vold_kalman(signal: np.ndarray, arguments: Sequence[np.ndarray],
                 starts: Sequence[int], dt: float,
                 cycles: float = BASE_CYCLES,
                 chunk: int | None = None) -> list[np.ndarray]:
-    """Every tone's complex envelope at every sample, solved jointly.
+    """Every tone's complex envelope at every sample of one channel,
+    solved jointly by the second-order Vold-Kalman filter.
 
-    Solved in chunks (`CHUNK` samples, or `chunk`), each with a margin
-    of `MARGIN_WINDOWS` smoothing windows of the slowest tone active
-    at its edges solved beyond it and discarded: the penalty's memory
-    is a few windows, so the interior is the whole-record answer and
-    the memory is the chunk's, not the record's. `_vold_kalman_whole`
-    is the solve itself, on one span; `_solve_piece` cuts one piece
-    out and solves it, which the sampled reading uses too.
+    The record is modeled as the sum of the tones, each a slowly
+    varying complex amplitude on its own known sweep argument, and the
+    amplitudes are found by least squares with a penalty on each
+    envelope's second difference, weighted so the envelope is smoothed
+    over `cycles` cycles of its tone's instantaneous frequency.
+
+    The record is solved in chunks of `CHUNK` samples (or `chunk`), each
+    with a margin of `MARGIN_WINDOWS` smoothing windows of the slowest
+    tone live at its edges, solved beyond it and discarded. The
+    penalty's memory is a few windows, so the interior matches the
+    whole-record solve and the memory used is the chunk's, not the
+    record's.
+
+    `signal` is one evenly sampled channel. Per tone, `arguments` and
+    `frequencies` are the cosine argument and the instantaneous
+    frequency (Hz) over the tone's span, as `SineTone.argument` and
+    `SineTone.trajectory` give them, and `starts` the sample at which
+    its span begins in `signal`. `dt` is the sample interval in seconds.
+    Returns, per tone, the complex envelope over its span clipped to
+    the record: the magnitude is the peak amplitude and the angle the
+    phase against the reconstructed sweep. Raises ValueError when no
+    tone overlaps the recording.
     """
     signal = np.asarray(signal, dtype=float)
     spans = _spans(arguments, starts, len(signal))
@@ -1530,15 +1591,18 @@ def _read_levels(signals, laid, dt, cycles, centers, chunk=None, pieces=None,
     if ticker is not None:
         ticker.add(len(bounds) * C)
 
-    def tick():
+    def tick(count=1):
         if ticker is not None:
-            ticker.tick()
+            ticker.tick(count)
 
     if pool is None:
         for start, end in bounds:
             made = prepare(start, end)
             if made is None:
-                tick()
+                # a piece with no tone live is C channels done: one tick
+                # left the bar short, and the pool's tick(C) raised
+                # TypeError (2026-10-13, found by the docstring pass)
+                tick(C)
                 continue
             (piece_lo, piece_hi, step, dt_piece, live, args, freqs, offsets,
              reads, blocks) = made
@@ -1685,22 +1749,24 @@ def sample_levels(history: Any, specification: SineSweepSpecification,
                   tones: Sequence[str] | None = None,
                   onsets: dict[str, float] | None = None,
                   ticker: Any = None) -> list[dict[str, Any]]:
-    """The levels read at `windows` stretches of each tone, cheaply.
+    """The levels read at `windows` points along each tone, cheaply.
 
-    The sine view's preview and the automatic smoothing's measurement:
-    rather than solve the whole record, solve one smoothing window's
-    worth at each of `windows` evenly spaced points along each tone
-    (with the chunked solve's margin around it), and read the
-    amplitude and the noise floor at the center. Costs a few short
+    Used for the sine view's preview and the automatic smoothing's
+    measurement. Instead of solving the whole record, it solves one
+    smoothing window at each of `windows` evenly spaced points along
+    each tone (with the chunked solve's margin around it) and reads the
+    amplitude and the noise floor at the center. That is a few short
     solves per channel whatever the record's length, so it can run on
     every edit of the setting.
 
-    Returns, per wanted tone, a dict: 'tone', 'frequency' (the sampled
-    points), 'seconds', 'amplitude' and 'floor' (channels × points,
-    debiased the way the full extraction is), 'scatter_db' (channels ×
-    points, the predicted standard deviation of a reading at this
-    smoothing, from the floor against the amplitude; infinite where
-    the tone is under the floor), and 'cycles'.
+    Returns, per wanted tone, a dict: 'tone', 'frequency' (Hz at the
+    sampled points), 'seconds' (recording seconds), 'amplitude' and
+    'floor' (channels × points, debiased as in the full extraction,
+    except that the amplitude is zero where the tone is under the
+    floor), 'scatter_db' (channels × points, the predicted standard
+    deviation of a reading at this smoothing, `scatter_db` of the
+    amplitude and the floor; infinite where the tone is under the
+    floor), and 'cycles'.
     """
     dt = _even_steps(np.asarray(history.abscissa, dtype=float),
                       'Extracting sine levels')
@@ -1748,9 +1814,10 @@ def scatter_db(amplitude: np.ndarray, floor: np.ndarray) -> np.ndarray:
 
     The envelope is the tone plus a complex noise of power floor²;
     half of that power lies along the tone, so the amplitude's
-    standard deviation is floor/√2, and in decibels of the amplitude
-    8.686 times their ratio. Infinite where the tone is under the
-    floor — there is no reading to scatter around.
+    standard deviation is floor/√2, and in dB of the amplitude
+    8.686 (20/ln 10) times their ratio. Infinite where the amplitude is
+    zero (a tone under its floor, as `sample_levels` reports it), since
+    there is no reading to scatter around.
     """
     amplitude = np.asarray(amplitude, dtype=float)
     floor = np.asarray(floor, dtype=float)
@@ -1765,21 +1832,25 @@ def suggest_cycles(history: Any, specification: SineSweepSpecification,
                    tones: Sequence[str] | None = None,
                    onsets: dict[str, float] | None = None,
                    ticker: Any = None) -> float:
-    """The smoothing the data asks for: the first rung of
+    """The smoothing the data asks for, in cycles: the first step of
     `CYCLES_LADDER` at which the predicted scatter of the readings is
     under `target_db` (one standard deviation).
 
-    Measured at `BASE_CYCLES` with `sample_levels`, where the noise
-    the smoothing lets through is read beside the tone it finds; the
-    scatter falls as the square root of the smoothing, so the rung
-    follows from one measurement. The median over the sampled points
-    and channels speaks for a tone — a resonance or a dropout should
-    not set the smoothing for a whole sweep — and the widest-asking
-    tone speaks for the recording, since one setting rides it. The
-    ladder is capped where a tone's smoothing window at its lowest
-    frequency would reach a quarter of its own span: past that the
-    reading is the sweep's mean, not a level along it. A tone under
-    the floor at the base smoothing asks for the top of the ladder.
+    Measured once at `BASE_CYCLES` with `sample_levels`, where the noise
+    the smoothing lets through is read beside the tone. The scatter
+    falls as the square root of the smoothing, so the smoothing needed
+    follows from that one measurement, with half again added, because
+    in dB the scatter grows faster than the noise-to-tone ratio once the
+    noise is a fair fraction of the tone. The median over the sampled
+    points and channels sets each tone's need, so a resonance or a
+    dropout does not set the smoothing for a whole sweep, and the tone
+    that needs the most sets it for the recording, since one setting is
+    used for all of it. A tone under the floor at more than half of its
+    sampled points asks for the top of the ladder. The result is capped
+    where a tone's smoothing window at its lowest frequency would reach
+    a quarter of the tone's duration, since past that the reading is
+    the sweep's mean, not a level along it, and it is never below
+    `BASE_CYCLES`.
     """
     sampled = sample_levels(history, specification, BASE_CYCLES,
                             tones=tones, onsets=onsets, ticker=ticker)
@@ -1847,61 +1918,69 @@ def extract_sine(history: Any, specification: SineSweepSpecification,
                  ) -> SineLevelSet:
     """Read each tone's level out of a recording, against its own sweep.
 
-    Reconstruct every wanted tone's sweep from the specification's
-    breakpoints, find where the environment's clock begins in the
-    recording (joint matched filter; `onsets` overrides per tone name,
-    and the found value rides the result as `.onset`), then solve for
-    every tone's complex envelope on every control channel at once
-    with the second-order **Vold-Kalman filter** (`vold_kalman`): the
-    record modeled as the sum of the tones on their known sweeps, each
-    envelope held to a slow curve over `cycles` cycles of its own
-    instantaneous frequency. Joint, so crossing sweeps are separated
-    by their frequency histories rather than each reading the other
-    as noise — the documented limit of the tracking demodulation this
-    replaced (2026-09-03). Solved one chunk of the record at a time
-    (`_read_levels`), so the memory is a chunk's whatever the record's
-    length (2026-10-01).
+    Every wanted tone's sweep is rebuilt from the specification's
+    breakpoints, and the start of the environment's clock is found in
+    the recording by joint matched filter (`find_environment`; `onsets`
+    overrides it per tone name, and each level carries its onset as
+    `SineLevel.onset`). Every tone's complex envelope on every control
+    channel is then solved jointly with the second-order Vold-Kalman
+    filter (`vold_kalman`): the record is modeled as the sum of the
+    tones on their known sweeps, each envelope held to a slowly varying
+    curve over `cycles` cycles of its own instantaneous frequency.
+    Because the solve is joint, crossing sweeps are separated by their
+    frequency histories instead of each reading the other as noise.
+    Tones far apart in frequency are solved separately
+    (`SEPARATION_BANDWIDTHS`), and the record is solved one chunk at a
+    time, so the memory needed is a chunk's whatever the record's
+    length.
 
-    `cycles` None is **automatic** (`suggest_cycles`): the smoothing
-    is climbed until the predicted scatter of the readings is under
-    `target_db`, measured from the recording itself. The smoothing
-    used rides the result as `SineLevelSet.cycles`.
+    `cycles` None is automatic (`suggest_cycles`): the smoothing is
+    increased until the predicted scatter of the readings is under
+    `target_db`, measured from the recording itself. The smoothing used
+    is stored on the result as `SineLevelSet.cycles`.
 
-    The magnitude is *debiased*: a noisy envelope's magnitude reads
-    high, so the noise power left in the residual around each
-    reading, scaled by the filter's equivalent averaging length, is
-    subtracted from the squared magnitude before the square root — a
-    planted amplitude under 4x its own RMS of noise reads back within
-    a fraction of a dB. Where the tone is under that noise the reading
-    is reported at the floor and flagged (`SineLevel.below_floor`)
-    rather than at zero. The controller's own live tracker carries the
-    raw bias, which is worth remembering when the two are compared.
+    The magnitude is debiased. A noisy envelope's magnitude reads high,
+    so the noise power the smoothing lets through, measured in the
+    residual beside the tone (`SIDE_CORNERS` filter corners above and
+    below it) and averaged over the filter's equivalent averaging
+    length, is subtracted from the squared magnitude before the square
+    root. A planted amplitude under four times its own RMS of noise
+    reads back within a fraction of a dB. Where the tone is under that
+    noise, the reading is reported at the floor and flagged
+    (`SineLevel.below_floor`) rather than reported as zero. The
+    controller's own tracking reading includes this bias, so under
+    noise it reads higher than the extracted level.
 
-    With `refine`, the sweep clock is checked against the recording:
-    each tone's envelope phase slope is fitted chunk by chunk
-    (`_clock_correction`) and, where the implied frequency offset
-    reaches `REFINE_FRACTION` of the filter's bandwidth at either end
-    of the sweep, the argument is moved by it and the solve repeated,
-    up to three times. The offset applied at the end of each tone's
-    sweep rides the result as `SineLevel.drift_hz`, zero when none was
-    needed.
+    With `refine` (default True), the sweep clock is checked against
+    the recording: each tone's envelope phase slope is fitted chunk by
+    chunk, and where the implied frequency offset is more than
+    `REFINE_FRACTION` of the filter's bandwidth at either end of the
+    sweep, the argument is moved by it and the solve repeated, up to
+    three solves in all. The offset applied at the end of each tone's
+    sweep is stored as `SineLevel.drift_hz`, zero when none was needed.
 
-    `workers` is how many processes the pieces are spread over
-    (Brandon, 2026-10-01: use the cores): None picks the cores up to
-    `MAX_WORKERS`, and spreads only when the work is more than
-    `PARALLEL_FLOOR` samples times channels, since the workers take a
-    second each to start; 1 does everything here. The numbers are the
-    same either way — each piece and channel is one task, and a task
-    is the serial code.
+    `workers` is how many processes the pieces are spread over. None
+    uses the cores up to `MAX_WORKERS`, and spreads the work only when
+    it is more than `PARALLEL_FLOOR` samples times channels, since each
+    worker takes about a second to start; 1 does everything in this
+    process. The numbers are the same either way, since each piece and
+    channel is one task and a task runs the serial code. `progress`,
+    when given, is called with (done, total) as the work proceeds.
 
-    The envelope is read every window/`points_per_window` along the
-    sweep, one (almost) independent reading each. Returns a
-    `SineLevelSet` — one object, one `SineLevel` per tone inside,
-    frequencies ascending whichever way the tone swept, each line
-    stamped with the second it was measured. A recording that ends
-    before a tone does yields the lines it reached — the coverage the
-    comparison reports.
+    The envelope is read every window/`points_per_window` samples along
+    the sweep (default 2), each reading nearly independent of the next.
+    Returns a `SineLevelSet` with one `SineLevel` per tone, frequencies
+    ascending whichever way the tone swept, each line with the second
+    it was measured. A recording that ends before a tone does gives the
+    lines it reached, which is the coverage the comparison reports.
+    Raises ValueError when the recording is not evenly sampled, lacks a
+    control channel, or holds less than one smoothing window of a tone.
     """
+    # The joint solve replaced the tracking demodulation (Brandon,
+    # 2026-09-03: the last analysis before a report should use the best
+    # estimator there is); crossing sweeps were that method's documented
+    # limit. Chunked since 2026-10-01, and spread over workers the same
+    # day (Brandon: use the cores).
     dt = _even_steps(np.asarray(history.abscissa, dtype=float),
                       'Extracting sine levels')
     rows = _control_rows(history, specification)

@@ -1,28 +1,29 @@
-"""The 3-D reading of a data object: its records as a waterfall.
+"""The 3-D view of a data object: its records as a waterfall.
 
-Many channels on one 2-D axis hide each other exactly where it matters
-most — resonances line up, and the tenth curve lands on the first nine.
-The waterfall spreads the records along a depth axis instead: one
-polyline per record at its own station, wearing the same label the
-grids and the legend use, colored by level so a peak reads across the
-whole set at once.
+Many channels on one 2-D axis hide each other where it matters most:
+resonances line up, and the tenth curve is drawn over the first nine.
+The waterfall spreads the records along a depth axis instead, one
+polyline per record at its own station, with the same label the grids
+and the legend use, and colored by level so that a peak can be followed
+across the whole set.
 
-numpy and PyVista only — no Qt, like the rest of `viz`. Two decisions
-carry the size ceiling:
+It uses numpy and PyVista only, with no Qt, like the rest of `viz`. Two
+choices set how large a scene can be:
 
-- **Points are peak-decimated per record** before VTK sees them
-  (`decimate.peak_decimate`, the same reading the 2-D plot and the
-  report use), so a million-sample time history arrives as the few
+- Each record's points are peak-decimated before VTK gets them
+  (`decimate.peak_decimate`, the same reduction the 2-D plot and the
+  report use), so a million-sample time history arrives as a few
   thousand points that keep every peak.
-- **The whole set of curves is one PolyData under one actor**, whatever
-  the record count — per-record actors are what make large scenes slow,
-  which the animation learned at 202k nodes.
+- All of the curves are one PolyData under one actor, whatever the
+  record count, because an actor per record is what makes a large scene
+  slow.
 
-The scene is drawn on a fixed stage (`STAGE`) rather than in data
-coordinates — a PSD spans decades while its frequency axis spans
-kilohertz, and raw coordinates would draw a needle — and the axes are
-relabeled with the real ranges (`axes_ranges`), the vertical one in
-log10 for data that reads on a log axis, which the axis title says.
+The scene is drawn on a fixed stage (`STAGE`) instead of in data
+coordinates, because a PSD's level spans decades while its frequency
+spans kilohertz, and drawn in raw coordinates it would be a thin needle.
+The axes are relabeled with the real ranges (`axes_ranges`). The
+vertical axis is in log10 for data read on a log axis, and its title
+says so.
 """
 
 from __future__ import annotations
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 
     from ..core.data import DataArray
     from ..units import UnitSystem
+
+# One actor for every curve: the animation learned at 202k nodes that
+# per-record (per-mesh) actors are what make a large scene slow.
 
 #: points a record may bring to the scene after decimation. 4096 keeps
 #: every peak a screen could show and puts a 320-record stack of
@@ -79,12 +83,13 @@ LABEL_LIMIT = 40
 def waterfall_groups(data: DataArray,
                      records: Sequence[int] | None = None
                      ) -> list[tuple[tuple[str, str | None], list[int]]]:
-    """Every (dimension, hint) group among the records asked for.
+    """Every (dimension, hint) group among `records` (all of them when
+    None), as [(key, record indices)].
 
-    In the object's own order — what the quantity box offers, and what
-    `waterfall_group` chooses from. Same grouping key as the 2-D plot,
-    minus the per-plot axis preferences that stacked axes need and one
-    floor does not.
+    In the object's own order. These are what the quantity box offers,
+    and what `waterfall_group` chooses from. The grouping key is the 2-D
+    plot's, without the per-plot axis preferences that stacked axes need
+    and a single stage does not.
     """
     wanted = (range(data.num_records) if records is None
               else [int(i) for i in records])
@@ -99,16 +104,17 @@ def waterfall_group(data: DataArray,
                     records: Sequence[int] | None = None,
                     quantity: tuple[str, str | None] | None = None
                     ) -> tuple[list[int], list[int]]:
-    """Which of the asked-for records draw together, and which wait.
+    """Which of the requested records are drawn together, and which are
+    left out.
 
-    One vertical axis cannot honestly hold accelerations and volts at
-    once. The 2-D plot answers with one stacked axis per quantity; a
-    scene has one floor, so the waterfall draws one (dimension, hint)
-    group — the one `quantity` names, else the largest (the earliest
-    on a tie) — and reports the rest for the quantity box to offer.
-    A `quantity` no longer present falls back to the largest rather
-    than refusing: it is a sticky view choice outliving the selection
-    it was made on, not a claim about this object.
+    One vertical axis cannot hold accelerations and volts at once. The
+    2-D plot uses one stacked axis per quantity; a scene has one stage,
+    so the waterfall draws one (dimension, hint) group, the one
+    `quantity` names or else the largest (the earliest on a tie), and
+    reports the rest for the quantity box to offer. A `quantity` that is
+    not present falls back to the largest group instead of raising,
+    because it is a view choice kept from an earlier selection and not a
+    statement about this object.
 
     Returns (drawn, left_out), both in the object's record order.
     """
@@ -127,35 +133,42 @@ def records_per_page(data: DataArray, drawn_count: int,
                      samples: int, shape: str,
                      budget: int = SCENE_BUDGET,
                      points: int = POINT_BUDGET) -> int:
-    """How many records fit in one scene, from what each one costs.
+    """How many records fit in one scene, from the vertices each one
+    costs.
 
-    A stepped record costs two points per bin and is never thinned, so
-    a 16k-line PSD is 32k vertices however the budget feels about it.
-    Anything else is thinned to `points` first, so it costs at most
-    that. Derived from vertices rather than fixed at a record count
-    because line counts vary by orders of magnitude — 300 records of
-    16k lines and 4800 of 1k lines are the same scene.
+    `samples` is the number of abscissa values and `shape` the drawing
+    shape (`plot.drawing_shape`). A stepped record ('steps') costs two
+    points per bin and is never thinned, so a 16k-line PSD is 32k
+    vertices whatever the budget. Any other record is thinned to
+    `points` first, so it costs at most that. The count comes from
+    vertices and not from a fixed number of records because line counts
+    vary by orders of magnitude: 300 records of 16k lines and 4800 of 1k
+    lines are the same size of scene. `budget` is the scene's vertex
+    limit, and the result is at most `drawn_count`.
 
-    `points` is the decimation budget actually in use, not always this
-    module's: the report draws the same stage on a far smaller one,
-    and costing its records at the app's budget answered 26 records
-    where 48 fit. On screen the two are the same number, which is why
-    this went unnoticed.
+    `points` must be the decimation budget actually in use, which is not
+    always this module's: the report draws the same stage with a much
+    smaller one.
 
-    Never returns zero: one record always draws, even if it is alone
-    over budget, because a page showing nothing is not a page.
+    Never returns zero. One record is always drawn, even when it alone
+    is over the budget.
     """
+    # Costing the report's records at the app's budget once gave 26
+    # records a page where 48 fit; on screen the two budgets are the
+    # same number, which is why it went unnoticed.
     per_record = 2 * samples if shape == 'steps' else min(samples, points)
     return max(1, min(drawn_count or 1, budget // max(per_record, 1)))
 
 
 def quantity_label(key: tuple[str, str | None]) -> str:
-    """The word the quantity box shows for one group.
+    """The word the quantity box shows for one (dimension, hint) group.
 
-    The response factor of the dimension, in the interface's own
-    vocabulary — a PSD group of acceleration**2/frequency reads
-    'acceleration', an FRF group by what it measures. A hinted group
-    keeps the undefined-units flag the axes carry.
+    It is the response quantity of the dimension, in the words the
+    interface uses: a PSD group of acceleration**2/frequency shows
+    'acceleration', and an FRF group shows what it measures. A group
+    whose units are undefined is named the same way from its hint, with
+    '[units undefined]' after it as the axes show, or is
+    'units undefined' when it has no hint.
     """
     from ..core.data import channel_quantities
     from ..core.unit_choices import shown_dimension
@@ -199,19 +212,30 @@ def waterfall_arrays(data: DataArray,
                      quantity: tuple[str, str | None] | None = None,
                      page: int = 0,
                      scene_budget: int | None = None) -> dict[str, Any]:
-    """The waterfall's numbers, before any VTK touches them.
+    """The waterfall's numbers, before VTK is involved.
 
-    Decimated per-record curves in display units, the log mapping, the
-    labels — everything the scene draws, in a form a test can hold
-    without a render window. Returns a dict:
+    Everything the scene draws, in a form a test can check without a
+    render window: the per-record curves in display units, decimated to
+    `budget` points (a stepped spectrum is not decimated), the log
+    mapping and the labels. `component` ('magnitude', 'real', 'imag' or
+    'phase') applies to complex frequency data, as in the 2-D plot.
+    `quantity` picks the group drawn (`waterfall_group`). The records
+    are split into pages of as many as fit in `scene_budget` vertices
+    (`SCENE_BUDGET` by default, `records_per_page`), and `page` picks
+    one, clipped to the pages there are. Returns a dict:
 
-    - ``curves``: one ``(x, z)`` pair per drawn record, peak-decimated;
-      ``z`` is log10 of the value when ``log_scaled``, with non-positive
-      values as NaN gaps
+    - ``curves``: one ``(x, z)`` pair per drawn record. ``z`` is log10
+      of the value when ``log_scaled``, with non-positive values as NaN
+      gaps, and ``x`` is log10 of the abscissa when ``log_abscissa``
     - ``labels``: each drawn record's `record_label`
-    - ``drawn`` / ``left_out``: record indices, from `waterfall_group`
-    - ``log_scaled``: whether ``z`` is the log10 reading
-    - ``xlabel`` / ``zlabel``: axis titles, plain text for VTK
+    - ``drawn`` / ``left_out``: record indices; ``drawn`` is this page
+      of the group from `waterfall_group`
+    - ``log_scaled`` / ``log_abscissa``: whether ``z`` and ``x`` are
+      log10 values
+    - ``xlabel`` / ``zlabel``: axis titles, in plain text for VTK
+    - ``page``, ``pages``, ``per_page``: the page drawn, how many there
+      are, and the records on each
+    - ``of_quantity``: how many records the group has over all pages
     """
     us = unit_system or DEFAULT_SYSTEM
     chosen, left_out = waterfall_group(data, records, quantity)
@@ -381,22 +405,24 @@ def _finite_runs(z: np.ndarray) -> list[tuple[int, int]]:
 
 def nice_axis(low: float, high: float,
               budget: float = 0.05) -> tuple[float, float, int]:
-    """(low, high, label count) — the range widened to round ticks,
-    when the widening is nearly free.
+    """(low, high, label count): the range widened to round tick values,
+    when that adds little empty axis.
 
-    The cube axes place their labels at even divisions of the range,
-    so a 0.4998 s record divided five ways puts ticks at 0.125 and
-    0.375 — and the default one-decimal format then *prints* them as
-    0.1 and 0.4, numbers that do not sit where they claim (Brandon,
-    2026-08-28: the record read as 0.6 s long against the truncation
-    boxes' honest 0.5). Widening to 0..0.5 with six labels makes
-    every tick round *and* true.
+    The cube axes place their labels at even divisions of the range, so
+    a 0.4998 s record divided five ways has ticks at 0.125 and 0.375,
+    which a one-decimal format prints as 0.1 and 0.4, values that are
+    not where they are drawn. Widened to 0 to 0.5 with six labels, every
+    tick is round and correct.
 
-    Only when it costs at most `budget` of the span in dead axis: a
-    1024 Hz Nyquist would widen to 1200, a fifth of the stage holding
-    no data, so it keeps its exact range — the label format prints
-    those positions truthfully instead.
+    The range is widened only when that adds at most `budget` of the
+    span as empty axis. A 1024 Hz Nyquist would widen to 1200, leaving a
+    fifth of the stage with no data, so it keeps its exact range with
+    five labels, and the label format prints those positions as they
+    are. A range that is empty or not finite is returned unchanged.
     """
+    # Brandon, 2026-08-28: a record read as 0.6 s long against the
+    # truncation boxes' correct 0.5, because the ticks at 0.125 and 0.375
+    # were printed as 0.1 and 0.4.
     span = float(high) - float(low)
     if not span > 0.0 or not np.isfinite(span):
         return float(low), float(high), 5
@@ -414,13 +440,15 @@ def nice_axis(low: float, high: float,
 
 def drawn_span(curves: Any, default: tuple[float, float] = (0.0, 1.0)
                ) -> tuple[float, float]:
-    """(low, high) of the abscissa where something is drawn: points
-    whose level is finite, never the whole abscissa a curve is carried
-    on. A PSD written as a controller writes a specification — every
-    line to Nyquist, zero outside its band — draws only over the band
-    (zero is a gap on a log level), and a stage that spanned all its
-    lines drew 20 to 400 Hz as a sliver of a 0 to 2048 Hz floor
-    (Brandon, 2026-10-09)."""
+    """(low, high) of the abscissa where something is drawn, over the
+    points whose level is finite, never over the whole abscissa a curve
+    is carried on. A PSD written the way a controller writes a
+    specification (every line to Nyquist, zero outside its band) is
+    drawn only over its band, since zero is a gap on a log level, and
+    the stage spans only that band. `curves` are ``(x, z)`` pairs, and
+    `default` is returned when nothing is finite."""
+    # Brandon, 2026-10-09: a stage that spanned every line drew 20 to
+    # 400 Hz as a small fraction of a 0 to 2048 Hz floor.
     lows, highs = [], []
     for cx, cz in curves:
         cx, cz = np.asarray(cx, dtype=float), np.asarray(cz, dtype=float)
@@ -436,19 +464,30 @@ def drawn_span(curves: Any, default: tuple[float, float] = (0.0, 1.0)
 def stage_curves(arrays: dict[str, Any],
                  ordinate_limits: tuple[float, float] | None = None
                  ) -> dict[str, Any]:
-    """The waterfall's curves placed on the unit stage.
+    """The waterfall's curves placed on the stage.
 
-    Takes `waterfall_arrays`' output and answers where every point
-    stands in stage coordinates — abscissa across, records receding,
-    level up — plus the real ranges that stage stands in for and the
-    runs of finite values each curve breaks into (a gap is a gap; a
-    polyline drawn through one would invent a value).
+    Takes the output of `waterfall_arrays` and gives the position of
+    every point in stage coordinates (abscissa across, records receding,
+    level up), the real ranges the stage stands for, and the runs of
+    finite values each curve breaks into. A gap stays a gap, since a
+    polyline drawn through one would show a value that is not there.
+    The abscissa range is widened to round ticks (`nice_axis`). When
+    `ordinate_limits` is given and the level is not log-scaled, it fixes
+    the vertical range, as the 2-D plot fixes a coherence to 0 to 1.05.
 
-    Here rather than inside `add_waterfall` because the report draws
-    the same stage in a canvas, and two normalizations would be two
-    pictures of one measurement. Returns a dict of ``runs`` (each
-    ``{'station', 'points', 'levels'}``), ``extents`` (x0, x1, z0,
-    z1), ``stations`` and ``labels`` — plain floats, no VTK.
+    This is separate from `add_waterfall` because the report draws the
+    same stage in a canvas, and two normalizations would give two
+    pictures of one measurement. Returns a dict, with no VTK in it:
+
+    - ``runs``: each ``{'record', 'station', 'points', 'levels',
+      'first'}``, where ``first`` is the run's first index in its curve
+    - ``extents``: (x0, x1, z0, z1), the real ranges
+    - ``stations``: how many records are on the stage
+    - ``x_label_count``: how many abscissa labels to draw
+    - ``labels``, ``xlabel``, ``zlabel``, ``log_abscissa``: from the
+      arrays
+    - ``xn``, ``zn``: functions taking real values to stage
+      coordinates
     """
     curves = arrays['curves']
     n = len(curves)
@@ -508,21 +547,32 @@ def add_waterfall(plotter: Any, data: DataArray,
                   page: int = 0,
                   scene_budget: int | None = None,
                   color: str | None = None) -> dict[str, Any]:
-    """Draw the waterfall into a plotter: one mesh, labels, axes.
+    """Draw the waterfall into a plotter: one mesh, the channel labels
+    and the axes.
 
-    `quantity` picks which (dimension, hint) group of a mixed object
-    stands on the floor — the quantity box's choice; None means the
-    largest. Returns `waterfall_arrays`' dict with ``points`` (how many
-    vertices the scene got — the number a size-ceiling test pins) and
-    ``named`` (which drawn positions got a channel label) added.
+    The arguments are those of `waterfall_arrays`. `quantity` picks
+    which (dimension, hint) group of a mixed object is drawn, as the
+    quantity box does; None means the largest. Past `LABEL_LIMIT`
+    records, only every nth record gets a channel label, so that at most
+    `LABEL_LIMIT` are labeled; every curve is still drawn.
+    A log abscissa is labeled in decades (`marks.add_decade_axis`).
 
-    `color` draws the ribbons flat in one color instead of on the
-    level colormap: the stood-back reading, for a record shown as the
-    reference for something else drawn over it — what the filter
-    preview does with the raw record (Brandon, 2026-08-25). The
-    extents, the axes and the stations are unchanged, so the thing
-    drawn over it lands in the same space.
+    `color` draws the curves in one flat color instead of on the level
+    colormap. That is for a record shown as the reference for something
+    drawn over it, as the filter preview does with the raw record. The
+    extents, the axes and the stations are unchanged, so what is drawn
+    over it lands in the same space.
+
+    Returns the dict from `waterfall_arrays` with these added:
+    ``points`` (how many vertices the scene has), ``named`` (which drawn
+    positions got a channel label), ``extents`` ((x0, x1, z0, z1), the
+    real ranges the stage stands for, so marks drawn later land at the
+    data positions they describe), ``stations`` (how many records are
+    on the stage) and, for a log abscissa, ``decades`` (the decade
+    labels drawn).
     """
+    # The flat `color` was added for the filter preview's raw record
+    # (Brandon, 2026-08-25).
     import pyvista as pv
 
     us = unit_system or DEFAULT_SYSTEM
@@ -627,14 +677,16 @@ def waterfall_scene(data: DataArray,
                     quantity: tuple[str, str | None] | None = None,
                     marks: str | None = None,
                     per_octave: int | None = None) -> Any:
-    """Build (or add to) a PyVista plotter showing the waterfall.
+    """Build a PyVista plotter showing the waterfall, or add it to
+    `plotter`.
 
-    Same shape as `geometry_scene`: `theme` is 'light', 'dark' or a
-    colors dict; returns the plotter — `.show()` it, or `.screenshot()`
-    if off_screen. The camera is placed once, here: from the front-left
-    and above, abscissa reading left to right, records receding.
-    `marks` draws one of the record's readings over the stage
-    (`viz.marks.add_stage_reading`).
+    Called the same way as `geometry_scene`: `theme` is 'light', 'dark'
+    or a colors dict, and the plotter is returned, to ``.show()``, or to
+    ``.screenshot()`` when it is off screen. `records`, `component`,
+    `budget` and `quantity` are those of `waterfall_arrays`. The camera
+    is placed here, once (`place_camera`). `marks` draws one of the
+    record's readings over the stage (`viz.marks.add_stage_reading`),
+    with `per_octave` for 'octave'.
     """
     import pyvista as pv
 
@@ -654,14 +706,14 @@ def waterfall_scene(data: DataArray,
 
 
 def place_camera(plotter: Any) -> None:
-    """The waterfall's home view, placed — never re-placed on a redraw.
+    """Place the camera at the waterfall's home view.
 
-    From the front-left and above: abscissa left to right, records
-    receding. Far enough out that the vertical axis title clears the
-    frame — one notch closer clipped it. The window calls this when the
-    displayed object changes and at no other time, per the standing
-    camera rule; the stage is a fixed size, so one home view fits every
-    object.
+    From the front-left and above, with the abscissa reading left to
+    right and the records receding, and far enough out that the
+    vertical axis title stays inside the frame (one step closer cut it
+    off). The window calls this when the displayed object changes and at
+    no other time, so a redraw never moves the camera. The stage is a
+    fixed size, so one home view fits every object.
     """
     sx, sy, sz = STAGE
     plotter.camera_position = [
@@ -671,15 +723,15 @@ def place_camera(plotter: Any) -> None:
 
 
 def stage_basis() -> tuple[np.ndarray, np.ndarray]:
-    """(right, up) — the stage's home view, as a parallel basis.
+    """(right, up): the stage's home view, as unit vectors for a
+    parallel projection.
 
-    Derived from the very camera `place_camera` sets, so everything
-    that draws the stage without a camera — the app icon's tile, the
-    report's 3-D figure — opens on the app's own view of data rather
-    than on a second isometric that merely looks similar. Parallel
-    rather than the camera's perspective: both of those readings are
-    small, and perspective at that size is a distortion nobody reads
-    as depth.
+    Computed from the camera `place_camera` sets, so everything that
+    draws the stage without a camera (the app icon's tile, the report's
+    3-D figure) shows the same view as the app, not a second isometric
+    view that looks similar. It is parallel, not the camera's
+    perspective, because both of those figures are small, and at that
+    size perspective looks like distortion rather than depth.
     """
     sx, sy, sz = STAGE
     position = np.array([-sx * 0.5, -sy * 2.3, sz * 3.0])
@@ -692,9 +744,11 @@ def stage_basis() -> tuple[np.ndarray, np.ndarray]:
 
 
 def ribbon(xn: Any, yn: Any, z_low: Any, z_high: Any) -> Any:
-    """A translucent surface between two curves over one path on the
-    stage — the banded and sine views' zone fill, built once here so
-    the two cannot drift apart. `yn` may be one depth or one per point.
+    """A surface between two curves over one path on the stage, as a
+    PolyData of quads: the zone fill of the banded and sine stages,
+    built here once so the two stay the same. `xn`, `z_low` and `z_high`
+    have one value per point, and `yn` is one depth or one per point.
+    The caller sets its color and opacity.
     """
     import numpy as np
     import pyvista as pv
@@ -713,9 +767,10 @@ def ribbon(xn: Any, yn: Any, z_low: Any, z_high: Any) -> Any:
 
 
 def finish_scene(plotter: Any, screenshot: str | None, show: bool) -> Any:
-    """End a stage's headless call the one way every stage does: render
-    to `screenshot` and hand back the image, or show, or hand back the
-    plotter for the caller to drive."""
+    """Finish a stage's headless call, the same way for every stage:
+    with a `screenshot` path, render to it, close the plotter and return
+    the image; otherwise show the plotter when `show` is true, and
+    return the plotter."""
     if screenshot is not None:
         image = plotter.screenshot(screenshot)
         plotter.close()
@@ -736,16 +791,16 @@ def plot_waterfall(data: DataArray,
                    per_octave: int | None = None) -> Any:
     """Show the waterfall interactively, or render it to `screenshot`.
 
-    The scriptable face of the plot bar's 3-D reading, like
-    `plot_geometry` for the geometry scene. Returns the pane (its
-    `.plotter` is the PyVista one), or the image array when rendering
-    to a file.
+    The script version of the plot bar's 3-D view, as `plot_geometry`
+    is for the geometry scene. `records`, `component` and `quantity`
+    are those of `waterfall_arrays`. Returns the pane (its `.plotter` is
+    the PyVista one), or the image array when rendering to a file.
 
-    `marks` puts one of the record's readings on the stage, as the
-    plot bar's toggles do in 3-D: 'averaging', 'shocks', 'truncation'
-    and 'filter' over a time history — each read from the history, or
-    what its detector would suggest — and 'octave' over a PSD, banded
-    `per_octave`.
+    `marks` draws one of the record's readings on the stage, as the plot
+    bar's toggles do in 3-D: 'averaging', 'shocks', 'truncation' or
+    'filter' over a time history, each taken from the history's own
+    setting or else from what its detector suggests, or 'octave' over a
+    PSD, banded `per_octave`.
     """
     if screenshot is not None:
         plotter = waterfall_scene(data, records, unit_system,

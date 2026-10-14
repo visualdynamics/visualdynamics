@@ -1,46 +1,43 @@
-"""The Engineering Sciences Common Data Format, read and written by its
-specification.
+"""Read and write the Engineering Sciences Common Data Format (ESCDF)
+by its specification files.
 
 ESCDF (github.com/sandialabs/Engineering-Sciences-Common-Data-Format,
-BSD-3-Clause) is one HDF5 file: metadata groups at the root — a
-geometry, a channel table, a set of parameters — and an `activities`
-group with one group per test or analysis, holding the results it
-produced and a `parameters` list naming the metadata it links to. Every
-dataset is a group stamped with the name of its specification, a
-descriptive name and a version, and carries one HDF5 dataset per
-property, each stamped with its type. What the types are is written in
-plain-text specification files, one per type, and those files are the
-standard: a reader that parses them reads every type there is, and a
-type added tomorrow is a file added tomorrow. The files ship here as
-package data (`escdf_specifications/`, with their license), and this
-module reads them the way the reference implementation does, from the
-grammar its documentation states — and was held to the reference's own
-files, both ways, as it was written (2026-09-30; PLAN.md "ESCDF: import
-and export first").
+BSD-3-Clause) is one HDF5 file. Metadata groups are at the root (a
+geometry, a channel table, a parameter set), and an `activities` group
+holds one group per test or analysis, with the results it produced and
+a `parameters` list naming the metadata it links to. Each dataset is a
+group with the name of its specification, a descriptive name and a
+version, and has one HDF5 dataset per property, each with its type.
+The types are defined in plain-text specification files, one per type,
+and those files are the standard: a reader that parses them reads every
+type they define, and a new type needs only a new file. The files are
+included as package data (`escdf_specifications/`, with their license),
+and this module parses them by the grammar the reference
+implementation's documentation states.
 
-What this module is: the generic layer. `Specification` is a parsed
-file; `Dataset` is one group's worth of values against its
-specification, validated the way the reference validates — every
-property named, every shared dimension the same size wherever it
-appears, one choice of every either-or group, an enumeration honored —
-and `File` is the whole file with its activities. `read` and `write`
-move a `File` to and from disk on h5py. What it is not: the mapping
-from these to Visual Dynamics' own objects, which is `escdf_objects`.
+This module is the generic layer. `Specification` is a parsed file;
+`Dataset` is one group's values against its specification, validated
+as the reference validates (every required property present, every
+shared dimension the same size wherever it appears, one alternative of
+every either-or group, every enumeration and pattern honored); `File`
+is the whole file with its activities. `read` and `write` move a `File`
+to and from disk with h5py. Converting these to and from Visual
+Dynamics objects is done in `escdf_objects`.
 
 The on-disk conventions, as measured from files the reference wrote:
-strings are variable-length UTF-8, a scalar string a zero-dimensional
-dataset; bytes are variable-length uint8; a `variable_length` property
-is a one-dimensional dataset of variable-length rows of its type;
-numbers are the type the specification names, `u8` meaning eight
-*bytes*, so `uint64`, and `c16` `complex128`; every property dataset
-carries a `data_type` attribute naming that type; every group carries
-`_specification_name`, `_descriptive_name` and `_version` (three
-integers); an activity group carries `activity_name` and
-`activity_date` (ISO 8601, UTC) and a `parameters` string dataset of
-the metadata names it links to; the file carries `created_by` and
-`created_date`. A choice group is written as whichever alternative was
-chosen, under the shared property name, and read back by which shape
-and type is found.
+strings are variable-length UTF-8, and a scalar string is a
+zero-dimensional dataset; bytes are variable-length uint8; a
+`variable_length` property is a one-dimensional dataset of
+variable-length rows of its type; numbers are the type the
+specification names, where `u8` means eight bytes (`uint64`) and `c16`
+is `complex128`; every property dataset has a `data_type` attribute
+naming that type; every group has `_specification_name`,
+`_descriptive_name` and `_version` (three integers); an activity group
+has `activity_name` and `activity_date` (ISO 8601, UTC) and a
+`parameters` string dataset of the metadata names it links to; the file
+has `created_by` and `created_date`. A choice group is written as
+whichever alternative was chosen, under the shared property name, and
+read back by the shape and type found.
 """
 
 from __future__ import annotations
@@ -54,6 +51,9 @@ from typing import Any
 
 import h5py
 import numpy as np
+
+# Checked against the reference's own files in both directions while it was
+# written (2026-09-30; PLAN.md "ESCDF: import and export first").
 
 __all__ = [
     'Activity',
@@ -80,19 +80,21 @@ _IDENTIFIER = re.compile(r'^[a-zA-Z][a-zA-Z0-9_]*$')
 
 
 def valid_identifier(name: str, prefix: str = 'item_') -> str:
-    """The format's name for a group: ASCII letters, digits and
-    underscores, starting with a letter — whitespace to underscores,
-    anything else dropped, `prefix` in front if what is left does not
-    start with a letter (the reference's own repair, so a name repaired
-    here is the name it would give).
+    """A name the format accepts for a group: ASCII letters, digits and
+    underscores, starting with a letter.
+
+    Whitespace becomes underscores, other characters are dropped, and
+    `prefix` is put in front when what is left does not start with a
+    letter. This is the reference implementation's repair, so a name
+    repaired here is the name it would give.
 
     Parameters
     ----------
     name : str
         Any text.
     prefix : str, default 'item_'
-        What to put in front when the repaired name starts with a digit
-        or is empty.
+        What to put in front when the repaired name does not start with a
+        letter (it starts with a digit or an underscore, or is empty).
 
     Returns
     -------
@@ -125,8 +127,8 @@ class Property:
 
     @property
     def key(self) -> str:
-        """What the on-disk dataset is called: the name, shared by the
-        alternatives of a choice group."""
+        """The name of the dataset on disk: the property name, which the
+        alternatives of a choice group share."""
         return self.name
 
 
@@ -152,9 +154,10 @@ class Specification:
     _parents: dict[str, Specification] = field(default_factory=dict, repr=False)
 
     def all_properties(self) -> list[Property]:
-        """Every property, inherited ones first, a child's redefinition
-        of a parent's name replacing the parent's (a `data_type` that
-        narrows its enumeration, as `response_spectrum` does)."""
+        """Every property, inherited ones first. A property this type
+        redefines replaces the parent's of the same name (as
+        `response_spectrum` redefines `data_type` with a narrower
+        enumeration)."""
         chain: list[Specification] = []
         spec: Specification | None = self
         while spec is not None:
@@ -316,8 +319,8 @@ _SPECIFICATIONS: dict[str, Specification] | None = None
 
 
 def specifications() -> dict[str, Specification]:
-    """Every type the vendored specification files define, by name,
-    each knowing its parents.
+    """Every type the included specification files define, by name, each
+    with its parent types resolved.
 
     Returns
     -------
@@ -358,12 +361,13 @@ class Dataset:
         return specifications().get(self.kind)
 
     def problems(self) -> list[str]:
-        """What keeps this dataset from validating against its
-        specification, as the reference would refuse it: a required
-        property missing, a choice group with none or two alternatives
-        chosen, a shared dimension of two sizes, a type the value cannot
-        take, an enumeration or pattern not honored. Empty when valid;
-        an unknown type is a problem of its own.
+        """Why this dataset does not validate against its specification,
+        as the reference would refuse it: a required property missing, a
+        choice group with no alternative or two chosen, a shared
+        dimension with two sizes, a value its type cannot hold, an
+        enumeration or pattern not honored. Empty when valid. A type no
+        specification defines may hold only extras, so it is a problem
+        only when it has values.
 
         Returns
         -------
@@ -523,8 +527,9 @@ class File:
     activities: dict[str, Activity] = field(default_factory=dict)
 
     def problems(self) -> list[str]:
-        """Every dataset's problems, each prefixed with where it is, and
-        a link that names no metadata."""
+        """Every dataset's problems, each prefixed with where it is, plus
+        each link that names no metadata and each known type in an
+        activity that is not an activity result."""
         out = [f'{name}: {p}' for name, ds in self.metadata.items()
                for p in ds.problems()]
         specs = specifications()
@@ -668,7 +673,7 @@ def _read_dataset(group: h5py.Group) -> Dataset:
 
 
 def write(file: File, path: str | os.PathLike) -> None:
-    """Write a `File` as an ESCDF file, validating first.
+    """Write a `File` as an ESCDF file, validating it first.
 
     Parameters
     ----------
@@ -676,6 +681,12 @@ def write(file: File, path: str | os.PathLike) -> None:
         What to write; `file.problems()` must be empty.
     path : path-like
         The file to write; replaced if it exists.
+
+    Raises
+    ------
+    ValueError
+        Listing the problems, when `file.problems()` is not empty.
+        Nothing is written.
     """
     problems = file.problems()
     if problems:
@@ -700,9 +711,9 @@ def write(file: File, path: str | os.PathLike) -> None:
 
 
 def read(path: str | os.PathLike) -> File:
-    """Read an ESCDF file whole: every dataset against its
-    specification, unknown types and undefined properties kept as they
-    are.
+    """Read a whole ESCDF file: every dataset against its specification,
+    with unknown types and properties no specification names kept as
+    they are.
 
     Parameters
     ----------
@@ -736,8 +747,8 @@ def read(path: str | os.PathLike) -> File:
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    """An HDF5 file with an `activities` group and the file's own
-    creation stamps."""
+    """True for an HDF5 file with an `activities` group and a
+    `created_by` attribute."""
     try:
         with h5py.File(path, 'r') as h5:
             return 'activities' in h5 and 'created_by' in h5.attrs

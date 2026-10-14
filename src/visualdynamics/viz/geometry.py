@@ -1,13 +1,11 @@
-"""PyVista scene construction for Geometry.
+"""Building the PyVista scene for a geometry.
 
-Coordinates are converted from stored SI to the display unit system at scene
-build time — switching unit systems rebuilds the scene, never the data.
+Coordinates are stored in SI and converted to the display unit system
+when the scene is built, so changing the unit system rebuilds the scene
+and leaves the data alone.
 
-Line elements are drawn with direct colors, grouped by color
-index, except when the scene is colored by value (see docs/colormap.md).
-An older note here warned that macOS VTK silently drops scalar-mapped line
-cells; that was measured against pyvista 0.48.4 / VTK 9.6.2 and does not
-reproduce — see the same doc for the numbers.
+Line elements are drawn in direct colors, grouped by color index,
+except when the scene is colored by value.
 """
 
 from __future__ import annotations
@@ -27,6 +25,11 @@ from ..units import DEFAULT_SYSTEM
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.geometry import Geometry
     from ..units import UnitSystem
+
+# An older note here warned that macOS VTK silently drops scalar-mapped
+# line cells. Measured against pyvista 0.48.4 / VTK 9.6.2 it did not
+# reproduce; the numbers were in docs/colormap.md, since removed (git
+# history has it).
 
 # UFF-style color indices -> RGB
 PALETTE = [
@@ -52,16 +55,19 @@ COLORMAP = 'viridis'
 
 
 def color_name(index: int) -> str:
+    """The name of a color index ('gray', 'blue', ...), wrapping past 9."""
     return COLOR_NAMES[int(index) % len(COLOR_NAMES)]
 
 
 def color_rgb(index: int) -> tuple[float, float, float]:
+    """The RGB triple (0 to 1) of a color index, wrapping past 9."""
     return PALETTE[int(index) % len(PALETTE)]
 
 
 def axis_unit_text(geometry: Geometry, unit_system: UnitSystem) -> str:
-    """What the labeled axes say. A geometry whose units are undefined
-    says so rather than naming one."""
+    """The unit text the labeled axes show, such as ``'[mm]'``. A
+    geometry whose units are undefined shows ``'[units undefined]'``
+    instead of a unit."""
     if not geometry.units_defined:
         return '[units undefined]'
     return f"[{unit_system.label_text('length')}]"
@@ -69,11 +75,12 @@ def axis_unit_text(geometry: Geometry, unit_system: UnitSystem) -> str:
 
 def display_points(geometry: Geometry,
                    unit_system: UnitSystem) -> tuple[np.ndarray, str]:
-    """(coordinates to draw, axis unit text) for a geometry.
+    """The coordinates to draw for a geometry, and the axis unit text.
 
-    A geometry whose units are undefined is drawn with the file's raw
-    coordinates — converting them would silently scale unknown values — and
-    its axes say so rather than naming a unit.
+    Coordinates are converted from SI to `unit_system`. A geometry whose
+    units are undefined is drawn with the file's raw coordinates, because
+    converting them would scale values whose unit is unknown, and its
+    axis text says the units are undefined.
     """
     if not geometry.units_defined:
         return geometry.node_xyz, axis_unit_text(geometry, unit_system)
@@ -94,18 +101,17 @@ def element_cells(geometry: Geometry,
                   indices: Sequence[int] | None = None
                   ) -> tuple[dict[int, list[list[int]]],
                              dict[int, list[list[int]]], dict[int, list[int]]]:
-    """How the elements draw: (faces, lines, points), each keyed by
-    element color, every entry node *rows* (positions in `node_id`).
+    """How the elements are drawn: (faces, lines, points), each keyed by
+    element color, with every entry given as node rows (positions in
+    `node_id`), not node ids.
 
-    A face element is its corners (`face_corners`: a quad8's midside
-    nodes are not a boundary to trace); a solid is the skin of its color
-    — each cell's faces (`solid_faces`), less every face two cells
-    share — since a polyline through a brick's eight nodes is not a
-    brick; a line element is its first two nodes, a point element its
-    nodes. One rule for the 3-D view and for the report's and the HTML
-    export's scenes: the HTML once drew a brick as one eight-sided
-    polygon in node order, which folds it into a bow tie (Brandon,
-    2026-10-11, the website's brick examples).
+    A face element is drawn as its corner nodes (`face_corners`), since
+    a quad8's midside nodes are not corners of the outline. A solid is
+    drawn as the outer surface of its color: each cell's faces
+    (`solid_faces`), less every face that two cells share. A line
+    element is its first two nodes, and a point element is its nodes.
+    The 3-D view, the report's scenes and the HTML export all use this
+    one function.
 
     Parameters
     ----------
@@ -120,6 +126,9 @@ def element_cells(geometry: Geometry,
         Faces and lines as lists of row lists, points as a row list,
         each by element color.
     """
+    # One rule for every scene because the HTML export once drew a brick
+    # as one eight-sided polygon in node order, which folds it into a bow
+    # tie (Brandon, 2026-10-11, the website's brick examples).
     id_to_row = {int(i): r for r, i in enumerate(geometry.node_id)}
 
     def rows(node_ids):
@@ -170,17 +179,22 @@ def geometry_scene(geometry: Geometry, unit_system: UnitSystem | None = None,
                    components: Sequence[str] | None = None,
                    scale: float = 1.0, bounds: bool = True,
                    orientation: bool = True) -> Any:
-    """Build (or add to) a PyVista plotter showing the geometry.
+    """Build a PyVista plotter showing the geometry, or add it to `plotter`.
 
-    `theme` is 'light', 'dark', or a colors dict; it sets the scene
-    background and annotation color. `components` limits what is drawn to a
-    subset of {'nodes', 'elements'} — selecting one in the
-    project tree shows just that part. `scale` multiplies every size
-    given in pixels — nodes, lines, the bounds' labels — for a render at
-    print resolution (`print_plotter`). `bounds` and `orientation` are
-    the labeled box and the corner triad (`annotate_scene`); a print
-    figure may want neither. Returns the plotter; call .show() on it (or
-    .screenshot() if off_screen).
+    `theme` is 'light', 'dark' or a colors dict, and sets the scene
+    background and the annotation color. `components` limits what is
+    drawn to any of 'nodes', 'elements' and 'coordinate_systems' (the
+    default is nodes and elements); selecting one of them in the project
+    tree shows only that part. `labels` names the kinds to caption with
+    their ids (`add_geometry`). `node_size` and `line_width` are in
+    pixels, and `scale` multiplies every size given in pixels (nodes,
+    lines, the bounds' labels) for a render at print resolution
+    (`print_plotter`). `bounds` and `orientation` turn on the labeled
+    box and the corner triad (`annotate_scene`); a print figure may want
+    neither. A new plotter is made off screen when `off_screen` is true.
+
+    Returns the plotter. Call ``.show()`` on it, or ``.screenshot()``
+    when it is off screen.
     """
     import pyvista as pv
 
@@ -219,16 +233,14 @@ PRINT_BOUNDS_SIZE = 4.6
 
 def print_plotter(size_in: tuple[float, float], dpi: float) -> tuple[Any, float]:
     """An off-screen plotter for a figure `size_in` inches at `dpi`, and
-    the scale every pixel size in it is to be drawn at.
+    the scale to draw every pixel size in it at.
 
-    A 3-D screenshot at print resolution came out with its labels at
-    about 2 pt, and ``screenshot(scale=)`` dropped the point labels and
-    swelled the axis triad (the band-average paper, 2026-09-26). Here the
-    window is the printed size in pixels, the render window's DPI makes
-    every text actor's points print as points, and the returned scale —
-    how many print pixels a screen pixel becomes — is what the sizes VTK
-    takes in pixels (nodes, lines, the bounds' labels) are multiplied
-    by, so the figure prints as the screen shows it.
+    The window is the printed size in pixels, and the render window's
+    DPI is set so that a text actor's size in points prints in points.
+    The returned scale is how many print pixels one screen pixel
+    becomes (`dpi` / 96). Multiply the sizes VTK takes in pixels (nodes,
+    lines, the bounds' labels) by it, and the figure prints the way the
+    screen shows it.
 
     Parameters
     ----------
@@ -240,7 +252,11 @@ def print_plotter(size_in: tuple[float, float], dpi: float) -> tuple[Any, float]
     Returns
     -------
     (pyvista.Plotter, float)
+        The plotter and the pixel scale.
     """
+    # A plain 3-D screenshot at print resolution came out with its labels
+    # at about 2 pt, and screenshot(scale=) dropped the point labels and
+    # enlarged the axis triad (the band-average paper, 2026-09-26).
     import pyvista as pv
 
     scale = float(dpi) / SCREEN_DPI
@@ -253,14 +269,15 @@ def print_plotter(size_in: tuple[float, float], dpi: float) -> tuple[Any, float]
 def annotate_scene(plotter: Any, axis_unit: str, colors: Mapping[str, str],
                    bounds: bool = True,
                    orientation: bool = True, scale: float = 1.0) -> None:
-    """Scene annotations, each independently switchable.
+    """Add or remove the scene's two annotations.
 
-    `bounds` is the labeled box drawn around the geometry; `orientation` is
-    the small triad in the corner. The 3D view toolbar toggles them
-    separately. `scale` other than one is a print render
-    (`print_plotter`): the box's labels, sized in screen pixels, are set
-    to print at the size the scene's other labels print
-    (`PRINT_BOUNDS_SIZE`).
+    `bounds` is the labeled box around the geometry, its titles carrying
+    `axis_unit`, and `orientation` is the small triad in the corner; the
+    3-D view's toolbar turns each on and off separately. Turned off, an
+    annotation already in the scene is removed. A `scale` other than one
+    means a print render (`print_plotter`): the box's labels, which are
+    sized in screen pixels, are set to print at the size of the scene's
+    other labels (`PRINT_BOUNDS_SIZE`).
     """
     if bounds:
         box = plotter.show_bounds(xtitle=f'X {axis_unit}',
@@ -300,10 +317,11 @@ def _label_counts(bounds: Sequence[float]) -> dict[str, bool]:
 
 
 def shared_points(points: ArrayLike) -> tuple[Any, np.ndarray]:
-    """A vtkPoints every mesh can share, plus a writable numpy view of it.
+    """A vtkPoints that every mesh can share, and a writable numpy view of it.
 
-    Writing through the view and calling Modified() moves every mesh at
-    once — the difference between one upload per frame and one per mesh.
+    The points are a copy of `points`. Writing through the view and
+    calling ``Modified()`` on the vtkPoints moves every mesh at once, so
+    a frame is one upload rather than one per mesh.
     """
     import pyvista as pv
     import vtk
@@ -377,15 +395,18 @@ DOF_ARROW_NODE_LIMIT = 300
 
 
 def dof_axis(direction: str) -> int | None:
-    """0/1/2 for a DOF direction's axis — 'RZ-' is a Z, so blue."""
+    """0, 1 or 2 for the axis of a DOF direction, or None if it has none.
+
+    A rotation counts as its axis: 'RZ-' is 2, and draws blue like 'Z+'.
+    """
     letter = str(direction).upper().lstrip('R')[:1]
     return {'X': 0, 'Y': 1, 'Z': 2}.get(letter)
 
 
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:
-    """One length for every arrow on a plot: 12% of the geometry's
-    extent, shrunk to the closest spacing of the arrowed nodes so a
-    dense set of arrows never overlaps its neighbors."""
+    """One length for every arrow on a plot: 12 % of `extent`, reduced to
+    0.9 times the closest spacing of the arrowed `points` so that arrows
+    on closely spaced nodes do not overlap."""
     length = 0.12 * extent
     unique = np.unique(np.asarray(points, dtype=float), axis=0)
     if len(unique) > 1:
@@ -406,15 +427,19 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    name: str | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
-    One arrow per DOF (built into one mesh per color, so ten thousand
-    cost what ten do), colored by the axis it points along — X red,
-    Y green, Z blue, the orientation marker's own convention. Response
-    style starts at the node and points outward, label at the tip;
-    `incoming` (forces) ends on the node instead, label at the base.
-    All arrows share one length: 12% of the geometry's extent, shrunk
-    to the closest node spacing so dense sets never overlap. DOFs at
-    nodes the geometry does not have are skipped. Returns how many
-    were drawn.
+    One arrow per DOF, colored by the axis it points along: X red,
+    Y green, Z blue, the same colors as the orientation triad. The
+    arrows of one color are built into one mesh, so ten thousand arrows
+    are three actors. A response arrow starts at the node and points
+    outward, with its label at the tip; with `incoming` (forces) the
+    arrow ends on the node instead, with its label at the base. All
+    arrows have one length (`dof_arrow_length`). Labels are drawn only
+    when there are at most `DOF_LABEL_LIMIT` arrows. A DOF at a node the
+    geometry does not have, or with a direction that is not a
+    translation or rotation, is skipped. Given a `name`, the actors are
+    named from it, so drawing again replaces them.
+
+    Returns how many arrows were drawn.
     """
     import pyvista as pv
 
@@ -487,16 +512,21 @@ def add_coordinate_system(plotter: Any, origin: ArrayLike, matrix: ArrayLike,
                           text_color: str = '#000000',
                           label: str | None = None,
                           name: str | None = None) -> None:
-    """One coordinate system: three directions, named, with angles curved.
+    """Draw one coordinate system: three arrows, with angular directions
+    drawn as arcs.
 
-    `label` (the system's id) is written at the origin. Direction names come
-    from the type — X/Y/Z, R/theta/Z, or R/theta/phi — and each is written
-    at the tip of its own arrow, so a cylindrical system is tellable from a
-    cartesian one at a glance rather than by consulting the table.
+    `matrix` holds the three direction vectors in its first three rows,
+    and `length` is the arrow length. The arrows show the type even
+    without names: a cylindrical system has one arc and a spherical one
+    has two. When `label` (the system's id) is given, it is written at
+    the origin and each direction's name, from the type (X/Y/Z, R/theta/Z
+    or R/theta/phi), is written at the tip of its arrow in `text_color`.
+    Without a `label`, only the arrows are drawn.
 
-    Given a `name`, every actor is named from it, so drawing again replaces
-    the drawing instead of piling another one on top — which is what lets a
-    frame be turned live without rebuilding the scene around it.
+    Given a `name`, every actor is named from it, so drawing again
+    replaces the drawing instead of adding another on top. That is what
+    lets a frame be rotated live without rebuilding the rest of the
+    scene.
     """
     import pyvista as pv
 
@@ -555,10 +585,11 @@ def add_coordinate_system(plotter: Any, origin: ArrayLike, matrix: ArrayLike,
 
 
 def shared_scalars(count: int, name: str) -> tuple[np.ndarray, Any]:
-    """A VTK point-data array every mesh can share, and a numpy view of it.
+    """A numpy view of a new VTK point-data array, and the array itself.
 
-    The color twin of `shared_points`: one array, written once per frame,
-    recolors every mesh in the scene at once.
+    The array holds `count` zeros and is named `name`. It does for color
+    what `shared_points` does for position: every mesh in the scene uses
+    the one array, so writing it once per frame recolors all of them.
     """
     import pyvista as pv
     from vtkmodules.util.numpy_support import vtk_to_numpy
@@ -592,13 +623,13 @@ ENTITY_LABEL_LIMIT = 5000
 
 def label_choices(labels: Sequence[str] | Mapping[str, Sequence[int] | None]
                   | None) -> dict[str, Sequence[int] | None]:
-    """`labels` in one shape: {kind: the ids to caption, or None}.
+    """`labels` in one form: {kind: the ids to caption, or None}.
 
-    Both spellings read naturally where they are used. A script says
-    `labels=['nodes']` and means *the nodes that are drawn*; the window,
-    which knows exactly what the user picked, says
-    `labels={'groups': [3]}`. None means "whatever this kind draws",
-    which is the right answer for both.
+    Two forms are accepted. A script passes a list of kinds, such as
+    ``labels=['nodes']``, meaning the nodes that are drawn. The window,
+    which knows what was picked, passes a dict, such as
+    ``labels={'groups': [3]}``. None as a value means every entity of
+    that kind that is drawn. `labels` of None gives an empty dict.
     """
     if labels is None:
         return {}
@@ -609,11 +640,12 @@ def label_choices(labels: Sequence[str] | Mapping[str, Sequence[int] | None]
 
 def labels_fit(geometry: Geometry, kind: str,
                chosen: Sequence[int] | None = None) -> bool:
-    """Would captioning this kind stay under `ENTITY_LABEL_LIMIT`?
+    """Whether captioning this kind stays within `ENTITY_LABEL_LIMIT`.
 
-    Asked by the window before it turns labels on, so a selection too
-    large to caption says so in the status bar rather than drawing
-    nothing and leaving the user to wonder.
+    Counts `chosen` when it is given, else every entity of the kind. The
+    window asks before it turns labels on, so a selection too large to
+    caption is reported in the status bar instead of silently drawing no
+    labels.
     """
     if chosen is not None:
         return len(chosen) <= ENTITY_LABEL_LIMIT
@@ -629,17 +661,18 @@ def label_spots(geometry: Geometry, points: np.ndarray, kind: str,
                 ) -> tuple[np.ndarray, list[str]]:
     """(positions, texts) captioning one kind of entity with its id.
 
-    `points` is the geometry's nodes as drawn, so a caption lands in the
-    same units and the same frame as the thing it names. Everything but
-    a node is captioned at the **centroid of its own nodes**: the middle
-    of an element's corners, of an element group's
-    elements. That is where a reader looks for the name of a shape, and
-    it keeps the number off the vertices, which are already carrying
-    node ids whenever both are shown.
+    `kind` is 'nodes', 'elements' or 'groups'; any other kind gets no
+    captions (a coordinate system's triad writes its own id). `points`
+    is the geometry's nodes as drawn, so a caption is in the same units
+    and frame as what it names. A node is captioned at the node. An
+    element is captioned at the mean of its nodes, and an element group
+    at the mean of its elements' nodes, so the number stays off the
+    vertices, which carry the node ids when both are shown. A group is
+    captioned with its name when it has one, else its id.
 
-    `chosen` is the ids (nodes, coordinate systems, element groups) or indices
-    (elements) to caption; None captions every one of the
-    kind. Returns nothing past `ENTITY_LABEL_LIMIT`; see `labels_fit`.
+    `chosen` is the ids (nodes, element groups) or the indices
+    (elements) to caption; None captions every one of the kind. Nothing
+    is returned past `ENTITY_LABEL_LIMIT` (see `labels_fit`).
     """
     if not labels_fit(geometry, kind, chosen):
         return np.empty((0, 3)), []
@@ -701,24 +734,29 @@ def add_geometry(plotter: Any, geometry: Geometry,
                  clim: tuple[float, float] | None = None) -> str:
     """Add one geometry's meshes to an existing plotter.
 
-    `color_override` paints the whole geometry one color, which is how
-    several geometries overlaid in one scene stay tellable apart.
-    `entities` restricts drawing to specific items, as a dict with any of
-    'nodes' (node ids), 'coordinate_systems' (ids)
-    and 'elements' (indices) — that is how a single node or element picked
-    in the tree gets highlighted.
+    `color_override` draws the whole geometry in one color, which is how
+    several geometries overlaid in one scene are told apart. `entities`
+    limits the drawing to specific items, as a dict with any of 'nodes'
+    (node ids), 'coordinate_systems' (ids) and 'elements' (indices); that
+    is how a single node or element picked in the tree is highlighted.
+    `components` limits it to whole kinds instead (`geometry_scene`).
 
-    `labels` names the kinds to caption with their ids — any of 'nodes',
-    'coordinate_systems', 'elements', 'groups'. Captions
-    follow `entities` when it restricts the drawing, so labeling a
-    picked element names that one and not all of them, and a kind with
-    more than `ENTITY_LABEL_LIMIT` of them is left uncaptioned (see
-    `labels_fit`).
+    `labels` names the kinds to caption with their ids, any of 'nodes',
+    'coordinate_systems', 'elements' and 'groups' (`label_choices`).
+    Captions follow `entities` when it limits the drawing, so labeling a
+    picked element names that element only, and a kind with more than
+    `ENTITY_LABEL_LIMIT` entities is not captioned (`labels_fit`).
+    Captions are drawn in `text_color`.
 
-    `scalars` is a VTK point-data array shared by every mesh, coloring the
-    whole geometry by value instead of by the geometry's own color indices;
-    `clim` fixes what the ends of the color map mean. One array serves all
-    the meshes, so a frame writes it once. Returns the axis unit text.
+    `points_source` is a shared vtkPoints (`shared_points`) for the
+    meshes to use instead of a new one, and each mesh made is appended to
+    `meshes` when a list is given; the animator uses both to move the
+    scene. `scalars` is a VTK point-data array (`shared_scalars`) shared
+    by every mesh, coloring the geometry by value instead of by its color
+    indices, and `clim` fixes the values at the two ends of the color
+    map. `node_size` and `line_width` are in pixels.
+
+    Returns the axis unit text.
     """
     import pyvista as pv
 
@@ -839,14 +877,14 @@ def add_geometry(plotter: Any, geometry: Geometry,
 
 
 def place_view(plotter: Any, view: Any = None, render: bool = True) -> None:
-    """Turn the camera to `view` — a geometry's `View`, or the default
-    isometric when None — and fit what the plotter holds.
+    """Turn the camera to `view` (a geometry's `View`, or the default
+    isometric view when None) and fit everything the plotter holds.
 
-    The one way a 3-D view of a geometry is opened: the app when it first
-    shows one and on Reset View, the script windows, the animations and
-    every exported figure, so a geometry opens the same way wherever it
-    is drawn. The report's scenes open on the same view through
-    `View.basis`.
+    Every 3-D view of a geometry is opened through this function: the
+    app when it first shows one and on Reset View, the script windows,
+    the animations and every exported figure, so a geometry opens the
+    same way wherever it is drawn. The report's scenes open on the same
+    view through `View.basis`. `render` renders after the camera moves.
     """
     from ..core.geometry import DEFAULT_VIEW
 
@@ -859,14 +897,18 @@ def plot_geometry(geometry: Geometry, unit_system: UnitSystem | None = None,
                   screenshot: str | None = None, theme: Any = None,
                   show: bool = True, size_in: tuple[float, float] | None = None,
                   dpi: float | None = None, **kwargs: Any) -> Any:
-    """Show the geometry interactively, or render to `screenshot` headlessly.
+    """Show the geometry interactively, or render it to the file
+    `screenshot` with no window.
 
-    Shown, it comes up in the app's own 3-D pane — the labeled axes and
-    the orientation triad are toggles on the bar over it, exactly as in
-    the window. Returns the pane (its `.plotter` is the PyVista one), or
-    the image array when rendering to a file. For print, `size_in` and
-    `dpi` render the figure at its printed size (`print_plotter`), every
-    label and line at the size the screen shows it.
+    Shown, it opens in the app's own 3-D pane, with the labeled axes and
+    the orientation triad as toggles on the bar above it, as in the
+    window. Returns the pane (its `.plotter` is the PyVista one), or the
+    image array when rendering to a file. For print, `dpi` renders the
+    file at its printed size (`print_plotter`), `size_in` inches (6 by
+    4.5 by default), with every label and line at the size the screen
+    shows it; `size_in` is used only with `dpi`. The camera opens on the
+    geometry's own view. Other keyword arguments go to
+    `geometry_scene`.
     """
     if screenshot is not None:
         if dpi is not None:
@@ -896,13 +938,15 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
               screenshot: str | None = None, theme: Any = None,
               show: bool = True, size_in: tuple[float, float] | None = None,
               dpi: float | None = None, **kwargs: Any) -> Any:
-    """The geometry with labeled arrows at every DOF `source` measures
-    as `quantity` — the GUI's DOF-arrows toggle, from a script.
+    """The geometry with labeled arrows at every DOF that `source`
+    measures as `quantity`: the app's DOF-arrows toggle, from a script.
 
-    Forces end on their node with the label at the base, responses
-    leave it with the label at the tip, exactly as the desktop draws
-    them. `source` is a data object (or several). For print, `size_in`
-    and `dpi` render at the printed size, as `plot_geometry` does.
+    Force arrows end on their node with the label at the base, and
+    response arrows start at it with the label at the tip, as the app
+    draws them (`add_dof_arrows`). `source` is a data object, or a list
+    or tuple of them. Shown or rendered to `screenshot` as
+    `plot_geometry` does, including `size_in` and `dpi` for print; other
+    keyword arguments go to `geometry_scene`.
     """
     from ..core.report import EXCITATION_QUANTITIES, series_quantity_dofs
 

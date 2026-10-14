@@ -1,22 +1,25 @@
-"""Dragging the stage's averaging span and shock windows.
+"""Dragging the averaging span, the truncation span and the shock
+windows on the 3-D stage.
 
-The handles are spheres `viz.marks` puts on each slab's floor edge —
-left edge, center, right edge: resize, move, resize, the 2-D region's
-own grammar. This class turns interactor events into those drags and
-commits them through the same rules the 2-D overlays use
-(`core.averaging.from_span`, `core.shocks.drag_settled`), so the two
-editors cannot disagree about what a drag means.
+The handles are spheres `viz.marks` puts on each slab's floor edge: the
+left edge, the center and the right edge, which resize, move and
+resize, as in the 2-D region. This class turns interactor events into
+those drags. The averaging and shock drags are settled through the same
+rules the 2-D overlays use (`core.averaging.from_span`,
+`core.shocks.drag_settled`), so the two editors cannot disagree about
+what a drag means. A truncation drag is kept inside the record's first
+and last times.
 
-Split on purpose into a semantic layer (`begin` / `drag_to` /
-`finish`) and the VTK plumbing that feeds it: the semantics are what
-the tests drive, because a synthetic mouse cannot reach an offscreen
-interactor. While a drag is live the interactor style is stood down,
-so the camera does not orbit under the handle; the press is also
-aborted at our observer so the style never begins a rotation.
+The class is split into a layer that says what a drag means (`begin`,
+`drag_to`, `finish`) and the VTK code that feeds it. The tests drive
+the first layer, because a synthetic mouse cannot reach an offscreen
+interactor. While a drag is live the interactor style is removed, so
+the camera does not orbit under the handle, and the press is aborted in
+this class's observer so the style never starts a rotation.
 
-Dragging previews by redrawing the marks (their actors replace by
-name, a few hundred points) and commits on release — the modal fit's
-lesson stands: the expensive recompute happens once, at the end.
+During a drag only the marks are redrawn (their actors are replaced by
+name, a few hundred points), and the change is committed on release, so
+the expensive recompute happens once, at the end.
 """
 
 from __future__ import annotations
@@ -27,13 +30,17 @@ from typing import Any
 from ..core.averaging import Averaging, from_span
 from ..core.shocks import Shock, drag_settled
 
+# Committing only on release is the rule the modal fit's drags follow
+# too: the expensive recompute happens once, at the end of the drag.
+
 _HANDLE = re.compile(
     r'^marks-(?:(averaging)|(truncation)|shock-(\d+))-handle-'
     r'(start|move|stop|open|close)$')
 
 
 class StageMarksDragger:
-    """One per stage plotter, armed with whatever the marks mean now."""
+    """One per stage plotter, armed with whatever the marks currently
+    mean."""
 
     def __init__(self, plotter: Any) -> None:
         self.plotter: Any = plotter
@@ -58,10 +65,10 @@ class StageMarksDragger:
     def arm_averaging(self, averaging: Averaging, sample_rate: float,
                       samples: int, extents, preview, commit,
                       origin: float = 0.0) -> None:
-        """`preview(averaging)` redraws the marks; `commit(averaging)`
-        is the window's own drag handler. `origin` is the record's
-        first instant: the handles are on the record's clock, the
-        averaging counts from its beginning."""
+        """Arm for an averaging span. `preview(averaging)` redraws the
+        marks, and `commit(averaging)` is the window's own drag handler.
+        `origin` is the record's first time: the handles are on the
+        record's clock, and the averaging counts from its beginning."""
         self._context = {
             'kind': 'averaging', 'averaging': averaging,
             'rate': float(sample_rate), 'samples': int(samples),
@@ -70,9 +77,10 @@ class StageMarksDragger:
 
     def arm_truncation(self, truncation, first: float, last: float,
                        extents, preview, commit) -> None:
-        """`preview(truncation)` redraws the marks; `commit(truncation)`
-        is the window's own drag handler. `first`/`last` are the
-        record's walls, which a drag cannot leave."""
+        """Arm for a truncation span. `preview(truncation)` redraws the
+        marks, and `commit(truncation)` is the window's own drag
+        handler. `first` and `last` are the record's first and last
+        times, which a drag cannot go past."""
         self._context = {
             'kind': 'truncation', 'truncation': truncation,
             'first': float(first), 'last': float(last),
@@ -81,8 +89,10 @@ class StageMarksDragger:
 
     def arm_shocks(self, shocks, common: bool, limit, extents,
                    preview, commit, origin: float = 0.0) -> None:
-        """`preview(shocks)` redraws; `commit(shocks)` stores the
-        settled series. `origin` as for the averaging."""
+        """Arm for shock windows. `preview(shocks)` redraws the marks,
+        and `commit(shocks)` stores the settled series. `common` and
+        `limit` are passed to `core.shocks.drag_settled`, and `origin`
+        is as for `arm_averaging`."""
         self._context = {
             'kind': 'shocks', 'shocks': tuple(shocks),
             'common': bool(common), 'limit': limit,
@@ -96,7 +106,9 @@ class StageMarksDragger:
     # ---- the semantics (what the tests drive) ----------------------------
 
     def begin(self, name: str, at_seconds: float | None = None) -> bool:
-        """Grab the named handle; returns whether it was one of ours."""
+        """Grab the named handle. Returns True when `name` is a handle
+        of what the dragger is armed for. `at_seconds` is where the
+        pointer took hold; it defaults to the middle of the span."""
         context = self._context
         if context is None:
             return False
@@ -181,8 +193,9 @@ class StageMarksDragger:
         self._context['preview'](self._proposal(seconds))
 
     def finish(self, seconds: float) -> None:
-        """The pointer let go: settle and commit through the shared
-        rules — or snap back when the drag asked for the impossible."""
+        """The pointer was released: settle the drag and commit it
+        through the shared rules, or put the marks back when the drag
+        asked for something impossible."""
         grab, context = self._grab, self._context
         if grab is None or context is None:
             self._grab = None

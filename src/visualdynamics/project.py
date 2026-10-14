@@ -1,15 +1,16 @@
-"""The project: every object a test holds, and how they belong together.
+"""The project: every object in a test, and how the objects are grouped.
 
-The GUI's window keeps exactly what a `Project` keeps — the named
-objects, the object groups, which group is the Basis, the project type,
-the active geometry — so a project built by clicking and one built in
-a script are the same thing, and either saves to the same `.vdyn`
-file. Scripts get the GUI's own verbs (`add`, `link`, `set_basis`,
-`rename`, `save`) instead of hand-assembling dicts and lists.
+The desktop app's window holds the same things a `Project` holds: the
+named objects, the object groups, which group is the Basis, the project
+type and the active geometry. A project built in the app and one built
+in a script are therefore the same, and both save to the same `.vdyn`
+file. A script uses the app's own verbs (`add`, `link`, `set_basis`,
+`rename`, `save`) instead of building dicts and lists by hand.
 
-`random_vibration_report` at the bottom is the whole of one of those
-workflows in a single call — a Rattlesnake run in, an HTML report out —
-and `random_vibration_run` is the project it does that from.
+The functions near the end of this module run a whole workflow in one
+call. `random_vibration_report`, for example, reads a Rattlesnake run
+and writes an HTML report, and `random_vibration_run` builds the project
+that report is made from.
 """
 
 from __future__ import annotations
@@ -74,15 +75,16 @@ TYPE_ORDER = (Geometry, Photos, ChannelTable, TimeHistory, Spectrum, Psd,
 
 
 def type_rank(obj: Any) -> int:
-    """Where an object sits in the canonical order."""
+    """The position of an object's type in the order the tree lists types."""
     return next((rank for rank, cls in enumerate(TYPE_ORDER)
                  if isinstance(obj, cls)), len(TYPE_ORDER))
 
 
 def describe(obj: Any) -> str:
-    """A few words about what an object holds — how big it is, not what
-    it is called. Empty categories are left out rather than reported as
-    zero."""
+    """A few words on what an object holds: its size, not its name.
+
+    A count of zero is left out of the text.
+    """
     if isinstance(obj, Geometry):
         counts = [(obj.num_nodes, 'node'),
                   (len(obj.elem_conn), 'element')]
@@ -127,10 +129,12 @@ def remap_links(object_groups: Iterable[ObjectGroup],
                 roles_taken: Iterable[str] = ()) -> list[ObjectGroup]:
     """Object groups translated through a {old name: new name} mapping.
 
-    Importing a project into one that already holds objects renames
-    what clashes; its groups have to follow, or the structure the file
-    carried is lost. A role already spoken for stays with the group
-    that has it — the Basis is the project's, not the file's.
+    When a project is imported into one that already holds objects,
+    the names that clash are renamed, and the groups have to be renamed
+    with them or the file's grouping is lost. A member missing from the
+    mapping is dropped, and a group left with fewer than two members is
+    dropped. A role in `roles_taken` stays with the group that already
+    has it, because the Basis belongs to the project, not to the file.
     """
     taken, out = set(roles_taken), []
     for group in object_groups or ():
@@ -150,10 +154,10 @@ def remap_links(object_groups: Iterable[ObjectGroup],
 def retarget(obj: Any, mapping: dict[str, str]) -> None:
     """Point an object's references at renamed objects.
 
-    Objects that name others — matched modes name their two shape
-    sets, a report's blocks name what they draw from — go stale the
-    moment a name changes under them, and a stale binding is an
-    unbound figure or a bracket that vanished.
+    Matched modes name their two shape sets, and a report's blocks name
+    the objects they draw from. When one of those objects is renamed,
+    the reference has to be changed with it, or the report figure has
+    nothing to draw. The object is changed in place.
     """
     follow = getattr(obj, 'rename_source', None)
     if callable(follow):                            # MatchedModes
@@ -213,21 +217,24 @@ _NARROWER = {cls: tuple(other for _s, _p, other in KINDS
 
 
 class Selection:
-    """Objects reached by *what they are* instead of what they were named.
+    """Objects reached by type instead of by name.
 
         project.geometry            # anywhere in the project
         project.basis.frf           # in the Basis group
-        project.basis.psds[0]       # when you mean to choose
+        project.basis.psds[0]       # one of several
 
-    A name is arbitrary — it came from whatever an importer or a user
-    called it, and importing a second geometry renames nothing but
-    makes 'Geometry' ambiguous. A type is not, so this is the path
-    worth typing, and the only one an editor can complete.
+    A name is whatever an importer or a user called the object, and
+    importing a second geometry makes 'Geometry' ambiguous without
+    renaming anything. A type does not change, and an editor can
+    complete it.
 
-    The singular gives the one object of that kind, and says which
-    ones it found when there are several. The plural is always a
-    list, so code written against one FRF keeps working when a second
-    arrives.
+    The singular gives the one object of that kind. When there are
+    several it raises AttributeError listing their names, except that
+    when exactly one of them is not on octave bands, that one is
+    returned. The plural is always a list, so code written for one FRF
+    still works when a second one is added. A kind leaves out objects
+    of a narrower kind: `time_history` does not return a transient
+    specification, and `psds` does not return a specification.
     """
 
     if TYPE_CHECKING:
@@ -288,9 +295,11 @@ class Selection:
         return [self._project[name] for name in self.names]
 
     def of_type(self, cls: type) -> list[str]:
-        """The names in scope holding objects of this class — and not
-        of a class registered as its own kind beneath it (see _NARROWER:
-        a transient specification is not the answer to `time_history`)."""
+        """The names in scope holding objects of this class.
+
+        Objects of a narrower kind are left out: a transient
+        specification is not returned for `TimeHistory`.
+        """
         narrower = _NARROWER.get(cls, ())
         return [name for name in self.names
                 if isinstance(self._project[name], cls)
@@ -367,33 +376,34 @@ class Selection:
 
 
 class Project(dict):
-    """Every object in one test, by name, plus the structure around them.
+    """Every object in one test, by name, and how the objects are grouped.
 
-    A Project *is* the name-to-object mapping, so `project['FRF']`,
-    `list(project)` and `project.items()` read the way the tree reads.
+    A Project is a dict from name to object, so `project['FRF']`,
+    `list(project)` and `project.items()` give what the tree shows.
 
-    It is also what the desktop app holds: the window's `objects`,
-    `links`, `project_type` and `active_geometry` are properties over one
-    of these, and its buttons call the verbs below. A project built by
-    clicking and one built by calling are the same object, and open in
-    each other.
+    The desktop app holds one of these: the window's `objects`,
+    `project_type` and `active_geometry` are properties over it, and its
+    buttons call the verbs below. A project built in the app and one
+    built in a script are the same object, and each opens in the other.
 
-    Objects are usually reached **by type** rather than by name —
-    `project.geometry`, `project.basis.frf`, `project.other.shapes`. The
-    singular gives the one there is and says so when several qualify; the
-    plural is always a list.
+    Objects are usually reached by type rather than by name, as in
+    `project.geometry`, `project.basis.frf` or `project.other.shapes`.
+    The singular gives the one object of that kind and raises an error
+    when several qualify; the plural is always a list.
 
     Attributes:
-        links: The groups objects have been declared to belong to, as
-            `{'members': [...], 'role': 'Basis' | None}`.
-            Association is explicit here, never inferred from names.
-        project_type: What kind of test this is — 'Modal Test', 'Random
-            Vibration', 'Shock', 'Transient' — which decides the report
-            template and the skeleton of slots the tree shows.
+        object_groups: The groups objects have been linked into, each
+            `{'members': [...], 'role': 'Basis' | None}` with an
+            optional 'name'. Objects are grouped only by `link`, never
+            by matching their names.
+        project_type: The kind of test: 'Modal Test', 'Random
+            Vibration', 'Transient', 'Shock', 'Sine Sweep', 'Random and
+            Sine' or 'System ID'. It sets the report template and the
+            empty slots the tree shows.
         active_geometry: The name of the geometry data is drawn on when
-            nothing says otherwise.
-        name: What the project is called, which is what a saved `.vdyn`
-            and a rendered report are titled.
+            nothing else is named.
+        name: The project's name, used as the title of a saved `.vdyn`
+            and of a rendered report.
     """
 
     if TYPE_CHECKING:
@@ -511,10 +521,13 @@ class Project(dict):
         return '\n'.join(lines)
 
     def grouped_names(self) -> list[tuple[ObjectGroup | None, list[str]]]:
-        """[(group or None, [names])] in the order the tree shows them:
-        the Basis group first, then the other object groups, then what is
-        unlinked — each in the canonical type order, and objects of one
-        type in the order they arrived."""
+        """[(group or None, [names])] in the order the tree shows them.
+
+        The Basis group comes first, then the other object groups, then
+        the unlinked objects under None. Within each, objects are in the
+        tree's type order, and objects of one type are in the order they
+        were added.
+        """
         def ordered(names: Iterable[str]) -> list[str]:
             return sorted(names, key=lambda name: type_rank(self[name]))
 
@@ -536,24 +549,24 @@ class Project(dict):
     # ---- objects -----------------------------------------------------------
 
     def add(self, name: str, obj: Any) -> str:
-        """Add an object under a unique name; returns the name used.
+        """Add an object under a unique name and return the name used.
 
-        A clash is numbered rather than refused or overwritten, exactly
-        as importing twice does in the GUI. The first geometry added
-        becomes the active one.
+        A name that is already taken gets a numbered suffix, the same as
+        importing a file twice in the app; nothing is overwritten. The
+        first geometry added becomes the active geometry.
 
         Parameters
         ----------
         name : str
-            What to call it. A clash gets a numbered suffix.
+            What to call the object.
         obj : object
             Any object the project can hold.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the object was added under, unique within the
+            project.
         """
         unique, n = str(name), 1
         while unique in self:
@@ -565,15 +578,14 @@ class Project(dict):
         return unique
 
     def duplicate(self, *names: Any) -> list[str]:
-        """Copies of objects, added beside them (Copy, then Paste, in
-        the tree): each under its own name with ' copy', numbered when
-        that is taken. Returns the names added.
+        """Copy objects and add the copies beside them, as Copy and Paste
+        do in the tree. Returns the names added.
 
-        Independent objects, not views: a copy's arrays are its own,
-        so editing one leaves the other as it was. Links and
-        provenance stay with the originals — a copy is a fresh object
-        that happens to hold the same numbers, and what it is for is
-        the user's to say.
+        Each copy is named '<name> copy', with a number added when that
+        name is taken. A copy's arrays are its own, so editing one leaves
+        the other unchanged. Links and provenance stay with the
+        originals: a copy is in no object group and has no record of how
+        it was computed.
 
         Parameters
         ----------
@@ -595,24 +607,26 @@ class Project(dict):
 
     def import_file(self, path: str | os.PathLike,
                     **options: Any) -> list[str]:
-        """Import a file into this project; returns the names added.
+        """Import a file into this project and return the names added.
 
-        Anything visualdynamics reads: a geometry, a Rattlesnake run, or a whole
-        saved project. A project brings its structure with it — its
-        object groups follow the objects even when a name clash renamed
-        them — and, into an empty project, its name, type and active
-        geometry too. Foreign readers' keys become readable names
-        ('Modal_frf' is an FRF), the way the tree spells them.
+        The file can be anything visualdynamics reads: a geometry, a
+        Rattlesnake run or a saved project. A saved project brings its
+        object groups, which follow the objects even when a name clash
+        renamed them, and when this project is empty it also brings its
+        name, type and active geometry. When a reader returns several
+        objects, each is named by its type the way the tree shows it (a
+        reader's key such as 'Modal_frf' becomes 'FRF'), and if one of
+        them is a channel table they are all linked into one group.
 
-        A file that knows what kind of test it was says so: a
-        controller's own save records which environment drove the run,
-        and adopting it here settles the project type in a script the
-        same way importing one settles it in the window.
+        A file that records what kind of test it was sets the project
+        type. A controller's save records which environment ran, and
+        importing it here sets the type the same way importing it in the
+        app does.
 
-        `options` pass through to the format's reader — an exodus
-        file's `steps='time'` and `nodes=[...]`, a geometry's
-        `length_unit='m'` — so a script can declare what the
-        window asks about in a dialog.
+        `options` are passed to the format's reader, for example an
+        Exodus file's `steps='time'` and `nodes=[...]` or a geometry's
+        `length_unit='m'`, so a script can give what the app asks for in
+        a dialog.
 
         Parameters
         ----------
@@ -667,7 +681,10 @@ class Project(dict):
         return [self.add(display_name(type(result).__name__), result)]
 
     def remove(self, *names: str) -> None:
-        """Delete objects, pruning them out of every object group.
+        """Delete objects and take them out of every object group.
+
+        A name not in the project is ignored. When the active geometry
+        is removed, the first remaining geometry becomes the active one.
 
         Parameters
         ----------
@@ -687,11 +704,13 @@ class Project(dict):
         self._prune_links()
 
     def rename(self, old: str, new: str) -> str:
-        """Rename an object; every reference to it follows.
+        """Rename an object and change every reference to it.
 
-        Object groups, matched-modes sets and report block bindings all
-        name their objects, and a rename that left any of them pointing
-        at the old name would strand a figure or a bracket.
+        Object groups, matched-mode sets, report blocks, provenance
+        records and the active geometry all refer to objects by name,
+        and each is updated so that no report figure is left pointing
+        at the old name. An unknown `old` raises KeyError; a `new` that
+        is empty or already in use raises ValueError.
 
         Parameters
         ----------
@@ -703,7 +722,7 @@ class Project(dict):
         Returns
         -------
         str
-            The name actually used, which may carry a suffix.
+            The new name.
         """
         if old not in self:
             raise KeyError(f'no object named {old!r}')
@@ -732,37 +751,39 @@ class Project(dict):
 
     def rename_dof(self, source: Any, old: str, new: str,
                    quantity: str | None = None) -> list[str]:
-        """Correct a channel's coordinate on an object and on everything
-        derived from it (double-click a row or reference column of the
-        grid and type).
+        """Correct a channel's coordinate on an object and on every object
+        derived from it. In the app, double-click a row or reference
+        column of the grid and type.
 
-        The channel, not the point: a force labeled at the wrong node
-        moves without taking the accelerometer at that node with it
-        (Brandon, 2026-09-06 — the other is changed explicitly if it
-        should be). The spectra computed from a time history inherited
-        its channels, so one found mislabeled is mislabeled in every
-        one of them; the correction follows the derivation chain rather
-        than leaving each derived object to be fixed by hand or
-        recomputed. An object downstream that does not carry the
-        channel is left alone.
+        Only the channel changes, not the point: correcting a force
+        labeled at the wrong node leaves the accelerometer at that node
+        where it is. Spectra computed from a time history carry its
+        channels, so the correction is also applied to every object
+        derived from the source, through any number of steps, instead of
+        leaving each one to be fixed by hand or recomputed. A derived
+        object that does not carry the channel is left alone. An object
+        with no coordinates raises TypeError.
 
         Parameters
         ----------
         source : str or object
             The object whose grid row or column was edited.
         old : str
-            The coordinate as it is, '101Z+'.
+            The coordinate as it is, for example '101Z+'.
         new : str
-            The coordinate to give it, normalized the way every DOF is.
+            The coordinate to give it, normalized the same way as every
+            coordinate.
         quantity : str, optional
-            Which channel at `old` — 'acceleration', 'force' …; every
-            channel at the coordinate when omitted.
+            Which channel at `old`, for example 'acceleration' or
+            'force'. Every channel at the coordinate when omitted.
 
         Returns
         -------
         list of str
             The names of the objects changed, the source first.
         """
+        # The channel, not the point (Brandon, 2026-09-06): the other
+        # channel at that node is changed explicitly if it should be.
         name = self.name_of(source)
         obj = self[name]
         if not hasattr(obj, 'rename_dof'):
@@ -799,30 +820,38 @@ class Project(dict):
 
     def link(self, *names: str, role: str | None = None,
              name: str | None = None) -> list[str]:
-        """Declare objects part of one group, merging any they are in.
+        """Link objects into one group, merging any groups they are
+        already in. Returns the group's members.
 
-        A group holds at most one geometry — its members are read
-        against it — and a member naming nodes that geometry lacks is
-        refused, because the link would be a claim that is not true.
-        Returns the group's members.
+        A group holds at most one geometry, and its members are checked
+        against it. A member that names nodes the geometry does not have
+        is still linked, and the app marks its row red so the mismatch
+        can be seen; a test often has drive points, control coordinates
+        or virtual channels the model does not draw. A modal object with
+        no shape set to be drawn against is refused with ValueError, as
+        are fewer than two names and a second geometry.
 
         Parameters
         ----------
         *names : str
-            The objects to act on, by name.
+            The objects to link, by name.
         role : str, optional
-            The role to give the group — 'Basis', or None.
+            The role to give the group: 'Basis', or None. Left out, a
+            group being merged into keeps the role it had.
         name : str, optional
-            What to call the group (Brandon, 2026-09-30: an activity in
-            the Engineering Sciences Common Data Format has a name, and
-            a named group exports as one that keeps its identity). Left
-            out, a group being merged into keeps the name it had.
+            What to call the group. A named group is exported to the
+            Engineering Sciences Common Data Format as an activity with
+            that name. Left out, a group being merged into keeps the
+            name it had.
 
         Returns
         -------
         list of str
             The group's members after linking.
         """
+        # A group can be named (Brandon, 2026-09-30): an activity in the
+        # Engineering Sciences Common Data Format has a name, and a named
+        # group exports as one that keeps its identity.
         names = [str(name) for name in names]
         if len(names) < 2:
             raise ValueError('linking takes two or more objects')
@@ -884,7 +913,8 @@ class Project(dict):
         return merged
 
     def unlink(self, *names: str) -> None:
-        """Take objects out of their groups; a group of one dissolves.
+        """Take objects out of their object groups. A group left with one
+        member is dissolved unless it has a role.
 
         Parameters
         ----------
@@ -896,8 +926,11 @@ class Project(dict):
         None
         """
         names = {str(name) for name in names}
+        # the group's name kept with it: rebuilt as members and role
+        # alone, every group lost its name, the untouched ones too
+        # (2026-10-13, found by the docstring pass)
         self.object_groups = [
-            {'members': kept, 'role': group['role']}
+            {**group, 'members': kept}
             for group, kept in
             ((group, [member for member in group['members']
                       if member not in names])
@@ -911,15 +944,16 @@ class Project(dict):
     def relink(self, name: Any, target: Any = None) -> list[str]:
         """Move one object into the group holding `target`.
 
-        `link` *merges* the groups its arguments are in, which is right
-        for declaring two things related and wrong for moving one thing
-        between groups — linking a geometry to the other side would pull
-        its whole group across with it. This takes the object out first,
-        so only it moves; `target` of None just takes it out.
+        `link` merges the groups of all its arguments, which is right for
+        saying two objects belong together and wrong for moving one
+        object: linking a geometry into the other group would bring its
+        whole group with it. This method takes the object out of its
+        group first, so only it moves. A `target` of None only takes it
+        out.
 
-        The group it lands in keeps its role, so dropping something into
-        the Basis makes it part of the Basis rather than dissolving it.
-        Returns the members of the group it ends up in, empty if none.
+        The group it joins keeps its role, so an object moved into the
+        Basis becomes part of the Basis. A move that `link` refuses
+        leaves the groups as they were and raises the same error.
 
         Parameters
         ----------
@@ -932,7 +966,8 @@ class Project(dict):
         Returns
         -------
         list of str
-            The group's members afterwards.
+            The members of the group the object ends up in, or an empty
+            list when `target` is None.
         """
         name = self.name_of(name)
         if target is None:
@@ -960,7 +995,9 @@ class Project(dict):
             raise
 
     def name_object_group(self, member: str, name: str | None) -> list[str]:
-        """Name the object group an object belongs to, or unname it.
+        """Name the object group an object belongs to, or remove its name.
+
+        An object in no group raises KeyError.
 
         Parameters
         ----------
@@ -1001,7 +1038,7 @@ class Project(dict):
         return None if group is None else list(group['members'])
 
     def role_of(self, name: Any) -> str | None:
-        """'Basis', or None for an unroled or unlinked object.
+        """'Basis' for an object in the Basis group, otherwise None.
 
         Parameters
         ----------
@@ -1017,13 +1054,13 @@ class Project(dict):
         return None if group is None else group['role']
 
     def placed(self) -> dict[str, list[str]]:
-        """{role: [members]} — which objects are in each *named* group.
+        """{role: [members]}: the objects in each group that has a role.
 
-        Nothing is guessed here. An object nobody has placed is in no
-        named group, which is what makes the tree's gray slots mean
-        anything: a slot is filled by an object in its own group, so a
-        modal test whose only geometry is the model's still shows a
-        slot for the measured one.
+        Nothing is inferred here. An object that has not been placed is
+        in no group with a role, and that is what makes the tree's gray
+        slots meaningful: a slot is filled only by an object in its own
+        group, so a modal test whose only geometry is the model's still
+        shows a slot for the measured one.
         """
         out: dict[str, list[str]] = {}
         for group in self.object_groups:
@@ -1033,11 +1070,12 @@ class Project(dict):
         return out
 
     def sides(self) -> dict[str, list[str]]:
-        """{side: [object names]} for the typed skeleton: the Basis by
-        its role, and under `OTHER_SIDE` every member of every group
-        that is not the Basis — the other side has no name, so it is
-        read off the groups rather than declared. What the tree's gray
-        slots and `missing` are computed from.
+        """{side: [object names]} for the project type's slots.
+
+        The Basis is listed under its role. Every member of every other
+        group is listed under `OTHER_SIDE`, because that side has no role
+        of its own and is read from the groups instead. The tree's gray
+        slots and `missing` are computed from this.
 
         Returns
         -------
@@ -1053,14 +1091,14 @@ class Project(dict):
         return sides
 
     def missing(self) -> list[tuple[str, type, str, int, bool, str | None]]:
-        """The typed skeleton's empty slots — what the tree shows gray.
+        """The project type's empty slots, the ones the tree shows gray.
 
-        Each is `project_expectations`' (label, class, icon key,
-        ordinal, optional, side). An untyped project expects nothing.
-        Until a Basis is declared every object counts for every slot:
-        the window places what arrives, a script may never, and a
-        script's project with everything in it and no groups is not
-        one with nothing in it.
+        Each is a tuple (label, class, icon key, ordinal, optional,
+        side), as `project_expectations` gives them. A project with no
+        type expects nothing. Until a Basis is set, every object counts
+        toward every slot: the app places objects as they arrive, a
+        script may never place them, and a script's project with
+        everything in it and no groups should not show every slot empty.
 
         Returns
         -------
@@ -1080,34 +1118,35 @@ class Project(dict):
         Parameters
         ----------
         role : str
-            Which named group to fetch — 'Basis' is the only name.
+            Which group to fetch. 'Basis' is the only role.
 
         Returns
         -------
         ObjectGroup or None
-            That group, or None if unset.
+            That group, or None when no group has the role.
         """
         return next((group for group in self.object_groups
                      if group['role'] == role), None)
 
     def place(self, name: Any, role: str) -> list[str]:
-        """Put one object into the named group, making it if need be.
+        """Put one object into the Basis or the other group, creating the
+        group if needed. Returns the group's members.
 
-        Unlike an ordinary link this takes a single object, because a
-        named group is a *declaration* rather than an observed relation
-        — and needing two members before the group can exist at all is
-        what made it impossible to move a wrongly-sorted pair across
-        one at a time. Returns the group's members.
+        Unlike `link`, this takes a single object. If a group needed two
+        members before it could exist, a pair sorted into the wrong
+        group could not be moved across one object at a time. A move
+        that is refused leaves the groups as they were.
 
         Parameters
         ----------
         name : str or object
             The object being placed.
         role : str or None
-            'Basis', or None for the *other* group — the one group
-            that is not the Basis, made if there is none yet. With
-            several groups besides the Basis there is no one other,
-            and this refuses: relink onto a member of the one meant.
+            'Basis', or None for the other group: the one group that is
+            not the Basis, created if there is none yet. When there are
+            several groups besides the Basis there is no single other
+            group, and this raises ValueError; use `relink` onto a
+            member of the group meant.
 
         Returns
         -------
@@ -1155,27 +1194,25 @@ class Project(dict):
 
     def set_channel_role(self, source: Any, dof: str, quantity: str,
                          role: str) -> list[str]:
-        """Give one channel a role — reference, response or monitor —
-        on a time history or on a channel table, and on whatever is
-        linked with it.
+        """Give one channel the role reference, response or monitor, on a
+        time history or a channel table and on whatever is linked with it.
 
-        The time history's role is the truth: it is what FRFs and
-        multiple coherence read. A channel table linked with a history
-        whose channels it describes shows the history's roles, so a
-        change made on either lands on both (Brandon, 2026-09-25: *the
-        channel table is just a pointer to the linked time data's
-        role*). A channel table with no such history holds its own
-        roles, as it always did.
+        The time history's roles are the ones FRFs and multiple
+        coherence use. A channel table linked with a history whose
+        channels it describes shows the history's roles, so a change
+        made on either is made on both. A channel table with no such
+        history keeps its own roles. An unknown role or channel raises
+        ValueError, and an object that is neither raises TypeError.
 
         Parameters
         ----------
         source : str or object
-            The time history or channel table, by name or as itself.
+            The time history or channel table, by name or as the object.
         dof : str
-            The channel's degree of freedom, '101Z+'.
+            The channel's degree of freedom, for example '101Z+'.
         quantity : str
             What it measures, as a history's `ordinate_dim` or a
-            table's channel type names it ('acceleration', 'force',
+            table's channel type names it ('acceleration', 'force', or
             'length' for a displacement).
         role : str
             'reference', 'response' or 'monitor'.
@@ -1185,6 +1222,9 @@ class Project(dict):
         list of str
             The objects whose roles changed.
         """
+        # The history's role is the truth (Brandon, 2026-09-25: "the
+        # channel table is just a pointer to the linked time data's
+        # role").
         from .core.channel_table import ROLES
 
         if role not in ROLES:
@@ -1304,8 +1344,10 @@ class Project(dict):
         return changes
 
     def set_role(self, name: str, role: str | None) -> None:
-        """Name what a group is. The Basis is unique: taking the role
-        takes it from whatever group held it.
+        """Set the role of the group an object is in. The Basis is
+        unique, so giving it to one group takes it from any other.
+
+        An object in no group raises ValueError.
 
         Parameters
         ----------
@@ -1328,10 +1370,13 @@ class Project(dict):
         group['role'] = role
 
     def set_basis(self, *names: Any) -> list[str]:
-        """Declare the Basis of comparisons: the group whose DOFs
-        comparisons happen in, whose modes are the MAC rows and the
-        frequency-error baseline. One name marks that object's group;
-        several link them first.
+        """Set the Basis for comparisons, the group the other objects are
+        compared against.
+
+        Comparisons are made in the Basis group's DOFs, its modes are
+        the rows of the MAC, and its frequencies are the baseline for
+        frequency error. One name marks that object's group as the
+        Basis; several names are linked first.
 
         Parameters
         ----------
@@ -1352,11 +1397,11 @@ class Project(dict):
 
     @property
     def basis(self) -> Selection:
-        """The Basis group, reached by type: `project.basis.frf`.
+        """The Basis group, reached by type, as in `project.basis.frf`.
 
-        Empty (and falsy) when no group has been declared the Basis,
-        so `if project.basis:` still asks the question it reads as.
-        Its member names are `project.basis.names`.
+        It is empty, and false, when no group is the Basis, so
+        `if project.basis:` works as it reads. Its member names are
+        `project.basis.names`.
         """
         # [] not None: None is the whole project, and a project with
         # no Basis declared has an *empty* one, not every object in it
@@ -1374,8 +1419,12 @@ class Project(dict):
 
     @property
     def other(self) -> Selection:
-        """The one object group that is not the Basis — the model side of
-        a correlation, usually. Says so when there are several."""
+        """The one object group that is not the Basis, usually the model
+        side of a correlation.
+
+        Empty when there is none. Raises AttributeError when there are
+        several; use `object_group_selections` then.
+        """
         others = [group for group in self.object_groups if group['role'] != 'Basis']
         if len(others) == 1:
             return Selection(self, others[0]['members'], 'the other group')
@@ -1405,8 +1454,8 @@ class Project(dict):
         return sorted({*super().__dir__(), *dir(Selection(self))})
 
     def geometry_for(self, name: Any) -> tuple[str, Geometry] | None:
-        """(name, geometry) the object answers to: its group's, else
-        the active one. What it is drawn on, and checked against.
+        """(name, geometry) for the geometry an object is drawn on and
+        checked against: the one in its group, otherwise the active one.
 
         Parameters
         ----------
@@ -1417,7 +1466,8 @@ class Project(dict):
         -------
         tuple of (str, Geometry), or None
             The geometry's name and the geometry itself, or None when
-            the object is not linked to one.
+            there is no geometry in the object's group and no active
+            geometry.
         """
         name = self.name_of(name)
         for member in self.object_group_of(name) or ():
@@ -1433,13 +1483,13 @@ class Project(dict):
                      if name in group['members']), None)
 
     def absorb_links(self, groups: Iterable[ObjectGroup]) -> None:
-        """Take on the object groups of a project being imported.
+        """Add the object groups of a project being imported.
 
-        The arriving objects have *already* been placed in named
-        groups by the project type's rules — one at a time, as each arrived,
-        which is a guess made without the file's own structure to go
-        on. The file knows better, so it goes last and `_prune_links`
-        lets it win.
+        By this point the arriving objects have already been placed in
+        groups one at a time by the project type's rules, without the
+        file's own grouping to go on. The file's groups are added last,
+        and where an object is in two groups the later one is kept, so
+        the file's grouping replaces the earlier placement.
 
         Parameters
         ----------
@@ -1479,7 +1529,7 @@ class Project(dict):
             kept = [member for member in group['members']
                     if member in self and member not in seen]
             seen.update(kept)
-            groups.append({'members': kept, 'role': group['role']})
+            groups.append({**group, 'members': kept})
         self.object_groups = [group for group in reversed(groups)
                       if len(group['members']) > 1
                       or (group['members'] and group['role'])]
@@ -1493,30 +1543,29 @@ class Project(dict):
 
     def verbs(self, source: Any = None) -> list[tuple[str, str]]:
         """The processing verbs that apply to an object, each with its
-        one-line reading — how a script writer discovers what can be
-        done with what (Brandon, 2026-08-31: a flat method list says
-        nothing about what `integrate` is *for*).
+        one-line summary, so a script can find what can be done with it.
 
-        The applicability table is the same one the window's bar
-        reads, so the two surfaces cannot disagree; the summaries
-        are the first paragraph of each verb's own docstring, so this
-        and the API reference cannot disagree either.
+        The table of which verb applies to what is the same one the
+        app's bar reads, so the two always agree. Each summary is the
+        first paragraph of the verb's own docstring, so it also matches
+        the API reference.
 
         Parameters
         ----------
         source : str or object, optional
-            The object to ask about — a name looks it up here, an
-            object answers for itself whether or not it has been
-            added (what applies to a result is knowable before it is
-            kept). Omitted, every processing verb is listed.
+            The object to ask about. A name is looked up in the project;
+            an object is checked as it is, whether or not it has been
+            added, so a result can be asked about before it is kept.
+            Omitted, every processing verb is listed.
 
         Returns
         -------
         list of (str, str)
             ``(verb, summary)`` pairs, in the order the verbs are
-            declared. Call the verb as ``getattr(project, verb)``, or
-            just read the list and type the name.
+            declared. Call a verb as ``getattr(project, verb)``.
         """
+        # Brandon, 2026-08-31: a flat method list says nothing about
+        # what `integrate` is *for*, so each verb comes with its reading.
         import inspect
 
         obj = self[source] if isinstance(source, str) else source
@@ -1529,17 +1578,17 @@ class Project(dict):
         return out
 
     def selection_verbs(self, *names: Any) -> list[tuple[str, str]]:
-        """The processing verbs a *selection* can act on, each with its
-        one-line reading — what the window's bar offers (Brandon,
-        2026-09-04: every act on the bar, none behind a menu).
+        """The processing verbs a selection can act on, each with its
+        one-line summary. This is what the app's bar offers.
 
-        One object: its own verbs, less the ones that need a partner
-        (`transform` needs a shape set beside the record). Several: the
-        partner verbs that apply to exactly that combination — a
-        record and a shape set transform or expand, two shape sets on
-        two geometries project, siblings of one type merge — and none
-        of the verbs that apply to one of them alone. The same table
-        `verbs` reads, so the bar and the API cannot disagree.
+        For one object, these are its own verbs less the ones that need
+        a second object (`transform` needs a shape set beside the
+        record). For several objects, these are the verbs that apply to
+        exactly that combination: a record and a shape set can be
+        transformed or expanded, two shape sets on two geometries can be
+        projected, and objects of one type can be merged. Verbs that
+        apply to only one of the objects are not listed. The table is
+        the same one `verbs` reads, so the bar and the API agree.
 
         Parameters
         ----------
@@ -1552,6 +1601,7 @@ class Project(dict):
             ``(verb, summary)`` pairs, in the order the verbs are
             declared.
         """
+        # Brandon, 2026-09-04: every act on the bar, none behind a menu.
         import inspect
 
         objects = [self[self.name_of(name)] for name in names]
@@ -1568,39 +1618,37 @@ class Project(dict):
         return out
 
     def compute_spectra(self, source: Any) -> str:
-        """Spectra from a time history's averages (the averaging
-        view's Compute Spectra).
+        """Compute spectra from a time history's averages, as Compute
+        Spectra in the averaging view does.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         return self._derive(source, self[source].compute_spectra(),
                             f'{source} Spectra', recipe=('compute_spectra', {}))
 
     def compute_psds(self, source: Any) -> str:
-        """PSDs from a time history's averages (Compute PSDs).
+        """Compute PSDs from a time history's averages (Compute PSDs).
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         return self._derive(source, self[source].compute_psds(),
@@ -1608,24 +1656,25 @@ class Project(dict):
 
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
-        """A spectrum integrated onto proportional bands (Compute
-        Octave Bands) — the same power, arranged the way it is read;
-        a specification with its warning and abort limits banded the
-        same way.
+        """Integrate a spectrum onto proportional octave bands (Compute
+        Octave Bands). A specification's warning and abort limits are
+        banded the same way.
+
+        The total power is unchanged; it is only arranged in bands, the
+        way such a spectrum is usually read.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
         per_octave : int, optional
-            Bands per octave. Defaults to `core.octave.PER_OCTAVE`.
+            Bands per octave. Defaults to `core.octave.PER_OCTAVE`, 6.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.octave import PER_OCTAVE
 
@@ -1637,31 +1686,31 @@ class Project(dict):
             recipe=('compute_octave', {'per_octave': per_octave}))
 
     def compute_frfs(self, source: Any, method: str = 'Hv') -> str:
-        """Frequency response functions from a time history (Compute
-        FRFs) — one per response and drive, over the frames a PSD uses.
+        """Compute frequency response functions from a time history
+        (Compute FRFs), one for each response and drive, over the
+        frames a PSD uses.
 
-        `method` is 'Hv', 'H1' or 'H2': where the noise is assumed to
-        be, which is the one thing the three estimators disagree about.
-        The name goes on the object, since two FRF sets from one history
-        differ in nothing else a reader can see.
+        The three estimators differ only in where the noise is assumed
+        to be. The method is put in the result's name, since two FRF
+        sets from one history differ in nothing else a reader can see.
 
-        The frames are detected if the history has none, the same way
-        the coherence does it, so the two describe one measurement.
+        If the history has no averaging set, the frames are detected the
+        same way the coherence detects them, so the FRFs and the
+        coherence come from the same frames. The detected averaging is
+        stored on the history.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
         method : str, default 'Hv'
-            Which estimator: 'Hv', 'H1' or 'H2' — where the noise is
-            assumed to be, which is the one thing they disagree about.
+            Which estimator: 'Hv', 'H1' or 'H2'.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         history = self[source]
@@ -1672,25 +1721,26 @@ class Project(dict):
                             recipe=('compute_frfs', {'method': method}))
 
     def compute_multiple_coherence(self, source: Any) -> str:
-        """Multiple coherence from a time history (Compute Multiple
-        Coherence) — how much of each response the drives account for.
+        """Compute the multiple coherence from a time history (Compute
+        Multiple Coherence): how much of each response the drives
+        account for.
 
-        Averaged over frames, and the frames are detected if the history
-        has none. Computed over the whole selection instead, the
-        reference set fits every response exactly and the answer is 1.0
-        at every line — a number that says nothing, arrived at honestly.
+        It is averaged over frames. If the history has no averaging set,
+        the frames are detected and stored on the history. Computed from
+        the whole record as one frame, the drives would fit every
+        response exactly and the coherence would be 1.0 at every line,
+        which says nothing about the measurement.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         history = self[source]
@@ -1704,31 +1754,25 @@ class Project(dict):
                     per_octave: int | None = None,
                     q: float | None = None,
                     kind: str = 'maximax') -> str:
-        """Shock response spectra from a time history's shocks (Compute
-        SRS) — one curve per channel per event.
+        """Compute shock response spectra from a time history's shocks
+        (Compute SRS), one curve per channel per event.
 
-        The events are the history's own — detected only when there is
-        nothing else to say where they are, so this answers rather than
-        asking the caller to go and find them.
-
-        Detection is the last resort and not the first. A record being
-        read as frames already says where its events are: a transient
-        run's playings *are* its averaging, and set loose on one the
-        detector answered with thirty-one events where there were six.
-        A target is one playing by definition and gets no detector at
-        all — it was being cut into three.
+        The events are the ones marked on the history. They are detected,
+        and marked on the history, only when it has no shocks marked and
+        no averaging set and is not a transient specification. A record
+        read as frames already says where its events are (in a transient
+        run each playing is one frame), and a specification is one
+        playing by definition.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
         per_octave : int, optional
-            Natural-frequency lines per octave. Defaults to the
-            module's convention (12).
+            Natural-frequency lines per octave. Defaults to 12.
         q : float, optional
-            The oscillator amplification, Q = 1/(2ζ); 10 — 5%
-            damping, the shock-test convention — when omitted.
+            The oscillator amplification, Q = 1/(2ζ). Defaults to 10
+            (5% damping), the usual value for shock tests.
         kind : str, default 'maximax'
             Which peak each oscillator reports: 'maximax' (largest
             magnitude of either sign), 'positive' or 'negative'.
@@ -1736,9 +1780,13 @@ class Project(dict):
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
+        # Detection is the last resort. Set loose on a transient run, whose
+        # playings are its averaging, the detector found thirty-one
+        # events where there were six, and a target (one playing by
+        # definition) was being cut into three.
         from .core.data import TransientSpecification
 
         source = self.name_of(source)
@@ -1760,29 +1808,29 @@ class Project(dict):
                                      'q': q, 'kind': kind}))
 
     def detect_shocks(self, source: Any) -> int:
-        """Find the events in a time history and mark them on it (the
-        shock view's Detect), returning how many.
+        """Find the events in a time history and mark them on it (Detect
+        in the shock view). Returns how many were found.
 
-        The verb the API was missing (Brandon, 2026-08-25). `compute_srs`
-        detects as a side effect when a record carries no windows, which
-        served while the SRS came straight off the recording — but the
-        recommended shock workflow filters first, and then the detection
-        happened on the *filtered* record and the recording itself was
-        left unmarked. The events belong to the recording: mark them
-        there and every derivation carries them forward, because
-        `core.filters` copies the marks onto whatever it makes.
+        Any events already marked are replaced. Mark the events on the
+        recording before filtering it: every object derived from the
+        recording then carries them, because `core.filters` copies the
+        marks onto what it makes. `compute_srs` detects events only when
+        a record has none, so if the filtered record were the first to
+        be detected, the recording itself would be left unmarked.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         int
             How many events were found and marked on the record.
         """
+        # The verb the API was missing (Brandon, 2026-08-25): the shock
+        # workflow filters first, and detection inside compute_srs then
+        # happened on the filtered record and left the recording unmarked.
         source = self.name_of(source)
         from .core.shocks import find
 
@@ -1791,25 +1839,27 @@ class Project(dict):
         return len(history.shocks or ())
 
     def filter_data(self, source: Any) -> str:
-        """A time history through its low-pass (the filter view's
-        Apply Filter) — every channel, zero phase, so the peaks stay put.
+        """Filter a time history with its own filter settings (Apply
+        Filter in the filter view), every channel at zero phase so the
+        peaks stay where they are.
 
-        The settings are the history's own `filtering`, set in the
-        filter view; with none set, the suggestion is adopted the way
-        `compute_frfs` adopts a suggested averaging, so the button
-        works before the view has been visited.
+        The settings are the history's `filtering`, set in the filter
+        view as a low-, high- or band-pass. When none is set, the
+        suggested low-pass (a tenth of the sample rate, order 4) is
+        stored on the history and used, the way `compute_frfs` uses a
+        suggested averaging, so this works before the filter view has
+        been opened.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         history = self[source]
@@ -1820,27 +1870,26 @@ class Project(dict):
                             recipe=('filter_data', {}))
 
     def truncate_data(self, source: Any) -> str:
-        """A time history cut to its truncation's span (the
-        truncate view's Apply Truncation) — every channel between start and
-        stop, the clock kept.
+        """Cut a time history to its truncation span (Apply Truncation in
+        the truncate view): every channel between start and stop, on the
+        record's original clock.
 
-        The span is the history's own `truncation`, set in the
-        truncate view. Unlike Filter Data there is no suggestion to
-        adopt: the whole record is the only neutral span and keeping
-        all of it is not an act, so with none set this refuses and
-        says where to set one.
+        The span is the history's `truncation`, set in the truncate
+        view. Unlike `filter_data`, there is no suggested value to fall
+        back on, because the only neutral span is the whole record and
+        keeping all of it changes nothing. With no span set this raises
+        ValueError.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         history = self[source]
@@ -1852,29 +1901,29 @@ class Project(dict):
                             recipe=('truncate_data', {}))
 
     def integrate(self, source: Any, drift_corner: Any = ...) -> str:
-        """One integration of a time history (Integrate): acceleration
-        channels become velocity, velocity becomes displacement.
+        """Integrate a time history once (Integrate): acceleration
+        channels become velocity, and velocity channels become
+        displacement.
 
-        Whole record, never the shock windows — the reasons live in
-        `core.filters`. The drift corner is a parameter of the act,
-        recorded in the recipe: ``...`` takes the default, ``None``
-        integrates raw.
+        The whole record is integrated, never the shock windows alone;
+        `core.filters` gives the reasons. The drift corner is stored in
+        the result's provenance, so a refresh uses the same one.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
         drift_corner : float or None, optional
-            High-pass corner in Hz applied after integration, to stop a
-            sensor bias becoming a ramp. `...` takes the default;
-            `None` integrates raw, drift and all.
+            High-pass corner in Hz applied after integration, so that a
+            sensor bias does not become a ramp. ``...``, the default,
+            uses `core.filters.DRIFT_CORNER` (2 Hz). None applies no
+            high-pass, so any drift is kept.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.filters import DRIFT_CORNER
 
@@ -1886,21 +1935,20 @@ class Project(dict):
                             recipe=('integrate', {'drift_corner': corner}))
 
     def differentiate(self, source: Any) -> str:
-        """One differentiation of a time history (Differentiate):
-        displacement channels become velocity, velocity becomes
-        acceleration.
+        """Differentiate a time history once (Differentiate):
+        displacement channels become velocity, and velocity channels
+        become acceleration.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         result = self[source].differentiate()
@@ -1909,20 +1957,19 @@ class Project(dict):
                             recipe=('differentiate', {}))
 
     def compute_cpsds(self, source: Any) -> str:
-        """The full cross-spectral matrix from a time history's averages
-        (Compute CPSDs) — every channel against every channel.
+        """Compute the full cross-spectral matrix from a time history's
+        averages (Compute CPSDs), every channel against every channel.
 
         Parameters
         ----------
         source : str or object
-            The object to read, by name or as the object itself;
-            `name_of` resolves either.
+            The object to read, by name or as the object itself.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         source = self.name_of(source)
         return self._derive(source, self[source].compute_cpsds(),
@@ -1931,28 +1978,29 @@ class Project(dict):
     def transform(self, source: Any, shapes: Any, *,
                   records: Sequence[int] | None = None,
                   name: str | None = None) -> str:
-        """Physical responses through a shape set to modal responses
-        (Transform to Modal Responses) — `q = Φ⁺u` for the motions,
-        `Φᵀf` for the forces, one record per mode and quantity at the
-        modal coordinates `M1` … `Mn`.
+        """Transform physical responses through a shape set to modal
+        responses (Transform to Modal Responses), one record per mode and
+        quantity at the modal coordinates `M1` … `Mn`.
 
-        Any set serves: the six rigid-body shapes of a geometry make
-        this the virtual point transformation. The result stands alone
-        in the tree — its DOFs are on no geometry — with its
-        provenance naming both the record and the set, and a
-        `transform_report` saying what was shared, dropped and left
-        unexplained.
+        The motions are transformed as `q = Φ⁺u` and the forces as
+        `Φᵀf`. Any shape set can be used; with the six rigid-body shapes of a
+        geometry this is the virtual point transformation. The result is
+        linked into the record's group when a shape set there has every
+        mode it names, and is otherwise in no group. Its provenance
+        names both the record and the shape set, and its
+        `transform_report` says what was shared, what was dropped and
+        what was left unexplained. A source that is not a data object,
+        or `shapes` that is not a shape set, raises TypeError.
 
         Parameters
         ----------
         source : str or object
-            The time history, by name or as the object itself;
-            `name_of` resolves either.
+            The time history, by name or as the object itself.
         shapes : str or object
-            The shape set to transform through, by name or as itself.
+            The shape set to transform through, by name or as the object.
         records : sequence of int, optional
-            Which of the record's channels to carry through — the ones
-            picked in the tree. All of them when omitted.
+            Which of the record's channels to use, the ones picked in
+            the tree. All of them when omitted.
         name : str, optional
             What to call the result. Defaults to the record's name
             followed by 'Modal Responses'.
@@ -1960,8 +2008,8 @@ class Project(dict):
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.transform import to_modal
 
@@ -1980,33 +2028,34 @@ class Project(dict):
     def expand(self, source: Any, shapes: Any, *,
                records: Sequence[int] | None = None,
                name: str | None = None) -> str:
-        """Modal responses back through a shape set to physical
-        responses (Expand to Physical Responses) — `u = Φq` at every
-        DOF the set covers, linked into the set's group so the result
-        animates on the geometry. A pick of modes expands those modes'
-        contribution alone, and the name says which.
+        """Expand modal responses through a shape set back to physical
+        responses (Expand to Physical Responses): `u = Φq` at every DOF
+        the shape set covers.
+
+        The result is linked into the shape set's group, so it animates
+        on that group's geometry. Expanding some of the modes gives
+        their contribution alone, and the result's name lists them.
 
         Parameters
         ----------
         source : str or object
-            The modal time history, by name or as the object itself;
-            `name_of` resolves either.
+            The modal time history, by name or as the object itself.
         shapes : str or object
-            The shape set it was transformed through, by name or as
-            itself.
+            The shape set it was transformed through, by name or as the
+            object.
         records : sequence of int, optional
-            Which modal records to expand — the modes picked in the
+            Which modal records to expand, the modes picked in the
             tree. All of them when omitted.
         name : str, optional
-            What to call the result. Defaults to the record's name
-            with 'Modal Responses' read as 'Physical Responses', and
-            the modes carried in brackets when they are not all.
+            What to call the result. Defaults to the record's name with
+            'Modal Responses' replaced by 'Physical Responses', and the
+            modes listed in parentheses when not all of them are used.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.transform import carried_modes, to_physical
 
@@ -2043,44 +2092,50 @@ class Project(dict):
     def author_specification(self, source: Any, draft: Any, *,
                              name: str | None = None,
                              replace: bool = False) -> str:
-        """A specification written from a sheet (the Specification
-        reading's Make Specification) — autospectra at breakpoints,
-        every cross term from a stated coherence and phase, bands in
-        decibels — beside the object the sheet was opened on: a shape
-        set (at its modal coordinates, ready to expand through it), a
-        channel table (at its control channels), or a specification.
-        With `replace`, the sheet is written *into* the specification
-        it was opened from under its own name, so links and report
-        slots hold — or into several at once, from a sheet that spans
-        them. A sheet holding every channel of the specification
-        rewrites it in the sheet's own form, its breakpoints or its
-        lines becoming the object's; a sheet holding a picked subset
-        merges back at the specification's own lines with the other
-        channels untouched. A pair the sheet leaves unstated is absent
-        from the result — nothing is assumed for it.
+        """Write a specification from a sheet (Make Specification in the
+        Specification reading) and add it beside the object the sheet
+        was opened on.
+
+        The sheet gives autospectra at breakpoints, each cross term as a
+        coherence and phase, and the limit bands in decibels. It can be
+        opened on a shape set (the specification is then at the set's
+        modal coordinates, ready to expand through it), on a channel
+        table (at its control channels) or on a specification. A pair
+        the sheet does not state is left out of the result; nothing is
+        assumed for it.
+
+        With `replace`, the sheet is written into the specification it
+        was opened from, under that specification's name, so its links
+        and report slots still hold. A sheet that spans several
+        specifications is written into each of them. A sheet holding
+        every channel of a specification replaces it in the sheet's
+        form, with the sheet's breakpoints or lines. A sheet holding some
+        of the channels is merged back at the specification's own lines,
+        and the other channels are unchanged. Replacing an object that
+        is not a specification raises TypeError.
 
         Parameters
         ----------
         source : str, object, or list of str
-            The object the sheet was opened on, by name or as itself;
-            the specifications' names when the sheet spans several.
-        draft : SpecificationDraft
-            What the author stated (`core.author`). A draft with a
-            pair unstated is refused by name.
+            The object the sheet was opened on, by name or as the
+            object, or the specifications' names when the sheet spans
+            several.
+        draft : SpecificationDraft or dict
+            What the author stated (`core.author`), or its dict form.
         name : str, optional
             What to call the result. Defaults to the source's name
             followed by 'Specification'.
         replace : bool, default False
-            Write the sheet into `source` — a specification, or
-            several — in place.
+            Write the sheet into `source` (a specification, or several)
+            in place.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix — or
-            the source's own name when replaced (the first of them
-            when several).
+            The name the result was added under, unique within the
+            project (a name already taken gets a numbered suffix). With
+            `replace`, the source's own name, or the first of them when
+            there are several.
         """
         from .core.author import SpecificationDraft
 
@@ -2116,24 +2171,23 @@ class Project(dict):
 
     def generate_rigid_body_modes(self, source: Any, *,
                                   name: str | None = None) -> str:
-        """The six rigid-body mode shapes of a geometry (Generate Rigid
-        Body Mode Shapes) — three translations and three rotations
+        """Generate the six rigid-body mode shapes of a geometry (Generate
+        Rigid Body Mode Shapes): three translations and three rotations
         about its reference point, as a shape set in the geometry's
         group.
 
-        The point, and the mass and inertia that mass-normalize the
-        set, are the geometry's own `mass_properties`, set in the
-        rigid-body view. With none set the centroid is adopted, unit
-        shapes about the middle of the model — a real answer, unlike
-        a whole-record truncation, and the one the virtual-point
-        transformation wants most often — and stored, so the
-        staleness fingerprint records what was actually used.
+        The reference point, and the mass and inertia that
+        mass-normalize the shapes, are the geometry's `mass_properties`,
+        set in the rigid-body view. When none are set, unit shapes about
+        the centroid are used, which is the case the virtual point
+        transformation needs most often. Those properties are then
+        stored on the geometry, so the result's provenance records what
+        was used. An object that is not a geometry raises TypeError.
 
         Parameters
         ----------
         source : str or object
-            The geometry, by name or as the object itself; `name_of`
-            resolves either.
+            The geometry, by name or as the object itself.
         name : str, optional
             What to call the result. Defaults to the geometry's name
             followed by 'Rigid Body Modes'.
@@ -2141,8 +2195,8 @@ class Project(dict):
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.rigid import rigid_body_shapes
 
@@ -2161,36 +2215,40 @@ class Project(dict):
                                tolerance: float | None = None,
                                groups: Sequence[int] | None = None,
                                exclude: Sequence[int] | None = None) -> dict:
-        """Make a geometry's coincident nodes one node (Merge Coincident
-        Nodes): elements renamed to the lowest id at each
-        point, the rest removed. Plates connect only where they share
-        nodes, so this is what ties planes meshed apart at the lines where
-        they meet.
+        """Merge each set of a geometry's coincident nodes into one node
+        (Merge Coincident Nodes). Elements are reconnected to the lowest
+        node id at each point, and the other nodes are removed.
 
-        With `groups`, only the nodes those element groups' elements use
-        are merged — the app's form, offered on element groups picked in
-        the tree and never on the whole geometry, because merging every
-        coincidence in a model ties parts that were meant to stay apart
-        (Brandon, 2026-10-11). Left out, the whole geometry, as scripts
-        and journals written before then expect.
+        Plates are connected only where they share nodes, so this is
+        what ties together planes meshed separately, along the lines
+        where they meet.
 
-        Refused while an object linked with the geometry names a node the
-        merge would remove — its data would point at a node that is gone;
-        merge first, then measure or solve.
+        With `groups`, only the nodes used by those element groups'
+        elements are merged. The app offers the merge only on element
+        groups picked in the tree, never on the whole geometry, because
+        merging every coincident node in a model ties together parts
+        that were meant to stay separate. With `groups` left out, the
+        whole geometry is merged.
+
+        While an object linked with the geometry names a node the merge
+        would remove, the merge raises ValueError, since that object's
+        data would refer to a node that no longer exists. Merge first,
+        then measure or solve. An object that is not a geometry raises
+        TypeError.
 
         Parameters
         ----------
         source : str or object
             The geometry, by name or as the object itself.
         tolerance : float, optional
-            How close two nodes must be to be one, in meters (as the
-            geometry holds its coordinates). Defaults to a millionth of
-            the geometry's size.
+            How close two nodes must be to be merged, in meters (the
+            geometry holds its coordinates in meters). Defaults to a
+            millionth of the diagonal of the geometry's extent.
         groups : sequence of int, optional
-            The element groups whose nodes are merged, by id; every node
+            The element groups whose nodes are merged, by id. Every node
             of the geometry when omitted.
         exclude : sequence of int, optional
-            Nodes left out of the merge, by id — the places unpicked in
+            Nodes left out of the merge, by id: the places deselected in
             the app's pane before Merge was pressed.
 
         Returns
@@ -2201,6 +2259,9 @@ class Project(dict):
             already filled, and 'links', the line elements removed for
             joining nodes that became one (`Geometry.merge_collapses`).
         """
+        # Brandon, 2026-10-11: the app merges only element groups picked
+        # in the tree. With `groups` left out the whole geometry is
+        # merged, as scripts and journals written before then expect.
         name = self.name_of(source)
         geometry = self[name]
         if not isinstance(geometry, Geometry):
@@ -2230,30 +2291,31 @@ class Project(dict):
     def align_meshes(self, source: Any, reach: float | None = None,
                      groups: Sequence[int] | None = None,
                      exclude: Sequence[int] | None = None) -> dict:
-        """Move the coarser mesh's nodes onto the finer's where parts
-        meshed apart meet or overlap (Align Meshes): each node of the
-        coarser piece within `reach` of the finer piece's surface moved
-        onto its nearest node there, so Merge Coincident Nodes can join
-        them next (`Geometry.align_moves`; Brandon, 2026-10-11).
+        """Move the coarser mesh's nodes onto the finer mesh's nodes where
+        parts meshed separately meet or overlap (Align Meshes), so Merge
+        Coincident Nodes can join them next.
 
-        Offered in the app on element groups picked in the tree, as the
-        merge is. Refused while an object linked with the geometry names
-        a node that would move — its data was measured or solved where
-        the node was.
+        Each node of the coarser piece within `reach` of the finer
+        piece's surface is moved onto its nearest node there
+        (`Geometry.align_moves`). The app offers this on element groups
+        picked in the tree, as it does the merge. While an object linked
+        with the geometry names a node that would move, this raises
+        ValueError, since that object's data was measured or solved
+        where the node was.
 
         Parameters
         ----------
         source : str or object
             The geometry, by name or as the object itself.
         reach : float, optional
-            How far a node may move, in meters (as the geometry holds its
-            coordinates). Defaults to half the coarsest piece's spacing
-            (`Geometry.align_reach`).
+            How far a node may move, in meters (the geometry holds its
+            coordinates in meters). Defaults to half the coarsest piece's
+            spacing (`Geometry.align_reach`).
         groups : sequence of int, optional
-            The element groups whose pieces are aligned, by id; every
+            The element groups whose pieces are aligned, by id. Every
             element of the geometry when omitted.
         exclude : sequence of int, optional
-            Nodes left out, by id — the moves unpicked in the app's pane
+            Nodes left out, by id: the moves deselected in the app's pane
             before Align was pressed, both nodes of each.
 
         Returns
@@ -2262,6 +2324,7 @@ class Project(dict):
             'moved', how many nodes moved; 'farthest', the longest move,
             in meters.
         """
+        # Align Meshes added by Brandon, 2026-10-11.
         name = self.name_of(source)
         geometry = self[name]
         if not isinstance(geometry, Geometry):
@@ -2274,22 +2337,23 @@ class Project(dict):
 
     def new_geometry(self, name: str = 'Geometry', *,
                      unit: str = 'm') -> str:
-        """An empty geometry, to build a model in (the project's **+**):
-        planes added with `add_plane`, links in the app's add mode.
+        """Add an empty geometry to build a model in (the project's +
+        button). Planes are added with `add_plane`, and links in the
+        app's add mode.
 
         Parameters
         ----------
         name : str, default 'Geometry'
             What to call it.
         unit : str, default 'm'
-            Its length unit. Coordinates are held in SI either way; this
-            is the unit it remembers it was built in.
+            Its length unit. Coordinates are held in SI either way; the
+            geometry records this as the unit it was built in.
 
         Returns
         -------
         str
             The name the result was added under, unique within the
-            project — a clash gets a numbered suffix.
+            project. A name already taken gets a numbered suffix.
         """
         return self.add(name, Geometry(node_id=[], node_xyz=np.empty((0, 3)),
                                        length_unit=unit))
@@ -2298,12 +2362,13 @@ class Project(dict):
         """Set the view a geometry opens on in 3-D, in the app, the report
         and every exported figure.
 
-        The app's Set Default View captures the view on screen; from a
-        script it is stated, a model built Y-up seen from the front and
-        above, say. Everything drawn on the geometry — its shapes, an
-        ODS, the DOF arrows — opens on it too, and Reset View returns to
-        it. The nodes are not turned: only how the model is looked at
-        (Brandon, 2026-09-27).
+        In the app, Set Default View captures the view on screen; from a
+        script the view is given, for example a model built Y-up seen
+        from the front and above. Everything drawn on the geometry (its
+        shapes, an ODS, the DOF arrows) opens on this view too, and Reset
+        View returns to it. The nodes are not rotated; only the viewing
+        direction changes. An object that is not a geometry, or a `view`
+        that is not a View, raises TypeError.
 
         Parameters
         ----------
@@ -2311,8 +2376,8 @@ class Project(dict):
             The geometry, by name or as the object itself.
         view : View, optional
             Where the eye is, seen from the model's center, and which way
-            is up; None goes back to the default isometric (from +X+Y+Z,
-            Z up).
+            is up. None returns to the default isometric view (from
+            +X+Y+Z, Z up).
 
         Returns
         -------
@@ -2323,6 +2388,8 @@ class Project(dict):
         >>> from visualdynamics import View
         >>> project.set_view('BARC', View(eye=(1, 1, -1), up=(0, 1, 0)))  # doctest: +SKIP
         """
+        # The nodes are not turned, only how the model is looked at
+        # (Brandon, 2026-09-27).
         name = self.name_of(source)
         geometry = self[name]
         if not isinstance(geometry, Geometry):
@@ -2334,16 +2401,18 @@ class Project(dict):
     def add_plane(self, source: Any, corner: Any, edge_a: Any, edge_b: Any,
                   size: float, group: str = '', *, unit: str = 'm',
                   tolerance: float | None = None, apart: bool = False) -> dict:
-        """Add a meshed rectangle of plates to a geometry (Add Plane): a
-        corner, two perpendicular edges and an element size, each edge
-        divided evenly into the whole number of elements nearest that
-        size (`mesh.plane`). Its nodes that fall on nodes already there
-        become them, so planes meeting along a line are tied there, and
-        the nodes already there keep their ids (`mesh.join`).
+        """Add a meshed rectangle of plates to a geometry (Add Plane),
+        given a corner, two perpendicular edges and an element size.
 
-        Planes given the same element group name are one element group — the five walls
-        of a box, each named 'box', are the box, given its material once
-        in the Element Groups table.
+        Each edge is divided evenly into the whole number of elements
+        nearest that size (`mesh.plane`). A new node that falls on an
+        existing node is replaced by it, so planes that meet along a
+        line are tied there, and the existing nodes keep their ids
+        (`mesh.join`).
+
+        Planes given the same element group name are one element group.
+        The five walls of a box, each named 'box', are the box, and its
+        material is set once in the Element Groups table.
 
         Parameters
         ----------
@@ -2352,23 +2421,23 @@ class Project(dict):
         corner : array_like
             One corner, (x, y, z).
         edge_a, edge_b : array_like
-            The two edges from that corner, as vectors; perpendicular.
+            The two edges from that corner, as perpendicular vectors.
         size : float
-            The element size aimed at.
+            The target element size.
         group : str, optional
-            The element group the plates go in, by name: an existing element group of
-            that name, or a new one.
+            The element group the plates go in, by name: an existing
+            element group of that name, or a new one.
         unit : str, default 'm'
             The unit the lengths above are in. A geometry whose units
             are not defined takes them as given.
         tolerance : float, optional
-            How close a node must be to one already there to be it, in
-            meters. Defaults to a millionth of the size of the two
-            together.
+            How close a new node must be to an existing one to be
+            replaced by it, in meters. Defaults to a millionth of the
+            size of the two together.
         apart : bool, default False
-            Join only the element group's own nodes, so the plane keeps
-            nodes of its own where it touches another part, to be
-            merged at the places picked (`mesh.join`).
+            Join only to the element group's own nodes, so the plane
+            keeps nodes of its own where it touches another part, to be
+            merged later at the places picked (`mesh.join`).
 
         Returns
         -------
@@ -2391,9 +2460,11 @@ class Project(dict):
     def tie_elements(self, source: Any, elements: Any, to: Any,
                      group: str | None = None) -> dict:
         """Tie a patch of a geometry's elements rigidly to the part under
-        it (Tie): each node of the patch linked by a rigid, massless link
-        to the nearest node of `to` — a bolted joint, from the elements
-        its washer covers (`mesh.tie`).
+        it (Tie), as for a bolted joint modeled from the elements its
+        washer covers.
+
+        Each node of the patch is joined by a rigid, massless link to the
+        nearest node of `to` (`mesh.tie`).
 
         Parameters
         ----------
@@ -2402,10 +2473,12 @@ class Project(dict):
         elements : sequence of int
             The patch, by element id.
         to : str, int or sequence of int
-            An element group, by name or id, or a second patch, by element ids.
+            An element group, by name or id, or a second patch, by
+            element ids.
         group : str, optional
-            The element group the links go into, made rigid if new. Defaults to
-            the geometry's first rigid element group, or a new one named 'ties'.
+            The element group the links go into, made rigid if new.
+            Defaults to the geometry's first rigid element group, or a
+            new one named 'ties'.
 
         Returns
         -------
@@ -2423,10 +2496,12 @@ class Project(dict):
         return mesh.tie(geometry, [int(e) for e in elements], to, group)
 
     def merge_groups(self, source: Any, groups: Any) -> dict:
-        """Merge a geometry's element groups into one (Merge Element Groups): the first
-        keeps its id, name and properties and the others' elements move
-        into it — refused unless they hold the same element types and
-        carry the same material and thickness or section
+        """Merge a geometry's element groups into one (Merge Element
+        Groups). The first group keeps its id, name and properties, and
+        the other groups' elements move into it.
+
+        The merge is refused unless the groups hold the same element
+        types and have the same material and thickness or section
         (`Geometry.merge_refusal`).
 
         Parameters
@@ -2439,8 +2514,8 @@ class Project(dict):
         Returns
         -------
         dict
-            'into', the element group kept; 'groups', how many merged into it;
-            'elements', how many elements moved.
+            'into', the element group kept; 'groups', how many merged
+            into it; 'elements', how many elements moved.
         """
         name = self.name_of(source)
         geometry = self[name]
@@ -2453,17 +2528,18 @@ class Project(dict):
                   unit: str = 'm', holes: Any = (),
                   hole_group: str | None = None,
                   tolerance: float | None = None, apart: bool = False) -> dict:
-        """Add a meshed box of solid bricks to a geometry (Add Block):
-        a corner, three perpendicular edges and an element size, each
-        edge divided evenly into the whole number of elements nearest
-        that size (`mesh.block`), with cylindrical holes cut the way a
-        structured mesh cuts them. Its nodes that fall on nodes already
-        there become them, so blocks meeting over a face are tied there
-        (`mesh.join`).
+        """Add a meshed box of solid bricks to a geometry (Add Block),
+        given a corner, three perpendicular edges and an element size.
 
-        Blocks given the same element group name are one element group —
-        the rails and uprights of a frame, each named 'frame', are the
-        frame, given its material once in the Element Groups table.
+        Each edge is divided evenly into the whole number of elements
+        nearest that size (`mesh.block`), and cylindrical holes are cut
+        the way a structured mesh cuts them. A new node that falls on an
+        existing node is replaced by it, so blocks that meet over a face
+        are tied there (`mesh.join`).
+
+        Blocks given the same element group name are one element group.
+        The rails and uprights of a frame, each named 'frame', are the
+        frame, and its material is set once in the Element Groups table.
 
         Parameters
         ----------
@@ -2472,9 +2548,9 @@ class Project(dict):
         corner : array_like
             One corner, (x, y, z).
         edge_a, edge_b, edge_c : array_like
-            The three edges from that corner, as vectors; perpendicular.
+            The three edges from that corner, as perpendicular vectors.
         size : float
-            The element size aimed at.
+            The target element size.
         group : str, optional
             The element group the bricks go in, by name: an existing
             group of that name, or a new one.
@@ -2485,17 +2561,17 @@ class Project(dict):
             Holes as `mesh.block` takes them: (center, radius, axis) or
             (center, radius, axis, depth).
         hole_group : str, optional
-            The element group the holes' bricks go to — an insert's —
-            or None to leave them out.
+            The element group the bricks inside the holes go to (an
+            insert, for example), or None to leave them out.
         tolerance : float, optional
-            How close a node must be to one already there to be it, in
-            meters. Defaults to a millionth of the size of the two
-            together.
+            How close a new node must be to an existing one to be
+            replaced by it, in meters. Defaults to a millionth of the
+            size of the two together.
         apart : bool, default False
-            Join only the element group's own nodes, so the box keeps
-            nodes of its own where it touches another part — a channel's
-            foot on the box it is bolted to — to be merged at the places
-            picked (`mesh.join`).
+            Join only to the element group's own nodes, so the box keeps
+            nodes of its own where it touches another part (a channel's
+            foot on the box it is bolted to), to be merged later at the
+            places picked (`mesh.join`).
 
         Returns
         -------
@@ -2535,9 +2611,11 @@ class Project(dict):
     def add_solid_block(self, source: Any, center: Any, widths: Any,
                         angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
                         corner: float = 0.0, unit: str = 'm') -> int:
-        """Add a block to a geometry's solids (`core.solids`): a shape to
-        build a part from and mesh later, not elements — `widths` across
-        along its own axes, its middle at `center`, turned by `angles`.
+        """Add a block to a geometry's solids (`core.solids`). A solid is
+        a shape to build a part from and mesh later; it adds no elements.
+
+        The block is `widths` across along its own axes, centered at
+        `center` and rotated by `angles`.
 
         Parameters
         ----------
@@ -2551,7 +2629,7 @@ class Project(dict):
             What to call it.
         corner : float, default 0
             The radius its four edges along its own Z are rounded to, in
-            `unit`: a window cut with rounded corners leaves fillets.
+            `unit`. A window cut with a rounded block leaves fillets.
         unit : str, default 'm'
             The unit the lengths are in. A geometry whose units are not
             defined takes them as given.
@@ -2572,10 +2650,12 @@ class Project(dict):
     def add_solid_cylinder(self, source: Any, center: Any, radius: float,
                            length: float, angles: Any = (0.0, 0.0, 0.0),
                            name: str = '', *, unit: str = 'm') -> int:
-        """Add a cylinder to a geometry's solids (`core.solids`): `radius`
-        round its own axis and `length` along it, its middle at
-        `center`; with no `angles` its axis is the geometry's Z. A hole
-        is one subtracted from a part (`combine_solids`).
+        """Add a cylinder to a geometry's solids (`core.solids`), of
+        `radius` about its own axis and `length` along it, centered at
+        `center`.
+
+        With no `angles` its axis is the geometry's Z. A cylinder
+        subtracted from a part (`combine_solids`) makes a hole.
 
         Parameters
         ----------
@@ -2611,10 +2691,12 @@ class Project(dict):
                           dimensions: Any, length: float,
                           angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
                           unit: str = 'm') -> int:
-        """Add a section to a geometry's solids (`core.solids.add_section`):
-        an I-beam, a channel, a tee, an angle, a rectangular or a round
-        tube, `length` along its own axis, sized by its own dimensions
-        and changed by them after (`edit_solid`).
+        """Add a structural section to a geometry's solids
+        (`core.solids.add_section`): an I-beam, channel, tee, angle,
+        rectangular tube or round tube, `length` along its own axis.
+
+        It is sized by its own dimensions, which `edit_solid` can change
+        later.
 
         Parameters
         ----------
@@ -2624,16 +2706,16 @@ class Project(dict):
             One of `core.solids.SECTIONS`: 'I-beam', 'channel', 'tee',
             'angle', 'rectangular tube' or 'round tube'.
         center : array_like
-            Three numbers, in `unit`: the middle of the box it fills.
+            Three numbers, in `unit`: the center of the box it fills.
         dimensions : sequence of float
-            In `unit`, in the order `SECTIONS[shape]` names them — an
-            I-beam's depth, flange width, flange thickness and web
-            thickness, as the beam element's section takes them.
+            In `unit`, in the order `SECTIONS[shape]` names them. For an
+            I-beam these are the depth, flange width, flange thickness
+            and web thickness, the same as the beam element's section.
         length : float
             In `unit`.
         angles : array_like, default (0, 0, 0)
-            Degrees about the geometry's X, then Y, then Z axes; with none
-            it runs along Z.
+            Degrees about the geometry's X, then Y, then Z axes. With
+            none it runs along Z.
         name : str, optional
             What to call it.
         unit : str, default 'm'
@@ -2659,9 +2741,11 @@ class Project(dict):
                        name: str = '', *, counterbore: Any = None,
                        unit: str = 'm') -> int:
         """Add a hole to a geometry's solids (`core.solids.add_hole`), to
-        subtract from a part (`combine_solids`): entered at `center`,
-        running `depth` along its own -Z, or through the part it is cut
-        from with none; a counterbore wider at the entry.
+        be subtracted from a part with `combine_solids`.
+
+        The hole enters at `center` and runs `depth` along its own -Z,
+        or through the part it is cut from when `depth` is None. A
+        counterbore makes it wider at the entry.
 
         Parameters
         ----------
@@ -2672,10 +2756,10 @@ class Project(dict):
         diameter : float
             In `unit`.
         depth : float, optional
-            In `unit`; None through.
+            In `unit`. None for a through hole.
         angles : array_like, default (0, 0, 0)
-            Degrees about the geometry's X, then Y, then Z axes; with none
-            it runs down Z.
+            Degrees about the geometry's X, then Y, then Z axes. With
+            none it runs down Z.
         name : str, optional
             What to call it.
         counterbore : (float, float), optional
@@ -2713,11 +2797,12 @@ class Project(dict):
         return found
 
     def delete_elements(self, source: Any, ids: Any) -> dict:
-        """Delete a geometry's elements, and the nodes only they used —
-        except nodes data in the project is measured or solved at
-        (Brandon, 2026-10-12): a meshed part's bricks deleted take its
-        nodes, a test geometry's panels deleted leave its measurement
-        points (`Geometry.delete_elements`).
+        """Delete a geometry's elements and the nodes only they used,
+        except nodes where data in the project is measured or solved
+        (`Geometry.delete_elements`).
+
+        Deleting a meshed part's bricks removes its nodes, while deleting
+        a test geometry's panels leaves its measurement points.
 
         Parameters
         ----------
@@ -2729,16 +2814,17 @@ class Project(dict):
         Returns
         -------
         dict
-            'elements' and 'nodes', how many went.
+            'elements' and 'nodes', how many were deleted.
         """
+        # Nodes data uses are kept (Brandon, 2026-10-12).
         _name, geometry = self._solid_geometry(source)
         return geometry.delete_elements([int(i) for i in ids], nodes=True,
                                         keep=sorted(self._data_nodes()))
 
     def delete_element_groups(self, source: Any, ids: Any) -> dict:
-        """Delete a geometry's element groups with their elements, and the
-        nodes only they used — except nodes data in the project is
-        measured or solved at (`Geometry.delete_groups`).
+        """Delete a geometry's element groups with their elements and the
+        nodes only they used, except nodes where data in the project is
+        measured or solved (`Geometry.delete_groups`).
 
         Parameters
         ----------
@@ -2750,7 +2836,7 @@ class Project(dict):
         Returns
         -------
         dict
-            'groups', 'elements' and 'nodes', how many went.
+            'groups', 'elements' and 'nodes', how many were deleted.
         """
         _name, geometry = self._solid_geometry(source)
         return geometry.delete_groups([int(i) for i in ids],
@@ -2761,13 +2847,16 @@ class Project(dict):
                    length: Any = None, corner: Any = None, counts: Any = None,
                    spacing: Any = None, dimensions: Any = None, name: Any = None,
                    unit: str = 'm') -> None:
-        """Change a solid after it is made (`core.solids.edit`): a block's
-        center, widths, angles and corner, a cylinder's center, radius,
-        length and angles, a section's center, dimensions, length and
-        angles, a hole's center, dimensions and angles, a pattern's
-        counts and spacing, any solid's name. What is not given is kept.
-        A boolean it is part of takes the change; a mesh made from it
-        does not, until Mesh Solids meshes it again.
+        """Change a solid after it is made (`core.solids.edit`). Anything
+        not given is kept.
+
+        The values that can be changed are a block's center, widths,
+        angles and corner; a cylinder's center, radius, length and
+        angles; a section's center, dimensions, length and angles; a
+        hole's center, dimensions and angles; a pattern's counts and
+        spacing; and any solid's name. A boolean the solid is part of
+        changes with it. A mesh made from it does not, until Mesh Solids
+        meshes it again.
 
         Parameters
         ----------
@@ -2782,8 +2871,8 @@ class Project(dict):
             As `pattern_solids` takes them.
         dimensions : sequence of float, optional
             A section's, as `add_solid_section` takes them, or a hole's:
-            its diameter, its depth (zero through), and its counterbore's
-            diameter and depth (zeros, none) — in `unit`.
+            its diameter, its depth (zero for a through hole) and its
+            counterbore's diameter and depth (zeros for none), in `unit`.
         unit : str, default 'm'
             The unit the lengths are in. A geometry whose units are not
             defined takes them as given.
@@ -2811,9 +2900,9 @@ class Project(dict):
 
     def move_solids(self, source: Any, ids: Any, offset: Any = (0.0, 0.0, 0.0),
                     turn: Any = (0.0, 0.0, 0.0), *, unit: str = 'm') -> int:
-        """Move solids whole (`core.solids.move`): a part with every solid
-        it is made of, turned by `turn` about the middle of their extent,
-        then slid by `offset`.
+        """Move whole solids (`core.solids.move`): a part and every solid
+        it is made of, rotated by `turn` about the center of their extent
+        and then translated by `offset`.
 
         Parameters
         ----------
@@ -2822,7 +2911,7 @@ class Project(dict):
         ids : sequence of int
             The solids, by id.
         offset : array_like, default (0, 0, 0)
-            How far, in `unit`.
+            The translation, in `unit`.
         turn : array_like, default (0, 0, 0)
             Degrees about the geometry's X, then Y, then Z axes.
         unit : str, default 'm'
@@ -2832,7 +2921,8 @@ class Project(dict):
         Returns
         -------
         int
-            How many blocks and cylinders moved.
+            How many primitive solids moved (blocks, cylinders, sections
+            and holes).
         """
         from .core import solids
 
@@ -2844,8 +2934,11 @@ class Project(dict):
     def combine_solids(self, source: Any, operation: str, ids: Any,
                        name: str = '') -> int:
         """Add a boolean of a geometry's solids: 'union', 'subtract' (the
-        rest taken from the first) or 'intersect'. The solids combined
-        become the new one's, and only it stands as a part.
+        others subtracted from the first) or 'intersect'.
+
+        The solids combined become part of the new solid, and only the
+        new solid is listed as a part. A solid already part of another
+        boolean is refused.
 
         Parameters
         ----------
@@ -2854,9 +2947,9 @@ class Project(dict):
         operation : str
             'union', 'subtract' or 'intersect'.
         ids : sequence of int
-            Two solids or more, by id, the first first.
+            Two or more solids, by id, in order.
         name : str, optional
-            What to call it.
+            What to call it. Defaults to the first solid's name.
 
         Returns
         -------
@@ -2872,9 +2965,11 @@ class Project(dict):
                        *, unit: str = 'm') -> int:
         """Pattern a geometry's solids in rows, columns and layers
         (Pattern): `counts` along X, Y and Z, the originals included,
-        `spacing` apart — one solid made of the originals, so changing
-        one changes every copy, and the pattern's counts and spacing are
-        changed with `edit_solid` (`core.solids.pattern`).
+        `spacing` apart.
+
+        The pattern is one solid made from the originals
+        (`core.solids.pattern`), so changing an original changes every
+        copy. Its counts and spacing are changed with `edit_solid`.
 
         Parameters
         ----------
@@ -2905,42 +3000,45 @@ class Project(dict):
     def mesh_solids(self, source: Any, ids: Any, size: float | None = None, *,
                     unit: str = 'm', apart: bool = False,
                     parts_apart: bool = False) -> dict:
-        """Mesh a geometry's solids into bricks (Mesh Solids): the parts,
-        extrusions along X, Y or Z, on one grid cut at every flat face,
-        their holes rounded, each part an element group named for it,
-        parts meshed together sharing nodes where they touch
-        (`core.solids.extrusion_mesh`). The solids stay, to mesh again,
-        and meshed again a part replaces its earlier mesh: the bricks of
-        the element group of its name, the group and its material kept.
+        """Mesh a geometry's solids into bricks (Mesh Solids). Each part
+        becomes an element group named for it.
+
+        The parts are extrusions along X, Y or Z, meshed on one grid cut
+        at every flat face, with their holes rounded
+        (`core.solids.extrusion_mesh`). Parts meshed together share nodes
+        where they touch. The solids are kept so they can be meshed
+        again, and a part meshed again replaces its earlier mesh: the
+        bricks in the element group of its name are deleted, and the
+        group and its material are kept.
 
         Parameters
         ----------
         source : str or object
             The geometry, by name or as the object itself.
         ids : sequence of int
-            The parts, by id: solids nothing else uses.
+            The parts, by id: solids no other solid uses.
         size : float, optional
-            The element size aimed at, in `unit`. Defaults to half the
+            The target element size, in `unit`. Defaults to half the
             thinnest feature (`core.solids.mesh_size`).
         unit : str, default 'm'
             The unit the size is in. A geometry whose units are not
             defined takes it as given.
         apart : bool, default False
-            Land the bricks only on nodes of their own element groups
-            (`mesh.join`), so a part meshed beside another keeps nodes of
-            its own where they touch.
+            Join the bricks only to nodes of their own element groups
+            (`mesh.join`), so a part meshed beside an existing one keeps
+            nodes of its own where they touch.
         parts_apart : bool, default False
-            The parts meshed here keep their own nodes where they touch
-            each other, on one grid, so their nodes lie on each other's
-            for bolts to be merged at.
+            Give each part meshed here its own nodes where the parts
+            touch each other. They are still on one grid, so their nodes
+            coincide and can be merged later where bolts go.
 
         Returns
         -------
         dict
-            'bricks', 'nodes', 'axis', 'rounded', 'shortest' as
-            `extrusion_mesh` says them, 'added', 'shared' and 'groups'
-            as `mesh.join` does, and 'replaced', the bricks of the
-            parts' earlier mesh it took the place of.
+            'bricks', 'nodes', 'axis', 'rounded' and 'shortest' as
+            `extrusion_mesh` gives them, 'added', 'shared' and 'groups'
+            as `mesh.join` gives them, and 'replaced', how many bricks of
+            the parts' earlier mesh were replaced.
         """
         from .core import mesh, solids
 
@@ -2964,8 +3062,11 @@ class Project(dict):
                 'groups': found['groups'], 'replaced': len(replaced)}
 
     def delete_solids(self, source: Any, ids: Any) -> int:
-        """Delete a geometry's solids, each with everything it is made of
-        (`core.solids.delete`); one a boolean still uses is refused.
+        """Delete a geometry's solids, each with every solid it is made
+        of (`core.solids.delete`).
+
+        A solid that a boolean still uses is refused unless the boolean
+        is deleted with it.
 
         Parameters
         ----------
@@ -2977,7 +3078,7 @@ class Project(dict):
         Returns
         -------
         int
-            How many solids went.
+            How many solids were deleted, the ones inside included.
         """
         from .core import solids
 
@@ -2985,20 +3086,24 @@ class Project(dict):
         return solids.delete(geometry, ids)
 
     def separate_solids(self, source: Any, ids: Any) -> int:
-        """Take a geometry's booleans apart (Take Apart): each goes, its
-        operands parts again (`core.solids.separate`).
+        """Take a geometry's booleans and patterns apart (Take Apart).
+        Each one is removed, and its operands are parts again
+        (`core.solids.separate`).
+
+        A primitive solid, or one that is still part of another, is
+        refused.
 
         Parameters
         ----------
         source : str or object
             The geometry, by name or as the object itself.
         ids : sequence of int
-            The booleans, by id.
+            The booleans or patterns, by id.
 
         Returns
         -------
         int
-            How many solids stand again.
+            How many solids are parts again.
         """
         from .core import solids
 
@@ -3009,18 +3114,19 @@ class Project(dict):
                     maximum_frequency: float | None = None,
                     num_modes: int | None = None, damping: float = 0.0,
                     name: str | None = None, progress: Any = None) -> str:
-        """The normal modes of a geometry whose element groups carry their
-        properties (Solve Modes): the finite element model built from
-        the element groups, solved, and the shapes added in the geometry's
+        """Solve the normal modes of a geometry whose element groups have
+        properties (Solve Modes). The shapes are added in the geometry's
         group.
 
-        The geometry is the model: each element group a material and a thickness
-        or a section (`fem.GroupProperties`, set in the Element Groups table or
-        on `geometry.group_properties`), every quad a plate, every
-        triangle a triangle, every two-node line a beam
-        (`fem.Model.from_geometry`). The solution is free-free unless the
-        geometry says otherwise later; the six rigid-body modes come
-        back at exactly 0 Hz with the elastic ones after them.
+        The finite element model is built from the geometry
+        (`fem.Model.from_geometry`). Each element group has a material
+        and a thickness or a section (`fem.GroupProperties`, set in the
+        Element Groups table or on `geometry.group_properties`); each
+        quad becomes a plate element, each triangle a triangular plate
+        element and each two-node line a beam. The model is solved
+        free-free, so the six rigid-body modes come back at 0 Hz,
+        followed by the elastic modes. A geometry with no element group
+        properties raises ValueError.
 
         Parameters
         ----------
@@ -3029,16 +3135,16 @@ class Project(dict):
         maximum_frequency : float, optional
             Solve for every mode up to this frequency, in Hz.
         num_modes : int, optional
-            Or for this many modes, rigid ones included.
+            Solve for this many modes instead, rigid-body modes included.
         damping : float, default 0.0
-            The fraction of critical damping every mode is given; a
-            finite element model has none of its own.
+            The fraction of critical damping given to every mode. A
+            finite element model has no damping of its own.
         name : str, optional
             What to call the result. Defaults to the geometry's name
             with ' Modes' after it.
         progress : callable, optional
-            Told ``(done, total)`` as the solve advances; the window's
-            strip bar reads it, a script can print it.
+            Called with ``(done, total)`` as the solve advances. The
+            app's progress bar uses it; a script can print it.
 
         Returns
         -------
@@ -3066,13 +3172,15 @@ class Project(dict):
                             recipe=('solve_modes', params))
 
     def read_as_specification(self, name: Any) -> str:
-        """Read this PSD as a specification — the requirement it is
-        judged against — under its own name, its object group and every
-        reference to it kept.
+        """Read a PSD as a specification, the requirement measurements are
+        judged against, keeping its name, object group and every
+        reference to it.
 
-        A file whose format has no word for a requirement (ESCDF's data
-        types do not) can only say so by its name, and a name is no
-        evidence; the person who knows says so instead.
+        Some formats have no way to mark a requirement (the ESCDF data
+        types do not), so a file can only suggest one by its name, and a
+        name is not evidence. The person who knows marks it here
+        instead. An object that is not a PSD, or is already a
+        specification, raises TypeError.
 
         Parameters
         ----------
@@ -3092,8 +3200,10 @@ class Project(dict):
         return name
 
     def read_as_psd(self, name: Any) -> str:
-        """Read this specification as a plain PSD again, under its own
-        name — `read_as_specification` undone.
+        """Read a specification as a plain PSD again, under its own name.
+        This undoes `read_as_specification`.
+
+        An object that is not a specification raises TypeError.
 
         Parameters
         ----------
@@ -3114,10 +3224,12 @@ class Project(dict):
 
     def scale_family(self, measured: Any) -> list[str]:
         """The measured PSDs that share one comparison scale: the object
-        and every non-specification PSD in its object group — its
-        source, or the octave bands made from it. One family, one
-        number, because an octave PSD is the same measurement on another
-        grid and two scales for one run is a contradiction.
+        and every PSD in its object group that is not a specification,
+        such as its source or the octave bands made from it.
+
+        The family has one scale because an octave-band PSD is the same
+        measurement on another frequency grid, and two scales for one
+        run would contradict each other.
 
         Parameters
         ----------
@@ -3140,13 +3252,15 @@ class Project(dict):
                 and not isinstance(self.get(n), Specification)]
 
     def comparison_scale(self, specification: Any, measured: Any) -> int:
-        """The decibels a measured PSD is scaled by to be compared with
-        a specification — what the comparison's plot, bars and report
-        all read. A value held anywhere in the family wins
-        (`set_comparison_scale` keeps the family equal); otherwise it is
-        detected on the family's narrowband member, so the same data
-        banded onto octaves cannot round to a different decibel than
-        the lines it came from.
+        """The decibels a measured PSD is scaled by when it is compared
+        with a specification. The comparison's plot, bars and report all
+        use this value.
+
+        A scale held on any member of the family is used
+        (`set_comparison_scale` keeps the family equal). Otherwise it is
+        detected on the family's narrowband member, so the same data on
+        octave bands cannot round to a different decibel than the lines
+        it came from.
 
         Parameters
         ----------
@@ -3179,11 +3293,14 @@ class Project(dict):
 
     def set_comparison_scale(self, measured: Any,
                              db: int | None) -> list[str]:
-        """Hold a comparison scale on a measured PSD and its whole
-        family (`scale_family`) — or, with None, return them to
-        detecting it from the data. Held on the objects, not a view,
-        so the report compares exactly what the screen does and a saved
-        project remembers the judgment. The data is never changed.
+        """Hold a comparison scale on a measured PSD and its whole family
+        (`scale_family`), or with None, go back to detecting it from the
+        data.
+
+        The scale is stored on the objects, not on a view, so the report
+        compares exactly what the screen shows and a saved project keeps
+        the choice. The data itself is never changed. A value that is
+        not a whole number raises ValueError.
 
         Parameters
         ----------
@@ -3195,7 +3312,7 @@ class Project(dict):
         Returns
         -------
         list of str
-            The PSDs now holding it.
+            The PSDs the value was set on.
         """
         if db is not None:
             if isinstance(db, float) and not db.is_integer():
@@ -3208,10 +3325,11 @@ class Project(dict):
 
     def fit_coherence(self, source: Any,
                       records: Sequence[int] | None = None) -> str | None:
-        """The coherence the fitting screen weights a fit of `source`
-        by: the one covering the most of the fit's response DOFs, one
-        in the FRF's own object group winning a tie. None when no
-        coherence covers any of them.
+        """The coherence the fitting screen weights a fit of `source` by,
+        or None when no coherence covers any of the fit's response DOFs.
+
+        It is the coherence covering the most of those DOFs, and one in
+        the FRF's own object group is chosen in a tie.
 
         Parameters
         ----------
@@ -3248,61 +3366,64 @@ class Project(dict):
                   at: Sequence[tuple[float, float]] | None = None,
                   refine: int = 0, records: Sequence[int] | None = None,
                   coherence: Any = None) -> str:
-        """Fit a modal model to an FRF set (the fitting screen).
+        """Fit a modal model to an FRF set, as the fitting screen does.
 
-        The screen's loop, scripted: confirm the suggestion, take the
-        next, `limit` times. The session's own suggestion logic is the
-        whole judgment — a confirmed peak is spoken for unless the
-        shape standing there is somebody else's — so the loop adds no
-        second opinion. It used to: a proximity guard here vetoed any
-        suggestion within 1 Hz of a confirmed mode, which was the same
-        ridge-trap bandaid the session has since outgrown, and it
-        silently skipped the repeated pair's second tooth that
-        `suggest` had deliberately offered. On the screen the person
-        stops the loop; scripted, `limit` is that judgment, and the
-        plate demo's own cap is the worked example of choosing it.
+        This runs the screen's loop: confirm the suggested mode, then
+        take the next suggestion, `limit` times. The session's
+        suggestion logic makes every choice (a peak already confirmed is
+        not offered again unless a different shape is found there, as
+        for a repeated pair), and the loop adds no check of its own. On
+        the screen the person stops the loop; in a script `limit` does,
+        and the plate demonstration's cap is a worked example of
+        choosing it.
 
-        On the screen the equivalent of `bounds` is the zoom — what is
-        on the plot is what gets searched. A script has no plot, so it
-        says so here.
+        On the screen the zoom does the job of `bounds`: what is on the
+        plot is what gets searched. A script has no plot, so it gives
+        `bounds` instead.
 
         Parameters
         ----------
         source : str
             The FRF set to fit.
         bounds : tuple of float, optional
-            (low, high) frequency limits to fit within. Defaults to
-            the whole band.
+            (low, high) frequency limits to fit within, in Hz. Defaults
+            to the whole band.
         limit : int, default 30
             The most modes to accept.
         name : str, optional
-            What to call the shape set.
+            What to call the shape set. Defaults to the FRF set's name
+            followed by 'Modes'.
         at : sequence of tuple, optional
-            Explicit (frequency, damping) picks — each optionally
-            (frequency, damping, description) — confirmed in the
-            order given — the residual is peeled sequentially, so the
-            order is part of the fit. This is how an interactive
-            session replays: the fitting screen journals its confirms
-            as exactly this call. `bounds` and `limit` are ignored
-            when picks are given.
+            Explicit (frequency, damping) picks, each optionally
+            (frequency, damping, description), confirmed in the order
+            given. Each mode is removed from the residual before the
+            next is fitted, so the order is part of the fit. The fitting
+            screen journals its confirms as this call, which is how an
+            interactive session is replayed. `bounds` and `limit` are
+            ignored when picks are given.
         refine : int, default 0
-            Times to run the joint residue refinement after the
-            confirms — the screen's Refine All, counted.
+            How many times to run the joint residue refinement after the
+            confirms (the screen's Refine All).
         records : sequence of int, optional
-            Fit these records only — the screen fits the records picked
+            Fit these records only; the screen fits the records picked
             in the tree. Every record when omitted.
         coherence : str or Coherence, optional
-            Weight each response's least squares by this coherence's
-            trust in it, line by line — the screen weights by
+            Weight each response's least-squares fit by this coherence,
+            line by line. The screen weights by
             `fit_coherence(source, records)` when the project has one.
             Unweighted when omitted.
 
         Returns
         -------
         str
-            The name the result was added under, unique within
-            the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
+        # The loop adds no second opinion. It used to: a proximity guard
+        # here vetoed any suggestion within 1 Hz of a confirmed mode, the
+        # same ridge-trap fix the session has since outgrown, and it
+        # silently skipped the second mode of a repeated pair that
+        # `suggest` had offered on purpose.
         from .core.modal_fit import ModalFitSession
 
         source = self.name_of(source)
@@ -3331,27 +3452,36 @@ class Project(dict):
     def project_onto_basis(self, source: str, *, onto: str | None = None,
                            tolerance: float = 0.02,
                            name: str | None = None) -> str:
-        """A shape set sampled at the Basis set's DOFs (Project onto
-        Basis DOFs): nearest node within `tolerance` of the basis
-        model's extent, the displacement there dotted with each basis
-        DOF's direction. Returns the new set's name.
+        """Sample a shape set at the Basis shape set's DOFs (Project onto
+        Basis DOFs). Returns the new shape set's name.
+
+        For each Basis DOF, the nearest node of the source's geometry is
+        found, and the displacement there is dotted with the DOF's
+        direction. A Basis DOF with no node within `tolerance` is
+        dropped rather than estimated. The result is linked into the
+        Basis shape set's group. With no shape set to project onto, or
+        either shape set without a geometry, this raises ValueError.
 
         Parameters
         ----------
         source : str
             The shape set to project.
         onto : str, optional
-            The basis to project onto. Defaults to the project's basis.
+            The shape set to project onto. Defaults to the one in the
+            project's Basis.
         tolerance : float, default 0.02
-            The residual a fit may leave.
+            How far the nearest node may be, as a fraction of the Basis
+            geometry's extent (the largest distance of a node from the
+            nodes' mean position).
         name : str, optional
-            What to call the result.
+            What to call the result. Defaults to the source's name
+            followed by '@ Basis DOFs'.
 
         Returns
         -------
         str
-            The name the result was added under, unique within
-            the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.correlate import project_shapes
 
@@ -3382,12 +3512,16 @@ class Project(dict):
                     macs: Iterable[float] | None = None,
                     threshold: float = 0.7,
                     name: str = 'Matched Modes') -> str:
-        """Commit matched mode pairs (the comparison screen's **+**).
+        """Save matched mode pairs as an object (the comparison screen's +
+        button).
 
-        With `pairs` those pairs exactly; otherwise each of `first`'s
-        modes takes its best partner in `second` when the MAC clears
-        `threshold`. Comparing across geometries goes through the
-        projection first, as the screen does.
+        With `pairs`, exactly those pairs are kept. Otherwise each of
+        `first`'s modes is paired with the mode in `second` that has the
+        highest MAC, when that MAC is at least `threshold`. Across
+        geometries the MAC is computed after projection, as the screen
+        does it (`comparison_mac`). The result is in no object group,
+        since it names a shape set in each; it records both geometries
+        itself.
 
         Parameters
         ----------
@@ -3399,7 +3533,8 @@ class Project(dict):
             Explicit (first, second) index pairs, overriding the
             automatic matching.
         macs : iterable of float, optional
-            MAC values for those pairs.
+            MAC values for those pairs. Computed from `comparison_mac`
+            when omitted.
         threshold : float, default 0.7
             The lowest MAC an automatic pairing may have.
         name : str, default 'Matched Modes'
@@ -3408,8 +3543,8 @@ class Project(dict):
         Returns
         -------
         str
-            The name the result was added under, unique within
-            the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         import numpy as np
 
@@ -3446,10 +3581,12 @@ class Project(dict):
         return self.add(name, matched)
 
     def comparison_mac(self, first: str, second: str) -> np.ndarray:
-        """The MAC between two shape sets as the comparison screen
-        shows it: across geometries the second set is projected onto
-        the first's DOFs, because matching DOF *names* across
-        geometries would trust them to mean the same directions.
+        """The MAC between two shape sets, as the comparison screen shows
+        it.
+
+        When the sets are on different geometries, the second set is
+        projected onto the first set's DOFs, because DOFs with the same
+        name on two geometries need not point in the same direction.
 
         Parameters
         ----------
@@ -3461,8 +3598,8 @@ class Project(dict):
         Returns
         -------
         numpy.ndarray
-            The MAC matrix, first's shapes down the
-            rows and second's across the columns.
+            The MAC matrix, with `first`'s shapes down the rows and
+            `second`'s across the columns.
         """
         from .core.correlate import project_shapes
         from .core.shapes import cross_mac
@@ -3477,27 +3614,29 @@ class Project(dict):
 
     def plot_mac(self, first: Any, second: Any = None,
                  **kwargs: Any) -> Any:
-        """The MAC picture the comparison screen draws: `first`
-        against itself, or against `second` — projected across
-        geometries exactly as `comparison_mac` does it, which a
-        shape set's own `plot_mac` cannot, since it compares by DOF
-        name and knows no geometry.
+        """Draw the MAC the comparison screen draws: `first` against
+        itself, or against `second`.
+
+        Across geometries the second set is projected exactly as
+        `comparison_mac` does it. A shape set's own `plot_mac` compares
+        by DOF name and has no geometry, so it cannot do this.
 
         Parameters
         ----------
         first : str or ShapeSet
             One shape set, by name or as the object.
         second : str or ShapeSet, optional
-            The other. Absent, the auto-MAC.
+            The other shape set. Omitted, the auto-MAC of `first` is
+            drawn.
         **kwargs
             Passed to the drawing: `path=` renders to a file,
-            `bars=True` is the 3-D reading (then `screenshot=`),
-            `theme`, `title`, `size`, `show`.
+            `bars=True` draws 3-D bars (then `screenshot=`), and
+            `theme`, `title`, `size` and `show`.
 
         Returns
         -------
         object
-            Whatever the drawing returns — a window, an image.
+            Whatever the drawing returns: a window or an image.
         """
         from .plot import plot_mac_matrix
 
@@ -3512,25 +3651,27 @@ class Project(dict):
                                **kwargs)
 
     def merge(self, *names: str, name: str | None = None) -> str:
-        """Combine compatible objects into one (Merge).
+        """Combine compatible objects into one (Merge). The merged object
+        replaces its parts.
 
-        Same concrete type only, and each kind has its own rule about
-        what may join: geometries need disjoint node ids, shape sets
-        the same DOF cover, data arrays an identical abscissa. The
-        merged object replaces its parts.
+        Only objects of the same type can be merged, and each kind has
+        its own rule: geometries need disjoint node ids, shape sets the
+        same DOFs, and data arrays an identical abscissa. The merged
+        object is linked into the first part's object group.
 
         Parameters
         ----------
         *names : str
-            The objects to act on, by name.
+            The objects to merge, by name.
         name : str, optional
-            What to call the merged object.
+            What to call the merged object. Defaults to the first
+            part's name.
 
         Returns
         -------
         str
-            The name the result was added under, unique within
-            the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
         from .core.merge import merge as merge_objects
 
@@ -3546,10 +3687,12 @@ class Project(dict):
 
     def export(self, name: str, path: str | os.PathLike,
                unit_system: Any = None, **kwargs: Any) -> str:
-        """Write an object to a foreign format, chosen by suffix —
-        every registered writer, `.unv`, `.exo`, `.npz`, `.bdf`,
-        `.afu`/`.ati`/`.ash`, `.xlsx`, `.3mf`, `.stl`, `.vdreport` and
-        the rest of `io.exporters()` (Export).
+        """Write an object to another file format, chosen by the file's
+        suffix (Export).
+
+        Any registered writer can be used: `.unv`, `.exo`, `.npz`,
+        `.bdf`, `.afu`/`.ati`/`.ash`, `.xlsx`, `.3mf`, `.stl`,
+        `.vdreport` and the rest of `io.exporters()`.
 
         Parameters
         ----------
@@ -3558,7 +3701,8 @@ class Project(dict):
         path : str or os.PathLike
             Where to write it. The format follows the extension.
         unit_system : UnitSystem, optional
-            Units to write in. Defaults to the project's own.
+            Units to write in. Omitted, the stored (SI) values are
+            written as they are.
         **kwargs
             Passed through to the exporter.
 
@@ -3577,33 +3721,36 @@ class Project(dict):
     def generate_report(self, template: str = 'modal',
                         name: str = 'Report', marking: str | None = None,
                         marking_color: str | None = None) -> str:
-        """Build a report from a starter template, bound symbolically
-        to this project's structure (Generate Report).
+        """Build a report from a starter template, bound by type to this
+        project's objects (Generate Report).
+
+        An unknown template raises ValueError.
 
         Parameters
         ----------
         template : str, default 'modal'
             Which starter to build: 'modal', 'random', 'shock',
-            'transient', 'sine', 'sysid' or 'empty' (a random-and-sine
-            project makes 'random' and 'sine', one report each) — or a saved
-            template, by the name it was saved under in the templates
-            folder or by the path of a `.vdreport` file (a report
-            exported on its own; `io.report_template`).
+            'transient', 'sine', 'sysid' or 'empty'. (In the app, a
+            Random and Sine project makes 'random' and 'sine', one
+            report each.) It can also be a saved template, by the name
+            it was saved under in the templates folder, or the path of a
+            `.vdreport` file, a report exported on its own
+            (`io.report_template`).
         name : str, default 'Report'
             What to call the report object.
         marking : str, optional
-            The banner across the top and bottom of every page —
-            'UNCLASSIFIED' unless said. A batch stamps its own
-            (Brandon, 2026-10-02).
+            The banner across the top and bottom of every page.
+            'UNCLASSIFIED' when omitted.
         marking_color : str, optional
             'ink' or 'red'.
 
         Returns
         -------
         str
-            The name the result was added under, which is unique
-            within the project — a clash gets a numbered suffix.
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
         """
+        # `marking` lets a batch stamp its own banner (Brandon, 2026-10-02).
         from .core.report import (
             TEMPLATE_BUILDERS,
             Report,
@@ -3636,27 +3783,27 @@ class Project(dict):
         return self.add(name, report)
 
     def work_up(self) -> list[str]:
-        """Every missing object the project's type expects, computed
-        from what is loaded, and the report last (the tree bar's
-        **Automatic**; Brandon, 2026-09-30).
+        """Compute every missing object the project's type expects from
+        what is loaded, with the report last (Automatic on the tree's
+        bar).
 
-        The skeleton's empty slots in their own order, each made from
-        the objects already there the way the workflow guide makes it
-        — PSDs from the time data, the octave bands from the PSDs and
-        the specification, the coherence from the time data; the FRFs
-        and a fitted shape set for a modal test; the levels for a sine
-        sweep; the filtered record, its SRS and the motion chain for a
-        shock; the two streams' PSDs on shared frames and the H1 plant
-        for a system identification — and the typed report once they
-        are in. A slot the loaded data cannot fill (a geometry, the
-        photographs, a specification) is left gray; a computation the
-        data refuses (no drive channel for a coherence) is skipped, and
-        the rest still happen. Nothing already present is remade:
-        pressed twice, the second press adds nothing.
+        The empty slots are filled in their own order, each from the
+        objects already there, the way the workflow guide makes them:
+        PSDs from the time data, octave bands from the PSDs and the
+        specification, and the coherence from the time data; the FRFs, a
+        fitted shape set and the matched modes for a modal test; the
+        levels for a sine sweep; the filtered record, its SRS and the
+        integrated motion for a shock; the two streams' PSDs on shared
+        frames and the H1 FRFs for a system identification; and then
+        the type's report. A slot the loaded data cannot fill (a
+        geometry, the photographs, a specification) is left gray. A
+        computation the data refuses (no drive channel for a coherence)
+        is skipped, and the rest still run. Nothing already present is
+        made again, so calling this twice adds nothing the second time.
 
-        One journal line, `project.work_up()`, the way `merge` is one
-        line: the verbs it calls are the ones the guide teaches, and a
-        script wanting them one at a time calls them.
+        It is journaled as one line, `project.work_up()`, the way
+        `merge` is. The verbs it calls are the ones the guide describes,
+        and a script that wants them one at a time can call them.
 
         Returns
         -------
@@ -3667,9 +3814,10 @@ class Project(dict):
         Raises
         ------
         ValueError
-            When the project has no type — there is no skeleton to
+            When the project has no type, so there are no slots to
             fill.
         """
+        # Automatic on the tree bar (Brandon, 2026-09-30).
         from .core.data import Psd, Specification, TransientSpecification
         from .core.report import (
             PROJECT_TEMPLATES,
@@ -3846,7 +3994,8 @@ class Project(dict):
         path : str or os.PathLike
             Where to write the self-contained HTML file.
         unit_system : UnitSystem, optional
-            Units to render in. Defaults to the project's own.
+            Units to render in. Defaults to `units.DEFAULT_SYSTEM`,
+            'in-slinch-lbf-s (g)'.
 
         Returns
         -------
@@ -3863,12 +4012,13 @@ class Project(dict):
         return path
 
     def table(self, name: Any) -> tuple[list[str], list[list[str]]]:
-        """(headers, rows) for an object that reads as a table.
+        """(headers, rows) for an object that can be shown as a table.
 
-        The instrumentation of a channel table, the identified
-        parameters of a shape set, the pairs of a matched-modes object
-        beside both sets' parameters — the same rows the report prints,
-        so a script and a report cannot disagree about what is in one.
+        The rows are a channel table's instrumentation, a shape set's
+        identified parameters, or a matched-modes object's pairs beside
+        both sets' parameters. They are the same rows the report prints,
+        so a script and a report always agree. An object with no table
+        raises ValueError.
 
         Parameters
         ----------
@@ -3890,8 +4040,10 @@ class Project(dict):
         return built
 
     def plot(self, name: str, **kwargs: Any) -> Any:
-        """Plot an object the way the GUI plots it: data as curves, a
+        """Plot an object the way the app plots it: data as curves, a
         geometry as its scene, a shape set as its auto-MAC.
+
+        An object with no plot raises TypeError.
 
         Parameters
         ----------
@@ -3913,15 +4065,19 @@ class Project(dict):
         return plot(**kwargs)
 
     def animate(self, name: str, mode: int = 0, **kwargs: Any) -> Any:
-        """A mode shape — or a complex spectrum's operating deflection —
-        moving on the geometry it answers to.
+        """Animate a mode shape, or a complex spectrum's operating
+        deflection shape, on the object's geometry.
+
+        The geometry is the one `geometry_for` gives; with none, this
+        raises ValueError. A spectrum's line is picked with
+        `frequency=` in `kwargs`.
 
         Parameters
         ----------
         name : str
-            The shape set to animate.
+            The shape set or spectrum to animate.
         mode : int, default 0
-            Which mode, by index.
+            Which mode, by index. Not used for a spectrum.
         **kwargs
             Passed through to the scene.
 
@@ -3943,18 +4099,20 @@ class Project(dict):
 
     def animate_pair(self, first: Any, mode: int, second: Any,
                      other_mode: int, **kwargs: Any) -> Any:
-        """Two shape sets' modes overlaid on their geometries, as the
-        window animates a picked cell of their cross-MAC.
+        """Animate two shape sets' modes overlaid on their geometries, as
+        the app does for a picked cell of their cross-MAC.
 
-        Each set is drawn on the geometry it answers to
-        (`geometry_for`); the Basis is the one looked at and the other
-        drawn through it (`theme.overlay_alphas`), whichever order they
-        are named in; the caption names both by their names here.
+        Each set is drawn on its own geometry (`geometry_for`), or on
+        the first set's when the second has none; the first must have
+        one, or this raises ValueError. The Basis set is drawn solid and
+        the other partly transparent over it (`theme.overlay_alphas`),
+        whichever order they are given in; with no Basis between them,
+        the first is drawn solid. The caption gives both names.
 
         Parameters
         ----------
         first, second : str or ShapeSet
-            The two sets.
+            The two shape sets.
         mode, other_mode : int
             Their modes, by index.
         **kwargs
@@ -3984,11 +4142,13 @@ class Project(dict):
         return self.ordered_names()
 
     def name_of(self, target: Any) -> str:
-        """The name an object goes by here; a name passes through.
+        """The name an object is stored under; a string is returned as
+        it is.
 
-        Verbs take either, so `project.compute_psds('Time History')`
-        and `project.compute_psds(project.basis.time_history)` are the
-        same call.
+        Every verb accepts either, so `project.compute_psds('Time
+        History')` and `project.compute_psds(project.basis.time_history)`
+        are the same call. An object not in the project raises
+        ValueError.
 
         Parameters
         ----------
@@ -4017,32 +4177,35 @@ class Project(dict):
     def extract_sine(self, source: Any,
                      specification: Any = None,
                      progress: Any = None) -> list[str]:
-        """Each specification tone's level, read out of a recording
-        (Extract Sine Levels) — one object per tone, because each tone
-        sweeps its own frequencies on its own clock.
+        """Read each specification tone's level out of a recording
+        (Extract Sine Levels), as one sine level set holding every tone.
 
-        The specification is found in the project when not named —
-        the one SineSweepSpecification there is — and each result is
-        linked to the recording it was read from.
+        Each tone is read against its own sweep, since each sweeps its
+        own frequencies on its own clock. When no specification is
+        named, the project's one sine sweep specification is used. The
+        settings are the recording's `sine_extraction`; when none is
+        set, the suggested setting is used, as `filter_data` uses its
+        suggested filter, and the setting with the smoothing chosen is
+        stored on the recording. The result is linked to the recording.
 
         Parameters
         ----------
         source : str or object
-            The sine level set or run to read.
+            The recording (a time history) to read.
         specification : str or object, optional
-            The sweep specification to extract against. Defaults to
-            the project's own, when it holds exactly one.
+            The sweep specification to extract against. Defaults to the
+            project's own, when it holds exactly one.
         progress : callable, optional
-            Told ``(done, total)`` as the extraction advances — the
-            matched filter per tone, the smoothing ladder, then the
-            solve's pieces per channel. The window's strip bar reads
-            it; a script can print it. Anything it raises stops the
-            extraction.
+            Called with ``(done, total)`` as the extraction advances:
+            the matched filter for each tone, the smoothing steps, then
+            the solve's pieces for each channel. The app's progress bar
+            uses it; a script can print it. Anything it raises stops
+            the extraction.
 
         Returns
         -------
         list of str
-            The names of the levels added, one per tone.
+            A list holding the name of the sine level set added.
         """
         from dataclasses import replace
 
@@ -4211,11 +4374,11 @@ class Project(dict):
         return ('content', digest.hexdigest())
 
     def stale(self) -> dict[str, str]:
-        """{derived name: why} for everything whose source's settings
-        have moved since it was computed.
+        """{derived name: reason} for every derived object whose source's
+        settings have changed since it was computed.
 
-        A missing source, or a derivation this bookkeeping predates,
-        answers nothing — absence of evidence is not staleness.
+        An object whose source is gone, or whose provenance records no
+        state to compare, is not reported.
         """
         out = {}
         for name, record in self.provenance.items():
@@ -4233,11 +4396,13 @@ class Project(dict):
     def refresh(self, name: Any) -> str:
         """Recompute a derived object in place, under its own name.
 
-        The links, the report's bindings and the grids all key on the
-        name, so replacing the value under it is what keeps every
-        reference honest. Anything derived from *this* object goes
-        stale by content, which is the cascade — refreshed one badge
-        at a time, or all at once, but always by a person.
+        Links, the report's figures and the grids all refer to the
+        object by name, so replacing the value under that name keeps
+        every reference correct. Objects derived from this one then
+        become stale by content, and are refreshed one at a time or all
+        together with `refresh_stale`, never automatically. An object
+        with no recorded derivation, or whose source is gone, raises
+        ValueError.
 
         Parameters
         ----------
@@ -4265,8 +4430,11 @@ class Project(dict):
         return name
 
     def refresh_stale(self) -> list[str]:
-        """Refresh everything stale, sources before their dependents,
-        until nothing is — the project row's one click."""
+        """Refresh every stale object, sources before the objects derived
+        from them, until nothing is stale. Returns the names refreshed.
+
+        This is the refresh on the project's row in the tree.
+        """
         done: list[str] = []
         # bounded: each pass refreshes at least one or stops, and a
         # refresh can only newly stale things derived from it
@@ -4282,20 +4450,21 @@ class Project(dict):
     # ---- the file ----------------------------------------------------------
 
     def save(self, path: str | os.PathLike, **options: Any) -> str:
-        """Write the whole project to one file: `.vdyn`, `.mat` for
-        the same layout in MATLAB's container, or `.h5` for the
-        Engineering Sciences Common Data Format.
+        """Write the whole project to one file: `.vdyn`, `.mat` for the
+        same layout in a MATLAB file, or `.h5` for the Engineering
+        Sciences Common Data Format.
 
         Parameters
         ----------
         path : str or os.PathLike
             Where to write the file. A `.mat` suffix writes the project
-            as MATLAB structs (`io.matlab`), `.h5` (or `.hdf5`, or
-            `.escdf`) as the standard's types with each object whole in
-            an attachment (`io.escdf_objects`); anything else is
-            `.vdyn`.
+            as MATLAB structs (`io.matlab`), and `.h5`, `.hdf5` or
+            `.escdf` writes the standard's types with each object stored
+            whole in an attachment (`io.escdf_objects`). Any other
+            suffix writes a `.vdyn` file.
         **options
-            Passed to a foreign writer: an ESCDF file's `created_by`.
+            Passed to the MATLAB or ESCDF writer, for example an ESCDF
+            file's `created_by`. Not used for a `.vdyn` file.
 
         Returns
         -------
@@ -4321,8 +4490,13 @@ class Project(dict):
 
     @classmethod
     def open(cls, path: str | os.PathLike) -> Project:
-        """Read a project back, from `.vdyn`, `.mat` or an ESCDF `.h5`
-        (`.hdf5`, `.escdf`)."""
+        """Read a project from a `.vdyn`, `.mat` or ESCDF `.h5` (`.hdf5`,
+        `.escdf`) file.
+
+        The journal starts over with the one line that opens the file. A
+        file holding a single object rather than a project raises
+        ValueError.
+        """
         from .io import import_file, load
         from .io.escdf_objects import SUFFIXES
 
@@ -4358,20 +4532,22 @@ class Project(dict):
 
     @contextlib.contextmanager
     def journal_as(self, line: str | None):
-        """Record a stretch of front-end work as one replaying line.
+        """Record a stretch of front-end work as the one line that
+        replays it.
 
-        The GUI imports a file by building the objects itself and
-        adding them one by one; journaled verb by verb, that stretch
-        is a pile of not-replayable comments — when the honest record
-        is the single `import_file` call a script would make. Inside
-        the stretch every verb stays quiet, exactly as verbs nested in
-        verbs do; the line lands only when the stretch succeeds.
+        The app imports a file by building the objects itself and
+        adding them one at a time. Journaled verb by verb, that stretch
+        would be lines that do not replay, when the accurate record is
+        the single `import_file` call a script would make. Inside the
+        stretch, verbs record nothing, the same as verbs called from
+        other verbs, and the line is added only when the stretch
+        finishes without an error.
 
         Parameters
         ----------
         line : str or None
-            The line that replays the stretch — None to record
-            nothing at all.
+            The line that replays the stretch, or None to record
+            nothing.
 
         Returns
         -------
@@ -4387,24 +4563,24 @@ class Project(dict):
 
     def record_setting(self, target: Any, attribute: str,
                        value: Any) -> None:
-        """A settings write, journaled the way a script would make it.
+        """Journal a settings write the way a script would make it.
 
-        The front ends' funnel: the GUI stores analysis settings by
-        assignment — a dragged averaging span, a filter corner, the
-        shock windows — and those writes are session acts as much as
-        any verb. A repeated write to the same slot replaces its own
-        last line, so a session of nudging settles to the one
-        assignment that stands rather than a line per keystroke.
+        The app stores analysis settings by assignment (a dragged
+        averaging span, a filter corner, the shock windows), and those
+        writes are part of the session as much as any verb. A repeated
+        write to the same attribute replaces its own last line, so a
+        setting adjusted many times leaves one assignment, not a line
+        for each change. An object not in the project is ignored.
 
         Parameters
         ----------
         target : str or object
-            The object written to, by name or as itself.
+            The object written to, by name or as the object.
         attribute : str
             Which settings attribute was stored.
         value : Any
-            What was stored; its repr must rebuild it, which every
-            settings dataclass here guarantees.
+            What was stored. Its repr must rebuild it, as every settings
+            dataclass in visualdynamics does.
 
         Returns
         -------
@@ -4423,34 +4599,35 @@ class Project(dict):
 
     def record_call(self, target: Any, method: str, *args: Any,
                     settle: bool = False, **kwargs: Any) -> None:
-        """A method call on an object, journaled as a script makes it.
+        """Journal a method call on an object the way a script would make
+        it.
 
-        The front ends' funnel for object verbs that are not Project
-        verbs — a line added to a geometry, a photo renamed —
-        each an act of the session the console must speak (Brandon,
-        2026-08-30: adding a line said nothing).
+        This is for object methods that are not Project verbs, such as a
+        line added to a geometry or a photo renamed, so the console
+        shows every change made in the session. An object not in the
+        project is ignored.
 
         Parameters
         ----------
         target : str or object
-            The object acted on, by name or as itself.
+            The object acted on, by name or as the object.
         method : str
             The method a script would call.
         *args : Any
-            The call's arguments; their reprs must rebuild them.
+            The call's arguments. Their reprs must rebuild them.
         settle : bool, default False
-            Replace the last line when it was this same call — the same
-            object, method, positional arguments and keyword names,
-            only the keyword values differing — so a gesture nudged
-            again settles to the one call that stands rather than
-            stacking a line per nudge.
+            Replace the last line when it was the same call (the same
+            object, method, positional arguments and keyword names, with
+            only the keyword values different), so a gesture adjusted
+            again leaves one line, not one per adjustment.
         **kwargs : Any
-            Keyword arguments, same rule.
+            Keyword arguments, under the same rule as `args`.
 
         Returns
         -------
         None
         """
+        # Brandon, 2026-08-30: adding a line said nothing in the console.
         try:
             name = self.name_of(target)
         except (KeyError, ValueError):
@@ -4492,14 +4669,15 @@ class Project(dict):
     )
 
     def session_script(self) -> str:
-        """This sitting's acts as a runnable Python script.
+        """This session's changes to the project as a runnable Python
+        script.
 
-        The journal joined under its imports: every verb that ran and
-        every setting stored — clicked in the GUI or called from a
-        script — recorded as the line that reproduces it, so a session
-        worked up by hand can be replayed, adapted, or kept. Reads and
-        refusals are absent on purpose: the script is what *happened
-        to the project*, and a verb that raised changed nothing.
+        It is the journal under the imports it needs: every verb that
+        ran and every setting stored, whether clicked in the app or
+        called from a script, as the line that reproduces it. A session
+        worked up by hand can then be replayed, adapted or kept. Reads
+        and refused calls are left out, because the script records what
+        changed the project, and a verb that raised changed nothing.
 
         Returns
         -------
@@ -5118,48 +5296,47 @@ def random_vibration_run(run: str | os.PathLike,
                          geometry: str | os.PathLike | None = None,
                          length_unit: str | None = None,
                          photos: Any = None) -> Project:
-    """A Rattlesnake random vibration run, worked up into a project.
+    """Work a Rattlesnake random vibration run up into a project.
 
         project = visualdynamics.random_vibration_run('run.nc4')
         project = visualdynamics.random_vibration_run(
             'run.nc4', last=100.0, geometry='article.stp', length_unit='mm',
             photos='setup_photos/')
 
-    Every step the window would take on the way from a controller file
-    to a finished project, in the order it takes them: import the run,
-    average PSDs from the control time histories, band those onto
-    proportional bands — and the specification onto the same bands,
-    limits and all, since the report reads the banded measurement
-    against the banded requirement (Brandon, 2026-09-18) — and
-    measure how much of each response the drives account for. The run
-    says it is a random vibration test, so the project comes back
-    declared as one.
+    These are the steps the app takes from a controller file to a
+    finished project, in the same order: import the run, average PSDs
+    from the control time histories, put those on proportional bands,
+    put the specification on the same bands with its limits (the report
+    compares the banded measurement with the banded requirement), and
+    compute how much of each response the drives account for. The run
+    records that it is a random vibration test, so the project's type
+    is set to Random Vibration.
 
-    The averaging is the Detect answer: the controller's own frame
+    The averaging is what Detect finds: the controller's own frame
     length, window and overlap from the file, with the start and the
-    count worked out from the record — where the run is at level and
-    how many frames that stretch holds — so a script, an import and a
-    click on Detect reach the same numbers (Brandon, 2026-09-19).
+    number of frames worked out from the record (where the run is at
+    level and how many frames that stretch holds). A script, an import
+    and a click on Detect therefore give the same numbers.
 
-    The rest is what the window's tree asks for after the run is in,
-    given here so a script never has to open it (Brandon,
-    2026-09-19): the article's geometry, with its length unit
-    declared when the file does not carry one; the setup photographs,
-    as a folder of png or jpeg files, one file, or a list of files in
-    the order they should appear; and, for a run too long to hold,
-    `last` — the seconds before the end to import, the same window the
-    import dialog's *Last* field sets, and a run shorter than that is
-    taken whole. The geometry and the photographs are linked into the
-    run's own group, which is what lets the report read them against
-    the channel table.
+    The other arguments are what the app's tree asks for after the run
+    is imported, so a script never has to open the app: the article's
+    geometry, with its length unit given when the file does not carry
+    one; the setup photographs, as a folder of png or jpeg files, one
+    file, or a list of files in the order they should appear; and, for
+    a run too long to hold in memory, `last`, the number of seconds
+    before the end to import. `last` is the same window the import
+    dialog's Last field sets, and a run shorter than that is imported
+    whole. The geometry and the photographs are linked into the run's
+    own group, so the report can read them against the channel table.
+    A run with no time data raises ValueError.
 
     Parameters
     ----------
     run : str or os.PathLike
         The controller's `.nc4`.
     per_octave : int, optional
-        Bands per octave for the banded PSD and specification; the
-        project's default (a sixth) when omitted.
+        Bands per octave for the banded PSD and specification. Defaults
+        to 6.
     last : float, optional
         Import only the last `last` seconds of the run's streams.
     geometry : str or os.PathLike, optional
@@ -5172,8 +5349,13 @@ def random_vibration_run(run: str | os.PathLike,
     Returns
     -------
     Project
-        The worked-up project, declared Random Vibration.
+        The worked-up project, of type Random Vibration.
     """
+    # The specification is banded too, limits and all, because the
+    # report reads the banded measurement against the banded
+    # requirement (Brandon, 2026-09-18). The averaging is the Detect
+    # answer, and the geometry, photos and `last` are taken here so a
+    # script never has to open the window (Brandon, 2026-09-19).
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
                                 else {}))
@@ -5220,17 +5402,18 @@ def _quiet_and_driven(project: Project) -> tuple[str | None, str]:
 
 
 def work_up_system_id(project: Project) -> tuple[str | None, str]:
-    """An imported system identification, worked up in place.
+    """Work up an imported system identification in place.
 
-    The seam between reading a file and doing the work, so the work
-    can be exercised on a recording built by hand: no file a test can
-    commit holds the *two* streams a system identification is made of,
-    and a rule that is never exercised is a rule that is not tested
-    (2026-09-22).
-
-    Returns the two stream names, the ambient one None where the
-    recording holds only the driven stream.
+    The project type is set to System ID, the driven stream is renamed
+    'Excitation Time History' and the ambient one 'Noise Time History',
+    and the H1 FRFs, the multiple coherence and both streams' PSDs (on
+    the excitation's frames) are computed. Returns the two stream
+    names, with the ambient one None when the recording holds only the
+    driven stream.
     """
+    # Kept apart from reading the file so the work can be tested on a
+    # recording built by hand: no file a test can commit holds the two
+    # streams a system identification is made of (2026-09-22).
     noise, driven = _quiet_and_driven(project)
     project.project_type = 'System ID'
     driven = project.rename(driven, 'Excitation Time History')
@@ -5254,21 +5437,23 @@ def system_id_run(run: str | os.PathLike, *,
                   geometry: str | os.PathLike | None = None,
                   length_unit: str | None = None,
                   photos: Any = None) -> Project:
-    """A Rattlesnake system identification, worked up into a project.
+    """Work a Rattlesnake system identification up into a project.
 
         project = visualdynamics.system_id_run('sysid.nc4')
 
-    The steps the window would take, in its order: import the
-    recording, name the two streams for what they are, measure the
-    plant from the driven one by H1 — the controller's own estimator,
-    the excitation being known and the noise on the response — take
-    the multiple coherence, and average a density from each stream on
-    **the same frames**, since the signal-to-noise is a ratio of
-    densities and a ratio only exists on shared lines. The project
-    comes back declared a System ID.
+    These are the steps the app takes, in the same order: import the
+    recording, name the two streams (the ambient and the driven), and
+    compute the FRFs from the driven stream by H1, the controller's own
+    estimator, since the excitation is known and the noise is on the
+    response. Then compute the multiple coherence, and average a PSD
+    from each stream on the same frames, since the signal-to-noise
+    ratio is a ratio of densities and is only defined on lines both
+    hold. The project's type is set to System ID. A recording with no
+    time data raises ValueError.
 
-    `last`, `geometry`, `length_unit` and `photos` are
-    `random_vibration_run`'s, and mean the same things.
+    `last`, `geometry`, `length_unit` and `photos` mean the same as in
+    `random_vibration_run`. The ambient stream, the geometry and the
+    photographs are linked into the driven stream's group.
 
     Parameters
     ----------
@@ -5276,7 +5461,7 @@ def system_id_run(run: str | os.PathLike, *,
         The controller's `.nc4`.
     last : float, optional
         Import only the last `last` seconds of the run's streams; a
-        shorter run is taken whole.
+        shorter run is imported whole.
     geometry : str or os.PathLike, optional
         A geometry file to import and link to the run.
     length_unit : str, optional
@@ -5287,7 +5472,7 @@ def system_id_run(run: str | os.PathLike, *,
     Returns
     -------
     Project
-        The worked-up project, declared System ID.
+        The worked-up project, of type System ID.
     """
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
@@ -5343,6 +5528,10 @@ def _report_path(run: str | os.PathLike,
         return os.path.splitext(os.path.expanduser(str(run)))[0] + '.html'
     path = os.path.expanduser(str(path))
     if os.path.isdir(path) or path.endswith((os.sep, '/')):
+        # a name ending in a separator says folder, so one not made yet
+        # is made: it was taken as a folder and then not found when the
+        # report was written (2026-10-13, found by the website pass)
+        os.makedirs(path, exist_ok=True)
         stem = os.path.splitext(os.path.basename(os.path.expanduser(
             str(run))))[0]
         return os.path.join(path, stem + '.html')
@@ -5413,31 +5602,32 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
               geometry: str | os.PathLike | None = None,
               length_unit: str | None = None,
               photos: Any = None) -> Project:
-    """A Rattlesnake random run with a sine sweep under it, worked up
-    into a project: both halves.
+    """Work a Rattlesnake random run with a sine sweep under it up into a
+    project, both halves.
 
         project = visualdynamics.mixed_run('run.nc4')
 
-    Everything `random_vibration_run` does — the run imported, the PSDs
-    averaged and banded, the specification banded, the coherence
-    measured, the geometry and photographs brought in — and then the
-    sine half: each tone's level extracted from the same recording
-    against the sweep specification the file carried. The run says it
-    is both, so the project comes back declared Random and Sine. A run
-    with no sine specification is refused by name rather than worked
-    up as half of what was asked for; `random_vibration_run` is the
-    call for it. The keywords are `random_vibration_run`'s.
+    This does everything `random_vibration_run` does (imports the run,
+    averages and bands the PSDs, bands the specification, computes the
+    coherence, and brings in the geometry and photographs), and then the
+    sine half: each tone's level is extracted from the same recording
+    against the sweep specification the file carries. The run records
+    that it is both, so the project's type is set to Random and Sine. A
+    run with no sine sweep specification raises ValueError instead of
+    being worked up as half of what was asked for; use
+    `random_vibration_run` for it. The keyword arguments are the same
+    as `random_vibration_run`'s.
 
     Parameters
     ----------
     run : str or os.PathLike
         The controller's `.nc4`.
     per_octave : int, optional
-        Bands per octave for the banded PSD and specification; the
-        project's default (a sixth) when omitted.
+        Bands per octave for the banded PSD and specification. Defaults
+        to 6.
     last : float, optional
         Import only the last `last` seconds of the run's streams; a
-        shorter run is taken whole.
+        shorter run is imported whole.
     geometry : str or os.PathLike, optional
         A geometry file to import and link to the run.
     length_unit : str, optional
@@ -5448,7 +5638,7 @@ def mixed_run(run: str | os.PathLike, per_octave: int | None = None, *,
     Returns
     -------
     Project
-        The worked-up project, declared Random and Sine.
+        The worked-up project, of type Random and Sine.
     """
     project = random_vibration_run(run, per_octave, last=last,
                                    geometry=geometry,
@@ -5469,19 +5659,19 @@ def sine_run(run: str | os.PathLike, *,
              geometry: str | os.PathLike | None = None,
              length_unit: str | None = None,
              photos: Any = None) -> Project:
-    """A Rattlesnake sine sweep run, worked up into a project.
+    """Work a Rattlesnake sine sweep run up into a project.
 
         project = visualdynamics.sine_run('sweep.nc4')
 
-    The run imported, each tone's level extracted from the control
-    channels against the sweep specification the file carried, and the
-    geometry and photographs brought in and linked, as
-    `random_vibration_run` brings them. The run says it is a sine
-    sweep, so the project comes back declared as one. A run with no
-    sine sweep specification is refused by name; `random_vibration_run`
-    or `mixed_run` is the call for it. The keywords are
-    `random_vibration_run`'s, less `per_octave`, which a sweep has no
-    use for.
+    The run is imported, each tone's level is extracted from the
+    control channels against the sweep specification the file carries,
+    and the geometry and photographs are imported and linked the way
+    `random_vibration_run` does it. The run records that it is a sine
+    sweep, so the project's type is set to Sine Sweep. A run with no
+    sine sweep specification, or no time data, raises ValueError; use
+    `random_vibration_run` or `mixed_run` for a run without a sweep. The
+    keyword arguments are `random_vibration_run`'s except `per_octave`,
+    which a sweep does not use.
 
     Parameters
     ----------
@@ -5489,7 +5679,7 @@ def sine_run(run: str | os.PathLike, *,
         The controller's `.nc4`.
     last : float, optional
         Import only the last `last` seconds of the run's streams; a
-        shorter run is taken whole.
+        shorter run is imported whole.
     geometry : str or os.PathLike, optional
         A geometry file to import and link to the run.
     length_unit : str, optional
@@ -5500,7 +5690,7 @@ def sine_run(run: str | os.PathLike, *,
     Returns
     -------
     Project
-        The worked-up project, declared Sine Sweep.
+        The worked-up project, of type Sine Sweep.
     """
     project = Project()
     project.import_file(run, **(_last_window(run, last) if last is not None
@@ -5534,53 +5724,54 @@ def sine_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
                 photos: Any = None,
                 unit_system: Any = None,
                 marking: str | None = None) -> Any:
-    """A Rattlesnake sine sweep run in, an HTML report out.
+    """Read a Rattlesnake sine sweep run and write an HTML report.
 
         visualdynamics.sine_report('sweep.nc4', 'report.html')
         visualdynamics.sine_report()                   # ask for both
         visualdynamics.sine_report('sweep.nc4', 'reports/')
 
-    `random_vibration_report`'s twin for a sweep: the same asking when
-    the run is left out, the same batch and folder rules, the workup
-    of `sine_run`, and the Sine Sweep report written as one
+    This is `random_vibration_report` for a sweep: a run left out is
+    asked for, the batch and folder rules are the same, the project is
+    worked up by `sine_run`, and the Sine Sweep report is written as one
     self-contained HTML file. Returns the path written, or the list of
-    them when several runs were chosen (Brandon, 2026-10-02: the batch
-    tool stopped at a run that was sine alone). `marking` is the banner
-    across every page of the report, 'UNCLASSIFIED' unless said — on
-    every one-call report since 2026-10-02, when a batch wanted its own
-    heading.
+    them when several runs were chosen. `marking` is the banner across
+    every page of the report, 'UNCLASSIFIED' when omitted.
 
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
-        The controller's `.nc4`, or a list of them for a batch; asked for
-        in a file dialog, as many as wanted, when omitted.
+        The controller's `.nc4`, or a list of them for a batch. When
+        omitted, a file dialog asks for as many as wanted.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
-        in a separator) the report lands in under the run's own name.
-        Beside the run when omitted. Several runs need a folder or None.
+        in a separator) the report is written into under the run's own
+        name. Beside the run when omitted. Several runs need a folder or
+        None.
     last : float, optional
         Import only the last `last` seconds of the run; a shorter run is
-        taken whole.
+        imported whole.
     geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
         A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, Cancel meaning none;
-        `ASK` asks even when the run was given.
+        the whole batch when the run was asked for, with Cancel meaning
+        none; `ASK` asks even when the run was given.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     unit_system : UnitSystem, optional
-        The units the report is written in; the package default,
-        'in-slinch-lbf-s (g)', when omitted.
+        The units the report is written in. Defaults to the package
+        default, 'in-slinch-lbf-s (g)'.
     marking : str, optional
-        The banner across the top and bottom of every page;
+        The banner across the top and bottom of every page.
         'UNCLASSIFIED' when omitted.
 
     Returns
     -------
     str or list of str
-        The path written; a list of them when several runs were chosen or
-        a list of runs was given.
+        The path written, or a list of them when several runs were
+        chosen or a list of runs was given.
     """
+    # Brandon, 2026-10-02: the batch tool stopped at a run that was sine
+    # alone, and a batch wanted its own banner (`marking`, on every
+    # one-call report since).
     return _one_call_reports(
         run, path, geometry, unit_system, 'sine',
         lambda one, geo: sine_run(one, last=last, geometry=geo, photos=photos),
@@ -5596,14 +5787,15 @@ _REPORTS_BY_TYPE = {
 
 def report_kind(run: str | os.PathLike) -> str:
     """Which one-call reports a Rattlesnake run gets: 'random', 'mixed',
-    'sine' or 'sysid', from the project type the file declares — 'mixed'
-    being a random run with a sweep under it, which gets a random report
-    and a sine report (`run_report`) — and
-    'sysid' for a streamed save with a system ID's shape, two streams,
-    a quiet one then a loud one, where the window asks and this
-    decides (Brandon, 2026-10-02: a batch defaults to the likeliest
-    reading). A run of a type with no one-call report, a modal or a
-    transient run, is refused by name.
+    'sine' or 'sysid', from the project type the file records.
+
+    'mixed' is a random run with a sweep under it, which gets both a
+    random report and a sine report (`run_report`). 'sysid' is also
+    given for a streamed save shaped like a system identification (two
+    streams, a quiet one and then a loud one); the app asks in that
+    case, and this function chooses 'sysid'. A run of a type with no
+    one-call report, such as a modal or transient run, raises
+    ValueError.
 
     Parameters
     ----------
@@ -5615,6 +5807,7 @@ def report_kind(run: str | os.PathLike) -> str:
     str
         'random', 'mixed', 'sine' or 'sysid'.
     """
+    # Brandon, 2026-10-02: a batch defaults to the likeliest reading.
     from .io.rattlesnake import project_type, streamed_sysid_candidate
 
     declared = project_type(run)
@@ -5642,7 +5835,7 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
            unit_system: Any = None,
            marking: str | None = None,
            progress: Any = None) -> Any:
-    """A Rattlesnake run in, the report its type calls for out.
+    """Read a Rattlesnake run and write the report its type calls for.
 
         visualdynamics.run_report('run.nc4', 'report.html')
         visualdynamics.run_report()               # ask for the runs and the geometry
@@ -5650,77 +5843,84 @@ def run_report(run: Any = ASK, path: str | os.PathLike | None = None, *,
         visualdynamics.run_report(['a.nc4', 'b.nc4'], 'reports/',
                                   geometry='article.stp')
 
-    The one-call report that reads the run's own type (`report_kind`)
-    and writes that report: a random run gets `random_vibration_report`'s,
-    a sweep `sine_report`'s, a system identification
-    `system_id_report`'s, and a random-and-sine run both a random and a
-    sine report, as `<name>_random.html` and `<name>_sine.html` — the
-    random reading only the last `last` seconds when they are given, the
-    sine always the whole run, since a sweep cut short loses tones (the
-    combined report retired 2026-10-05). A streamed save
-    that looks like a system ID, two streams quiet then loud, is taken
-    as one rather than asked about. Named for what it takes, since
-    `visualdynamics.report` is the rendering package. The asking, the batch and the
-    folder are the same rule the typed functions share, and a batch
-    may mix kinds. The keywords are the union of theirs; `per_octave`
-    reaches the random halves alone.
+    This one-call report reads the run's own type (`report_kind`) and
+    writes that report. A random run gets `random_vibration_report`'s
+    report, a sweep `sine_report`'s, a system identification
+    `system_id_report`'s, and a random and sine run gets both a random
+    and a sine report, as `<name>_random.html` and `<name>_sine.html`.
+    For that run the random report reads only the last `last` seconds
+    when they are given, and the sine report always reads the whole
+    run, since a sweep cut short loses tones. A streamed save that
+    looks like a system identification (two streams, quiet and then
+    loud) is treated as one without asking. The function is named for
+    what it takes, since `visualdynamics.report` is the rendering
+    package.
+
+    The asking, the batch and the folder follow the same rules as the
+    typed functions, and a batch may mix kinds. The keyword arguments
+    are the union of theirs, and `per_octave` is used only for the
+    random reports.
 
     Every run's kind is read before any report is written, so a batch
-    holding a run with no one-call report is refused whole rather than
-    stopping partway through. `kinds` overrides the reading run by run —
-    a restarted random run the system-ID guess took for one, a file
-    that declares no type (Reports from Runs' per-run choice,
-    2026-10-06) — and `last` may be given run by run too. `progress(done, total)` is told after
-    each run, the hook the window's bar and Cancel ride on (Reports
-    from Runs, 2026-10-04); a run is the smallest step, so a cancel
-    lands between runs.
+    holding a run with no one-call report raises ValueError before
+    writing anything instead of stopping partway through. `kinds`
+    overrides the reading run by run, for example for a restarted
+    random run that was taken for a system identification or a file
+    that records no type, and `last` can be given run by run too.
+    `progress(done, total)` is called after each run, which is what the
+    app's progress bar and Cancel use; a run is the smallest step, so a
+    cancel takes effect between runs.
 
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
-        The controller's `.nc4`, or a list of them for a batch; asked for
-        in a file dialog, as many as wanted, when omitted.
+        The controller's `.nc4`, or a list of them for a batch. When
+        omitted, a file dialog asks for as many as wanted.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
-        in a separator) the report lands in under the run's own name.
-        Beside the run when omitted. Several runs need a folder or None.
+        in a separator) the report is written into under the run's own
+        name. Beside the run when omitted. Several runs need a folder or
+        None.
     last : float or Mapping, optional
         Import only the last `last` seconds of the run; a shorter run is
-        taken whole. For a random-and-sine run the random report alone:
-        its sine report reads the whole run. A mapping gives each run its
-        own, by path; a run it leaves out, or maps to None, is read
-        whole.
+        imported whole. For a random and sine run it applies to the
+        random report only, and the sine report reads the whole run. A
+        mapping gives each run its own value, by path; a run it leaves
+        out, or maps to None, is read whole.
     kinds : Mapping, optional
         The report each run gets, by path: 'random', 'mixed' (a random
-        and a sine report), 'sine' or 'sysid'. A run it leaves out gets
-        the report its file declares (`report_kind`).
+        and a sine report), 'sine' or 'sysid'. Any other value raises
+        ValueError. A run it leaves out gets the report its file
+        records (`report_kind`).
     geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
         A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, Cancel meaning none;
-        `ASK` asks even when the run was given.
+        the whole batch when the run was asked for, with Cancel meaning
+        none; `ASK` asks even when the run was given.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     per_octave : int, optional
-        Bands per octave for the banded PSD and specification; the
-        project's default (a sixth) when omitted. The random
-        halves alone read it.
+        Bands per octave for the banded PSD and specification. Defaults
+        to 6. Only the random reports use it.
     unit_system : UnitSystem, optional
-        The units the report is written in; the package default,
-        'in-slinch-lbf-s (g)', when omitted.
+        The units the report is written in. Defaults to the package
+        default, 'in-slinch-lbf-s (g)'.
     marking : str, optional
-        The banner across the top and bottom of every page;
+        The banner across the top and bottom of every page.
         'UNCLASSIFIED' when omitted.
     progress : callable, optional
-        Called as ``progress(done, total)`` before the first run and after
-        each; it may raise to stop the batch between runs.
+        Called as ``progress(done, total)`` before the first run and
+        after each one. It may raise to stop the batch between runs.
 
     Returns
     -------
     str or list of str
-        The path written; a list of them when several runs were chosen, a
-        list of runs was given, or a run was random and sine (two
-        reports).
+        The path written, or a list of them when several runs were
+        chosen, a list of runs was given, or a run was random and sine
+        (two reports).
     """
+    # The combined random-and-sine report was retired on 2026-10-05.
+    # `kinds` is the per-run choice in Reports from Runs (2026-10-06),
+    # and `progress` the hook its bar and Cancel use (2026-10-04).
     runs, asked, many = _runs_of(run)
     chosen = {str(key): value for key, value in (kinds or {}).items()}
     wrong = sorted({str(value) for value in chosen.values()
@@ -5789,54 +5989,56 @@ def system_id_report(run: Any = ASK,
                      photos: Any = None,
                      unit_system: Any = None,
                      marking: str | None = None) -> Any:
-    """A Rattlesnake system identification in, an HTML report out.
+    """Read a Rattlesnake system identification and write an HTML
+    report.
 
         visualdynamics.system_id_report('sysid.nc4', 'sysid.html')
         visualdynamics.system_id_report()            # ask for both
 
-    `system_id_run` followed by the System ID report: the measured
-    plant's FRFs, the coherence map, and the signal-to-noise of the
-    measurement, line by line and per channel — where it falls to
-    zero decibels, the plant is the room.
+    This is `system_id_run` followed by the System ID report: the
+    measured FRFs, the coherence map, and the signal-to-noise ratio of
+    the measurement at each line and for each channel. Where the ratio
+    falls to zero decibels, the measurement is of the ambient noise,
+    not of the structure.
 
-    Everything about being asked, writing a batch and taking a folder
-    is `random_vibration_report`'s, and means the same things: left
-    out, the run is asked for and as many may be chosen as there are
-    reports wanted; the geometry is asked for once for the whole
-    batch when the run was asked for, Cancel meaning none;
-    `visualdynamics.ASK` forces either question; and `path` may be the
-    file to write or the folder to write into.
+    Asking, batches and folders work as in `random_vibration_report`.
+    When the run is left out it is asked for, and as many runs may be
+    chosen as there are reports wanted; the geometry is asked for once
+    for the whole batch when the run was asked for, with Cancel meaning
+    none; `visualdynamics.ASK` forces either question; and `path` may
+    be the file to write or the folder to write into.
 
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
-        The controller's `.nc4`, or a list of them for a batch; asked for
-        in a file dialog, as many as wanted, when omitted.
+        The controller's `.nc4`, or a list of them for a batch. When
+        omitted, a file dialog asks for as many as wanted.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
-        in a separator) the report lands in under the run's own name.
-        Beside the run when omitted. Several runs need a folder or None.
+        in a separator) the report is written into under the run's own
+        name. Beside the run when omitted. Several runs need a folder or
+        None.
     last : float, optional
         Import only the last `last` seconds of the run; a shorter run is
-        taken whole.
+        imported whole.
     geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
         A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, Cancel meaning none;
-        `ASK` asks even when the run was given.
+        the whole batch when the run was asked for, with Cancel meaning
+        none; `ASK` asks even when the run was given.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     unit_system : UnitSystem, optional
-        The units the report is written in; the package default,
-        'in-slinch-lbf-s (g)', when omitted.
+        The units the report is written in. Defaults to the package
+        default, 'in-slinch-lbf-s (g)'.
     marking : str, optional
-        The banner across the top and bottom of every page;
+        The banner across the top and bottom of every page.
         'UNCLASSIFIED' when omitted.
 
     Returns
     -------
     str or list of str
-        The path written; a list of them when several runs were chosen or
-        a list of runs was given.
+        The path written, or a list of them when several runs were
+        chosen or a list of runs was given.
     """
     return _one_call_reports(
         run, path, geometry, unit_system, 'sysid',
@@ -5853,7 +6055,7 @@ def random_vibration_report(run: Any = ASK,
                             per_octave: int | None = None,
                             unit_system: Any = None,
                             marking: str | None = None) -> Any:
-    """A Rattlesnake random vibration run in, an HTML report out.
+    """Read a Rattlesnake random vibration run and write an HTML report.
 
         visualdynamics.random_vibration_report('run.nc4', 'report.html')
         visualdynamics.random_vibration_report(
@@ -5862,70 +6064,70 @@ def random_vibration_report(run: Any = ASK,
         visualdynamics.random_vibration_report()          # ask for both
         visualdynamics.random_vibration_report('run.nc4', 'reports/')
 
-    **Left out, it asks.** Called with no run, it opens a file dialog
-    and takes as many runs as are chosen, writing one report each and
-    returning the list; a run chosen that way is asked about its
-    geometry too, where Cancel means none. `visualdynamics.ASK` in
-    either place forces the question, so a script with a run in hand
-    can still be asked for the geometry. A run given without a
-    geometry keyword means *no geometry*, as it always has, and
-    nothing opens.
+    Called with no run, it opens a file dialog and takes as many runs as
+    are chosen, writes one report for each and returns the list. A run
+    chosen that way is asked about its geometry too, with Cancel meaning
+    none. `visualdynamics.ASK` in either place forces the question, so a
+    script with a run in hand can still be asked for the geometry. A
+    run given without a `geometry` argument means no geometry, and no
+    dialog opens.
 
-    **A folder is a folder.** `path` may be the file to write, or a
-    folder the report lands in under the run's own name with an
-    `.html` extension. Without a path it lands beside the run. Several
-    runs need a folder or no path, never one file name.
+    `path` may be the file to write, or a folder the report is written
+    into under the run's own name with an `.html` extension. Without a
+    path the report is written beside the run. Several runs need a
+    folder or no path; a single file name raises ValueError.
 
-    The whole workflow in one call, with nothing to click (Brandon,
-    2026-09-19): import the run — or only its last `last` seconds, a
-    shorter run taken whole — detect the averaging, compute the PSDs,
-    band them and the specification onto octave bands, compute the
-    multiple coherence, bring in the geometry and the photographs when
-    they are given, generate the Random Vibration report and write it
-    as one self-contained HTML file. Returns the path written, or the
-    list of them when several runs were chosen. The keywords are
-    `random_vibration_run`'s, plus `unit_system` for the units the
-    report is written in.
+    The whole workflow runs in one call: import the run (or only its
+    last `last` seconds; a shorter run is imported whole), detect the
+    averaging, compute the PSDs, put them and the specification on
+    octave bands, compute the multiple coherence, bring in the geometry
+    and the photographs when they are given, generate the Random
+    Vibration report, and write it as one self-contained HTML file. The
+    keyword arguments are `random_vibration_run`'s except `length_unit`,
+    plus `unit_system` and `marking` for the report.
 
-    Everything it does is `random_vibration_run` followed by
-    `generate_report` and `export_report`; reach for those instead when
-    the project is wanted afterwards — to write the test summary, or to
-    save it as `.vdyn`.
+    It is `random_vibration_run` followed by `generate_report` and
+    `export_report`. Use those instead when the project is wanted
+    afterwards, to write the test summary or to save it as `.vdyn`.
 
     Parameters
     ----------
     run : str, os.PathLike, sequence of them, or `visualdynamics.ASK`
-        The controller's `.nc4`, or a list of them for a batch; asked for
-        in a file dialog, as many as wanted, when omitted.
+        The controller's `.nc4`, or a list of them for a batch. When
+        omitted, a file dialog asks for as many as wanted.
     path : str, os.PathLike or None, optional
         The file to write, or a folder (one that exists, or a name ending
-        in a separator) the report lands in under the run's own name.
-        Beside the run when omitted. Several runs need a folder or None.
+        in a separator) the report is written into under the run's own
+        name. Beside the run when omitted. Several runs need a folder or
+        None.
     last : float, optional
         Import only the last `last` seconds of the run; a shorter run is
-        taken whole.
+        imported whole.
     geometry : str, os.PathLike, `visualdynamics.ASK` or None, optional
         A geometry file to import and link to the run. Asked for once for
-        the whole batch when the run was asked for, Cancel meaning none;
-        `ASK` asks even when the run was given.
+        the whole batch when the run was asked for, with Cancel meaning
+        none; `ASK` asks even when the run was given.
     photos : str, os.PathLike or sequence of them, optional
         A folder of photographs, one photograph, or several in order.
     per_octave : int, optional
-        Bands per octave for the banded PSD and specification; the
-        project's default (a sixth) when omitted.
+        Bands per octave for the banded PSD and specification. Defaults
+        to 6.
     unit_system : UnitSystem, optional
-        The units the report is written in; the package default,
-        'in-slinch-lbf-s (g)', when omitted.
+        The units the report is written in. Defaults to the package
+        default, 'in-slinch-lbf-s (g)'.
     marking : str, optional
-        The banner across the top and bottom of every page;
+        The banner across the top and bottom of every page.
         'UNCLASSIFIED' when omitted.
 
     Returns
     -------
     str or list of str
-        The path written; a list of them when several runs were chosen or
-        a list of runs was given.
+        The path written, or a list of them when several runs were
+        chosen or a list of runs was given.
     """
+    # The whole workflow in one call, with nothing to click (Brandon,
+    # 2026-09-19).
+    #
     # no length unit reaches the workup: the report draws the geometry
     # as a shape and never states a coordinate or a scale, so declaring
     # what the file's numbers meant changed one label and nothing else

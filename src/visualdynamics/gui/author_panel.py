@@ -1,25 +1,26 @@
 """The specification being edited, as tables beside the plot.
 
-What an author states, laid out to be stated: the breakpoints and a
-level per channel in one grid, every pair's coherence and phase in
-another with one row that sets them all, and the bands in decibels.
-The plot beside it draws the autospectra with their bands. One sheet
-for every door in: a shape set's modal coordinates, a channel table's
-control channels, a specification opened to edit (Brandon,
-2026-09-04: a generic editor, not a modal one).
+The panel lays out what an author states. One grid holds the
+breakpoints, with a level per channel, and another holds each pair's
+coherence and phase, with a row under it that sets every pair at once.
+Above them are the form (Breakpoints, or Interpolated onto frequency
+lines at a spacing) and the two band constraints, Symmetric and
+Uniform. The bands themselves are dragged on the plot beside the panel,
+which draws the autospectra with their bands. The same panel is used
+for every way in: a shape set's modal coordinates, a channel table's
+control channels, or a specification opened to edit.
 
-The two grids are the application's ordinary tables (PLAN.md, "How
-tables behave"; Brandon, 2026-09-06: every editable table should be
-the same table): `CopyPasteTableView` over `TableModel` columns, so
-a column header selects the column, a row header the row, Cmd-click
-adds a cell, and copy, paste, Delete-to-clear, Batch Edit and the
-fill handle come from the one implementation rather than being
-written here again. A frequency typed between two others re-sorts
-the breakpoints rather than refusing them.
+The two grids are the application's ordinary tables,
+`CopyPasteTableView` over `TableModel` columns. So a column header
+selects the column, a row header the row, Cmd-click adds a cell, and
+copy, paste, Delete to clear, Batch Edit and the fill handle come from
+the one implementation every table uses. A frequency typed between two
+others re-sorts the breakpoints instead of being refused.
 
 Nothing here computes anything. The panel hands back a
-`SpecificationDraft` in SI and says when it moved; the window lands
-every edit on the specification through `project.author_specification`.
+`SpecificationDraft` in SI and reports when it changes, and the window
+applies every edit to the specification through
+`Project.author_specification`.
 """
 
 from __future__ import annotations
@@ -47,17 +48,23 @@ from .tables import Column, CopyPasteTableView, TableModel
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
 
+# One sheet for every way in (Brandon, 2026-09-04: a generic editor, not
+# a modal one). The grids are the ordinary tables (PLAN.md, "How tables
+# behave"; Brandon, 2026-09-06: every editable table should be the same
+# table).
+
 #: wider than the reading panels: a grid with a column per channel
 #: needs the room, and scrolls sideways past six
 PANEL_WIDTH = 440
 
 
 class Sheet:
-    """What the two grids edit: the draft's fields, mutable, in SI.
+    """The draft's fields in SI, as the two grids edit them.
 
-    The models write here cell by cell and the panel reads a draft
-    back whole; the display unit is applied on the way out and undone
-    on the way in, so a cell nobody touched keeps its exact SI value.
+    The table models write here one cell at a time, and the panel reads
+    a whole draft back. The display unit is applied when a cell is shown
+    and undone when one is typed, so a cell nobody edited keeps its
+    exact SI value.
     """
 
     def __init__(self, draft: SpecificationDraft,
@@ -83,8 +90,8 @@ class Sheet:
         self.reordered: bool = False
 
     def draft(self) -> SpecificationDraft:
-        """The sheet as a draft — refused by the draft's own rules for
-        what no specification could hold."""
+        """The sheet as a `SpecificationDraft`. The draft's own checks
+        raise ValueError for anything no specification could hold."""
         return SpecificationDraft(
             list(self.channels), list(self.dims), list(self.frequencies),
             [list(row) for row in self.levels], dict(self.pairs),
@@ -92,9 +99,9 @@ class Sheet:
             list(self.sources), self.form, self.spacing)
 
     def sort(self) -> None:
-        """Breakpoints in frequency order, their levels along — a
-        frequency typed between two others lands where it belongs
-        (Brandon, 2026-09-06: typed out of order, the sheet stalled)."""
+        """Put the breakpoints in frequency order, with their levels, so a
+        frequency typed between two others moves to its place."""
+        # Brandon, 2026-09-06: typed out of order, the sheet stalled.
         order = np.argsort(self.frequencies, kind='stable')
         self.frequencies = [self.frequencies[k] for k in order]
         self.levels = [[row[k] for k in order] for row in self.levels]
@@ -165,10 +172,11 @@ def _number_text(value: Any) -> str:
 
 def sheet_models(sheet: Sheet, parent: Any = None
                  ) -> tuple[TableModel, TableModel]:
-    """(breakpoints, pairs): the sheet's two grids as the ordinary
-    table models — the conventions test holds them to the contract.
-    The cells journal through the verb the window calls on every edit,
-    so each column is declared journaled elsewhere."""
+    """(breakpoints, pairs): the sheet's two grids as ordinary table
+    models, which the table conventions test holds to the same contract
+    as every other table. The window records each edit in the journal
+    through the verb it calls, so each editable column is declared as
+    journaled elsewhere."""
     unit_system = sheet.unit_system
     points = [Column('Hz', lambda s, r: s.frequencies[r], set=_set_frequency,
                      format=lambda v: f'{v:g}', journal=_elsewhere)]
@@ -187,7 +195,15 @@ def sheet_models(sheet: Sheet, parent: Any = None
 
 
 class AuthorPanel(QWidget):
-    """The draft as two grids and the bands; every edit is the object's."""
+    """The specification editor: the breakpoints and pairs grids, the
+    form buttons and the band constraints.
+
+    Each edit is reported on `changed` as a whole `SpecificationDraft`.
+    The form buttons report on `form_asked` and the constraints on
+    `constraint_asked`, both for the whole specification. There is no
+    apply button, because the window applies every edit to the
+    specification as it is made.
+    """
 
     #: the draft moved; here is what it says now
     changed = Signal(object)
@@ -369,10 +385,11 @@ class AuthorPanel(QWidget):
     def show_draft(self, draft: SpecificationDraft, unit_system: UnitSystem,
                    origin: str = '',
                    spacing_hint: float | None = None) -> None:
-        """Lay the draft out, in the display units of each channel's
-        density. `origin` says where the sheet came from;
-        `spacing_hint` the line spacing to offer when the draft
-        remembers none — a time history's averaging, say."""
+        """Show a draft, with each channel's levels in the display units
+        of its density. `origin` says where the sheet came from and is
+        shown with the draft's notes. `spacing_hint` is the line spacing
+        to offer when the draft has none, such as a time history's
+        averaging."""
         self._unit_system = unit_system
         self._loading = True
         try:
@@ -418,8 +435,8 @@ class AuthorPanel(QWidget):
             view.update()
 
     def draft(self) -> SpecificationDraft:
-        """The draft the sheet holds, in SI. Raises `ValueError` for
-        what no specification could hold."""
+        """The draft the sheet holds, in SI. Raises ValueError when no
+        sheet is open, or for anything no specification could hold."""
         if self._sheet is None:
             raise ValueError('no sheet is open')
         return self._sheet.draft()

@@ -884,6 +884,35 @@ def test_the_damping_no_longer_comes_from_two_crossings():
         'the search should not be fooled the same way')
 
 
+def test_a_dragged_fit_keeps_the_damping_its_parabola_shows():
+    """The drag searches the damping at the cursor and draws it; the fit
+    that follows each tick read the half-power width again, so on a
+    close pair the mode a drag fitted took the pair's width, not the
+    damping on screen (2026-10-13). The fit keeps the searched one."""
+    from visualdynamics.core.data import Frf
+    from visualdynamics.core.modal_fit import ModalFitSession
+
+    df, zeta = 0.25, 0.01
+    f = np.arange(1, 601) * df
+    w = 2 * np.pi * f
+    pair = sum((1j * w) ** 2
+               / ((2 * np.pi * hz) ** 2 - w ** 2
+                  + 2j * zeta * (2 * np.pi * hz) * w) * weight
+               for hz, weight in ((60.0, 1.0), (61.2, 0.9)))
+    frf = Frf(f, np.array([pair, 0.6 * pair]),
+              response_dof=['1Z+', '2Z+'], reference_dof=['1Z+'] * 2,
+              ordinate_dim='acceleration/force')
+    session = ModalFitSession(frf)
+    session.move_to(60.0)
+    shown = session.pending['damping']
+    index = int(np.argmin(np.abs(np.asarray(session.frequencies) - 60.0)))
+    crossings = session._half_power(session._residual_cmif(), index)
+    assert abs(crossings - shown) > 0.05 * shown, 'the two must differ, or this proves nothing'
+    fitted = session.fit_pending()
+    assert fitted['damping'] == pytest.approx(shown, rel=1e-9)
+    assert session.confirm()['damping'] == pytest.approx(shown, rel=1e-9)
+
+
 def test_the_search_is_quick_enough_to_sit_in_a_click():
     """Only the frequency and the damping are nonlinear; given them the
     residues are a linear least squares. So the two-parameter surface is

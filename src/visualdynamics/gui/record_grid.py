@@ -1,19 +1,26 @@
-"""Sub-items shown as a grid, inside the object's own tree expansion.
+"""Sub-items shown as a grid, inside the object's own expansion in the
+tree.
 
-Every object that expands into records, channels or modes expands into a
-grid — even one column wide. Rows are DOFs (modes for a shape set), columns
-are whatever tells records apart besides their row: reference DOFs for a
-matrix of measurements, the capture for repeated averages, or a single
-unlabeled column when the row alone is the identity. One format for every
-object means one set of habits: the same selection, the same deletion, the
-same icons.
+Every object that expands into records, channels, modes or other
+sub-items expands into a grid, even one column wide. Rows are DOFs
+(modes for a shape set, names for photos, the two mode numbers for a
+matched pair), and columns are whatever tells records apart besides
+their row: reference DOFs for a matrix of measurements, the capture for
+repeated averages, or a single unlabeled column when the row alone
+identifies the record. With one format for every object, selecting,
+deleting and the icons work the same way everywhere.
 
-A set that does not fill its rectangle — a record deleted out of a full
-matrix, an FRF measured for some pairs only — stays a grid with disabled
-holes where the missing records would be. The holes say precisely what is
-absent, which neither a flat list nor a refusal did.
+A set that does not fill its rectangle (a record deleted out of a full
+matrix, or an FRF measured for some pairs only) stays a grid, with
+disabled cells where the missing records would be. The disabled cells
+show exactly what is absent.
 
-Geometry is the exception, on request: its categories keep the list.
+The rows of time data channels have a Role column first: reference,
+response or monitor, changed by clicking it. Row labels that are
+coordinates or photo names, and the reference columns of a matrix, are
+edited by double-clicking them.
+
+Geometry is the exception: its categories stay a list.
 """
 
 from __future__ import annotations
@@ -43,6 +50,10 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
     from ..core.data import DataArray
 
+# Geometry keeps its list at Brandon's request. The disabled cells
+# replaced a flat list and a refusal, neither of which said what was
+# missing.
+
 ROW_HEIGHT = 24
 MAX_HEIGHT = 320         # past this the grid scrolls rather than the tree
 MAX_WIDTH = 460
@@ -54,8 +65,8 @@ COLUMN_WIDTH = 24
 
 
 class RowKey(NamedTuple):
-    """What identifies a row: a DOF, what it measures, and — only if those
-    two are not enough — which of the channels sharing them it is."""
+    """What identifies a row: a DOF, what it measures, and, only when
+    those two are not enough, which of the channels sharing them it is."""
 
     dof: str
     quantity: str
@@ -65,28 +76,29 @@ class RowKey(NamedTuple):
 def row_keys(data: DataArray) -> list[RowKey]:
     """One RowKey per record.
 
-    A row is a DOF *and* a data type. Two channels can sit at one point — a
+    A row is a DOF and a quantity. Two channels can be at one point (a
     shaker's load cell and the accelerometer beside it share a node and a
-    direction — so a DOF may repeat, but never within a quantity, and a volt,
-    a newton and a meter per second squared never belong on one row whatever
-    their DOF says.
+    direction), so a DOF may repeat, but never within a quantity. A volt,
+    a newton and a meter per second squared never belong on one row,
+    whatever their DOF.
 
-    The quantity comes from `known_dim`, not `ordinate_dim`: a source can name
-    a quantity without sizing it, and that claim is enough to tell channels
-    apart. It is the *response factor* of the dimension
-    (`channel_quantities`), because the row is the response channel: keyed
-    on the compound, a CPSD split every accelerometer into a row per thing
-    it was measured against. The record's icon reads the hint too, and the
-    two must agree or the axis and the cells describe different rows.
+    The quantity comes from `known_dim`, not `ordinate_dim`: a source can
+    name a quantity without giving its unit, and that is enough to tell
+    channels apart. It is the response factor of the dimension
+    (`channel_quantities`), because the row is the response channel.
+    Keyed on the whole compound dimension, a CPSD would split every
+    accelerometer into a row for each channel it was measured against.
+    The record's icon reads the same quantity, and the two must agree or
+    the axis and the cells describe different rows.
 
-    When even that is not enough — an import that says nothing about units, so
-    every channel at a DOF reads 'unknown' — `occurrence` breaks the tie by
-    channel order. That is deliberately the last resort. A channel index is an
-    artifact of how a file was written rather than a property of a
-    measurement, and reordering the table would rename the row; but the
-    alternative is refusing the grid and losing an arrangement we *do* know,
-    which is worse. Declare the units and the quantities separate, every
-    occurrence falls back to 0, and the artifact stops being used.
+    When even that is not enough (an import that says nothing about
+    units, so every channel at a DOF reads 'unknown'), `occurrence`
+    breaks the tie by channel order. This is the last resort. A channel
+    index comes from how a file was written and is not a property of a
+    measurement, and reordering the table would rename the row, but the
+    alternative is refusing the grid and losing an arrangement that is
+    known. Once the units are declared and the quantities differ, every
+    occurrence is 0 and the channel order is no longer used.
     """
     factors = [channel_quantities(data.known_dim(i))
                for i in range(data.num_records)]
@@ -111,13 +123,15 @@ def row_keys(data: DataArray) -> list[RowKey]:
 
 
 def row_labels(keys: Sequence[RowKey]) -> list[str]:
-    """Headers for `row_keys`: the DOF, and a marker only where it must have one.
+    """Headers for `row_keys`: the DOF, with a marker only where one is
+    needed.
 
-    Normally the DOF alone — what a row measures is on the icon in each of its
-    cells, which is read faster than a word. But two channels telling apart
-    only by `occurrence` have the *same* icon, because neither says what it
-    measures, so there the DOF is not enough and the channel's position has to
-    show. It disappears again the moment units are declared.
+    Normally the header is the DOF alone, because what a row measures is
+    shown by the icon in each of its cells, which is read faster than a
+    word. Two channels told apart only by `occurrence` have the same
+    icon, because neither says what it measures, so there the header
+    adds the channel's position ('101Z+ #2'). The marker goes away once
+    units are declared.
     """
     ambiguous = {key.dof for key in keys if key.occurrence}
     return [f'{key.dof} #{key.occurrence + 1}' if key.dof in ambiguous
@@ -127,10 +141,11 @@ def row_labels(keys: Sequence[RowKey]) -> list[str]:
 def short_labels(columns: Sequence[str]) -> list[str]:
     """Column headers narrow enough that a 20-average grid is usable.
 
-    A block reads as 'avg 7' in a record label, where it is prose. As a
-    column header it only has to be told from its neighbors, and the word
-    is the same on all twenty — so where every column shares one prefix, the
-    prefix goes. Reference DOFs have no common prefix and are left alone.
+    An average reads as 'avg 7' in a record label. As a column header it
+    only has to be told from its neighbors, and the word is the same on
+    all twenty, so when every column shares one prefix the prefix is
+    dropped. Reference DOFs have no common prefix and are left as they
+    are.
     """
     if len(columns) < 2:
         return list(columns)
@@ -142,15 +157,16 @@ def short_labels(columns: Sequence[str]) -> list[str]:
 
 def grid_axes(data: DataArray
               ) -> tuple[list[RowKey], list[str]] | None:
-    """(rows, columns) for any grid-able object; None only when it has none.
+    """(rows, columns) for an object shown as a grid, or None for an
+    object that is not.
 
-    The columns are whatever tells records apart besides their row — the
+    The columns are whatever tells records apart besides their row: the
     reference DOF for a matrix of measurements, the capture for repeated
-    averages — and a single unlabeled column when the row alone is the
-    identity: multiple coherence, a plain time history, a channel table, a
-    shape set. A specification whose every record is a channel against
-    itself collapses its reference column too, because a diagonal spelled
-    out across six columns says nothing the rows do not.
+    averages, and a single unlabeled column when the row alone identifies
+    the record (multiple coherence, a plain time history, a channel
+    table, a shape set). A specification whose every record is a channel
+    against itself drops its reference column too, because a diagonal
+    spelled out across six columns says nothing the rows do not.
     """
     plan = grid_plan(data)
     if plan is None:
@@ -197,12 +213,13 @@ def _icon_source(obj, kind):
 
 
 class GridPlan(NamedTuple):
-    """Everything a grid needs, independent of what kind of object it maps.
+    """Everything a grid needs, whatever kind of object it maps.
 
-    `kind` is the reference vocabulary — 'record', 'channel' or 'mode' — so
-    a selection in the grid speaks the same language as the tree always has.
-    `cells` maps (row, column) to the item index; positions absent from it
-    are holes.
+    `kind` says what a cell is: 'record', 'channel', 'mode', 'photo',
+    'match' (a matched pair of modes) or 'dof' (a control DOF of a sine
+    specification or level set), the same words the tree uses for a
+    selection. `cells` maps (row, column) to the item index, and
+    positions absent from it are holes.
     """
 
     kind: str
@@ -229,6 +246,9 @@ class GridPlan(NamedTuple):
 
 
 def grid_plan(obj: Any) -> GridPlan | None:
+    """The `GridPlan` for an object: a data array, a channel table, a
+    shape set, matched modes, photos, or a sine specification or level
+    set. None for any other object."""
     from ..core.channel_table import ChannelTable
     from ..core.matches import MatchedModes
     from ..core.photos import Photos
@@ -368,8 +388,8 @@ def _mode_plan(shapes):
 
 def sine_dofs(grouped) -> list[str]:
     """The control DOFs a sine specification or a level set covers, in
-    order: the specification's own, or the union of its levels' — a
-    tone the instructions windowed may have been read at fewer."""
+    order: the specification's own, or the union of its levels', since a
+    tone the instructions windowed may have been read at fewer DOFs."""
     if hasattr(grouped, 'tones'):
         return [str(dof) for dof in grouped.response_dof]
     out: list[str] = []
@@ -426,10 +446,15 @@ class _LabelEditor(QLineEdit):
 class RecordGrid(QTableWidget):
     """Sub-items laid out as rows against columns, whatever their kind.
 
-    Selecting cells is how sub-items are chosen; the selection is the only
-    state, so nothing can disagree with it. `kind` says what a cell *is* —
-    'record', 'channel' or 'mode' — in the same vocabulary the tree has
-    always used, so everything downstream of a selection is unchanged.
+    Selecting cells is how sub-items are chosen. The selection is the
+    only state, so nothing can disagree with it. `kind` says what a cell
+    is, in the same words the tree uses ('record', 'channel', 'mode',
+    'photo', 'match' or 'dof'), so code that reads a selection works the
+    same for every kind.
+
+    `selection_changed` is emitted when the selection changes,
+    `row_renamed` and `column_renamed` when a row or column label is
+    typed over, and `role_changed` when a row's role is changed.
     """
 
     selection_changed = Signal()
@@ -593,7 +618,7 @@ class RecordGrid(QTableWidget):
                 for row in range(self.rowCount())]
 
     def show_roles(self, roles: Sequence[str]) -> None:
-        """Restate every row's role without announcing a change — a
+        """Show every row's role without emitting `role_changed`, for a
         role set elsewhere (the linked channel table, a link)."""
         if self.role_column is None:
             return
@@ -601,8 +626,9 @@ class RecordGrid(QTableWidget):
             self._show_role(row, role)
 
     def set_row_role(self, row: int, role: str) -> None:
-        """Give a row a role, as picking it from the menu does, and
-        announce it when it changed."""
+        """Give a row a role, as picking it from the menu does, and emit
+        `role_changed` when it changed. Raises ValueError for anything
+        other than 'reference', 'response' or 'monitor'."""
         if role not in ROLE_TEXT:
             raise ValueError(f'{role!r} is not a role: '
                              + ', '.join(ROLE_TEXT))
@@ -634,18 +660,20 @@ class RecordGrid(QTableWidget):
                 if r == row]
 
     def edit_row_label(self, row: int) -> None:
-        """Open an editor over the row's header, in place.
+        """Open an editor over the row's header, in place, and return it.
 
-        A header is not a cell and Qt will not edit one, so the editor
-        is a line edit laid over the section. It commits on Enter or on
-        losing focus and abandons on Escape, which is what editing a
-        name anywhere else in the window does.
+        The editor holds the row's coordinate (or a photo's name), not
+        the label, so a '#2' marker is not part of it. A header is not a
+        cell and Qt will not edit one, so the editor is a line edit laid
+        over the section. It commits on Enter or on losing focus and
+        abandons on Escape, as editing a name does everywhere else in the
+        window, and a commit emits `row_renamed`.
 
-        The commit is *queued*: acting on it rebuilds this grid, and
-        rebuilding the widget an editor is sitting in — from inside that
-        editor's own signal — is the shape of crash that took the docks
-        out.
+        The commit is queued, because acting on it rebuilds this grid,
+        and rebuilding the widget an editor is in, from inside that
+        editor's own signal, can crash the application.
         """
+        # A crash of exactly that kind once took the docks out.
         header = self.verticalHeader()
         # the coordinate itself, not the label: a row told apart only
         # by its position reads '101Z+ #2', and the '#2' is the grid's
@@ -658,8 +686,9 @@ class RecordGrid(QTableWidget):
             lambda text: self.row_renamed.emit(row, text))
 
     def edit_column_label(self, column: int) -> None:
-        """Open an editor over a reference column's header, in place —
-        the row gesture on the other edge of the grid."""
+        """Open an editor over a reference column's header, in place, and
+        return it. It works as `edit_row_label` does, and a commit emits
+        `column_renamed`."""
         header = self.horizontalHeader()
         return self._edit_label(
             header, self.references[column],
@@ -699,9 +728,9 @@ class RecordGrid(QTableWidget):
         return editor
 
     def refresh_icons(self) -> None:
-        """Restate every cell icon in place — after units are declared, the
-        badge goes and a quantity may appear — without rebuilding the grid
-        and losing the selection."""
+        """Redraw every cell icon in place, without rebuilding the grid and
+        losing the selection. This is for after units are declared, when
+        the badge goes and a quantity may appear."""
         for (row, column), index in self._records.items():
             self.item(row, column).setIcon(self._icon_for(index))
 
@@ -711,7 +740,8 @@ class RecordGrid(QTableWidget):
                       for index in self.selectedIndexes())
 
     def select_records(self, records: Sequence[int]) -> None:
-        """Show `records` as selected, without echoing back a change."""
+        """Show `records` as selected, without emitting
+        `selection_changed`."""
         wanted = set(records)
         cells = [cell for cell, record in self._records.items()
                  if record in wanted]
@@ -722,19 +752,22 @@ class RecordGrid(QTableWidget):
         self.blockSignals(blocked)
 
     def sizeHint(self) -> QSize:
+        """The `preferred_size`."""
         # QTableWidget's stock hint is 256x192 whatever the content;
         # the tree row takes the widget's word for it, so a one-photo
         # grid stood 192 px tall
         return self.preferred_size()
 
     def minimumSizeHint(self) -> QSize:
+        """The `preferred_size`."""
         return self.preferred_size()
 
     def preferred_size(self) -> QSize:
-        """How big the tree should make room for.
+        """The size the tree should make room for.
 
-        Capped: a 100-channel CPSD would otherwise push everything else in
-        the tree off the bottom, so past the cap the grid scrolls itself.
+        It is capped at `MAX_WIDTH` by `MAX_HEIGHT` (460 by 320 pixels),
+        because a 100-channel CPSD would otherwise push everything else in
+        the tree off the bottom. Past the cap the grid scrolls itself.
         """
         # the header's own width is not settled until the widget is laid out,
         # and this is asked for before that; its hint capped is what it will be

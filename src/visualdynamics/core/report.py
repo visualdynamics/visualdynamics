@@ -1,14 +1,21 @@
-"""Reports: an ordered story told from a project's objects.
+"""Reports: an ordered document built from a project's objects.
 
-A Report is a list of blocks — text the user wrote, plots, animated
-geometry scenes, tables — each naming the object it draws from. It holds
-*references*, never data. A reference is a literal object name, or a
-symbolic selector like '@basis:Frf' resolved against the project's link
-groups at render time (`resolve_binding`) — which is what makes one
-saved report a template for the next project: nobody has to name their
-objects anything in particular. An unresolvable block sits unbound in
-the builder until pointed at a compatible object, and an unbound block
-simply does not render.
+A `Report` is a list of blocks (text the user wrote, plots, animated
+geometry scenes, tables, bar charts) that each name the object they draw
+from. A report holds references, never data. A reference is a literal
+object name, or a symbolic selector such as '@basis:Frf' that is
+resolved against the project's object groups when the report is
+rendered (`resolve_binding`). Because of the selectors, a saved report
+works as a template for the next project, whatever its objects are
+named. A block whose reference does not resolve stays unbound in the
+editor until it is pointed at a compatible object, and an unbound block
+is not rendered.
+
+This module also holds the project types (`PROJECT_TYPES`), the objects
+each type expects (`project_expectations`), and the report template
+each type generates (`PROJECT_TEMPLATES`, `TEMPLATE_BUILDERS`). A
+Random and Sine project generates two reports, a random report and a
+sine report.
 """
 
 from __future__ import annotations
@@ -24,12 +31,28 @@ BLOCK_KINDS = ('text', 'plot', 'scene', 'table', 'photo', 'pairs',
 class Report:
     """An ordered list of blocks, each a plain dict.
 
+    `title` is the report's heading. `marking` is the classification
+    marking drawn as a banner across the top and bottom of the rendered
+    document, 'UNCLASSIFIED' by default; an empty string draws no
+    banner. `marking_color` is 'ink' (the page's own text color) or
+    'red'; any other value is read as 'ink'. A block of a kind not in
+    `BLOCK_KINDS` raises `ValueError`.
+
     Block shapes:
       {'kind': 'text',  'text': str}
-      {'kind': 'plot',  'source': name, 'mode': curves|cmif|mac|map,
+      {'kind': 'plot',  'source': name,
+                        'mode': curves|cmif|mac|map|stage|scalogram|
+                                pair|ratio|overlay,
                         'select': ''|drive|dim:<quantity>,
                         'component': magnitude|real|imag|phase,
                         'caption': str}
+        (a plot may also carry 'specification', the requirement drawn
+        with the curves; 'channel', the one control channel to open
+        on; 'grid', to lay every control channel out on a grid;
+        'tone', one tone of a sine level set; 'floor', the ambient
+        density for 'pair' and 'ratio'; 'shapes'; 'octave', to band
+        the data for the comparison; and 'averaging': False to leave
+        the averaging frames off a time plot)
       {'kind': 'scene', 'geometry': name, 'shapes': name-or-'',
                         'dofs': quantity, 'dofs_source': name,
                         'caption': str}
@@ -45,24 +68,30 @@ class Report:
         (the matched pairs animated over each other: both sets'
         geometries in one scene, resolved through the object's own
         geometry references, each pair phase-aligned)
-      {'kind': 'bars', 'source': name, 'mode': kurtosis|srs|sine|snr,
+      {'kind': 'bars', 'source': name, 'measured': name,
+                       'mode': error|lines|srs|waveform|kurtosis|sine|snr,
                        'caption': str}
-        (a bar reading: kurtosis per channel, SRS levels against the
-        target, sine levels against their tones, or — with 'floor' the
-        ambient Psd's name — RMS signal-to-noise per channel)
+        (a bar chart, one bar per channel: 'error' is each control
+        channel's RMS error against the specification in decibels and
+        'lines' the share of its band outside the abort limits; a
+        shock specification gives SRS deviations and a transient
+        specification waveform errors; 'kurtosis' reads one record
+        with no 'measured'; 'sine' compares every sine level in the
+        project with its tones; 'snr' is the RMS signal-to-noise per
+        channel, with 'floor' naming the ambient Psd)
       {'kind': 'verdict', 'source': Specification-name,
                           'measured': Psd-name, 'level_label': str}
         (the pass/fail box: whether the run passed, read off the
-        octave-band comparison of `measured` against `source` —
-        `compliance.verdict` — with the test level it was judged at
-        beside it, under `level_label`, 'Test level' when absent)
+        octave-band comparison of `measured` against `source`
+        (`compliance.verdict`), with the test level it was judged at
+        beside it under `level_label`, 'Test level' when absent)
 
     'select' filters a curves plot to the records the GUI's own filters
     would pick: 'drive' is the response==reference diagonal of an FRF,
-    and 'dim:<dimension>' keeps only records of that quantity — how a
-    time history splits into Time (Acceleration) and Time (Force).
-    'map' is the coherence map — frequency across, channel down,
-    pinned 0..1.
+    and 'dim:<dimension>' keeps only records of that quantity, which is
+    how a time history is split into Time (Acceleration) and Time
+    (Force). 'map' is the coherence map, with frequency across, channel
+    down and the color scale fixed at 0 to 1.
     """
 
     def __init__(self, title: str = 'Report',
@@ -97,9 +126,14 @@ class Report:
 
     @property
     def num_blocks(self) -> int:
+        """How many blocks the report holds."""
         return len(self.blocks)
 
     def add(self, block: Mapping[str, Any], at: int | None = None) -> None:
+        """Add a copy of `block` at index `at`, or at the end.
+
+        Raises `ValueError` for a block kind not in `BLOCK_KINDS`.
+        """
         if block.get('kind') not in BLOCK_KINDS:
             raise ValueError(f"unknown block kind {block.get('kind')!r}")
         if at is None:
@@ -108,13 +142,17 @@ class Report:
             self.blocks.insert(int(at), dict(block))
 
     def remove(self, indices: Sequence[int]) -> None:
+        """Remove the blocks at `indices`; an index out of range is ignored."""
         doomed = {int(i) for i in indices}
         self.blocks = [block for i, block in enumerate(self.blocks)
                        if i not in doomed]
 
     def move(self, rows: Sequence[int], to: int) -> None:
-        """Move the blocks at `rows` so the first lands at index `to` —
-        the drop half of drag-to-reorder."""
+        """Move the blocks at `rows`, in order, to just before the block at `to`.
+
+        A `to` past the end moves them to the end. This is the drop
+        half of drag-to-reorder.
+        """
         rows = sorted({int(r) for r in rows})
         lifted = [self.blocks[r] for r in rows]
         rest = [block for i, block in enumerate(self.blocks)
@@ -125,8 +163,13 @@ class Report:
 
     def unbound(self, objects: Mapping[str, Any],
                 object_groups: Sequence[Mapping[str, Any]] | None = None) -> list[int]:
-        """Block indices whose references the project cannot resolve —
-        a missing name, or a symbolic selector with nothing to pick."""
+        """The indices of blocks whose references the project cannot resolve.
+
+        A reference is unresolved when it is a name that is not in
+        `objects`, or a symbolic selector with nothing to pick. The
+        'source', 'geometry', 'dofs_source' and 'shapes' fields are
+        checked.
+        """
         out = []
         for i, block in enumerate(self.blocks):
             needed = [block.get(key)
@@ -180,7 +223,7 @@ def _wanted_classes(block):
 
 
 def source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) -> list[str]:
-    """Object names a block of this kind could draw from."""
+    """The names of the objects a block of this kind could draw from."""
     wanted = _wanted_classes(block)
     if wanted is None:
         return []
@@ -199,8 +242,11 @@ BANDED_TOKENS = {'OctavePsd': 'Psd', 'OctaveSpecification': 'Specification'}
 
 
 def binding_tokens() -> dict[str, tuple[type, bool | None]]:
-    """{token: (class, banded)} — every symbolic token: the plain
-    types (banded None, meaning not banded), and the banded flavors."""
+    """Every symbolic token, as {token: (class, banded)}.
+
+    The plain types have `banded` None, meaning not banded, and the
+    banded tokens ('OctavePsd', 'OctaveSpecification') have True.
+    """
     types = binding_types()
     out: dict[str, tuple[type, bool | None]] = {
         token: (cls, None) for token, cls in types.items()}
@@ -210,13 +256,13 @@ def binding_tokens() -> dict[str, tuple[type, bool | None]]:
 
 
 def is_banded(obj: Any) -> bool:
-    """Does this object live on bands — an octave-band PSD or
-    specification rather than one on lines?"""
+    """Whether the object is on bands (an octave-band PSD or
+    specification) instead of on frequency lines."""
     return getattr(obj, 'bandwidth', None) is not None
 
 
 def binding_types() -> dict[str, type]:
-    """{token: class} — the types a symbolic binding can name."""
+    """The types a symbolic binding can name, as {token: class}."""
     from .channel_table import ChannelTable
     from .data import (
         Frf,
@@ -252,17 +298,24 @@ def binding_types() -> dict[str, type]:
 
 def resolve_binding(value: str | None, objects: Mapping[str, Any],
                     object_groups: Sequence[Mapping[str, Any]] | None = None) -> str | None:
-    """The object name a binding field means.
+    """The object name a binding field refers to.
 
-    A literal name passes through untouched. A symbolic selector —
-    '@basis:Frf', '@other:ShapeSet', '@any:MatchedModes' — resolves
-    against the project at render time, so a report never depends on
-    what anyone named their objects: 'basis' is the first object of
-    the type in the Basis object group, 'other' the first outside it,
-    'any' the first anywhere. Without a Basis declared, 'basis'
-    degrades to the first of the type and 'other' to the second, so a
-    small unlinked project still renders. Returns the name, or None
-    when nothing fits.
+    A literal name is returned unchanged (an empty one as None). A
+    symbolic selector such as '@basis:Frf', '@other:ShapeSet' or
+    '@any:MatchedModes' is resolved against the project when the report
+    is rendered, so a report does not depend on what the objects are
+    named: 'basis' is the first object of the type in the Basis object
+    group, 'other' the first outside it, and 'any' the first anywhere.
+    Without a Basis group, 'basis' is the first of the type and 'other'
+    the second, so a small project with no groups still renders.
+
+    A specification never answers for the measurement it bounds:
+    '@basis:Psd' never returns a Specification. A banded object answers
+    only to its own token ('@basis:OctavePsd'), and a more specific
+    kind of the same measurement (multiple coherence for 'Coherence')
+    is ranked after the objects of the exact kind. Returns the name, or
+    None when nothing fits or the selector is not one of the known
+    roles and tokens.
     """
     value = str(value or '')
     if not value.startswith('@'):
@@ -317,8 +370,8 @@ def resolve_binding(value: str | None, objects: Mapping[str, Any],
 
 
 def binding_label(value: str) -> str:
-    """A human reading of a binding: 'Basis FRF (auto)' for
-    '@basis:Frf'; a literal name reads as itself."""
+    """A readable label for a binding, such as 'Basis FRF (auto)' for
+    '@basis:Frf'. A literal name is returned as it is."""
     value = str(value)
     if not value.startswith('@'):
         return value
@@ -329,8 +382,12 @@ def binding_label(value: str) -> str:
 
 
 def symbolic_options(block: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """[(selector, label)] this block could bind instead of a name —
-    how a report stays independent of what objects are called."""
+    """The symbolic selectors this block could bind instead of a name.
+
+    Returned as [(selector, label)], a basis and an other selector for
+    each token that fits the block. A selector keeps a report
+    independent of what the objects are named.
+    """
     wanted = _wanted_classes(block)
     if wanted is None:
         return []
@@ -349,7 +406,7 @@ def symbolic_options(block: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 def photo_options(block: Mapping[str, Any], objects: Mapping[str, Any],
                   object_groups: Sequence[Mapping[str, Any]] | None = None) -> list[str]:
-    """The photo names a photo block's bound Photos object holds."""
+    """The photo names held by the Photos object a photo block is bound to."""
     from .photos import Photos
 
     owner = objects.get(
@@ -358,6 +415,7 @@ def photo_options(block: Mapping[str, Any], objects: Mapping[str, Any],
 
 
 def shape_options(objects: Mapping[str, Any]) -> list[str]:
+    """The names of the shape sets in `objects`."""
     from .shapes import ShapeSet
 
     return [name for name, obj in objects.items()
@@ -366,14 +424,17 @@ def shape_options(objects: Mapping[str, Any]) -> list[str]:
 
 def base_quantity(dim: str) -> str:
     """The quantity a record's dimension names: 'acceleration' whether
-    the record holds accelerations or their square-per-Hz."""
+    the record holds accelerations or their square per hertz."""
     base = dim.partition('/')[0]
     return base.removesuffix('**2')
 
 
 def record_dimensions(obj: Any) -> set[str]:
-    """The quantities one data array's records hold — unknowns and
-    cross terms (a CPSD's acceleration*force) dropped."""
+    """The quantities one data array's records hold.
+
+    Unknown dimensions and cross terms (a CPSD's acceleration*force)
+    are left out.
+    """
     from ..units import UNKNOWN
 
     dims = {base_quantity(obj.known_dim(i))
@@ -392,23 +453,30 @@ def _held_dimensions(objects: Mapping[str, Any],
 
 
 def time_dimensions(objects: Mapping[str, Any]) -> list[str]:
-    """The quantities the project's time data actually holds, sorted —
-    what the insert menu's Time (…) options are made of."""
+    """The quantities the project's time histories hold, sorted.
+
+    These are the insert menu's Time (…) entries.
+    """
     from .data import TimeHistory
 
     return _held_dimensions(objects, TimeHistory)
 
 
 def spectrum_dimensions(objects: Mapping[str, Any]) -> list[str]:
-    """The quantities the project's spectra hold — the Spectra (…)
-    options, exactly as the time ones."""
+    """The quantities the project's spectra hold, sorted.
+
+    These are the insert menu's Spectra (…) entries.
+    """
     from .data import Spectrum
 
     return _held_dimensions(objects, Spectrum)
 
 
 def psd_dimensions(objects: Mapping[str, Any]) -> list[str]:
-    """The quantities the project's PSDs hold — the PSD (…) options."""
+    """The quantities the project's PSDs hold, sorted.
+
+    These are the insert menu's PSD (…) entries.
+    """
     from .data import Psd
 
     return _held_dimensions(objects, Psd)
@@ -419,10 +487,11 @@ def series_dof_quantities(
         ) -> list[str]:
     """Every quantity the selected data measures at some DOF, sorted.
 
-    `series` is [(name, data, records)] with records None for the whole
-    object — the same shape the GUI's selection speaks. References
-    count: an FRF per unit force names its force DOFs even when no
-    force channel was kept."""
+    `series` is [(name, data, records)], with records None for the
+    whole object, the same form the GUI's selection uses. References
+    count too: an FRF per unit force names its force DOFs even when no
+    force channel was kept.
+    """
     from ..units import UNKNOWN
 
     dims = set()
@@ -441,9 +510,12 @@ def series_dof_quantities(
 def series_quantity_dofs(
         series: Sequence[tuple[str, Any, Sequence[int] | None]],
         quantity: str) -> list[str]:
-    """Every DOF the selected data measures as `quantity`: response
-    DOFs of records holding it, and reference DOFs of records
-    referenced to it. Deduped and ordered by node."""
+    """Every DOF the selected data measures as `quantity`.
+
+    These are the response DOFs of records holding it and the reference
+    DOFs of records referenced to it, each once, ordered by node.
+    `series` is as for `series_dof_quantities`.
+    """
     from .data import parse_dof
 
     dofs = []
@@ -473,8 +545,10 @@ def _whole_project_series(objects: Mapping[str, Any]
 
 
 def dof_quantities(objects: Mapping[str, Any]) -> list[str]:
-    """Every quantity the project measures anywhere — the DOFs (…)
-    insert options."""
+    """Every quantity the project measures at some DOF.
+
+    These are the insert menu's DOFs (…) entries.
+    """
     return series_dof_quantities(_whole_project_series(objects))
 
 
@@ -484,8 +558,11 @@ def quantity_dofs(objects: Mapping[str, Any], quantity: str) -> list[str]:
 
 
 def dofs_source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) -> list[str]:
-    """Data objects a DOFs scene could read its arrows from — those
-    that actually measure the block's quantity at some DOF."""
+    """The data objects a DOFs scene could read its arrows from.
+
+    These are the objects that measure the block's quantity at some
+    DOF.
+    """
     from .data import DataArray
 
     quantity = block.get('dofs', '')
@@ -495,9 +572,11 @@ def dofs_source_options(block: Mapping[str, Any], objects: Mapping[str, Any]) ->
 
 
 def insert_options(objects: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """[(kind, label)] for the editor's Result drop-down. The Time
-    entries are per quantity, and only for quantities the project's
-    time data actually holds."""
+    """The entries of the editor's Result drop-down, as [(kind, label)].
+
+    The DOFs, Time, Spectra and PSD entries are one per quantity, and
+    only for the quantities the project's data holds.
+    """
     return ([('verdict', 'Pass/Fail Box'),
              ('geometry', 'Geometry'),
              ('modes', 'Mode Shape Animations')]
@@ -525,9 +604,12 @@ def insert_options(objects: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 
 def takes_shapes(block: Mapping[str, Any]) -> bool:
-    """May this block name a shape set? Scenes animate them, a CMIF
-    overlays their synthesis, a MAC crosses against them, and a drive
-    point plot marks their frequencies."""
+    """Whether this block may name a shape set.
+
+    A scene animates one, a CMIF overlays its resynthesis, a MAC is
+    computed against it, a drive point plot marks its frequencies, and
+    the matched-modes table takes one too.
+    """
     return (block.get('kind') in ('scene', 'pairs')
             or (block.get('kind') == 'plot'
                 and (block.get('mode') in ('cmif', 'mac')
@@ -586,17 +668,19 @@ _INSTRUMENTATION_TEXT = (
 def instrumentation_text(objects: Mapping[str, Any],
                          object_groups: Sequence[Mapping[str, Any]] | None = None
                          ) -> str:
-    """The front matter's prose, saying only what the project holds.
+    """The instrumentation section's text, naming only what the project holds.
 
-    The standing text names the geometry, the DOF scenes and the
-    channel table. A run imported without a geometry has none of the
-    first three, and a paragraph about "the test geometry" over a
-    channel table alone reads as a report with holes in it (Brandon,
-    2026-09-19). With a geometry bound the text is the standing one;
-    without, it is the channel table's sentence, and the photographs'
-    when there are any. An empty project keeps the standing text —
-    there it is the template being read.
+    The standard text refers to the geometry, the DOF scenes and the
+    channel table. A run imported without a geometry has no geometry or
+    DOF scenes, and a paragraph about "the test geometry" above a
+    channel table alone reads as a report with parts missing. With a
+    geometry bound the text is the standard one; without one, it is the
+    channel table's sentence, and the photographs' sentence when there
+    are photographs. An empty project keeps the standard text, since
+    there the template itself is being read.
     """
+    # Brandon, 2026-09-19: no paragraph about a geometry the run does
+    # not have.
     if not objects:
         return _INSTRUMENTATION_TEXT
     if resolve_binding('@basis:Geometry', objects, object_groups) in objects:
@@ -615,29 +699,34 @@ def instrumentation_text(objects: Mapping[str, Any],
 def project_expectations(
         project_type: str
         ) -> list[tuple[str, type, str, int, bool, str | None]]:
-    """[(label, class, icon key, count, optional, side)] a report of
-    this type draws from — the gray slots a typed project shows until
-    filled.
+    """The objects a report of this type draws from, as
+    [(label, class, icon key, count, optional, side)].
 
-    The label is the type's own name and nothing more (Brandon,
-    2026-09-02: every slot named for the object it waits for, so a
-    skeleton reads the same in every project type); a type that
-    expects several of one class shows the same label several times,
-    and `count` says which instance satisfies which slot. The side is
-    'Basis', `OTHER_SIDE`, or None for a slot on neither side (the
-    report, the matched modes). A project knows its Basis and
-    everything else is *other*: the other side is a place in the
-    tree, not a role — its group carries no name and is never guessed
-    into, since a second test is as good a comparison as a model. The
-    FEM tag that once named that pair went 2026-09-02. `optional`
-    marks best-practice slots a report renders without.
+    These are the gray slots a typed project shows until they are
+    filled. The label is the display name of the class the slot waits
+    for, so a skeleton reads the same in every project type. A type
+    that expects several objects of one class shows the same label
+    several times, and `count` says which instance (first, second, ...)
+    fills which slot. The side is 'Basis', `OTHER_SIDE`, or None for a
+    slot on neither side (the report, the matched modes). A project
+    knows its Basis, and everything else is on the other side; the
+    other side is a place in the tree and not a role, so its group has
+    no name and objects are never guessed into it, since a second test
+    is as good a comparison as a model. `optional` marks the
+    recommended slots a report can be rendered without. An unknown
+    project type gives an empty list.
 
-    Every type ends with the report itself. It is the one object the
-    others exist to produce, and a project that has everything a report
-    needs but no report is not finished — so it is a slot like the rest,
-    gray until it is generated. It carries no object group: a report reads
-    the whole project and belongs to no one side of it.
+    Every type ends with the report itself. The report is what the
+    other objects exist to produce, and a project that has everything a
+    report needs but no report is not finished, so it is a slot like
+    the rest, gray until it is generated. It is in no object group,
+    because a report reads the whole project. A Random and Sine project
+    has two report slots, one for the random report and one for the
+    sine report.
     """
+    # Every slot named for the object it waits for (Brandon,
+    # 2026-09-02). The FEM tag that once named the other side's pair
+    # was removed the same day.
     from ..names import display_name
 
     def raw(project_type):
@@ -902,21 +991,23 @@ def missing_expectations(
         ) -> list[tuple[str, type, str, int, bool, str | None]]:
     """The expectations the project does not satisfy yet.
 
-    `placed` is {side: [object names]} — which objects are in each
-    side's groups: `Project.placed()` for the Basis, and under
-    `OTHER_SIDE` every member of every other group (the window adds
-    that key). A slot is filled by an object *on its own side*, never
-    by one anywhere in the project: a modal test
-    whose only geometry is the model's still needs a measured one, and
-    counting globally made the Basis slots vanish the moment any
-    geometry at all arrived, leaving a skeleton with nothing in it and
-    no way to see what was wrong.
+    They are in the form `project_expectations` gives.
 
-    A slot with no group of its own — the report — is still answered by
-    the whole project, since that is what a report reads. Passing
-    nothing counts everything for everything, which is what this did
-    before and is kept for callers that have no links to offer.
+    `placed` is {side: [object names]}, the objects in each side's
+    groups: `Project.placed()` for the Basis, and under `OTHER_SIDE`
+    every member of every other group (the window adds that key). A
+    slot is filled only by an object on its own side, never by one
+    anywhere in the project: a modal test whose only geometry is the
+    model's still needs a measured one.
+
+    A slot with no side (the report) is filled from the whole project,
+    since that is what a report reads. With `placed` omitted, every
+    object counts for every slot, for callers that have no groups to
+    offer.
     """
+    # Counting the whole project for every slot made the Basis slots
+    # disappear the moment any geometry arrived, leaving a skeleton with
+    # nothing in it and no way to see what was wrong.
     expectations = project_expectations(project_type)
     classes = [expectation[1] for expectation in expectations]
     out, ordinals = [], {}
@@ -943,18 +1034,23 @@ def expectation_satisfiers(
         project_type: str, objects: Mapping[str, Any],
         placed: Mapping[str, Sequence[str]] | None = None
         ) -> dict[str, list[str]]:
-    """{object group: [object names]} — which objects satisfy each of
-    the type's *named* expectations, so the Basis members link
-    together. The count-th instance of a class (in project order)
-    satisfies a count-th expectation. Slots on the other side carry no
-    name and are never guessed into a group: a second geometry and
-    shape set are linked by hand, or by the file that brought them.
+    """Which objects fill each of the type's Basis slots.
 
-    That ordering is a *guess*: the first geometry imported could belong
-    to either group, and nothing about the object says which. Objects
-    already placed are therefore taken as given and left out of the
-    guessing — pass `placed` (from `Project.placed()`) and each one
-    counts only for the group it is in.
+    Returned as {object group: [object names]}.
+
+    The result is used to link the Basis members together. The n-th
+    instance of a class, in project order, fills the slot whose count
+    is n (a banded slot takes the first banded object). Slots on the
+    other side have no group name and are never filled by a guess: a
+    second geometry and shape set are linked by hand, or by the file
+    that brought them in.
+
+    The project order is only a guess, since the first geometry
+    imported could belong to either group and nothing about the object
+    says which. Objects already placed are therefore taken as given:
+    pass `placed` (from `Project.placed()`) and each placed object
+    counts only for the group it is in. The groups in `placed` are
+    returned with the guessed members added.
     """
     homes = {name: tag for tag, names in (placed or {}).items()
              for name in names}
@@ -1016,9 +1112,12 @@ EXCITATION_QUANTITIES = frozenset({'voltage', 'force'})
 
 
 def quantity_order(dims: set[str]) -> list[str]:
-    """The quantities in reading order: excitations first — voltage,
-    then force — then the responses, alphabetical past the standing
-    three. The same order the DOF scenes read in."""
+    """The quantities in `dims` in reading order.
+
+    Voltage, then force, then acceleration (the order of
+    `DOF_SCENE_QUANTITIES`, which the DOF scenes follow), then any
+    other quantity in alphabetical order.
+    """
     known = [q for q in DOF_SCENE_QUANTITIES if q in dims]
     return known + sorted(dims - set(DOF_SCENE_QUANTITIES))
 
@@ -1028,30 +1127,37 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
                      caption: str, per_quantity: str,
                      mode: str = 'curves',
                      averaging: bool = True) -> list[dict[str, Any]]:
-    """The time plots for one history: one figure per quantity it
-    measures (Brandon, 2026-08-23 — an axis holds one quantity, so a
-    stream carrying drive voltages beside response accelerations must
-    not overlay them). `per_quantity` is the caption with a
-    ``{quantity}`` slot; a single-quantity or unbound source keeps the
-    plain `caption`, one figure, as before.
+    """The time plots for one history, one figure per quantity it measures.
 
-    Filled by `replace`, never `str.format` (Brandon, 2026-08-25): a
-    caption may carry a live reference — `{{Object.field}}` — and
-    `format` reads the doubled braces as an escape and collapses them
-    to single ones, which the reference resolver then does not match.
-    The shock report shipped 'at {Time History.filter_corner}' under
-    two figures exactly that way, and only in the two-quantity case,
-    because the one-quantity path never calls format at all.
+    An axis holds one quantity, so a stream with drive voltages beside
+    response accelerations is drawn as two figures. `per_quantity` is
+    the caption with a ``{quantity}`` placeholder; a source with one
+    quantity, or an unbound one, gets a single figure with the plain
+    `caption`. The placeholder is filled by `str.replace`, because a
+    caption may hold a live reference (`{{Object.field}}`) whose double
+    braces `str.format` would collapse.
 
-    Flat, not the stage (Brandon, 2026-09-20). A stage figure carries
-    `MAX_FIGURE_POINTS` — two million points — and a report's time
-    histories are the largest thing in it by an order of magnitude:
-    the plate's modal report was 36 MB, 88% of it two such figures,
-    and a 144-channel run at 16 kHz made a 200 MB report. The flat
-    figure pages its channels two dozen at a time and draws each page
-    as an envelope on one shared time axis, which is the same picture
-    at every zoom the page offers. `mode='stage'` is still there for a
-    template that wants depth."""
+    The figures are flat (`mode='curves'`) by default, because time
+    histories are by far the largest data in a report and a 3-D stage
+    figure of them makes the file very large. The flat figure pages its
+    channels two dozen at a time and draws each page as an envelope on
+    one shared time axis. `mode='stage'` is available for a template
+    that wants depth. `averaging=False` leaves the averaging frames off
+    the figures, for a reading that averages nothing.
+    """
+    # One quantity per axis (Brandon, 2026-08-23).
+    #
+    # `replace`, never `str.format` (Brandon, 2026-08-25): `format`
+    # reads the doubled braces of a live reference as an escape and
+    # collapses them, and the reference resolver then does not match.
+    # The shock report shipped 'at {Time History.filter_corner}' under
+    # two figures exactly that way, and only in the two-quantity case,
+    # because the one-quantity path never calls format at all.
+    #
+    # Flat, not the stage (Brandon, 2026-09-20). A stage figure carries
+    # `MAX_FIGURE_POINTS` (two million points): the plate's modal report
+    # was 36 MB, 88% of it two such figures, and a 144-channel run at
+    # 16 kHz made a 200 MB report.
     name = resolve_binding(source, objects, object_groups)
     obj = objects.get(name)
     dims = record_dimensions(obj) if obj is not None else set()
@@ -1071,19 +1177,18 @@ def time_data_blocks(source: str, objects: Mapping[str, Any],
 
 def kurtosis_block(source: str = '@basis:TimeHistory',
                    caption: str = '') -> dict[str, Any]:
-    """How Gaussian every channel of a record is, as a bar apiece.
+    """A bar chart of the Pearson kurtosis of every channel of a record.
 
-    In every report (Brandon, 2026-08-24), because it answers a
-    question a spectrum cannot: two records with identical PSDs can be
-    a smooth hiss and a train of rare hard peaks, and only the second
-    fatigues an article the way the peaks suggest. One chart for all
-    channels whatever they measure — kurtosis is dimensionless, so
-    this is the one reading here where mixing quantities is honest.
-
-    A computed judgment of the record, so it sits with the other
-    judgments rather than beside the traces (the standing order:
-    geometry, table, time data, spectra, then what was computed).
+    Kurtosis shows something a spectrum cannot: two records with
+    identical PSDs can be a smooth hiss and a train of rare large
+    peaks, and only the second fatigues an article the way the peaks
+    suggest. All channels go on one chart whatever they measure, since
+    kurtosis is dimensionless. It is a computed result, so templates
+    place it with the other computed results after the spectra, not
+    beside the time traces. `caption` defaults to a description of the
+    Gaussian band.
     """
+    # Brandon, 2026-08-24: kurtosis in the reports.
     return {'kind': 'bars', 'mode': 'kurtosis', 'source': source,
             'caption': caption or
             'Pearson kurtosis by channel — 3 is Gaussian; above the '
@@ -1095,15 +1200,17 @@ def paired_density_blocks(loud: str, quiet: str,
                           objects: Mapping[str, Any],
                           caption: str,
                           per_quantity: str) -> list[dict[str, Any]]:
-    """The two densities overlaid, one figure per quantity they share
-    (Brandon, 2026-08-23). Same one-quantity-per-axis rule as the time
-    data, and the same reading order.
+    """Two densities overlaid, one figure per quantity they share.
 
-    Flat, each channel's ambient dashed in its own color, continuing
-    into further figures past a dozen channels: the 3-D stage made the
-    report files too large (Brandon, 2026-10-05: the random, random
-    and sine, and system ID reports are 2-D only).
+    `loud` is drawn solid and `quiet` (the ambient) dashed in each
+    channel's own color, with the same one-quantity-per-axis rule and
+    reading order as `time_data_blocks`. The figures are flat and
+    continue into further figures past a dozen channels. Either name
+    empty gives no blocks.
     """
+    # One quantity per axis (Brandon, 2026-08-23). Flat because the
+    # 3-D stage made the report files too large (Brandon, 2026-10-05:
+    # the random, random and sine, and system ID reports are 2-D only).
     if not loud or not quiet:
         return []
     shared = (record_dimensions(objects[loud])
@@ -1120,14 +1227,17 @@ def paired_density_blocks(loud: str, quiet: str,
 def front_matter(objects: Mapping[str, Any],
                  object_groups: Sequence[Mapping[str, Any]] | None,
                  dofs_source: str) -> list[dict[str, Any]]:
-    """The blocks every report opens with, in one order (Brandon,
-    2026-08-23): the test geometry, a DOF scene per data type —
-    excitations before responses — the photographs, and the channel
-    table. What was tested and where it was instrumented, before any
-    data means anything. Every slot is symbolic and an unbound or
-    empty one does not render, so a bare project keeps the outline
-    without blank figures.
+    """The blocks every report opens with, always in the same order.
+
+    The test geometry, then a DOF scene for each quantity `dofs_source`
+    measures (excitations before responses; every quantity in
+    `DOF_SCENE_QUANTITIES` when the source is not there yet), then the
+    photographs, then the channel table: what was tested and where it
+    was instrumented, before any data. Every reference is symbolic, and
+    an unbound or empty block is not rendered, so a bare project keeps
+    the outline without blank figures.
     """
+    # One order for every report (Brandon, 2026-08-23).
     geometry = '@basis:Geometry'
     photos = '@basis:Photos'
     photos_name = resolve_binding(photos, objects, object_groups)
@@ -1168,13 +1278,19 @@ def front_matter(objects: Mapping[str, Any],
 
 
 def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A modal-test report from whatever the project holds.
+    """A modal test report from whatever the project holds.
 
-    Sources bind *symbolically* — '@basis:Frf' and friends, resolved
-    against the object groups at render time — so the report never
-    depends on what anyone named their objects. Blocks whose type the
-    project lacks are still added, unbound, so the outline of a proper
-    modal report is there to fill in.
+    The sections are the test summary, the setup and front matter, the
+    measured time data and averaged PSDs, data quality (drive point
+    FRFs and multiple coherence), the modal analysis (the CMIF with its
+    resynthesis, the identified parameters, the auto-MAC and the
+    animated shapes), an optional test-analysis correlation (cross-MAC,
+    matched modes and their overlay), and conclusions. Sources bind
+    symbolically ('@basis:Frf' and the like, resolved against the
+    object groups when the report is rendered), so the report does not
+    depend on what the objects are named. Blocks whose type the project
+    lacks are still added, unbound, so the outline of a full modal
+    report is there to fill in.
     """
     geometry = '@basis:Geometry'
     shapes = '@basis:ShapeSet'
@@ -1393,15 +1509,20 @@ def modal_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[s
 
 
 def shock_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A shock report: the transients, and the SRS against its target.
+    """A shock test report: the transients, and the SRS against its target.
 
-    The time histories lead the data and are not decoration. A shock
-    is a single event and its whole character — how long, how many,
-    whether the article was still ringing when the next one landed —
-    is in the trace and nowhere in the spectrum. The SRS answers a
-    narrower question and answers it after. Front matter first, like
-    every report here (Brandon, 2026-08-23).
+    After the front matter, the measured time histories come first. A
+    shock is a single event, and its character (how long it lasted, how
+    many events there were, whether the article was still ringing when
+    the next one arrived) is in the trace and not in the spectrum. Then
+    come the filtered record, velocity and displacement where the
+    project has them, a scalogram of the filtered record, the shock
+    specification on its own, the measured SRS against it, and the SRS
+    deviation bars. There is no kurtosis figure, because a shock
+    record is a transient in a long quiet stretch and never reads near
+    three.
     """
+    # Front matter first, like every report (Brandon, 2026-08-23).
     time = '@basis:TimeHistory'
     srs = '@basis:Srs'
 
@@ -1764,14 +1885,18 @@ def _sine_level_blocks(objects: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def sine_template(objects: Mapping[str, Any],
                   object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A sine sweep report: the tones, and the levels they reached.
+    """A sine sweep test report: the tones, and the levels they reached.
 
-    The level figures and the deviation bars are `_sine_level_blocks`:
-    the bars judge every tone at every control channel in one chart,
-    the same signed three-decibel reading the random and shock reports
-    give. A sweep run under a random environment gets this report and
-    a random one (`PROJECT_TEMPLATES`), and this one says where the
-    random half is judged.
+    After the front matter and the measured time histories (drawn
+    without averaging frames, since nothing is averaged), each tone
+    gets a figure of its extracted level against the requirement, and
+    one bar chart gives the signed deviation of every tone at every
+    control channel against a threshold of 3 dB, as the random and
+    shock reports do. A kurtosis chart and conclusions follow. A Random
+    and Sine project gets this report and a random report
+    (`PROJECT_TEMPLATES`); when the project holds a random
+    specification, this report says that the random is judged in its
+    own report.
     """
     time = '@basis:TimeHistory'
 
@@ -1868,22 +1993,24 @@ def sine_template(objects: Mapping[str, Any],
 
 def sysid_template(objects: Mapping[str, Any],
                    object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A system identification report: the measured plant, and whether
-    to believe it.
+    """A system identification report: the measured plant, and its quality.
 
-    The CMIF reads the whole FRF matrix at a glance — a package's
-    3 x 9 is twenty-seven curves nobody reads one by one — the
-    coherence map says where the estimate held together, and the
-    signal-to-noise says whether there was a measurement at all:
-    where it approaches one, the plant is the room.
+    The order is the one every report follows: the front matter
+    (geometry, DOF scenes, photographs, channel table), then the time
+    data, then the spectra, then the computed results. The time data is
+    the ambient (noise) recording first and the driven one after it,
+    each drawn with its own averaging frames; a spectral package has no
+    recordings, and the block stays an unbound slot that is not
+    rendered. The spectra are the driven and ambient densities overlaid
+    per channel and the magnitude of every FRF. The computed results
+    are the multiple coherence map, which shows where the drives
+    account for the responses, the signal-to-noise ratio per line and
+    its RMS per channel, which show how far the driven measurement is
+    above the noise floor, and the kurtosis of both recordings.
 
-    Ordered the way every report here is (Brandon, 2026-08-23): the
-    front matter — geometry, DOF scenes, photographs, channel table —
-    then the time data, then the spectra, then the computed
-    judgments: coherence and signal-to-noise. The time data is the
-    ambient (noise) stream first and the driven one after it, each
-    drawn under its own averaging frames; a spectral package has no
-    streams, and the block stays an unbound slot that does not render.
+    The two densities and the two recordings are bound by name, the
+    louder as the driven one and the quieter as the ambient one, since
+    no symbolic selector picks "the second PSD".
     """
     import numpy as np
 
@@ -2114,22 +2241,21 @@ def sysid_template(objects: Mapping[str, Any],
 
 def transient_template(objects: Mapping[str, Any],
                        object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A transient replication report: what was asked for, and what came
-    back — two waveforms of the same thing.
+    """A transient replication report: the target waveform and the measured one.
 
-    A transient test is judged differently from a random one, and the
-    report has to be shaped that way. There is no band to fall outside
-    and no share of the spectrum to count: there is a target waveform, a
-    measured one, and the difference between them. So the specification
-    and the response go on the same axes, at one control channel at a
-    time, and the reader compares them by eye — which is what everyone
-    does with a shock trace anyway.
-
-    Deliberately shorter than the random report. There is no settled
-    numerical comparison for two transients — RMS error over the event,
-    peak error, an SRS of each — and inventing one here would be
-    inventing a convention rather than reporting a measurement. The
-    plots come first; the numbers can follow once they are agreed.
+    A transient test has a target waveform, a measured one, and the
+    difference between them, so the report is built around comparing
+    the two. After the front matter come the transient specification,
+    the measured control response, an overlay of the first playing on
+    the target waveform channel by channel (compared by eye, sample
+    against sample), the drive forces, and a scalogram of the control
+    response. Two numerical readings follow: the control PSDs against
+    the PSD specification with the RMS error per control channel, and
+    the waveform error per control channel and per playing. There is no
+    accepted tolerance for how closely a replicated transient must
+    follow its target, so the threshold on the waveform chart is a
+    visual reference, not a pass mark. A kurtosis chart and conclusions
+    end the report.
     """
     time = '@basis:TimeHistory'
 
@@ -2287,10 +2413,13 @@ def transient_template(objects: Mapping[str, Any],
 
 
 def control_channels_of(spec: Any) -> list[str]:
-    """The control channels a specification names, as the comparison
-    figure labels them: its autospectra, in its own order. A cross
-    term has no measured response to stand against it. Empty for
-    anything that is not a specification."""
+    """The control channels a specification names, as comparison figures label them.
+
+    These are the channels of its autospectra, in its own order; a
+    cross term has no measured response to compare with. A sine sweep
+    specification's control channels are its response DOFs. Empty for
+    anything that is not a specification.
+    """
     from .sine import SineSweepSpecification
 
     if isinstance(spec, SineSweepSpecification):
@@ -2309,12 +2438,15 @@ def control_channels_of(spec: Any) -> list[str]:
 def control_channel_labels(objects: Mapping[str, Any],
                            object_groups: Sequence[Mapping[str, Any]] | None,
                            token: str = '@basis:Specification') -> list[str]:
-    """The control channels the specification a token binds names, as
-    the comparison figure labels them — each its own figure in the
-    random report (Brandon, 2026-09-18: one figure per control
-    channel rather than one figure with a drop-down). Empty when the
-    token binds nothing yet, and the template writes one figure that
-    picks."""
+    """The control channels of the specification that `token` binds.
+
+    Labeled as the comparison figure labels them (`control_channels_of`);
+    each gets its own figure in the random report. Empty when the token
+    binds nothing yet, in which case the template writes one figure
+    with a channel selector.
+    """
+    # Brandon, 2026-09-18: one figure per control channel rather than
+    # one figure with a drop-down.
     name = resolve_binding(token, objects, object_groups)
     return control_channels_of(objects[name] if name and name in objects
                                else None)
@@ -2333,16 +2465,18 @@ def channel_grid(labels: Sequence[str],
                  geometry: Any = None) -> dict[str, Any]:
     """The grid the random report lays many control channels out on.
 
-    A row per node, in the order the channels first name them; a
-    column per direction. With a geometry that can place a channel
-    (`Geometry.dof_direction`), the columns are the global axes —
-    'Global X', 'Global Y', 'Global Z' — and a channel goes under the
-    axis its measured direction is nearest, with how far off it sits
-    noted when it is not on it (Brandon, 2026-09-19). Without one, or
-    for a node the geometry cannot place, the columns are the DOF's
-    own letters; a channel with no direction at all — a node number
-    alone — stands in a 'Channel' column. Only the columns in use
-    appear, in that order.
+    There is a row per node, in the order the channels first name
+    them, and a column per direction. With a geometry that can place a
+    channel (`Geometry.dof_direction`), the columns are the global
+    axes ('Global X', 'Global Y', 'Global Z'), a channel goes under the
+    axis its measured direction is nearest, and the angle it is off
+    that axis is noted when it is half a degree or more. Without a
+    geometry, or for a node the geometry cannot place, the columns are
+    the DOF's own direction letters, and a channel with no direction at
+    all (a node number alone) goes in a 'Channel' column. Only the
+    columns in use appear, in that order. When no channel has a
+    direction, the channels are laid across one row, a column each,
+    headed by their own names.
 
     Parameters
     ----------
@@ -2355,9 +2489,11 @@ def channel_grid(labels: Sequence[str],
     -------
     dict
         'columns', the column headings; 'rows', one dict per node with
-        'label' and 'cells' — a list per column of the channels in it,
+        'label' and 'cells', a list per column of the channels in it,
         each {'channel': str, 'note': str}.
     """
+    # Brandon, 2026-09-19: global axes when the geometry can place a
+    # channel.
     import numpy as np
 
     from .data import parse_dof
@@ -2414,21 +2550,24 @@ def _figures_text(labels: Sequence[str], sequence: str, grid: str) -> str:
 def prune_unbound(report: Report, objects: Mapping[str, Any],
                   object_groups: Sequence[Mapping[str, Any]] | None = None
                   ) -> Report:
-    """Drop what the project cannot fill, once it holds anything
-    (Brandon, 2026-09-19): every figure block that fails to bind, and
-    every section whose figures all did.
+    """Remove the figures and sections the project cannot fill.
+
+    Every unbound figure is removed, and so is every section with no
+    bound figure.
 
     A section is a text block opening with a `## ` heading and what
-    follows it up to the next; its figures are the blocks in it that
-    are not text. When none of them can resolve — the section's
-    objects are simply not in the project — the whole section goes,
-    heading and prose included, rather than a heading over nothing;
-    when some can, the ones that cannot go on their own, so the editor
-    shows no unbound cards for a run that has no geometry. A section
-    with no figures (the summary, the conclusions) is prose and stays.
-    An empty project keeps the whole outline: that is the template
-    being read, not a report being written.
+    follows it up to the next heading; its figures are the blocks in it
+    that are not text. When none of them can be resolved (the
+    section's objects are not in the project), the whole section is
+    removed, heading and text included, so there is no heading over
+    nothing. When some can, only the ones that cannot are removed, so
+    the editor shows no unbound cards for a run that has no geometry.
+    A section with no figures (the summary, the conclusions) stays. An
+    empty project keeps the whole outline, since there the template
+    itself is being read. `report` is changed in place and returned.
     """
+    # Brandon, 2026-09-19: once the project holds anything, what it
+    # cannot fill is removed.
     if not objects:
         return report
     keys = ('source', 'geometry', 'dofs_source', 'shapes', 'measured',
@@ -2575,30 +2714,35 @@ def _random_control_blocks(objects: Mapping[str, Any],
 
 
 def random_template(objects: Mapping[str, Any], object_groups: Sequence[Mapping[str, Any]] | None = None) -> Report:
-    """A random vibration report: what was asked for, what arrived, and
-    by how much they differ.
+    """A random vibration report: the specification, the measurement, and how they differ.
 
-    Ordered the standing way (Brandon, 2026-08-23): the front matter —
-    geometry, the DOF scenes excitation-first, photographs, the
-    channel table — then the time data, then the spectra, then the
-    computed judgments. Within the spectra the specification still
-    leads: it is what the article was required to see, and the control
-    PSDs against it are the whole claim. Coherence stays last among
-    the judgments — it is how you tell a real exceedance from a bad
-    channel, a question asked only once the comparison has raised it.
+    The pass/fail box comes first, under the title, read off the
+    octave-band comparison. Then the order every report follows: the
+    front matter (geometry, the DOF scenes with excitations first,
+    photographs, the channel table), the time data, the spectra, and
+    the computed results. The specification is not drawn on its own:
+    it is the target and the shaded limits behind each control
+    comparison, one figure per control channel (a grid past
+    `GRID_ABOVE` channels). The RMS error and the band outside the
+    abort limits follow as bar charts, then the same comparison on
+    octave bands. The data quality checks, multiple coherence and
+    kurtosis, come last, because they are how a real exceedance is
+    told from a bad channel once the comparison has raised the
+    question.
 
-    Sources bind symbolically, like the modal template's, so the report
-    finds its objects under the names the typed project's tree
-    suggested, and every unbound slot is invisible — a run with no
-    geometry still renders.
+    Sources bind symbolically, like the modal template's, and the
+    report is passed through `prune_unbound`, so a run with no
+    geometry still renders without empty figures.
 
-    A random run with a sine sweep under it gets this report and a sine
-    report (`PROJECT_TEMPLATES`; one combined report until 2026-10-05),
-    and this one then says the two things a reader of the random half
-    has to know: the control spectra carry the sweep's power across
-    the band it swept, so a channel reading high there may be the
-    tone, and a kurtosis under three is the sweep, not clipping.
+    A Random and Sine project gets this report and a sine report
+    (`PROJECT_TEMPLATES`). When the project holds a sine sweep
+    specification, this report adds what a reader of the random half
+    needs to know: the control spectra include the sweep's power across
+    the band it swept, so a channel reading high there may be the tone,
+    and a kurtosis under three comes from the sweep, not from clipping.
     """
+    # The standing order (Brandon, 2026-08-23). One combined random and
+    # sine report until 2026-10-05.
     from .sine import SineSweepSpecification
 
     time = '@basis:TimeHistory'

@@ -1,16 +1,16 @@
-"""What an object will accept, in one place.
+"""The checks on what an object accepts: ids, DOFs, frequencies and
+damping.
 
-A type annotation is a *claim* — it tells an editor, a type checker and
-the API reference what a thing is, and it does nothing at all at run
-time. `node_id: NDArray[np.int64]` will not stop a string arriving. So
-each claim needs an enforcement beside it, and the two belong in one
-place or they drift: the helper here is what makes the annotation true,
-and the annotation is what tells a reader the helper exists.
+A type annotation tells an editor, a type checker and the API reference
+what a value is, and does nothing at run time:
+`node_id: NDArray[np.int64]` does not stop a string being passed. Each
+annotation here has a function that enforces it, kept in the same
+module so the two do not drift apart.
 
-The failures worth catching are not the absurd ones. `'x'` for a node id
-already fails, loudly, inside numpy. What silently succeeds is `1.7`
-becoming node 1 — a mode shape drawn on the wrong node three weeks
-later, with nothing in the file to say why.
+The errors these catch are the ones that would otherwise pass without
+notice. `'x'` as a node id already fails inside numpy. `1.7` would
+become node 1, and a mode shape would be drawn on the wrong node with
+nothing in the file to say why.
 """
 
 from __future__ import annotations
@@ -43,22 +43,24 @@ Dof = str
 
 
 def ids(values: ArrayLike, label: str, unique: bool = False) -> IdArray:
-    """`values` as ids, or a refusal saying which one was wrong.
+    """`values` as an int64 id array, or a ValueError naming the values
+    that are wrong.
 
-    Whole numbers only. `1.7` is not node 1 with a rounding error — it
-    is a caller who has computed an id, and truncating it quietly is how
-    that becomes somebody else's afternoon. Numeric strings *are*
-    accepted: every file format in this field writes ids as text, and a
-    reader that has to convert them before calling is a reader that will
-    convert them wrongly.
+    Whole numbers only. `1.7` is not node 1 with a rounding error; it
+    means the caller computed an id, and truncating it without notice
+    would hide that. Numeric strings are accepted, because the file
+    formats in this field write ids as text, and requiring every reader
+    to convert them first would mean many places to get the conversion
+    wrong.
 
-    **Not negative.** An id is a label, and there is no meaning to give
-    a negative one; zero is allowed, because files in the wild do number
-    from zero and refusing them would be refusing real data.
+    Ids cannot be negative: an id is a label, and a negative one has no
+    meaning. Zero is allowed, because real files do number from zero.
 
-    `unique` where something refers to these by id — nodes, coordinate
-    systems and blocks. Element ids are labels nothing refers to
-    (a UNV trace line that lifts the pen), so they are not held to it.
+    Set `unique` where something refers to these by id: nodes,
+    coordinate systems and blocks. Element ids are labels nothing refers
+    to (a UNV trace line that lifts the pen, for example), so they are
+    not checked for duplicates. `label` names the values in the error
+    message.
     """
     array = np.asarray(values)
     if array.size == 0:
@@ -95,13 +97,14 @@ def ids(values: ArrayLike, label: str, unique: bool = False) -> IdArray:
 
 def damping(values: ArrayLike,
             label: str = 'damping') -> NDArray[np.float64]:
-    """Damping as a fraction of critical: zero or more, per mode.
+    """Damping as a fraction of critical, per mode: finite and zero or
+    more.
 
-    No upper bound. Above 1.0 is overdamped — a real thing to measure
-    even if it is not a mode anyone will animate — so the rule is a
-    floor and not a range. Below zero is a fit that has gone wrong or a
-    sign convention nobody meant, and a negative damping synthesizes an
-    FRF that grows without bound.
+    There is no upper bound. Above 1.0 is overdamped, which can be
+    measured even if it is not a mode anyone will animate, so the check
+    is a lower limit and not a range. A negative value comes from a
+    failed fit or an unintended sign convention, and a negative damping
+    synthesizes an FRF that grows without bound.
     """
     return _nonnegative(values, f'{label} is a fraction of critical and '
                         'cannot be negative', label)
@@ -109,11 +112,11 @@ def damping(values: ArrayLike,
 
 def frequency(values: ArrayLike,
               label: str = 'frequency') -> NDArray[np.float64]:
-    """Modal frequencies in Hz: zero or more.
+    """Modal frequencies in Hz, per mode: finite and zero or more.
 
-    Exactly zero is a rigid-body mode and is load-bearing — the FRF
-    synthesis cancels its 0/0 by testing for it — so zero is not merely
-    allowed, it is meaningful. Negative is not a frequency.
+    Exactly zero is a rigid-body mode, and the FRF synthesis tests for
+    it to cancel its 0/0, so zero is allowed and has a meaning. A
+    negative value is not a frequency.
     """
     return _nonnegative(values, f'{label} cannot be negative', label)
 
@@ -147,7 +150,7 @@ MODAL_PREFIX = 'M'
 
 def modal_coordinate(text: str) -> int | None:
     """The mode index a modal coordinate names, or None for anything
-    else — the one reader of the `M<index>` spelling.
+    else. This is the one function that reads the `M<index>` spelling.
 
     Parameters
     ----------
@@ -169,25 +172,26 @@ def modal_coordinate(text: str) -> int | None:
 
 def dofs(values: Sequence[str], label: str = 'DOF',
          allow_unknown: bool = False) -> list[str]:
-    """DOF strings: a node id, then one of `DIRECTIONS`. `'101RX+'`.
-    Or a modal coordinate, `'M3'` (`modal_coordinate`).
+    """DOF strings, checked and normalized: a node id, then one of
+    `DIRECTIONS` (`'101RX+'`), or a modal coordinate (`'M3'`, see
+    `modal_coordinate`).
 
-    A DOF is the whole vocabulary of this toolset — it is how a record
-    finds its node on a geometry, how a shape finds its column, how a
-    channel finds what it measures. An unparseable one does not fail
-    where it is written; it fails as a record that quietly measures
-    nothing, on a geometry that quietly has no such node, which is a
-    much worse afternoon than a refusal at the door.
+    A record finds its node on a geometry by its DOF, a shape finds its
+    column by it, and a channel says what it measures with it. A DOF
+    that cannot be parsed would not fail where it was written; it would
+    show up later as a record matched to no node on the geometry. So it
+    is refused here, with a ValueError naming the string.
 
-    An unsigned direction is taken as the positive one — `'101Z'` is
-    `'101Z+'` — because that is how people write them by hand, and the
-    string is returned normalized so that everything downstream compares
-    like with like.
+    An unsigned direction is taken as the positive one (`'101Z'` is
+    `'101Z+'`), because that is how people write them by hand. The
+    direction is upper-cased and the node id written without leading
+    zeros, so that later comparisons are between identical strings.
+    A single string is accepted as a list of one.
 
-    `allow_unknown` lets an **incomplete** DOF through, because a
-    channel table is written by people and people leave fields out. A
-    DOF string is the node and the direction concatenated, so whatever
-    was recorded is what comes out:
+    `allow_unknown` lets an incomplete DOF through, because a channel
+    table is written by people and people leave fields out. A DOF
+    string is the node and the direction concatenated, so whatever was
+    recorded is what comes out:
 
     | node | direction | DOF     |
     |------|-----------|---------|
@@ -197,11 +201,10 @@ def dofs(values: Sequence[str], label: str = 'DOF',
     | —    | —         | `''`    |
 
     All four import. Refusing the file would leave the user nothing to
-    fix, where an imported record is visibly incompatible with any
-    geometry and the channel table is right there to correct it in. What
-    is still refused either way is a direction that is not a direction:
-    `101Q+` is a typo, not an omission, and no amount of fixing the
-    channel table will make Q an axis.
+    fix, while an imported record is shown as matching no geometry and
+    can be corrected in the channel table. A direction that is not a
+    direction is still refused either way: `101Q+` is a typo, not an
+    omission, and Q is not an axis.
     """
     out = []
     for value in ([values] if isinstance(values, str) else values):

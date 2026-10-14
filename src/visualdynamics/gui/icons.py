@@ -1,9 +1,11 @@
-"""Type icons for the project tree.
+"""Icons for the project tree, the toolbars and the panels.
 
-Icons are drawn at runtime with QPainter rather than shipped as assets, so
-they stay sharp at any DPI and need no files. Each type gets a distinct
-shape as well as a distinct color — shape carries the meaning, so the icons
-are still tellable apart at 16 px and without relying on color vision.
+Icons are drawn at runtime with QPainter instead of shipped as image
+files, so they stay sharp at any DPI. Each type has its own shape as
+well as its own color. The shape carries the meaning, so the icons can
+be told apart at 16 px and without relying on color vision. A record's
+icon shows what it measures (acceleration, force, or one over the
+other), not the object that holds it.
 """
 
 from __future__ import annotations
@@ -1904,7 +1906,10 @@ def color_swatch(rgb: tuple[float, float, float]) -> QIcon:
 
 
 def control_icon(name: str) -> QIcon:
-    """Toolbar glyphs: play, pause, add, and the element types."""
+    """The glyph for a toolbar or panel control, by name: play, pause,
+    add, the element types, the processing steps and the rest. Drawn in
+    the control gray; a name with no glyph of its own gets the default
+    glyph."""
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -2007,10 +2012,12 @@ EMPTY_COLOR = '#6a6a72'      # a category with nothing in it
 @cache
 def child_icon(kind: str, parent_type: str = 'Geometry',
                units_defined: bool = True, empty: bool = False) -> QIcon:
-    """Icon for a sub-item, drawn in its parent object's color.
+    """Icon for a sub-item, drawn in its parent object's color, or in
+    gray when `empty`.
 
-    Carries the same undefined-units badge as a top-level icon, so a single
-    channel with no units declared is visible without expanding anything.
+    It carries the same undefined-units badge as a top-level icon, so a
+    single channel with no units declared shows without expanding
+    anything.
     """
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -2025,11 +2032,12 @@ def child_icon(kind: str, parent_type: str = 'Geometry',
 
 
 def quantity_of(dimension: str) -> str | None:
-    """The quantity a *simple* dimension names, if it is one we draw.
+    """The quantity a simple dimension names, if it has a glyph, and
+    otherwise None.
 
-    Compounds return None; `record_icon` splits those into their channel
-    factors itself, and the other callers — a channel table's unit, a
-    DOF-arrow quantity — only ever hold simple dimensions.
+    Compound dimensions return None. `record_icon` splits those into
+    their channel factors itself, and the other callers (a channel
+    table's unit, a DOF arrow's quantity) only hold simple dimensions.
     """
     dimension = (dimension or '').strip()
     return dimension if dimension in _QUANTITY_DRAW else None
@@ -2037,7 +2045,7 @@ def quantity_of(dimension: str) -> str | None:
 
 @cache
 def quantity_icon(quantity: str, units_defined: bool = True) -> QIcon:
-    """Icon for what a record measures, rather than for what holds it."""
+    """Icon for what a record measures, as opposed to what holds it."""
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -2050,18 +2058,18 @@ def quantity_icon(quantity: str, units_defined: bool = True) -> QIcon:
 
 
 def record_icon(data: DataArray, index: int) -> QIcon:
-    """The icon for one record: what that record measures.
+    """The icon for one record, showing what that record measures.
 
-    A density or a square resolves to its base quantity — a PSD record
-    is accelerations, squared per hertz — and a ratio or a cross term
-    draws *both* quantities as a fraction, response over reference: an
-    FRF record wears acceleration-over-force, a CPSD cross term the
-    same. Identical factors collapse to the single glyph, and a record
-    whose quantities we cannot draw — a coherence, an undeclared
-    channel — keeps its object's type icon. Undefined units keep their
-    badge either way, and a `dimension_hint` is enough to choose: a
-    source that said "force" without sizing it has still said what the
-    record is.
+    A density or a square resolves to its base quantity (a PSD record
+    is acceleration, squared per hertz), and a ratio or a cross term
+    draws both quantities as a fraction, response over reference: an
+    FRF record shows acceleration over force, and so does a CPSD cross
+    term. Identical factors show as a single glyph, and a record whose
+    quantities have no glyph (a coherence, an undeclared channel) keeps
+    its object's type icon. Undefined units keep their badge either way,
+    and a `dimension_hint` is enough to choose the glyph: a source that
+    said "force" without giving the unit has still said what the record
+    is.
     """
     from ..core.data import channel_quantities
 
@@ -2105,7 +2113,8 @@ def ratio_icon(response: str, reference: str,
 
 @cache
 def type_icon(type_name: str, units_defined: bool = True) -> QIcon:
-    """Icon for a visualdynamics type, by class name. Requires a running QApplication."""
+    """Icon for a Visual Dynamics type, by class name, with the badge
+    when `units_defined` is False. Needs a running QApplication."""
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -2118,16 +2127,16 @@ def type_icon(type_name: str, units_defined: bool = True) -> QIcon:
 
 
 def object_icon(obj: Any, units_defined: bool = True) -> QIcon:
-    """The icon for an object, which is not always its class's.
+    """The icon for an object, which is not always its class's icon.
 
-    A PSD integrated onto proportional bands is still a `Psd` — same
-    units, same dimension, the same area under it — and deliberately so:
-    everything that reads a spectrum works on either without asking. But
-    the two do not *look* alike and must not read alike in the tree, so
-    the icon asks the object a question its class name cannot answer.
-
-    The same rule as `record_icon`: what a thing measures, not what
-    holds it.
+    A PSD integrated onto proportional bands is still a `Psd`, with the
+    same units, the same dimension and the same area under it, on
+    purpose, so everything that reads a spectrum works on either. The
+    two do not look alike, though, and should not look alike in the
+    tree, so this asks the object whether it has a `bandwidth`, which its
+    class name cannot say. A specification on bands gets its own icon
+    the same way. As with `record_icon`, the icon shows what a thing
+    measures, not what holds it.
     """
     from ..core.data import Psd, Specification
 
@@ -2145,8 +2154,8 @@ def object_icon(obj: Any, units_defined: bool = True) -> QIcon:
 
 @cache
 def placeholder_icon(type_name: str) -> QIcon:
-    """The type's glyph in gray: expected by the project's type, not
-    yet in the project."""
+    """The type's glyph in gray, for an object the project's type
+    expects that is not in the project yet."""
     pixmap = QPixmap(SIZE, SIZE)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)

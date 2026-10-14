@@ -1,17 +1,13 @@
-"""The cut, drawn on the record it will be made from.
+"""A truncation drawn on the time history it will be applied to.
 
-Two numbers do not tell you whether the kept stretch sits on the part
-of the record you meant. Drawn, it does: the discarded ends are grayed
-over — gray because cut-away data is reference, not subject — and the
-span between them is the control, the averaging region's own grammar:
-take it by an edge to move that instant, by the middle to slide the
-whole window along the record.
+A start and a stop time alone do not show whether the kept span covers
+the part of the record that was intended, so the span is drawn on the
+plot. The discarded ends are shaded gray, and the kept span can be
+dragged the same way as the averaging region: by an edge to move that
+time, or by the middle to slide the whole span along the record.
 
-The drag settles before it is said (the filter corner's lesson,
-2026-08-28): the shading follows the hand move by move — cheap, four
-rectangle corners — and `changed` is emitted once, at release, because
-whoever listens stores the span, re-reads staleness and re-settles the
-report.
+During a drag only the shading moves. `TruncationOverlay.changed` is
+emitted once, when the mouse is released.
 """
 
 from __future__ import annotations
@@ -23,6 +19,13 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor
 
 from ..core.truncate import Truncation
+
+# Gray because cut-away data is reference, not the subject. The drag
+# settles before it is said (the filter corner's lesson, 2026-08-28):
+# the shading follows the mouse move by move, which is cheap (four
+# rectangle corners), and `changed` is emitted once, at release,
+# because whoever listens stores the span, re-reads staleness and
+# re-settles the report.
 
 #: how solid the grayed-out ends are. Enough to read as "going away",
 #: light enough that the trace under them can still be judged — the
@@ -36,12 +39,14 @@ LEAST_SHARE = 1e-3
 
 
 class TruncationOverlay(QObject):
-    """The truncation as marks on a time history plot.
+    """A truncation drawn as marks on a time history plot.
 
-    Owns every item it adds and takes them all away again on `remove`,
-    so a redraw cannot leave a shade behind. It reports a settled drag
-    and does not act on it: what a new span *means* — storing it,
-    restating the table — belongs to whoever put the overlay up.
+    The overlay owns every item it adds and removes all of them in
+    `remove`, so a redraw cannot leave shading behind. A drag that
+    leaves a span shorter than a thousandth of the record is undone.
+    Any other finished drag is reported through `changed` and not acted
+    on here: storing the new span and updating the table are left to
+    whatever created the overlay.
     """
 
     #: the user let go of a drag; here is the truncation it settled on
@@ -98,7 +103,7 @@ class TruncationOverlay(QObject):
         self.shades[1].setRegion((min(stop, self.last), self.last))
 
     def set_truncation(self, truncation: Truncation) -> None:
-        """Restate the marks for a span set elsewhere, silently."""
+        """Move the marks to a span set elsewhere, without emitting `changed`."""
         self.truncation = truncation
         self._restating = True
         try:

@@ -1,26 +1,25 @@
-"""One tone read several ways, overlaid: the level against frequency
-through each tracking band and detector, over the specification.
+"""Levels of one sine tone read several ways, overlaid on one plot.
 
-The question this view answers is *how much does the reading depend
-on how it was taken* — so every reading is drawn over the same axes,
-and the specification stands back in gray behind them as the
-reference, the way a specification stands behind its response
-everywhere else here.
+Each reading is the level against frequency through one tracking band
+and detector, drawn over the specification. The plot shows how much
+the level depends on how it was measured, so every reading is drawn on
+the same axes, and the specification is drawn wide and gray behind them
+as the reference, the same as a specification behind its response in
+the other plots.
 
-**Each reading wears a marker as well as a color.** Several readings
-of one channel are told apart by color alone nowhere else in the
-package, because nowhere else are several curves of one quantity on
-one channel meant to be compared line for line; and a reader who
-cannot separate two of the palette's hues cannot read this plot by
-hue. So each reading also carries its own marker shape, placed at a
-dozen points along it (every point would bury the curve) and shown
-beside its name in the legend. Shapes rather than dashes: dashes here
-already mean a synthesis drawn over a measurement.
+Each reading has a marker shape as well as a color. This is the only
+plot where several curves of one quantity on one channel are meant to
+be compared line by line, and a reader who cannot tell two of the
+palette's colors apart could not read it by color alone. The markers
+are placed at a dozen points along each curve (a marker at every point
+would hide the curve) and are shown beside each name in the legend.
+Shapes are used instead of dashes because dashes already mean a
+synthesis drawn over a measurement.
 
-**The level axis is linear.** The sine levels are drawn in decades
-elsewhere, which is right for a sweep spanning a resonance; here the
-readings sit within tens of percent of each other, and on a log axis
-the 30 % a harmonic adds to a peak reading is a sliver.
+The level axis is linear. Sine levels are drawn in decades elsewhere,
+which suits a sweep through a resonance. Here the readings are within
+tens of percent of each other, and on a log axis the 30 % a harmonic
+adds to a peak reading would be a very small difference.
 """
 
 from __future__ import annotations
@@ -62,12 +61,17 @@ def build_sine_tracking(layout: Any, levels: Sequence[Any],
                         settings: Sequence[Any], *, channel: int = 0,
                         specification: Any = None,
                         unit_system: Any = None, theme: Any = None) -> int:
-    """Draw the readings of one channel, and return how many drew.
+    """Draw one channel's readings of a tone and return how many were drawn.
 
-    `levels` and `settings` are what `core.sine_tracking.track_sine`
-    takes and returns, in the same order; `channel` is the row of the
-    levels drawn. With `specification`, the tone's target at that
-    channel is drawn behind them in the specification's gray.
+    `settings` is the list of tracking settings given to
+    `core.sine_tracking.track_sine` and `levels` is the list it
+    returned, in the same order; each reading is named in the legend by
+    its setting. `channel` is the row of the levels that is drawn. With
+    `specification`, the tone's target at that channel is drawn behind
+    the readings in the specification's gray.
+
+    Raises `ValueError` when `levels` is empty or when `levels` and
+    `settings` differ in length.
     """
     import pyqtgraph as pg
 

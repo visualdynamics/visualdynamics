@@ -1,34 +1,43 @@
 """Merging several objects of one type into one.
 
-`mergeable` says whether — and, when not, why, which is what a test or a
-tooltip wants; the GUI simply does not offer a merge that would refuse.
-`merge` builds the combined object and touches nothing it was given.
+`mergeable` returns None when the objects can be merged and the reason
+when they cannot, for a test or a tooltip to show; the app does not
+offer a merge that would be refused. `merge` builds the combined object
+and does not change the objects it was given.
 
-The ground rules, per Brandon:
+The rules:
 
-- Only objects of the same concrete type merge. Channel tables merge
-  when their rows agree — a multi-pass survey carries one table per
-  pass, with the reference rows repeated verbatim and the response
-  rows disjoint. Identical rows (numbering aside) collapse to one,
-  the rest concatenate, and channel numbers renumber: they are the
-  wiring of one acquisition, not the identity of a measurement point.
-  The same point with the same role described two different ways is a
-  disagreement, and refuses by naming the point.
-- A geometry merge must have disjoint node and coordinate-system ids —
-  colliding numbers are a decision, not a default. Element
-  ids only name themselves, so those renumber quietly.
-- FRFs (and every other frequency-domain array) refuse when two records
-  share a (response, reference) pair: the same measurement twice is not
-  one set. Time histories are the exception — a repeated DOF is another
-  average, and lands in its own averaging column (`block`) — but only
-  two time-data merges tell a true story: repeat runs (every channel
-  shared) or one acquisition split across files (no channel shared,
-  equal capture counts). A mixture — a roving survey's passes — refuses
-  (see `_time_refusal`).
-- Units gate per object where units are object-wide (geometry, shapes):
-  everything defined, or everything raw — mixing SI values with raw ones
-  would add meters to numbers. Data-array units are per record and simply
-  ride along.
+- Only objects of exactly the same type merge.
+- Channel tables merge when their rows agree. A multi-pass survey has
+  one table per pass, with the reference rows repeated exactly and
+  different response rows. Rows that are identical apart from the
+  channel number become one row, the rest are concatenated, and the
+  channels are renumbered from 1, because a channel number is the
+  wiring of one acquisition and not the identity of a measurement
+  point. The same point in the same role described two different ways
+  is refused, and the message names the point.
+- Geometries must have different node ids. A coordinate system id may
+  appear in more than one geometry only if it is the same system (type
+  and matrix) in each. Element ids are only labels, so the elements are
+  renumbered.
+- Shape sets must cover the same DOFs. The merged modes are sorted by
+  frequency.
+- Data arrays must share one abscissa, and specifications must carry
+  the same limit curves. FRFs and every other frequency-domain array are
+  refused when two records share a (response, reference) pair, since
+  the same measurement twice is not one set. Time histories are the
+  exception: a repeated DOF is another average and gets its own
+  averaging label (`block`). Time data merges only as repeat runs
+  (every channel shared) or as one acquisition split across files (no
+  channel shared), with every channel holding the same number of
+  captures. A mixture, such as the passes of a roving survey, is
+  refused.
+- Sine sweep specifications merge their tones when they name the same
+  control channels in the same unit and no tone name repeats.
+- Geometries and shape sets have units for the whole object, so either
+  all of them have units defined or none do; mixing SI values with
+  values that have no units would add meters to plain numbers. A data
+  array's units are per record and are carried over as they are.
 """
 
 from __future__ import annotations
@@ -44,9 +53,15 @@ from .geometry import Geometry
 from .shapes import ShapeSet
 from .sine import SineSweepSpecification
 
+# The merge rules in the module docstring are Brandon's.
+
 
 def mergeable(objects: Sequence[Any]) -> str | None:
-    """None when the objects can merge; otherwise the reason they cannot."""
+    """None when the objects can be merged, otherwise the reason they cannot.
+
+    The rules are in this module's docstring. Fewer than two objects, or
+    objects of different types, are refused.
+    """
     objects = list(objects)
     if len(objects) < 2:
         return 'merging takes at least two objects'
@@ -67,7 +82,11 @@ def mergeable(objects: Sequence[Any]) -> str | None:
 
 
 def merge(objects: Sequence[Any]) -> Any:
-    """The combined object; call `mergeable` first, this trusts it."""
+    """The combined object. The objects given are not changed.
+
+    Raises ValueError with the reason from `mergeable` when the objects
+    cannot be merged.
+    """
     objects = list(objects)
     reason = mergeable(objects)
     if reason is not None:

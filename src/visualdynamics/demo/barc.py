@@ -1,60 +1,56 @@
-"""The BARC, built from planes, and again from bricks.
+"""The BARC, built from plates, and again from bricks.
 
-The BARC — Box Assembly with Removable Component — is a small bolted
-aluminum structure the structural dynamics community shares as a
-common test article: a square box tube with its top wall slotted in two,
-and on it the "Bench", two channels standing on the two halves and a
-flat bar bolted across their tops. Its solid model, test data and
+The BARC (Box Assembly with Removable Component) is a small bolted
+aluminum structure the structural dynamics community shares as a common
+test article: a square box tube with its top wall slotted in two, and on
+it the "Bench", two channels standing on the two halves and a flat bar,
+the beam, bolted across their tops. Its solid model, test data and
 finite element models are shared on the SEM Dynamic Substructuring
 Focus Group wiki, https://wiki.sem.org/wiki/BARC.
 
 Here it is built the way a person would build a simple plate model with
-this package (Brandon, 2026-09-26): each part as the planes it is made
-of, meshed at mid-thickness (`visualdynamics.mesh`), each part an element group
-given its material and thickness, and the bolts as rigid, massless
-links. Every dimension below comes from the shared solid model (inches):
+this package: each part as the planes it is made of, meshed at
+mid-thickness (`visualdynamics.mesh`), each part an element group given
+its material and thickness, and the bolts as rigid, massless links.
+Every dimension below comes from the shared solid model, in inches:
 
     from visualdynamics.demo import barc
 
     model = barc.build()
     shapes = model.eigensolution(maximum_frequency=2000)
 
-**The joints are the model.** The parts meet through bolts, and their
-mid-surfaces do not touch — a channel's foot sits 0.1875 in above the
-box wall's mid-surface — so what joins them is a modeling choice, and it
-decides the Bench's modes. The choices were checked against the finite
-element models shared on the wiki while this was built: a single rigid
-link at each bolt came out soft, and softer at every mesh refinement (a
-point tie on a plate is a local singularity, not a joint), and each foot
-tied over its whole area came out stiff. What is built ties each bolt
-over the elements it clamps (`bolt_patch`), to the part below with
-`mesh.tie` — what the app's Tie does with the same elements picked
-(2026-09-26) — so the model a person builds in the app by the
-documentation's steps is this one, node for node and link for link.
-Four bolts join each channel to the box, each over the elements its
-washer covers, and four join the beam to each channel, each over the
-element it passes through (Brandon, 2026-10-11; the beam had one bolt
-at each end).
+The joints decide the Bench's modes. The parts meet through bolts, and
+their mid-surfaces do not touch (a channel's foot is 0.1875 in above the
+box wall's mid-surface), so what joins them is a modeling choice. The
+choices were checked against the finite element models shared on the
+wiki: a single rigid link at each bolt came out soft, and softer at
+every mesh refinement, because a point tie on a plate is a local
+singularity and not a joint; each foot tied over its whole area came
+out stiff. What is built ties each bolt over the elements it clamps
+(`bolt_patch`) to the part below with `mesh.tie`, which is what the
+app's Tie does with the same elements picked. So the model a person
+builds in the app by the documentation's steps is this one, node for
+node and link for link. Four bolts join each channel to the box, each
+over the elements its washer covers, and four join the beam to each
+channel, each over the element it passes through.
 
-**And from bricks** (2026-10-07): the same structure as solid
-eight-node bricks, the higher-fidelity model, and the removable
-component on its own — the two channels and the beam, the part the
-BARC is named for (`solid_geometry`, `solid_project`). Since
-2026-10-11 its parts are solids, the fewest blocks each can be (the
-box a block less its inside and its slot, a channel a block less the
-inside of its C, the beam a block; `BOX_SOLIDS`, `CHANNEL_SOLIDS`,
-`BEAM_SOLID`), meshed by Mesh Solids — the documentation's steps, node
-for node the boxes they replaced. Bricks touch where the parts do, so
-their bolts are built the other way (Brandon, 2026-10-11): the parts
-meshed on one grid each with its own nodes (`parts_apart`), coincident
-with the next part's where the two touch and joined to none of them,
-and each bolt made by merging the
-places it clamps (`bolt_places`, Merge Coincident Nodes with the rest
-left out) — at a foot the corners of the brick under the bolt and the
-eight around it, the washer's area, and at the beam the four corners
-of the brick the bolt passes through. The bolts' masses are point
-masses, an element group of point elements given a mass
-(`fem.GroupProperties(mass=...)`).
+The same structure is also built from solid eight-node bricks, the
+higher-fidelity model, along with the removable component on its own:
+the two channels and the beam, the part the BARC is named for
+(`solid_geometry`, `solid_project`). Its parts are solids, each made of
+as few blocks as it can be (the box a block less its inside and its
+slot, a channel a block less the inside of its C, the beam a block;
+`BOX_SOLIDS`, `CHANNEL_SOLIDS`, `BEAM_SOLID`), and meshed by Mesh
+Solids, following the documentation's steps. Bricks touch where the
+parts do, so their bolts are made differently. The parts are meshed on
+one grid, each with its own nodes (`parts_apart`), coincident with the
+next part's nodes where the two touch and joined to none of them. Each
+bolt is then made by merging the places it clamps (`bolt_places`, Merge
+Coincident Nodes with the rest left out): at a foot, the corners of the
+brick under the bolt and the eight around it, the washer's area, and at
+the beam, the four corners of the brick the bolt passes through. The
+bolts' masses are point masses, an element group of point elements
+given a mass (`fem.GroupProperties(mass=...)`).
 
 Run it directly to print the models and their first modes:
 
@@ -68,6 +64,14 @@ from typing import Any
 import numpy as np
 
 from visualdynamics import View, fem, mesh
+
+# The plate model follows the steps a person takes in the app (Brandon,
+# 2026-09-26), and the bolts are tied over patches the way the app's Tie
+# does it (2026-09-26). The beam had one bolt at each end until Brandon,
+# 2026-10-11, made it four per channel. The brick model was added on
+# 2026-10-07; since 2026-10-11 its parts are solids, meshed by Mesh
+# Solids, node for node the boxes they replaced, and its bolts are made
+# by merging nodes (Brandon, 2026-10-11).
 
 #: element size aimed at, inches: 0.125 converges the first ten modes to
 #: about a percent (0.0625 moves them no more) and solves in a few
@@ -147,8 +151,8 @@ VIEW = View(eye=(1.0, 1.0, -1.0), up=(0.0, 1.0, 0.0))
 
 def geometry(size: float = SIZE) -> Any:
     """The BARC as a geometry of plates and rigid links, every element group
-    given what it is made of — ready for `fem.Model.from_geometry`, or
-    for the app's Solve Modes.
+    given its material and thickness, ready for `fem.Model.from_geometry`
+    or for the app's Solve Modes.
 
     Parameters
     ----------
@@ -175,12 +179,14 @@ def geometry(size: float = SIZE) -> Any:
 
 
 def bolt_patch(geometry: Any, bolt: tuple) -> tuple[list[int], str]:
-    """The elements a bolt clamps, and the element group it bolts them to:
-    the `CLAMPED` elements across of the part on top, centered on the
-    element the bolt passes through — at a foot that element and the
-    eight around it, the washer's area, and at the beam the element
-    alone. Whole elements rather than the washer's circle because they
-    are what a person picks: whole rows, countable in the view.
+    """The elements a bolt clamps, and the element group it bolts them to.
+
+    The clamped elements are a square `CLAMPED` elements across, on the
+    part on top, centered on the element the bolt passes through: at a
+    foot that element and the eight around it, the washer's area, and at
+    the beam the element alone. Whole elements are used, not the washer's
+    circle, because whole elements are what a person picks in the view,
+    in rows that can be counted.
 
     Parameters
     ----------
@@ -224,7 +230,7 @@ def _clamped(corners: dict, axis: tuple, across: int) -> list[int]:
 
 
 def build(size: float = SIZE) -> fem.Model:
-    """The BARC's finite element model (`geometry` built).
+    """The BARC's finite element model of plates, built from `geometry`.
 
     Parameters
     ----------
@@ -243,13 +249,14 @@ SOLVE_TO = 2000.0
 
 
 def project(size: float = SIZE, solved: bool = False) -> Any:
-    """A project to open in the app: the BARC's geometry, its element groups
-    given their properties — Solve Modes on it gives its modes.
+    """A project to open in the app: the BARC's plate geometry, its
+    element groups given their properties, so Solve Modes on it gives its
+    modes.
 
         barc.project().save('barc.vdyn')
 
-    With `solved`, the modes are solved to `SOLVE_TO` already: the
-    example project the downloads page offers.
+    With `solved`, the modes are already solved to `SOLVE_TO` (2000 Hz).
+    That is the example project the downloads page offers.
 
     Parameters
     ----------
@@ -338,8 +345,9 @@ def _parts(project: Any, name: str, part: str) -> list[int]:
 
 def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     """The BARC, or its removable component, as a geometry of bricks
-    and point masses, every element group given what it is made of — ready
-    for `fem.Model.from_geometry`, or for the app's Solve Modes.
+    and point masses, every element group given its material or mass,
+    ready for `fem.Model.from_geometry` or for the app's Solve Modes. A
+    `part` not in `PARTS` raises ValueError.
 
     Parameters
     ----------
@@ -414,11 +422,13 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
 
 def bolt_places(geometry: Any, axis: tuple, kind: str) -> set[int]:
     """The places a bolt clamps, as the ids of the nodes of the part on
-    top that a merge joins there: the corners, on the face where the
-    parts touch, of the bricks it clamps (`CLAMPED`, the rule the planes'
-    bolts are picked by) — the washer's 4 × 4 places at a foot, the four
-    corners of the brick the bolt passes through at the beam. What the
-    app's merge pane marks, and a person clicks.
+    top that a merge joins there.
+
+    They are the corners, on the face where the parts touch, of the
+    bricks the bolt clamps, picked by the same `CLAMPED` rule as the
+    plate model's bolts: the washer's 4 x 4 places at a foot, and the
+    four corners of the brick the bolt passes through at the beam. These
+    are the places the app's merge pane marks and a person clicks.
 
     Parameters
     ----------
@@ -451,8 +461,8 @@ def bolt_places(geometry: Any, axis: tuple, kind: str) -> set[int]:
 
 
 def solid_build(part: str = 'BARC', size: float = SIZE) -> fem.Model:
-    """The BARC's, or its removable component's, model of bricks
-    (`solid_geometry` built).
+    """The finite element model of bricks of the BARC or of its removable
+    component, built from `solid_geometry`.
 
     Parameters
     ----------
@@ -475,13 +485,13 @@ PART_NAMES = {'BARC': 'BARC', 'removable component': 'Removable Component'}
 
 def solid_project(size: float = SIZE, solved: bool = False) -> Any:
     """A project to open in the app: the BARC and its removable
-    component, both of bricks — Solve Modes on either gives its modes.
+    component, both of bricks, so Solve Modes on either gives its modes.
 
         barc.solid_project().save('barc-bricks.vdyn')
 
-    With `solved`, the BARC's modes are solved to `SOLVE_TO` and the
-    removable component's to `PART_SOLVE_TO`: the example project the
-    downloads page offers.
+    With `solved`, the BARC's modes are already solved to `SOLVE_TO`
+    (2000 Hz) and the removable component's to `PART_SOLVE_TO`
+    (2600 Hz). That is the example project the downloads page offers.
 
     Parameters
     ----------
@@ -505,7 +515,9 @@ def solid_project(size: float = SIZE, solved: bool = False) -> Any:
 
 
 def describe(size: float = SIZE, modes: int = 10) -> None:
-    """Print the models and their first elastic modes."""
+    """Print the plate model, the brick BARC and the brick removable
+    component, each with its size, its mass and its first `modes`
+    elastic frequencies (those above 1 Hz)."""
     model = build(size)
     shapes = model.eigensolution(maximum_frequency=SOLVE_TO)
     print(f'BARC from planes: {model.num_nodes} nodes, {len(model.plates)} '

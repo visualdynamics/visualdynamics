@@ -1,28 +1,27 @@
 """Shock response spectra.
 
-An SRS is not a spectrum of the shock. It is the answer to a question
-asked of it: hang a single-degree-of-freedom oscillator off the base,
-shake the base with the measured transient, and record the largest
-response the oscillator ever reaches. Sweep the oscillator's natural
-frequency across the band of interest and the curve of those peaks is
-the shock response spectrum.
+An SRS is not a spectrum of the shock itself. A single-degree-of-freedom
+oscillator is attached to the base, the base is driven with the
+measured transient, and the largest response the oscillator reaches is
+recorded. Repeating that for natural frequencies across the band of
+interest gives the curve of peaks that is the shock response spectrum.
 
-That is why two shocks with the same SRS can look nothing alike, and
-why an SRS cannot be inverted back to a time history: every peak is one
-number taken from one whole run of one filter, and the phase that
-produced it is gone.
+For that reason two shocks with the same SRS can look very different,
+and an SRS cannot be inverted back to a time history: each point is one
+number taken from a whole run of one filter, and the phase that
+produced it is lost.
 
 The filter is Smallwood's ramp-invariant recursion (Smallwood 1981),
-which is the method the shock community settled on. Multiplying by the
-continuous transfer function in the frequency domain is the obvious
-alternative and it is wrong near Nyquist: the sampled input is a ramp
-between samples, not a train of impulses, and the ramp-invariant filter
-is the one that gets that right. The recursion below is exact for that
-assumption rather than an approximation of it.
+the standard method for shock response spectra. Multiplying by the
+continuous transfer function in the frequency domain is the other
+common approach, and it is inaccurate near Nyquist: the sampled input
+is a ramp between samples, not a train of impulses, and the
+ramp-invariant filter is built on that assumption. The recursion below
+is exact for that assumption rather than an approximation of it.
 
-Damping is quoted either as a ratio or as Q = 1/(2*zeta). Q = 10 —
-5% of critical — is the near-universal default, and the value a
-specification is assumed to be written at unless it says otherwise.
+Damping is given either as a ratio or as Q = 1/(2*zeta). Q = 10 (5% of
+critical) is the usual default, and a specification is assumed to be
+written at that value unless it says otherwise.
 
 References
 ----------
@@ -70,8 +69,11 @@ def octave_frequencies(low: float, high: float,
                        per_octave: int = PER_OCTAVE) -> np.ndarray:
     """Natural frequencies from `low` to `high`, `per_octave` to an octave.
 
-    Geometric, because an SRS is read on a log axis and a linear grid
-    would crowd the top of the band and starve the bottom.
+    The spacing is geometric, because an SRS is read on a log axis and a
+    linear grid would put most of its points at the top of the band and
+    few at the bottom. The last frequency is the nearest whole number
+    of steps to `high`, so it can land slightly above or below it.
+    Raises ValueError unless 0 < `low` < `high`.
     """
     low, high = float(low), float(high)
     if not (low > 0.0 and high > low):
@@ -86,12 +88,13 @@ def ramp_invariant(frequencies: ArrayLike, sample_rate: float,
     """Smallwood's filter coefficients, one row per natural frequency.
 
     Returns (b, a), each (F, 3), for the absolute acceleration of the
-    oscillator given the acceleration of its base.
+    oscillator given the acceleration of its base. `damping` is a ratio
+    of critical and must be between 0 and 1, or it raises ValueError.
 
-    The gain at DC is exactly one — b.sum() / a.sum() == 1 — which is
-    the statement that an infinitely stiff oscillator goes wherever its
-    base goes. It is the cheapest check that the coefficients are the
-    right ones, and `test_srs` makes it.
+    The gain at DC is exactly one (b.sum() / a.sum() == 1), because an
+    infinitely stiff oscillator moves with its base. That is the
+    simplest check that the coefficients are correct, and `test_srs`
+    makes it.
     """
     frequencies = np.asarray(frequencies, dtype=float)
     dt = 1.0 / float(sample_rate)
@@ -120,12 +123,16 @@ def ramp_invariant(frequencies: ArrayLike, sample_rate: float,
 def peaks(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
           damping: float | None = None,
           q: float = DEFAULT_Q) -> tuple[np.ndarray, np.ndarray]:
-    """(highest, lowest) the oscillators reach, one per frequency.
+    """(highest, lowest) response the oscillators reach, one per
+    frequency.
 
-    The filter runs over the record once for every natural frequency at
-    once — the state is a vector across frequencies and the loop is over
-    time — so nothing of length (frequencies x samples) is ever held.
-    Only the running extremes are kept, which is all an SRS is.
+    `damping` is a ratio of critical; when it is None, `q` sets it.
+    The filter makes one pass over the record for all natural
+    frequencies together: the state is a vector across frequencies and
+    the loop is over time, so no array of size (frequencies x samples)
+    is held. Only the running maximum and minimum are kept, which is
+    all an SRS needs. Both start at zero, so `highest` is never below
+    zero and `lowest` never above it.
     """
     x = np.asarray(signal, dtype=float).ravel()
     zeta = damping_for(q) if damping is None else float(damping)
@@ -150,10 +157,12 @@ def peaks(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
 def maximax(signal: ArrayLike, frequencies: ArrayLike, sample_rate: float,
             damping: float | None = None,
             q: float = DEFAULT_Q) -> np.ndarray:
-    """The peak absolute response, whichever way it went.
+    """The peak absolute response, in either direction, one per
+    frequency.
 
-    The reading a shock specification is written against: a shock that
-    only ever pushes one way is no gentler for it.
+    This is the value a shock specification is written against: a
+    shock whose response is all in one direction is no less severe for
+    it. `damping` and `q` are as in `peaks`.
     """
     highest, lowest = peaks(signal, frequencies, sample_rate, damping, q)
     return np.maximum(highest, -lowest)

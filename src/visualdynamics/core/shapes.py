@@ -1,20 +1,22 @@
 """Mode shapes.
 
-A ShapeSet holds a set of modes over a common set of DOFs: modal frequency
-and damping per mode, plus a shape coefficient per DOF. Shapes may be real
-(normal modes) or complex (damped/experimental modes).
+A ShapeSet holds a set of modes over a common set of DOFs: the modal
+frequency and damping of each mode, and a shape coefficient at each DOF.
+Shapes may be real (normal modes) or complex (modes of a damped
+structure, often from a test).
 
-Units follow the same rule as the rest of visualdynamics. Frequency is Hz and damping
-is a fraction of critical, both always known. Shape coefficients are
-mass-normalized (phi^T M phi = I), so they carry units of 1/sqrt(mass) — a
-shape normalized against a kg mass matrix is not the same number as one
-normalized against slinch. Files do not record which was used, so the mass
-unit starts undefined and the user declares it; values are then stored in
-SI, 1/sqrt(kg).
+Units follow the same rule as the rest of `visualdynamics`. Frequency
+is in Hz and damping is a fraction of critical, and both are always
+known. Shape coefficients are mass-normalized (phi^T M phi = I), so
+their unit is 1/sqrt(mass), and a shape normalized against a mass matrix
+in kg is a different number from one normalized against a mass matrix in
+slinch. Files do not record which unit was used, so the mass unit starts
+undefined and is declared with `ShapeSet.define_units`; the values are
+then stored in SI, 1/sqrt(kg).
 
-The half power puts this outside the integer-power dimension algebra in
-visualdynamics.units, so a ShapeSet carries its mass unit directly rather than a
-dimension expression.
+Because of the half power, this unit cannot be written in the
+integer-power dimensions of `visualdynamics.units`, so a ShapeSet stores
+its mass unit directly instead of a dimension expression.
 """
 
 from __future__ import annotations
@@ -41,10 +43,11 @@ def mac_matrix(shapes: ArrayLike,
                others: ArrayLike | None = None) -> np.ndarray:
     """The Modal Assurance Criterion between two shape matrices.
 
-    MAC_ij = |phi_i^H psi_j|^2 / ((phi_i^H phi_i)(psi_j^H psi_j)) — 1 for
-    the same shape in any scaling, near 0 for independent ones. With one
-    argument it is the auto-MAC, whose off-diagonals say how distinct the
-    set's own modes are.
+    MAC_ij = |phi_i^H psi_j|^2 / ((phi_i^H phi_i)(psi_j^H psi_j)), which
+    is 1 for the same shape at any scaling and near 0 for independent
+    shapes. Each matrix has one shape per row. With one argument it is
+    the auto-MAC, whose off-diagonal terms show how distinct the set's
+    own modes are.
     """
     shapes = np.atleast_2d(shapes)
     others = shapes if others is None else np.atleast_2d(others)
@@ -57,10 +60,10 @@ def mac_matrix(shapes: ArrayLike,
 def cross_mac(a: ShapeSet, b: ShapeSet) -> np.ndarray:
     """MAC between two shape sets, on the DOFs they share.
 
-    The sets need not cover the same DOFs or list them in the same order;
-    each shape is restricted to the shared set before comparing. Rows are
-    `a`'s modes, columns are `b`'s. Raises when nothing is shared —
-    a MAC over no DOFs is not a number.
+    The sets do not have to cover the same DOFs or list them in the same
+    order; each shape is limited to the shared DOFs before the
+    comparison. Rows are `a`'s modes and columns are `b`'s. Raises
+    ValueError when the sets share no DOFs.
     """
     positions = {dof: i for i, dof in enumerate(b.coordinate)}
     shared = [dof for dof in a.coordinate if dof in positions]
@@ -75,13 +78,15 @@ def alignment_factor(a: ShapeSet, i: int, b: ShapeSet,
                      j: int) -> complex:
     """The unit factor that phase-aligns b's mode j with a's mode i.
 
-    A real normal mode is defined up to sign and a complex one up to a
-    rotation; the factor undoing that is the phase of the inner product
-    on the shared DOFs — the MAC numerator's own. 1.0 when the sets
-    share nothing (there is no alignment to speak of). Useful on its
-    own when the factor, measured between comparable sets (a set and a
-    projection), must be applied to a third (the projection's dense
-    original)."""
+    A real normal mode is only defined up to its sign, and a complex mode
+    up to a rotation. The factor that removes the difference is computed
+    from the phase of the inner product on the shared DOFs (the same
+    inner product as in the MAC numerator). It is 1.0 when the sets share
+    no DOFs or the inner product is zero. It is useful by itself when the
+    factor is measured between two comparable sets (a set and a
+    projection) and has to be applied to a third (the dense set the
+    projection was made from).
+    """
     positions = {dof: k for k, dof in enumerate(b.coordinate)}
     shared = [dof for dof in a.coordinate if dof in positions]
     if not shared:
@@ -95,7 +100,8 @@ def alignment_factor(a: ShapeSet, i: int, b: ShapeSet,
 
 
 def apply_alignment(shape: np.ndarray, factor: complex) -> np.ndarray:
-    """`shape` times the alignment factor, kept real when it was."""
+    """`shape` times the alignment factor, kept real if `shape` was real
+    and the factor has no imaginary part."""
     aligned = shape * factor
     if not np.iscomplexobj(shape) and abs(np.imag(factor)) < 1e-9:
         aligned = np.real(aligned)
@@ -105,21 +111,22 @@ def apply_alignment(shape: np.ndarray, factor: complex) -> np.ndarray:
 def aligned_mode(a: ShapeSet, i: int, b: ShapeSet, j: int) -> np.ndarray:
     """b's mode j, phase-aligned to move with a's mode i.
 
-    Returns the full shape vector over b's coordinates.
+    Returns the full shape vector over b's coordinates
+    (`alignment_factor` applied to it).
     """
     return apply_alignment(b.shape_matrix[j], alignment_factor(a, i, b, j))
 
 
 def paired_mode(a: ShapeSet, i: int, b: ShapeSet, j: int,
                 projected: ShapeSet | None = None) -> np.ndarray:
-    """b's mode j, phase-aligned to swing with a's mode i when the two
-    are overlaid — over b's own coordinates.
+    """b's mode j over b's own coordinates, phase-aligned to move with
+    a's mode i when the two are overlaid.
 
-    Sets on one geometry share DOFs and align directly. Sets on two
+    Sets on one geometry share DOFs and are aligned directly. Sets on two
     geometries share none, so the alignment is measured against
-    `projected` — b carried onto a's DOFs (`correlate.project_shapes`)
-    — and applied to b's dense original. The one rule the window's
-    overlay, the report's and `ShapeSet.animate_pair` all draw by.
+    `projected` (b projected onto a's DOFs by `correlate.project_shapes`)
+    and applied to b's original shape. The window's overlay, the
+    report's overlay and `ShapeSet.animate_pair` all use this function.
     """
     if projected is None:
         return aligned_mode(a, i, b, j)
@@ -129,23 +136,26 @@ def paired_mode(a: ShapeSet, i: int, b: ShapeSet, j: int,
 
 def pair_scale_note(a_name: str, a: ShapeSet, b_name: str, b: ShapeSet,
                     i: int, j: int) -> str | None:
-    """One line: how big this pair's second shape is against its first.
+    """One line giving the size of this pair's second shape relative to
+    its first, as in ``'Test/Model = 1.02'``, or None when it cannot be
+    computed.
 
-    Overlaying scales each shape to its own peak, which is what makes a
-    sparse test set and a dense model comparable — and also what hides
-    one set being thirty times the other. So the number the overlay
-    cannot show is written above it.
+    An overlay scales each shape to its own peak, which makes a sparse
+    test set and a dense model comparable but also hides a set that is
+    thirty times the size of the other. This line gives the number the
+    overlay cannot show.
 
-    **For the pair on screen, not for the sets.** A constant factor
-    across every mode is a unit or a normalization convention; a factor
-    that is 1.00 everywhere and 3.4 on one mode is that mode fitted
-    badly, and a figure averaged over the set hides exactly that.
-    `ScaleComparison.message` is the other reading — over a whole set,
-    at length — and the report still uses it.
+    It is for the pair on screen, not for the whole sets. A constant
+    factor across every mode is a unit or a normalization convention,
+    but a factor that is 1.00 everywhere and 3.4 on one mode means that
+    mode was fitted poorly, and a figure averaged over the set would hide
+    that. `ScaleComparison.message` describes the whole set and is what
+    the report uses.
 
-    Named by the objects rather than by their roles: a reader looking
-    at two animations wants to know which of the two things in front
-    of them is the bigger.
+    The sets are named by `a_name` and `b_name` rather than as first and
+    second, so a reader looking at two animations can tell which one is
+    larger. A set that is `unscaled` is named in parentheses after the
+    ratio, since its size has no physical meaning.
     """
     try:
         ratios = compare_scaling(a, b, [(i, j)]).ratios
@@ -165,9 +175,12 @@ def pair_scale_note(a_name: str, a: ShapeSet, b_name: str, b: ShapeSet,
 
 def pair_caption(a_name: str, a: ShapeSet, b_name: str, b: ShapeSet,
                  i: int, j: int) -> str:
-    """What the corner of an overlay says: each mode on a line of its
-    own — set, number, description, frequency, damping — and the scale
-    note under them (`pair_scale_note`)."""
+    """The caption in the corner of an overlay.
+
+    One line for each mode (set name, mode number, description,
+    frequency in Hz and damping in percent), then the scale note from
+    `pair_scale_note` when there is one.
+    """
     def described(name: str, shape_set: ShapeSet, mode: int) -> str:
         description = str(shape_set.description[mode]).strip()
         return (f'{name}  mode {mode + 1}'
@@ -195,30 +208,32 @@ SCALE_SPREAD = 1.5
 
 
 class ScaleComparison:
-    """Whether two shape sets are scaled alike, and what it means if not.
+    """Whether two shape sets are scaled the same way, and what it means
+    if they are not.
 
-    Overlaying two mode shapes scales each to its own peak, so that a
-    sparse test set and a dense model swing comparably and the
-    comparison is one of *shape*. That is what overlaying is for — and
-    it also means a reader cannot see that one set is thirty times the
-    other, which is exactly the thing they would want to know. This is
-    the sentence that says so.
+    An overlay of two mode shapes scales each to its own peak, so a
+    sparse test set and a dense model are drawn at a comparable size and
+    the comparison is of shape only. As a result a reader cannot see
+    that one set is thirty times the size of the other. `message` gives
+    that information as a sentence.
 
-    Two readings, because the two faults look different:
+    There are two cases, because the two kinds of difference look
+    different:
 
-    - **a constant factor.** Every matched pair off by the same amount
+    - A constant factor. Every matched pair differing by the same amount
       is a unit or a normalization convention, not a difference in the
-      structure. Mode shapes go as one over the square root of mass, so
-      a set normalized in grams sits about 31.6 times one normalized in
-      kilograms.
-    - **a factor that changes mode by mode.** That is not one scaling
-      applied wrongly, it is two different normalizations — unit-
-      normalized shapes (each mode's peak set to 1) beside
-      mass-normalized ones being the usual pair.
+      structure. Mode shapes scale as one over the square root of mass,
+      so sets normalized in grams and in kilograms differ by a factor of
+      about 31.6.
+    - A factor that changes from mode to mode. This is two different
+      normalizations, most often unit-normalized shapes (each mode's
+      peak set to 1) beside mass-normalized ones.
 
-    `ratios` is `second / first` per matched pair, measured as the norm
-    over the DOFs the two sets share so that a sparse set and a dense
-    one are compared on the same footing.
+    `ratios` is `second / first` for each matched pair, measured as the
+    norm over the DOFs the two sets share, so a sparse set and a dense
+    one are compared over the same DOFs (`scale_ratios`). `first` and
+    `second` are the two shape sets, used by `message` to check their
+    mass units and whether either is unscaled.
     """
 
     def __init__(self, ratios: ArrayLike, first: str | None = None,
@@ -234,14 +249,15 @@ class ScaleComparison:
 
     @property
     def factor(self) -> float:
-        """How much bigger the second set is, typically. NaN with no
-        pairs to measure."""
+        """The median ratio of the second set to the first, or NaN when
+        there are no pairs."""
         return (float(np.median(self.ratios)) if self.ratios.size
                 else float('nan'))
 
     @property
     def spread(self) -> float:
-        """Largest ratio over smallest: 1.0 is perfectly consistent."""
+        """The largest ratio over the smallest; 1.0 when every pair has
+        the same ratio, or when fewer than two ratios are usable."""
         usable = self.ratios[np.isfinite(self.ratios) & (self.ratios > 0)]
         if usable.size < 2:
             return 1.0
@@ -249,24 +265,29 @@ class ScaleComparison:
 
     @property
     def consistent(self) -> bool:
-        """Do the two sets carry one scaling, whatever it is?"""
+        """Whether the two sets have one scaling factor, whatever it is
+        (`spread` at most 1.5)."""
         return self.spread <= SCALE_SPREAD
 
     @property
     def equal(self) -> bool:
-        """Are they scaled alike — same convention *and* same size?"""
+        """Whether the sets are scaled the same: one factor (`consistent`)
+        and that factor within 10% of 1."""
         factor = self.factor
         return bool(self.consistent and np.isfinite(factor)
                     and abs(factor - 1.0) <= SCALE_TOLERANCE)
 
     def message(self, first_name: str = 'the first set',
                 second_name: str = 'the second set') -> str | None:
-        """What to tell the reader, or None when there is nothing to say.
+        """A sentence describing the scale difference, or None when the
+        sets are scaled the same.
 
-        Deliberately a description and not an accusation: a scale
-        difference is sometimes exactly what was intended, and the
-        person reading knows which case they are in. What they cannot do
-        is see it, because the overlay has normalized it away.
+        The message describes the difference and does not call it an
+        error, because a scale difference is sometimes intended and the
+        reader knows whether it is. The overlay cannot show it, because
+        it scales each shape to its own peak. An unscaled set, or mass
+        units that differ or are declared on only one set, are reported
+        before the ratios.
         """
         if not self.ratios.size:
             return None
@@ -327,22 +348,22 @@ class ScaleComparison:
 def scale_ratios(a: ShapeSet, b: ShapeSet,
                  pairs: Sequence[Sequence[int]] | None = None
                  ) -> list[float | None]:
-    """How much bigger b's mode is than a's, one answer per pair.
+    """The size of b's mode relative to a's, one value per pair.
 
-    Each ratio is the norm of b's mode over the norm of a's, both
-    restricted to the DOFs the two sets share — a sparse test set and a
-    dense model would otherwise differ by the square root of the DOF
-    count and nothing else.
+    Each ratio is the norm of b's mode over the norm of a's, both limited
+    to the DOFs the two sets share; otherwise a sparse test set and a
+    dense model would differ by the square root of the ratio of their DOF
+    counts.
 
-    `pairs` is [(a's mode, b's mode)]; without it the modes are taken in
-    order, as far as the shorter set goes.
+    `pairs` is a list of (a's mode, b's mode). Without it, the modes are
+    paired in order up to the length of the shorter set.
 
-    **One entry per pair given, in order**, `None` where there is no
-    answer: a mode index past the end of its set, a mode that is zero
-    over the shared DOFs (which is a mode that set does not see there),
-    or two sets sharing no DOFs at all. Aligned rather than filtered
-    because a table puts these in rows beside the pairs that produced
-    them, and a shorter list would silently slide up the column.
+    The list has one entry per pair, in order, with None where there is
+    no value: a mode index past the end of its set, a mode that is zero
+    over the shared DOFs, or two sets that share no DOFs. The entries are
+    not filtered out, because a table puts them in rows beside the pairs
+    they belong to, and a shorter list would put values in the wrong
+    rows.
     """
     if pairs is None:
         pairs = [(i, i) for i in range(min(a.num_shapes, b.num_shapes))]
@@ -367,9 +388,9 @@ def compare_scaling(a: ShapeSet, b: ShapeSet,
                     pairs: Sequence[Sequence[int]] | None = None) -> ScaleComparison:
     """`ScaleComparison` of two shape sets over their matched pairs.
 
-    The set-wide reading of `scale_ratios`: the pairs that have an
-    answer, summarized into one factor and a spread. See that function
-    for what a ratio is and when there is none.
+    The pairs that have a ratio in `scale_ratios` are summarized as one
+    factor and a spread. See `scale_ratios` for how a ratio is computed
+    and when there is none.
     """
     return ScaleComparison(
         [r for r in scale_ratios(a, b, pairs) if r is not None], a, b)
@@ -385,38 +406,44 @@ def _split_sign(dof):
 class ShapeSet:
     """Mode shapes over a shared set of DOFs.
 
-    `shape_matrix` is (modes, dofs). `coordinate` lists the DOF strings the
-    columns correspond to ('101X+').
+    `shape_matrix` is (modes, dofs). `coordinate` lists the DOF strings
+    that the columns correspond to ('101X+'). The modes are always stored
+    in ascending frequency, so rigid-body modes come first.
 
-    A fitted set is also the *record of the fit*: reopening one in the
-    app (Edit Fit) reconstructs the session that produced it, which is
-    why the description and the scaling flag ride along with the numbers.
+    A fitted set is also the record of the fit: reopening one in the app
+    (Edit Fit) restores the fitting session that produced it, which is
+    why the descriptions and the scaling flag are stored with the
+    numbers.
 
     Attributes:
-        frequency: Hz per mode. A rigid-body mode is exactly 0.0 — the
-            FRF synthesis cancels its 0/0 by testing for that, so 'very
-            small' is not the same thing.
+        frequency: Hz per mode. A rigid-body mode is exactly 0.0, because
+            the FRF synthesis tests for exactly 0.0 to handle its 0/0; a
+            very small frequency is not treated the same way.
         damping: Fraction of critical per mode, so 2% is 0.02.
-        coordinate: The DOF string of each *column* of `shape_matrix`.
-        shape_matrix: `(modes, dofs)`. Complex for a complex mode; the
-            overlay and MAC machinery handles either.
-        modal_mass: Per mode. 1.0 throughout for a mass-normalized set,
-            which is what an eigensolution here produces. For complex
-            shapes it is modal A, the first-order scaling, which is what
-            `synthesize_frf` reads it as. Complex when an imported source
-            carried it complex — kept as measured, never squeezed real.
-        modal_damping: Complex modal damping per mode where a source
-            carried one (I-DEAS ADFs do), or None. Distinct from
-            `damping`, the viscous fraction of critical: this is the
-            complex-mode estimate as the identifying tool reported it.
-        mass_unit: What `modal_mass` is in, or `None` when undeclared.
-        description: Free text per mode — what the shape *is*, filled in
-            while reading the table ('first torsion').
-        comment: One line about the set as a whole.
-        unscaled: True when the fit had no drive point to pin the
-            mass-normalized scale. Shapes and MACs are unaffected;
-            modal masses are then a convention rather than physics, and
-            comparisons refuse to read a scale factor out of them.
+        coordinate: The DOF string of each column of `shape_matrix`.
+        shape_matrix: `(modes, dofs)`. Complex for complex modes; the
+            overlay and the MAC handle either.
+        modal_mass: Per mode. 1.0 for every mode of a mass-normalized
+            set, which is what an eigensolution here produces. For
+            complex shapes it is modal A, the first-order scaling, and
+            `synthesize_frf` uses it that way. It is complex when an
+            imported file had it complex; the values are kept as read and
+            never converted to real.
+        modal_damping: Complex modal damping per mode where a file had
+            one (I-DEAS ADFs do), or None. It is different from
+            `damping`, the viscous fraction of critical: it is the
+            complex-mode estimate as the identification software
+            reported it.
+        mass_unit: The mass unit the shapes were normalized against, or
+            `None` when it has not been declared.
+        description: Free text per mode describing the shape, for
+            example 'first torsion'.
+        comment: One line per mode; a single string given to the
+            constructor is used for every mode.
+        unscaled: True when the fit had no drive point to set the
+            mass-normalized scale. Shapes and MACs are not affected, but
+            the modal masses are only a convention, and comparisons do
+            not report a scale factor from them.
     """
 
     def __init__(self, frequency: ArrayLike, damping: ArrayLike,
@@ -517,11 +544,13 @@ class ShapeSet:
                 enumerate(_split_sign(dof) for dof in self.coordinate)}
 
     def auto_mac(self) -> np.ndarray:
-        """MAC of every mode against every other; the diagonal is 1."""
+        """The MAC of every mode against every other mode; the diagonal is 1."""
         return mac_matrix(self.shape_matrix)
 
     def covers(self, dof: str) -> bool:
-        """Does the shape set have a coefficient at this DOF?
+        """Whether the shape set has a coefficient at this DOF.
+
+        The sign is ignored, so '101Z-' is covered when '101Z+' is.
 
         Parameters
         ----------
@@ -547,49 +576,44 @@ class ShapeSet:
             H_jk(f) = sum_r (iw)^power phi_jr phi_kr
                             / (m_r (w_r^2 - w^2 + 2i z_r w_r w))
 
-        with w = 2*pi*f — exact for mass-normalized shapes, with
-        `modal_mass` carrying any other scaling. For complex shapes, the
-        first-order form, a pole and its conjugate:
+        with w = 2*pi*f. It is exact for mass-normalized shapes, and
+        `modal_mass` holds any other scaling. For complex shapes, the
+        first-order form, with a pole and its conjugate:
 
             H_jk(f) = sum_r (iw)^power [ psi_jr psi_kr / (A_r (iw - l_r))
                           + conj(psi_jr psi_kr / A_r) / (iw - conj(l_r)) ]
 
         with the pole l_r = -z_r w_r + i w_r sqrt(1 - z_r^2) and
-        `modal_mass` read as **modal A**, the scaling a complex mode
-        carries (unity when a set has none). The two are the same FRF
-        for a real mode whose modal A is 2i w_d m_r, with w_d the damped
-        frequency, which is how they connect.
+        `modal_mass` used as modal A, the scaling of a complex mode (1.0
+        when a set has none). The two forms give the same FRF for a real
+        mode whose modal A is 2i w_d m_r, where w_d is the damped natural
+        frequency.
 
-        Which form is decided by the shapes alone, complex or real, as
-        sdynpy decides it. The second-order form cannot represent a
-        complex mode: however `modal_mass` is set, it gives the
-        conjugate pole the residue -R where the structure has conj(R),
-        and with modal A in `modal_mass` it is off by 2i w_d outright —
-        every imported complex set synthesized an answer rotated 90
-        degrees and 2 w_d times too small, until 2026-09-23. Modal A is
-        conjugated in the second term, where sdynpy's is not; the two
-        agree whenever modal A is real, and only the conjugate is right
-        when it is not — sdynpy is 2.5% of peak off the exact FRF on the
-        complex modal A of the test system (measured 2026-09-24).
+        The form is selected by the shapes alone: complex shapes use the
+        first-order form and real shapes the second-order form. The
+        second-order form cannot represent a complex mode, because it
+        gives the conjugate pole the residue -R where the structure has
+        conj(R), whatever `modal_mass` is set to. Modal A is conjugated
+        in the second term, which only matters when modal A is complex.
 
-        `power` picks the response quantity: 0 displacement per force, 1
-        velocity, 2 acceleration. It applies inside the sum because a
-        real rigid-body mode's denominator is exactly -w^2: at w = 0 its
-        accelerance cancels to the finite residue, where an
-        after-the-fact multiply is 0/0 and a screenful of warnings. Its
-        displacement and velocity there are genuinely unbounded and
-        come back as nan.
+        `power` selects the response quantity: 0 displacement per force,
+        1 velocity, 2 acceleration. It is applied inside the sum because
+        a real rigid-body mode's denominator is exactly -w^2: at w = 0
+        its accelerance reduces to the finite residue, while multiplying
+        afterward would give 0/0. Its displacement and velocity at w = 0
+        are unbounded and are returned as nan.
 
-        Both forms are checked against the direct inverse of the dynamic
-        stiffness — proportionally damped for real shapes, and not
-        proportionally damped for complex ones — and against sdynpy's own
-        synthesis, all to rounding (`tests/test_frf_synthesis_exact.py`,
+        Both forms are checked to rounding error against the direct
+        inverse of the dynamic stiffness (proportionally damped for real
+        shapes, non-proportionally damped for complex ones) and against
+        the output of sdynpy's synthesis saved as test data
+        (`tests/test_frf_synthesis_exact.py`,
         `tests/test_modal_frf_oracle.py`).
 
-        `modes` restricts the sum; a truncated synthesis beside the
-        measurement is what shows which modes the measurement actually
-        contains. Raises ValueError for a DOF the shapes do not cover;
-        `covers` says so in advance.
+        `modes` limits the sum to some modes; a synthesis from a subset
+        of modes plotted beside the measurement shows which modes the
+        measurement contains. Raises ValueError for a DOF the shapes do
+        not cover, which `covers` can check in advance.
 
         Parameters
         ----------
@@ -620,6 +644,15 @@ class ShapeSet:
            first-order (state-space) form, its conjugate pole pairs,
            and modal A as the scaling that goes with them.
         """
+        # The form follows the shapes, complex or real, the same rule
+        # sdynpy uses. Until 2026-09-23 complex sets went through the
+        # second-order form, and with modal A in `modal_mass` every
+        # imported complex set synthesized an answer rotated 90 degrees
+        # and 2 w_d times too small. Modal A is conjugated in the second
+        # term; sdynpy's is not, and the two agree whenever modal A is
+        # real. On the complex modal A of the test system the
+        # unconjugated form is 2.5% of peak off the exact FRF (measured
+        # 2026-09-24).
         frequencies = np.asarray(frequencies, dtype=np.float64)
         picked = (np.arange(self.num_shapes) if modes is None
                   else np.asarray(sorted({int(m) for m in modes})))
@@ -670,12 +703,15 @@ class ShapeSet:
         return out
 
     def delete_modes(self, indices: Sequence[int]) -> None:
-        """Remove the given modes in place; the last one is refused.
+        """Remove the given modes in place.
+
+        Raises IndexError for an index out of range, and ValueError if
+        every mode would be removed (delete the object instead).
 
         Parameters
         ----------
         indices : sequence of int
-            Which modes to remove.
+            Which modes to remove, by zero-based index.
 
         Returns
         -------
@@ -708,17 +744,20 @@ class ShapeSet:
 
     @property
     def is_complex(self) -> bool:
-        """Whether these are complex modes. Real normal modes move
-        every DOF in phase; complex ones do not, which is what a
-        damped or non-proportionally damped structure produces."""
+        """Whether these are complex modes.
+
+        Real normal modes move every DOF in or out of phase; complex
+        modes do not, which is the result of non-proportional damping.
+        A set is complex when its shape matrix has a complex dtype.
+        """
         return np.iscomplexobj(self.shape_matrix)
 
     # ---- units --------------------------------------------------------------
 
     @property
     def units_defined(self) -> bool:
-        """Whether the shapes carry a mass unit, without which a
-        modal mass is a number with no scale behind it."""
+        """Whether a mass unit has been declared. Without one, a modal
+        mass is a number with no unit."""
         return self.mass_unit is not None
 
     @staticmethod
@@ -729,13 +768,15 @@ class ShapeSet:
     def define_units(self, mass_unit: str) -> ShapeSet:
         """Declare the mass unit the shapes were normalized against.
 
-        Re-declaring reinterprets the file's values rather than scaling
-        twice, so a wrong guess can be corrected.
+        The coefficients are converted to SI, 1/sqrt(kg). Declaring again
+        reinterprets the original values instead of scaling twice, so a
+        wrong unit can be corrected.
 
         Parameters
         ----------
         mass_unit : str
-            The unit modal mass is in.
+            The mass unit of the mass matrix the shapes were normalized
+            against, such as 'kg'.
 
         Returns
         -------
@@ -750,7 +791,7 @@ class ShapeSet:
         return self
 
     def undefine_units(self) -> ShapeSet:
-        """Take the declaration back, restoring the file's raw coefficients."""
+        """Remove the mass unit and restore the original coefficients; returns self."""
         if self.mass_unit is None:
             return self
         self.shape_matrix = self.shape_matrix / self._scale_to_si(self.mass_unit)
@@ -758,8 +799,9 @@ class ShapeSet:
         return self
 
     def display_shapes(self, unit_system: UnitSystem) -> np.ndarray:
-        """Coefficients in the display system's 1/sqrt(mass); undefined pass
-        through unchanged.
+        """The coefficients in the display system's 1/sqrt(mass).
+
+        A set without a declared mass unit is returned unchanged.
 
         Parameters
         ----------
@@ -777,17 +819,17 @@ class ShapeSet:
             si_factor(unit_system.unit('mass'), 'mass'))
 
     def unit_label(self, unit_system: UnitSystem | None = None) -> str:
-        """'1/√kg' for the stored unit, or the display system's.
+        """The unit label of the coefficients, such as '1/√kg'.
 
         Parameters
         ----------
         unit_system : UnitSystem, optional
-            Units to label in.
+            The units to label in. The declared mass unit when omitted.
 
         Returns
         -------
         str
-            How the shapes' own unit reads.
+            The label, or '' when no mass unit has been declared.
         """
         if not self.units_defined:
             return ''
@@ -796,12 +838,12 @@ class ShapeSet:
         return f'1/√{unit}'
 
     def mode_label(self, i: int) -> str:
-        """'Mode 3 — 12.4 Hz, 2.0% damping'.
+        """A short label for one mode, such as 'Mode 3 — 12.4 Hz, 2% damping'.
 
         Parameters
         ----------
         i : int
-            Which mode.
+            Which mode, by zero-based index.
 
         Returns
         -------
@@ -850,13 +892,13 @@ class ShapeSet:
         native.save(self, path)
 
     def plot_mac(self, other: ShapeSet | None = None, **kwargs: Any) -> Any:
-        """The MAC grid: this set against itself, or against `other`.
+        """Plot the MAC: this set against itself, or against `other`.
 
         Parameters
         ----------
         other : ShapeSet, optional
-            The set to compare against. This set against itself when
-            omitted, which is how repeated modes show up.
+            The set to compare against. When omitted, the plot is the
+            auto-MAC, which shows repeated or similar modes.
         **kwargs
             Passed through to the plotting layer.
 
@@ -870,7 +912,7 @@ class ShapeSet:
 
     def animate(self, geometry: Geometry, mode: int = 0,
                 **kwargs: Any) -> Any:
-        """This mode moving on a geometry, as the GUI animates it.
+        """Animate one mode on a geometry, as the app does.
 
         Parameters
         ----------
@@ -896,16 +938,17 @@ class ShapeSet:
                      projected: ShapeSet | None = None,
                      names: tuple[str, str] = ('first', 'second'),
                      **kwargs: Any) -> Any:
-        """This mode and another set's overlaid, swinging together, as
-        the window animates a picked cell of the two sets' cross-MAC.
+        """Animate this mode and a mode of another set overlaid, as the
+        window does for a picked cell of the two sets' cross-MAC.
 
         The other mode is phase-aligned to this one (`paired_mode`) and
-        each is scaled to its own peak, so the picture compares shape;
-        the caption names both modes and says how their sizes compare
-        (`pair_caption`). On two geometries the other set is projected
-        onto this one's DOFs to measure the alignment
-        (`correlate.project_shapes`), and drawn on its own geometry —
-        or, `on_basis`, the projection on this one's.
+        each is scaled to its own peak, so the animation compares shape.
+        The caption names both modes and gives the ratio of their sizes
+        (`pair_caption`). When the sets are on two geometries, the other
+        set is projected onto this one's DOFs to measure the alignment
+        (`correlate.project_shapes`) and drawn on its own geometry, or,
+        with `on_basis`, the projection is drawn on this geometry.
+        Raises ValueError when either set has no DOFs on its geometry.
 
         Parameters
         ----------
@@ -922,11 +965,13 @@ class ShapeSet:
         on_basis : bool, default False
             Draw the other set's projection on this geometry instead.
         projected : ShapeSet, optional
-            The other set already carried onto this one's DOFs
-            (`correlate.project_shapes`), for a script animating many
-            pairs of the same two sets: made here when omitted.
+            The other set already projected onto this set's DOFs
+            (`correlate.project_shapes`), for a script that animates
+            many pairs of the same two sets. Computed here when omitted
+            and the geometries differ.
         names : tuple of str
-            What the caption calls the two sets.
+            The names the caption uses for the two sets, by default
+            ('first', 'second').
         **kwargs
             Passed through to `viz.animate.animate_pair`: `colors`,
             `alphas`, `scale`, `screenshot=`, `movie=`.
@@ -955,17 +1000,17 @@ class ShapeSet:
 
     def plot(self, geometry: Geometry | None = None, mode: int = 0,
              **kwargs: Any) -> Any:
-        """The set's own reading: its auto-MAC, or one mode animated
-        when a geometry says where to put it.
+        """Plot the set: its auto-MAC, or one mode animated when a
+        geometry is given.
 
         Parameters
         ----------
         geometry : Geometry, optional
-            The geometry to draw on.
+            The geometry to draw on. Without it the auto-MAC is plotted.
         mode : int, default 0
-            Which mode.
+            Which mode, when a geometry is given.
         **kwargs
-            Passed through to the scene.
+            Passed through to `plot_mac` or `animate`.
 
         Returns
         -------
@@ -980,19 +1025,21 @@ class ShapeSet:
 def synthesize_overlay(shapes: ShapeSet, frf: Any,
                        records: Sequence[int] | None = None,
                        modes: Sequence[int] | None = None) -> Any:
-    """The modal model's prediction of `frf`, as an Frf to draw over it.
+    """The modal model's prediction of `frf`, as an Frf to plot over it.
 
-    Same DOF pairs, same frequencies, residue form over `modes` (all of
-    them by default). Each record copies its original's dimension and
-    units, so the pair lands on one axis, and is scaled to the
-    original's quantity by powers of iω — accelerance assumed when
-    nothing said what the measurement is, the modal-test norm. Records
-    at DOFs the shapes do not cover are left out; None when that is all
-    of them.
+    The result has the same DOF pairs and frequencies as `frf`, computed
+    with `ShapeSet.synthesize_frf` over `modes` (all of them by default),
+    for the records in `records` (all by default). Each record copies its
+    original's dimension and units, so both are plotted on one axis, and
+    is computed for the original's quantity by powers of iω; accelerance
+    is used when the measurement's quantity is not known, as is usual in
+    a modal test. Records at DOFs the shapes do not cover are left out,
+    and the result is None when that is every record or `frf` has no
+    reference DOFs.
 
-    The result carries `synthesized` (drawn dashed) and
-    `mode_frequencies` (the fitting screen's bookmarks), so a plot can
-    tell it from the measurement wherever it is handed one.
+    The result has `synthesized` set to True (it is drawn dashed) and
+    `mode_frequencies` (the frequencies marked on the fitting screen), so
+    a plot can tell it from a measurement.
     """
     import numpy as np
 

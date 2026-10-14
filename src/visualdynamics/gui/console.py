@@ -1,16 +1,12 @@
 """The console: the session as Python, along the bottom of the window.
 
-A tab, not a menu (Brandon, 2026-08-30): the tab announces that the
-console exists, sitting collapsed at the bottom edge, and clicking it
-is the whole gesture — expand to read, click again to put it away.
-It shows `project.journal` — every verb and settings write of this
-sitting as the line that replays it — selectable and copyable, so the
-Python-comfortable half of the audience can lift a session straight
-into a script while everyone else never has to see it.
-
-Read-only by decision: an input line was designed and dropped
-(Brandon, 2026-08-30) — the journal's value is copy-out. PLAN.md,
-"The console".
+A tab on the bottom edge of the views opens and closes it: click it to
+expand the console and click again to collapse it. It shows
+`project.journal`, every verb and settings change of this session as
+the line of Python that replays it. The text is read-only and can be
+selected and copied, so a session done in the window can be copied
+into a script, and a user who does not want the Python never has to
+open it.
 """
 
 from __future__ import annotations
@@ -25,26 +21,34 @@ from PySide6.QtWidgets import (
 
 from .drawer_tab import DrawerTab
 
+# A tab, not a menu (Brandon, 2026-08-30): the tab shows that the
+# console exists, sitting collapsed at the bottom edge, and clicking it
+# is the whole gesture. Read-only by decision: an input line was
+# designed and dropped the same day, because the journal's value is
+# copying out. PLAN.md, "The console".
+
 #: how tall the scrollback opens — enough to read a working stretch of
 #: a session without claiming the plot's space
 CONSOLE_HEIGHT = 180
 
 
 class ConsolePanel(QWidget):
-    """The scrollback, and the tab that floats over the views' edge.
+    """The scrollback, and the tab that floats over the edge of the
+    views.
 
-    The panel holds only the scrollback, so collapsed it is zero rows
-    tall — the first cut reserved a full-width strip for the tab and
-    the empty strip read as a gray bar across the window (Brandon,
-    2026-08-31). The tab is not in any layout: `float_over` overlays
-    it on the bottom edge of whatever the console expands under, the
-    way a drawer handle sits on the drawer. Nothing built in does
-    this — Qt's tab widgets are document tabs and the native macOS
-    drawer is long deprecated — so the handle is placed by hand and
-    follows its host's resizes."""
+    The panel holds only the scrollback, so collapsed it is zero pixels
+    tall. The tab is not in any layout: `float_over` places it on the
+    bottom edge of the widget the console expands under, the way a
+    handle sits on a drawer, and moves it when that widget is resized.
+    Qt has nothing built in for this (its tab widgets are document tabs,
+    and the native macOS drawer is deprecated), so the tab is placed by
+    hand."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # Only the scrollback is in the panel: the first cut reserved a
+        # full-width strip for the tab, and the empty strip read as a
+        # gray bar across the window (Brandon, 2026-08-31).
         column = QVBoxLayout(self)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
@@ -76,17 +80,17 @@ class ConsolePanel(QWidget):
         self._toggled(False)
 
     def float_over(self, host: QWidget) -> None:
-        """Overlay the tab on `host`'s bottom edge, centered, and keep
-        it there through resizes.
+        """Place the tab on `host`'s bottom edge, centered, and keep it
+        there when `host` is resized.
 
         Parameters
         ----------
         host : QWidget
-            A plain container holding the views *and* this panel — the
-            tab rides the drawer's top edge like a handle. Never a
-            QSplitter: a splitter adopts any child widget as a new
-            pane, and the first cut's tab became a third panel parked
-            at the right edge.
+            A plain container that holds the views and this panel; the
+            tab sits on the drawer's top edge like a handle. It must not
+            be a QSplitter, because a splitter makes any child widget a
+            new pane, and the tab would become a third pane at the right
+            edge.
         """
         self._host = host
         self.tab.setParent(host)
@@ -128,15 +132,16 @@ class ConsolePanel(QWidget):
     def refresh(self, journal: list[str]) -> None:
         """Bring the scrollback up to date with the session's journal.
 
-        Cheap when nothing changed — one tuple comparison — and a full
-        rewrite when something did, because the journal is allowed to
-        edit its own tail (a drag session settles to one line) and an
-        append-only view would keep the superseded write.
+        When nothing changed this is one tuple comparison. When something
+        did, the text is rewritten in full, because the journal may edit
+        its own last line (a drag settles to one line) and a view that
+        only appended would keep the line that was replaced. Lines longer
+        than `SHOWN_CHARACTERS` are shortened, as `elided` says.
 
         Parameters
         ----------
         journal : list of str
-            The project's session journal, shown verbatim.
+            The project's session journal, shown as written.
         """
         lines = tuple(journal)
         if lines == self._shown:
@@ -159,7 +164,8 @@ SHOWN_CHARACTERS = 2000
 
 def elided(line: str) -> str:
     """A journal line as the console shows it: whole up to
-    `SHOWN_CHARACTERS`, else its head and how long it really is."""
+    `SHOWN_CHARACTERS` characters, and otherwise its first
+    `SHOWN_CHARACTERS` characters followed by the line's full length."""
     if len(line) <= SHOWN_CHARACTERS:
         return line
     return (f'{line[:SHOWN_CHARACTERS]} … [{len(line):,} characters; the '

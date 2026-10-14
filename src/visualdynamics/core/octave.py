@@ -1,36 +1,35 @@
 """Proportional-band spectra: a PSD resampled onto octave bands.
 
-A narrowband PSD answers "how much power per hertz, at this hertz". A
-proportional-band one answers "how much power in this band", where the
-bands get wider as the frequency rises — which is how a structure's
-response is usually specified, and how an ear hears.
+A narrowband PSD gives the power per hertz at each frequency line. A
+proportional-band PSD gives the power in each band, where the bands get
+wider as the frequency increases. Responses are usually specified this
+way, and it is also how the ear hears.
 
-The bands are the base-ten system of ANSI S1.11 / IEC 61260, which is
-what sdynpy uses and therefore what a result has to agree with:
+The bands are the base-ten system of ANSI S1.11 / IEC 61260:
 
-- one octave is a factor of ten to the three tenths, not a factor of
-  two. For nth-octave the band ratio is `10 ** (3 / (10 n))` — at a
-  sixth of an octave that is 1.122018, where a base-two reading would
-  give 1.122462. They differ in the fourth digit, which is enough to
-  put every band edge in a slightly different place.
-- the grid is **absolute**. It does not depend on the frequency range
-  asked for, or on any specification: the range only chooses which
-  bands of the one fixed grid are returned. 1000 Hz anchors it.
-- and which of edges or centers lands on `10 ** (3 k / (10 n))`
-  depends on whether `n` is odd or even. For **odd** fractions — whole
-  octaves, thirds — the band *centers* sit on the grid; for **even**
-  ones — sixths, twelfths — the *edges* do, and the centers fall half
-  a step between. Getting this backwards puts every band half a step
-  out, which is a real disagreement and not a rounding one.
-- bands tile — each one's upper edge is the next one's lower — and a
-  band's center is the geometric mean of its edges.
+- One octave is a factor of ten to the three tenths, which is close to
+  two but not equal to it. For 1/n octave the band ratio is
+  `10 ** (3 / (10 n))`. At a sixth of an octave that is 1.122018, where
+  a base-two ratio would be 1.122462. The two differ in the fourth
+  digit, which is enough to move every band edge.
+- The grid is absolute. It does not depend on the frequency range
+  requested or on any specification; the range only selects which bands
+  of the one fixed grid are returned. 1000 Hz is on the grid.
+- Whether the edges or the centers land on `10 ** (3 k / (10 n))`
+  depends on whether `n` is odd or even. For odd fractions (whole
+  octaves, thirds) the band centers are on the grid. For even fractions
+  (sixths, twelfths) the edges are, and the centers fall half a step
+  between. Getting this backwards moves every band by half a step,
+  which is a real difference in the result and much larger than
+  rounding.
+- The bands tile: each band's upper edge is the next band's lower edge,
+  and a band's center is the geometric mean of its edges.
 
-Converting a spectrum is an integration, not a resampling. The value in
-a band is the mean-square content of that band divided by its width, so
-the area under the spectrum is unchanged and the RMS it carries is the
-RMS it carried before. Reading the narrowband curve at each band center
-instead would throw away everything between the centers, and would not
-conserve anything.
+Converting a spectrum is an integration. The value in a band is the
+mean-square content of that band divided by its width, so the area under
+the spectrum is unchanged and the RMS is the same before and after.
+Reading the narrowband curve at each band center would ignore
+everything between the centers and would not conserve the RMS.
 
 References
 ----------
@@ -52,6 +51,9 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike
 
+# The base-ten system is also the one sdynpy uses, and so the one a
+# result here has to agree with when the two are compared.
+
 #: one octave, as a power of ten. The base-ten system's defining
 #: constant: an octave is 10**0.3, near enough to 2 for the names to
 #: have stuck and far enough for the edges to differ.
@@ -67,7 +69,10 @@ CHOICES = (1, 2, 3, 6, 12, 24)
 
 
 def ratio(per_octave: int = PER_OCTAVE) -> float:
-    """How much wider each band is than the one below it."""
+    """The ratio of each band's center to the center of the band below it.
+
+    Raises `ValueError` when `per_octave` is less than one.
+    """
     per_octave = int(per_octave)
     if per_octave < 1:
         raise ValueError('there is at least one band to an octave')
@@ -76,12 +81,13 @@ def ratio(per_octave: int = PER_OCTAVE) -> float:
 
 def edges(low: float, high: float,
           per_octave: int = PER_OCTAVE) -> np.ndarray:
-    """The edges of every band overlapping `low` to `high`.
+    """The edges of every band that overlaps `low` to `high`, in Hz.
 
-    One more edge than there are bands, since they tile. Snapped to the
-    fixed grid rather than started at `low`: two spectra covering
-    different ranges land on the same bands, which is the whole point
-    of a standard grid and the reason two runs can be compared at all.
+    There is one more edge than there are bands, since the bands tile.
+    The edges are taken from the fixed grid instead of starting at
+    `low`, so two spectra covering different ranges land on the same
+    bands and can be compared. Raises `ValueError` unless
+    `0 < low < high`.
     """
     low, high = float(low), float(high)
     if not (low > 0.0 and high > low):
@@ -103,11 +109,11 @@ def edges(low: float, high: float,
 
 def bands(low: float, high: float, per_octave: int = PER_OCTAVE
           ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(centers, widths, edges) for every band overlapping the range.
+    """(centers, widths, edges) for every band that overlaps the range.
 
-    The center is the geometric mean of the band's own edges — the
-    arithmetic mean would sit above it, and on a log axis a band would
-    then be drawn off-center from the number naming it.
+    The center is the geometric mean of the band's edges. The
+    arithmetic mean would be higher, and on a log axis the band would
+    then be drawn off center from the frequency that names it.
     """
     bounds = edges(low, high, per_octave)
     lower, upper = bounds[:-1], bounds[1:]
@@ -123,8 +129,11 @@ SNAP = 1e-9
 
 
 def per_octave_of(centers: ArrayLike) -> int:
-    """The fraction a set of band centers is on: bands to the octave,
-    read off the ratio of neighboring centers. Two bands are enough."""
+    """The number of bands per octave that a set of band centers is on.
+
+    It is read from the ratio of the first two positive centers, so two
+    bands are enough. Raises `ValueError` with fewer than two.
+    """
     centers = np.asarray(centers, dtype=float)
     centers = centers[np.isfinite(centers) & (centers > 0.0)]
     if centers.size < 2:
@@ -134,17 +143,17 @@ def per_octave_of(centers: ArrayLike) -> int:
 
 def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
                ) -> tuple[np.ndarray, np.ndarray]:
-    """(left, right) of the bin each line stands for.
+    """(left, right) edges of the bin that each line represents.
 
-    With no widths the bins are the midpoints between neighbors, which
-    is exact for evenly spaced FFT lines. With them the edges follow
-    from `c = sqrt(l u)` and `w = u - l`:
+    With no widths, the bin edges are the midpoints between neighboring
+    lines, which is exact for evenly spaced FFT lines. With widths, the
+    edges follow from `c = sqrt(l u)` and `w = u - l`:
 
         u = (w + sqrt(w^2 + 4 c^2)) / 2,   l = u - w
 
-    the positive root, which is where a proportional band's edges
-    actually are. Taking `c +/- w/2` instead would be assuming the
-    center is the arithmetic mean of the edges, and it is not.
+    using the positive root. Taking `c +/- w/2` would assume the center
+    is the arithmetic mean of the edges, which is not true for a
+    proportional band.
     """
     centers = np.asarray(centers, dtype=float)
     if widths is not None:
@@ -159,24 +168,28 @@ def bin_bounds(centers: ArrayLike, widths: ArrayLike | None = None
 def resample(frequencies: ArrayLike, values: ArrayLike, bounds: ArrayLike,
              widths: ArrayLike | None = None,
              source: ArrayLike | None = None) -> np.ndarray:
-    """`values` integrated onto the bands `bounds` describes.
+    """`values` integrated onto the bands whose edges are `bounds`.
 
-    Each line stands for its own bin, flat across it, which is what a
-    discrete density is. A band's content is the part of every bin that
-    falls inside it, and the band's value is that content over the
-    band's width — so the area under the spectrum survives and a band
-    straddling the end of the data is credited only for the part of it
-    that has data underneath.
+    Each line represents its own bin and is constant across it, which
+    is what a discrete density is. A band's content is the part of each
+    bin that falls inside the band, and the band's value is that
+    content divided by the band's width, so the area under the spectrum
+    is unchanged. `source` gives the (left, right) bin edges of the
+    input lines; without it they are taken from `bin_bounds`, which is
+    only exact for evenly spaced lines. `widths` overrides the band
+    widths, which are otherwise the differences of `bounds`.
 
-    Complex values pass through as complex: the cross terms of a CPSD
-    average over a band the same way the diagonal does.
+    Complex values stay complex: the cross terms of a CPSD are averaged
+    over a band the same way the diagonal is.
 
-    A band the source only partly fills holds that content over its
-    whole width, and reads lower than its neighbors for it. That is
-    what an octave band of a target ending inside it is: the bands
-    are defined frequency bands, whole, not cut or read over part of
-    themselves (Brandon, 2026-09-19, twice).
+    A band that the data only partly covers holds that content over its
+    whole width, so it reads lower than its neighbors. The bands are
+    fixed frequency bands and are never cut down to the part that has
+    data. A band with no data under it at all is NaN. Raises
+    `ValueError` with fewer than two lines.
     """
+    # Bands are whole, never cut or read over part of themselves
+    # (Brandon, 2026-09-19, twice).
     frequencies = np.asarray(frequencies, dtype=float)
     values = np.atleast_2d(np.asarray(values))
     if frequencies.size < 2:

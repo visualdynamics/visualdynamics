@@ -28,91 +28,120 @@
 </div>
 <main>
   <header><h1>Workflows</h1>
-    <p class="tagline">Seven, implemented end to end.</p></header>
+    <p class="tagline">Seven project types, each with its report, and finite element models built and solved in the app.</p></header>
 
   <p class="lede">
-    A project is of a kind, and its kind is what the application knows.
-    Each workflow below carries the shape of its own test: what a
-    project of that kind expects you to bring, which figures its report
-    is built from, and how the result is judged.
+    A project has a type, and the type sets what the project expects:
+    the data you bring, the objects it holds, the figures its report is
+    built from, and how the result is judged. The seven types are
+    described below, followed by correlation and finite element
+    modeling, which work in any project.
   </p>
 
   <h2>Modal analysis</h2>
   <p>
-    Measure frequency response functions from a hammer or shaker
-    survey, fit modes to them, and animate the shapes on the test
-    geometry. Coherence and drive-point checks come with it, so a
-    doubtful channel is visible before it reaches a fit.
-  </p>
-
-  <h2>Finite element model correlation</h2>
-  <p>
-    Pair the test modes against a model's, by modal assurance
-    criterion, and show where the two disagree — which pairs, by how
-    much in frequency, and where on the structure the shapes part
-    company.
+    Import frequency response functions from a hammer or shaker survey,
+    or compute them from the time data, fit modes to them on the
+    fitting screen, and animate the shapes on the test geometry. The
+    report includes the coherence and the drive-point FRFs, so a poor
+    channel can be found before it affects a fit.
   </p>
 
   <h2>Random vibration test analysis</h2>
   <p>
-    Averaged spectra against a specification, with the bands, the
-    tolerance lines and the exceedances marked — and the averaging
-    itself shown rather than assumed, so the number of averages and
-    the window are part of what the report says.
+    Control PSDs averaged over the run's own frames, overlap and
+    window, compared against the specification with its warning and
+    abort lines, channel by channel. Octave-band levels, multiple
+    coherence and RMS error bars in decibels are part of the same
+    reading.
   </p>
 
   <h2>Shock test analysis</h2>
   <p>
-    Find the events in a record, filter and integrate it into velocity
-    and displacement, compute shock response spectra on log axes, and
-    judge them against the required band.
+    Detect the events in a record, filter and integrate it into
+    velocity and displacement, compute a shock response spectrum for
+    each channel and each event, and compare them against the required
+    spectrum and its tolerance band. Signed error bars in decibels
+    show which events under-tested or over-tested.
   </p>
 
   <h2>Transient environment analysis</h2>
   <p>
-    A measured waveform against the one it was controlled to, aligned
-    and compared over the interval that matters rather than over
-    whatever the file happens to contain.
+    A measured run compared against the target waveform the controller
+    was asked to reproduce, one control channel at a time. Each playing
+    is overlaid on the target where it actually landed, the waveform
+    error is shown for every channel and playing, and the PSDs of both
+    compare the levels.
   </p>
 
   <h2>Sine sweep test analysis</h2>
   <p>
     One or more tones swept across a frequency range at a controlled
-    amplitude, so the article sees each frequency in turn. The level
-    each tone actually reached is extracted from the recording and
-    judged against the level it was required to reach, tone by tone
-    and channel by channel, with the difference in decibels.
+    amplitude, so the test article sees each frequency in turn. The
+    level each tone actually reached is extracted from the recording
+    and compared against the level it was required to reach, tone by
+    tone and channel by channel, with the difference in decibels.
+  </p>
+
+  <h2>Random and sine</h2>
+  <p>
+    A random test with one or more sine tones swept under it on the
+    same shakers. One project holds both halves, each judged by its own
+    workflow, and it generates two reports: a random report and a sine
+    report.
   </p>
 
   <h2>System identification</h2>
   <p>
     The plant a later test will be controlled through: the frequency
     response of every control channel to every drive, measured from an
-    ambient recording and a driven one. The report carries the plant
-    and the three readings that say whether to believe it — the
-    coherence map, the signal-to-noise against the ambient floor, and
-    the complex mode indicator that reads the whole matrix at a glance.
+    ambient recording and a driven one. The report shows the densities
+    of both recordings, every FRF, and the two measurements that say
+    whether to trust the result: the multiple coherence map and the
+    signal-to-noise against the ambient floor.
   </p>
   <p>
     The signal-to-noise follows the standard definition, signal power
     over noise power, as IEEE Std 1241 states it and as Bendat and
     Piersol use it in <cite>Random Data</cite>. The driven recording
-    holds the signal and the same noise the ambient one recorded, so
+    holds the signal plus the same noise the ambient one recorded, so
     the signal's power is the driven power less the ambient power, and
-    the ratio is that over the ambient. The report draws it line by
-    line for every channel and once per channel over the whole band, as
-    bars against a 10 dB threshold, the margin at which the coherence
-    the same noise allows reaches 0.91.
+    the ratio is that divided by the ambient power. The report draws
+    it line by line for every channel, and once per channel over the
+    whole band as bars against a 10 dB threshold, the margin at which
+    the coherence that the same noise allows reaches 0.91.
     <a href="documentation/guide/workflows/sysid-workflow/#how-the-signal-to-noise-is-computed">How
     it is computed</a>.
   </p>
 
+  <h2>Finite element model correlation</h2>
+  <p>
+    Compare test modes against a model's by the modal assurance
+    criterion. The model's shapes are sampled at the test's degrees of
+    freedom, the cross-MAC shows which modes pair up, matched pairs are
+    kept with their frequency error, and the two shapes of a pair can
+    be animated together on the structure.
+  </p>
+
+  <h2>Finite element models</h2>
+  <p>
+    Build a model in the app and solve its modes. A thin-walled part is
+    built from planes of plate elements, with each bolt a tie over the
+    elements its washer covers. A thicker part is built from solids
+    (blocks, cylinders, sections such as I-beams, channels, tees,
+    angles and rectangular and round tubes, and holes that go through,
+    to a depth or with a counterbore), combined by subtracting and
+    joining, copied with Pattern, and meshed into bricks with Mesh
+    Solids, which meshes rings of bricks about each hole. Parts meshed
+    apart are bolted by aligning their meshes and merging the nodes
+    each bolt clamps. A model can also start from an imported mesh.
+  </p>
+
   <h2 id="formats">Supported data formats</h2>
   <p>
-    Each one reads into the same objects, so what happens next does
+    Every format reads into the same objects, so what happens next does
     not depend on where the data came from. Most of them are written
-    as well as read — where a format is read-only the table says so,
-    rather than leaving you to find out at the export dialog.
+    as well as read, and the table marks the ones that are read-only.
   </p>
   <!-- The authority for this table is the registry in
        src/visualdynamics/io/__init__.py, and
@@ -138,25 +167,29 @@
       <tr><td>sdynpy geometry, data and shapes</td><td>.npz, .npy</td><td>yes</td><td>yes</td></tr>
       <tr><td>Photographs</td><td>.png, .jpg, .heic</td><td>yes</td><td>yes</td></tr>
       <tr><td>Visual Dynamics project</td><td>.vdyn</td><td>yes</td><td>yes</td></tr>
-      <tr><td>MATLAB file, the project's own layout as structs</td><td>.mat</td><td>yes</td><td>yes</td></tr>
+      <tr><td>MATLAB file, the project's own layout as structs, in the display units</td><td>.mat</td><td>yes</td><td>yes</td></tr>
       <tr><td>Engineering Sciences Common Data Format, the project as the standard's types with each object whole beside them</td><td>.h5</td><td>yes</td><td>yes</td></tr>
-      <tr><td>Report template — a report on its own, to load into another project</td><td>.vdreport</td><td>yes</td><td>yes</td></tr>
+      <tr><td>Report template: a report on its own, to load into another project</td><td>.vdreport</td><td>yes</td><td>yes</td></tr>
     </tbody>
   </table>
   </div>
   <p class="note">
-    A universal file comes in two encodings — dataset 58 as text and
-    dataset 58b as raw floats — and both are read and written. The
-    binary one is about a third the size and exact, where five decimal
-    places of text are not.
+    A universal file comes in two encodings, dataset 58 as text and
+    dataset 58b as binary floats, and both are read and written. The
+    binary one is about a third the size and keeps the values exactly,
+    where text keeps five decimal places.
   </p>
   <p class="note">
-    The ones that do not write back: a Rattlesnake <code>.nc4</code>
-    is a controller's own record of a run and writing one would be
-    claiming to have run it, and a STEP or IGES file is the CAD tool's
-    own — both stay read-only on purpose. The punch and Femap writers
-    are simply not written yet — anything read here is meant to be
-    writable, and those two are the outstanding exceptions.
+    A Rattlesnake <code>.nc4</code> is a controller's record of a run,
+    and a project is not exported as one, since that file would
+    describe a run that never happened. A run can be cut to a stretch
+    of time and saved as a new <code>.nc4</code>, though: <em>Save
+    Truncated Copy…</em> in the import window for a long run, or
+    <em>File → Truncate Rattlesnake File…</em> for any run, copies
+    every setting and channel as it is and cuts only the time data.
+    STEP and IGES files belong to the CAD tool and are read-only on
+    purpose. Punch and Femap writers have not been written yet; every
+    other format that is read can also be written.
   </p>
 
   <ul class="links">

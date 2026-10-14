@@ -1,17 +1,16 @@
-"""The shock windows, marked on the time history they were found in.
+"""Shock windows marked on the time history they were found in.
 
-The averaging overlay has a hard job: frames overlap, so it has to say
-which sample belongs to which average and how heavily. This one does
-not. A shock window is a span, the spans do not overlap, and each is one
-event — so the mark is a shaded region with a number on it, and the
-number is the point. `shock 3` in a table of spectra means nothing until
-you can see which of the four events on the trace it was.
+A shock window is a span of the record, the windows do not overlap,
+and each one is a single event. Each is drawn as a shaded region with
+its number on it, so that "shock 3" in a table of spectra can be
+matched to one of the events on the time history.
 
-The regions are draggable, because detection is a good guess and not an
-oracle: a window that opened a little late, or closed before the
-ringdown was done, is fixed by pulling its edge rather than by arguing
-with a threshold. `locked` turns that off, for a report or a plot
-rendered to a file — there is nobody on the other end of a drag there.
+The regions can be dragged, because the detection is an estimate: a
+window that starts a little late, or ends before the ringdown is over,
+is corrected by moving its edge instead of changing the threshold. A
+window is held to its neighbors and cannot be dragged over one. With
+`locked` the regions cannot be dragged, which is what a report or a
+plot saved to a file uses.
 """
 
 from __future__ import annotations
@@ -36,13 +35,19 @@ EDGE_ALPHA = 150
 LABEL_HEIGHT = 0.93
 
 class ShockOverlay:
-    """The windows on one plot, and the dragging of them.
+    """The shock windows on one plot, and dragging them.
 
-    Owns nothing but its own items: the shocks themselves live on the
-    time history, and this is told about them and reports back when one
-    is dragged. `changed` is a callback rather than a Qt signal because
-    the overlay is not a QObject — it is a handful of items on somebody
-    else's plot, and it goes away when they do.
+    The overlay owns only its own plot items. The shocks are stored on
+    the time history; the overlay is given them and calls `changed` with
+    the new list when one is dragged. `changed` is a callback and not a
+    Qt signal because the overlay is not a QObject: it is a few items on
+    another object's plot and is removed with that plot.
+
+    With `common` the series is held at one length, so resizing any
+    window resizes all of them; `limit` is the end of the record in
+    seconds, which a shared length cannot pass. `origin` is the time of
+    the record's first sample, the zero the shocks' start times count
+    from.
     """
 
     def __init__(self, plot: Any, shocks: Sequence[Shock],
@@ -190,7 +195,7 @@ class ShockOverlay:
     # ---- keeping up -------------------------------------------------------
 
     def set_shocks(self, shocks: Sequence[Shock]) -> None:
-        """Show these instead, without going through a redraw of the plot."""
+        """Draw these shocks in place of the current ones, without redrawing the plot."""
         shocks = tuple(shocks)
         if shocks == self.shocks:
             return

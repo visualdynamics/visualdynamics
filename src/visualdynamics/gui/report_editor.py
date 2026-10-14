@@ -1,18 +1,18 @@
-"""The report editor: the exported page as the preview, the acts on the bar.
+"""The report editor: the exported page as the preview, with the actions
+on a bar above it.
 
-The page shown is the very HTML the export writes — a browser view of
-exactly what the reader will get, figures drawn by the same JavaScript
-their browser will run — and it does two things the export's page does
-not: it frames the selected block, and it says which block was clicked.
-Everything else lives in Qt (Brandon, 2026-09-08: "the toolbar should be
-the same as the task bar at the top of the report screen how we have for
-every other GUI object"): a bar of acts above the page — Insert,
-Reference, Move Up, Move Down, Delete, Export — and a settings pane
-beside it carrying what the selected block has to say: a figure block's
-sources and caption, a text block's Markdown in a Qt editor, the
-report's title and marking when nothing is selected. Every act is one
-operation on the `Report` model, journaled by the window, followed by a
-re-render of the page; the exported file never carries any chrome.
+The page shown is the same HTML the export writes, so it is exactly what
+the reader will get, with the figures drawn by the same JavaScript the
+reader's browser will run. It does two things the exported page does
+not: it outlines the selected block, and it reports which block was
+clicked. Everything else is in Qt. Above the page is a bar of actions
+(Insert, Reference, Move Up, Move Down, Delete, and Export as HTML or as
+a report template), and beside it is a settings pane for the selection:
+a figure block's sources and caption, a text block's Markdown in a Qt
+editor, or the report's title and marking when nothing is selected.
+Each action is one operation on the `Report` model, which the window
+records in the journal, followed by a new render of the page. The
+exported file carries none of the editor's controls.
 """
 
 from __future__ import annotations
@@ -65,6 +65,10 @@ from PySide6.QtWidgets import (
 )
 
 from .icons import control_icon
+
+# The bar and the pane are Qt, as for every other object (Brandon,
+# 2026-09-08: "the toolbar should be the same as the task bar at the top
+# of the report screen how we have for every other GUI object").
 
 # the insert menu: Markdown, plus the Result drop-down's options. Each
 # template's '_bind' fields are pointed at the first compatible object
@@ -132,8 +136,9 @@ class _Bridge(QObject):
         system clipboard. The page cannot reach the clipboard on its own
         from inside a `QWebEngineView` without a permission grant that
         differs by Qt version, and this process owns the clipboard
-        anyway; the answer goes back so the button can say whether it
-        copied (Brandon, 2026-09-24)."""
+        anyway. Returns whether it copied, so the button can say so."""
+        # the answer goes back for the button's own message (Brandon,
+        # 2026-09-24)
         _header, _, encoded = data_url.partition(',')
         image = QImage.fromData(QByteArray.fromBase64(encoded.encode('ascii')))
         if image.isNull():
@@ -156,8 +161,13 @@ class _Bridge(QObject):
 
 
 class ReportEditor(QWidget):
-    """Owns the web view, the bar and the pane; mutates the report the
-    operations describe."""
+    """The report editor: the web view, the bar and the settings pane.
+
+    It applies each operation to the report and renders the page again.
+    `edited` is emitted after each change to the report, and
+    `export_requested` and `template_requested` when Export → HTML or
+    Export → Report template is chosen.
+    """
 
     export_requested = Signal()
     #: the report on its own, as a template another project can load
@@ -348,8 +358,8 @@ class ReportEditor(QWidget):
     # ---- the acts -------------------------------------------------------------
 
     def insert(self, kind: str) -> None:
-        """Insert a block of `kind` after the selected block, or at the
-        end, and select it."""
+        """Insert a block of `kind`, one of the Insert menu's kinds, after
+        the selected block or at the end, and select it."""
         if self.report is None:
             return
         at = (self.selected + 1 if self.selected is not None
@@ -357,9 +367,10 @@ class ReportEditor(QWidget):
         self._operate({'op': 'insert', 'at': at, 'kind': kind})
 
     def insert_reference(self, kind: str, caption: str) -> None:
-        """`{{figure:caption}}` or `{{table:caption}}` at the text
-        editor's cursor — the token the model stores, renumbered by
-        the same code that numbers the page."""
+        """Insert `{{figure:caption}}` or `{{table:caption}}` at the text
+        editor's cursor. This is the token the report stores, numbered by
+        the same code that numbers the page. Nothing happens unless a
+        text block's editor is open."""
         if self.text_editor is None:
             return
         self.text_editor.textCursor().insertText(f'{{{{{kind}:{caption}}}}}')
@@ -382,8 +393,9 @@ class ReportEditor(QWidget):
         self._operate({'op': 'remove', 'at': self.selected})
 
     def flush_text(self) -> None:
-        """Land the text editor's Markdown on the block now — what the
-        debounce does after typing rests, and what a test calls."""
+        """Apply the text editor's Markdown to the selected block now. The
+        editor does this itself once typing has paused for
+        `TEXT_DEBOUNCE_MS`, and tests call it directly."""
         self._text_timer.stop()
         if (self.text_editor is None or self.report is None
                 or self.selected is None
@@ -559,6 +571,13 @@ class ReportEditor(QWidget):
                     objects: Callable[[], dict[str, Any]],
                     unit_system: Any,
                     object_groups: Callable[[], list[Any]] | None = None) -> None:
+        """Open `report` in the editor, with nothing selected.
+
+        `objects` returns the project's objects by name and
+        `object_groups`, when given, the project's object groups. Both
+        are called on every render, so the editor reads the project as it
+        stands. `unit_system` is the display units.
+        """
         self.report = report
         self.objects = objects
         self.object_groups = object_groups
@@ -569,6 +588,9 @@ class ReportEditor(QWidget):
         self._show_selection()
 
     def rebuild(self) -> None:
+        """Render the page again from the report and load it, keeping the
+        scroll position. When the render raises, the page shows the
+        traceback and `failure` holds a one-line summary of it."""
         from ..report import render_html
 
         if self.report is None:
@@ -641,42 +663,40 @@ class ReportEditor(QWidget):
     def stand_down(self) -> None:
         """Leave the page with nothing for the view's destructor to wait on.
 
-        A `QWebEngineView` destroyed while its page is live blocked the
-        whole process: Chromium's teardown waits on the render process
-        in a synchronous `mach_msg` call that never returned. That was
-        the gate's "stall at 98 %" — sampled on 2026-09-18 with a
-        worker's main thread parked inside QtWebEngineCore, and then
-        named exactly by a faulthandler dump: the window fixture
-        delivering the deferred delete to a window whose report page
-        had *just finished* loading. Stopping a navigation in flight
-        (the first cut of this) was not enough; a loaded, rendering
-        page hangs the destructor just the same.
+        Call this before the editor is destroyed. A `QWebEngineView`
+        destroyed while its page is live can block the whole process,
+        because Chromium's teardown waits on the render process and does
+        not return. A hidden page can be discarded instead (its render
+        process shut down and the page unloaded), and a discarded page is
+        destroyed in about a millisecond.
 
-        The cure is Qt's own: a hidden page can be *discarded* — its
-        render process shut down gracefully, the page unloaded — and
-        a discarded page is destroyed in a millisecond (measured: the
-        destructor went from a hang to 0.001 s). So the view is
-        hidden, the page discarded, and the events that carry the
-        change are pumped before the caller goes on to destroy
-        anything. The scroll-restoring slot of a navigation in flight
-        is dropped too, since it would fire into the discarded page.
-
-        Then the discard itself hung (2026-09-28, a stack this time:
-        `setLifecycleState(Discarded)` never returning from
-        `WebContentsAdapter::discard()`). Qt's source says why it can:
-        discard asks the render process to shut down and then destroys
-        the live web contents synchronously, right there — the same
-        teardown the destructor did — while the page is still bound
-        to the widget it drew into, with that widget's compositor and
-        surfaces alive to be waited on. The view's destructor never
-        did better: it deletes an owned page in the very call that
-        detaches it. So the page is detached from the view *first*,
-        the events that carry the widget away are pumped, and only
-        then is the page discarded, with nothing left to wait on but
-        the renderer it is asking to leave. Which is a mechanism, not
-        a witnessed cure — the hang wants a starved machine and never
-        reproduced alone — so the log still records each step.
+        So the navigation in flight and its scroll-restoring slot are
+        stopped, the view is hidden, the page is detached from the view,
+        the events that remove the widget are processed, and only then is
+        the page discarded, with nothing left to wait on but the render
+        process it is shutting down. Each step is written to the debug
+        log.
         """
+        # History. A destroyed view blocked in a synchronous `mach_msg`
+        # call that never returned: the gate's "stall at 98 %", sampled on
+        # 2026-09-18 with a worker's main thread parked inside
+        # QtWebEngineCore, then named by a faulthandler dump (the window
+        # fixture delivering the deferred delete to a window whose report
+        # page had just finished loading). Stopping a navigation in flight,
+        # the first cut, was not enough: a loaded, rendering page hangs the
+        # destructor the same way. Discarding took the destructor from a
+        # hang to 0.001 s (measured).
+        # Then the discard itself hung (2026-09-28, a stack this time:
+        # `setLifecycleState(Discarded)` never returning from
+        # `WebContentsAdapter::discard()`). Qt's source says why: discard
+        # asks the render process to shut down and then destroys the live
+        # web contents synchronously, the same teardown the destructor did,
+        # while the page is still bound to the widget it drew into, with
+        # that widget's compositor and surfaces alive to be waited on. The
+        # view's destructor deletes an owned page in the same call that
+        # detaches it. Hence detach first, pump, then discard. That is a
+        # mechanism, not a witnessed cure (the hang needs a starved machine
+        # and never reproduced alone), so the log still records each step.
         from PySide6.QtWidgets import QApplication
 
         page = self.page

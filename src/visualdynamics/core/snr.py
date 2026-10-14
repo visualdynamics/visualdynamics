@@ -1,44 +1,45 @@
-"""Signal to noise: how far a driven measurement stands above its floor.
+"""Signal-to-noise ratio of a driven measurement over its noise floor.
 
-A system identification records each channel twice — once with the
-drives still (the ambient: the room, the amplifiers, the cabling and the
-sensors) and once with them running. The driven recording holds the
-signal *and* that same noise, so its power is the sum of the two, and
-the signal's own power is what is left when the noise is taken away:
+A system identification records each channel twice: once with the
+drives off (the ambient recording, which holds the noise of the room,
+the amplifiers, the cabling and the sensors) and once with them
+running. The driven recording holds the signal and that same noise, so
+its power is the sum of the two, and the signal power is the driven
+power minus the ambient power:
 
     SNR = (P_driven - P_ambient) / P_ambient,    in dB 10 log10(SNR)
 
-That is the textbook definition — signal power over noise power, as
+This is the standard definition, signal power over noise power, as
 IEEE Std 1241 states it for digitizers and as Bendat and Piersol
-(*Random Data*, 4th ed., Wiley, 2010) use it for random data — with the
-signal's power estimated by subtraction, which is exact when the noise
-is uncorrelated with the signal, the one assumption a separate ambient
-recording makes anyway. The plain quotient P_driven / P_ambient is
-SNR + 1: the two agree when the margin is wide and part near the floor,
-where a quotient of 3 dB is a signal-to-noise of 0 dB. It flatters
-exactly the channels the reading exists to find, so it is not what is
-drawn here (Brandon, 2026-10-03: the per-line curve moved to this
-definition with the per-channel bars).
+(*Random Data*, 4th ed., Wiley, 2010) use it for random data. The
+signal power is estimated by subtraction, which is exact when the
+noise is uncorrelated with the signal; a separate ambient recording
+assumes that already. The plain quotient P_driven / P_ambient is
+SNR + 1. The two agree when the margin is large and differ near the
+floor, where a quotient of 3 dB is a signal-to-noise ratio of 0 dB.
+The quotient overstates the margin of the channels closest to their
+floor, which are the channels this check is meant to find, so it is
+not used here.
 
-It is also the quantity coherence speaks for: with the noise on the
-response, ordinary coherence is SNR / (1 + SNR) (Bendat and Piersol),
-so the `THRESHOLD_DB` the bars are judged against is the margin at
-which that coherence reaches 0.9.
+The ratio also sets the coherence: with the noise on the response,
+ordinary coherence is SNR / (1 + SNR) (Bendat and Piersol), so
+`THRESHOLD_DB`, the level the per-channel bars are compared against,
+is the margin at which that coherence is about 0.91.
 
-Two readings, one rule:
+Two functions compute it by the same rule:
 
-- `signal_to_noise` — line by line, every shared channel: the curve,
-  the stage and the report's figure all divide here.
-- `rms_signal_to_noise` — one number per channel, from the RMS of each
-  recording over the band the two densities share: P is the area under
-  the density, read the way the density is drawn (`Psd.area`). A
-  summary, dominated by wherever the energy is, so it ranks channels
-  and the curve stays the diagnostic.
+- `signal_to_noise`: line by line, for every shared channel. The
+  curve, the stage and the report's figure all use it.
+- `rms_signal_to_noise`: one value per channel, from the mean square
+  of each recording over the band the two densities share, taken as
+  the area under the density the way the density is drawn
+  (`Psd.area`). The band's largest peaks dominate it, so it is for
+  ranking channels, and the curve is the one to diagnose with.
 
-Where the driven power does not exceed the ambient — estimation scatter
-right at the floor, or a channel the drives never reached — there is no
-signal to state, and the answer is NaN rather than a number or minus
-infinity: the channel is at its noise floor, and the readings say so.
+Where the driven power does not exceed the ambient (estimation scatter
+at the floor, or a channel the drives did not excite), there is no
+signal to report, and the result is NaN rather than a number or minus
+infinity: the channel is at its noise floor.
 """
 
 from __future__ import annotations
@@ -50,6 +51,10 @@ from typing import Any
 import numpy as np
 
 from .data import paired_channels
+
+# The plain quotient P_driven / P_ambient is not drawn: the per-line
+# curve moved to the subtracted definition together with the
+# per-channel bars (Brandon, 2026-10-03).
 
 __all__ = ['AT_FLOOR', 'THRESHOLD_DB', 'at_floor', 'rms_signal_to_noise',
            'signal_to_noise']
@@ -68,9 +73,11 @@ AT_FLOOR = 'at noise floor'
 
 
 def at_floor(rows: Sequence[tuple[str, float]]) -> list[tuple[str, float]]:
-    """The rows with every NaN channel's label saying why it has no
-    bar — one place, so the app, the headless plot and the report name
-    it alike."""
+    """The rows, with each NaN channel's label marked as at the noise
+    floor, where its bar would be.
+
+    The app, the headless plot and the report all label these channels
+    through this function, so they label them the same way."""
     return [(f'{label} ({AT_FLOOR})' if not np.isfinite(value) else label,
              value) for label, value in rows]
 
@@ -86,17 +93,17 @@ def _subtracted(driven: np.ndarray, ambient: np.ndarray) -> np.ndarray:
 
 
 def signal_to_noise(signal: Any, floor: Any):
-    """The signal-to-noise of a driven density over its ambient one,
-    channel by channel, line by line, as a power ratio (take
-    10 log10 for decibels).
+    """The signal-to-noise ratio of a driven density over its ambient
+    density, channel by channel and line by line, as a power ratio
+    (take 10 log10 for decibels).
 
-    Channels pair by `paired_channels`: same DOF, same quantity, on
-    the same frequency lines, or it refuses. A line whose ambient is
-    zero answers NaN, never infinity — on hardware zero means below
-    resolution, in a simulation it means the quiet was exactly silent,
-    and neither is an infinite signal-to-noise. A line where the
-    driven density does not exceed the ambient answers NaN too: it is
-    at the noise floor.
+    Channels are paired by `paired_channels`: same DOF, same quantity
+    and the same frequency lines, or it raises. A line whose ambient is
+    zero gives NaN, not infinity. On hardware a zero is noise below the
+    recording's resolution, and in a simulation it is an ambient run
+    with no noise in it; neither is an infinite signal-to-noise ratio.
+    A line where the driven density does not exceed the ambient also
+    gives NaN, because it is at the noise floor.
 
     Parameters
     ----------
@@ -108,9 +115,10 @@ def signal_to_noise(signal: Any, floor: Any):
     Returns
     -------
     tuple
-        ``(abscissa, rows, dofs, dims)`` — the frequency lines, the
-        ratio as one row per shared channel, each row's DOF and its
-        quantity, so a mixed object's rows can be told apart.
+        ``(abscissa, rows, dofs, dims)``: the frequency lines, the
+        ratio as one row per shared channel, and each row's DOF and
+        quantity, so the rows of an object holding several quantities
+        can be told apart.
     """
     rows, dofs, dims = [], [], []
     for i, j, dof, dim in paired_channels(signal, floor):
@@ -123,23 +131,24 @@ def signal_to_noise(signal: Any, floor: Any):
 def rms_signal_to_noise(signal: Any, floor: Any,
                         records: Sequence[int] | None = None
                         ) -> tuple[list[tuple[str, float]], list[str]]:
-    """([(channel label, RMS signal-to-noise in dB)], [silent labels])
-    for the channels the two densities share.
+    """The RMS signal-to-noise ratio in dB of each channel the two
+    densities share, and the labels of the channels with no ambient
+    noise.
 
     P_driven and P_ambient are each channel's mean square over the
-    whole band the densities stand on — the area under the density —
-    and the reading is 10 log10((P_driven - P_ambient) / P_ambient),
-    which is 20 log10 of the signal's RMS over the noise's. NaN where
-    the driven power does not exceed the ambient: that channel is at
-    its noise floor.
+    whole band of the densities (the area under the density), and the
+    value is 10 log10((P_driven - P_ambient) / P_ambient), which is
+    20 log10 of the signal RMS over the noise RMS. It is NaN where the
+    driven power does not exceed the ambient, because that channel is
+    at its noise floor.
 
-    A channel whose ambient recorded nothing at all is the opposite
-    case and is kept apart: on hardware zero is noise below the
-    recording's resolution, in a simulation a quiet that was exactly
-    silent, and either way there is no noise to divide by. Reading it
-    as at the floor would flag the cleanest channel as the worst (the
-    plate's drive-point load cells did exactly that, 2026-10-03), so
-    it is left out of the rows and named in the second list.
+    A channel whose ambient recording is exactly zero is the opposite
+    case and is kept separate. On hardware a zero is noise below the
+    recording's resolution, and in a simulation it is an ambient run
+    with no noise in it; either way there is no noise to divide by.
+    Treating it as at the floor would mark the cleanest channel as the
+    worst, so it is left out of the rows and listed in the second
+    list instead.
 
     Parameters
     ----------
@@ -154,13 +163,16 @@ def rms_signal_to_noise(signal: Any, floor: Any,
     Returns
     -------
     rows : list of (str, float)
-        One row per channel, labeled as the driven object labels it —
-        with the quantity added where one DOF carries two (a drive
-        point's accelerometer and load cell), so the bars can tell
-        them apart.
+        One row per channel, labeled as the driven object labels it,
+        with the quantity added where one DOF has two channels (a drive
+        point's accelerometer and load cell), so the bars can be told
+        apart.
     silent : list of str
-        The labels of the channels whose ambient recorded nothing.
+        The labels of the channels whose ambient recording is zero.
     """
+    # A zero ambient read as at the floor marked the plate's
+    # drive-point load cells, the cleanest channels, as the worst
+    # (2026-10-03); they are listed as silent instead.
     pairs = paired_channels(signal, floor)
     if records is not None:
         wanted = {int(k) for k in records}

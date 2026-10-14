@@ -1,47 +1,52 @@
-"""Add Block and Add Plane, typed into a pane beside the 3-D view.
+"""The pane beside the 3-D view where Add Block, Add Plane and the
+solids are typed.
 
-The pop-up windows these replaced (`plane_dialog`, 2026-09-26 and
-2026-09-30) took a corner and two or three edges; Brandon wanted no
-window at all, and the box described the way it is thought of — where
-its center is and how wide it is along each axis — with the preview in
-the view turned and slid by the same gizmo that turns a coordinate
-system (2026-10-02). So the pane holds a center, three widths and an
-element size, in the display unit, and the window holds the frame the
-box is drawn in: the rings turn it about its center, the arrows slide
-the center along its own axes onto the grid. The rotation is also three
-fields, degrees about the geometry's X, Y and Z, for an odd angle the
-rings' whole degrees do not reach (Brandon, 2026-10-02); the rings
-write the angles back, so the two never disagree.
+A box is described by its center and its width along each axis, and its
+preview in the view is turned and slid by the same gizmo that turns a
+coordinate system. So the pane holds a center, three widths and an
+element size in the display unit, and the window holds the frame the box
+is drawn in: the rings turn it about its center, and the arrows slide
+the center along the frame's own axes onto the grid. The rotation is
+also three fields, degrees about the geometry's X, Y and Z applied in
+that order, for an angle the rings' whole degrees do not reach. The
+rings write the angles back, so the fields and the view always agree.
+Square Up turns the box back to the geometry's axes and keeps its
+center.
 
 A block takes three widths. A plate lies in a plane, and the plane is
-named by the one width left at zero — a width of zero along Z is a
-plate in the frame's X-Y plane — so a plate and a block are typed the
-same way.
+named by the one width left at zero (a width of zero along Z is a plate
+in the frame's X-Y plane), so a plate and a block are typed the same
+way.
 
 The pane holds no rule of its own. The window turns the fields and its
 frame into the corner and edges the project's `add_block` and
-`add_plane` take, asks the core what they would make, and draws it;
-**Add** is the project verb, so the journal line is the call a script
-makes.
+`add_plane` take, asks the core what they would make, and draws it. Add
+runs the project verb, so the journal line is the call a script makes.
 
-**Keep apart** (Brandon, 2026-10-11) lands the box only on its own
-element group's nodes, so a part meshed against another — a channel's
-foot on the box it is bolted to — keeps nodes of its own where the two
-touch, for Merge Coincident Nodes to join at the bolts. Shown once the
-geometry holds something to be kept apart from.
+Keep apart from other groups joins the box only to its own element
+group's nodes. A part meshed against another (a channel's foot on the
+box it is bolted to) then keeps nodes of its own where the two touch,
+for Merge Coincident Nodes to join at the bolts. It is shown once the
+geometry has nodes.
 
-**Solids** (2026-10-11) are typed in the same pane: a solid block is a
-center, three widths and three angles, a cylinder a center, a radius, a
-length and three angles — its axis the frame's Z — and either a name.
-No element size and no element group: a solid is a shape, meshed
-later (`core.solids`). The same gizmo turns and slides it.
+Solids are typed in the same pane and turned and slid by the same
+gizmo. A solid has a name in place of the element group and no element
+size, because it is a shape that is meshed later (`core.solids`).
 
-A **section** (2026-10-12) is a shape picked — I-beam, channel, tee,
-angle, rectangular or round tube — its dimensions, named as the beam
-element's sections name them, and a length along the frame's Z. A
-**hole** is a diameter, a depth or Through, and a counterbore when
-asked for one; its center is where it enters, and it runs down the
-frame's Z.
+- A solid block is a center, three widths, three angles and a corner
+  radius, which rounds its four edges along its own Z.
+- A cylinder is a center, a radius, a length along the frame's Z, and
+  three angles.
+- A section is a shape (I-beam, channel, tee, angle, rectangular tube or
+  round tube), its dimensions, named as `core.solids.SECTIONS` names
+  them, and a length along the frame's Z.
+- A hole is a diameter, a depth or Through, and a counterbore's diameter
+  and depth when one is asked for. Its center is where it enters, and it
+  runs down the frame's Z.
+
+A solid already made can be opened in the pane to change it, with Apply
+in place of Add. A boolean has no size of its own, so its pane (Move
+Part) only moves and turns it.
 """
 
 from __future__ import annotations
@@ -61,6 +66,13 @@ from PySide6.QtWidgets import (
 from ..core.solids import HOLE_DIMENSIONS, SECTIONS
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
+
+# The pop-up windows this pane replaced (`plane_dialog`, 2026-09-26 and
+# 2026-09-30) took a corner and two or three edges. Brandon wanted no
+# window at all, the box described by its center and widths, and the
+# preview turned and slid by the coordinate-system gizmo, with the
+# rotation as fields too (Brandon, 2026-10-02). Keep apart: Brandon,
+# 2026-10-11. Solids: 2026-10-11. Sections and holes: 2026-10-12.
 
 #: what the fields open on, in the display unit: a box one unit on a side
 #: in X and Y and a tenth deep, sitting on the origin's corner, a tenth
@@ -110,7 +122,13 @@ def _box(value: float, minimum: float = -1e9) -> DoubleSpinBox:
 
 
 class MeshPanel(QWidget):
-    """The fields for one box or plate, and its Add."""
+    """The fields for one block, plate or solid, and its Add (or Apply)
+    button.
+
+    `changed` is emitted when a field is edited; the window then reads
+    `values` and redraws the preview. `add_asked`, `close_asked` and
+    `square_asked` are the Add, Close and Square Up buttons.
+    """
 
     #: a field was edited: the window reads `values()` and redraws
     changed = Signal()
@@ -274,13 +292,19 @@ class MeshPanel(QWidget):
 
     def open_for(self, kind: str, unit: str, groups: Sequence[str],
                  default: str | None = None, editing: bool = False) -> None:
-        """Set the pane up for `kind` — a block or a plane of elements, or
-        a solid block or cylinder — in the display unit `unit`, with the
-        geometry's element groups to choose from, opening on `default`;
-        the fields open on the defaults. Only the fields the kind takes
-        are shown. `editing` opens it on a solid already made, to change
-        it ('solid_part' a boolean, moved and turned whole): Apply, not
-        Add."""
+        """Set the pane up for `kind`, with every field on its default.
+
+        `kind` is 'block' or 'plane' for elements, or a solid:
+        'solid_block', 'solid_cylinder', 'solid_section' or 'solid_hole',
+        or 'solid_part' for a boolean, which is only edited. `unit` is the
+        display unit the fields are in. `groups` are the geometry's
+        element groups to choose from, and the field opens on `default`,
+        or on 'block' or 'plate' when it is None; a solid has a name field
+        instead, which opens empty. Only the fields the kind takes are
+        shown. `editing` opens the pane on a solid already made, to change
+        it, with Apply in place of Add; a section's shape cannot be
+        changed then.
+        """
         self.kind = kind
         self.editing = editing
         self.unit = unit
@@ -379,10 +403,17 @@ class MeshPanel(QWidget):
         self.counterbore.setVisible(True)
 
     def values(self) -> dict:
-        """The fields as typed, in the display unit. A section's
-        `dimensions` are its shape's, in order; a hole's its diameter,
-        its depth (zero through) and its counterbore's two (zeros,
-        none), as `edit_solid` takes them."""
+        """The fields as typed, in the display unit, as a dict: 'center',
+        'widths', 'shape', 'dimensions', 'radius', 'length', 'corner',
+        'angles' in degrees, 'size', 'group' and 'apart'.
+
+        A section's 'dimensions' are its shape's, in the order `SECTIONS`
+        gives them. A hole's are its diameter, its depth (zero when it
+        goes through) and its counterbore's diameter and depth (zeros
+        when it has none), as `edit_solid` takes them. For a cylinder, a
+        section and a hole, 'widths' is the size of the box around the
+        solid, which the gizmo is sized by.
+        """
         shape = self.shape.currentText()
         section = tuple(box.value() for box in self.section[:len(SECTIONS[shape])])
         through, bored = self.through.isChecked(), self.counterbore.isChecked()
@@ -415,12 +446,17 @@ class MeshPanel(QWidget):
                 'apart': self.apart.isChecked()}
 
     def set_values(self, quiet: bool = False, **values) -> None:
-        """Fill fields by name — center=(x, y, z), widths=(x, y, z),
-        angles=(x, y, z) in degrees, size=..., radius=..., length=...,
-        corner=..., shape=..., dimensions=(...), group=..., apart=...;
-        a hole's dimensions as `values` gives them; how a test
-        types, and how the gizmo writes the center and the angles back.
-        `quiet` fills them without a `changed`."""
+        """Fill fields by name, in the display unit: center=(x, y, z),
+        widths=(x, y, z), angles=(x, y, z) in degrees, size, radius,
+        length, corner, shape, dimensions, group and apart. A hole's
+        dimensions are given as `values` gives them. Picking a shape
+        opens its dimensions on that shape's defaults, except when
+        editing.
+
+        Tests type with this, and the gizmo writes the center and the
+        angles back with it. With `quiet` the fields are filled without
+        emitting `changed`.
+        """
         boxes = [*self.center, *self.widths, *self.angles, self.size,
                  self.radius, self.length, self.corner, *self.section, *self.hole]
         if quiet:
@@ -474,5 +510,7 @@ class MeshPanel(QWidget):
             self.changed.emit()
 
     def show_reading(self, text: str, ok: bool) -> None:
+        """Show what Add would make, as the window reads it from the core,
+        and enable Add only when `ok`."""
         self.reading_label.setText(text)
         self.add_button.setEnabled(ok)

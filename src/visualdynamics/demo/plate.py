@@ -1,18 +1,15 @@
 """The demonstration test article: a free aluminum plate.
 
-A 12 in x 12 in x 0.5 in plate of 6061-T6, hung free-free — the
-canonical modal-survey article, chosen because a completely free
-square plate is *the* classical benchmark: its nondimensional
-frequencies are tabulated (Leissa, NASA SP-160) and every test
-engineer has rapped one with a hammer. Where the drone demonstrates
-scale, the plate demonstrates truth: its answers can be checked
-against a book.
+A 12 in x 12 in x 0.5 in plate of 6061-T6, free-free. A completely free
+square plate is a classical benchmark: its nondimensional frequencies
+are tabulated (Leissa, NASA SP-160), and most test engineers have tapped
+one with a hammer. The drone shows a large model; the plate is the one
+whose answers can be checked against a book.
 
-Built entirely with `visualdynamics.fem` — the rectangular MITC4
-shell element, validated against the same tables in
-`tests/test_fem.py` — so it owes nothing to any other library. It is
-the model the small test fixtures come from, the way the drone is
-the model the large ones come from.
+It is built with `visualdynamics.fem` only, from the rectangular MITC4
+shell element, which `tests/test_fem.py` checks against the same tables.
+The small test fixtures are made from this model (`testdata/generate_plate.py`),
+as the large ones are made from the drone.
 
     from visualdynamics.demo import plate
 
@@ -24,16 +21,16 @@ against the classical table:
 
     python3 -m visualdynamics.demo.plate
 
-The article is *defined* in inches and pounds — the drawing a
-machine shop would get — and *carried* in SI exactly, converted
-once below, because `fem.Model` is SI inside like everything else
-in the package. Display units are the status bar's business.
+The plate is defined in inches and pounds, as the drawing for a machine
+shop would give it, and converted exactly to SI once, below, because
+`fem.Model` works in SI like the rest of the package. The units shown
+are set in the app's status bar.
 
-The plate answers to the tables to about a percent, not exactly,
-for two honest reasons: the mesh (discretization converges from
-above as h^2 — `tests/test_fem.py` measures it per mode), and
-Poisson's ratio (the classical values are computed at 0.3, 6061 is
-0.33, and a free plate's frequencies shift a little with it).
+The frequencies agree with the tables to about a percent, for two
+reasons. One is the mesh: the frequencies converge from above as h^2,
+which `tests/test_fem.py` measures per mode. The other is Poisson's
+ratio: the classical values are computed at 0.3, 6061 is 0.33, and a
+free plate's frequencies change a little with it.
 """
 
 from __future__ import annotations
@@ -58,11 +55,13 @@ MESH = 12
 
 
 def build(mesh: int = MESH) -> fem.Model:
-    """The plate, meshed `mesh` x `mesh`.
+    """The plate's finite element model, `mesh` x `mesh` plate elements
+    (12 by default), in meters.
 
-    Node ids read like a survey grid: row 1 is 101..1xx along the
-    front edge, row 2 is 201.., so node 704 is four points along the
-    seventh row — the numbering a channel table would use.
+    Node ids are numbered like a survey grid: row 1 is 101, 102, ...
+    along the edge at y = 0, row 2 is 201, 202, ..., so node 704 is the
+    fourth node of the seventh row, the numbering a channel table would
+    use.
     """
     model = fem.Model('plate', length_unit='m')
     for j in range(mesh + 1):
@@ -79,15 +78,16 @@ def build(mesh: int = MESH) -> fem.Model:
 
 
 def instrumented(model: fem.Model) -> dict[str, list[int]]:
-    """The nodes a modal survey of this plate would put sensors on.
+    """The nodes a modal survey of this plate would put sensors on, as
+    {'grid': node ids, 'drive': [node id]}.
 
-    A five-by-five grid of accelerometers — the layout a real plate
-    survey uses, dense enough that the sixth elastic mode (three
-    half-waves) is unaliased — and the drive point at a corner,
-    because a corner of a free plate moves in every low mode while
-    the center sits on the node lines of all the antisymmetric ones.
-    Found from the model rather than written down, for the same
-    reason the drone's are: numbering follows the mesh.
+    The grid is five by five accelerometers, a common layout for a plate
+    survey and dense enough that the sixth elastic mode (three
+    half-waves) is not spatially aliased. The drive point is the corner
+    node 101, because a corner of a free plate moves in every low mode
+    while the center is on the node lines of all the antisymmetric ones.
+    The nodes are found from the model, not written down, because their
+    ids depend on the mesh.
     """
     ids = model.node_ids
     rows = round(math.sqrt(len(ids))) - 1
@@ -99,7 +99,9 @@ def instrumented(model: fem.Model) -> dict[str, list[int]]:
 
 
 def describe(model: fem.Model | None = None) -> None:
-    """What it weighs and where its modes land against the book."""
+    """Print the plate's size, its mass, and its elastic frequencies
+    beside the classical nondimensional values. `model` defaults to
+    `build()`."""
     model = model or build()
     shapes = model.eigensolution(maximum_frequency=2500.0)
     bending = (ALUMINUM.youngs_modulus * THICKNESS ** 3

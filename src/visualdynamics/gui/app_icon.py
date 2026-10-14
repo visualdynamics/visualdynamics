@@ -1,24 +1,22 @@
 """The application's icon: four FRFs on the waterfall stage.
 
-The 3-D reading of data is what this application looks like — the
-waterfall stage, channels receding, level-colored — so that is what
-the tile shows (Brandon, 2026-08-23; it was a plate carrying a mode
-before). The curves are real: accelerances synthesized from the
-demonstration plate's own eigensolution, noiseless on purpose, drawn
-from the exact viewpoint `viz.waterfall.place_camera` gives the stage.
+The 3-D view of data (the waterfall stage, with channels receding and
+colored by level) is what the application looks like, so it is what the
+tile shows. The curves are accelerances synthesized from the
+demonstration plate's own modes, without noise, and drawn from the
+viewpoint `viz.waterfall.place_camera` gives the stage.
 
-Drawn with QPainter and numpy alone. An icon that needed a GL context
-to exist could not be built on a machine without one, and under Qt's
-offscreen platform VTK's render widget takes the process down with it
-— which is exactly the situation an icon build runs in. The synthesis
-is a fifth of a second and the drawing is cached, so the app pays for
-its icon once.
+The icon is drawn with QPainter and numpy only, so it can be built on a
+machine with no GL context. Under Qt's offscreen platform, which is
+where an icon build runs, VTK's render widget crashes the process. The
+synthesis takes about a fifth of a second and the drawing is cached, so
+each size is drawn once per run.
 
-Two deliberate departures from the honest plot, both because a tile
-is not a plot: the vertical is stretched to fill the tile (the
-stage's view projects wide and short), and the color/height range is
-clipped to the top `DECADES` decades — unclipped, one deep
-antiresonance eats the whole range and every peak reads flat green.
+The tile differs from a plot in two ways. The vertical is stretched to
+fill the tile, because the stage's view projects wide and short. And
+the color and height range is clipped to the top `DECADES` decades:
+without the clip, one deep antiresonance takes up the whole range and
+every peak reads flat green.
 """
 
 from __future__ import annotations
@@ -33,6 +31,9 @@ if TYPE_CHECKING:                                    # pragma: no cover
 from functools import cache
 
 import numpy as np
+
+# The icon has been the waterfall stage since Brandon, 2026-08-23; before
+# that it was a plate carrying a mode.
 
 #: the synthesis: a drive at the plate's corner, responses spread
 #: across it, the band the plate's modes live in
@@ -64,8 +65,8 @@ SMALL = 96
 
 
 def colormap(values: ArrayLike) -> np.ndarray:
-    """`values` in 0..1 as an (N, 3) array of RGB — `theme.VIRIDIS`,
-    which everything that paints by level reads from."""
+    """`values` in 0..1 as an (N, 3) array of RGB on `theme.VIRIDIS`,
+    the ramp everything that paints by level uses."""
     from ..theme import colormap as ramp
 
     return ramp(values)
@@ -73,12 +74,12 @@ def colormap(values: ArrayLike) -> np.ndarray:
 
 @cache
 def synthesized_levels() -> np.ndarray:
-    """The four curves, as levels in 0..1: color and height alike.
+    """The four curves as levels in 0..1, used for both color and
+    height.
 
-    Noiseless accelerances from the demonstration plate's own modes
-    (`ShapeSet.synthesize_frf`), log magnitude, clipped to the top
-    `DECADES` decades of the set and normalized. Real data, no
-    measurement — the icon shows what the instrument shows, clean.
+    Accelerances without noise from the demonstration plate's own modes
+    (`ShapeSet.synthesize_frf`), as log magnitude, clipped to the top
+    `DECADES` decades of the set and normalized. Cached.
     """
     from ..demo import plate
 
@@ -94,27 +95,28 @@ def synthesized_levels() -> np.ndarray:
 
 @cache
 def stage_basis() -> tuple[np.ndarray, np.ndarray]:
-    """(right, up) — the stage's home view. See
-    `viz.waterfall.stage_basis`, which owns it: the icon's geometry
-    *is* the app's default 3-D view of data, and so is the report's
-    3-D figure."""
+    """(right, up), the stage's home view, from
+    `viz.waterfall.stage_basis`. The icon uses the same view as the
+    application's default 3-D view of data and the report's 3-D
+    figure."""
     from ..viz.waterfall import stage_basis as basis
 
     return basis()
 
 
 def curve_count(size: int) -> int:
-    """How many curves a tile this size can carry legibly."""
+    """How many curves a tile of `size` pixels shows: three below
+    `SMALL` (96 pixels), four otherwise."""
     return 3 if size < SMALL else 4
 
 
 def screen_curves(size: int) -> list[np.ndarray]:
     """The curves as (N, 2) pixel paths, front first.
 
-    Projected through the stage basis, then fitted per axis into the
-    tile — the stage's view projects wide and short, and a uniform fit
-    left the tile empty top and bottom. An icon may stretch where a
-    plot may not.
+    Projected through the stage basis, then fitted to the tile on each
+    axis separately. The stage's view projects wide and short, and a
+    uniform fit would leave the tile empty at the top and bottom; an
+    icon may be stretched where a plot may not.
     """
     from ..viz.waterfall import STAGE
 
@@ -144,8 +146,8 @@ def screen_curves(size: int) -> list[np.ndarray]:
 def draw_app_icon(size: int) -> QImage:
     """The icon at `size` pixels square, as a QImage.
 
-    Cached: the synthesis is a fifth of a second, the drawing less,
-    and every caller asks for the same handful of sizes.
+    Cached: the synthesis takes about a fifth of a second, the drawing
+    less, and every caller asks for the same few sizes.
     """
     from PySide6.QtCore import QPointF, QRectF, Qt
     from PySide6.QtGui import (
@@ -196,13 +198,13 @@ def draw_app_icon(size: int) -> QImage:
 
 @cache
 def app_icon() -> QIcon:
-    """The icon at the sizes a window manager asks for.
+    """The icon at the sizes a window manager asks for, 16 to 512
+    pixels.
 
-    Several rather than one scaled: below about a hundred pixels the
-    fourth curve goes and the rest thicken, because four ridges over
-    thirty pixels is a smear. `tools/make_app.py` renders the same
-    function into a Mac `.icns`, so the Dock and the window wear one
-    mark.
+    Each size is drawn, not scaled from one image: below 96 pixels the
+    fourth curve is left out, because four curves in thirty pixels
+    cannot be told apart. `tools/make_app.py` renders the same drawing
+    into a Mac `.icns`, so the Dock and the window show the same icon.
     """
     from PySide6.QtGui import QIcon, QPixmap
 

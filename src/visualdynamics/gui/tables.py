@@ -1,13 +1,15 @@
 """Tables that behave like a spreadsheet.
 
-Model/view rather than per-cell widgets, so a table costs nothing until it
-is scrolled, edits write straight back to the underlying visualdynamics object with
-validation, and switching display units restates the values without
-rebuilding anything.
+The tables are model/view, not a widget per cell, so a table costs
+nothing until it is scrolled, an edit is validated and written straight
+back to the visualdynamics object under it, and switching display units
+restates the values without rebuilding anything.
 
-`CopyPasteTableView` speaks Excel's clipboard format — tab-separated text,
-newline-separated rows — so a selection copies straight into a spreadsheet
-and a block of spreadsheet cells pastes back in.
+`CopyPasteTableView` uses Excel's clipboard format (tab-separated cells,
+one row per line), so a selection copies straight into a spreadsheet and
+a block of spreadsheet cells pastes back in. It also has Batch Edit,
+Clear, a fill handle, a copy button for the whole table, and Delete for
+whole rows where its owner allows it.
 """
 
 from __future__ import annotations
@@ -67,7 +69,8 @@ FILL_GRAB = 4                  # slack around it, so it is not a pixel hunt
 
 @dataclass
 class Column:
-    """One column: how to read it, how to show it, whether it can be set."""
+    """One column of a `TableModel`: how to read it, how to show it, and
+    whether it can be set."""
 
     title: str
     get: Callable                      # (obj, row) -> value
@@ -104,19 +107,26 @@ class Column:
 
     @property
     def editable(self) -> bool:
+        """Whether the column can be set, which is whether it has a
+        `set`."""
         return self.set is not None
 
     def choices_for(self, obj: Any, row: int) -> list | None:
-        """What one cell offers, which can be narrower than the column's list.
+        """What one cell offers, which can be narrower than the column's
+        list.
 
-        A channel the file said was an acceleration should offer four units,
-        not all twenty-one, while the channel below it offers its own four.
+        A channel the file said was an acceleration offers the
+        acceleration units, not every unit, while the channel below it
+        offers its own.
         """
         if self.row_choices is not None:
             return self.row_choices(obj, row)
         return self.choices
 
     def text(self, obj: Any, row: int) -> str:
+        """The cell's text: `format` applied to the value when the column
+        has one, otherwise a float to six significant figures and '' for
+        None."""
         value = self.get(obj, row)
         if self.format is not None:
             return self.format(value)
@@ -126,7 +136,14 @@ class Column:
 
 
 class TableModel(QAbstractTableModel):
-    """A table over a visualdynamics object, described by a list of Columns."""
+    """A table over a visualdynamics object, described by a list of
+    `Column` objects.
+
+    `edit_rejected` carries the reason a cell refused a value. For each
+    successful edit of a journaled column, `edit_journaled` carries the
+    replay line's suffix; the window puts `project[name]` in front of it
+    and appends it to the journal.
+    """
 
     edit_rejected = Signal(str)         # why a cell refused a value
     #: a successful edit's replay-line suffix — the window prepends
@@ -224,11 +241,11 @@ class TableModel(QAbstractTableModel):
     # ---- helpers ------------------------------------------------------------
 
     def refresh_row(self, row: int) -> None:
-        """Restate one row, leaving the selection alone.
+        """Redraw one row, leaving the selection alone.
 
-        A full reset clears the selection, which matters when the selection
-        is what the edit applies to — turning a coordinate system would
-        lose the very system being turned.
+        A full reset clears the selection, which matters when the
+        selection is what the edit applies to: turning a coordinate system
+        would lose the system being turned.
         """
         self.dataChanged.emit(self.index(row, 0),
                               self.index(row, self.columnCount() - 1))
@@ -242,17 +259,19 @@ class TableModel(QAbstractTableModel):
 
     def set_cells(self, cells: Sequence[tuple[int, int, str]]
                   ) -> tuple[int, int, str]:
-        """Write a different value into each of many cells, as one change.
+        """Write a different value into each of many cells, as one change,
+        and return (applied, rejected, reason).
 
-        `set_many` puts one value everywhere and is written over this;
-        here each cell gets its own. One dataChanged for the lot: cell-by-
-        cell setData would emit once per cell, and every one of those
-        redraws the 3D view, so setting a column of a few thousand nodes
-        has to cost one redraw, not a few thousand.
+        `cells` holds (row, column, text) for each cell. `set_many` is
+        this with one value for every cell. One `dataChanged` covers all
+        of them: setData cell by cell would emit once per cell, and each
+        emission redraws the 3-D view, so setting a column of a few
+        thousand nodes costs one redraw and not a few thousand.
 
-        Cells that refuse the value are left alone and counted, so a batch
-        that only partly lands is not mistaken for a clean one; the first
-        refusal's reason comes back with the counts.
+        Cells that refuse their value are left as they are and counted,
+        so a batch that only partly lands is not mistaken for a clean
+        one, and the reason for the first refusal is returned with the
+        counts.
         """
         applied = rejected = 0
         reason = ''
@@ -279,8 +298,9 @@ class TableModel(QAbstractTableModel):
 
     def set_many(self, indexes: Sequence[QModelIndex],
                  text: str) -> tuple[int, int, str]:
-        """Write one value into many cells, reporting a single change —
-        `set_cells` with the same text for every cell."""
+        """Write one value into many cells as one change, and return
+        (applied, rejected, reason): `set_cells` with the same text for
+        every cell."""
         return self.set_cells((index.row(), index.column(), text)
                               for index in indexes)
 
@@ -288,8 +308,8 @@ class TableModel(QAbstractTableModel):
 class ChoiceDialog(QDialog):
     """Pick one of a column's choices, shown the way its cells show them.
 
-    Batch editing a column of colors should offer the same list of colors
-    as editing one cell of it, not a box to type a color name into.
+    Batch editing a column of colors offers the same list of colors as
+    editing one cell of it, not a box to type a color name into.
     """
 
     def __init__(self, parent: QWidget | None, prompt: str,
@@ -312,6 +332,7 @@ class ChoiceDialog(QDialog):
         layout.addWidget(buttons)
 
     def value(self) -> str:
+        """The choice picked, as text."""
         return self.combo.currentText()
 
 
@@ -322,11 +343,16 @@ _UNITS_TRACE = (pathlib.Path.home() / 'Library' / 'Logs'
 
 
 def trace_units(what: str) -> None:
-    """A witness line per units-editor event, like the drop log: the
-    instantly-closing drop-down could not be reproduced by synthetic
-    clicks, so the real click writes its own story
-    (~/Library/Logs/VisualDynamics-units.log, truncated per session by
-    the first line written)."""
+    """Write one line to the units-editor log for an event in a choice
+    cell's drop-down, with the mouse buttons, the open popup and the
+    focused widget at that moment.
+
+    The log is ~/Library/Logs/VisualDynamics-units.log, overwritten by
+    the first line each run writes. A failure to write is ignored.
+    """
+    # A witness log, like the drop log: the drop-down that closed the
+    # moment it opened could not be reproduced by synthetic clicks, so
+    # the real click writes its own record.
     try:
         from PySide6.QtWidgets import QApplication
 
@@ -386,13 +412,13 @@ LIST_PADDING = 48
 
 
 class ChoiceDelegate(QStyledItemDelegate):
-    """Edit a column that declares `choices` with a drop-down.
+    """Edit a column that declares `choices` with a drop-down, and a date
+    column with a calendar.
 
-    Opening the cell opens the list: a closed combo box would make the user
-    click twice to see what the choices even are. Picking one applies it
-    and closes, rather than waiting for focus to move away.
-
-    Typing still works — the model accepts the same values either way — so
+    Opening the cell opens the list, because a closed combo box would
+    take a second click to show the choices. Picking one applies it and
+    closes the editor, without waiting for the focus to move. Typing
+    still works, since the model accepts the same values either way, so
     pasting a column of them from a spreadsheet is unaffected.
     """
 
@@ -503,14 +529,14 @@ class ChoiceDelegate(QStyledItemDelegate):
               index: QModelIndex | QPersistentModelIndex) -> None:
         """Mark the selected cell of a choice column with a drop-down arrow.
 
-        Otherwise there is nothing to say a cell has a list behind it until
-        you have already opened one. Only the selected cell is marked: an
-        arrow in every cell of a 200k-row column is noise, and a spreadsheet
-        marks the active cell the same way.
+        Otherwise nothing shows that a cell has a list behind it until
+        one has been opened. Only the selected cell is marked: an arrow in
+        every cell of a 200k-row column is noise, and a spreadsheet marks
+        the active cell the same way.
 
-        The arrow is the platform's own — asking the style for a combo box's
-        arrow sub-control, so it is whatever a real drop-down would draw
-        here — rather than something hand-drawn that would look foreign.
+        The arrow is the platform's own, drawn by the style as a combo
+        box's arrow sub-control, so it is what a real drop-down would draw
+        here.
         """
         super().paint(painter, option, index)
         column = self._column(index)
@@ -536,7 +562,18 @@ class ChoiceDelegate(QStyledItemDelegate):
 
 
 class CopyPasteTableView(QTableView):
-    """A table view with spreadsheet clipboard behavior."""
+    """A table view that behaves like a spreadsheet: copy and paste as
+    tab-separated text, Batch Edit, Clear, a fill handle, and a copy
+    button for the whole table.
+
+    `edits_applied` reports (cells written, cells refused, the first
+    refusal's reason) after a batch edit, a clear or a fill.
+    `rows_deleted` carries the whole rows a person asked to remove, and
+    is emitted only when the owner sets `rows_deletable`, because only
+    the owner knows whether a row is an item (a channel, a mode) or just
+    cells. `whole_table_copy` is False where the table is a working
+    surface, as in the geometry editor, and hides the whole-table copy.
+    """
 
     # cells written, cells refused, why the first refusal happened
     edits_applied = Signal(int, int, str)
@@ -584,15 +621,16 @@ class CopyPasteTableView(QTableView):
     def show_rows(self, rows: Iterable[int] | None) -> None:
         """Show only these rows of the model; None shows them all.
 
-        The rest are out of the table, not merely out of sight: they
-        cannot be selected (`selectionChanged` lets them go, so Select
+        The other rows are out of the table, not only out of sight. They
+        cannot be selected (`selectionChanged` deselects them, so Select
         All and a drag across the gap reach only what is shown, and the
-        owner's selection-driven acts — a highlight, Delete — never act
-        on a row nobody can see), and copy, paste and the fill handle
-        pass over them. Rows keep their model indices, so whoever reads
-        the selection still reads the model's own rows (2026-10-10: the
-        pencil on an element group opened every element group).
+        owner's actions on a selection, such as a highlight or Delete,
+        never act on a row nobody can see), and copy, paste and the fill
+        handle skip them. Rows keep their model indices, so code that
+        reads the selection still reads the model's own rows.
         """
+        # 2026-10-10: the pencil on an element group opened every element
+        # group.
         self._shown_rows = None if rows is None else {int(r) for r in rows}
         model = self.model()
         count = model.rowCount() if model is not None else 0
@@ -603,6 +641,7 @@ class CopyPasteTableView(QTableView):
             self._drop_hidden(selection.selection())
 
     def row_shown(self, row: int) -> bool:
+        """Whether `row` is shown (see `show_rows`)."""
         shown = getattr(self, '_shown_rows', None)
         return shown is None or row in shown
 
@@ -646,6 +685,8 @@ class CopyPasteTableView(QTableView):
         return rows, columns
 
     def to_tsv(self, whole_table: bool = False) -> str:
+        """The selection, or every shown row with `whole_table`, as
+        tab-separated text without headers."""
         model = self.model()
         if model is None:
             return ''
@@ -668,13 +709,14 @@ class CopyPasteTableView(QTableView):
         return '\n'.join(lines)
 
     def copy(self, whole_table: bool = False) -> str:
+        """Put `to_tsv` on the clipboard, and return it."""
         text = self.to_tsv(whole_table)
         if text:
             QApplication.clipboard().setText(text)
         return text
 
     def table_cells(self) -> tuple[list[str], list[list[str]]]:
-        """(headers, rows) of the whole table, as text."""
+        """(headers, rows) of the whole table's shown rows, as text."""
         model = self.model()
         if model is None:
             return [], []
@@ -688,12 +730,15 @@ class CopyPasteTableView(QTableView):
         return headers, rows
 
     def copy_table(self) -> bool:
-        """The whole table, headers and all, as tab-separated text and
-        as HTML in one clipboard entry: a spreadsheet pastes cells, a
-        document or a mail pastes a table. The copy button in the
-        corner (Brandon, 2026-09-24), and what a selection copy is not:
-        that stays bare cells, which is what a paste back into a sheet
-        wants."""
+        """Copy the whole table with its headers, as tab-separated text
+        and as HTML in one clipboard entry, so a spreadsheet pastes cells
+        and a document or an email pastes a table. Returns False when
+        there are no rows to copy.
+
+        This is the copy button in the corner. A copy of a selection
+        stays bare cells, which is what pasting back into a sheet needs.
+        """
+        # The copy button: Brandon, 2026-09-24.
         headers, rows = self.table_cells()
         if not rows:
             return False
@@ -741,10 +786,14 @@ class CopyPasteTableView(QTableView):
             self._copy_button.hide()
 
     def paste(self) -> tuple[int, int]:
-        """Paste tab-separated text over the selection's top-left corner.
+        """Paste tab-separated text from the clipboard over the selection's
+        top-left corner, onto the shown rows, and return (applied,
+        rejected).
 
-        Cells that will not accept a value are left alone and counted, so a
-        paste that partly lands is not silently half-applied.
+        Cells that will not accept a value are left as they are and
+        counted, so a paste that partly lands is not silently half
+        applied. A paste past the table's edge stops there and does not
+        wrap.
         """
         model = self.model()
         text = QApplication.clipboard().text()
@@ -787,10 +836,12 @@ class CopyPasteTableView(QTableView):
 
     def shared_choices(self,
                        indexes: Sequence[QModelIndex]) -> Column | None:
-        """The Column the selection shares, when they all offer one list.
+        """The Column the selection shares, when all of its columns offer
+        the same list, or None.
 
-        A selection spanning a color column and a coordinate column has no
-        common list, so it falls back to typing a value.
+        A selection spanning a color column and a coordinate column has
+        no common list, so a batch edit of it falls back to typing a
+        value.
         """
         model = self.model()
         columns = [model.columns[column] for column
@@ -802,9 +853,12 @@ class CopyPasteTableView(QTableView):
         return None
 
     def batch_edit(self, text: str | None = None) -> tuple[int, int]:
-        """Set every selected cell to one value, across columns as well.
+        """Set every selected editable cell to one value, across columns
+        as well, and return (applied, rejected).
 
-        Pass `text` to skip the prompt.
+        The prompt offers the columns' choices when the selection shares
+        a list, and otherwise asks for text. Pass `text` to skip the
+        prompt.
         """
         indexes = self.editable_selection()
         if not indexes:
@@ -827,19 +881,21 @@ class CopyPasteTableView(QTableView):
         return applied, rejected
 
     def whole_rows(self) -> list[int]:
-        """Rows whose every column is selected — a row-header click, or a
-        drag across the full width. The distinction Delete turns on."""
+        """Rows whose every column is selected (a row-header click, or a
+        drag across the full width). Delete removes whole rows, where the
+        table allows it, and clears anything less."""
         selection = self.selectionModel()
         if selection is None:
             return []
         return sorted({index.row() for index in selection.selectedRows()})
 
     def clear_cells(self) -> tuple[int, int]:
-        """Empty the selected cells, for the columns that accept empty.
+        """Empty the selected cells, for the columns that accept empty, and
+        return (applied, rejected).
 
-        A column that cannot be blank — a node id, a connectivity list —
-        refuses and is counted, exactly as it would refuse the same value
-        typed in. Nothing here decides what empty means; the column does.
+        A column that cannot be blank (a node id, a connectivity list)
+        refuses and is counted, as it would refuse the same value typed
+        in. The column decides what empty means.
         """
         indexes = self.editable_selection()
         if not indexes:
@@ -851,10 +907,10 @@ class CopyPasteTableView(QTableView):
     # ---- fill handle --------------------------------------------------------
 
     def fill_handle_rect(self) -> QRect | None:
-        """The little square at the bottom-right of the selection, or None.
+        """The small square at the bottom-right of the selection, or None.
 
-        Excel's affordance, and the fastest way to carry one value down a
-        column without selecting the whole thing first.
+        It is the spreadsheet fill handle, the fastest way to carry one
+        value down a column without selecting the whole column first.
         """
         rows, columns = self.selected_block()
         if not rows or self.model() is None:
@@ -875,11 +931,13 @@ class CopyPasteTableView(QTableView):
             -FILL_GRAB, -FILL_GRAB, FILL_GRAB, FILL_GRAB).contains(position)
 
     def fill_from_selection(self, through: int) -> tuple[int, int]:
-        """Repeat the selected block over the rows out to `through`.
+        """Repeat the selected block over the rows out to `through`, and
+        return (applied, rejected).
 
-        The block repeats rather than only its last row, so filling from two
-        alternating rows carries the alternation — which is what a
-        spreadsheet does and what makes it worth dragging two cells.
+        The whole block repeats, not only its last row, so filling from
+        two alternating rows carries the alternation, as a spreadsheet
+        does. Columns named in a filled column's `carries` are filled
+        along with it, and hidden rows are skipped.
         """
         rows, columns = self.selected_block()
         model = self.model()
@@ -940,8 +998,8 @@ class CopyPasteTableView(QTableView):
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """Double-clicking the handle fills all the way down, as Excel does.
 
-        The common case is "this unit, for every channel"; dragging 45 rows
-        to say it is a chore.
+        The common case is one unit for every channel, and dragging over
+        45 rows to say so is slow.
         """
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._on_handle(event.position().toPoint())):

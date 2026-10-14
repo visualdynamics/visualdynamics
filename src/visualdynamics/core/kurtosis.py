@@ -1,25 +1,24 @@
-"""How Gaussian a record is, channel by channel.
+"""Kurtosis, channel by channel: how close a record is to Gaussian.
 
 A random vibration test is specified as a spectrum, and a spectrum says
-nothing about the *shape* of the distribution that produced it. Two
-records with identical PSDs can be a smooth Gaussian hiss and a train
-of rare hard peaks, and the second fatigues an article in a way the
-first never will. Kurtosis is the number that tells them apart, and
-reading it per channel is how a rattling fixture or a clipping
-amplifier is caught while the spectrum still looks right.
+nothing about the shape of the distribution that produced it. Two
+records with the same PSD can be Gaussian noise or a series of rare,
+large peaks, and the second does more fatigue damage to a test article
+than the first. Kurtosis is the number that separates them, and
+computing it per channel shows a rattling fixture or a clipping
+amplifier while the spectrum still looks correct.
 
-**Pearson, not Fisher** (Brandon, 2026-08-24). The Pearson kurtosis of
-a Gaussian is 3; Fisher's "excess" form subtracts that 3 so a Gaussian
-reads 0. Both are in use and they differ by exactly three, which is
-the sort of ambiguity that ends in a report claiming a value it did
-not compute — so the nominal is written down here as `NOMINAL` and
-every reading of it says which one it is.
+The kurtosis here is Pearson's, not Fisher's. The Pearson kurtosis of a
+Gaussian is 3; Fisher's excess kurtosis subtracts 3, so a Gaussian is
+0. Both are in use and they differ by exactly three, so the nominal
+value is defined once as `NOMINAL`, and every plot and label of it says
+which convention it is.
 
-The band: within `TOLERANCE` of nominal is unremarkable, and beyond it
-in either direction is worth looking at. High is the interesting
-direction — peaks the spectrum did not predict — but low matters too,
-because a record that reads much *under* three has usually been
-clipped or is not random at all.
+Within `TOLERANCE` of nominal a value is unremarkable, and beyond it in
+either direction it is worth looking at. High values are the more
+common concern, because they mean peaks the spectrum did not predict.
+Low values matter too: a record well under three has usually been
+clipped or is not random.
 
 References
 ----------
@@ -48,6 +47,10 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike
 
+# Pearson, not Fisher (Brandon, 2026-08-24). The two differ by exactly
+# three, the kind of ambiguity that ends in a report quoting a value it
+# did not compute, so the nominal is written down once as NOMINAL.
+
 #: a Gaussian's Pearson kurtosis. Fisher's excess form is this minus
 #: three; nothing here uses it, and the axis label says Pearson so a
 #: reader never has to guess which convention a number is in.
@@ -69,14 +72,15 @@ HIGH = NOMINAL + TOLERANCE
 def kurtosis(values: ArrayLike) -> float:
     """The Pearson kurtosis of one record: 3 for a Gaussian.
 
-    The population (biased) estimator, `m4 / m2**2`, which is what
-    every vibration-test convention quotes and what
-    `scipy.stats.kurtosis(fisher=False, bias=True)` returns — the
-    tests hold this against scipy rather than restating the algebra.
+    The population (biased) estimator, `m4 / m2**2`, which is the
+    value vibration-test practice quotes and the value
+    `scipy.stats.kurtosis(fisher=False, bias=True)` returns; the tests
+    compare this function against scipy. Non-finite samples are
+    dropped first.
 
-    A record with no variance has no shape to describe, so it answers
-    NaN rather than dividing by zero: a dead channel is not a
-    Gaussian one.
+    A record with no variance, or fewer than two finite samples, has no
+    distribution shape to describe, so the result is NaN rather than a
+    division by zero: a dead channel is not a Gaussian one.
     """
     x = np.asarray(values, dtype=float)
     x = x[np.isfinite(x)]
@@ -90,24 +94,26 @@ def kurtosis(values: ArrayLike) -> float:
 
 
 def analyzed_span(data: Any) -> tuple[list[tuple[int, int]], str]:
-    """Which stretch of a record the analysis reads, and its name.
+    """The part of a record the kurtosis is computed over, and its name.
 
-    The same stretch the spectra beside it are computed from, and for
-    a reason found the hard way (Brandon, 2026-08-24): a system-ID
-    excitation read whole came out at 4.23 where every steady frame of
-    it read 2.92. Nothing was wrong with the arithmetic — the record
-    is only a quarter analyzed, and the silent lead-in and tail make
-    the *whole* record a mixture of a loud distribution and a quiet
-    one, which genuinely is not Gaussian. A number that disagrees with
-    the PSD printed beside it is worse than no number, so the reading
-    covers what the PSD covers.
+    It is the same part the spectra shown with it are computed from.
+    A record with a quiet lead-in and tail is, taken whole, a mixture
+    of a loud distribution and a quiet one, and that mixture is not
+    Gaussian even when the excitation is, so a kurtosis of the whole
+    record would disagree with the PSD shown beside it.
 
-    Returns ``([(first, last), ...], phrase)`` — sample ranges and
-    what to call them in a caption. A record with frames set answers
-    with its analysis span, one with shocks found answers with those
+    Returns ``([(first, last), ...], phrase)``: sample ranges, and the
+    phrase a caption uses for them. A record with averaging frames set
+    gives its analysis span, one with shocks found gives the shock
     windows (order does not matter to a distribution, so separate
-    windows read together), and one with neither is read whole.
+    windows are read together), and one with neither is read whole.
     """
+    # Found on a system-ID excitation (Brandon, 2026-08-24): read whole
+    # it came out at 4.23, where every steady frame of it read 2.92.
+    # The arithmetic was right; only a quarter of the record is
+    # analyzed, and the silent lead-in and tail made the whole record a
+    # mixture. A number that disagrees with the PSD printed beside it
+    # is worse than no number, so this covers what the PSD covers.
     averaging = getattr(data, 'averaging', None)
     if averaging is not None:
         try:
@@ -139,16 +145,18 @@ def channel_kurtosis(data: Any, records: Sequence[int] | None = None
                      ) -> list[tuple[str, float]]:
     """[(channel label, Pearson kurtosis)] for a time history.
 
-    Read over `analyzed_span` — the stretch the spectra beside it are
-    computed from — so the two readings describe one thing.
+    Computed over `analyzed_span`, the part of the record the spectra
+    shown with it are computed from, so the two describe the same data.
 
-    Every channel on one chart whatever it measures (Brandon,
-    2026-08-24): kurtosis is dimensionless, so accelerations, forces
-    and volts share an axis honestly — which is the one reading in
-    this package where mixing quantities is not a lie. Channels whose
-    record is dead answer NaN and draw as a gap rather than as zero,
-    which would read as an impossibly flat distribution.
+    Every channel goes on one chart, whatever it measures: kurtosis is
+    dimensionless, so accelerations, forces and volts can share an
+    axis. A channel whose record is dead gives NaN and is drawn as a
+    gap, because a zero would look like an impossibly flat
+    distribution.
     """
+    # Every channel on one chart whatever it measures (Brandon,
+    # 2026-08-24): this is the one value in the package where mixing
+    # quantities on an axis is correct.
     wanted = (range(data.num_records) if records is None
               else [int(i) for i in records])
     ordinate = np.asarray(data.ordinate)

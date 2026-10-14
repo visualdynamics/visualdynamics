@@ -1,21 +1,22 @@
-"""Turning data at DOFs into node motion.
+"""Turning values at DOFs into node motion.
 
-Both mode shape animation and time history playback reduce to the same
-question: given values at DOFs, where does each node go? A DOF is a node
-plus a signed direction, so a value displaces its node along that direction
-— rotated out of the node's displacement coordinate system into global.
+Mode shape animation, operating deflection shapes, PSD envelopes and time
+history playback all answer the same question: given values at DOFs,
+where does each node go? A DOF is a node plus a signed direction, so a
+value displaces its node along that direction, rotated out of the node's
+displacement coordinate system into global coordinates.
 
-Everything expensive is done once, here, so playback is a scalar multiply
-and a scatter write:
+The expensive work is done once, when a deflection is built, so drawing
+a frame is a multiply and a write:
 
-- direction signs and coordinate-system rotations are baked into a unit
-  vector per DOF
-- only the nodes that actually move are touched per frame
-- DOFs are grouped into passes with no repeated node, so a frame is a
-  handful of vectorized writes rather than a scatter-add
+- direction signs and coordinate system rotations are combined into one
+  unit vector per DOF
+- only the nodes that move are written each frame
+- for time histories, DOFs are grouped into passes with no repeated
+  node, so a frame is a few vectorized adds instead of a scatter-add
 
-Rotational DOFs are ignored: a rotation does not displace the node it
-belongs to. Nodes with no data hold still.
+Rotational DOFs are ignored, since a rotation does not displace the node
+it belongs to. Nodes with no data do not move.
 """
 
 from __future__ import annotations
@@ -37,21 +38,26 @@ AXES = {'X': 0, 'Y': 1, 'Z': 2}
 
 def animation_records(data: DataArray, records: Sequence[int] | None
                       ) -> tuple[list[int], str]:
-    """Which records a deflection animation shows, and why, as (indices, note).
+    """Which records a deflection animation shows, as (indices, note).
 
-    An animation gives every node one trajectory, so it can use at most one
-    record per DOF. Two rules follow:
+    An animation gives every node one trajectory, so it can use at most
+    one record per DOF. Two rules follow:
 
-    - A whole object holding repeated captures animates its **first** one —
-      all twenty averages summed into one waveform is not a measurement
-      anyone took. The same convention as a shape set: the first, with a
+    - When `records` is None and the object holds repeated captures (its
+      `block` labels), only the first capture is animated, since twenty
+      averages summed into one waveform is not a measurement anyone
+      took. This is the same convention as a shape set: the first, with a
       note saying how to pick another.
-    - Within what remains, the first record per DOF wins and the rest are
-      dropped with a note. A drive point carries a load cell beside its
+    - Of what remains, the first record for each response DOF is kept and
+      the rest are dropped. A drive point has a load cell beside its
       accelerometer, and meters per second squared plus newtons is not a
-      deflection. An FRF's reference columns repeat every response DOF the
-      same way, so a whole FRF animates against its first reference.
-      Incompatibility warns; it does not block.
+      deflection. An FRF repeats every response DOF once per reference
+      in the same way, so a whole FRF is animated against its first
+      reference.
+
+    The note is empty when nothing was dropped, and otherwise is text to
+    append to a status line, saying what was left out. Dropping records
+    is reported, never refused.
     """
     notes = ''
     if records is None and data.block is not None:
@@ -80,20 +86,21 @@ def animation_records(data: DataArray, records: Sequence[int] | None
 def envelope_records(data: DataArray, records: Sequence[int] | None = None,
                      quantity: str | None = None
                      ) -> tuple[list[int], str | None, int, int]:
-    """Which records an envelope may honestly show, one quantity at a
-    time — (indices, quantity, cross records dropped, other-quantity
-    records dropped).
+    """Which records a PSD envelope shows, as (indices, quantity, cross
+    records dropped, other-quantity records dropped).
 
-    The envelope is the autospectra's reading: a cross row's phase
-    belongs to an operating deflection shape, so cross records go
-    first. Then one quantity — newtons and meters per second squared
-    cannot share a normalization — with the commonest kind answering
-    when `quantity` is None. Both filters run **before** the
-    one-record-per-DOF rule in `animation_records`, or a cross row or
-    a drive point's force PSD listed first would shadow its own DOF's
-    genuine accelerometer auto. That ordering broke twice, which is
-    why the app and the headless call now share this one function.
+    An envelope is drawn from the autospectra: a cross record's phase
+    belongs to an operating deflection shape, so cross records are
+    dropped first. Then only one quantity is kept, since newtons and
+    meters per second squared cannot share a normalization; when
+    `quantity` is None it is the most common one among the remaining
+    records. Both filters run before the one-record-per-DOF rule in
+    `animation_records`, or a cross record or a drive point's force PSD
+    listed first would take the place of that DOF's accelerometer
+    autospectrum. The app and the headless call both use this function.
     """
+    # The filter order broke twice before the app and the headless call
+    # shared this one function.
     from .core.report import base_quantity
 
     initial = (list(records) if records is not None
@@ -114,12 +121,12 @@ def envelope_records(data: DataArray, records: Sequence[int] | None = None,
 
 def dof_directions(geometry: Geometry, dofs: Sequence[str]
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """(rows, directions, used) for DOFs this geometry can move.
+    """(rows, directions, used) for the DOFs this geometry can move.
 
     `rows` indexes into the geometry's nodes, `directions` is the global
-    unit vector each DOF displaces along, and `used` masks which of the
-    given DOFs are usable — rotational, unknown, or absent-node DOFs are
-    dropped.
+    unit vector each DOF displaces along, and `used` is a mask over
+    `dofs` of the ones kept. Rotational DOFs, DOFs that do not parse,
+    and DOFs on nodes the geometry does not have are dropped.
     """
     rows, directions, used = [], [], np.zeros(len(dofs), dtype=bool)
     known = {int(node): row for row, node in enumerate(geometry.node_id)}
@@ -166,10 +173,11 @@ def _cs_rotations(geometry: Geometry) -> dict[int, np.ndarray]:
 
 def node_displacements(geometry: Geometry, dofs: Sequence[str],
                        values: ArrayLike) -> np.ndarray:
-    """(num_nodes, 3) displacement from one value per DOF.
+    """The (num_nodes, 3) displacement of every node from one value per
+    DOF.
 
-    Values may be complex; the result matches. Contributions to the same
-    node accumulate.
+    Values may be complex, and the result is then complex too. DOFs on
+    the same node add, and nodes with no usable DOF are zero.
     """
     rows, directions, used = dof_directions(geometry, dofs)
     values = np.asarray(values)[used]
@@ -206,7 +214,8 @@ def _passes(targets):
 
 
 def model_size(geometry: Geometry) -> float:
-    """Bounding-box diagonal, the yardstick deflections are scaled against."""
+    """The length of the geometry's bounding-box diagonal, which
+    deflections are scaled against; 1.0 for a geometry with no extent."""
     low, high = geometry.extent
     diagonal = float(np.linalg.norm(np.asarray(high) - np.asarray(low)))
     return diagonal or 1.0
@@ -214,7 +223,8 @@ def model_size(geometry: Geometry) -> float:
 
 def auto_scale(geometry: Geometry, peak: float,
                fraction: float = 0.1) -> float:
-    """Scale putting the largest deflection at `fraction` of the model size."""
+    """The scale that draws a deflection of `peak` at `fraction` of the
+    model size (`model_size`); 1.0 when `peak` is zero or not finite."""
     peak = float(abs(peak))
     if not peak or not np.isfinite(peak):
         return 1.0
@@ -222,40 +232,46 @@ def auto_scale(geometry: Geometry, peak: float,
 
 
 class Deflection:
-    """Node offsets as a function of one parameter (phase, or sample index).
+    """Node offsets as a function of one parameter (a phase, or a sample
+    index).
 
-    Subclasses expose `rows` — the node rows that move — and `offsets(p)`,
-    giving those rows' displacement. Everything else holds still, which is
-    what keeps playback independent of model size.
+    Subclasses have `rows`, the geometry rows of the nodes that move,
+    and `offsets(parameter)`, those rows' (len(rows), 3) displacement.
+    No other node moves, so the cost of a frame depends on the nodes
+    with data and not on the size of the model.
 
-    `offsets` returns a buffer it reuses on every call, so a frame allocates
-    nothing. Consume the result before calling again, or copy it.
+    `offsets` returns a buffer it reuses on every call, so a frame
+    allocates nothing. Use the result before calling again, or copy it.
     """
 
     rows: np.ndarray
 
     def offsets(self, parameter: float) -> np.ndarray:
+        """The (len(rows), 3) displacement of the moving nodes at
+        `parameter`."""
         raise NotImplementedError
 
     @property
     def peak(self) -> float:
+        """The largest single displacement component over the whole
+        animation, which the animator scales against."""
         raise NotImplementedError
 
     @property
     def peak_magnitude(self) -> float:
         """The largest distance any node travels, over the whole animation.
 
-        Not the same as `peak`, which is the largest value of a single DOF:
-        a node moving in both X and Z travels sqrt(x^2 + z^2), further than
-        either. This is what the top of a color scale should mean, so that
-        the top color appears at the one instant the model is at its
-        furthest and nowhere else.
+        This differs from `peak`, the largest value of a single DOF: a
+        node moving in both X and Z travels sqrt(x^2 + z^2), further than
+        either. It is the top of the color scale, so the top color
+        appears only at the instant the model is at its furthest.
         """
         raise NotImplementedError
 
 
 class ShapeDeflection(Deflection):
-    """One mode: offsets sweep with phase, `Re(phi * exp(i*theta))`."""
+    """One mode shape, animated through phase: the offsets at phase
+    theta are `Re(phi * exp(i*theta))`."""
 
     def __init__(self, geometry: Geometry, dofs: Sequence[str],
                  shape: ArrayLike) -> None:
@@ -274,7 +290,7 @@ class ShapeDeflection(Deflection):
         self._buffer = np.empty_like(self._real)
 
     def offsets(self, parameter: float) -> np.ndarray:
-        """`parameter` is the phase in radians."""
+        """The offsets at phase `parameter`, in radians."""
         np.multiply(self._real, np.cos(parameter), out=self._buffer)
         if self._complex:
             self._buffer -= self._imag * np.sin(parameter)
@@ -282,14 +298,17 @@ class ShapeDeflection(Deflection):
 
     @property
     def peak(self) -> float:
+        """The largest magnitude of any node's shape coefficient along a
+        global axis."""
         return float(np.abs(self._real + 1j * self._imag).max(initial=0.0))
 
     @property
     def peak_magnitude(self) -> float:
-        """Closed form, so no phase sweep is needed.
+        """The largest distance any node travels over a cycle, in closed
+        form, so no phase sweep is needed.
 
         With offsets r*cos(t) - m*sin(t), the squared distance a node
-        travels is  (A+B)/2 + (A-B)/2*cos(2t) - (r.m)*sin(2t), where A=r.r
+        travels is (A+B)/2 + (A-B)/2*cos(2t) - (r.m)*sin(2t), where A=r.r
         and B=m.m. Its largest value over t is (A+B)/2 + hypot((A-B)/2, r.m).
         """
         if not len(self.rows):
@@ -302,24 +321,27 @@ class ShapeDeflection(Deflection):
 
 
 class OdsDeflection(Deflection):
-    """An operating deflection shape read off complex spectra.
+    """An operating deflection shape read from complex spectra.
 
     At one abscissa line the records' complex values are a deflection
-    pattern — magnitude and phase per DOF — and the animation sweeps it
-    exactly like a complex mode, `Re(H(w_line) * exp(i*theta))`. The
-    line is movable: the plot cursor picks which frequency deflects,
-    so moving it must cost one small bake, not a scene rebuild.
+    pattern, a magnitude and phase per DOF, and the animation sweeps it
+    the same way as a complex mode: `Re(H(w_line) * exp(i*theta))`. The
+    plot cursor sets `line`, the frequency shown, and moving it
+    recomputes only the pattern at that line, not the scene.
 
-    Every line deflects at full scale: the pattern is normalized by its
-    own largest record, so an anti-resonance shows its shape as plainly
-    as a peak. Keeping the true relative amplitude was tried first and
-    read as broken — away from resonance the model barely moved, and
-    what a frequency *does* is exactly what the cursor is there to ask.
-    How much it responds is the plot's own curve, one glance away.
+    Every line is drawn at full scale: the pattern is normalized by its
+    own largest record, so an anti-resonance shows its shape as clearly
+    as a peak. How large the response is at that line is shown by the
+    plot's curve. The pattern's overall phase is also rotated so that
+    phase zero is its fullest deflection, since a steady state has no
+    time origin.
     """
 
     def __init__(self, geometry: Geometry, dofs: Sequence[str],
                  ordinate: ArrayLike) -> None:
+        # Keeping the true relative amplitude was tried first and looked
+        # broken: away from resonance the model barely moved, and what a
+        # frequency does is what the cursor is there to ask.
         rows, directions, used = dof_directions(geometry, dofs)
         self._ordinate = np.ascontiguousarray(
             np.asarray(ordinate, dtype=np.complex128)[used])
@@ -335,7 +357,8 @@ class OdsDeflection(Deflection):
 
     @property
     def line(self) -> int:
-        """The abscissa index whose pattern is deflecting."""
+        """The abscissa index whose pattern is shown. Setting it clips
+        to the valid range."""
         return self._line
 
     @line.setter
@@ -369,23 +392,23 @@ class OdsDeflection(Deflection):
 
     @property
     def strongest_line(self) -> int:
-        """The line where a record is largest — where a cursor should
-        start, because a flat-spectrum line 0 deflects as nothing."""
+        """The line where a record is largest, where the cursor
+        starts, since line 0 of a spectrum is often nearly zero."""
         if not self.num_lines:
             return 0
         return int(np.argmax(np.abs(self._ordinate).max(axis=0)))
 
     def offsets(self, parameter: float) -> np.ndarray:
-        """`parameter` is the phase in radians."""
+        """The offsets at phase `parameter`, in radians."""
         np.multiply(self._real, np.cos(parameter), out=self._buffer)
         self._buffer -= self._imag * np.sin(parameter)
         return self._buffer
 
     @property
     def peak(self) -> float:
-        """1.0 — the yardstick the animator scales against. Every line
-        is normalized to its own strongest record, so the largest DOF
-        value any line ever shows is exactly one."""
+        """1.0, the value the animator scales against, or 0.0 when there
+        is no data. Every line is normalized to its own largest record, so
+        the largest DOF value any line shows is 1."""
         return 1.0 if self.num_lines and np.any(self._ordinate) else 0.0
 
     @property
@@ -393,9 +416,9 @@ class OdsDeflection(Deflection):
         """The furthest any node gets, over every line and phase, with
         each line at its normalized scale.
 
-        Per line the closed form is ShapeDeflection's; walking the lines
-        in chunks keeps the working set bounded the way TimeDeflection's
-        sample walk does.
+        Each line uses `ShapeDeflection`'s closed form. The lines are
+        processed in chunks to limit memory, as `TimeDeflection` does
+        with its samples.
         """
         nodes = len(self.rows)
         if not nodes or not self.num_lines:
@@ -420,29 +443,29 @@ class OdsDeflection(Deflection):
 
 
 class EnvelopeDeflection(Deflection):
-    """The envelope a PSD names at one movable line.
+    """The envelope of a PSD at one line, which can be moved.
 
-    An autospectrum gives each DOF an amplitude — the square root of
-    the PSD value — and no phase and no sign. The honest picture is the
-    *envelope*: every extreme every DOF reaches, with no claim about
-    when. One of these deflects a copy of the geometry by +pattern; the
-    animator mirrors a second copy to −pattern through the sign of its
-    scale, and the pair is the envelope.
+    An autospectrum gives each DOF an amplitude, the square root of the
+    PSD value, and no phase or sign. So what is drawn is the envelope:
+    the extreme each DOF reaches, with no claim about when. One of these
+    deflects a copy of the geometry by +pattern; the animator draws a
+    second copy at -pattern by giving it a negative scale, and the pair
+    is the envelope.
 
-    The line moves like `OdsDeflection`'s and each line shows at its
-    own full scale, for the same reason. Color is the one channel left
-    to carry level, so it is absolute: `node_decibels` reads each node
-    against the loudest node at any line, floored at `FLOOR_DB`.
+    `line` moves as `OdsDeflection`'s does, and each line is drawn at its
+    own full scale for the same reason. The level is shown by color, on
+    an absolute scale: `node_decibels` gives each node's level against
+    the loudest node at any line, with `FLOOR_DB` as the bottom.
 
-    A node measured along two axes deflects to their in-phase diagonal
-    — two copies cannot show the four corners of the true rectangle —
-    which is exact for single-axis surveys and stated in the guide for
-    the rest.
+    A node measured along two axes is drawn at the in-phase diagonal of
+    the two, because two copies of the geometry cannot show the four
+    corners of the true rectangle. That is exact for single-axis surveys,
+    and the plotting guide says so for the rest.
     """
 
     #: the bottom of the color scale, in dB below the loudest node at
-    #: any line: two decades of power, below which everything reads
-    #: equally quiet
+    #: any line: two decades of amplitude (four of power), below which
+    #: everything reads equally quiet
     FLOOR_DB = -40.0
 
     def __init__(self, geometry: Geometry, dofs: Sequence[str],
@@ -484,7 +507,8 @@ class EnvelopeDeflection(Deflection):
 
     @property
     def line(self) -> int:
-        """The abscissa index whose envelope is showing."""
+        """The abscissa index whose envelope is shown. Setting it clips
+        to the valid range."""
         return self._line
 
     @line.setter
@@ -513,31 +537,34 @@ class EnvelopeDeflection(Deflection):
 
     @property
     def strongest_line(self) -> int:
-        """Where a record is largest — where the cursor starts."""
+        """The line where a record is largest, where the cursor starts."""
         if not self.num_lines:
             return 0
         return int(np.argmax(self._amplitude.max(axis=0)))
 
     def offsets(self, parameter: float) -> np.ndarray:
-        """The +pattern; `parameter` is unused — the line is the state,
-        and the sign lives in the animator's scale."""
+        """The +pattern at the current line. `parameter` is not used:
+        the line sets the pattern, and the sign is the animator's
+        scale."""
         return self._offsets
 
     def node_decibels(self) -> np.ndarray:
-        """Each moving node's level, dB below the loudest node at any
-        line — the absolute reading the color carries."""
+        """Each moving node's level at the current line, in dB relative
+        to the loudest node at any line (0 dB), no lower than
+        `FLOOR_DB`. The color scale shows these values."""
         return self._db
 
     @property
     def peak(self) -> float:
-        """1.0 — every line is normalized to its own strongest record."""
+        """1.0, since every line is normalized to its own largest
+        record, or 0.0 when there is no data."""
         return 1.0 if self.num_lines and self._amplitude.any() else 0.0
 
     @property
     def peak_magnitude(self) -> float:
-        """The furthest any node gets with each line at its normalized
-        scale — unused when the animator pins an absolute color range,
-        but every deflection answers it."""
+        """The furthest any node gets, with each line at its normalized
+        scale. The animator does not use it when it fixes the color
+        range in dB, but every deflection provides it."""
         if not len(self.rows) or not self.num_lines:
             return 0.0
         largest = 0.0
@@ -551,7 +578,8 @@ class EnvelopeDeflection(Deflection):
 
 
 class TimeDeflection(Deflection):
-    """Records over time: offsets are the samples at one index."""
+    """Time histories played back: the offsets are the samples at one
+    index."""
 
     def __init__(self, geometry: Geometry, dofs: Sequence[str],
                  ordinate: ArrayLike) -> None:
@@ -568,7 +596,7 @@ class TimeDeflection(Deflection):
         self.num_frames: int = self._ordinate.shape[1] if len(rows) else 0
 
     def offsets(self, parameter: float) -> np.ndarray:
-        """`parameter` is the sample index."""
+        """The offsets at sample index `parameter`."""
         column = self._ordinate[:, int(parameter)]
         self._buffer[:] = 0.0
         for targets, directions, group, values, scratch in self._passes:
@@ -579,14 +607,15 @@ class TimeDeflection(Deflection):
 
     @property
     def peak(self) -> float:
+        """The largest magnitude of any sample of any record used."""
         return float(np.abs(self._ordinate).max(initial=0.0))
 
     @property
     def peak_magnitude(self) -> float:
-        """Walk the samples in chunks, tracking the furthest any node gets.
+        """The furthest any node gets over all samples.
 
-        Chunked rather than all at once: the full (nodes, 3, samples) array
-        would be far larger than the data it came from.
+        The samples are processed in chunks, because the full (nodes,
+        samples, 3) array would be far larger than the data it came from.
         """
         nodes, samples = len(self.rows), self.num_frames
         if not nodes or not samples:

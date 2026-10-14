@@ -1,26 +1,25 @@
-"""Merge Coincident Nodes, as a pane beside the 3-D view.
+"""Merge Coincident Nodes and Align Meshes, as a pane beside the 3-D view.
 
-The merge was a question and an answer: a tolerance asked in a dialog,
-and every coincidence within it made one node. Brandon (2026-10-11)
-wanted to see what it would merge before it does, and to leave some
-of it out — the way a joint is built from parts meshed apart, one
-place at a time, instead of with rigid links — so the merge became
-select, see, set, apply (principle 13): the element groups picked in
-the tree, every place their nodes coincide marked in the view, the
-tolerance set here, a click on a mark in the view to leave that place
-out (and again to put it back), and **Merge**, the project's
+Merge follows select, see, set, apply (principle 13). The element
+groups are picked in the tree, every place their nodes coincide is
+marked in the view, and the tolerance is set here. A click on a mark
+leaves that place out of the merge and a second click puts it back;
+All and None mark every place or none. Merge then runs the project's
 `merge_coincident_nodes` with the places left out as its `exclude`.
+Leaving places out is how a joint is built from parts meshed
+separately, one place at a time, instead of with rigid links.
 
-The pane holds no rule of its own: the window asks the geometry
-(`coincident_spots`, `merge_folds`) what the settings would merge,
-marks it, and says it here.
+Align Meshes uses the same pane. Parts meshed separately at element
+sizes that do not match have no coincident nodes to merge, so this
+step, done before the merge, moves the coarser mesh's nodes onto the
+finer mesh's where they meet. The pane shows a reach in place of the
+tolerance, each mark is a move (the node, and a line to where it goes),
+and Align runs the project's `align_meshes`.
 
-**Align Meshes** is the same pane (Brandon, 2026-10-11): parts meshed
-apart at sizes that do not match have no coincident nodes to merge, so
-the step before the merge moves the coarser mesh's nodes onto the
-finer's where they meet. A reach in place of the tolerance, a move per
-mark (the node, and a line to where it goes), **Align** in place of
-Merge (`align_moves`, `align_folds`, the project's `align_meshes`).
+The pane holds no rules of its own. The window asks the geometry what
+the settings would merge (`coincident_spots`, `merge_folds`) or move
+(`align_moves`, `align_folds`), marks it in the view, and shows the
+result here.
 """
 
 from __future__ import annotations
@@ -30,6 +29,12 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from .editors import DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
+
+# Brandon, 2026-10-11: the merge was a question and an answer, a
+# tolerance asked in a dialog and every coincidence within it made one
+# node. He wanted to see what it would merge before it does, and to
+# leave some of it out, so it became this pane; Align Meshes joined it
+# the same day.
 
 #: what the pane says for each kind: (title, the number's label, its
 #: tooltip, the button)
@@ -45,8 +50,8 @@ KINDS = {
 
 
 class MergePanel(QWidget):
-    """The tolerance, what it finds, and the Merge — or the reach, the
-    moves, and the Align."""
+    """The tolerance, what it finds, and the Merge button; or, for Align
+    Meshes, the reach, the moves and the Align button."""
 
     #: the tolerance was edited: the window finds the places again
     changed = Signal()
@@ -102,8 +107,8 @@ class MergePanel(QWidget):
     def open_for(self, unit: str, tolerance: float, groups: str,
                  kind: str = 'merge') -> None:
         """Set the pane up for `kind`, 'merge' or 'align': the tolerance
-        (or the reach) in the display unit `unit`, and the element groups
-        it works on, named."""
+        (or the reach) in the display unit `unit`, and `groups`, the
+        names of the element groups it works on."""
         title, label, tip, button = KINDS[kind]
         self.title.setText(title)
         self.tolerance_label.setText(f'{label} [{unit}]')
@@ -119,12 +124,12 @@ class MergePanel(QWidget):
         self.groups_label.setText(f'Element groups: {groups}')
 
     def value(self) -> float:
-        """The tolerance as typed, in the display unit."""
+        """The tolerance (or the reach) as typed, in the display unit."""
         return self.tolerance.value()
 
     def set_value(self, tolerance: float) -> None:
-        """Type a tolerance, as a person would: the places are found
-        again."""
+        """Set the tolerance (or the reach) as if it were typed.
+        `changed` is emitted, so the window finds the places again."""
         self.tolerance.setValue(tolerance)
 
     def show_reading(self, text: str, ok: bool) -> None:

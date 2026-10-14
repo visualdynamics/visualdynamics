@@ -1,12 +1,11 @@
-"""What every settings panel is built from.
+"""The pieces every settings panel is built from.
 
-Seven panels — averaging, filter, sine, truncate, wavelet, rigid body,
-octave — wore the same chrome (the grid, the fixed width, the bold
-title), laid out their editable rows, drew the rule under them and
-listed their derived readings with the same loops, each with its own
-copy (2026-09-12; the rows and the rule, 2026-10-10). The copies live
-here once; each panel keeps what is its own: which rows, which
-readings, the button.
+The settings panels (averaging, filter, sine, truncate, wavelet, rigid
+body, octave, and the geometry panes) share one frame: the grid, the
+fixed width and the bold title, the editable rows, the rule under them
+and the derived readings below it. Those are built here once, and each
+panel keeps what is its own: which rows, which readings, and its
+button.
 """
 
 from __future__ import annotations
@@ -24,14 +23,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# Seven panels once carried their own copies of the frame and of the
+# loops that lay out the rows and readings (2026-09-12; the rows and the
+# rule, 2026-10-10).
+
 #: every settings panel's width: wide enough for the widest label and a
 #: spin box beside it, narrow enough to leave the plot the room
 PANEL_WIDTH = 210
 
 
 def panel_grid(panel: QWidget, title: QLabel) -> QGridLayout:
-    """The panel's grid with the title across its first row, the panel
-    fixed at `PANEL_WIDTH` and never stretched taller than it asks."""
+    """A grid layout on `panel` with `title`, set in bold, across its
+    first row. The panel's width is fixed at `PANEL_WIDTH`."""
     grid = QGridLayout(panel)
     grid.setContentsMargins(8, 8, 8, 8)
     grid.setHorizontalSpacing(8)
@@ -47,9 +50,10 @@ def panel_grid(panel: QWidget, title: QLabel) -> QGridLayout:
 
 
 def add_settings(grid: QGridLayout, rows, first_row: int = 1) -> list[QLabel]:
-    """The editable rows: a name and its editor per `(label, editor)`,
-    from `first_row` down. Returns the name labels in order, for a panel
-    that renames or hides a row as its settings change."""
+    """Add the editable rows: a name and its editor for each
+    `(label, editor)`, from `first_row` down. Returns the name labels in
+    order, for a panel that renames or hides a row as its settings
+    change."""
     names = []
     for offset, (label, editor) in enumerate(rows):
         name = QLabel(label)
@@ -61,9 +65,10 @@ def add_settings(grid: QGridLayout, rows, first_row: int = 1) -> list[QLabel]:
 
 def add_keyed_settings(grid: QGridLayout, rows, first_row: int = 1
                        ) -> tuple[dict[str, QLabel], dict[str, QWidget]]:
-    """`add_settings` for rows a panel reaches by key, `(key, label,
-    editor)` each — to rename or hide one as the settings change.
-    Returns key → name label and key → editor."""
+    """`add_settings` for rows a panel looks up by key, each a
+    `(key, label, editor)`, so one can be renamed or hidden as the
+    settings change. Returns two dicts: key → name label and key →
+    editor."""
     names = add_settings(grid, [(label, editor) for _key, label, editor in rows],
                          first_row)
     return ({key: name for (key, _label, _editor), name in zip(rows, names)},
@@ -71,8 +76,8 @@ def add_keyed_settings(grid: QGridLayout, rows, first_row: int = 1
 
 
 def add_rule(grid: QGridLayout, row: int) -> None:
-    """The sunken line across the panel between the editable rows and
-    the readings that follow from them."""
+    """Add the sunken line across the panel, at `row`, between the
+    editable rows and the readings that follow from them."""
     rule = QFrame()
     rule.setFrameShape(QFrame.Shape.HLine)
     rule.setFrameShadow(QFrame.Shadow.Sunken)
@@ -81,9 +86,10 @@ def add_rule(grid: QGridLayout, row: int) -> None:
 
 def add_derived(grid: QGridLayout, derived, first_row: int
                 ) -> dict[str, tuple[QLabel, QLabel]]:
-    """The read-only rows under the editable ones: a grayed name and a
-    right-aligned value per `(key, label)`, from `first_row` down.
-    Returns key → (name label, value label)."""
+    """Add the read-only rows under the editable ones: a grayed name and
+    a right-aligned value (a dash until it is set) for each
+    `(key, label)`, from `first_row` down. Returns key → (name label,
+    value label)."""
     made = {}
     for offset, (key, label) in enumerate(derived):
         name = QLabel(label)
@@ -98,12 +104,15 @@ def add_derived(grid: QGridLayout, derived, first_row: int
 
 
 class PreviewPlot(QWidget):
-    """The small plot a panel draws its preview in — the filter's
-    response, the sine extraction's sampled readings: log frequency
-    across, no mouse, no menu, the axes in the theme's foreground.
-    The two built it line for line apart (2026-10-10); each keeps its
-    own curves and says only how it differs: `HEIGHT`, `LOG_Y`,
+    """The small plot a panel draws its preview in, such as the filter's
+    response or the sine extraction's sampled readings. Frequency is on
+    a log axis, the mouse and the menu are turned off, and the axes are
+    in the theme's foreground color. A subclass adds its own curves and
+    sets only how it differs, through `HEIGHT`, `LOG_Y` and
     `AXIS_WIDTH`."""
+
+    # The filter and sine panels built this plot line for line apart
+    # until 2026-10-10.
 
     HEIGHT = 150
     LOG_Y = True
@@ -135,7 +144,7 @@ class PreviewPlot(QWidget):
         layout.addWidget(self.widget)
 
     def apply_theme(self, colors: Mapping[str, str]) -> None:
-        """Follow a theme change, like every other drawing here."""
+        """Redraw the background and the axes in a new theme's colors."""
         self.colors = colors
         self.widget.setBackground(colors['plot_background'])
         for edge in ('left', 'bottom'):

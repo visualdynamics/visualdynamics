@@ -1,4 +1,11 @@
-"""Desktop GUI. Start with `visualdynamics-gui [files...]` or `python -m visualdynamics`."""
+"""The desktop application.
+
+Start it with `visualdynamics [files...]` (the older `visualdynamics-gui`
+still works) or `python -m visualdynamics`. Files named on the command
+line are imported once the window is open, `--theme dark` or
+`--theme light` sets the theme, and `--no-disclaimer` skips the alpha
+notice.
+"""
 
 from __future__ import annotations
 
@@ -38,10 +45,10 @@ def _quiet_message_handler(_mode: Any, _context: Any,
 
 
 def qt_binding() -> str | None:
-    """Which Qt pyqtgraph is bound to, or None if it is still free.
+    """The Qt binding pyqtgraph uses, or None if it has not chosen one.
 
-    None means nothing has imported pyqtgraph yet, so importing visualdynamics's
-    own widgets first will decide it in our favor.
+    None means nothing has imported pyqtgraph yet, so importing the
+    Visual Dynamics widgets first will make it use PySide6.
     """
     import sys
 
@@ -50,22 +57,23 @@ def qt_binding() -> str | None:
 
 
 def check_qt_binding() -> None:
-    """Point pyqtgraph at the same Qt as the rest of the GUI, or explain.
+    """Make pyqtgraph use the same Qt binding as the rest of the GUI, or
+    raise an error that says why it cannot.
 
-    pyqtgraph binds to one Qt for the life of the process, chosen when it is
-    first imported: whichever binding is already in `sys.modules`, and
-    failing that its own order of preference, which puts **PyQt6 ahead of
-    PySide6**. Having PySide6 installed is not enough.
+    pyqtgraph binds to one Qt for the life of the process, chosen when it
+    is first imported: whichever binding is already in `sys.modules`, and
+    otherwise its own order of preference, which puts PyQt6 ahead of
+    PySide6. Having PySide6 installed is not enough.
 
-    visualdynamics is a PySide6 application, so a pyqtgraph on any other binding hands
-    back plot widgets a PySide6 layout will not accept. That surfaced as
-    `QSplitter.addWidget called with wrong argument types` from deep inside
-    the main window, naming nothing useful.
+    Visual Dynamics is a PySide6 application, and a PySide6 layout will
+    not accept plot widgets from another binding. The failure otherwise
+    comes from deep inside the main window, as `QSplitter.addWidget
+    called with wrong argument types`, and does not name the cause.
 
-    So: import PySide6 first, which decides it in our favor whenever
-    pyqtgraph has not yet been imported. When it has — sdynpy imports it
-    with PyQt5 at `import sdynpy` — the choice cannot be undone, and all
-    that is left is to say so before a window is built out of the mismatch.
+    So this imports PySide6 first, which settles the binding whenever
+    pyqtgraph has not been imported yet. If it has (sdynpy, for example,
+    imports it with PyQt5 at `import sdynpy`), the choice cannot be
+    undone, and this raises RuntimeError before a window is built.
     """
     import importlib
 
@@ -93,8 +101,10 @@ def check_qt_binding() -> None:
 
 
 def theme_flag(argv: list[str]) -> tuple[list[str], str | None]:
-    """Take `--theme dark`, `--theme light` or `--theme=dark` out of
-    the arguments: the rest, and the theme named, or None."""
+    """Remove `--theme dark`, `--theme light` or `--theme=dark` from the
+    arguments. Returns the remaining arguments and the theme named
+    (lower case), or None when there is none; raises SystemExit for a
+    theme other than dark or light."""
     rest: list[str] = []
     theme = None
     skip = False

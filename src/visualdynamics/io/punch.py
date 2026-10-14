@@ -1,36 +1,35 @@
-"""Nastran punch files (.pch) — eigenvectors, read as a ShapeSet.
+"""Read Nastran punch files (.pch): the eigenvectors, as a ShapeSet.
 
-Phase 2 of the FEM interchange arc (PLAN.md): the bulk deck carries
-the mesh and no results, and what a correlation needs is the modes.
-SOL 103 punches them as text — `DISPLACEMENT(PUNCH) = ALL` in case
-control — in a layout documented in every Nastran vendor's reference
-and stable across them, which is exactly why the punch is read and
-the .f06 print file is not: the print is a report formatted for eyes
-and vendors disagree about its columns; the punch says the same
-numbers in a fixed shape.
+A bulk deck has the mesh and no results; the modes a correlation needs
+are in the punch file that SOL 103 writes with `DISPLACEMENT(PUNCH) =
+ALL` in case control. Its layout is documented in every Nastran
+vendor's reference and is the same across them, which is why the punch
+is read and the .f06 print file is not: the print file is formatted for
+reading, and vendors differ in its columns.
 
-The layout, from those references: every line is 72 columns of data
-with an optional sequence number in 73-80 (dropped unread). A mode
-starts at a `$EIGENVALUE = <lambda> MODE = <k>` header — lambda is
-the eigenvalue in (rad/s)^2, so the frequency in Hz is
-sqrt(lambda)/2pi — under `$` header lines naming the output
-(`$DISPLACEMENTS`, `$EIGENVECTOR`) and its arithmetic
-(`$REAL OUTPUT` or `$COMPLEX OUTPUT`). Each grid then takes one line
-of id, type and three translations, with `-CONT-` lines carrying the
-three rotations.
+The layout: each line is 72 columns of data with an optional sequence
+number in columns 73-80, which is ignored. A mode starts at a
+`$EIGENVALUE = <lambda> MODE = <k>` header, under `$` header lines
+naming the output (`$DISPLACEMENTS`, `$EIGENVECTOR`) and its form
+(`$REAL OUTPUT` or `$COMPLEX OUTPUT`). Lambda is the eigenvalue in
+(rad/s)^2, so the frequency in Hz is sqrt(lambda)/2pi; a negative lambda
+(a rigid body mode with numerical error) gives 0 Hz. Each grid then has
+one line of id, type and three translations, and a `-CONT-` line with
+the three rotations. Every grid must have the same number of values, 3
+or 6, and every mode the same grids.
 
-`$COMPLEX OUTPUT` refuses loudly: a complex modal solution punches
-its eigenvalue in a header layout no file here has ever shown, and a
-guessed frequency on every mode is worse than a refusal naming the
-gap — sample-and-extend when a real one arrives.
+`$COMPLEX OUTPUT` is refused, because no sample file has shown the
+header layout of a complex modal solution's eigenvalue, and a guessed
+frequency on every mode would be worse than the refusal.
 
-Only `G` (grid) rows are kept. `S` (scalar) points carry one value
-that belongs to no geometric direction, so they are skipped
-knowingly rather than mapped onto an axis they do not have.
+Only `G` (grid) rows are kept. `S` (scalar) points have one value that
+belongs to no direction, so they are skipped instead of being assigned
+to an axis.
 
-Real normal modes carry no damping; the ShapeSet says 0 and the
-person fitting against it knows why. A punch is unitless like the
-deck it came from, so shapes arrive raw.
+Real normal modes have no damping, so the damping is 0. The punch does
+not record how the modes were normalized, so the ShapeSet is marked
+unscaled. A punch has no units, like the deck it came from, so the
+shapes are read as written.
 """
 
 from __future__ import annotations
@@ -42,6 +41,9 @@ from typing import Any
 import numpy as np
 
 from .sniffing import text_head
+
+# Phase 2 of the FEM interchange work (PLAN.md). The complex layout is to be
+# sampled and added when a real complex punch file arrives.
 
 _COMPONENTS = ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')
 

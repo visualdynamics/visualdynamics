@@ -1,12 +1,10 @@
-"""What an object reads as, as a table: headers and rows of text.
+"""An object's contents as a table: headers and rows of text.
 
-The app has table *models* — editable, colored, unit-aware, and Qt to
-the core. This is the other kind: the read-only rendering that goes in a
-report, and that a script wants when it asks what is in a channel table
-without opening a window.
-
-One implementation, because the report and a script asking the same
-question must not answer it differently.
+The app has its own table models, which are editable, colored, aware of
+units and built on Qt. This module is the read-only version: the table
+that goes in a report, and the one a script gets when it asks what is in
+a channel table without opening a window. The report and a script use
+the same functions here, so they always show the same table.
 """
 
 from __future__ import annotations
@@ -20,22 +18,26 @@ MATCHED_DECIMALS = (None, 4, 3, None, 4, 3, None, 3, 2)
 
 def matched_rows(matched: Any, objects: Mapping[str, Any]
                  ) -> tuple[list[str], list[tuple[Any, ...]]]:
-    """A MatchedModes object's table as values: headers, and a row per
-    pair — each set's mode number, frequency [Hz] and damping [%], the
-    frequency error against the first set (text, signed), the pair's
-    MAC, and the second set's size against the first's.
+    """The table of a `MatchedModes` object, as values.
 
-    The sets are read live by name, so their parameters restate
-    themselves as the sets change, while the MAC is the object's own
-    stored value (it came from the comparison as displayed, possibly
-    projected). A set gone from `objects`, or a mode past its end,
-    reads None rather than a guess. The last column is the scale each
-    pair was normalized by, which an overlay — both shapes drawn to
-    their own peak — cannot show: 1.00 down it is the evidence that a
-    comparison is of shape alone.
+    Returns the headers and one row per pair: each set's mode number
+    (one-based), frequency [Hz] and damping [%], the frequency error of
+    the second set against the first as signed text in percent, the
+    pair's MAC, and the size of the second set's mode relative to the
+    first's (`scale_ratios`).
 
-    The window's table and the report's draw these rows; `table_of`
-    is them as text.
+    The two sets are looked up by name in `objects` each time, so the
+    frequencies and damping follow any change to the sets. The MAC is
+    the value stored in the object, because it came from the comparison
+    as it was displayed, possibly after a projection. A set missing from
+    `objects`, or a mode number past the end of its set, gives None (and
+    a dash for the frequency error). The last column shows how the two
+    shapes of each pair are scaled relative to each other, which an
+    overlay cannot show because it draws each shape to its own peak; a
+    column of 1.00 means the comparison is of shape alone.
+
+    The window's table and the report's table are drawn from these
+    rows; `table_of` gives the same rows as text.
     """
     from .shapes import scale_ratios
 
@@ -68,7 +70,7 @@ def matched_rows(matched: Any, objects: Mapping[str, Any]
 
 
 def cell_text(value: Any, decimals: int | None) -> str:
-    """One matched-modes value as it is read: a dash for nothing."""
+    """One matched-modes value as text, to `decimals` places; None is a dash."""
     if value is None:
         return '—'
     return str(value) if decimals is None else f'{value:.{decimals}f}'
@@ -77,15 +79,15 @@ def cell_text(value: Any, decimals: int | None) -> str:
 def table_of(obj: Any, geometry: Any = None,
              objects: Mapping[str, Any] | None = None
              ) -> tuple[list[str], list[list[str]]] | None:
-    """(headers, rows) for an object that reads as a table, else None.
+    """``(headers, rows)`` for an object that has a table, else None.
 
-    A shape set is its identified modal parameters; a channel table is
-    its instrumentation — with the direction columns a geometry
-    derives beside it, when one is given; matched modes are the pairs
-    beside both sets' parameters (`matched_rows`), read from the sets
-    in `objects`. Everything is text, formatted the way it is read
-    rather than the way it is stored — a damping of 0.0213 is '2.130'
-    percent, because that is the number an engineer quotes.
+    A shape set gives its modal parameters (mode, frequency, damping,
+    description). A channel table gives its columns, plus the direction
+    columns derived from `geometry` when one is given. Matched modes
+    give the pairs beside both sets' parameters (`matched_rows`), with
+    the sets looked up in `objects`. Every cell is text, formatted the
+    way it is usually quoted rather than the way it is stored: a damping
+    of 0.0213 is '2.130' percent.
     """
     from .channel_table import ChannelTable
     from .matches import MatchedModes

@@ -146,10 +146,10 @@ def build():
 
     if not SOURCE.exists():
         raise SystemExit(
-            f'{SOURCE} is absent. The examples are generated from the '
-            'plate project, which lives in stressdata/ and is not in '
-            'the repository; the pages they produce are committed, so '
-            'this only needs running when the examples change.')
+            f'{SOURCE} is missing. The plate examples are generated from '
+            'the plate project in stressdata/, which is not in the '
+            'repository. The pages it produces are committed, so this '
+            'only needs to run when the examples change.')
 
     source = visualdynamics.Project.open(str(SOURCE))
     demo = visualdynamics.Project('Examples')
@@ -182,7 +182,7 @@ def build():
                        'channel per station'},
         'modes.html': {
             'kind': 'scene', 'geometry': 'Geometry', 'shapes': 'Modes',
-            'caption': 'Finite element modes of the plate — pick one '
+            'caption': 'Finite element modes of the plate. Pick one '
                        'from the list, and drag to turn it'},
     }
 
@@ -234,8 +234,8 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
     demo.link('BARC', 'Modes')
     report = Report('', [{
         'kind': 'scene', 'geometry': 'BARC', 'shapes': 'Modes',
-        'caption': 'Finite element modes of the BARC, built from planes — '
-                   'pick one from the list, and drag to turn it'}])
+        'caption': 'Finite element modes of the BARC, built from planes. '
+                   'Pick one from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
                                      visualdynamics.SI, object_groups=demo.object_groups)
@@ -278,8 +278,8 @@ def build_barc_bricks(size: float = BARC_BRICKS_WEB_SIZE,
     demo.link('BARC', 'Modes')
     report = Report('', [{
         'kind': 'scene', 'geometry': 'BARC', 'shapes': 'Modes',
-        'caption': 'Finite element modes of the BARC, built from bricks — '
-                   'pick one from the list, and drag to turn it'}])
+        'caption': 'Finite element modes of the BARC, built from bricks. '
+                   'Pick one from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),
                                      visualdynamics.SI, object_groups=demo.object_groups)
@@ -327,7 +327,7 @@ def build_frame(size: float = FRAME_WEB_SIZE,
     report = Report('', [{
         'kind': 'scene', 'geometry': 'Frame', 'shapes': 'Modes',
         'caption': 'Finite element modes of the Frame-Wing, the frame '
-                   'with its thick wing, built from solids — pick one '
+                   'with its thick wing, built from solids. Pick one '
                    'from the list, and drag to turn it'}])
     report.marking = ''
     html = report_module.render_html(report, dict(demo.items()),

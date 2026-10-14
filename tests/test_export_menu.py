@@ -129,3 +129,35 @@ def test_a_specification_is_offered_as_the_controllers_target(window, pump,
     assert 'sdynpy data array (.npz) (*.npz)' in seen['filters'], \
         'two formats share a suffix; the list tells them apart'
 
+
+
+def test_the_line_after_a_save_names_the_units_the_format_wrote(window, pump,
+                                                                monkeypatch, tmp_path):
+    """Most formats cannot say their units, so the status line does, and
+    it says what the format wrote: a `.mat` holds the display system, g
+    included; a UNV the coherent system it is built on. It named the
+    coherent system whatever the format did (2026-10-13)."""
+    import numpy as np
+
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.io.exporters import units_written
+    from visualdynamics.units import SYSTEMS
+
+    history = TimeHistory(np.arange(4) * 0.01, [[0.0, 1.0, -2.0, 0.5]], ['1X+'])
+    history.define_units('g')
+    window.add_object('Run', history)
+    window.tree.setCurrentItem(window.test_item.child(0))
+    window.unit_combo.setCurrentText('in-slinch-lbf-s (g)')
+    pump()
+    filters = offered(window, monkeypatch)['filters']
+    mat = next(f for f in filters if '.mat' in f)
+    offered(window, monkeypatch, answer=(str(tmp_path / 'run.mat'), mat))
+    assert window.statusBar().currentMessage() == 'Saved run.mat in in-slinch-lbf-s (g)'
+    unv = next(f for f in filters if '(*.unv)' in f and 'binary' not in f)
+    offered(window, monkeypatch, answer=(str(tmp_path / 'run.unv'), unv))
+    assert window.statusBar().currentMessage() == 'Saved run.unv in in-slinch-lbf-s'
+    system = SYSTEMS['in-slinch-lbf-s (g)']
+    assert units_written('nastran', system) == 'SI'
+    assert units_written('adf_time', system) == 'SI'
+    assert units_written('threemf', system) == 'meters'
+    assert units_written('escdf', system) == 'the units each object was declared in'

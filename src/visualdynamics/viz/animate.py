@@ -1,11 +1,13 @@
 """Moving a geometry scene without rebuilding it.
 
-The scene's meshes all share one point buffer (see `shared_points`), so a
-frame is: compute the offsets for the moving nodes, write them through a
-numpy view of VTK's memory, and mark it modified. Nothing is allocated and
-nothing is rebuilt, which is what keeps large models animatable.
+The scene's meshes all share one point buffer (`shared_points`), so a
+frame is three steps: compute the offsets of the moving nodes, write
+them through a numpy view of VTK's memory, and mark the buffer modified.
+Nothing is allocated or rebuilt per frame, which is what allows large
+models to be animated.
 
-Knows nothing about Qt — the caller drives it.
+The animators use no Qt; the caller drives them. The `animate_*`
+functions play an animation in a window, or save a still or an MP4.
 """
 
 from __future__ import annotations
@@ -48,12 +50,13 @@ MOVIE_SECONDS = 6.0
 def cycle_parameters(cycle_seconds: float = SECONDS_PER_CYCLE,
                      fps: int = MOVIE_FPS,
                      seconds: float = MOVIE_SECONDS) -> np.ndarray:
-    """The phases a saved mode-shape animation steps through.
+    """The phases, in radians, that a saved mode-shape animation steps
+    through.
 
-    Whole cycles, at least `seconds` of them, at the speed the window
-    plays (`cycle_seconds` a cycle) — and the last frame stops one step
-    short of 2π, so a player set to loop shows no stutter where the
-    file wraps.
+    Whole cycles lasting at least `seconds` in total, at `fps` frames a
+    second and at the speed the window plays (`cycle_seconds` a cycle).
+    The last frame stops one step short of 2π, so a player set to loop
+    shows no repeated frame where the file wraps.
     """
     per_cycle = max(2, round(cycle_seconds * fps))
     cycles = max(1, int(np.ceil(seconds * fps / per_cycle - 1e-9)))
@@ -62,18 +65,21 @@ def cycle_parameters(cycle_seconds: float = SECONDS_PER_CYCLE,
 
 def sweep_parameters(count: int, seconds: float = SECONDS_PER_RECORD,
                      fps: int = MOVIE_FPS) -> np.ndarray:
-    """The sample (or line) indices a saved sweep steps through: all
-    `count` of them, once, in `seconds` — how the window plays a
-    record through."""
+    """The sample (or line) indices a saved sweep steps through: 0 to
+    `count` - 1, once, in `seconds` at `fps` frames a second, the way the
+    window plays a record. Indices are spaced evenly, so some are skipped
+    when there are more of them than frames, and some repeat when there
+    are fewer."""
     frames = max(1, round(seconds * fps))
     return (np.arange(frames) * count // frames).astype(int)
 
 
 def movie_frames(plotter: Any, step: Any, parameters: Any) -> Any:
-    """The scene at each parameter, rendered, as images — the frames a
-    movie is made of, pulled one at a time. `step(parameter)` puts the
-    scene there: an animator's `set_parameter`, or whatever else moves
-    with it (a caption, the window's plot cursor)."""
+    """Yield the scene rendered at each of `parameters`, as images: the
+    frames of a movie, one at a time. `step(parameter)` moves the scene
+    there; it is an animator's `set_parameter`, or a function that also
+    moves whatever else goes with it (a caption, the window's plot
+    cursor)."""
     for parameter in parameters:
         step(parameter)
         plotter.render()
@@ -93,11 +99,12 @@ def _color_range(deflection: Deflection) -> float:
 
 
 class PairedAnimator:
-    """Two deflections of one geometry, moving in step.
+    """Two animated copies, moving in step.
 
-    Each copy keeps its own point buffer and its own automatic scale, so
-    two mode shapes of different normalization compare by *shape* — which
-    is what overlaying them is for.
+    Each copy is a `GeometryAnimator` with its own point buffer and its
+    own automatic scale, so two mode shapes with different
+    normalizations are compared by shape, which is the purpose of
+    overlaying them. The copies may be on the same geometry or on two.
     """
 
     def __init__(self, first: GeometryAnimator,
@@ -108,26 +115,32 @@ class PairedAnimator:
 
     @property
     def deflection(self) -> Any:
-        """The first copy's — for a pair sharing one deflection (the
-        envelope), the pair's."""
+        """The first copy's deflection, which for a pair sharing one
+        deflection (the envelope) is the pair's."""
         return self.first.deflection
 
     @property
     def parameter(self) -> float:
+        """The first copy's current phase or index."""
         return self.first.parameter
 
     def set_scale(self, user_scale: float) -> None:
+        """Set both copies' scale, as a multiple of each one's own
+        automatic scale."""
         self.first.set_scale(user_scale)
         self.second.set_scale(user_scale)
 
     def set_parameter(self, parameter: float) -> None:
+        """Move both copies to this phase or index."""
         self.first.set_parameter(parameter)
         self.second.set_parameter(parameter)
 
     def render(self) -> None:
+        """Render the scene the copies share."""
         self.first.render()
 
     def reset(self) -> None:
+        """Put both copies back at their undeformed positions."""
         self.first.reset()
         self.second.reset()
 
@@ -135,9 +148,18 @@ class PairedAnimator:
 class GeometryAnimator:
     """A geometry scene whose nodes move with a deflection.
 
-    `deflection` supplies offsets for the nodes it moves; everything else
-    holds its base position. `parameter` means phase in radians for a mode
-    shape and a sample index for time data.
+    The geometry is drawn into `plotter` on construction (`add_geometry`,
+    with any extra keyword arguments passed on). `deflection` supplies
+    offsets for the nodes it moves, and every other node stays at its
+    base position. The parameter is a phase in radians for a mode shape,
+    and a sample index for time data.
+
+    The automatic scale makes the largest deflection `fraction` of the
+    model's size (the diagonal of its bounding box), and `set_scale`
+    multiplies it. With `colormap` the nodes are colored by the size of
+    their offset, under the array name `scalar_name`, on a color range
+    of `clim`; by default the range runs from zero to the largest offset
+    any node ever reaches, fixed for the whole animation.
     """
 
     def __init__(self, plotter: Any, geometry: Geometry,
@@ -185,9 +207,13 @@ class GeometryAnimator:
 
     @property
     def scale(self) -> float:
+        """The factor offsets are drawn at: the automatic scale times the
+        user's."""
         return self.auto * self.user_scale
 
     def set_scale(self, user_scale: float) -> None:
+        """Set the user's scale, a multiple of the automatic one, and
+        redraw at the current parameter."""
         self.user_scale = float(user_scale)
         self.set_parameter(self.parameter)
 
@@ -209,10 +235,12 @@ class GeometryAnimator:
             self.scalars_source.Modified()
 
     def render(self) -> None:
+        """Render the plotter."""
         self.plotter.render()
 
     def reset(self) -> None:
-        """Put every node back where it started."""
+        """Put every node back at its base position, and its color at
+        zero."""
         self.view[:] = self.base
         self.points_source.Modified()
         if self.magnitude is not None:
@@ -221,14 +249,16 @@ class GeometryAnimator:
 
 
 class EnvelopeAnimator(GeometryAnimator):
-    """One copy of a PSD envelope; a ± pair of these is the picture.
+    """One copy of a PSD envelope. The envelope is drawn as a pair of
+    these, one deflected + and one -.
 
-    `sign` mirrors the pattern through the scale, so the window's one
-    Scale control still drives both copies through `PairedAnimator`.
-    The parameter is the abscissa line — the envelope has no phase to
-    sweep — and color is absolute: dB below the loudest node at any
-    line, the one channel left to carry level once every line deflects
-    at full size.
+    `sign` (+1 or -1) multiplies the scale, so the window's one Scale
+    control still drives both copies through `PairedAnimator`. The
+    parameter is the abscissa line, since an envelope has no phase to
+    sweep. Color is absolute: dB below the loudest node at any line,
+    between the deflection's `FLOOR_DB` and 0. Every line deflects at
+    full size, so the color is the only thing that shows level; a node
+    with no data is drawn at the floor.
     """
 
     def __init__(self, plotter: Any, geometry: Geometry,
@@ -247,9 +277,11 @@ class EnvelopeAnimator(GeometryAnimator):
 
     @property
     def scale(self) -> float:
+        """The automatic scale times the user's, times `sign`."""
         return self.auto * self.user_scale * self.sign
 
     def set_parameter(self, parameter: float) -> None:
+        """Move to this abscissa line, and recolor the nodes for it."""
         self.deflection.line = int(parameter)
         super().set_parameter(parameter)
         if self.magnitude is not None:
@@ -375,8 +407,9 @@ def build_pair(plotter: Any, first: tuple[Geometry, Any],
                unit_system: UnitSystem | None = None,
                text_color: str = '#000000') -> PairedAnimator:
     """Two (geometry, deflection) copies moving in step in one scene,
-    each on its own mesh in one flat color at its own opacity — the
-    overlay the window, the report and `animate_pair` all show."""
+    each on its own meshes in one flat color (`colors`, None for the
+    geometry's own colors) at its own opacity (`alphas`). This is the
+    overlay that the window, the report and `animate_pair` all show."""
     return PairedAnimator(*(
         GeometryAnimator(plotter, geometry, deflection,
                          unit_system=unit_system, color_override=color,
@@ -389,11 +422,12 @@ def pair_deflections(a: ShapeSet, i: int, b: ShapeSet, j: int,
                      a_geometry: Geometry, b_geometry: Geometry,
                      projected: ShapeSet | None = None,
                      on_basis: bool = False) -> tuple[tuple, tuple]:
-    """The two (geometry, deflection) copies of an overlaid pair: a's
-    mode i on a's geometry, b's mode j phase-aligned to it
-    (`paired_mode`) on b's — or, `on_basis`, the projection of b on a's
-    geometry, both sampled at the basis DOFs. `projected` is b carried
-    onto a's DOFs, needed when the geometries differ."""
+    """The two (geometry, deflection) copies of an overlaid pair: mode
+    `i` of `a` on a's geometry, and mode `j` of `b`, phase-aligned to it
+    (`paired_mode`), on b's geometry. With `on_basis`, the second copy
+    is instead the projection of b drawn on a's geometry, both sampled
+    at the basis DOFs (this needs `projected`). `projected` is b carried
+    onto a's DOFs, and is needed when the two geometries differ."""
     from ..core.shapes import aligned_mode, paired_mode
     from ..deform import ShapeDeflection
 
@@ -420,15 +454,19 @@ def animate_pair(first: tuple[Geometry, Any], second: tuple[Geometry, Any],
                  cycle_seconds: float = SECONDS_PER_CYCLE,
                  theme: Any = None, screenshot: str | None = None,
                  movie: str | None = None, show: bool = True) -> Any:
-    """Two deflections overlaid and swinging together, as the window
-    animates a picked MAC cell (`pair_deflections` makes the pair).
+    """Two deflections overlaid and moving together, as the window
+    animates a picked MAC cell. `pair_deflections` makes the pair.
 
     Each copy is scaled to its own peak, so the picture compares shape
-    and not level — the caption's scale note says what that hid.
-    `colors` default to the theme's pair, `alphas` to the first solid
-    and the second drawn through it (`theme.overlay_alphas`).
-    `screenshot` is the still at peak phase, `movie` whole cycles as an
-    MP4; otherwise a window plays it.
+    and not level. `caption`, when given, is written in the corner of
+    every frame; `core.shapes.pair_caption` makes one that includes a
+    note on the two scales.
+    `colors` default to the theme's pair, and `alphas` to the first
+    copy solid and the second translucent (`theme.overlay_alphas`).
+    `scale` multiplies both automatic scales, and `cycle_seconds` is the
+    time of one cycle. `screenshot` saves the still at peak phase, and
+    `movie` saves whole cycles as an MP4 and returns its path; otherwise
+    a window plays it and is returned.
     """
     from ..theme import PAIR_COLORS, overlay_alphas
     from ..theme import theme as resolve_theme
@@ -458,14 +496,16 @@ def animate_shape(geometry: Geometry, shapes: ShapeSet, mode: int = 0, *,
                   screenshot: str | None = None,
                   movie: str | None = None,
                   show: bool = True) -> Any:
-    """One mode shape moving on a geometry, as the GUI animates it.
+    """One mode shape (index `mode` of `shapes`) moving on a geometry, as
+    the app animates it.
 
-    Colored by displacement on viridis like the desktop scene. With
-    `screenshot` the deflected shape is rendered to a file at peak
-    phase instead — an animation has no still to save, so the still is
-    the one that shows the shape. With `movie` it is saved as an MP4
-    (H.264) of whole cycles at `cycle_seconds` a cycle, and the path
-    is returned (`gui.movie.write_movie`).
+    With `colormap` the nodes are colored by displacement on viridis, as
+    in the app's scene. `scale` multiplies the automatic scale. With
+    `screenshot` the deflected shape is rendered to the file at peak
+    phase, the frame that shows the shape best. With `movie` it is saved
+    as an MP4 (H.264) of whole cycles at `cycle_seconds` a cycle, and
+    the path is returned (`gui.movie.write_movie`). Otherwise a window
+    plays it and is returned.
     """
     from ..deform import ShapeDeflection
     from ..theme import theme as resolve_theme
@@ -491,17 +531,24 @@ def animate_envelope(geometry: Geometry, data: Any,
                      screenshot: str | None = None,
                      movie: str | None = None,
                      show: bool = True) -> Any:
-    """A PSD's envelope on a geometry, as the GUI shows it: two copies
-    deflected ±sqrt(PSD) at one line, colored dB below the loudest.
+    """A PSD's envelope on a geometry, as the app shows it: two copies
+    deflected by plus and minus sqrt(PSD) at one line, colored in dB
+    below the loudest node.
 
-    One quantity at a time — newtons and meters per second squared
-    cannot share a normalization — defaulting to the commonest among
-    the records. Cross records are left out: their phase belongs to an
-    operating deflection shape, not an envelope.
+    One `quantity` at a time, because newtons and meters per second
+    squared cannot share a normalization; by default the most common
+    one among the `records`. Cross records are left out, since their
+    phase belongs to an operating deflection shape and not an envelope.
+    The still is at `frequency` (the first line at or above it), or at
+    the strongest line when none is given.
 
-    `screenshot` is the still at one line; `movie` sweeps every line
-    once through in `seconds`, as Play does in the window, with the
-    line's frequency captioned on each frame, and returns the path.
+    `screenshot` saves the still. `movie` sweeps every line once in
+    `seconds`, as Play does in the window, with the line's frequency
+    written on each frame, and returns the path. Otherwise a window
+    plays it and is returned.
+
+    Raises ValueError when no auto record measures the quantity, or
+    when none of the records is at a node of this geometry.
     """
     from ..deform import (
         EnvelopeDeflection,
@@ -562,14 +609,18 @@ def animate_ods(geometry: Geometry, data: Any,
                 screenshot: str | None = None,
                 movie: str | None = None,
                 show: bool = True) -> Any:
-    """The operating deflection shape of complex spectra at one line,
-    as the GUI animates it when the object is selected with a geometry.
+    """The operating deflection shape of complex spectra at one line, as
+    the app animates it when the object is selected with a geometry.
 
-    The pattern is the records' complex values at the chosen frequency
-    — the strongest line when none is named — swept in phase like a
-    complex mode. Record choice follows `animation_records`: one record
-    per DOF, first reference of a whole FRF. `screenshot` and `movie`
-    save it as `animate_shape` does.
+    The shape is the records' complex values at `frequency` (the first
+    line at or above it), or at the strongest line when none is given,
+    swept in phase like a complex mode. The records follow
+    `animation_records`: one record per DOF, and the first reference of a
+    whole FRF. `screenshot` and `movie` save it as `animate_shape` does,
+    and otherwise a window plays it.
+
+    Raises ValueError for real data, which has no phase, and when none
+    of the records is at a node of this geometry.
     """
     from ..deform import OdsDeflection, animation_records
     from ..theme import theme as resolve_theme
@@ -603,14 +654,18 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
                  screenshot: str | None = None,
                  movie: str | None = None,
                  show: bool = True) -> Any:
-    """Time records moving on a geometry, as the GUI plays them: the
+    """Time records moving on a geometry, as the app plays them: the
     record once through in `seconds`, one record per DOF
-    (`animation_records`).
+    (`animation_records`). A window plays it on a loop.
 
     With `screenshot` the still is the sample where some record is
-    furthest from zero — the first sample is usually rest, and a still
-    of rest says nothing. With `movie` the record is saved once through
-    as an MP4 (H.264) and the path returned.
+    furthest from zero, because the first sample is usually at rest and
+    a still of the structure at rest shows nothing. With `movie` the
+    record is saved once through as an MP4 (H.264) and the path is
+    returned.
+
+    Raises ValueError when none of the records is at a node of this
+    geometry.
     """
     from ..deform import TimeDeflection, animation_records
     from ..theme import theme as resolve_theme

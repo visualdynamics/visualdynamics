@@ -1,4 +1,11 @@
-"""visualdynamics: units-aware structural dynamics analysis toolset."""
+"""Visual Dynamics, a units-aware structural dynamics toolset.
+
+`import visualdynamics` gives the `Project` and the one-call report
+functions, the data objects (`TimeHistory`, `Frf`, `Psd`, `ShapeSet`,
+`Geometry` and the rest), the readers and writers (`import_file`,
+`export_file`, `load`, `save`), the unit systems and `convert`, and
+`launch_gui`, which opens the desktop app.
+"""
 
 import os as _os
 from typing import Any
@@ -90,23 +97,21 @@ from .units import (
 #: alpha, said in the version itself so the dialog, the About text, the
 #: installers and latest.json all say the same thing, and the first
 #: non-alpha release is offered as an upgrade (Brandon, 2026-09-11)
-__version__ = '0.1.0a49'
+__version__ = '0.1.0a50'
 
 
 def launch_gui(*paths: str, in_process: bool | None = None) -> Any:
-    """Launch the app, optionally importing files on the way in.
+    """Open the desktop app, importing any files given.
 
         visualdynamics.launch_gui('test.vdyn', 'frfs.unv')
 
-    Normally this runs the window in *this* interpreter and blocks
-    until it closes, and returns nothing — the window is gone, there is
-    nothing to hand back. If pyqtgraph has already been bound to another
-    Qt — `import sdynpy` does that, with PyQt5, and the choice cannot be
-    undone in a running process — the app is started in a fresh process
-    instead, and the `Popen` handle comes back straight away because
-    that one is still running. So a session that has been using sdynpy
-    still gets a window, and sdynpy's own plotting in that session is
-    left alone.
+    Normally the window runs in this interpreter, and the call blocks
+    until it closes and returns None. If pyqtgraph in this session is
+    already bound to a Qt other than PySide6 (importing sdynpy binds it
+    to PyQt5, for example), that cannot be undone in a running process,
+    so the app is started in a new process instead and the call returns
+    its `Popen` handle at once. The session's own plotting is left as it
+    was.
 
     `in_process` overrides the decision either way.
 

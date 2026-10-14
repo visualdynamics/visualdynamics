@@ -1,23 +1,27 @@
-"""Importer for sdynpy data array files (.npz).
+"""Read and write sdynpy data array files (.npz).
 
-The format is a numpy .npz with two entries:
+The format is a NumPy .npz with two entries:
 
-- 'function_type': scalar int, UFF dataset 58 function type code (the same
-  vocabulary visualdynamics uses: 1 time response, 4 FRF, 9 PSD, 12 spectrum)
-- 'data': structured array with per-record fields 'abscissa' (n,), 'ordinate'
-  (n,), 'comment1'..'comment5', and 'coordinate' — (node, direction) pairs,
-  shape (1,) for response-only data or (2,) for response/reference data.
-  Directions use the UFF signed 1..6 code.
+- 'function_type': a scalar int, the universal file dataset 58 function
+  type code, which is the vocabulary Visual Dynamics uses (1 time
+  response, 4 FRF, 6 coherence, 9 PSD, 12 spectrum and so on).
+- 'data': a structured array of records with the fields 'abscissa'
+  (n,), 'ordinate' (n,), 'comment1' to 'comment5', and 'coordinate',
+  the (node, direction) pairs, shape (1,) for data with a response only
+  or (2,) for response and reference. Directions use the signed
+  universal file code, 1 to 6.
 
-Files carry no units. Units may be declared at import:
+The files have no units. Units may be declared at import:
 
-- time/spectrum data:   ordinate_unit (e.g. 'm/s**2', 'g', 'N')
-- FRF:                  response_unit and reference_unit
-- PSD:                  ordinate_unit = the engineering unit whose square-
-                        per-Hz the PSD is in (e.g. 'g' for g^2/Hz)
+- time and spectrum data: `ordinate_unit` (for example 'm/s**2', 'g'
+  or 'N');
+- FRFs: `response_unit` and `reference_unit`, both needed;
+- PSDs: `ordinate_unit`, the unit whose square per Hz the PSD is in
+  (for example 'g' for g^2/Hz).
 
-Without them the data arrives unit-less, holding the file's raw values, for
-the user to define units later with `define_units()`.
+Without them the data is unit-less, holding the file's values, and the
+units can be defined later with `define_units()`. Every record must
+share one abscissa; a file whose records differ is refused.
 """
 
 from __future__ import annotations
@@ -113,10 +117,12 @@ def _coordinate_pairs(data):
 
 
 def save(data: DataArray, path: str | os.PathLike, unit_system: UnitSystem | None = None) -> None:
-    """Write a data array in sdynpy's own .npz layout.
+    """Write a data array in the sdynpy .npz layout.
 
-    Values go out in `unit_system`, or as stored without one. The format
-    has nowhere to record which units they are.
+    Values are written in the coherent form of `unit_system` when the
+    units are defined, and as stored otherwise. The format has no place
+    to record which units they are. The ordinate is complex only when
+    the data is, and the comment fields are left blank.
     """
     from .exporters import data_values
 

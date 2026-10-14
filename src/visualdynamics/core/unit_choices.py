@@ -1,19 +1,13 @@
 """Which units the interface offers, grouped by the quantity they measure.
 
-Objects import unit-less when their source does not declare units. The
-user says what the values are in the imported-units pane (see
-`MainWindow.show_units_panel`); these lists are what it offers.
+Objects are imported without units when their source does not declare
+them. The user sets the units in the imported-units pane (see
+`MainWindow.show_units_panel`), and these lists are what it offers.
 
-Grouping matters: a channel a file called an acceleration is offered four
-units rather than twenty-one, and the four are the only ones that could
-be right. The lists are shortlists, never limits — every unit cell takes
-anything visualdynamics can parse, typed or pasted.
-
-In core rather than beside the widgets that offer these lists: which
-units an acceleration could be in is a fact about accelerations, and
-`ChannelTable` needs it to narrow a channel's unit column. It lived in
-`gui/` and core reached up into it, which is the one direction imports
-must not go.
+The lists are grouped by dimension, so a channel the file calls an
+acceleration is offered the four acceleration units instead of every
+unit in the list. They are shortlists, not limits: every unit cell
+accepts any unit visualdynamics can read, typed or pasted.
 """
 
 from __future__ import annotations
@@ -22,6 +16,12 @@ import re
 from collections.abc import Sequence
 
 from ..units import is_compound_unit, plain_unit, pretty_unit
+
+# In core rather than beside the widgets that offer these lists: which
+# units an acceleration could be in is a fact about accelerations, and
+# `ChannelTable` needs it to narrow a channel's unit column. It lived in
+# `gui/` and core reached up into it, which is the one direction imports
+# must not go.
 
 LENGTH_UNITS = ['in', 'ft', 'm', 'mm', 'cm']
 
@@ -89,12 +89,36 @@ _STORED = {shown: stored for stored, shown in DISPLAY_DIMENSIONS.items()}
 
 
 def shown_dimension(dimension: str) -> str:
-    """The word for a dimension in the interface."""
+    """The word for a dimension in the interface: 'length' is shown as
+    'displacement', 'modal_velocity' as 'modal velocity'.
+
+    Parameters
+    ----------
+    dimension : str
+        The stored dimension tag.
+
+    Returns
+    -------
+    str
+        The word shown, or `dimension` itself if it has no other name.
+    """
     return DISPLAY_DIMENSIONS.get(dimension, dimension)
 
 
 def stored_dimension(shown: str) -> str:
-    """The dimension behind a word the interface offered."""
+    """The stored dimension tag for a word the interface shows; the
+    inverse of `shown_dimension`, ignoring case and surrounding spaces.
+
+    Parameters
+    ----------
+    shown : str
+        The word, such as 'displacement'.
+
+    Returns
+    -------
+    str
+        The dimension tag, such as 'length'.
+    """
     return _STORED.get(shown.strip().lower(), shown.strip().lower())
 
 # What an FRF is usually driven by, when the file did not say
@@ -104,21 +128,45 @@ REFERENCE_UNITS = ['lbf', 'N', 'kN', 'g', 'm/s**2', 'in/s**2', 'V']
 def base_dimension(dimension: str) -> str:
     """The quantity whose unit the user picks, given a record's dimension.
 
-    An FRF's ordinate is named by its numerator and a PSD is declared by the
-    engineering unit whose square it stores, so in every case the choice is
-    named by the leading term.
+    This is the leading term of the expression: an FRF's ordinate is
+    declared by its numerator, and a PSD by the engineering unit whose
+    square it stores.
+
+    Parameters
+    ----------
+    dimension : str
+        A dimension tag or expression, such as 'acceleration/force'.
+
+    Returns
+    -------
+    str
+        The leading tag, such as 'acceleration'.
     """
     return dimension.split('/')[0].split('*')[0]
 
 
 def units_for(dimension: str | None,
               fallback: Sequence[str] | None = None) -> Sequence[str]:
-    """The units worth offering for a dimension, everything if it is unknown.
+    """The units to offer for a dimension, or the fallback if it has no
+    shortlist.
 
-    A file often names a quantity without sizing it — a UNV with no dataset
-    164 says 'acceleration' and stops. Narrowing the list to that quantity
-    turns 21 choices into four, and the four are the only ones that could be
-    right.
+    A file often names a quantity without giving its unit; a UNV with no
+    dataset 164 says 'acceleration' and nothing more. The list is then
+    limited to the units of that quantity.
+
+    Parameters
+    ----------
+    dimension : str or None
+        A dimension tag or expression; only its leading term is used
+        (`base_dimension`).
+    fallback : sequence of str, optional
+        What to offer when the dimension has no shortlist. The default
+        is every unit in every shortlist.
+
+    Returns
+    -------
+    sequence of str
+        The units, the most likely first.
     """
     if fallback is None:
         fallback = ALL_ORDINATE_UNITS
@@ -133,10 +181,20 @@ _SQUARED_PER_HZ = re.compile(r'\s*(?:\*\*\s*2|\^\s*2|²)\s*/\s*Hz\s*$', re.IGNOR
 
 
 def squared_per_hz(unit: str | None) -> str:
-    """How a PSD's declared unit actually reads: 'g' -> 'g²/Hz'.
+    """The full unit of a PSD declared in `unit`: 'g' -> 'g²/Hz'.
 
-    A compound unit is bracketed, so '(m/s²)²/Hz' cannot be misread as
-    m/s² squared only in the seconds.
+    A compound unit is bracketed, '(m/s²)²/Hz', so the square cannot be
+    read as applying to the seconds only.
+
+    Parameters
+    ----------
+    unit : str or None
+        The engineering unit the PSD was declared in.
+
+    Returns
+    -------
+    str
+        The label, or an empty string if `unit` is empty or None.
     """
     if not unit:
         return ''
@@ -147,8 +205,18 @@ def squared_per_hz(unit: str | None) -> str:
 def engineering_unit(text: str) -> str:
     """The unit inside a PSD label; the inverse of `squared_per_hz`.
 
-    Typing 'g' is accepted as readily as 'g²/Hz' — the suffix is what the
-    interface adds for clarity, not something the user must reproduce.
+    'g' and 'g²/Hz' both give 'g'. The interface adds the suffix for
+    clarity, and the user does not have to type it.
+
+    Parameters
+    ----------
+    text : str
+        The label as shown or typed.
+
+    Returns
+    -------
+    str
+        The engineering unit in pint's spelling.
     """
     text = _SQUARED_PER_HZ.sub('', text.strip())
     if text.startswith('(') and text.endswith(')'):

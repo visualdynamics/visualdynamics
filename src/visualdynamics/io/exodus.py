@@ -1,25 +1,26 @@
-"""Reader and writer for Exodus finite element files (.exo/.e).
+"""Read and write Exodus finite element files (.exo, .e, .exo2, .g,
+.gen).
 
-Exodus is netCDF underneath; both directions go straight through
-netCDF4. Read: nodes, element blocks, the file's coordinate frames
-(as coordinate systems), the node sets that carry which node is placed
-or measured in which frame, and results. Write (`save`): a geometry as
-named blocks with its systems as frames and its assignments as node
-sets, and shapes or records riding that geometry as nodal and global
-variables — damping and modal mass as `Damping`/`ModalMass`, a complex
-part as `<name>_IM` beside the real one — so a modal model round-trips
-lossless (2026-09-12). Drawn lines are beam blocks and go out as
-beam elements. The format carries no units; `length_unit` may be
-given to declare them at import, otherwise the geometry arrives
-unit-less.
+Exodus is netCDF, and both directions go through netCDF4. Reading
+gives the nodes, the element blocks, the file's coordinate frames (as
+coordinate systems), the node sets that record which node is placed or
+measured in which frame, and the results. Writing (`save`) gives a
+geometry as named blocks, its coordinate systems as frames and its
+assignments as node sets, and mode shapes or data records on that
+geometry as nodal and global variables. Damping and modal mass are
+written as the global variables `Damping` and `ModalMass`, and the
+imaginary part of a complex value as `<name>_IM` beside the real part,
+so a modal model reads back with all of them. A drawn line is a block
+of two-node line elements and is written as beam elements. The format
+has no units: `length_unit` declares the unit of the positions on
+import, and without it the geometry is unit-less.
 
-Beyond the mesh, exodus carries results: `time_whole` is a step axis,
-nodal variables are (steps x nodes) records, global variables scalars
-per step. What the step axis *means* the file cannot say — a modal run
-stores one mode per step with frequency as time, a transient stores
-time, and spectral conventions store frequency — so `load(steps=...)`
-declares it rather than guessing, the same principle as declaring
-units. See "Exodus beyond the mesh" in PLAN.md.
+Beyond the mesh, an Exodus file holds results: `time_whole` is a step
+axis, nodal variables are (steps x nodes) records, and global variables
+are one value per step. The file cannot say what the step axis means.
+A modal run stores one mode per step with the frequency as the time, a
+transient stores time, and spectral results store frequency, so
+`load(steps=...)` declares it, in the same way units are declared.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ import numpy as np
 
 from ..core.geometry import Geometry
 from ..units import si_factor
+
+# A modal model round-trips with nothing lost since 2026-09-12.
 
 # exodus elem_type attribute -> UFF 2412 descriptor code
 _ELEM_TYPES = {
@@ -134,16 +137,31 @@ def _unique_block_labels(keys):
 def load(path: str | os.PathLike, length_unit: str | None = None,
          blocks: dict[int, str] | None = None, steps: str | None = None,
          nodes: Any | None = None) -> Any:
-    """Read an exodus file: the mesh, and whatever results it carries.
+    """Read an Exodus file: the mesh, and the results it holds.
+
+    `length_unit` declares the unit of the positions; without it the
+    geometry is unit-less. `blocks` keeps only the element blocks whose
+    ids are among its keys (and then numbers the elements from 1).
 
     `steps` declares what the file's step axis means, because the file
-    cannot say: `'modes'` (the default) reads displacement variables as
-    a mode per step with frequency as the step's time; `'time'` reads
-    every nodal and global variable as a `TimeHistory`; `'frequency'`
-    reads them as a `Spectrum`, with `_RE`/`_IM` variable pairs merged
-    into complex records. `nodes` limits the result records to those
-    node ids — a large transient is records x steps for every node, and
-    nobody wants all of a 200k-node mesh as channels.
+    cannot say. `'modes'` (the default) reads the displacement and
+    rotation variables as one mode per step with the step's time as the
+    frequency, and returns the geometry alone, or a dict keyed
+    'geometry' and 'shapes' when there are modes. `'time'` reads every
+    nodal and global variable as a `TimeHistory`, returned in a dict
+    keyed 'geometry', 'time' and 'global'. `'frequency'` reads them as a
+    `Spectrum`, with `_RE`/`_IM` variable pairs merged into complex
+    records, keyed 'geometry', 'spectra' and 'global spectra'. A key is
+    left out when there is nothing for it.
+
+    `nodes` limits the result records to those node ids, since a large
+    transient is a record for every node and direction, which for a
+    200,000-node mesh is far more channels than anyone wants.
+    `node_set_nodes` gives the ids of a node set.
+
+    Raises ValueError for an unknown `steps`, an element type with no
+    match, a node in `nodes` the file does not have, or, with `'time'`
+    or `'frequency'`, a file with no step axis or no variables.
     """
     import netCDF4
 
@@ -241,10 +259,10 @@ def _read_frames(v, scale, path, num_nodes):
     tag for rectangular, cylindrical or spherical — and nothing in the
     format refers to them: nodal coordinates and nodal variables are
     always global Cartesian, and an analysis code names a frame from
-    its own input for a load or a boundary condition. So the
-    *definitions* travel here and the *assignment* cannot: every node
-    reads back placed and measured in the global system. Frames have
-    no names either.
+    its own input for a load or a boundary condition. So this places
+    every node in the global system, and `_read_assignments` then
+    restores the assignments from the node sets this package writes.
+    Frames have no names.
 
     The nodes need a global system to refer to. A frame that is the
     identity at the origin serves; a file whose frames are all local
@@ -712,7 +730,19 @@ _EXODUS_TYPES = {
 def save(obj: Any, path: str | os.PathLike, title: str = 'visualdynamics geometry',
          geometry: Geometry | None = None,
          unit_system: UnitSystem | None = None) -> None:
-    """Write a geometry, or mode shapes, as exodus."""
+    """Write a geometry, mode shapes, or a time history or spectrum, as
+    Exodus.
+
+    Shapes and data need `geometry`, the mesh they are written on, and
+    are refused without it. Each mode is written as one time step with
+    its frequency as the time, and each data record as a nodal variable
+    over `time_whole` (or a global variable when it has no DOF). Values
+    at a node with a local displacement system are rotated into the
+    global frame, because an Exodus nodal variable is always global.
+    Positions and values are written in `unit_system` (its coherent form)
+    where their units are defined, and as stored otherwise. `title` is
+    the file's title.
+    """
     from ..core.data import Spectrum, TimeHistory
     from ..core.shapes import ShapeSet
 
@@ -809,8 +839,9 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
     DOFs at nodes the mesh does not have are dropped, and damping and
     modal mass ride as two global variables, one number per step.
 
-    Elements are grouped into one block per type, which is how exodus wants
-    them — a block holds elements of a single shape.
+    Each element group is written as a block, split into one block per
+    element type where it mixes types, since an exodus block holds
+    elements of a single shape.
 
     Exodus has no traceline; a drawn line is a block of two-node line
     elements here and goes out as that block (2026-09-30), which is
@@ -820,8 +851,9 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
     node is placed or measured in which as named node sets — the format
     has no node-to-frame reference of its own, so the sets are this
     package's convention on a standard feature (`_write_assignments`);
-    a frame carries no name. Coordinates go out as stored, since the
-    format records no units either.
+    a frame carries no name. The format records no units: coordinates
+    are written in `unit_system` when the geometry's units are defined,
+    and as stored otherwise.
 
     With `data` (a TimeHistory or Spectrum), records ride as results:
     the abscissa becomes `time_whole`, each (quantity, direction) a
@@ -975,11 +1007,12 @@ def _save_geometry(geometry, path, title='visualdynamics geometry',
                     i += 1
             # a mode's damping and modal mass: one number per step is
             # what a global variable is, so they ride as two — lost
-            # until 2026-09-12. Modal mass in the target system's mass
-            # unit, as the shape coefficients are.
+            # until 2026-09-12. The modal mass is a scale factor with no
+            # unit: the coefficients carry the mass unit (1/sqrt(mass)),
+            # and converting it as a mass as well made the shapes predict
+            # FRFs 175 times too large in inches (2026-10-13, found by
+            # the docstring pass)
             mass = np.asarray(shapes.modal_mass, dtype=np.float64)
-            if unit_system is not None and shapes.units_defined:
-                mass = unit_system.coherent.from_si(mass, 'mass')
             ds.createDimension('num_glo_var', 2)
             labels = ds.createVariable('name_glo_var', 'S1',
                                        ('num_glo_var', 'len_string'))
@@ -1155,12 +1188,13 @@ def _direction_of(data, i):
 
 
 def result_summary(path: str | os.PathLike) -> dict[str, Any]:
-    """What the file's results are, cheaply — the import dialog's facts.
+    """The names and counts of the file's results, read without the
+    values, for the import dialog.
 
-    {'nodal': [names], 'global': [names], 'steps': n, 'nodes': n,
-    'node_sets': [(id, name, count)]} — everything empty or zero for a
-    bare mesh, which is how a caller knows there is nothing to ask
-    about. Names only; no values are read.
+    Returns {'nodal': [names], 'global': [names], 'steps': n, 'nodes':
+    n, 'node_sets': [(id, name, count)]}. For a mesh with no results the
+    lists are empty and the step count is zero. The node sets that
+    record coordinate system assignments are not listed.
     """
     import netCDF4
 
@@ -1191,10 +1225,12 @@ def result_summary(path: str | os.PathLike) -> dict[str, Any]:
 
 
 def node_set_nodes(path: str | os.PathLike, set_id: int) -> np.ndarray:
-    """The node ids one node set holds — what `load(nodes=...)` wants.
+    """The node ids in one node set, in the form `load(nodes=...)`
+    takes.
 
-    Exodus stores set members as 1-based local indices; they come back
-    mapped through `node_num_map` into the ids everything else speaks.
+    Exodus stores set members as 1-based local indices; they are mapped
+    through `node_num_map` to node ids. Raises ValueError when the file
+    has no node set `set_id`.
     """
     import netCDF4
 

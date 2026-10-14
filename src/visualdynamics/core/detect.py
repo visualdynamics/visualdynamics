@@ -1,35 +1,32 @@
-"""Finding the stretch of a record worth averaging.
+"""Find the stretch of a record worth averaging.
 
 A run holds more than the test: the shaker coming up, a reduced-level
-check, the full level, and whatever was still recording after the
-environment stopped. Averaging the lot mixes them into one PSD that
-describes none of them. This works out which stretch to use.
+check, the full level, and whatever was still recorded after the
+environment stopped. Averaging all of it mixes them into one PSD that
+describes none of them. This finds which stretch to use.
 
-The record is compressed to one number per hop before anything else is
-decided — a level, in dB — and every judgment after that is made on
-that short series. That is what keeps it quick on the sets where it
-matters: three hundred channels of a ten-minute run cost one pass, and
-the rest is arithmetic on a few thousand points.
+The record is first compressed to one level per hop, in dB, and every
+decision after that is made on that short series. That keeps it quick
+on large sets: three hundred channels of a ten-minute run take one pass
+over the samples, and the rest is arithmetic on a few thousand points.
 
-Two things make the compression trustworthy rather than merely small:
+Two choices make the compression reliable:
 
-- the consensus is the median across channels, not the mean, so a
-  channel that drops out or spikes or sits forty dB above its
-  neighbors is one vote and not the answer;
+- the levels are combined across channels by the median, not the mean,
+  so a channel that drops out, spikes, or sits forty dB above its
+  neighbors does not decide the answer;
 - the mean is removed within each hop, so a DC offset or a slow drift
   is not read as level.
 
-Nothing normalizes the levels against each other or centers the series.
-Both were tried: the median across channels already does that work, and
-the threshold sweep walks every bin edge from the top, so scaling a
-whole record by a million moves the bins together and lands on the same
-hops. Neither changed an answer, so neither is here.
+The levels are not normalized against each other and the series is not
+centered. The median across channels already does that work, and the
+threshold sweep walks every bin edge from the top, so scaling a whole
+record by a million moves the bins together and lands on the same hops.
 
-The level is in dB rather than in power because a level change is
-multiplicative. In power, scatter grows with the level, so the flattest
-stretch of a record is reliably its quietest — which is the opposite of
-what is wanted. In dB a quiet stretch and a loud one scatter alike, and
-flat means flat.
+The level is in dB, not power, because a level change is
+multiplicative. In power the scatter grows with the level, so the
+flattest stretch of a record is reliably its quietest, the opposite of
+what is wanted. In dB a quiet stretch and a loud one scatter alike.
 """
 
 from __future__ import annotations
@@ -43,6 +40,9 @@ from .averaging import Averaging
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
+
+# Normalizing the levels against each other and centering the series
+# were both tried; neither changed an answer, so neither is here.
 
 #: how much of a detected stretch to keep, as fractions of its length.
 #: Closed-loop control does not arrive at a new level instantly — under
@@ -96,12 +96,13 @@ CHUNK_SAMPLES = 4_000_000
 
 
 def frame_length_for(sample_rate: float) -> int:
-    """The nearest power of two to one second of record.
+    """The power of two nearest one second of record at
+    `sample_rate`, in samples (nearest on a log scale, at least 2).
 
     A power of two for the FFT, and about a second because that is the
-    resolution a random vibration test is usually specified at. On a
-    rate that is itself a power of two — which most are — the two come
-    out the same number.
+    resolution (1 Hz) a random vibration test is usually specified at.
+    When the rate is itself a power of two, as most are, the two are
+    the same number. A rate that is not positive is refused.
     """
     if sample_rate <= 0:
         raise ValueError('a sample rate must be positive')
@@ -109,20 +110,20 @@ def frame_length_for(sample_rate: float) -> int:
 
 
 def scatter_floor(samples: int) -> float:
-    """The least a stretch can scatter, in dB, for estimator noise alone.
+    """The least a stretch can scatter, in dB, from estimator noise
+    alone, for a power estimated from `samples` samples.
 
-    A power estimated from `samples` samples has at most that many
-    degrees of freedom, and a chi-squared with dof has a relative
+    That power has at most `samples` degrees of freedom, and a
+    chi-squared variable with dof degrees of freedom has a relative
     standard deviation of sqrt(2/dof); in dB that is 4.343 times it, for
-    the small values this deals in.
+    the small values used here.
 
-    A floor and not an estimate. Real records scatter more, and by a
-    lot: the full-level stretch of a closed-loop run scatters about a dB
-    against a floor here of a quarter of one, because the loop is
-    adjusting the whole time and the response really is wandering.
-    Band-limited data has fewer independent lines than samples, too. So
-    this bounds the answer from below and `observed_scatter` supplies
-    the rest.
+    This is a lower bound, not an estimate. Real records scatter more:
+    the full-level stretch of a closed-loop run scatters about a dB
+    against a floor here of about a quarter of one, because the loop is
+    adjusting the whole time and the response does wander. Band-limited
+    data also has fewer independent values than samples. The larger of
+    this and `observed_scatter` is used.
     """
     return 4.343 * np.sqrt(2.0 / max(float(samples), 2.0))
 
@@ -130,11 +131,13 @@ def scatter_floor(samples: int) -> float:
 def observed_scatter(level: np.ndarray) -> float:
     """How much this record actually scatters hop to hop, in dB.
 
-    From the first differences, which a level *change* barely touches —
-    one step in a hundred hops moves one difference — so what is left is
-    the wander within a level. Robust rather than a standard deviation,
-    for the same reason: the steps must not set the tolerance for what
-    counts as the same level.
+    It is taken from the first differences of the levels, which a level
+    change barely affects (one step in a hundred hops moves one
+    difference), so what is left is the wander within a level. It uses
+    the median absolute deviation, scaled to a standard deviation,
+    instead of the standard deviation itself, for the same reason: the
+    steps must not set the tolerance for what counts as the same level.
+    0 for fewer than three hops.
     """
     if len(level) < 3:
         return 0.0
@@ -147,27 +150,28 @@ def observed_scatter(level: np.ndarray) -> float:
 
 def hop_levels(ordinate: ArrayLike, hop: int,
                sparse: bool = False, loudest: bool = False) -> np.ndarray:
-    """The record as one level per hop, in dB.
+    """The record as one level per hop of `hop` samples, in dB.
 
+    Each channel's power in a hop is its variance within the hop (the
+    mean removed), and the live channels are combined by the median.
     Returns an empty array when there is not a whole hop of record, or
-    when every channel is flat — a file of zeros has no level to speak
-    of, and saying so is better than reporting a floor.
+    when every channel is flat: a file of zeros has no level, and
+    reporting a floor for it would be wrong.
 
-    `loudest` reduces across channels by the maximum instead of the
-    median. The median is the right voter for *detection* — one bad
-    channel is a vote, not the answer — but it is blind to one channel
+    `loudest` combines the channels by the maximum instead of the
+    median. The median is the right choice for detection, where one bad
+    channel should not decide the answer, but it cannot see one channel
     still ringing under twenty quiet ones, and a shock window sized on
-    it closes while that channel's spectrum is still being written.
+    it closes while that channel is still responding.
 
-    `sparse` changes what counts as a flat channel, and it exists
-    because the two detectors ask different questions of the same
-    compression. A stationary run's channel is live when its *median*
-    hop carries power: anything quieter than that half the time is a
-    channel that dropped out. A shock record's channel is quiet most of
-    the time by definition — three events in a minute leaves the median
-    hop empty — so there, a channel is live if it carries power
-    anywhere. Judged by the stationary rule, a record of sparse
-    transients reports no level at all.
+    `sparse` changes what counts as a flat channel, because the two
+    detectors ask different questions of the same compression. A
+    stationary run's channel is live when its median hop carries power:
+    a channel quieter than that half the time has dropped out. A shock
+    record's channel is quiet most of the time (three events in a
+    minute leave the median hop empty), so with `sparse` a channel is
+    live if it carries power anywhere. Judged by the stationary rule, a
+    record of sparse transients reports no level at all.
     """
     ordinate = np.asarray(ordinate)
     if ordinate.ndim == 1:
@@ -250,21 +254,28 @@ def _grow(level, first, last, sigma, tolerance=TOLERANCE):
 
 def plateau(level: np.ndarray, sigma: float, want_hops: int,
             tolerance: float = TOLERANCE) -> tuple[int, int]:
-    """The highest level the record holds for `want_hops` hops.
+    """The highest level the record holds for `want_hops` hops, as
+    (first, last) hops, last exclusive.
 
-    Level alone is the wrong thing to maximize. A ten-second overload in
-    the middle of a two-minute test is the highest level in the record
-    and the last thing anyone wants to average; sought that way it wins,
-    and returns a fifth of the frames the test itself would have. So
-    duration comes first and level second.
+    `sigma` is the scatter in dB, and `tolerance` is how many of it a
+    hop may sit from the plateau's level. Level alone is the wrong
+    thing to maximize: a ten-second overload in the middle of a
+    two-minute test is the highest level in the record and the last
+    thing anyone wants to average, and chosen by level it would return
+    a fifth of the frames the test holds. So duration comes first and
+    level second.
 
-    Sweeping a threshold down from the top does both at once: the
-    longest run above a threshold only grows as the threshold falls, so
-    the first threshold whose run is long enough is the highest level
-    that is held long enough. When nothing is held that long — a short
-    record, or a test that never settled — the longest stretch near the
-    top is taken instead, and it is the caller's business that it is
-    shorter than asked for.
+    A threshold is swept down from the top in steps of `tolerance`
+    times `sigma`. The longest run above a threshold only grows as the
+    threshold falls, so the first threshold whose run is long enough
+    gives the highest level that is held long enough. The sweep stops
+    `FULL_LEVEL_MARGIN` (12 dB) under the record's top level (its
+    `TOP_QUANTILE` percentile), since below that a run is not the test
+    at full level however long it lasts. The run found is grown to the
+    whole level it sits in. When nothing is held that long, as in a
+    short record or a test that never settled, the longest stretch at
+    the highest level the record holds is returned instead, shorter
+    than asked for.
     """
     if len(level) == 0:
         return (0, 0)
@@ -312,13 +323,15 @@ def _top_level_run(level: np.ndarray, sigma: float,
 
 def trim(first: int, last: int,
          keep: tuple[float, float] = KEEP) -> tuple[int, int]:
-    """Take the settled middle of a stretch.
+    """The settled middle of the stretch (`first`, `last`), keeping
+    the fractions `keep` of its length (`KEEP`, 0.20 to 0.90).
 
-    Closed-loop control arrives at a level over several frames rather
-    than at once, so the front of a stretch is not yet the level the
-    rest of it is. The tail is trimmed a little as well, because the
-    level often starts to come off before the environment formally
-    stops. What is left is the part that is all one thing.
+    Closed-loop control reaches a level over several frames instead of
+    at once, so the front of a stretch is not yet at the level the rest
+    of it is. The tail is trimmed a little as well, because the level
+    often starts to come off before the environment formally stops. A
+    stretch too short to trim is returned whole. `keep` must be two
+    fractions in [0, 1], the first below the second.
     """
     low, high = keep
     if not 0.0 <= low < high <= 1.0:
@@ -335,12 +348,16 @@ def trim(first: int, last: int,
 def compress(history: TimeHistory, overlap: float = 0.5,
              frame_length: int | None = None
              ) -> tuple[np.ndarray, int, int, float]:
-    """(levels in dB, hops per frame, hop in samples, scatter floor).
+    """(levels in dB, hops per frame, hop in samples, scatter in dB).
 
-    The one pass over the samples, and everything a caller needs to
-    reason about the record afterwards. Separated out because more than
-    one question gets asked of the same compression, and asking twice
-    means reading three gigabytes twice.
+    This is the one pass over the samples, and it returns everything a
+    caller needs to reason about the record afterward. The frame is
+    `frame_length` samples, or about a second (`frame_length_for`) when
+    None, and never longer than the record; the hop is the frame length
+    times (1 - `overlap`). The scatter is the larger of `scatter_floor`
+    and `observed_scatter`. It is separate from `analysis_window`
+    because more than one question is asked of the same compression,
+    and asking twice would mean reading the samples twice.
     """
     ordinate = np.asarray(history.ordinate)
     if ordinate.ndim == 1:
@@ -358,11 +375,15 @@ def compress(history: TimeHistory, overlap: float = 0.5,
 def analysis_window(history: TimeHistory, want_frames: int = WANT_FRAMES,
                     overlap: float = 0.5, frame_length: int | None = None,
                     keep: tuple[float, float] = KEEP) -> tuple[int, int]:
-    """(first sample, last sample) worth averaging in this history.
+    """(first sample, last sample) worth averaging in this history,
+    last exclusive.
 
-    The whole record when there is nothing to choose between one part of
-    it and another — a noise floor capture is a level like any other,
-    and the point of finding it is to be able to put a PSD on it.
+    The stretch is the highest level held for `want_frames` frames of
+    `frame_length` samples at `overlap` (see `plateau`), trimmed to its
+    settled middle by `keep` (see `trim`). A noise floor capture is a
+    level like any other and is found the same way, so a PSD can be
+    computed from it. The whole record comes back when the record has
+    no level to compare (shorter than a hop, or every channel flat).
     """
     samples = np.asarray(history.ordinate).reshape(
         -1, len(history.abscissa)).shape[1]
@@ -380,12 +401,14 @@ def suggest(history: TimeHistory, want_frames: int = WANT_FRAMES,
             window: str = 'hann', overlap: float = 0.5,
             frame_length: int | None = None,
             keep: tuple[float, float] = KEEP) -> Averaging:
-    """The averaging to use for a record nobody has set parameters on.
+    """The averaging to use for a record that has no parameters set.
 
-    Hann at half overlap, a frame about a second long, and as many
-    frames as the settled stretch will carry — which is the answer to
-    'how many averages', rather than a number chosen in advance and
-    hoped for.
+    By default a Hann `window` at half `overlap` and a frame about a
+    second long (`frame_length_for`), starting where `analysis_window`
+    puts the stretch, with as many frames as fit before the stretch
+    ends, and at least one. The frame count is the answer to how many
+    averages, not a number chosen in advance. The start is marked as
+    chosen (`start_set`).
     """
     rate = history.sample_rate
     samples = len(history.abscissa)

@@ -1,39 +1,41 @@
-"""Writing and editing a specification, at any coordinates.
+"""Writing and editing a specification sheet, at any channels.
 
-A specification is a sheet: breakpoints, a level per channel at each,
-bands in decibels either side, and a cross term per pair of channels.
-None of that depends on where the channels are, so one draft serves
-every door in (Brandon, 2026-09-04: a generic editor, not a modal
-one) — new at a shape set's modal coordinates, new at chosen physical
-DOFs, or opened from a specification that already exists — and every
-way out: a new object, or the one it was opened from, replaced.
+A specification sheet is a set of breakpoints, a level per channel at
+each breakpoint, warning and abort bands in decibels below and above the
+target, and a cross term for each pair of channels. None of that depends
+on where the channels are, so one draft class is used for every way a
+sheet is opened (new at a shape set's modal coordinates, new at chosen
+physical DOFs or at a channel table's control channels, or opened from
+an existing specification) and for every way it is saved (as a new
+specification, or written back into the one it was opened from).
 
-The virtual point arc's third tool is one of those doors. Written at
-`M1 … Mn` and expanded through the set, a specification becomes an
-exact control-channel CPSD, phase and coherence included, with no
-assumption in it: every number came from something the author
-stated.
+A specification written at the modal coordinates `M1 … Mn` and expanded
+through the shape set becomes an exact control-channel CPSD, phase and
+coherence included. The expansion makes no assumption: every number in
+it comes from a value the author entered.
 
-What an author states, per `SpecificationDraft`:
+What an author enters in a `SpecificationDraft`:
 
-- **Channels**, each with the quantity its density is of.
-- **Breakpoints**: frequencies and a level per channel at each, the
-  power law between breakpoints being how a written specification
-  reads (`Specification.interpolation = 'log_log'`).
-- **Every pair's cross term**, as a coherence and a phase, from which
-  `S_ij = √(γ² S_ii S_jj) e^{iφ}`. A pair left unstated is a refusal
-  to make the specification, not a zero: independent channels are a
-  statement too, and the author makes it (Brandon, 2026-09-04: no
-  assumptions about cross terms, ever). `with_all_pairs` states one
-  answer for every pair in one gesture.
-- **Bands**: warning and abort, as decibels either side of the
-  target, the same on every channel — which is what lets them carry
-  exactly through a transform.
+- The channels, each with the quantity its density is of.
+- The breakpoints: frequencies, and a level per channel at each.
+  Between breakpoints the level follows a power law, which is how a
+  written specification is read (`Specification.interpolation =
+  'log_log'`).
+- Each pair's cross term, as a coherence and a phase, from which
+  `S_ij = √(γ² S_ii S_jj) e^{iφ}`. A pair that has not been entered is
+  not assumed to be zero; the specification made from the draft has no
+  cross term for it. Independent channels are a statement too, and the
+  author has to make it. `with_all_pairs` enters one coherence and
+  phase for every pair at once.
+- The bands: warning and abort, in decibels below and above the
+  target, set per channel and per segment between breakpoints, under
+  each channel's `symmetric` and `uniform` constraints.
 
-The operations on a draft (`scaled_db`, `with_bands`,
-`with_breakpoint`, `without_breakpoint`, `with_all_pairs`) each give
-a new draft and leave this one alone, so a script reads as a sequence
-of statements and a session journals as one.
+The operations on a draft (`scaled_db`, `with_band`, `with_band_edge`,
+`shifted_band`, `constrained`, `with_breakpoint`, `without_breakpoint`,
+`with_all_pairs`, `to_breakpoints`, `to_lines`) each return a new draft
+and leave the original unchanged, so a script reads as a sequence of
+statements, and so does a session's journal.
 """
 
 from __future__ import annotations
@@ -52,6 +54,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
     from .channel_table import ChannelTable
     from .data import Specification
     from .shapes import ShapeSet
+
+# One draft for every way in and out (Brandon, 2026-09-04: a generic
+# editor, not a modal one). The modal-coordinate way in is the virtual
+# point workflow's third tool. No assumptions about cross terms, ever
+# (Brandon, 2026-09-04).
 
 #: the bands a starter draft wears, in decibels below and above the
 #: target — the customary ±3 dB warning and ±6 dB abort
@@ -79,9 +86,9 @@ class SpecificationDraft:
     """A specification being written, at any channels.
 
     Attributes:
-        channels: The DOF strings, one per channel — modal coordinates
-            (`M1`), physical DOFs (`101Z+`), whatever the door opened
-            on.
+        channels: The DOF strings, one per channel: modal coordinates
+            (`M1`), physical DOFs (`101Z+`), or whatever the sheet was
+            opened at. Any name is accepted except an empty one.
         dims: The quantity each channel's density is of
             ('acceleration', 'angular_acceleration', …), one per
             channel; the density's dimension is its square per hertz.
@@ -90,35 +97,38 @@ class SpecificationDraft:
             in the channel's SI density unit.
         pairs: `{(i, j): (coherence, phase_degrees)}` for every pair
             `i < j` of channels, or None where the pair has not been
-            stated yet.
+            entered yet.
         bands: One entry per channel: `{'warning': [(below, above)
             per segment], 'abort': [...], 'symmetric': bool, 'uniform':
-            bool}`, the bands in decibels either side of the target,
-            a segment being the span between two neighboring
-            breakpoints. A channel's own constraints: `symmetric`
-            holds above at minus below, `uniform` holds every segment
-            at one band (Brandon, 2026-09-06: each channel its own
-            settings, the bands dragged on the plot per section, not
-            typed in a pane). A breakpoint belongs to the segment on
-            its right, the last one to the segment on its left.
-        notes: What a door could not carry over — cross terms that
-            varied with frequency, bands that differed — said rather
-            than silently dropped.
-        sources: Which specification each channel was opened from, one
-            per channel, when the sheet spans several (`across`);
-            empty when it is one object's. Channels of different
-            sources have no cross term between them — the pair is not
-            offered rather than unstated.
-        form: 'breakpoints' — the few points a specification is
-            written from — or 'lines', the same requirement read onto
-            evenly spaced frequency lines, as a controller writes its
-            target. `to_breakpoints` and `to_lines` convert; the
-            levels are edited on the breakpoints (Brandon,
-            2026-09-06).
-        spacing: The frequency spacing, in Hz, the lines form has or
-            the sheet remembers from the specification it opened —
-            what `to_lines` reads onto when not told otherwise.
+            bool}`, the bands in decibels below and above the target,
+            where a segment is the span between two neighboring
+            breakpoints. The constraints belong to each channel:
+            `symmetric` holds the upper edge at minus the lower one,
+            and `uniform` holds every segment at one band. A breakpoint
+            belongs to the segment on its right, and the last
+            breakpoint to the segment on its left.
+        notes: What could not be carried over when the sheet was
+            opened (cross terms that varied with frequency, bands that
+            differed), listed so that nothing is dropped without
+            notice.
+        sources: The name of the specification each channel was opened
+            from, one per channel, when the sheet spans several
+            (`across`); empty when the sheet is one specification's.
+            Channels from different specifications have no cross term
+            between them, and the pair is not offered at all.
+        form: 'breakpoints', the few points a specification is written
+            from, or 'lines', the same requirement read onto evenly
+            spaced frequency lines, as a controller writes its target.
+            `to_breakpoints` and `to_lines` convert between the two.
+            The levels are edited on the breakpoints.
+        spacing: The frequency spacing in Hz of the lines form, or the
+            spacing remembered from the specification the sheet was
+            opened from. `to_lines` uses it when no spacing is given.
     """
+    # Each channel has its own band settings, and the bands are dragged
+    # on the plot per section, not typed in a pane (Brandon,
+    # 2026-09-06). The levels are edited on the breakpoints (Brandon,
+    # 2026-09-06).
 
     channels: list[str]
     dims: list[str]
@@ -167,11 +177,13 @@ class SpecificationDraft:
                              quantity: str = 'acceleration',
                              modes: Sequence[int] | None = None
                              ) -> SpecificationDraft:
-        """A starter at a shape set's modal coordinates `M1 … Mn`, each
-        channel's quantity by the transform's unit rule — a unit rigid
-        set's rotations per radian, a mass-normalized set's modal
-        quantity. A set with no mass unit gives its coordinates no
-        unit, and a specification in nothing is refused.
+        """A starter sheet at a shape set's modal coordinates `M1 … Mn`.
+
+        The starter is the one `at_dofs` makes. Each channel's quantity
+        follows the transform's unit rule: per radian for a unit rigid
+        set's rotations, the modal quantity for a mass-normalized set.
+        A set with no mass unit gives its coordinates no unit, and a
+        specification with no unit is refused.
 
         Parameters
         ----------
@@ -180,18 +192,26 @@ class SpecificationDraft:
         quantity : str, default 'acceleration'
             The physical quantity the target is a density of.
         modes : sequence of int, optional
-            Which shapes get a channel, by index from 0 — the ones
-            picked in the tree. All of them when omitted. A virtual
-            point's target is usually its three translations alone
-            (Brandon, 2026-09-06): expanded through the set, a shape
-            with no channel contributes nothing, which is what a zero
-            would say, and a sheet holds positive levels.
+            Which shapes get a channel, by index from 0 (the ones
+            selected in the tree). All of them when omitted. A virtual
+            point's target is usually its three translations alone.
+            Expanded through the set, a shape with no channel
+            contributes nothing, which is the same as a zero level, and
+            a sheet holds only positive levels.
 
         Returns
         -------
         SpecificationDraft
-            Every pair unstated.
+            No pair entered.
+
+        Raises
+        ------
+        ValueError
+            When no shape is selected, an index is out of range, or the
+            set has no mass unit.
         """
+        # A virtual point's target is usually its three translations
+        # alone (Brandon, 2026-09-06).
         which = (list(range(shapes.num_shapes)) if modes is None
                  else [int(k) for k in modes])
         if not which:
@@ -216,8 +236,10 @@ class SpecificationDraft:
     @classmethod
     def at_dofs(cls, dofs: list[str], quantity: str | list[str]
                 = 'acceleration') -> SpecificationDraft:
-        """A starter at chosen DOFs: a flat line across 20–2000 Hz at
-        one SI unit of density on every channel, every pair unstated.
+        """A starter sheet at chosen DOFs, with no pair entered.
+
+        The starter is a flat line from 20 to 2000 Hz at one SI unit of
+        density on every channel.
 
         Parameters
         ----------
@@ -241,16 +263,15 @@ class SpecificationDraft:
 
     @classmethod
     def at_control_channels(cls, table: ChannelTable) -> SpecificationDraft:
-        """A starter at a channel table's control channels — every
-        motion channel when none is flagged — each in the quantity
-        its channel type declares.
+        """A starter sheet at a channel table's control channels.
 
-        A flagged channel of any declared type is taken: a test can be
-        controlled to a force or a voltage as well as to a motion
-        (Brandon, 2026-09-26), and a specification written at a force
-        is a force specification. The motions are only the fallback
-        for a table that flags nothing, where they are the likely
-        control channels.
+        Each channel is in the quantity its channel type declares, and
+        the starter is the one `at_dofs` makes. A flagged control
+        channel of any declared type is used: a test can be controlled
+        to a force or a voltage as well as to a motion, and a
+        specification written at a force is a force specification.
+        When the table flags no control channel, every motion channel
+        is used, since those are the likely control channels.
 
         Parameters
         ----------
@@ -261,7 +282,15 @@ class SpecificationDraft:
         -------
         SpecificationDraft
             The sheet to fill.
+
+        Raises
+        ------
+        ValueError
+            When the flagged channels declare no channel type, or when
+            nothing is flagged and the table has no motion channel.
         """
+        # Any declared type, not only motions: a test can be controlled
+        # to a force or a voltage (Brandon, 2026-09-26).
         dofs, types = table.dof_strings(), table.types()
         flagged = table.controls()
         if flagged.any():
@@ -286,17 +315,24 @@ class SpecificationDraft:
     def from_specification(cls, spec: Specification,
                            channels: list[str] | None = None,
                            source: str = '') -> SpecificationDraft:
-        """The sheet a specification already is: its autospectra's lines
-        as breakpoints, its cross terms as a coherence and phase where
-        they hold one over frequency, its bands as decibels where they
-        do — and a note for whatever did not fit the sheet.
+        """A sheet opened from an existing specification.
+
+        The autospectra's lines become the breakpoints. Lines at 0 Hz,
+        or where any autospectrum is not positive, are left out, with
+        a note. A cross term that is one coherence and phase over
+        frequency becomes that pair's entry; one that varies is left
+        unentered, with a note. The warning and abort limits become
+        bands in decibels per segment, and a specification with no
+        limits opens with the default bands. A specification on evenly
+        spaced lines opens in the 'lines' form and remembers its
+        spacing.
 
         Parameters
         ----------
         spec : Specification
             The specification to open.
         channels : list of str, optional
-            Only these of its channels — the ones picked in the tree.
+            Only these of its channels (the ones selected in the tree).
             All of them when omitted.
         source : str, default ''
             The specification's name, for a sheet that will span
@@ -305,8 +341,15 @@ class SpecificationDraft:
         Returns
         -------
         SpecificationDraft
-            Ready to edit; `written_into` writes it back, `make` makes
-            a new specification of it alone.
+            Ready to edit. `written_into` writes it back, and `make`
+            makes a new specification from it alone.
+
+        Raises
+        ------
+        ValueError
+            When a named channel has no autospectrum, the specification
+            has no autospectrum, or fewer than two lines have every
+            autospectrum positive.
         """
         from .data import channel_quantities
 
@@ -460,14 +503,17 @@ class SpecificationDraft:
     @classmethod
     def across(cls, drafts: dict[str, SpecificationDraft]
                ) -> SpecificationDraft:
-        """One sheet spanning several specifications' sheets, so an
-        edit — a scale, a band — lands on all of them at once.
+        """One sheet spanning several specifications' sheets.
 
-        The sheets meet on one breakpoint list: the union of theirs
-        over the range they share, each read off its own power law
-        there (exact at its own breakpoints). Pairs are offered within
-        a specification only. `for_source` gives each its own sheet
-        back, and `written_into` writes it at its own lines.
+        An edit such as a scale or a band is then applied to all of
+        them at once. The sheets share one breakpoint list: the union
+        of their breakpoints over the range they all cover, each
+        sheet's levels read off its own power law (exact at its own
+        breakpoints). Pairs are offered only within one specification.
+        `for_source` returns each specification's own sheet, which
+        `written_into` writes back at that specification's own lines.
+        Raises `ValueError` when there are no sheets, or when they
+        share fewer than two breakpoints.
 
         Parameters
         ----------
@@ -515,8 +561,11 @@ class SpecificationDraft:
                    spacings.pop() if len(spacings) == 1 else None)
 
     def for_source(self, source: str) -> SpecificationDraft:
-        """The sheet of one of the specifications a combined sheet
-        spans — its channels and pairs alone, unnamed.
+        """The sheet of one of the specifications a combined sheet spans.
+
+        It has that specification's channels and pairs only, and its
+        `sources` is empty. Raises `ValueError` when no channel is
+        from `source`.
 
         Parameters
         ----------
@@ -552,9 +601,18 @@ class SpecificationDraft:
         return len(self.channels)
 
     def validate(self) -> None:
-        """Refuse what no specification could hold: unordered or
-        repeated breakpoints, a level that is not positive, a
-        coherence outside [0, 1], a band the wrong way round."""
+        """Raise `ValueError` for anything no specification could hold.
+
+        That is: no channels, a channel named twice, a channel with no
+        quantity, fewer than two breakpoints or breakpoints that are
+        not positive and increasing, a level that is not finite and
+        positive, a coherence outside [0, 1], a pair across two
+        specifications, a band that is not below and above the
+        target, a band that breaks its channel's `symmetric` or
+        `uniform` constraint, a form other than 'breakpoints' or
+        'lines', or a spacing that is not positive. Every draft is
+        checked when it is made.
+        """
         n = self.num_channels
         if not n:
             raise ValueError('a specification needs at least one channel')
@@ -633,15 +691,17 @@ class SpecificationDraft:
         return self.sources or [''] * self.num_channels
 
     def pairable(self) -> list[tuple[int, int]]:
-        """Every pair `(i, j)`, `i < j`, that has a cross term: two
-        channels of the same specification."""
+        """Every pair `(i, j)`, `i < j`, that can have a cross term.
+
+        Those are the pairs of channels from the same specification.
+        """
         sources = self._sources()
         n = self.num_channels
         return [(i, j) for i in range(n) for j in range(i + 1, n)
                 if sources[i] == sources[j]]
 
     def unset_pairs(self) -> list[tuple[int, int]]:
-        """The pairs no cross term has been stated for."""
+        """The pairs that have no cross term entered yet."""
         return [pair for pair in self.pairable()
                 if self.pairs.get(pair) is None]
 
@@ -661,7 +721,7 @@ class SpecificationDraft:
 
     def with_all_pairs(self, coherence: float,
                        phase_degrees: float = 0.0) -> SpecificationDraft:
-        """The same draft with one answer stated for every pair.
+        """The same draft with one coherence and phase entered for every pair.
 
         Parameters
         ----------
@@ -669,7 +729,8 @@ class SpecificationDraft:
             The coherence between every two channels, 0 for
             independent, 1 for fully coherent.
         phase_degrees : float, default 0.0
-            The phase of the later channel against the earlier.
+            The phase of the later channel against the earlier, in
+            degrees.
 
         Returns
         -------
@@ -682,8 +743,10 @@ class SpecificationDraft:
 
     def scaled_db(self, decibels: float,
                   channels: list[str] | None = None) -> SpecificationDraft:
-        """The same draft with the target raised or lowered by
-        `decibels` — on every channel, or the named ones.
+        """The same draft with the target raised or lowered by `decibels`.
+
+        The change is applied to every channel, or to the named ones.
+        Raises `ValueError` for a channel the draft does not have.
 
         Parameters
         ----------
@@ -707,9 +770,12 @@ class SpecificationDraft:
             for name, row in zip(self.channels, self.levels)])
 
     def segment_of(self, frequencies: Any = None) -> np.ndarray:
-        """Which segment each frequency lies in: a breakpoint belongs to
-        the segment on its right, the last breakpoint (and anything
-        past the end) to the last segment."""
+        """The index of the segment each frequency lies in.
+
+        A breakpoint belongs to the segment on its right, and the last
+        breakpoint (and anything past the end) to the last segment.
+        With no frequencies, the answer is for each breakpoint.
+        """
         f = np.asarray(self.frequencies)
         last = max(len(f) - 2, 0)
         if frequencies is None:
@@ -719,8 +785,9 @@ class SpecificationDraft:
 
     def band_db(self, kind: str, channel: int,
                 frequencies: Any = None) -> tuple[np.ndarray, np.ndarray]:
-        """(below, above) in decibels at each frequency for one
-        channel: the band of the segment each lies in.
+        """One channel's band, (below, above) in decibels, at each frequency.
+
+        Each frequency takes the band of the segment it lies in.
 
         Parameters
         ----------
@@ -729,7 +796,8 @@ class SpecificationDraft:
         channel : int
             Which channel, by index.
         frequencies : array-like, optional
-            Where to answer; the breakpoints themselves when omitted.
+            The frequencies in Hz; the breakpoints themselves when
+            omitted.
 
         Returns
         -------
@@ -770,7 +838,7 @@ class SpecificationDraft:
     def with_band(self, kind: str, below: float, above: float,
                   channels: Any = None,
                   segments: Any = None) -> SpecificationDraft:
-        """The same draft with a band stated outright.
+        """The same draft with a band set to the given values.
 
         Parameters
         ----------
@@ -787,8 +855,8 @@ class SpecificationDraft:
         Returns
         -------
         SpecificationDraft
-            A new draft; this one is unchanged. Refused where the
-            band breaks a channel's own constraint.
+            A new draft; this one is unchanged. `ValueError` is raised
+            where the band breaks a channel's own constraint.
         """
         bands = [_normal_bands(entry) for entry in self.bands]
         for k in self._channel_indices(channels):
@@ -805,12 +873,13 @@ class SpecificationDraft:
     def shifted_band(self, kind: str, side: str, segments: Any,
                      decibels: float, channels: Any = None,
                      step: float = LIMIT_STEP_DB) -> SpecificationDraft:
-        """The same draft with one edge of a band moved — the drag on
-        the plot, landed. A symmetric channel moves the other edge to
-        match; a uniform channel moves every segment. The edge lands
-        on a multiple of `step` (`LIMIT_STEP_DB`: a quarter decibel,
-        Brandon 2026-09-18, from the whole decibel of 2026-09-06), and
-        never nearer the target than one step.
+        """The same draft with one edge of a band moved by `decibels`.
+
+        This is a drag on the plot, applied. On a symmetric channel the
+        other edge moves to match, and on a uniform channel every
+        segment moves. The edge lands on a multiple of `step` (by
+        default `LIMIT_STEP_DB`, a quarter decibel) and is never nearer
+        the target than one step.
 
         Parameters
         ----------
@@ -823,8 +892,8 @@ class SpecificationDraft:
         decibels : float
             How far, positive up.
         channels : list of str, optional
-            Which channels; all of them when omitted — the channels
-            selected are the channels edited.
+            Which channels; all of them when omitted. The selected
+            channels are the ones edited.
         step : float, default LIMIT_STEP_DB
             The decibel grid the edge lands on.
 
@@ -833,20 +902,23 @@ class SpecificationDraft:
         SpecificationDraft
             A new draft; this one is unchanged.
         """
+        # A quarter decibel (Brandon, 2026-09-18), from the whole
+        # decibel of 2026-09-06.
         return self._band_edge(kind, side, segments, channels, step,
                                lambda was: was + decibels)
 
     def with_band_edge(self, kind: str, side: str, segments: Any,
                        decibels: float, channels: Any = None,
                        step: float = LIMIT_STEP_DB) -> SpecificationDraft:
-        """The same draft with one edge of a band set to `decibels` on
-        every channel — the drag on the plot, landed (Brandon,
-        2026-09-06: a drag from 3 to 4 dB puts every selected channel
-        at 4 dB, not each one decibel further from where it was, so a
-        channel at 3 and one at 4 both come out at 4). A symmetric
-        channel sets the other edge to match; a uniform channel sets
-        every segment. Lands on a multiple of `step`, never nearer the
-        target than one step.
+        """The same draft with one edge of a band set to `decibels`.
+
+        This is a drag on the plot, applied. Every selected channel is
+        set to the same level: a drag from 3 to 4 dB puts a channel at
+        3 dB and one at 4 dB both at 4 dB, instead of moving each one
+        by 1 dB. On a symmetric channel the other edge is set to match,
+        and on a uniform channel every segment is set. The edge lands
+        on a multiple of `step` and is never nearer the target than
+        one step.
 
         Parameters
         ----------
@@ -868,6 +940,8 @@ class SpecificationDraft:
         SpecificationDraft
             A new draft; this one is unchanged.
         """
+        # Brandon, 2026-09-06: a drag sets every selected channel to the
+        # level it was dragged to.
         return self._band_edge(kind, side, segments, channels, step,
                                lambda was: np.full_like(was, decibels))
 
@@ -902,9 +976,11 @@ class SpecificationDraft:
 
     def constrained(self, channels: Any = None, symmetric: bool | None = None,
                     uniform: bool | None = None) -> SpecificationDraft:
-        """The same draft with channels' constraints set. Turning
-        symmetric on mirrors the band above to the one below; turning
-        uniform on gives every segment the first one's band.
+        """The same draft with the channels' constraints set.
+
+        Turning symmetric on mirrors the band above the target to the
+        one below, and turning uniform on gives every segment the first
+        segment's band.
 
         Parameters
         ----------
@@ -934,10 +1010,13 @@ class SpecificationDraft:
         return self._copy(bands=bands)
 
     def sections(self, channel: int, tolerance: float = 1e-6) -> list[list[int]]:
-        """One channel's segments grouped into the linear sections of
-        its requirement: every segment on its own in the breakpoints
-        form, and in the interpolated form the runs of one power law
-        — the lines between bends, as `to_breakpoints` finds them."""
+        """One channel's segments grouped into its requirement's straight sections.
+
+        In the breakpoints form each segment is its own section. In the
+        lines form a section is a run of segments on one power law,
+        between the bends that `to_breakpoints` finds; `tolerance` is
+        how much the log-log slope may change and still be one section.
+        """
         n = len(self.frequencies)
         if n < 2:
             return []
@@ -955,12 +1034,14 @@ class SpecificationDraft:
         return runs
 
     def band_runs(self, channel: int, kind: str) -> list[list[int]]:
-        """The segments of one channel grouped as the plot draws its
-        handles: one run over the whole range while the channel is
-        uniform, else one per linear section of the requirement
-        (Brandon, 2026-09-06: Uniform off should show a level per
-        section, each moved on its own), split again wherever the
-        band already differs within a section."""
+        """One channel's segments grouped as the plot draws its band handles.
+
+        A uniform channel has one run over the whole range. Otherwise
+        there is one run per section of the requirement (`sections`),
+        split again wherever the band already differs within a section.
+        """
+        # Brandon, 2026-09-06: Uniform off should show a level per
+        # section, each moved on its own.
         pairs = self.bands[channel][kind]
         if not pairs:
             return []
@@ -976,14 +1057,18 @@ class SpecificationDraft:
         return runs
 
     def with_breakpoint(self, frequency: float) -> SpecificationDraft:
-        """The same draft with a breakpoint at `frequency`, its levels
-        read off the power law between its neighbors — or the end
-        breakpoint's, past the ends.
+        """The same draft with a breakpoint added at `frequency`.
+
+        Its levels are read off the power law between its neighbors, or
+        are the end breakpoint's level outside the range. The segment it
+        splits keeps its band on both halves. A frequency that is
+        already a breakpoint gives an unchanged copy, and one that is
+        not positive raises `ValueError`.
 
         Parameters
         ----------
         frequency : float
-            Where, in Hz.
+            The frequency in Hz.
 
         Returns
         -------
@@ -1015,8 +1100,10 @@ class SpecificationDraft:
         Parameters
         ----------
         frequency : float
-            Which, in Hz; it has to be one of the breakpoints, and not
-            one of the last two.
+            The frequency in Hz. It has to be one of the breakpoints,
+            and the draft has to have more than two; otherwise
+            `ValueError` is raised. The merged segment keeps the band
+            of the segment it starts in.
 
         Returns
         -------
@@ -1038,19 +1125,22 @@ class SpecificationDraft:
             bands=self._bands_on(frequencies))
 
     def to_breakpoints(self, tolerance: float = 1e-6) -> SpecificationDraft:
-        """The same requirement as the few points it was written from:
-        the first and last line, and every line where the log-log
-        slope of any channel changes. Exact for a specification that
-        was read onto lines from breakpoints (a controller's target);
-        a specification with no such structure keeps every line, and
-        the notes say so rather than the sheet inventing a
-        simplification.
+        """The same requirement as the few points it was written from.
+
+        The breakpoints kept are the first and last line, every line
+        where the log-log slope of any channel changes, and every line
+        where a band steps. This is exact for a specification that was
+        read onto lines from breakpoints (a controller's target). A
+        specification with no such structure keeps every line. Either
+        way a note says how many lines became how many breakpoints, and
+        another note is added if a band changed within a merged
+        segment, which then takes the band at its start.
 
         Parameters
         ----------
         tolerance : float, default 1e-6
-            How much the slope may wander between adjacent segments
-            and still be one power law.
+            How much the slope may change between adjacent segments and
+            still be one power law.
 
         Returns
         -------
@@ -1096,21 +1186,24 @@ class SpecificationDraft:
             bands=self._bands_on(frequencies), notes=notes, form='breakpoints')
 
     def to_lines(self, spacing: float | None = None) -> SpecificationDraft:
-        """The same requirement read onto evenly spaced frequency
-        lines — multiples of `spacing` from 0 Hz, as a controller lays
-        its lines — over the band the breakpoints cover, each channel
-        on its own power law between them.
+        """The same requirement read onto evenly spaced frequency lines.
 
-        Only the lines inside the band: a sheet holds positive levels,
-        and the zeros a controller writes outside the band are its own
-        convention, filled in by its loader for any line the file
-        does not name.
+        The lines are multiples of `spacing` from 0 Hz, as a controller
+        lays out its lines, over the range the breakpoints cover, with
+        each channel on its own power law between breakpoints. Only the
+        lines inside that range are made: a sheet holds positive
+        levels, and the zeros a controller writes outside the band are
+        its own convention, filled in by its loader for any line the
+        file does not name. A note is added when an end breakpoint is
+        not on the grid.
 
         Parameters
         ----------
         spacing : float, optional
             The line spacing in Hz. Defaults to the spacing the sheet
-            remembers; with neither, refused — nothing is guessed.
+            remembers. With neither, `ValueError` is raised; the spacing
+            is not guessed. It is also raised when the spacing is not
+            positive or fewer than two lines fall in the range.
 
         Returns
         -------
@@ -1149,23 +1242,33 @@ class SpecificationDraft:
     # ---- the ways out ------------------------------------------------------------
 
     def bands_differ(self) -> bool:
-        """Whether any channel's band changes from one segment to the
-        next — where the object needs a helper line to carry the step."""
+        """Whether any channel's band changes from one segment to the next.
+
+        Where it does, the specification needs a helper line to hold
+        the step (`with_band_corners`).
+        """
         return any(entry[kind][s] != entry[kind][s + 1]
                    for entry in self.bands for kind in ('warning', 'abort')
                    for s in range(len(entry[kind]) - 1))
 
     def with_band_corners(self, part: float = 1e-6) -> SpecificationDraft:
-        """The same draft with a helper breakpoint a hair before each
-        breakpoint whose two segments carry different bands, so the
-        object made of it can carry the step.
+        """The same draft with helper breakpoints where a band steps.
 
-        A limit array holds one value per line and a breakpoint
-        belongs to the segment on its right, so the segment on its
-        left needs a line of its own at the corner to show its band up
-        to it. The helper sits `part` of the breakpoint's frequency
-        before it, on the same power law, and folds away again —
-        `to_breakpoints` keeps only lines that bend.
+        A helper is added just below each breakpoint whose two segments
+        have different bands, so the specification made from the draft
+        can hold the step. A limit array holds one value per line and a
+        breakpoint belongs to the segment on its right, so the segment
+        on its left needs its own line at the corner to carry its band
+        up to it. The helpers are removed again when the specification
+        is opened as a sheet, and `to_breakpoints` drops them, since
+        they lie on a straight section.
+
+        Parameters
+        ----------
+        part : float, default 1e-6
+            How far below the breakpoint the helper is, as a fraction
+            of the breakpoint's frequency. The helper is on the same
+            power law.
 
         Returns
         -------
@@ -1185,18 +1288,28 @@ class SpecificationDraft:
         return out
 
     def make(self, comment: str = '') -> Specification:
-        """The specification, with every cross term.
+        """The specification this sheet describes.
+
+        A pair with no cross term entered is left out of the
+        specification, not assumed to be zero. Where a band steps
+        between segments, helper lines are added first
+        (`with_band_corners`). The channels' `symmetric` and `uniform`
+        constraints are kept on the specification as
+        `band_constraints`, so a sheet reopens as it was set. Raises
+        `ValueError` when the sheet spans several specifications.
 
         Parameters
         ----------
         comment : str, default ''
-            A comment for the records — where the sheet came from.
+            A comment for the records, such as where the sheet came
+            from. Defaults to 'written as a specification sheet'.
 
         Returns
         -------
         Specification
-            Autospectra and cross terms at the breakpoints, a power law
-            between them, the bands on every autospectrum.
+            The autospectra and the entered cross terms at the
+            breakpoints, interpolated log-log between them, with the
+            warning and abort limits on every autospectrum.
         """
         from .data import Specification
 
@@ -1254,32 +1367,38 @@ class SpecificationDraft:
         return spec
 
     def constraints(self) -> dict[str, dict[str, bool]]:
-        """Each channel's constraints, by channel — what the object
-        carries beside its limits so a sheet reopens as it was set."""
+        """Each channel's `symmetric` and `uniform` constraints, by name.
+
+        The specification keeps these beside its limits, so a sheet
+        reopens as it was set.
+        """
         return {name: {'symmetric': entry['symmetric'],
                        'uniform': entry['uniform']}
                 for name, entry in zip(self.channels, self.bands)}
 
     def written_into(self, spec: Specification,
                      comment: str = '') -> Specification:
-        """The specification with this sheet's channels rewritten in
-        it, at its own lines.
+        """`spec` with this sheet's channels rewritten in it, at its own lines.
 
         The sheet's channels take the sheet's levels, cross terms and
         bands over the sheet's range, read off its power law at each
-        line; a breakpoint that is not a line becomes one. Lines the
-        sheet left out — 0 Hz, a zero level — keep what they had, and
-        a cross term the sheet states but the specification never
-        held is made there from its own autospectra. Channels the
-        sheet does not hold are untouched, read off their own curve
-        at any new line.
+        line, and a breakpoint that is not one of the specification's
+        lines becomes a new line. Lines the sheet left out (0 Hz, a
+        zero level) keep what they had. A cross term the sheet has but
+        the specification never held is added, made from the
+        autospectra. Channels the sheet does not hold are unchanged,
+        read off their own curves at any new line. Raises `ValueError`
+        when the sheet spans several specifications; write each one
+        with `for_source`.
 
         Parameters
         ----------
         spec : Specification
             The specification the sheet was opened from.
         comment : str, default ''
-            Appended to the record's comment.
+            The comment for each cross-term record the sheet adds;
+            'written as a specification sheet' when empty. Records the
+            specification already had keep their own comments.
 
         Returns
         -------
@@ -1401,8 +1520,10 @@ class SpecificationDraft:
         return out
 
     def preview(self) -> Specification:
-        """The autospectra and their bands alone — what the plot shows
-        beside the sheet."""
+        """The autospectra and their bands only, as the plot beside the sheet shows.
+
+        Raises `ValueError` when the sheet spans several specifications.
+        """
         from .data import Specification
 
         if len(set(self.sources)) > 1:
@@ -1464,12 +1585,12 @@ def _normal_bands(entry: Any) -> dict[str, Any]:
 
 
 def band_notes(spec: Specification) -> list[str]:
-    """What a sheet opened on `spec` should say about bands it does
-    not have: a specification with no warning or abort limits opens
-    wearing the defaults, there on the plot to drag, and the first
-    edit writes them (Brandon, 2026-09-06: where there are none, the
-    sheet is where they are added). Said from the object rather than
-    kept on the draft, so the saying stops when the limits exist.
+    """The notes a sheet opened on `spec` shows about bands it does not have.
+
+    A specification with no warning or abort limits opens with the
+    default bands on the plot, ready to drag, and the first edit writes
+    them to it. The notes are computed from the specification instead
+    of being stored on the draft, so they stop once the limits exist.
 
     Parameters
     ----------
@@ -1481,6 +1602,8 @@ def band_notes(spec: Specification) -> list[str]:
     list of str
         One note per band kind missing; empty when both are there.
     """
+    # Brandon, 2026-09-06: where there are none, the sheet is where
+    # they are added.
     limits = getattr(spec, 'limits', None) or {}
     return [f'no {kind} band on the specification — the sheet shows '
             f'{low:+.0f}/{high:+.0f} dB, written with the first edit'
@@ -1503,15 +1626,16 @@ def _helper_lines(frequencies: Any) -> list[float]:
 
 
 def uniform_spacing(frequencies: Any) -> float | None:
-    """The spacing of evenly spaced lines, or None when they are not
-    — a controller writes its target at multiples of one spacing, a
-    breakpoint specification at whatever frequencies it was written.
+    """The spacing of evenly spaced lines, in Hz, or None when they are not.
 
-    A helper line — one a hair before a breakpoint, carrying a band
-    step (`with_band_corners`) — is not a line of the grid and is
-    left out of the reckoning: read as one, two helpers made a
-    controller's target open as four thousand breakpoints, each its
-    own section (2026-09-06)."""
+    A controller writes its target at multiples of one spacing; a
+    breakpoint specification is at whatever frequencies it was written
+    at. Helper lines (just below a breakpoint, holding a band step; see
+    `SpecificationDraft.with_band_corners`) are not on the grid and are
+    ignored. Fewer than three lines gives None.
+    """
+    # Counted as grid lines, two helpers made a controller's target open
+    # as four thousand breakpoints, each its own section (2026-09-06).
     f = np.asarray(frequencies, dtype=float)
     if len(f) < 3:
         return None
@@ -1527,11 +1651,14 @@ def uniform_spacing(frequencies: Any) -> float | None:
 
 def read_at_lines(old_f: np.ndarray, values: np.ndarray,
               lines: np.ndarray) -> np.ndarray:
-    """A specification's record read at new lines: its own value where
-    a line is one of its own, and between them the power law a
-    specification means — magnitude log–log, phase straight — so a
-    channel the sheet does not hold is unchanged in meaning by a line
-    the sheet added. Past its ends, its end values."""
+    """A specification record read at new lines.
+
+    At its own lines the record keeps its own values. Between them it
+    is interpolated the way a specification is read, the magnitude
+    log-log and the phase linearly, so a line the sheet added does not
+    change what a channel the sheet does not hold means. Outside its
+    range it takes its end values.
+    """
     values = np.asarray(values)
     exact = np.isin(lines, old_f)
     if exact.all():

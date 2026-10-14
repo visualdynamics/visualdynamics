@@ -1,100 +1,86 @@
-"""Where a record's frequencies are, moment by moment.
+"""The continuous wavelet transform: when each frequency occurs in a record.
 
-A PSD says what frequencies a record contains and says nothing about
-*when*. For a stationary run that is the whole truth and a scalogram
-would add nothing. For everything that is not stationary — a rattle
-that comes and goes, a shock's ring-down, a resonance that walks as a
-structure heats, a sweep passing through a mode — the question is when,
-and the spectrum has already averaged the answer away.
+A PSD gives the frequencies a record contains but not when they occur.
+For a stationary record that is all there is to know. For a record that
+is not stationary (a rattle that comes and goes, a shock's ring-down, a
+resonance that shifts as a structure heats, a sweep passing through a
+mode) the time is the question, and the spectrum has averaged it out.
 
-The continuous wavelet transform answers it by correlating the record
-against a wave packet at many scales. Where a spectrum multiplies the
-whole record by one sinusoid, this multiplies it by a short burst slid
-along the record, and does that again for a burst of every duration.
+The continuous wavelet transform correlates the record against a short
+wave packet at many scales. A Fourier transform multiplies the whole
+record by one sinusoid; the wavelet transform multiplies it by a short
+burst moved along the record, and repeats that for bursts of many
+durations.
 
-**Scale and frequency are one axis, not two.** A wavelet at scale `s`
-responds to a band around a frequency that follows from `s` — so a
-scalogram has three things in it, time, frequency and magnitude, and
-scale is the other name for the frequency axis rather than a third
-dimension. This module works in Hz throughout and converts at the edge,
-because every other frequency axis in this toolset is in Hz and a scale
-number means nothing without the wavelet's center frequency beside it.
+Scale and frequency are the same axis. A wavelet at scale `s` responds
+to a band around a frequency that follows from `s`, so a scalogram has
+three quantities in it (time, frequency and magnitude), and scale is
+another name for the frequency axis. This module works in Hz throughout
+and converts to scale internally, because every other frequency axis in
+Visual Dynamics is in Hz and a scale means nothing without the
+wavelet's center frequency beside it.
 
-The wavelet is **Morlet**, the standard choice for vibration work: a
-Gaussian-windowed complex sinusoid, so it has a magnitude and a phase,
-and its time-frequency trade is the best a wavelet can do. `omega0` is
-the knob on that trade — how many cycles fit under the window. Low
-resolves *when* and blurs *what*; high resolves *what* and blurs *when*.
-Six is the conventional default and is very nearly the smallest value
-for which the wavelet has no appreciable mean, which is the condition
-that makes the transform admissible.
+The wavelet is the Morlet, the standard choice for vibration work: a
+Gaussian-windowed complex sinusoid, so each coefficient has a magnitude
+and a phase. `omega0`, the number of cycles under the window, sets the
+trade between time and frequency resolution. A low value resolves when
+something happens and blurs its frequency; a high value resolves the
+frequency and blurs the time. Six is the conventional default and is
+very nearly the smallest value for which the wavelet has a negligible
+mean, which is the condition for the transform to be admissible.
 
-**The normalization and the frequency mapping are one decision, and
-pairing them wrongly biases every frequency this view reports.** Two
-conventions are in use. Torrence and Compo (1998) normalize each
-wavelet to unit *energy* and give the scale-to-period relation
-`4*pi*s / (omega0 + sqrt(2 + omega0**2))`; the other normalizes to
-unit *amplitude* and pairs with `2*pi*s / omega0`. Both relations are
-exact — for their own convention. At `omega0=6` they differ by 1.4%,
-so borrowing T&C's relation (which is the one quoted everywhere,
-including in this file's first draft) while normalizing for amplitude
-reports every frequency 1.4% **high** — a 100 Hz tone at 101.4. That is
-not scatter; it is a bias, one way, and it is invisible on any
-frequency grid coarser than about 1%.
+The normalization and the scale-to-frequency relation have to be chosen
+together. Two conventions are in use. Torrence and Compo (1998)
+normalize each wavelet to unit energy and give the scale-to-period
+relation `4*pi*s / (omega0 + sqrt(2 + omega0**2))`. The other
+convention normalizes to unit amplitude and uses `2*pi*s / omega0`.
+Each relation is exact for its own normalization. At `omega0=6` they
+differ by 1.4%, so using Torrence and Compo's relation with the
+amplitude normalization reports every frequency 1.4% high: a 100 Hz
+tone at 101.4 Hz. The error is a bias in one direction, and it cannot
+be seen on a frequency grid coarser than about 1%.
 
-This module normalizes for **amplitude**, so it uses `2*pi/omega0`.
-Amplitude because this is a units-aware toolset whose user reads g and
-N off a picture: under the energy convention the same 2 g tone draws
-four times taller at 50 Hz than at 800 Hz, which is right for asking
-how variance is distributed and useless for reading a number.
-`tests/test_wavelet.py` measures the pairing rather than trusting it —
-a tone must be reported at its own frequency, on a grid fine enough
-that 1.4% is two lines out.
+This module normalizes for amplitude and uses `2*pi*s / omega0`.
+Amplitude, because the user reads g and N off the picture: under the
+energy normalization the same 2 g tone is drawn four times taller at
+50 Hz than at 800 Hz, which is correct for asking how the variance is
+distributed and of no use for reading a value. `tests/test_wavelet.py`
+checks the pairing by measuring it: a tone must be reported at its own
+frequency, on a grid fine enough that 1.4% is two lines.
 
-## What is actually computed, and where it comes from
+## What is computed
 
-For a record `x`, one scale at a time and all of them at once in the
-frequency domain:
+For a record `x`, at every scale, in the frequency domain:
 
     W(s) = IFFT[ 2 * exp(-(s*omega - omega0)**2 / 2) * H(omega) * X(omega) ]
 
-`X` is the DFT of the record with its mean removed, `H` is the
-Heaviside step that keeps only positive frequencies, and `s` is the
+`X` is the DFT of the zero-padded record with its mean removed, `H` is
+the Heaviside step that keeps only positive frequencies, and `s` is the
 scale that tunes the wavelet to the frequency of the row.
 
-Each piece has a source:
+Where each piece comes from:
 
-- **The Morlet wavelet** is standard, and its frequency-domain form is
-  Torrence and Compo (1998), "A Practical Guide to Wavelet Analysis",
-  *Bull. Amer. Meteor. Soc.* 79(1), table 1:
+- The Morlet wavelet is standard, and its frequency-domain form is
+  from Torrence and Compo (1998):
   `psi(s*omega) = pi**-0.25 * H(omega) * exp(-(s*omega - omega0)**2 / 2)`.
-  Their equation 4 is the transform as a product in the frequency
-  domain, which is what makes this affordable — one multiply and one
-  inverse per scale instead of a convolution.
-- **The `2`** in place of their `pi**-0.25` is the amplitude
-  normalization, and it is derived here rather than taken from
-  anywhere. A real tone of amplitude `A` puts `A*N/2` in each half of
-  its DFT; the analytic wavelet keeps one half; the tuned daughter's
-  own peak is its constant; the inverse divides by `N`. So the constant
-  that makes `|W|` read back `A` is exactly 2. Every step of that is
-  checked numerically in `tests/test_wavelet.py` — a 2 g tone reads
-  2.0 at 50, 200 and 800 Hz alike.
-- **The padding** is T&C's too (their section 3f): a transform the
-  length of the record wraps, and zeros are what stop the two ends
-  meeting.
-- **The cone of influence** is their table 1's e-folding time for the
+  They also write the transform as a product in the frequency domain,
+  which keeps the cost down: one multiply and one inverse FFT per scale
+  instead of a convolution.
+- The factor `2` in place of their `pi**-0.25` is the amplitude
+  normalization, derived here. A real tone of amplitude `A` puts
+  `A*N/2` in each half of its DFT; the analytic wavelet keeps one half;
+  the peak of the tuned wavelet is its constant; the inverse divides by
+  `N`. So the constant that makes `|W|` equal `A` is exactly 2.
+  `tests/test_wavelet.py` checks this numerically: a 2 g tone reads 2.0
+  at 50, 200 and 800 Hz.
+- The zero padding is also from Torrence and Compo. A transform the
+  length of the record wraps around, and the zeros keep the two ends
+  of the record apart.
+- The cone of influence is Torrence and Compo's e-folding time for the
   Morlet, `sqrt(2) * s`.
 
-Written from those published definitions. **No code was read from
-sdynpy, rattlesnake or forcefinder** — hard rule 1 in `AGENTS.md`,
-which matters here because a structural dynamics library is exactly
-the sort of place a wavelet transform lives. Nor from scipy's, which
-no longer has one to read: `signal.cwt`, `morlet`, `morlet2` and
-`ricker` were deprecated in 1.12 and removed in 1.15, so this is
-written out because it has to be, not because rewriting it was
-preferred. scipy is still what runs the transforms — `scipy.fft` takes
-a `workers` argument that numpy's has nowhere to put, and the inverse
-is one independent FFT per scale.
+The FFTs are computed with `scipy.fft`, which takes a `workers`
+argument, and the inverse is one independent FFT per scale.
 
 References
 ----------
@@ -117,6 +103,23 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike
+
+# Written from the published definitions above. No code was read from
+# sdynpy, rattlesnake or forcefinder (hard rule 1 in AGENTS.md), which
+# matters here because a structural dynamics library is exactly where a
+# wavelet transform would be found. Nor from scipy's, which no longer
+# has one to read: `signal.cwt`, `morlet`, `morlet2` and `ricker` were
+# deprecated in 1.12 and removed in 1.15, so this is written out
+# because it has to be. scipy still runs the transforms, because
+# `scipy.fft` takes a `workers` argument that numpy's has nowhere to
+# put.
+#
+# Torrence and Compo's scale-to-period relation is the one quoted
+# everywhere, and this file's first draft used it with the amplitude
+# normalization, which is the 1.4% bias the module docstring describes.
+# Their paper is in Bull. Amer. Meteor. Soc. 79(1); the frequency-domain
+# Morlet and the e-folding time are in its table 1, the transform as a
+# product is its equation 4 and the padding is its section 3f.
 
 #: cycles under the Gaussian window. Six is conventional, and is about
 #: the smallest for which the Morlet wavelet's mean is negligible — the
@@ -149,49 +152,52 @@ COLUMNS = 4096
 
 
 def fourier_factor(omega0: float = OMEGA0) -> float:
-    """Seconds of Fourier period per second of wavelet scale.
+    """Seconds of Fourier period per second of wavelet scale, `2*pi/omega0`.
 
-    `2*pi/omega0`, which is the exact relation for the amplitude
-    normalization this module uses: a tone peaks where the wavelet is
-    tuned to it, `s*omega == omega0`, because nothing reweights one
-    scale against another.
+    This is the exact relation for the amplitude normalization this
+    module uses. A tone peaks where the wavelet is tuned to it,
+    `s*omega == omega0`, because no factor weights one scale against
+    another.
 
-    **Not** Torrence and Compo's `4*pi/(omega0 + sqrt(2 + omega0**2))`,
-    which is exact for *their* normalization — unit energy, whose
-    `sqrt(s)` factor tilts the response across scales and moves the
-    peak. Their form is the one usually quoted, and taking it while
-    normalizing for amplitude reports every frequency 1.4% high — a
-    100 Hz tone at 101.37 (measured 2026-08-27, and again 2026-09-23,
-    when this line was found saying "low"). The two are a pair with the normalization,
-    not interchangeable constants.
+    Torrence and Compo's `4*pi/(omega0 + sqrt(2 + omega0**2))` is exact
+    for their unit-energy normalization, whose `sqrt(s)` factor tilts
+    the response across scales and moves the peak. Using it with the
+    amplitude normalization reports every frequency 1.4% high: a 100 Hz
+    tone at 101.37 Hz. Each relation belongs with its own normalization.
     """
+    # The 1.4% was measured 2026-08-27, and again 2026-09-23, when this
+    # docstring was found saying "low".
     return 2.0 * np.pi / omega0
 
 
 def scale_for(frequency: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
-    """The wavelet scale, in seconds, that listens at these frequencies."""
+    """The wavelet scale, in seconds, tuned to each frequency in Hz."""
     return 1.0 / (np.asarray(frequency, dtype=float) * fourier_factor(omega0))
 
 
 def frequency_for(scale: ArrayLike, omega0: float = OMEGA0) -> np.ndarray:
-    """The frequency a wavelet of this scale listens at, in Hz.
+    """The frequency, in Hz, that a wavelet of each scale is tuned to.
 
-    The inverse of `scale_for`, and the reason the view can label its
-    axis in Hz: the scale axis and the frequency axis are the same axis
-    under a change of variable.
+    This is the inverse of `scale_for`. The scale axis and the frequency
+    axis are one axis under a change of variable, which is why the view
+    can label its axis in Hz.
     """
     return 1.0 / (np.asarray(scale, dtype=float) * fourier_factor(omega0))
 
 
 def log_frequencies(low: float, high: float,
                     per_octave: int = PER_OCTAVE) -> np.ndarray:
-    """Frequencies spaced evenly by octave, from `low` to `high`.
+    """Frequencies spaced evenly in octaves, `per_octave` lines to the octave.
 
-    Logarithmic because that is how a wavelet's resolution works: each
-    scale has a constant *fractional* bandwidth, so evenly spaced lines
-    would crowd together at the top of the range and leave gaps at the
-    bottom. It is also how a structural dynamicist reads a frequency
-    axis.
+    The first line is `low` and the last is the first line at or above
+    `high`, so the top line can be slightly above `high`. Raises
+    `ValueError` unless `0 < low < high` and `per_octave` is at least
+    one.
+
+    The spacing is logarithmic because each scale has a constant
+    fractional bandwidth: evenly spaced lines would crowd together at
+    the top of the range and leave gaps at the bottom. It is also how a
+    structural dynamics engineer reads a frequency axis.
     """
     if not 0.0 < float(low) < float(high):
         raise ValueError('the frequency range runs from a positive low '
@@ -205,20 +211,22 @@ def log_frequencies(low: float, high: float,
 
 def cone_of_influence(frequencies: ArrayLike, sample_rate: float,
                       omega0: float = OMEGA0) -> np.ndarray:
-    """Seconds at each end of the record that the edges reach into.
+    """The time, in seconds, at each end of the record that edge effects reach.
 
-    A wavelet near the start of a record hangs off the end of it, and
-    what it correlates against there is the padding rather than the
-    measurement. The transform still returns a number and the number
-    still looks like data, which is why this is drawn rather than left
-    to be remembered — inside the cone, a scalogram is an artifact of
-    where the record was cut.
+    One value per frequency. A wavelet near the start of a record
+    extends past the start, and there it is correlated against the
+    padding instead of the measurement. The transform still returns a
+    value and the value still looks like data, so the cone is drawn on
+    the picture; inside it, the scalogram is an artifact of where the
+    record was cut.
 
-    The e-folding time of the Morlet's Gaussian envelope, `sqrt(2) * s`
-    (Torrence and Compo table 1): the amplitude of an edge effect has
-    fallen by 1/e² beyond it. Low frequencies use long wavelets, so the
-    cone is wide at the bottom of the axis and narrow at the top, and
-    the bottom of a short record may be nothing but cone.
+    The width is the e-folding time of the Morlet's Gaussian envelope,
+    `sqrt(2) * s` (Torrence and Compo): beyond it, the power of an edge
+    effect has fallen by a factor of e² (its amplitude by e). Low
+    frequencies use long wavelets, so the cone is wide at the bottom of
+    the axis and narrow at the top, and at the bottom of a short record
+    the cone can cover the whole record. `sample_rate` is accepted and
+    not used, since the cone is in seconds.
     """
     scales = scale_for(frequencies, omega0)
     del sample_rate                      # the cone is in seconds, not samples
@@ -228,59 +236,60 @@ def cone_of_influence(frequencies: ArrayLike, sample_rate: float,
 def scalogram(values: ArrayLike, sample_rate: float,
               frequencies: ArrayLike,
               omega0: float = OMEGA0) -> np.ndarray:
-    """The complex wavelet coefficients: one row per frequency.
+    """The complex wavelet coefficients, one row per frequency.
 
-    Computed in the frequency domain, which is what makes this
-    affordable: the transform at every scale is one multiply against
-    the record's FFT and one inverse, rather than a convolution per
-    scale in time.
+    The transform is computed in the frequency domain: at each scale it
+    is one multiply against the record's FFT and one inverse FFT,
+    instead of a convolution in time.
 
-    Computed a band of scales at a time (`BAND_BYTES`), because every
-    scale at once is three arrays of (scales, padded length) complex
-    values and a long record turns that into tens of gigabytes. The
-    answer here is still the whole thing — one complex row per
-    frequency, as long as the record — which for a long record is
-    itself gigabytes; a picture wants `scalogram_peaks`, which reduces
-    each band as it lands and never holds the whole.
+    It is computed a band of scales at a time (`BAND_BYTES`), because
+    every scale at once is three arrays of (scales, padded length)
+    complex values, and for a long record that is tens of gigabytes.
+    The result is still the whole transform, one complex row per
+    frequency as long as the record, which for a long record is itself
+    gigabytes. For a picture, use `scalogram_peaks`, which reduces each
+    band as it is computed and never holds the whole transform.
 
-    Normalized so that **the magnitude is the record's own amplitude**:
-    a 2 g tone reads 2 wherever it sits on the frequency axis, so the
-    color bar carries the record's units and a ridge's height means
-    one thing everywhere.
-
-    That is a choice, and the other one is defensible. Torrence and
-    Compo normalize each wavelet to unit *energy*, which is right for
-    asking how a record's variance is distributed and is what a
-    geophysicist expects; under it a constant-amplitude tone reads
-    proportional to the square root of its period, so the same 2 g at
-    50 Hz and at 800 Hz differ by a factor of four on the picture. For
-    a units-aware toolset whose user reads amplitudes in g and N, that
-    is a scalogram you cannot read a number off. Amplitude it is —
-    stated because the two conventions differ by sqrt(scale) and a
-    scalogram never says which one it is in.
+    The magnitude is normalized to the record's own amplitude: a 2 g
+    tone reads 2 at any frequency, so the color bar is in the record's
+    units and a ridge's height means the same thing everywhere.
+    Torrence and Compo normalize each wavelet to unit energy instead,
+    which is correct for asking how a record's variance is distributed.
+    Under that normalization a constant-amplitude tone reads in
+    proportion to the square root of its period, so the same 2 g at
+    50 Hz and at 800 Hz differ by a factor of four on the picture, and
+    no amplitude in g or N can be read from it. The two conventions
+    differ by sqrt(scale), and a scalogram does not show which one it
+    is in, so it is stated here.
 
     Parameters
     ----------
     values : array_like
-        One channel's record, evenly sampled. Complex input is refused:
-        a measurement is real, and a complex array here is a mistake
-        worth catching rather than transforming.
+        One channel's record, evenly sampled. It must be real and
+        one-dimensional, with at least two samples.
     sample_rate : float
         Samples per second.
     frequencies : array_like
-        Where to listen, in Hz. Anything at or above Nyquist is a
-        frequency the record cannot carry.
+        The frequency of each row, in Hz, each above zero and below
+        Nyquist.
     omega0 : float, default OMEGA0
-        Cycles under the wavelet's window: the time-against-frequency
-        trade.
+        Cycles under the wavelet's window, which sets the trade between
+        time and frequency resolution.
 
     Returns
     -------
     numpy.ndarray
-        Complex, shape ``(len(frequencies), len(values))``. Magnitude
-        is what a scalogram draws; the phase is kept because it costs
-        nothing to keep and a ridge's phase is what an instantaneous
-        frequency would be read from.
+        Complex, shape ``(len(frequencies), len(values))``. The
+        magnitude is what a scalogram draws. The phase is kept because
+        it costs nothing, and an instantaneous frequency would be read
+        from the phase along a ridge.
+
+    Raises
+    ------
+    ValueError
+        When `values` is complex, not one-dimensional or shorter than
+        two samples, or when a frequency is at or below zero or at or
+        above Nyquist.
     """
     record, wanted, samples = _prepared(values, sample_rate, frequencies)
     out = np.empty((wanted.size, samples), dtype=complex)
@@ -292,37 +301,43 @@ def scalogram(values: ArrayLike, sample_rate: float,
 def scalogram_peaks(values: ArrayLike, sample_rate: float,
                     frequencies: ArrayLike, omega0: float = OMEGA0, *,
                     columns: int = COLUMNS) -> tuple[np.ndarray, np.ndarray]:
-    """The scalogram's magnitude, held to at most `columns` of time.
+    """The scalogram's magnitude, reduced to at most `columns` time columns.
 
-    What a picture is drawn from: the view, the scripting plot and the
-    report all want the magnitude at about a screen's worth of columns,
-    and a million-sample record is not that. Time is cut into equal
-    slices and each column is the **largest** magnitude in its slice —
-    peak-hold, the same reading `decimate.peak_decimate` gives a curve
-    — because a scalogram's story is its ridges and a stride would land
-    between the very samples a transient's energy lives in, while a
-    mean would halve it. Under the budget nothing is held: the reading
-    is the magnitude itself, exactly.
+    This is what a picture is drawn from. The view, the scripting plot
+    and the report all draw about a screen's width of columns, and a
+    million-sample record is far more than that. Time is cut into equal
+    slices and each column is the largest magnitude in its slice (a
+    peak hold, the same reduction `decimate.peak_decimate` applies to a
+    curve). The peaks are kept because the ridges are what a scalogram
+    is read for: taking every nth sample could skip the samples where a
+    transient's energy is, and a mean would lower its peak. When the
+    record has no more samples than `columns`, nothing is reduced and
+    the result is the magnitude itself.
 
-    Computed band by band and reduced as each band lands, so the whole
-    transform is never in memory at once: this is what a long record
-    goes through, and it costs `BAND_BYTES` a working array whatever
-    the length.
+    The transform is computed band by band and each band is reduced as
+    it is computed, so the whole transform is never in memory at once.
+    A long record should go through this function, which uses
+    `BAND_BYTES` per working array whatever the record's length.
 
     Parameters
     ----------
     values, sample_rate, frequencies, omega0
         As for `scalogram`.
     columns : int
-        The most columns to hand back.
+        The largest number of time columns to return.
 
     Returns
     -------
     times, magnitude
-        `times` is each column's clock in seconds from the record's
-        start — the center of its slice, so the first and last columns
-        sit half a slice inside the record's ends — and `magnitude` is
-        ``(len(frequencies), len(times))``, real.
+        `times` is the time of each column in seconds from the
+        record's start, at the center of its slice, so the first and
+        last columns are half a slice inside the ends of the record.
+        `magnitude` is real, shape ``(len(frequencies), len(times))``.
+
+    Raises
+    ------
+    ValueError
+        As for `scalogram`.
     """
     record, wanted, samples = _prepared(values, sample_rate, frequencies)
     step = max(1, -(-samples // int(columns)))
@@ -447,14 +462,14 @@ def _bands(record, sample_rate, wanted, omega0):
 
 
 def ridge(coefficients: ArrayLike, frequencies: ArrayLike) -> np.ndarray:
-    """The strongest frequency at each instant, in Hz.
+    """The frequency of the largest magnitude at each instant, in Hz.
 
-    What the eye follows across a scalogram, as a number a report can
-    quote: for each column, the frequency of the largest magnitude.
-    Instants with nothing in them still answer — a ridge is only
-    meaningful where there is something to be the ridge of, so a
-    caller with a quiet stretch should say so rather than trusting the
-    line drawn across it.
+    This is the line a reader follows across a scalogram, as numbers a
+    report can quote: for each column of `coefficients`, the entry of
+    `frequencies` at the row with the largest magnitude. A column with
+    no signal in it still returns a frequency, so the ridge only means
+    something where there is a ridge to follow; a caller with a quiet
+    stretch should treat that part of the line as meaningless.
     """
     magnitude = np.abs(np.asarray(coefficients))
     wanted = np.asarray(frequencies, dtype=float)
@@ -462,16 +477,17 @@ def ridge(coefficients: ArrayLike, frequencies: ArrayLike) -> np.ndarray:
 
 
 def decade_values(low: float, high: float) -> list[float]:
-    """The round frequencies a person would label a log axis with.
+    """The round frequencies to label a log axis with.
 
-    1, 2, 5 per decade, every one inside ``[low, high]``, ascending.
-    The transform's rows are twelfths of an octave and nobody reads
-    158.7 Hz off an axis, so the flat picture, the 3-D stage and the
-    report figure all label these values instead — and they call this
-    one function rather than each carrying the loop, which is how the
-    three drifted apart once (2026-09-16: the three loops were
-    byte-for-byte the same, and the fourth would not have been).
+    1, 2 and 5 times each power of ten, every one inside
+    ``[low, high]``, in ascending order. The transform's rows are
+    twelfths of an octave and nobody reads 158.7 Hz off an axis, so the
+    flat picture, the 3-D stage and the report figure all label these
+    values instead, and all three call this function.
     """
+    # One function rather than a loop in each caller, because the three
+    # loops drifted apart once (2026-09-16: they were byte-for-byte the
+    # same, and the fourth would not have been).
     low, high = float(low), float(high)
     values = []
     decade = 10.0 ** np.floor(np.log10(low))
@@ -485,22 +501,22 @@ def decade_values(low: float, high: float) -> list[float]:
 
 
 def default_range(sample_rate: float, duration: float) -> tuple[float, float]:
-    """The frequency range a record can honestly carry, low to high.
+    """The default (low, high) frequency range for a record, in Hz.
 
-    One implementation for the panel, the scripting plot and the
-    report, because the three drifted within a day of each other:
-    the view's default top moved from 0.4 of Nyquist to 0.98 when the
-    0.4 was measured to be superstition (a tone at 0.95 of Nyquist
-    reads its amplitude to 0.1%), and `plot_scalogram` kept the old
-    number until this function existed.
-
-    The top is just under Nyquist — under, because the topmost line
-    has to lie below it, and the reading is true to a fraction of a
-    percent right up against it. The bottom is where a handful of the
-    longest wavelets still fit inside the record rather than hanging
-    off both ends: a default whose bottom octave is all cone would be
-    a default that draws an artifact.
+    The panel, the scripting plot and the report all use this one
+    range. The top is 0.98 of Nyquist: the top line has to be below
+    Nyquist, and the amplitude is accurate to a fraction of a percent
+    right up to it. The bottom is eight cycles over the record's
+    `duration` in seconds, kept between a thousandth of Nyquist and half
+    the top (with no duration it is a hundredth of the top). At that
+    frequency the longest wavelets still fit inside the record, so the
+    bottom octave is not all cone of influence.
     """
+    # One implementation, because the three callers drifted within a day
+    # of each other: the view's default top moved from 0.4 of Nyquist to
+    # 0.98 when the 0.4 was measured to be unnecessary (a tone at 0.95 of
+    # Nyquist reads its amplitude to 0.1%), and `plot_scalogram` kept the
+    # old number until this function existed.
     nyquist = float(sample_rate) / 2.0
     high = nyquist * 0.98
     low = (8.0 / float(duration)) if duration else high / 100.0
@@ -512,18 +528,18 @@ def reading(history: Any, channel: int = 0, *, low: float | None = None,
             high: float | None = None, per_octave: int | None = None,
             omega0: float | None = None
             ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
-    """One channel's scalogram as the app draws it, flat or in 3-D:
-    (clock, magnitude, frequencies, omega0).
+    """One channel's scalogram as the app draws it, flat or in 3-D.
 
-    Settings left out take the defaults the panel opens on
-    (`default_range`, `PER_OCTAVE`, `OMEGA0`); lines at or over Nyquist
-    are dropped, since the record cannot carry them. Time is held to
-    `COLUMNS` columns by peak-hold (`scalogram_peaks`), so a long
-    record reads in bounded memory and a transient's ridge is not
-    strided past. The clock is the record's own.
+    Returns (clock, magnitude, frequencies, omega0) for row `channel`
+    of `history`. Settings left out take the defaults the panel opens
+    with (`default_range`, `PER_OCTAVE`, `OMEGA0`), and lines at or
+    above Nyquist are dropped. Time is reduced to at most `COLUMNS`
+    columns by a peak hold (`scalogram_peaks`), so a long record is
+    computed in bounded memory and a transient's ridge is kept. The
+    clock is in seconds and starts at the record's first time value.
 
-    One implementation for the window, `plot.plot_scalogram` and
-    `viz.scalogram.plot_scalogram_stage`.
+    The window, `plot.plot_scalogram` and
+    `viz.scalogram.plot_scalogram_stage` all call this function.
 
     Raises
     ------

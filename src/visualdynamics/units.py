@@ -1,17 +1,19 @@
 """Unit handling for visualdynamics.
 
 Values whose units are known are stored in SI (m, kg, s, N, Pa, K, ...).
-Values imported from a source that does not declare units are stored exactly
-as they appear in the file and tagged `unknown` until the user defines units;
-defining units converts them to SI once and records the unit chosen, so a
-wrong guess can be corrected without losing anything.
+Values read from a source that does not declare units are stored exactly
+as they appear in the file and tagged `unknown` until the user defines
+units. Defining units converts them to SI once and records the unit
+chosen, so a wrong choice can be corrected without losing anything.
 
-Conversions are affine — `si = raw * scale + offset` — so offset scales like
-degC and degF are handled correctly alongside purely multiplicative units.
+Conversions are affine, `si = raw * scale + offset`, so offset scales such
+as degC and degF are handled correctly along with purely multiplicative
+units.
 
-pint provides the registry but is kept internal to this module: core objects
-carry plain numpy arrays plus a dimension tag (a string like 'length',
-'acceleration', or a compound expression like 'acceleration/force').
+pint provides the unit registry and is used only inside this module. The
+core objects carry plain numpy arrays and a dimension tag: a string such
+as 'length' or 'acceleration', or a compound expression such as
+'acceleration/force'.
 """
 
 from __future__ import annotations
@@ -30,11 +32,17 @@ _ureg = None
 
 
 def unit_registry() -> Any:
-    """The one pint registry, built on first use.
+    """The pint unit registry, built on first use.
 
-    One, because pint units from two registries do not compare — and
-    lazily, because building it costs a tenth of a second that a script
-    doing no unit conversion should not pay.
+    There is one registry because pint units from two registries cannot
+    be compared. It is built on first use because building it takes about
+    0.1 s, which a script that converts no units should not have to wait
+    for.
+
+    Returns
+    -------
+    pint.UnitRegistry
+        The shared registry, with `gn` defined as standard gravity.
     """
     global _ureg
     if _ureg is None:
@@ -98,14 +106,25 @@ _UNIT_TOKEN = re.compile(r'[A-Za-z_]+')
 
 @lru_cache(maxsize=4096)
 def fold_unit_case(unit: str) -> str:
-    """`unit` respelled in the case this toolset knows, when that is the
-    only reading that means anything.
+    """`unit` with its letter case corrected, when only the corrected
+    spelling is a unit this toolset can read.
 
-    `'G'` becomes `'g'`, `'LBF/IN'` becomes `'lbf/in'`, `'Volts'` becomes
-    `'volts'`. A string that already names a quantity is returned as it
-    came — `'mV'` stays millivolts, and so does `'MV'` stay megavolts —
-    and so is one that no respelling rescues, so a caller can still
-    tell "unknown" from "known".
+    `'G'` becomes `'g'`, `'LBF/IN'` becomes `'lbf/in'` and `'Volts'`
+    becomes `'volts'`. A string that already names a tracked quantity is
+    returned unchanged, so `'mV'` stays millivolts and `'MV'` stays
+    megavolts. A string that no change of case makes readable is also
+    returned unchanged, so a caller can still tell an unknown unit from a
+    known one.
+
+    Parameters
+    ----------
+    unit : str
+        The unit as written, for example in a channel table.
+
+    Returns
+    -------
+    str
+        The respelled unit, or `unit` itself.
     """
     if not isinstance(unit, str) or _reading(unit) == 2:
         return unit
@@ -133,7 +152,22 @@ def _reading(unit: str) -> int:
 
 
 def normalize_unit(unit: str) -> str:
-    """A unit string as visualdynamics reads it, before pint sees it."""
+    """A unit string as visualdynamics reads it, before it is given to pint.
+
+    The case is corrected as in `fold_unit_case`, then `g` is read as
+    standard gravity (never grams, which are written `gram`), `mil` as a
+    thousandth of an inch and `lbm` as pound-mass.
+
+    Parameters
+    ----------
+    unit : str
+        The unit as written.
+
+    Returns
+    -------
+    str
+        The spelling pint is given.
+    """
     if not isinstance(unit, str):
         return unit
     return _spell(fold_unit_case(unit))
@@ -201,16 +235,20 @@ def _derived_units(units: dict) -> dict:
 
 
 class UnitError(ValueError):
-    """A unit was wrong: unreadable, or not the dimension asked for.
+    """A unit could not be read, or is not of the dimension required.
 
-    A ValueError, because that is what a bad value is, and a named one
-    so the app can tell a unit problem it should explain from a
-    programming error it should not swallow.
+    It is a ValueError, since a bad unit is a bad value, and it has its
+    own name so the app can tell a unit problem, which it explains to the
+    user, from a programming error, which it does not catch.
     """
 
 
 class UnitsRequired(UnitError):
-    """Raised when an operation needs units that have not been defined."""
+    """Raised when an operation needs units that have not been defined.
+
+    `required` names the unit settings that are missing (by default
+    `('length_unit',)`), so the caller can ask for exactly those.
+    """
 
     def __init__(self, message: str,
                  required: Sequence[str] = ('length_unit',)) -> None:
@@ -243,12 +281,35 @@ def _exponents_to_unicode(unit: str) -> str:
 
 
 def pretty_unit(unit: str) -> str:
-    """A unit string with real exponents, for showing: 'm/s**2' -> 'm/s²'."""
+    """A unit string with superscript exponents, for display:
+    'm/s**2' -> 'm/s²'.
+
+    Parameters
+    ----------
+    unit : str
+        The unit in pint's spelling.
+
+    Returns
+    -------
+    str
+        The same unit with superscripts and `·` for products.
+    """
     return _exponents_to_unicode(unit)
 
 
 def plain_unit(text: str) -> str:
-    """The inverse of `pretty_unit`, so a shown unit can be read back."""
+    """The inverse of `pretty_unit`, so a displayed unit can be read back.
+
+    Parameters
+    ----------
+    text : str
+        A unit as `pretty_unit` writes it, such as 'm/s²'.
+
+    Returns
+    -------
+    str
+        The unit in pint's spelling, such as 'm/s**2'.
+    """
     text = text.replace('·', '*')
     return _PRETTY_POWER.sub(
         lambda m: f'{m.group(1)}**'
@@ -258,7 +319,19 @@ def plain_unit(text: str) -> str:
 
 
 def is_compound_unit(unit: str) -> bool:
-    """Does it need brackets before something is done to the whole of it?"""
+    """Whether a unit needs brackets before it is raised to a power or
+    divided by another.
+
+    Parameters
+    ----------
+    unit : str
+        The unit string.
+
+    Returns
+    -------
+    bool
+        True if it contains `/`, `*` or `·`.
+    """
     return _is_compound(unit)
 
 
@@ -326,10 +399,29 @@ def _parse_dimension(expression: str) -> tuple[tuple[str, int], ...]:
 def parse_dimension(expression: str) -> list[tuple[str, int]]:
     """Parse a dimension expression into (base_dimension, power) parts.
 
-    Memoized: this is a pure function of a short string, and the plot asks
-    for the same handful of expressions once per record. Drawing one curve
-    out of a 1356-record FRF used to reparse and reconvert 1356 times.
+    'acceleration/force' gives `[('acceleration', 1), ('force', -1)]`.
+    The results are cached.
+
+    Parameters
+    ----------
+    expression : str
+        A dimension tag or an expression of tags joined by `*`, `/` and
+        integer `**` powers.
+
+    Returns
+    -------
+    list of (str, int)
+        Each base dimension and its power.
+
+    Raises
+    ------
+    UnitError
+        If the expression names a dimension that is not tracked.
     """
+    # Cached because this is a pure function of a short string and the
+    # plot asks for the same few expressions once per record: drawing
+    # one curve out of a 1356-record FRF used to parse and convert 1356
+    # times.
     return list(_parse_dimension(expression))
 
 
@@ -353,7 +445,24 @@ def _parse_dimension_uncached(expression: str) -> list[tuple[str, int]]:
 def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]:
     """(scale, offset) such that `si_value = value * scale + offset`.
 
-    Offset is non-zero only for affine units such as degC and degF.
+    The offset is non-zero only for affine units such as degC and degF.
+
+    Parameters
+    ----------
+    unit : str
+        The unit, for example 'mm' or 'degF'.
+    dimension : str, optional
+        If given, the unit is checked to be of this dimension.
+
+    Returns
+    -------
+    tuple of (float, float)
+        The scale and the offset.
+
+    Raises
+    ------
+    UnitError
+        If the unit cannot be read, or is not of `dimension`.
     """
     ureg = unit_registry()
     unit = normalize_unit(unit)
@@ -378,19 +487,26 @@ def si_transform(unit: str, dimension: str | None = None) -> tuple[float, float]
 def si_factor(unit: str, dimension: str | None = None) -> float:
     """Multiplier converting values in `unit` to SI.
 
-    Raises for affine units (degC, degF), which need `to_si`/`from_si`.
+    Affine units (degC, degF) have no single factor; convert those with
+    `to_si` and `from_si`.
 
     Parameters
     ----------
     unit : str
-        The unit, e.g. 'mm' or 'lbf'.
+        The unit, for example 'mm' or 'lbf'.
     dimension : str, optional
-        The dimension the unit is meant as, where a spelling is ambiguous.
+        If given, the unit is checked to be of this dimension.
 
     Returns
     -------
     float
         The factor: a value in `unit` times this is the value in SI.
+
+    Raises
+    ------
+    UnitError
+        If the unit has an offset, cannot be read, or is not of
+        `dimension`.
     """
     scale, offset = si_transform(unit, dimension)
     if offset:
@@ -402,28 +518,60 @@ def si_factor(unit: str, dimension: str | None = None) -> float:
 
 def to_si(values: ArrayLike, unit: str,
           dimension: str | None = None) -> Any:
-    """`values`, read as `unit`, in SI. Handles offsets, so degrees
-    Celsius arrive as kelvin rather than as a scaled nonsense."""
+    """`values`, read as `unit`, converted to SI.
+
+    Offsets are applied, so degrees Celsius are converted to kelvin
+    correctly.
+
+    Parameters
+    ----------
+    values : array-like
+        The values, in `unit`.
+    unit : str
+        The unit they are in.
+    dimension : str, optional
+        If given, the unit is checked to be of this dimension.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The values in SI.
+    """
     scale, offset = si_transform(unit, dimension)
     return values * scale + offset
 
 
 def from_si(values: ArrayLike, unit: str,
             dimension: str | None = None) -> Any:
-    """SI `values` expressed in `unit` — the inverse of `to_si`."""
+    """SI `values` converted to `unit`; the inverse of `to_si`.
+
+    Parameters
+    ----------
+    values : array-like
+        The values, in SI.
+    unit : str
+        The unit wanted.
+    dimension : str, optional
+        If given, the unit is checked to be of this dimension.
+
+    Returns
+    -------
+    numpy.ndarray or float
+        The values in `unit`.
+    """
     scale, offset = si_transform(unit, dimension)
     return (values - offset) / scale
 
 
 def convert(values: ArrayLike, from_unit: str, to_unit: str) -> Any:
-    """`values` from one unit to another, through SI.
+    """`values` converted from one unit to another, through SI.
 
     Parameters
     ----------
     values : array-like
         The values, in `from_unit`.
     from_unit : str
-        The unit they are in, e.g. 'in/s**2'.
+        The unit they are in, for example 'in/s**2'.
     to_unit : str
         The unit wanted, of the same dimension.
 
@@ -436,10 +584,24 @@ def convert(values: ArrayLike, from_unit: str, to_unit: str) -> Any:
 
 
 def dimension_of(unit: str) -> str | None:
-    """The visualdynamics base dimension matching a unit string, or None.
+    """The visualdynamics dimension tag of a unit string, or None.
 
-    Only single base dimensions are recognized ('m/s**2' -> 'acceleration');
-    compound quantities like FRFs carry their dimension expression explicitly.
+    Only single tags are returned ('m/s**2' -> 'acceleration'). Compound
+    quantities such as FRFs carry their dimension expression explicitly.
+    A dimensionless unit is 'angle' if it is spelled with an angle (rad,
+    deg) and 'dimensionless' otherwise, and rad/s is 'angular_velocity'
+    where Hz is 'frequency'.
+
+    Parameters
+    ----------
+    unit : str
+        The unit string.
+
+    Returns
+    -------
+    str or None
+        The dimension tag, or None if the unit cannot be read or matches
+        no tracked dimension.
     """
     return _dimension_of_spelled(normalize_unit(unit))
 
@@ -470,12 +632,16 @@ def _dimension_of_spelled(unit: str) -> str | None:
 
 @dataclass(frozen=True)
 class UnitSystem:
-    """A named mapping of dimension -> display unit.
+    """A named mapping of dimension tag to display unit.
 
-    `base` is the coherent system this one came from — the same object for
-    a coherent system, and the parent for one carrying display-only
-    overrides such as accelerations in g. Exports use it, because no
-    foreign format can record "g" as a unit.
+    `base` is the coherent system a derived system was made from, such as
+    in-slinch-lbf-s for in-slinch-lbf-s (g), which shows accelerations in
+    g. It is None for a coherent system. Most exporters write in the
+    coherent system (see `coherent`), because most file formats cannot
+    label a value as g.
+
+    The angular, moment and modal units are filled in from the base
+    units when the system does not name them.
     """
 
     name: str
@@ -491,24 +657,31 @@ class UnitSystem:
 
     @property
     def coherent(self) -> UnitSystem:
-        """This system with display-only overrides stripped."""
+        """The coherent system this one is based on, or this system if it
+        is coherent."""
         return self.base or self
 
     def unit(self, dimension: str) -> str:
-        """Display unit for a dimension or dimension expression.
+        """Display unit for a dimension tag or dimension expression.
 
-        Expressions compose from the base units: with in-lbf-s,
-        'acceleration/force' -> '(in/s**2)/lbf'.
+        Expressions are built from the base units: in in-slinch-lbf-s,
+        'acceleration/force' gives '(in/s**2)/lbf'.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag, such as 'acceleration', or an expression,
+            such as 'acceleration/force'.
 
         Returns
         -------
         str
-            The unit string for this dimension.
+            The unit string in pint's spelling; empty for 'unknown'.
+
+        Raises
+        ------
+        UnitError
+            If the system has no unit for a dimension in the expression.
         """
         if dimension == UNKNOWN:
             return ''
@@ -530,18 +703,25 @@ class UnitSystem:
         return out
 
     def transform(self, dimension: str) -> tuple[float, float]:
-        """(scale, offset) converting a display value to SI.
+        """(scale, offset) converting a value in this system's unit to SI,
+        `si = value * scale + offset`.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'acceleration/force'.
 
         Returns
         -------
         tuple of (float, float)
-            The scale and offset taking SI to display —
-            an offset matters for temperature and nothing else.
+            The scale and offset. The offset is non-zero only for
+            temperature; (1.0, 0.0) for 'unknown'.
+
+        Raises
+        ------
+        UnitError
+            If an expression includes an offset unit such as degF.
         """
         if dimension == UNKNOWN:
             return 1.0, 0.0
@@ -558,17 +738,24 @@ class UnitSystem:
         return scale, 0.0
 
     def factor(self, dimension: str) -> float:
-        """SI-per-display-unit scale (offset-free dimensions only).
+        """SI value per display unit, for dimensions with no offset.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'acceleration/force'.
 
         Returns
         -------
         float
-            What an SI value is multiplied by to display it.
+            What a value in this system's unit is multiplied by to give
+            SI; divide an SI value by it to display it.
+
+        Raises
+        ------
+        UnitError
+            If the display unit has an offset (degC, degF).
         """
         scale, offset = self.transform(dimension)
         if offset:
@@ -585,7 +772,8 @@ class UnitSystem:
         values : array_like
             Values in SI.
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'force'.
 
         Returns
         -------
@@ -603,7 +791,7 @@ class UnitSystem:
         values : array_like
             Values in this system's units.
         dimension : str
-            A dimension tag, such as 'acceleration'.
+            A dimension tag or expression, such as 'acceleration'.
 
         Returns
         -------
@@ -614,17 +802,18 @@ class UnitSystem:
         return values * scale + offset
 
     def label(self, dimension: str) -> str:
-        """Display unit text; empty when the dimension is undefined.
+        """Display unit text, the same as `unit`; empty for 'unknown'.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'force'.
 
         Returns
         -------
         str
-            The unit's name in this system.
+            The unit string in this system.
         """
         return self.unit(dimension)
 
@@ -644,39 +833,41 @@ class UnitSystem:
         return parts
 
     def label_text(self, dimension: str) -> str:
-        """Display unit for plain-text output, with real exponents: in/s².
+        """Display unit for plain-text output, with superscript
+        exponents: in/s².
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'force'.
 
         Returns
         -------
         str
-            The label as plain text.
+            The label as plain text; empty for 'unknown'.
         """
         return self._slash_label(
             dimension, _exponents_to_unicode,
             lambda text, power: text + _superscript(str(power)))
 
     def label_ascii(self, dimension: str) -> str:
-        """Display unit in plain ASCII, exponents as carets: in/s^2.
+        """Display unit in plain ASCII, with exponents as carets: in/s^2.
 
-        For renderers that quietly drop what they cannot draw: VTK's
-        3-D axis titles lose unicode superscripts in every text mode,
-        so `label_text`'s (in/s²)²/Hz read (in/s)/Hz off the waterfall
-        — wrong by two squarings, with nothing saying so.
+        This is for renderers that drop characters they cannot draw. VTK's
+        3-D axis titles drop unicode superscripts in every text mode, so
+        `label_text`'s (in/s²)²/Hz is drawn as (in/s)/Hz there.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'force'.
 
         Returns
         -------
         str
-            The label with no unicode, for renderers that drop it.
+            The label with no unicode characters; empty for 'unknown'.
         """
         return self._slash_label(dimension, _exponents_to_ascii,
                                  lambda text, power: f'{text}^{power}')
@@ -699,17 +890,19 @@ class UnitSystem:
         return f'{text or "1"}/{denominator[0]}'
 
     def label_html(self, dimension: str) -> str:
-        """Display unit as HTML — a stacked fraction when it has one.
+        """Display unit as HTML, drawn as a stacked fraction when it has a
+        denominator.
 
         Parameters
         ----------
         dimension : str
-            A dimension tag, such as 'acceleration' or 'force'.
+            A dimension tag or expression, such as 'acceleration' or
+            'force'.
 
         Returns
         -------
         str
-            The label with HTML superscripts.
+            The label with HTML superscripts; empty for 'unknown'.
         """
         parts = self._unit_parts(dimension)
         if not parts:
@@ -727,15 +920,17 @@ class UnitSystem:
             f'<tr><td align="center">{denominator}</td></tr></table>')
 
     def with_units(self, name: str | None = None, **overrides) -> UnitSystem:
-        """A copy of this system with per-dimension unit overrides.
+        """A copy of this system with some dimensions' units replaced.
 
-        Example: IN_LBF_S.with_units(acceleration='g') displays
-        acceleration in g while everything else stays inch-pound-second.
+        `IN_LBF_S.with_units(acceleration='g')` shows acceleration in g
+        and every other dimension in inch-pound-second units. The copy's
+        `base` is this system's coherent system.
 
         Parameters
         ----------
         name : str, optional
-            What to call the derived system.
+            What to call the derived system. The default is this
+            system's name followed by ' (custom)'.
         **overrides
             Dimension/unit pairs to change.
 
@@ -743,6 +938,11 @@ class UnitSystem:
         -------
         UnitSystem
             A copy with those units replaced.
+
+        Raises
+        ------
+        UnitError
+            If a unit cannot be read or is not of its dimension.
         """
         for dimension, unit in overrides.items():
             si_transform(unit, dimension)  # validates dimension and unit
@@ -781,8 +981,10 @@ FT_LBF_S = UnitSystem('ft-slug-lbf-s', {
 _COHERENT = (SI, MMKS, IN_LBF_S, FT_LBF_S)
 
 # Accelerometers are read in g, so every system gets a variant that shows
-# accelerations that way. Only the display changes: exports are written in
-# the coherent system, since no file format can record "g" as a unit.
+# accelerations that way. Only the display changes: most exports are
+# written in the coherent system, since most file formats cannot record
+# "g" as a unit (the .mat writer, which labels each value, is the
+# exception; io/exporters.py).
 _IN_G = tuple(s.with_units(f'{s.name} (g)', acceleration='g')
               for s in _COHERENT)
 
@@ -790,6 +992,6 @@ SYSTEMS = {s.name: s for s in _COHERENT + _IN_G}
 
 # in-slinch-lbf-s with accelerations displayed in g (Brandon,
 # 2026-08-28): the units his tests are specified and read in. Display
-# only — exports still write the coherent system's in/s**2, since no
-# file format can record "g" as a unit.
+# only: most exports still write the coherent system's in/s**2, since
+# most file formats cannot record "g" as a unit.
 DEFAULT_SYSTEM = SYSTEMS['in-slinch-lbf-s (g)']

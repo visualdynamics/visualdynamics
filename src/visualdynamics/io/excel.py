@@ -1,16 +1,17 @@
-"""Excel for channel tables, both ways.
+"""Read and write channel tables as Excel workbooks (.xlsx, .xlsm).
 
-A channel table is the one visualdynamics object that *is* a spreadsheet — rows of
-per-channel text — so it gets a spreadsheet format. Nothing is lost in the
-writing: every column goes out in order, 'channel' as the integer it is
-and the rest as the strings they are. Units here are metadata, not values,
-so there is nothing to convert and `unit_system` is accepted and unused.
+A channel table is rows of text for each channel, which is what a
+spreadsheet holds, so it has a spreadsheet format. Every column is
+written in order under the header the window and the report use, the
+'channel' column and other integer columns as numbers and the rest as
+text, with drop-down lists for the columns that have fixed choices and a
+unit list that follows each channel's type. Units in a channel table
+are labels, not values, so there is nothing to convert, and
+`unit_system` is accepted and not used.
 
-Reading it back matters as much as writing it. A channel table arrives
-as a spreadsheet far more often than as anything else — a calibration
-lab sends one, a controller writes one — and until this existed the
-export was a one-way door: a table dragged out of the window could not
-be dragged back in.
+Reading is as important as writing, because a channel table more often
+arrives as a spreadsheet than as anything else: a calibration lab sends
+one, and a controller writes one.
 """
 
 from __future__ import annotations
@@ -21,6 +22,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..core.channel_table import ChannelTable
     from ..units import UnitSystem
+
+# Before the reader existed the export only went one way: a table dragged
+# out of the window could not be dragged back in.
 
 
 def _cell(table: ChannelTable, name: str, row: int) -> Any:
@@ -201,12 +205,13 @@ def _key(cell):
 
 
 def sniff(path: str | os.PathLike) -> bool:
-    """Is this a spreadsheet holding a channel table?
+    """True for an `.xlsx` or `.xlsm` workbook holding a channel table.
 
-    The extension is not enough — an `.xlsx` may hold anything — so this
-    opens it and looks for a header row naming a channel column. Wrong
-    guesses here are expensive: this importer is asked about every file
-    dropped on the window.
+    The suffix is not enough, since a workbook may hold anything, so this
+    opens the file and looks in the first rows of the active sheet for a
+    header row naming a channel column. A file that cannot be opened is
+    not a channel table. This is asked of every file dropped on the
+    window, so a wrong answer is costly.
     """
     if not str(path).lower().endswith(('.xlsx', '.xlsm')):
         return False
@@ -234,17 +239,25 @@ def _header_row(sheet: Any) -> tuple[int, list[str]] | None:
 
 
 def load(path: str | os.PathLike, **_kwargs: Any) -> ChannelTable:
-    """The spreadsheet as a ChannelTable.
+    """Read the active sheet of a workbook as a ChannelTable.
 
-    Every column is kept, in the file's own order, under the name its
-    header spells — the same rule the object itself follows, so whatever
-    a lab or a controller put in the file survives the trip. Values are
-    read as **text**, because that is what the object stores: a serial
-    number that happens to be all digits is not a number, and one with a
-    leading zero would come back a different string if it were.
+    The header is the first of the top ten rows with a cell naming the
+    channel column (such as 'Channel', 'Channel Number' or 'Ch'), so a controller's
+    sheet with group headings above the column names reads too. Each
+    header is matched to the channel table's column names by
+    `canonical_name` (case, spacing, a parenthetical unit and the known
+    aliases do not matter), and a column the channel table does not have
+    is dropped, as it is from any source. A column named twice keeps the
+    first. Values are read as text, because that is what the object
+    stores: a serial number of all digits is not a number, and one with
+    a leading zero would read back as a different string if it were.
 
-    Blank trailing rows are dropped; a blank *column* header is not a
-    column and its cells go with it.
+    Blank rows are skipped, and a column with a blank header is left
+    out. A `node`, `direction` or `unit` column the sheet does not have
+    is created blank.
+
+    Raises ValueError when no header row is found, or the header has no
+    channels under it.
     """
     from openpyxl import load_workbook
 

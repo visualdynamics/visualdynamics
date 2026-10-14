@@ -1,53 +1,55 @@
 """Beams, plates and solids, and the eigensolution they give.
 
-visualdynamics is an analysis toolset, so this is deliberately the smallest
-modeling capability that produces something worth analyzing: three-dimensional
-two-node beams; flat-shell plates — four-node rectangles (MITC4) and
-three-node triangles (MITC3); solids — eight-node hexahedra with incompatible
-modes, six-node wedges and four-node tetrahedra; and lumped masses, discrete
-springs, rigid links and grounds, assembled into mass and stiffness matrices
-and solved for real normal modes, dense for a small model and sparse past
-`SPARSE_ABOVE` degrees of freedom. It exists because a demonstration needs a
-*truth* model — a dense analytical answer the measured one can be compared
-against — and because building one should not require reaching for another
-package.
+Visual Dynamics is an analysis toolset, and this module is the smallest
+modeling capability that produces something worth analyzing. It has
+three-dimensional two-node beams; flat-shell plates, as four-node
+rectangles (MITC4) and three-node triangles (MITC3); solids, as
+eight-node hexahedra with incompatible modes, six-node wedges and
+four-node tetrahedra; and lumped masses, discrete springs, rigid links
+and grounds. These are assembled into mass and stiffness matrices and
+solved for real normal modes, dense for a small model and sparse past
+`SPARSE_ABOVE` degrees of freedom. A demonstration needs a reference
+model, an analytical answer the measured one can be compared against,
+and building one should not require another package.
 
-There are three ways in. Build a structure member by member, as the
-example below does. Give a geometry's element groups their properties
-(`GroupProperties`) — a material and a thickness for an element group of
-plates, a material and a section for one of beams, a material alone for one
-of solids, a mass for point masses, a stiffness for springs, the directions
-held for ground — and let `from_geometry` build every element as the element
-it is, which is how an exodus file means a structure and the way a user
-builds a model of a simple article. Or draw a shape as a surface mesh and
-let `from_geometry`, given one material and one section, put a member along
-every edge of it and share the mass over its nodes: the shorter road from
-any geometry to *some* set of modes, and how `visualdynamics.demo.drone` is
-built throughout.
+There are three ways to build a model. The first is member by member,
+as the example below does. The second is to give a geometry's element
+groups their properties (`GroupProperties`): a material and a thickness
+for an element group of plates, a material and a section for one of
+beams, a material alone for one of solids, a mass for point masses, a
+stiffness for springs and the directions held for ground.
+`from_geometry` then builds every element as the element it is, which
+is how an Exodus file describes a structure and how a model of a simple
+test article is built in the app. The third is to draw a shape as a
+surface mesh and let `from_geometry`, given one material and one
+section, put a beam along every edge of it. That is the shortest route
+from any geometry to a set of modes, and it is how
+`visualdynamics.demo.drone` is built.
 
-What it is not: a general finite element code. The quad plate is rectangular
-only — a skewed or warped quad is refused rather than solved badly, because
-the MITC4 tying assumes the element's natural axes run along its sides
-(`Plate`) — while the triangle takes any flat shape it is given. Every shell
-is flat, so a curved surface is a faceted one. A solid carries three
-translations per node and no rotations, and the linear wedge and tetrahedron
-lock in bending where the brick does not (`Solid`). The constraints are
-holding degrees of freedom (`fixed`, `add_ground`) and rigid links, which the
-eigensolution eliminates exactly rather than approximating with a stiff
-member (`constraint_transform`); there is no general multipoint constraint,
-and no static solution: modes are the one answer this gives. Wiring a
-surface mesh's edges with `from_geometry` makes a grillage of beams, not
-plates, which is a real modeling choice with a known cost rather than an
-approximation hidden inside an element: it answers what order of mode
-density and what mode families a shape has, and it does not pretend to be
+This is not a general finite element code. The quad plate is
+rectangular only: a skewed or warped quad is refused rather than solved
+badly, because the MITC4 tying assumes the element's natural axes run
+along its sides (`Plate`). The triangle takes any flat shape. Every
+shell is flat, so a curved surface is a faceted one. A solid carries
+three translations per node and no rotations, and the linear wedge and
+tetrahedron lock in bending where the brick does not (`Solid`). The
+constraints are held degrees of freedom (`fixed`, `add_ground`) and
+rigid links, which the eigensolution eliminates exactly instead of
+approximating them with a stiff member (`constraint_transform`). There
+is no general multipoint constraint and no static solution; modes are
+the only result. Wiring a surface mesh's edges with `from_geometry`
+makes a grillage of beams, not plates. That is a modeling choice with a
+known cost, not an approximation hidden inside an element: it shows the
+order of mode density and the mode families a shape has, and it is not
 shell theory.
 
-Everything here is SI, because the mass and stiffness matrices are the one
-place in visualdynamics where several dimensions have to be consistent with each
-other at once — a length in millimeters beside a modulus in pascals is not
-wrong in any single entry, it is wrong only in the answer. The objects that
-come out (`Geometry`, `ShapeSet`) carry their units declared, so the
-conversion happens once, at the boundary, as it does everywhere else.
+Everything here is SI, because the mass and stiffness matrices are the
+one place in Visual Dynamics where several dimensions have to be
+consistent with each other at once. A length in millimeters beside a
+modulus in pascals is not wrong in any single entry; it is wrong only in
+the answer. The objects that come out (`Geometry`, `ShapeSet`) carry
+their units, so the conversion happens once, at the boundary, as it
+does everywhere else.
 
     from visualdynamics import fem
 
@@ -61,12 +63,12 @@ conversion happens once, at the boundary, as it does everywhere else.
     shapes = model.eigensolution(maximum_frequency=2000,
                                  fixed=['100'], damping=0.01)
 
-The beam is Euler-Bernoulli with a consistent mass matrix:
-no shear flexibility and no section rotary inertia, which is right while a
-member is slender (length more than about ten times its depth) and
-progressively optimistic when it is not. A drone arm at 180 mm long and
-16 mm deep is comfortably inside that; a stubby mounting stub is not, and
-frequencies there read high.
+The beam is Euler-Bernoulli with a consistent mass matrix: no shear
+flexibility and no section rotary inertia. That is accurate while a
+member is slender (length more than about ten times its depth), and
+the frequencies come out increasingly high when it is not. A drone arm
+180 mm long and 16 mm deep is well inside that limit; a short, deep
+mounting stub is not, and its frequencies read high.
 
 References
 ----------
@@ -127,9 +129,13 @@ AXES = ('X', 'Y', 'Z', 'RX', 'RY', 'RZ')
 
 
 def ground_axes(directions: Any) -> tuple[str, ...]:
-    """A ground's directions as `AXES` names, in their order: True for
-    all six, False or None or nothing for none, else names ('X', 'RY'),
-    a sign or case making no difference — 'x+' is 'X'."""
+    """A ground's directions as `AXES` names, in their order.
+
+    True means all six, and False, None or an empty value means none.
+    Otherwise the names are given as a sequence, or as one string separated
+    by spaces or commas ('X', 'RY'); sign and case make no difference, so
+    'x+' is 'X'. A name that is not a direction raises ValueError.
+    """
     if directions is True:
         return AXES
     if not directions:
@@ -216,10 +222,11 @@ ASSEMBLY_CHUNK = 4096
 class Material:
     """An isotropic elastic material.
 
-    Shear modulus is derived from the modulus and Poisson's ratio unless it
-    is given: for carbon fiber laminates the isotropic relation is a poor
-    guess and the torsional stiffness it implies can be out by a factor of
-    two, so the door is left open to state it.
+    The modulus is in Pa and the density in kg/m^3. The shear modulus is
+    derived from the modulus and Poisson's ratio unless
+    `modulus_of_rigidity` is given. For carbon fiber laminates the
+    isotropic relation is a poor estimate, and the torsional stiffness it
+    implies can be off by a factor of two, so it can be stated directly.
     """
 
     name: str
@@ -230,9 +237,10 @@ class Material:
 
     @property
     def is_rigid(self) -> bool:
-        """Whether this is `RIGID`: a link, not a material. A modulus
-        left blank in the Element Groups table (None) is a material not yet
-        finished, not a link."""
+        """Whether this is `RIGID`, the material that makes rigid links. A
+        modulus left blank in the Element Groups table (None) is a material not
+        yet finished, not a link.
+        """
         return (self.youngs_modulus is not None
                 and math.isinf(self.youngs_modulus))
 
@@ -254,11 +262,11 @@ LB_PER_IN3 = 27679.90471020312            #: kg/m^3
 class LibraryMaterial:
     """A material the library offers, with where its numbers came from.
 
-    The note names the kind of source and what the values are typical
-    of, because a handbook's typical modulus and density are what a
-    modal solution wants and also not what a particular heat of a
-    particular alloy measures: a person with the part's certification
-    in hand types those numbers over the library's.
+    The note names the kind of source and what the values are typical of.
+    A handbook's typical modulus and density are what a modal solution
+    needs, and they are not what a particular heat of a particular alloy
+    measures, so a person with the part's certification in hand types
+    those numbers over the library's.
     """
 
     material: Material
@@ -320,11 +328,12 @@ MATERIALS[RIGID.name] = RIGID
 
 
 def material(name: str) -> Material:
-    """A library material by name — `material('6061-T6')` — the same
+    """A library material by name, such as `material('6061-T6')`: the same
     entry the Element Groups table's Material drop-down fills a row from.
+    The rigid link, `RIGID`, is found by its name too.
 
-    Raises `KeyError` naming the library when the name is not in it,
-    so a typo reads as one rather than as a missing material.
+    A name not in the library raises `KeyError` with the library's names
+    listed, so a typo can be seen as one.
     """
     try:
         return MATERIALS[name]
@@ -338,31 +347,31 @@ class Section:
     """A beam cross section, as the four numbers the element needs.
 
     `iy` and `iz` are second moments of area about the element's own local
-    y and z axes, and `j` is the torsion constant — St Venant's, which
-    equals the polar second moment only for a circular section. For
-    anything else it is smaller, and using the polar value overstates
-    torsional stiffness; the constructors below carry the right formula for
-    the shapes they build.
+    y and z axes, and `j` is the St Venant torsion constant, which equals
+    the polar second moment only for a circular section. For any other
+    section it is smaller, and using the polar value overstates the
+    torsional stiffness; the constructors below use the correct formula for
+    the shapes they build. Areas are in m^2 and the moments in m^4.
 
-    **The shapes** (`SHAPES`): a section built from one remembers it —
-    `shape` and its `dimensions` in meters, in the order the constructor
-    takes them — so a table can show the dimensions and a file or a
-    session script rebuilds the section from them. One rule for which way
-    a shape faces: its width or flanges run along local **y** and its
-    depth or height along local **z**, so the orientation vector (which
-    names local y) points across the flanges, and `iy` is the
-    strong-axis bending of an I-beam or a channel. An angle is the
-    exception, because its leg axes are not principal and the element has
-    no product term: its `iy` and `iz` are its principal moments, and the
-    orientation vector points along the major principal axis
-    (`angle_major_axis` says where that is relative to the legs).
+    A section built from one of the shapes (`SHAPES`) remembers it: `shape`
+    and its `dimensions` in meters, in the order the constructor takes
+    them, so a table can show the dimensions and a file or a session script
+    can rebuild the section from them. One rule sets which way a shape
+    faces: its width or flanges run along local y and its depth or height
+    along local z, so the orientation vector (which names local y) points
+    across the flanges, and `iy` is the strong-axis bending of an I-beam or
+    a channel. An angle is the exception, because its leg axes are not
+    principal and the element has no product term. Its `iy` and `iz` are
+    its principal moments, and the orientation vector points along the
+    major principal axis (`angle_major_axis` gives where that is relative
+    to the legs).
 
-    The element assumes the shear center is the centroid. For the
-    symmetric shapes it is; a channel's and an angle's are not, and the
-    twisting a load through their centroid causes is not in the model.
+    The element assumes the shear center is at the centroid. For the
+    symmetric shapes it is; for a channel and an angle it is not, and the
+    twisting that a load through their centroid causes is not in the model.
 
-    `polar` is the *inertia* term, always the true polar second moment
-    (iy + iz), because rotary inertia about the axis is a property of where
+    `polar` is the inertia term, always the true polar second moment
+    (iy + iz), because rotary inertia about the axis depends only on where
     the material is and has nothing to do with warping.
     """
 
@@ -383,6 +392,9 @@ class Section:
                  dimensions: Sequence[float]) -> Section:
         """The section of a named shape (`SHAPES`), given its dimensions
         in meters in the order the shape's constructor takes them.
+
+        A shape not in `SHAPES`, the wrong number of dimensions, or dimensions
+        the constructor refuses raise ValueError.
 
         Parameters
         ----------
@@ -469,17 +481,20 @@ class Section:
 
     @classmethod
     def square_tube(cls, name: str, width: float, wall: float) -> Section:
-        """A square tube, given its outside width and wall thickness — a
-        rectangular tube of equal sides."""
+        """A square tube, given its outside width and wall thickness: a
+        rectangular tube with equal sides.
+        """
         return cls.rectangular_tube(name, width, width, wall)
 
     @classmethod
     def i_beam(cls, name: str, depth: float, flange_width: float,
                flange_thickness: float, web_thickness: float) -> Section:
-        """A doubly symmetric I-beam: overall `depth` along local z,
-        flanges `flange_width` wide along y. Fillets are left out, which
-        puts area and torsion a few percent under a rolled shape's table
-        values (a W8x31: 8.99 in² against 9.13, J 0.50 in⁴ against 0.54)."""
+        """A doubly symmetric I-beam, with overall `depth` along local z and
+        flanges `flange_width` wide along y. Fillets are left out, which puts
+        the area and the torsion constant a few percent under a rolled shape's
+        table values (for a W8x31, 8.99 in² against 9.13, and J of 0.50 in⁴
+        against 0.54).
+        """
         d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
         web = d - 2.0 * tf
         if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
@@ -496,15 +511,15 @@ class Section:
     @classmethod
     def channel(cls, name: str, depth: float, flange_width: float,
                 flange_thickness: float, web_thickness: float) -> Section:
-        """A channel: overall `depth` along local z, the flanges
-        `flange_width` wide (web included) running along +y from the web.
-        `iz` is about the centroid, which sits off the web; the shear
-        center sits further off it the other way, and the element does
-        not know. The flanges are of one thickness: a rolled channel's
-        taper toward their tips, and its table flange thickness is an
-        average, so this `iz` runs high for one (a C6x10.5: 1.06 in⁴
-        against the table's 0.86) — a bent-plate channel it gives
-        exactly."""
+        """A channel, with overall `depth` along local z and the flanges
+        `flange_width` wide (web included), running along +y from the web.
+        `iz` is about the centroid, which is off the web; the shear center is
+        further off it on the other side, and the element does not include
+        that. The flanges have one thickness. A rolled channel's flanges taper
+        toward their tips and its table flange thickness is an average, so
+        this `iz` is high for one (a C6x10.5 gives 1.06 in⁴ against the
+        table's 0.86); for a bent-plate channel it is exact.
+        """
         d, bf, tf, tw = depth, flange_width, flange_thickness, web_thickness
         web = d - 2.0 * tf
         if min(d, bf, tf, tw) <= 0 or web <= 0 or tw > bf:
@@ -525,10 +540,12 @@ class Section:
     @classmethod
     def angle(cls, name: str, long_leg: float, short_leg: float,
               thickness: float) -> Section:
-        """An angle of one thickness. Its leg axes are not principal and
-        the element has no product term, so `iy` and `iz` are the
-        principal moments — major and minor — and the orientation vector
-        is to point along the major principal axis (`angle_major_axis`)."""
+        """An angle of one thickness, its short leg no longer than its long
+        one. Its leg axes are not principal and the element has no product
+        term, so `iy` and `iz` are the principal moments, major and minor, and
+        the orientation vector should point along the major principal axis
+        (`angle_major_axis`).
+        """
         a, b, t = long_leg, short_leg, thickness
         if min(a, b, t) <= 0 or t >= min(a, b) or b > a:
             raise ValueError(f'{name}: an angle needs a long leg, a short '
@@ -566,17 +583,18 @@ def _angle_properties(a: float, b: float, t: float
 
 
 def with_article(shape: str) -> str:
-    """'a channel', 'an I-beam', 'an angle' — a shape named in a
-    sentence."""
+    """A shape's name with its article, for a sentence: 'a channel', 'an
+    I-beam', 'an angle'.
+    """
     return ('an ' if shape[:1].lower() in 'aeio' or shape.startswith('I-')
             else 'a ') + shape
 
 
 def angle_major_axis(long_leg: float, short_leg: float,
                      thickness: float) -> float:
-    """Where an angle's major principal axis lies — the direction its
-    orientation vector points — in degrees from the long leg, turning
-    toward the short leg. 45 for an equal angle.
+    """Where an angle's major principal axis lies, which is the direction
+    its orientation vector points, in degrees from the long leg toward the
+    short leg; 45 for an equal angle.
 
     Parameters
     ----------
@@ -611,33 +629,37 @@ SHAPES: dict[str, tuple[str, tuple[str, ...]]] = {
 class GroupProperties:
     """What an element group of a geometry is made of, for `Model.from_geometry`.
 
-    One property set per element group of one element type, the way every
-    finite element format states a structure: a material for any
-    element group, plus a thickness for an element group of plates (triangles or
-    quads) or a section — and an orientation vector for the roll, as
-    `Model.add_beam` takes it — for an element group of beams; an element group of
-    solids takes the material alone. An element group given both, or plates or
-    beams given neither, is refused when the model is built, by name.
+    There is one property set per element group of one element type, the
+    way finite element formats state a structure. An element group of
+    plates (triangles or quads) takes a material and a thickness, in
+    meters. An element group of beams takes a material and a section, and
+    optionally an orientation vector for the roll, as `Model.add_beam`
+    takes it. An element group of solids takes the material alone, and an
+    element group of two-node lines made of `RIGID` is a set of rigid
+    links. An element group given both a thickness and a section, or a
+    group of plates or beams given neither, is refused by name when the
+    model is built.
 
-    An element group of point elements is a set of lumped masses and takes a
-    mass alone, no material (2026-10-07): ``GroupProperties(mass=m)``
-    puts ``m`` kilograms at the node of every element in the element group —
-    a bolt, a sensor, a fitting too small to mesh — which is how a
-    finite element deck states one, a CONM2 or a point-mass element group.
+    An element group of point elements given a `mass`, and no material, is
+    a set of lumped masses: ``GroupProperties(mass=m)`` puts ``m``
+    kilograms at the node of every element in the element group (a bolt, a
+    sensor, a fitting too small to mesh), which is how a finite element
+    deck states one, as a CONM2 or a point-mass element group.
 
-    Springs and ground (2026-10-08, Brandon: a spring is a kind of line
-    element, and ground a kind of point). A group given a ``stiffness``,
-    six numbers in the global X, Y, Z, RX, RY and RZ directions with None
-    for free, is a group of springs: every two-node line in it a spring
-    between its two nodes in each direction given (`Model.add_spring`),
-    the nodes free to coincide, and every point element a spring from its
-    node to ground — a Nastran CBUSH, or CELAS cards one direction at a
-    time. A group given ``ground`` holds points, and each one's node is
-    held in each direction given (`Model.add_ground`): all six with
+    An element group given a `stiffness`, six numbers in the global X, Y,
+    Z, RX, RY and RZ directions (N/m and N m/rad) with None for free, is a
+    group of springs. Every two-node line in it is a spring between its two
+    nodes in each direction given (`Model.add_spring`), the nodes free to
+    coincide, and every point element is a spring from its node to ground.
+    That is a Nastran CBUSH, or CELAS cards one direction at a time. An
+    element group given `ground` holds points, and each one's node is held
+    in each direction given (`Model.add_ground`): all six with
     ``ground=True``, the translations alone with ``ground=('X', 'Y',
-    'Z')`` — a support, or the far end of a spring to ground drawn as a
-    line. A Nastran SPC1 reads as one, its components the directions.
+    'Z')``. That is a support, or the far end of a spring to ground drawn
+    as a line. A Nastran SPC1 reads as one, its components the directions.
     """
+    # point masses (2026-10-07); springs and ground (Brandon, 2026-10-08:
+    # a spring is a kind of line element, and ground a kind of point)
 
     material: Material | None = None
     thickness: float | None = None            #: m, for an element group of plates
@@ -654,15 +676,18 @@ class GroupProperties:
 
     @property
     def kind(self) -> str:
-        """'plate', 'beam', 'solid', 'rigid', 'mass', or what is wrong
-        with it. A rigid element group takes no thickness and no section, and any
-        left from before the material was picked are ignored; a material
-        alone is an element group of solids (2026-09-30), which take nothing
-        else — an element group of plates or beams given only a material is
-        refused where the elements are built, by what they are. A mass
-        makes an element group of point masses whatever else is set: the mass is
-        the one number such an element group can use; ground and a stiffness
-        likewise make a group of supports and of springs."""
+        """What the element group is: 'ground', 'mass', 'spring', 'rigid',
+        'plate', 'beam' or 'solid', or else what is wrong with it ('no
+        material', 'both a thickness and a section'). Ground comes first,
+        then a mass, then a stiffness, whatever else is set, since each is the
+        one thing such a group can use. A rigid element group takes no
+        thickness and no section, and any left from before the material was
+        picked are ignored. A material alone is an element group of solids,
+        which take nothing else; an element group of plates or beams given
+        only a material is refused where the elements are built, by what they
+        are.
+        """
+        # a material alone is an element group of solids (2026-09-30)
         if self.ground:
             return 'ground'
         if self.mass is not None:
@@ -702,23 +727,24 @@ class Plate:
     """One four-node rectangular plate-bending element.
 
     A flat shell: plane-stress membrane action in its own plane and
-    Mindlin bending out of it, with the transverse shear tied at the
-    edge midpoints (MITC4). The tying is not optional finesse — a
-    plain bilinear Mindlin element locks in shear as the plate gets
-    thin, and a 12x12 mesh of the locked element puts the first
-    elastic mode of a thin free plate several times too high.
+    Mindlin bending out of it, with the transverse shear tied at the edge
+    midpoints (MITC4). The tying is necessary. A plain bilinear Mindlin
+    element locks in shear as the plate gets thin, and a 12x12 mesh of the
+    locking element puts the first elastic mode of a thin free plate
+    several times too high.
 
-    Rectangles only, and refused otherwise rather than silently
-    mis-integrated: the tying directions assume the natural axes align
-    with the sides, which is exactly true for a rectangle and only
-    approximately for anything else. The models this module exists to
-    build mesh rectangular panels; a skewed general quad earns its
-    place when something needs it, with the covariant transforms and
-    the validation that come with it.
+    Only rectangles are accepted, and any other quad is refused, because
+    the tying directions assume the natural axes run along the sides,
+    which is exactly true for a rectangle and only approximately true for
+    anything else. A general quad would need the covariant
+    transforms and the checks that come with them, and the models this
+    module builds mesh rectangular panels.
 
-    Nodes run around the perimeter: 1-2 is the first edge, 1-4 the
-    second, corner 3 opposite corner 1.
+    Nodes run around the perimeter: 1-2 is the first edge, 1-4 the second,
+    and corner 3 is opposite corner 1. The thickness is in meters.
     """
+    # A skewed general quad can be added when something needs it, with the
+    # covariant transforms and the validation that come with it.
 
     nodes: tuple[int, int, int, int]
     material: Material
@@ -731,17 +757,16 @@ class Plate:
 class Triangle:
     """One three-node triangular plate-bending element.
 
-    The quad's sibling, so a mesh of triangles and a mesh of rectangles
-    are one theory: a flat shell with plane-stress membrane action in
-    its own plane and Mindlin bending out of it, the transverse shear
-    tied along the three edges (MITC3, Lee & Bathe 2004). The tying is
-    what keeps a linear triangle from locking in shear as the plate
-    gets thin — a plain linear Mindlin triangle is the worst locker
-    there is. Any flat triangle is a valid element; only a degenerate
-    one (zero area) is refused.
+    The same theory as the quad, so a mesh of triangles and a mesh of
+    rectangles agree: a flat shell with plane-stress membrane action in its
+    own plane and Mindlin bending out of it, with the transverse shear tied
+    along the three edges (MITC3, Lee & Bathe 2004). The tying keeps a
+    linear triangle from locking in shear as the plate gets thin; a plain
+    linear Mindlin triangle locks badly. Any flat triangle is a valid
+    element, and only a degenerate one (zero area) is refused.
 
-    Nodes run around the perimeter, counterclockwise about the normal
-    the element takes as its own +z.
+    Nodes run around the perimeter, counterclockwise about the normal the
+    element takes as its own +z. The thickness is in meters.
     """
 
     nodes: tuple[int, int, int]
@@ -756,25 +781,24 @@ class Solid:
     """One solid element: a hexahedron, a wedge or a tetrahedron, told
     apart by how many nodes it names (8, 6 or 4).
 
-    Three translations per node and no rotations — a solid has no
-    rotational stiffness, and the rotations of a node only solids touch
-    are grounded by the eigensolution rather than left as degrees of
+    Each node has three translations and no rotations. A solid has no
+    rotational stiffness, and the rotations of a node that only solids
+    touch are grounded by the eigensolution rather than left as degrees of
     freedom with nothing on them (`Model.dangling_rotations`).
 
-    The hexahedron is trilinear with Wilson's incompatible bending
-    modes, Taylor's form (the extra modes' strains taken from the
-    centroid's Jacobian, so a distorted brick still passes the patch
-    test): a plain trilinear brick is far too stiff in bending, and a
-    part meshed a few elements through its thickness would come out a
-    third high. With the modes, one layer of bricks bends like a beam.
-    The wedge is the linear six-node element and the tetrahedron the
-    constant-strain one — transition and imported shapes, not what a
-    part is meshed with here (`mesh.block` makes bricks); a linear
-    tetrahedron locks in bending and a mesh of them is trusted only
-    where it is fine.
+    The hexahedron is trilinear with Wilson's incompatible bending modes,
+    in Taylor's form (the extra modes' strains are taken from the Jacobian
+    at the centroid, so a distorted brick still passes the patch test). A
+    plain trilinear brick is far too stiff in bending, and a part meshed a
+    few elements through its thickness would come out a third high. With
+    the modes, one layer of bricks bends like a beam. The wedge is the
+    linear six-node element and the tetrahedron the constant-strain one.
+    They are for transitions and imported meshes, not what a part is
+    meshed with here (`mesh.block` makes bricks); a linear tetrahedron
+    locks in bending, and a mesh of them is accurate only where it is fine.
 
-    Nodes run around the bottom face and then the top, the same way
-    round (UFF 2412 and Nastran's CHEXA/CPENTA/CTETRA order).
+    Nodes run around the bottom face and then the top, the same way round
+    (the UFF 2412 and Nastran CHEXA/CPENTA/CTETRA order).
     """
 
     nodes: tuple[int, ...]
@@ -785,9 +809,11 @@ class Solid:
 
 @dataclass
 class RigidLink:
-    """Two nodes held rigidly together, with no mass of their own: the
-    second moves as the first does, translated by the first's rotation
-    about it (`RIGID`)."""
+    """Two nodes held rigidly together, with no mass of their own. In each
+    rigid body the node added to the model first leads, and the others
+    follow its translation and rotation exactly (`Model.add_rigid_link`,
+    `RIGID`).
+    """
 
     node_a: int
     node_b: int
@@ -797,16 +823,18 @@ class RigidLink:
 @dataclass
 class Spring:
     """A discrete spring between two degrees of freedom, or from one to
-    ground: the flexible counterpart of a `RigidLink`, and what a
-    Nastran CELAS states (2026-10-08, proposed for two-beam
-    substructuring cases, where a test article meets its fixture at
-    coincident nodes with no length between them for a beam).
+    ground: the flexible counterpart of a `RigidLink`, and what a Nastran
+    CELAS states.
 
-    Each end is a node and a signed direction code (`direction_code`:
-    1-3 the translations, 4-6 the rotations); the spring resists the
-    difference of the two motions, each taken along its own sign, so
-    'X+' to 'X+' is the ordinary axial spring. `node_b` None grounds it.
+    Each end is a node and a signed direction code (`direction_code`: 1-3
+    the translations, 4-6 the rotations). The spring resists the difference
+    of the two motions, each taken along its own sign, so 'X+' to 'X+' is
+    the ordinary axial spring. `node_b` None grounds it. The stiffness is
+    in N/m between translations and N m/rad between rotations.
     """
+    # proposed for two-beam substructuring cases (2026-10-08), where a test
+    # article meets its fixture at coincident nodes with no length between
+    # them for a beam
 
     node_a: int
     direction_a: int
@@ -820,11 +848,11 @@ class Spring:
 class LumpedMass:
     """A rigid item carried at a node: a motor, a battery, a camera.
 
-    The inertias are about the global axes through the node. A point mass
-    leaves them zero, which is honest for something small against the
-    members carrying it and wrong for a battery the size of the structure —
-    a mass with no inertia cannot rock, so a rocking mode simply will not
-    appear.
+    The mass is in kg and the inertias, in kg m^2, are about the global
+    axes through the node. A point mass leaves them zero, which is accurate
+    for something small compared with the members carrying it and wrong
+    for a battery the size of the structure: a mass with no inertia cannot
+    rock, so a rocking mode will not appear.
     """
 
     node: int
@@ -835,14 +863,13 @@ class LumpedMass:
 
 @dataclass
 class Face:
-    """A cosmetic face: shading, not stiffness.
+    """A face for drawing: shading, not stiffness.
 
-    A grillage of beams reads as a wireframe, and a wireframe of a drone
-    deck reads as nothing much. Faces spanning nodes that are already
-    there give the renderer something to shade and the animation something
-    to deform, while contributing nothing to the matrices — which is
-    exactly the truth about them, and is why they are a separate kind
-    rather than a zero-stiffness element.
+    A grillage of beams draws as a wireframe, and a wireframe of a drone
+    deck is hard to read. Faces spanning nodes that are already there give
+    the renderer something to shade and the animation something to deform,
+    and they add nothing to the matrices. That is why they are a separate
+    kind rather than a zero-stiffness element.
     """
 
     nodes: tuple[int, ...]
@@ -853,11 +880,10 @@ class Face:
 def connected_pieces(neighbors: dict[int, set[int]]) -> list[list[int]]:
     """The connected components of an adjacency map, largest first.
 
-    One piece is a structure; more than one is that many free bodies,
-    each bringing its own six zero-frequency modes. The flood fill is
-    shared by the model (asking over its beams and plates) and the
-    drone's drawing (asking over its face edges, before a model
-    exists), so the two cannot disagree about what "joined" means.
+    One piece is a structure; more than one is that many free bodies, each
+    with its own six zero-frequency modes. The model (over its elements)
+    and the drone's drawing (over its face edges, before a model exists)
+    both use this one search, so the two agree about what "joined" means.
     """
     seen: set[int] = set()
     found: list[list[int]] = []
@@ -881,22 +907,41 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Refine a block of approximate modes until they are converged.
 
-    Block inverse iteration with the shifted factor (K - sigma M), each
-    step followed by Rayleigh-Ritz on the block — the small projected
-    generalized problem solved densely — repeated until every one of the
+    This is block inverse iteration with the shifted factor (K - sigma M),
+    each step followed by Rayleigh-Ritz on the block (the small projected
+    generalized problem, solved densely). It repeats until each of the
     first `wanted` modes has a relative residual below `POLISH_RESIDUAL`,
-    or a step no longer halves the worst of them (the floor the
-    conditioning sets), or `POLISH_STEPS` are spent. The residual of a mode is
-    |K v - lambda M v| over |(K - sigma M) v|, which is defined for a
-    rigid-body mode too (its numerator and |K v| are both zero). The
-    block is polished whole: the Ritz step resolves the modes *inside*
-    it exactly, and iteration removes what leaks in from *outside*, at
-    a rate set by the gap between the last wanted mode and the first
-    beyond the block, which is why the caller hands over a guard band.
+    or a step no longer halves the largest of them (the floor the
+    conditioning sets), or `POLISH_STEPS` steps are spent. The residual of
+    a mode is |K v - lambda M v| over |(K - sigma M) v|, which is defined
+    for a rigid-body mode too (its numerator and |K v| are both zero). The
+    block is refined as a whole: the Ritz step separates the modes inside
+    it exactly, and the iteration removes what comes in from outside it at
+    a rate set by the gap between the last wanted mode and the first one
+    beyond the block, which is why the caller passes extra modes above the
+    wanted ones.
 
-    Returns the eigenvalues, the mass-normal vectors, both for the whole
-    block in ascending order, and the residual of each after the last
-    step. Sparse `stiffness` and `mass` in CSC form.
+    Parameters
+    ----------
+    stiffness, mass : scipy.sparse matrix
+        K and M, in CSC form.
+    sigma : float
+        The shift.
+    vectors : numpy.ndarray
+        (n, m), the approximate modes to start from.
+    wanted : int
+        How many of the lowest modes must converge.
+    factor : optional
+        The LU factor of (K - sigma M) (`scipy.sparse.linalg.splu`);
+        computed when not given.
+    ticker : Ticker, optional
+        Told one tick per step.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray)
+        The eigenvalues and the mass-normal vectors for the whole block, in
+        ascending order, and each mode's residual after the last step.
     """
     from scipy.linalg import eigh as scipy_eigh
     from scipy.sparse.linalg import splu
@@ -926,17 +971,16 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
 
 
 class Model:
-    """Nodes, beams and lumped masses, and the modes they imply.
+    """A structure's nodes, elements, masses, springs and constraints, and
+    the modes they give.
 
-    Two assemblies of one set of element matrices. Dense (`matrices`):
-    (6 x nodes) square, every mode solved whole — exact, and the path for a
-    model up to `SPARSE_ABOVE` degrees of freedom. Sparse
-    (`sparse_matrices`): only the nonzeros, the lowest modes by
-    shift-invert Lanczos. The dense path was the only one, and its ceiling
-    (~1000 nodes) deliberate, until a plate model of a small real
-    structure met it: the BARC at a quarter inch, 1,500 nodes, is ~13 GB
-    dense; sparse, its eighth-inch mesh of 6,150 nodes solves in three
-    seconds in under half a gigabyte (2026-09-26).
+    One set of element matrices is assembled two ways. Dense (`matrices`)
+    is (6 x nodes) square, and every mode is solved; it is exact, and it is
+    used for a model of up to `SPARSE_ABOVE` degrees of freedom. Sparse
+    (`sparse_matrices`) stores only the nonzeros, and the lowest modes are
+    found by shift-invert Lanczos. A plate model of the BARC at a quarter
+    inch, 1,500 nodes, is about 13 GB dense; sparse, its eighth-inch mesh of
+    6,150 nodes solves in three seconds in under half a gigabyte.
 
     Attributes:
         name: What the model is called; it becomes the geometry's name
@@ -945,15 +989,22 @@ class Model:
             SI; this is what the `Geometry` is told on the way out.
         beams: Every member, as `Beam` records naming two nodes, a
             material and a section.
+        plates, triangles, solids: The plate and solid elements, as
+            `Plate`, `Triangle` and `Solid` records.
+        rigid_links: Rigid, massless links between two nodes, as
+            `RigidLink` records (`add_rigid_link`).
         masses: Lumped masses, as `LumpedMass` records at a node.
         springs: Discrete springs between two degrees of freedom or to
             ground, as `Spring` records (`add_spring`).
         grounds: The nodes held, and in which directions, {node: axes
             0-5} (`add_ground`).
-        faces: Surfaces, as `Face` records naming three or four nodes.
-            They carry no stiffness — a face is drawn, and its *edges*
-            are what carry members.
+        faces: Surfaces for drawing, as `Face` records naming three or
+            four nodes. They carry no stiffness; `wire_faces` puts beams
+            on their edges.
     """
+    # The dense path was the only one, its ceiling (~1000 nodes)
+    # deliberate, until a plate model of a small real structure met it: the
+    # BARC example (2026-09-26).
 
     def __init__(self, name: str = '', length_unit: str = 'm') -> None:
         self.name: str = name
@@ -1002,7 +1053,7 @@ class Model:
                   section: Section,
                   orientation: Sequence[float] | None = None,
                   color: int = 1, group: str = '') -> list[Beam]:
-        """A run of beams through consecutive nodes — a member, in one call."""
+        """A run of beams through consecutive nodes: one member in one call."""
         nodes = [int(n) for n in nodes]
         return [self.add_beam(a, b, material, section, orientation, color, group)
                 for a, b in pairwise(nodes)]
@@ -1010,7 +1061,10 @@ class Model:
     def add_plate(self, nodes: Sequence[int], material: Material,
                   thickness: float, color: int = 1,
                   group: str = '') -> Plate:
-        """One rectangular plate element over four existing nodes."""
+        """One rectangular plate element over four existing nodes, `thickness`
+        in meters. Corners that do not form a flat rectangle are refused
+        (`Plate`).
+        """
         nodes = tuple(int(n) for n in nodes)
         if len(nodes) != 4 or len(set(nodes)) != 4:
             raise ValueError('a plate spans four distinct nodes')
@@ -1030,7 +1084,9 @@ class Model:
     def add_triangle(self, nodes: Sequence[int], material: Material,
                      thickness: float, color: int = 1,
                      group: str = '') -> Triangle:
-        """One triangular plate element over three existing nodes."""
+        """One triangular plate element over three existing nodes, `thickness`
+        in meters. A triangle with no area is refused.
+        """
         nodes = tuple(int(n) for n in nodes)
         if len(nodes) != 3 or len(set(nodes)) != 3:
             raise ValueError('a triangle spans three distinct nodes')
@@ -1049,6 +1105,10 @@ class Model:
                   color: int = 1, group: str = '') -> Solid:
         """One solid element over eight, six or four existing nodes: a
         hexahedron, a wedge or a tetrahedron.
+
+        A solid with no volume is refused, and so is one made of `RIGID`. One
+        numbered the other way round (its volume negative) is the same element
+        and is accepted.
 
         Parameters
         ----------
@@ -1089,18 +1149,18 @@ class Model:
         """Join two nodes rigidly, adding no mass.
 
         Links that share nodes join into one rigid body, however they are
-        chained; each body moves as its first node does (the one added to
-        the model first), and the others follow it exactly. The
-        eigensolution eliminates the followers' degrees of freedom rather
-        than stiffening anything, so the answer is the limit of an
-        infinitely stiff member and the matrices stay well conditioned.
+        chained. Each body moves as its first node does (the one added to the
+        model first), and the others follow it exactly. The eigensolution
+        eliminates the followers' degrees of freedom rather than stiffening
+        anything, so the answer is the limit of an infinitely stiff member and
+        the matrices stay well conditioned.
 
         Parameters
         ----------
         node_a, node_b : int
             The nodes, both already in the model, and different.
         group : str, optional
-            The part the link belongs to — its element group, from a geometry.
+            The part the link belongs to (its element group, from a geometry).
 
         Returns
         -------
@@ -1123,40 +1183,41 @@ class Model:
 
         The ends are written the way `fixed` writes them, a node and a
         direction: ``model.add_spring('101Z+', '201Z+', 5e5)`` joins two
-        nodes' Z translations, ``model.add_spring('101RY+', '201RY+',
-        2e3)`` their rotations about Y, and ``model.add_spring('1Z+',
-        None, 1e4)`` grounds node 1 in Z. The nodes may coincide — a
-        joint between two parts meshed to the same point, which no beam
-        can be — and a joint stiff in more than one direction is one
-        spring per direction. It adds no mass. A spring to a node
-        nothing else touches is a spring to ground, since that node is
-        grounded whole (`loose_nodes`).
+        nodes' Z translations, ``model.add_spring('101RY+', '201RY+', 2e3)``
+        their rotations about Y, and ``model.add_spring('1Z+', None, 1e4)``
+        grounds node 1 in Z. The nodes may coincide, as at a joint between two
+        parts meshed to the same point, where no beam can go, and a joint stiff
+        in more than one direction is one spring per direction. A spring adds
+        no mass. A spring to a node nothing else touches is a spring to
+        ground, since that node is grounded whole (`loose_nodes`). A spring on
+        a rotation must be on a node that a beam, plate or rigid link holds,
+        or on a ground point; otherwise the solve refuses it.
 
-        A spring far stiffer than the structure costs the solve digits:
-        two beams joined by springs ten orders over their EI/L read
-        0.2 % low on the dense solver (2026-10-08), where five orders
-        were within 3e-5 of the one beam. A joint meant to be rigid is
-        a rigid link (`add_rigid_link`), which costs nothing.
+        A spring far stiffer than the structure costs the solve accuracy: two
+        beams joined by springs ten orders of magnitude stiffer than their
+        EI/L came out 0.2 % low on the dense solver, where five orders were
+        within 3e-5 of the single beam. A joint meant to be rigid should be a
+        rigid link (`add_rigid_link`), which costs no accuracy.
 
         Parameters
         ----------
         dof_a : str
             The first end, as '<node><direction>': 'X+' to 'Z+' a
-            translation, 'RX+' to 'RZ+' a rotation; a minus sign turns
-            the end around.
+            translation, 'RX+' to 'RZ+' a rotation; a minus sign turns the end
+            around.
         dof_b : str or None
-            The second end, the same way, or None for ground. Both ends
-            are translations or both rotations.
+            The second end, the same way, or None for ground. Both ends are
+            translations or both are rotations.
         stiffness : float
-            Positive: N/m between translations, N m/rad between
-            rotations.
+            Positive: N/m between translations, N m/rad between rotations.
         name : str, optional
-            What the spring is called — its element group, from a geometry.
+            What the spring is called (its element group, from a geometry).
 
         Returns
         -------
         Spring
         """
+        # the 0.2 % measurement is from 2026-10-08
         ends = [self._spring_end(text) for text in (dof_a, dof_b)
                 if text is not None]
         if not float(stiffness) > 0.0:
@@ -1178,19 +1239,21 @@ class Model:
         return spring
 
     def add_ground(self, node: int, directions: Any = True) -> int:
-        """Hold a node in some or all of the six directions: a support,
-        solved for as `fixed` would hold it, but carried by the model —
-        what a ground point in a geometry builds. A node nothing else
-        touches is held whole already (`loose_nodes`); this holds one the
-        structure touches too. Held twice, a node is held in both sets.
+        """Hold a node in some or all of the six directions.
+
+        This is a support, solved as `fixed` would hold it but carried by the
+        model; a ground point in a geometry builds one. A node nothing else
+        touches is held whole already (`loose_nodes`); this holds a node the
+        structure also touches. A node held twice is held in the directions of
+        both.
 
         Parameters
         ----------
         node : int
             The node, already in the model.
         directions : bool or sequence of str, default True
-            The directions held, as `AXES` names ('X', 'RY'); True for
-            all six.
+            The directions held, as `AXES` names ('X', 'RY') or anything
+            `ground_axes` reads; True for all six. Holding none is refused.
 
         Returns
         -------
@@ -1231,8 +1294,9 @@ class Model:
         return node, code
 
     def rigid_bodies(self) -> list[list[int]]:
-        """The groups of nodes the rigid links join, each in the model's
-        node order — its first node is the one the others follow."""
+        """The sets of nodes the rigid links join, each in the model's node
+        order, so its first node is the one the others follow.
+        """
         neighbors: dict[int, set[int]] = {}
         for link in self.rigid_links:
             neighbors.setdefault(link.node_a, set()).add(link.node_b)
@@ -1270,51 +1334,69 @@ class Model:
                       name: str = '',
                       groups: dict[int, str] | None = None,
                       sections: dict[str, Section] | None = None) -> Model:
-        """A structure from a drawn shape: members on its edges, mass at its
-        nodes.
+        """A structure from a geometry: its elements built from their element
+        groups' properties or, without them, beams on its edges.
 
-        The shortest route from *any* geometry to a set of modes. Every
-        element contributes its own edges as beams — a face gives its
-        perimeter, a line element gives its run — and the mass is shared
-        equally over the nodes. What comes back is a model that can be
-        solved like any other.
+        When `geometry.group_properties` gives what each element group is made
+        of (`GroupProperties`), every element becomes the element it is: a
+        quad a plate, a triangle a triangle, a two-node line a beam, a rigid
+        link or springs, a hexahedron, wedge or tetrahedron a solid, and a
+        point element a lumped mass, a spring to ground or a ground point,
+        each with its element group's properties. That is the model an Exodus
+        file describes, one property set per element group of one element
+        type. An element group with no properties, or an element type the
+        solver has no element for, is refused by name, and `material`,
+        `section` and `sections` are not used. Nodes no element touches are
+        grounded at solve time (`loose_nodes`) rather than refused, as a
+        deck's reference points are; a point mass on such a node, and a
+        geometry in more than one piece, are refused.
 
-        This is a sanity-check tool, not a mesher. The members are a stand-in
-        for whatever the real structure is: one section for the whole model,
-        chosen to put the modes where they are wanted, and the answer scales
-        as its square root. Shell bending, membrane action and any real
-        thickness are simply not represented. What it *is* good for is
-        looking at a shape and asking what order of mode density and what
-        mode families it has — which is the question a display model usually
-        raises first.
+        Without element group properties a grillage is built, and `material`
+        and `section` are required. Every element contributes its own edges as
+        beams (a face its perimeter, a line element its run, so a wireframe
+        geometry holds together), and each face of three or four nodes is also
+        kept as a `Face` for drawing. This is a check on a shape, not a
+        mesher. The beams stand in for whatever the real structure is, with
+        one section for the whole model chosen to put the modes where they are
+        wanted, and shell bending, membrane action and any real thickness are
+        not represented. What it shows is the order of mode density and the
+        mode families a shape has, which is usually the first question about a
+        display model. A node connected to nothing, and a geometry in more than
+        one piece, are refused.
 
-        **A geometry whose element groups carry properties builds itself.** When
-        `geometry.group_properties` names what each element group is made of
-        (`GroupProperties`), every element becomes the element it is:
-        a quad a plate, a triangle a triangle, a two-node line a beam,
-        each with its element group's material and thickness or section, and a
-        point element in an element group given a mass a lumped mass at its
-        node. That
-        is the model an exodus file means, one property set per element group
-        of one element type (Brandon, 2026-09-25), and the demonstration
-        plate rebuilt from its own geometry this way is the same model
-        to the last digit (`tests/test_block_model.py`). An element group with no
-        properties, or an element type the solver has no element for,
-        is refused by name; `material` and `section` are not consulted.
-        Without element group properties the grillage below is built, and
-        `material` and `section` are required for it.
+        Parameters
+        ----------
+        geometry : Geometry
+            The shape. The model takes its name and its length unit.
+        material : Material, optional
+            The grillage's material.
+        section : Section, optional
+            The grillage's section.
+        total_mass : float, optional
+            Mass in kg to share over the nodes by the length of beam each
+            carries (`distribute_mass`), as lumped masses added to the
+            elements' own mass. It needs beams to share over.
+        name : str, optional
+            The model's name; the geometry's name when not given.
+        groups : dict of int to str, optional
+            {node: part}, the label of the part each node belongs to
+            (`Model.group`), since the first question asked of a result is
+            which part of the structure a mode is in. Taken from the
+            geometry's element groups when not given.
+        sections : dict of str to Section, optional
+            For a grillage, {part: section}: the beams on the edges of the
+            elements in an element group whose name starts with `part` take
+            that section, so a part can be made stiffer or softer than the
+            rest without redrawing anything.
 
-        A drawn line — an element group of two-node line elements with no
-        properties, what a traceline was — is an element like any other
-        here and gives its run, which is what a wireframe geometry
-        needs to hold together at all.
-        `groups` labels the nodes by the part they belong to; a Geometry
-        does not carry that, and the first question asked of any result is
-        which part of the structure a mode lives in. `sections` then gives
-        one part a section of its own — {'prop': stiffer} — applied where
-        both ends of an edge belong to it, which is how a part is made
-        stiffer or softer than the rest without redrawing anything.
+        Returns
+        -------
+        Model
         """
+        # One property set per element group of one element type is the model
+        # an exodus file means (Brandon, 2026-09-25), and the demonstration
+        # plate rebuilt from its own geometry this way is the same model to the
+        # last digit (`tests/test_block_model.py`).
         model = cls(name or getattr(geometry, 'name', '') or 'geometry',
                     length_unit=geometry.length_unit or 'm')
         properties = dict(getattr(geometry, 'group_properties', {}) or {})
@@ -1399,15 +1481,17 @@ class Model:
         return model
 
     def pieces(self) -> list[list[int]]:
-        """The structure's disconnected parts, largest first.
+        """The structure's disconnected parts, as lists of node ids, largest
+        first.
 
-        One piece is a structure; more than one is that many free bodies,
-        each bringing its own six zero-frequency modes. It is the first
-        thing to ask of any model that comes back too floppy, and the
-        answer is almost never what was intended — the old airplane
-        fixture, meshed and wired through its own drawn lines, turned out
-        to be three: the fuselage, a wing and the tail, none joined.
+        One piece is a structure; more than one is that many free bodies, each
+        with its own six zero-frequency modes. It is the first thing to check
+        on a model that comes back with too many zero-frequency modes. Elements,
+        rigid links and springs between two nodes all join what they connect.
         """
+        # the old airplane fixture, meshed and wired through its own drawn
+        # lines, turned out to be three pieces: the fuselage, a wing and the
+        # tail, none joined
         neighbors: dict[int, set[int]] = {n: set() for n in self.node_ids}
         for beam in self.beams:
             if beam.node_a in neighbors and beam.node_b in neighbors:
@@ -1441,23 +1525,25 @@ class Model:
 
     def wire_faces(self, material: Material, section: Section,
                    color: int = 1, group: str = '') -> int:
-        """Put a beam along every edge of every face, and return how many.
+        """Put a beam along every edge of every face, and return how many were
+        added.
 
-        This is the shortest road from a shape to a structure: draw the
-        thing as a surface mesh, and let its own edges be its members. The
-        geometry then *is* the model, with nothing derived, nothing tied,
-        and no second set of nodes that only exist to be looked at.
+        This is the shortest route from a shape to a structure: draw it as a
+        surface mesh and let its own edges be its members. The geometry is then
+        the model, with nothing derived, nothing tied, and no second set of
+        nodes that exist only to be drawn.
 
-        Beams, not axial springs. A spring on each edge leaves a quad free
-        to shear and a flat sheet free to fold — the edges never change
-        length, so nothing resists it — and the model comes back a
-        mechanism with as many zero-frequency modes as it has panels. A
-        beam carries moment, so a wireframe of them is a space frame and
-        stands up. It is the same element the rest of this module uses.
+        Beams are used, not axial springs. A spring on each edge leaves a quad
+        free to shear and a flat sheet free to fold, since the edges never
+        change length and nothing resists it, and the model comes back a
+        mechanism with as many zero-frequency modes as it has panels. A beam
+        carries moment, so a wireframe of them is a space frame and is stable.
+        It is the same beam element the rest of this module uses.
 
-        Shared edges are wired once. An edge that already has a beam is
-        left alone, so explicit members (a truss strut, a standoff) can be
-        placed first and keep their own section.
+        Shared edges are wired once. An edge that already has a beam is left
+        alone, so explicit members (a truss strut, a standoff) can be placed
+        first and keep their own section. Each new beam is in `group`, or in
+        'edge N' when no group is given.
         """
         seen = {frozenset((beam.node_a, beam.node_b)) for beam in self.beams}
         added = 0
@@ -1476,28 +1562,41 @@ class Model:
 
     def distribute_mass(self, total: float, spin: float = 1.0 / 12.0
                         ) -> dict[int, float]:
-        """Share `total` over the nodes by the members meeting at each.
+        """Share `total` over the nodes by the beams meeting at each, as lumped
+        masses, and return {node: mass}.
 
-        A node's share is proportional to the length of member it carries —
-        half of every member that reaches it — so mass follows the material
-        rather than the mesh. Returns {node: mass}.
+        A node's share is proportional to the length of beam it carries (half
+        of every beam that reaches it), so the mass follows the material.
+        Sharing it equally would let the node count decide where the mass
+        goes, and a node count only says how finely something was drawn.
 
-        Sharing it *equally* is the obvious thing and it is a trap, because
-        a node count is a statement about how finely something was drawn
-        rather than about how much of it there is. On the demonstration
-        airframe that put 42% of the mass into the propellers — they need
-        the finest mesh to look right, so they collect the most nodes — and
-        117 g on each rotor buried every airframe mode below 1.8 kHz under
-        blade motion, while the battery, the heaviest real item on the
-        aircraft, was left with 51 g.
+        Each node also gets a rotary inertia, without which its three
+        rotational degrees of freedom carry no mass, the mass matrix is
+        singular and the Cholesky factorization fails. It is
+        `spin * m * L^2`, with L the mean length of the beams meeting there
+        (the patch of structure the node stands for, spun about its own
+        middle); the default 1/12 is a uniform rod's. Masses shared by an
+        earlier call are replaced. Only beams count, so a model with no beams
+        is refused.
 
-        Each node also gets a rotary inertia, without which the three
-        rotational degrees of freedom carry nothing, the mass matrix is
-        singular and the Cholesky factorization fails outright. It is
-        taken as `spin * m * L^2` with L the mean length of the members
-        meeting there — the patch of structure the node stands for, spun
-        about its own middle. The default 1/12 is a uniform rod's.
+        Parameters
+        ----------
+        total : float
+            The mass to share, in kg.
+        spin : float, default 1/12
+            The rotary inertia's factor.
+
+        Returns
+        -------
+        dict of int to float
+            {node: mass in kg}.
         """
+        # Sharing it equally is the obvious thing and a trap. On the
+        # demonstration airframe that put 42% of the mass into the propellers
+        # (they need the finest mesh to look right, so they collect the most
+        # nodes), and 117 g on each rotor buried every airframe mode below
+        # 1.8 kHz under blade motion, while the battery, the heaviest real item
+        # on the aircraft, was left with 51 g.
         nodes = self.node_ids
         if not nodes:
             raise ValueError('there are no nodes to share the mass over')
@@ -1530,7 +1629,9 @@ class Model:
 
     @property
     def node_ids(self) -> list[int]:
-        """In insertion order: the matrices' row order follows this."""
+        """The node ids in the order they were added, which is the matrices'
+        row order.
+        """
         return list(self._nodes)
 
     @property
@@ -1545,23 +1646,27 @@ class Model:
         return self._nodes[int(node)]
 
     def group(self, node: int) -> str:
-        """What this node was added as part of — 'arm 2', 'top deck'.
+        """The part this node was added as part of, such as 'arm 2' or 'top
+        deck'.
 
-        A label for the modeler's own use: nothing here reads it, but
-        working out which part of a structure a mode lives in is the first
-        question asked of any result, and reconstructing it from
-        coordinates afterwards is guesswork.
+        It is a label for the modeler: nothing here reads it, but which part of
+        a structure a mode is in is the first question asked of any result, and
+        working that out from coordinates afterwards is guesswork.
         """
         return self._node_group[int(node)]
 
     def dof_strings(self) -> list[str]:
-        """'101X+', '101Y+', … in the matrices' own order."""
+        """Every degree of freedom, '101X+', '101Y+', ..., in the matrices'
+        own order.
+        """
         return [f'{node}{direction}'
                 for node in self._nodes for direction in DIRECTIONS]
 
     @property
     def structural_mass(self) -> float:
-        """What the members weigh, before anything is hung on them."""
+        """What the elements weigh, in kg (beams, plates, triangles and
+        solids), before any lumped mass is added.
+        """
         beams = float(sum(beam.section.area * beam.material.density
                           * self._length(beam) for beam in self.beams))
         plates = 0.0
@@ -1739,10 +1844,15 @@ class Model:
     def matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Assemble the global mass and stiffness matrices, dense.
 
-        Rows and columns run structural node by structural node in
-        insertion order, six per node in `DIRECTIONS` order, which is what
-        `dof_strings()` spells out. Display nodes are absent: they carry
-        nothing, so there is nothing of theirs to assemble.
+        Rows and columns run node by node in the order the nodes were added,
+        six per node in `DIRECTIONS` order, which is what `dof_strings()`
+        lists. Every node has its six rows, including a node nothing touches;
+        the eigensolution holds those.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            (mass, stiffness), each (num_dof, num_dof) and symmetric.
         """
         n = self.num_dof
         mass = np.zeros((n, n), dtype=np.float64)
@@ -1758,11 +1868,17 @@ class Model:
         return (mass + mass.T) / 2.0, (stiffness + stiffness.T) / 2.0
 
     def sparse_matrices(self, ticker: Any = None) -> tuple[Any, Any]:
-        """The same mass and stiffness matrices as `matrices`, stored
-        sparse (scipy CSR): each node couples only to the nodes of the
-        elements it touches, so a row holds a few dozen entries of
-        thousands, and the storage grows with the nodes rather than
-        their square.
+        """The same mass and stiffness matrices as `matrices`, stored sparse
+        (scipy CSR).
+
+        Each node couples only to the nodes of the elements it touches, so a
+        row holds a few dozen nonzero entries out of thousands, and the
+        storage grows in proportion to the number of nodes.
+
+        Parameters
+        ----------
+        ticker : Ticker, optional
+            Told one tick per element as it is assembled.
 
         Returns
         -------
@@ -1803,12 +1919,15 @@ class Model:
         return gather(rows_m, cols_m, vals_m), gather(rows_k, cols_k, vals_k)
 
     def rigid_body_vectors(self) -> np.ndarray:
-        """The six rigid-body motions, as columns over the model's DOFs.
+        """The six rigid-body motions, as columns over the model's DOFs:
+        translations along X, Y and Z, then rotations about X, Y and Z through
+        the nodes' mean position.
 
-        Written down from the node positions rather than found from the
-        matrices: they are what the null space of an unconstrained
-        stiffness matrix *is*, and knowing them in advance is what lets a
-        rigid mode be recognized as rigid rather than as a very soft one.
+        They are written down from the node positions rather than found from
+        the matrices, because they are what the null space of an unconstrained
+        stiffness matrix should be, and so they check it. The eigensolution
+        does not use them to recognize a rigid mode; it uses the mode's strain
+        energy (`ZERO_ENERGY`).
         """
         n = self.num_dof
         solved = self.node_ids
@@ -1837,53 +1956,62 @@ class Model:
                       ) -> ShapeSet:
         """Real normal modes, mass-normalized, as a ShapeSet.
 
-        `fixed` names degrees of freedom to ground: '101X+' fixes one,
-        '101' fixes all six of that node. Rigid links are eliminated
-        exactly (`constraint_transform`).
+        `fixed` names degrees of freedom to ground: '101X+' fixes one, and
+        '101' fixes all six of that node; the sign makes no difference. Rigid
+        links are eliminated exactly (`constraint_transform`). Ground points
+        (`add_ground`), nodes nothing touches (`loose_nodes`) and rotations
+        nothing acts on (`dangling_rotations`, `idle_lead_rotations`) are held
+        as well. A mode that strains nothing (`ZERO_ENERGY`) is given a
+        frequency of exactly 0 Hz.
 
-        Two solvers, one answer. **Dense** (a model of up to
-        `SPARSE_ABOVE` degrees of freedom): the symmetric generalized
-        problem K phi = lambda M phi solved whole, by factoring M
-        (Cholesky), reducing to a standard symmetric problem and
-        transforming back — every mode, mass-normalized to machine
-        precision. **Sparse** (larger models): the matrices stored as
-        their nonzeros (`sparse_matrices`) and the lowest modes found by
-        shift-invert Lanczos (ARPACK, `scipy.sparse.linalg.eigsh`), the
-        family the large finite element codes use; it finds the lowest
-        `num_modes`, or every mode up to `maximum_frequency`, and one of
-        the two must be said. Memory grows with the nodes instead of
-        their square: a plate model of 1,500 nodes, ~13 GB dense, is tens
-        of megabytes sparse (Brandon, 2026-09-26, for the BARC example —
-        the dense ceiling, deliberate until then, measured and met).
+        There are two solvers, giving one answer. The dense solver, for a model
+        of up to `SPARSE_ABOVE` degrees of freedom, solves the symmetric
+        generalized problem K phi = lambda M phi whole: M is factored
+        (Cholesky), the problem reduced to a standard symmetric one and the
+        result transformed back, which gives every mode, mass-normalized to
+        machine precision. The sparse solver, for larger models, stores the
+        matrices as their nonzeros (`sparse_matrices`) and finds the lowest
+        modes by shift-invert Lanczos (ARPACK, `scipy.sparse.linalg.eigsh`),
+        the method large finite element codes use, refined by
+        `polish_modes`. It finds the lowest `num_modes`, or every mode up to
+        `maximum_frequency`, and one of the two must be given. Its memory
+        grows with the number of nodes instead of its square: a plate model of
+        1,500 nodes that needs about 13 GB dense needs tens of megabytes
+        sparse.
 
-        `damping` is a fraction of critical, applied uniformly. A model
-        has no damping of its own; it is stated so the modes can
-        synthesize an FRF that looks like a measurement.
+        `damping` is a fraction of critical, given to every mode. A model has
+        no damping of its own; it is stated so the modes can synthesize an FRF
+        that looks like a measurement.
 
         Parameters
         ----------
         maximum_frequency : float, optional
             Keep every mode up to this frequency, in Hz.
         num_modes : int, optional
-            Keep this many, the lowest, rigid ones included.
+            Keep this many, the lowest, rigid ones included. With
+            `maximum_frequency` as well, the lowest this many of those.
         damping : float, default 0.0
             The fraction of critical damping every mode is given.
         fixed : sequence of str
-            Degrees of freedom to ground.
+            Degrees of freedom to ground, as above. A node that follows a
+            rigid link cannot be fixed by itself (`constraint_transform`).
         solver : {'auto', 'dense', 'sparse'}, default 'auto'
-            Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees
-            of freedom and sparse beyond.
+            Which solver; 'auto' is dense up to `SPARSE_ABOVE` degrees of
+            freedom and sparse beyond.
         progress : callable, optional
-            Told ``(done, total)`` as the solve advances: the assembly
-            per element, the factorization, the eigen iterations (an
-            estimated length, extended while they run), the polish.
-            The window's strip bar reads it; anything it raises stops
-            the solve.
+            Told ``(done, total)`` as the solve advances: the assembly per
+            element, the factorization, the eigen iterations (an estimated
+            length, extended while they run), and the polish. The window's
+            progress bar reads it, and anything it raises stops the solve.
 
         Returns
         -------
         ShapeSet
+            The modes in ascending frequency, at every degree of freedom
+            (`dof_strings`), with mass in kg.
         """
+        # the sparse solver came for the BARC example (Brandon, 2026-09-26):
+        # the dense ceiling, deliberate until then, was measured and met
         if solver not in ('auto', 'dense', 'sparse'):
             raise ValueError(f'{solver!r} is not a solver: auto, dense, sparse')
         ticker = Ticker(progress)
@@ -1965,26 +2093,38 @@ class Model:
 
     def scaled_system(self, fixed: Sequence[str] = (),
                       ticker: Any = None) -> tuple[Any, ...]:
-        """The sparse eigenproblem as the sparse solver poses it.
+        """The sparse eigenproblem as the sparse solver sets it up.
 
-        Returns (K, M, T, S, sigma, stiffness): the constrained,
-        symmetrically scaled stiffness and mass in CSC form, the
-        constraint transform T and the scaling S that carry a solution
-        back to every degree of freedom as T (S phi), the shift sigma, and
-        the unconstrained sparse stiffness. Public so a test can hand the
-        polish a start of its own choosing.
+        The shift is -(2 pi)^2, just below zero, so the rigid-body modes
+        (eigenvalue 0) are nearest it and come first, and K - sigma M =
+        K + |sigma| M is positive definite even when K alone is singular
+        (free-free). The scaling is symmetric and diagonal, S K S and S M S
+        with S = 1/sqrt of the shifted diagonal, which keeps the eigenvalues
+        and makes the modes S phi'. It is needed because a model of plates
+        mixes meters with radians, and rigid links put lever arms into the
+        rotations: unscaled, the rigid-link test model's shifted matrix has a
+        condition number of 4e12, and Lanczos, which converges no better than
+        its linear solves, leaves residuals of 1e-2. Scaled, the condition
+        number is 4e9. This is public so a test can give the polish a start of
+        its own choosing.
 
-        The shift is just below zero: the rigid-body modes (eigenvalue 0)
-        are nearest it, so they come first, and K - sigma M = K + |sigma| M
-        is positive definite even when K alone is singular (free-free).
-        The scaling is symmetric and diagonal, S K S and S M S with S =
-        1/sqrt of the shifted diagonal: the same eigenvalues, the modes
-        S phi'. A model of plates mixes meters with radians, and rigid
-        links fold lever arms into the rotations — the rigid-link test
-        model's shifted matrix had a condition number of 4e12, and
-        Lanczos, which converges no better than its linear solves, left
-        residuals of 1e-2. Scaled it is 4e9 (2026-09-26).
+        Parameters
+        ----------
+        fixed : sequence of str
+            Degrees of freedom to ground, as `eigensolution` takes them.
+        ticker : Ticker, optional
+            Passed to `sparse_matrices`.
+
+        Returns
+        -------
+        tuple
+            (K, M, T, S, sigma, stiffness): the constrained, symmetrically
+            scaled stiffness and mass in CSC form; the constraint transform T
+            and the scaling S, which carry a solution back to every degree of
+            freedom as T (S phi); the shift sigma; and the unconstrained sparse
+            stiffness.
         """
+        # the condition numbers were measured 2026-09-26
         from scipy import sparse
 
         mass, stiffness = self.sparse_matrices(ticker)
@@ -2084,19 +2224,21 @@ class Model:
 
     def constraint_transform(self, fixed: Sequence[str] = (),
                              sparse: bool = False) -> Any:
-        """T, with u = T q: every degree of freedom of the model written
-        in terms of those that remain free — grounded ones gone, and each
-        rigid body's followers written through its first node, u_b = u_a +
-        θ_a × (x_b − x_a) and θ_b = θ_a. The identity's columns when there
-        is nothing to constrain.
+        """T, with u = T q: every degree of freedom of the model written in terms
+        of those that remain free.
+
+        Held degrees of freedom are removed (those `fixed` names, and those
+        the eigensolution holds on its own), and each rigid body's followers
+        are written through its first node, u_b = u_a + θ_a × (x_b − x_a) and
+        θ_b = θ_a. With nothing to constrain, T is the identity.
 
         Parameters
         ----------
         fixed : sequence of str
             Degrees of freedom to ground, as `eigensolution` takes them. A
-            rigid body is grounded through its first node; naming one of
-            its followers is refused, since fixing a follower alone would
-            fix part of a rigid body and not the rest.
+            rigid body is grounded through its first node; naming one of its
+            followers is refused, since fixing a follower alone would fix part
+            of a rigid body and not the rest.
 
         sparse : bool, default False
             Return it as a scipy CSR matrix, for the sparse solver.
@@ -2153,21 +2295,26 @@ class Model:
         return transform
 
     def dangling_rotations(self) -> list[int]:
-        """The nodes whose rotations nothing acts on: touched by solids or
-        translational springs and by nothing that carries a rotation — no
-        beam, plate or triangle, and no rigid link, whose lead's rotation
-        moves its followers. Neither a solid nor a spring along an axis
-        gives a rotation stiffness, so these rotations are grounded by the
-        eigensolution; left free they would be degrees of freedom with
-        neither mass nor stiffness, which no factorization survives. A
-        mass on springs is the newer case (2026-10-08): a tuned mass hung
-        from a structure by spring lines, its node no beam's.
+        """The nodes whose rotations nothing acts on.
+
+        These are nodes touched by solids or translational springs and by
+        nothing that carries a rotation: no beam, plate or triangle, and no
+        rigid link, whose lead's rotation moves its followers. Neither a solid
+        nor a spring along an axis gives a rotational stiffness, so these
+        rotations are grounded by the eigensolution; left free, they would be
+        degrees of freedom with neither mass nor stiffness, and the
+        factorization would fail. A mass hung from a structure on springs is
+        one case, since its node is no beam's. Nodes already held in all three
+        rotations are not listed, and a lumped mass with rotary inertia on one
+        of these nodes is refused at solve time.
 
         Returns
         -------
         list of int
             The nodes, in the model's order.
         """
+        # a mass on springs is the newer case (2026-10-08): a tuned mass hung
+        # from a structure by spring lines, its node no beam's
         rotating = self._rotating_nodes()
         touched = {n for solid in self.solids for n in solid.nodes}
         touched |= {node for spring in self.springs
@@ -2182,29 +2329,30 @@ class Model:
                 if n in touched and n not in rotating and n not in held]
 
     def idle_lead_rotations(self) -> list[tuple[int, int]]:
-        """(lead node, axis 0-2) for each rotation of a rigid body's lead
-        that nothing acts on: a body only solids touch, whose nodes lie
-        on one line, cannot feel a rotation about that line — it moves
-        no follower, and a solid has no rotational stiffness — so that
-        rotation is a degree of freedom with neither mass nor stiffness.
+        """(lead node, axis 0-2) for each rotation of a rigid body's lead that
+        nothing acts on.
 
-        Found tying a beam of bricks to the channels under it (the BARC
-        in hexes, 2026-10-07): the two meshes' columns line up, so each
-        tied channel node leads only the beam nodes straight above it,
-        and the app's Tie on any two conforming brick meshes does the
-        same. Grounded like the rotations of a node only solids touch
-        (`dangling_rotations`): the rotation about the line where the
-        line runs along a global axis, all three where the body's nodes
-        coincide. A line at a slant is left to the factorization's own
+        A body that only solids touch, with its nodes on one line, cannot feel
+        a rotation about that line: the rotation moves no follower, and a
+        solid has no rotational stiffness, so the rotation is a degree of
+        freedom with neither mass nor stiffness. Tying two brick meshes whose
+        columns line up (the app's Tie on any two conforming brick meshes)
+        makes such bodies, each tied node leading only the nodes straight
+        above it. These rotations are grounded like those of a node only
+        solids touch (`dangling_rotations`): the rotation about the line where
+        the line runs along a global axis, and all three where the body's
+        nodes coincide. A line at a slant is left to the factorization's own
         refusal, which names it; grounding an oblique axis would need a
         rotated basis, and no model here has needed one.
 
         Returns
         -------
         list of (int, int)
-            The lead's node and the rotation's axis, in the model's
-            order.
+            The lead's node and the rotation's axis, in the model's order.
         """
+        # Found tying a beam of bricks to the channels under it (the BARC in
+        # hexes, 2026-10-07): the two meshes' columns line up, so each tied
+        # channel node leads only the beam nodes straight above it.
         if not self.solids:
             return []
         carried = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
@@ -2231,18 +2379,21 @@ class Model:
         return idle
 
     def loose_nodes(self) -> list[int]:
-        """The nodes nothing touches: no element, no rigid link, no
-        lumped mass. A finite element deck carries them routinely — a
-        reference point, a constraint's own grid — and a model built
-        from its element groups grounds them whole rather than refusing the
-        deck (2026-09-30); the grillage path still refuses, since there
-        a loose node is a drawing that was never wired.
+        """The nodes nothing touches: no element, no rigid link and no lumped
+        mass (a spring alone does not count).
+
+        A finite element deck often has them (a reference point, a
+        constraint's own grid point), and a model built from its element
+        groups grounds them whole rather than refusing the deck. The grillage
+        path of `from_geometry` still refuses them, since there a loose node is
+        a drawn node that was never wired.
 
         Returns
         -------
         list of int
             The nodes, in the model's order.
         """
+        # grounded rather than refused since 2026-09-30
         touched = self._rotating_nodes()
         touched |= {n for solid in self.solids for n in solid.nodes}
         touched |= {m.node for m in self.masses}
@@ -2327,17 +2478,22 @@ class Model:
     # ---- what it looks like -----------------------------------------------
 
     def geometry(self, beams: bool = True) -> Geometry:
-        """The model as a Geometry: nodes, beams as elements, faces as faces.
+        """The model as a Geometry: its nodes, and its beams, rigid links,
+        plates, triangles, solids and faces as elements, each in the element
+        group of the part it belongs to.
 
-        Beams become element type 21 (beam2) rather than tracelines,
-        because they *are* elements — a traceline is a line drawn through
-        nodes to make a display readable, and confusing the two would make
-        the model's own connectivity indistinguishable from a drawing aid
-        the moment anything edited it.
+        Beams become element type 21 (beam2) rather than tracelines, because
+        they are elements. A traceline is a line drawn through nodes to make a
+        display readable, and treating the two alike would make the model's
+        own connectivity indistinguishable from a drawing aid as soon as
+        anything edited it. Rigid links are two-node lines too, in element
+        groups of their own; plates and triangles are written as quads and
+        triangles (types 44 and 41), and solids by their node count
+        (`SOLID_CODES`).
 
-        `beams=False` leaves them out, for a model whose members are all
-        wrapped in surfaces: there the beams run *inside* the shells, so
-        drawing them puts a wireframe over the thing it is the skeleton of.
+        `beams=False` leaves the beams out, for a model whose members are all
+        covered by surfaces: there the beams run inside the shells, and drawing
+        them puts a wireframe over the thing it is the skeleton of.
         """
         node_ids = self.node_ids
         connectivity, types, colors = [], [], []

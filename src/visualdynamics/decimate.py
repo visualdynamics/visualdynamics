@@ -1,19 +1,16 @@
-"""Peak-keeping decimation: fewer points, every peak kept.
+"""Peak-keeping decimation: fewer points, with every peak kept.
 
-A million-sample record cannot go to a renderer point for point, and
-plain striding is the wrong thinning: it walks straight past the one
-spike that was the reason to look at the record. The peak-keeping
-reading cuts the samples into equal slices and keeps each slice's
-smallest and largest value at their own abscissa positions, so no
-resonance, dropout or shock thins away — the same reading pyqtgraph's
-`peak` downsampling gives the 2-D plot.
+A record of a million samples is too many to draw point for point, and
+keeping every n-th sample can skip the one large peak that was the
+reason to look at the record. Peak-keeping decimation cuts the samples
+into equal slices and keeps each slice's smallest and largest value at
+their own abscissa positions, so no resonance, dropout or shock is lost.
+It is the same method as pyqtgraph's `peak` downsampling, which the 2-D
+plot uses.
 
-One implementation, used by the report (a document, not a scope) and
-by the 3-D waterfall (a scene with a point budget). The core is
-vectorized over whole records at once because the waterfall hands it
-hundreds of them: as a per-bin Python loop the same work took 10.6 s
-on a 320-record million-sample history, batched it is 1.3 s — both
-measured. numpy only.
+The report and the 3-D waterfall both use this module. It works on all
+of an object's records at once, because the waterfall passes it hundreds
+of them. It needs only numpy.
 """
 
 from __future__ import annotations
@@ -21,18 +18,25 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike
 
+# Vectorized over whole records because of the waterfall: as a per-bin
+# Python loop the same work took 10.6 s on a 320-record million-sample
+# history, and batched it is 1.3 s (both measured).
+
 
 def peak_decimate(x: ArrayLike, y: ArrayLike,
                   budget: int) -> tuple[np.ndarray, np.ndarray]:
-    """(x, y) thinned to about `budget` points that keep every extreme.
+    """`x` and `y` thinned to at most `budget` points that keep every
+    extreme.
 
-    Real values; a caller reading complex data extracts its component
-    first, because "the extremes" of a complex value is not a question
-    with one answer. Input at or under the budget is returned as given.
+    The samples are cut into `budget // 2` slices, and each slice keeps
+    its smallest and largest value. `y` must be real: a caller with
+    complex data takes the component it wants first, because the
+    extremes of a complex value are not defined. Input at or under the
+    budget is returned as given.
 
-    NaN marks a gap (a specification is NaN outside its band) and never
-    wins an extreme. A slice that is *all* gap keeps its first point, so
-    the gap survives to be drawn as a gap.
+    NaN marks a gap (a specification is NaN outside its band) and is
+    never kept as an extreme. A slice that is all NaN keeps its first
+    point, so the gap is still drawn as a gap.
     """
     x = np.asarray(x)
     y = np.asarray(y)
@@ -46,11 +50,10 @@ def peak_decimate_rows(x: ArrayLike, rows: ArrayLike,
                        budget: int) -> list[tuple[np.ndarray, np.ndarray]]:
     """`peak_decimate` for every record of one object at once.
 
-    The records share `x` going in but not coming out: each keeps its
-    own extremes at their own positions. One vectorized pass over the
-    whole (records, samples) block, which is what makes decimating a
-    320-record million-sample history cost tenths of a second rather
-    than tens.
+    `rows` is a (records, samples) array on the shared abscissa `x`. The
+    result is one (x, y) pair per record, and the records no longer share
+    an abscissa: each keeps its own extremes at their own positions. The
+    whole block is decimated in one vectorized pass.
     """
     x = np.asarray(x)
     rows = np.atleast_2d(np.asarray(rows))
@@ -92,18 +95,23 @@ def _extreme_indices(rows: np.ndarray, bins: int) -> list[np.ndarray]:
 
 def envelope_rows(x: ArrayLike, rows: ArrayLike, bins: int
                   ) -> tuple[np.ndarray, np.ndarray]:
-    """Every record of one object thinned onto the same `bins`: two
-    points a bin, the bin's least and greatest in the order they
-    occurred, at the bin's first and last sample time.
+    """Every record of one object thinned onto the same bins, at most
+    `bins` of them: two points a bin, the bin's least and greatest value
+    in the order they occurred, at the bin's first and last sample time.
 
     `peak_decimate_rows` keeps each record's extremes at their own
     positions, so a page carrying two dozen records carries two dozen
-    time axes. A report's time-history page shares one axis among its
-    curves (2026-09-20: it is what halved the page), and an envelope
-    on common bins draws the same picture — the bin is far narrower
-    than a pixel at any zoom the page offers. Input at or under two
-    points a bin is returned as given, one axis for all.
+    abscissas. An envelope on common bins lets a report's time-history
+    page share one abscissa among its curves, and draws the same
+    picture, since a bin is far narrower than a pixel at any zoom the
+    page offers. Input with at most two points a bin is returned as
+    given.
+
+    Returns ``(axis, envelope)``: the shared abscissa and a (records,
+    points) array.
     """
+    # The shared axis halved the size of a report's time-history page
+    # (2026-09-20).
     x = np.asarray(x, dtype=float)
     rows = np.atleast_2d(np.asarray(rows, dtype=float))
     n, m = rows.shape

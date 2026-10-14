@@ -1,21 +1,20 @@
-"""SEP 005 — the sdypy ecosystem's unified timeseries, in and out.
+"""Convert between SEP 005 timeseries, the sdypy project's standard,
+and `TimeHistory` objects.
 
 SEP 005 (`SEP 5 <https://github.com/sdypy/sdypy/blob/main/docs/seps/sep-0005.rst>`_)
 is the interchange standard of the open-source sdypy project: one plain
-dict per timeseries — ``data`` shaped ``(n,)`` or ``(m, n)``, a
+dict per timeseries, with ``data`` shaped ``(n,)`` or ``(m, n)``, a
 ``name``, per-channel ``unit_str``, and either a sampling frequency
-``fs`` or a ``time`` vector — with a list of dicts for several series.
-It is an **in-memory standard, not a file format**, so this module
-converts objects rather than registering a file importer:
-`from_sep005` turns the dicts a sdypy package hands over into
-`TimeHistory` objects, and `TimeHistory.to_sep005` goes the other way.
+``fs`` or a ``time`` vector, and a list of dicts for several series. It
+is a standard for data in memory, not a file format, so this module
+converts objects and does not register a file importer. `from_sep005`
+turns the dicts into `TimeHistory` objects, and `TimeHistory.to_sep005`
+converts the other way.
 
-Nothing here imports anything from sdypy — the standard *is* the dict,
-and staying import-free is what keeps the license boundary trivial.
+This module imports nothing from sdypy; the standard is the dict.
 
-Timeseries are the standard's whole scope, which is why only
-`TimeHistory` converts: sdypy has no richer exchange form for FRFs,
-PSDs or geometry, so those stay in ``.vdyn`` / UNV.
+The standard covers timeseries only, so only `TimeHistory` converts.
+FRFs, PSDs and geometry are exchanged as ``.vdyn`` or universal files.
 """
 
 from __future__ import annotations
@@ -23,6 +22,8 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+
+# Staying free of imports keeps the license boundary simple.
 
 #: SEP 005 quantity letters -> the dimension recorded as the claim in
 #: `dimension_hint` when a series arrives without a usable unit. The
@@ -40,26 +41,29 @@ DIMENSION_TO_QUANTITY = {'force': 'f', 'acceleration': 'a',
 
 def from_sep005(timeseries: dict[str, Any] | list[dict[str, Any]]
                 ) -> Any:
-    """SEP 005 timeseries into `TimeHistory` objects.
+    """Convert SEP 005 timeseries to `TimeHistory` objects.
 
         history = visualdynamics.from_sep005({'data': y, 'fs': 256.0,
                                               'name': 'run 4',
                                               'unit_str': 'm/s²'})
 
-    One dict returns one `TimeHistory`; a list — the standard's form
-    for several series — returns ``{name: TimeHistory}``, numbering a
-    repeated name the way the project tree would.
+    One dict returns one `TimeHistory`. A list, the standard's form for
+    several series, returns ``{name: TimeHistory}``, with a repeated
+    name numbered 'name (2)' and so on, as in the project tree. The
+    channels are named by ``channel_name``, or numbered from 1 without
+    it, and the series ``name`` becomes the comment.
 
-    ``unit_str`` entries that parse are *declared* on the object
-    (values converted to SI, exactly as `define_units` would), because
-    the producer stated them; one that does not parse leaves that
-    channel's values raw with the claim kept in `dimension_hint`, where
-    ``quantity`` also lands when there is no unit at all. Nothing is
-    ever scaled by a guess.
+    A ``unit_str`` entry that parses is declared on its channel, so the
+    values are converted to SI as `define_units` converts them, since the
+    producer stated the unit. One that does not parse leaves that
+    channel's values as they are and keeps the unit string in
+    `dimension_hint`, unless the series ``quantity`` letter has already
+    put a dimension there. Values are never scaled by a guess.
 
-    Refused, with the reason: a series with no ``data``, with neither
-    ``fs`` nor ``time``, a ``time`` vector of the wrong length, or a
-    ``channel_name`` list that does not match the channel count.
+    Raises ValueError, with the reason, for a series with no ``data``,
+    ``data`` with more than two dimensions, neither ``fs`` nor ``time``,
+    a ``time`` vector of the wrong length, or a ``channel_name`` list
+    that does not match the channel count.
 
     Parameters
     ----------

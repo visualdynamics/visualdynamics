@@ -1,18 +1,19 @@
 """File dialogs for the one-call workflows.
 
-The scripted entry points take paths. When one is left out, this is
-where the question gets asked — a dialog rather than a refusal, so
-`visualdynamics.random_vibration_report()` on its own is a working
-thing to type (Brandon, 2026-09-22).
+The scripted entry points take paths. When a path is left out, they ask
+for it here with a file dialog instead of refusing, so
+`visualdynamics.random_vibration_report()` with no arguments works.
 
-It lives in `gui/` because Qt does, and the workflows reach it by a
-function-local import: `project.py` stays Qt-free, and a script that
-passes every path never loads a widget toolkit at all.
+This module is in `gui/` because it needs Qt. The workflows import it
+inside the function that asks, so `project.py` stays free of Qt and a
+script that passes every path never loads Qt at all.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+# A dialog in place of a refusal for a missing path: Brandon, 2026-09-22.
 
 #: what the import dialog offers for a controller's run
 RUN_FILTER = ('Controller runs (*.nc4 *.nc);;All files (*)')
@@ -48,10 +49,11 @@ def _application() -> Any:
 
 
 def for_runs(title: str = 'Select the runs to report on') -> list[str]:
-    """Controller runs to work up, chosen by the user. Empty if none.
+    """The controller runs the user picks in a file dialog, or an empty
+    list when the dialog is canceled.
 
-    Several at once on purpose: a test campaign is a folder of runs and
-    the answer to each is its own report.
+    The dialog allows several files at once, because a test campaign is
+    a folder of runs and each run gets its own report.
     """
     from PySide6.QtWidgets import QFileDialog
 
@@ -62,10 +64,11 @@ def for_runs(title: str = 'Select the runs to report on') -> list[str]:
 
 def for_geometry(title: str = 'Select a geometry (Cancel for none)'
                  ) -> str | None:
-    """One geometry, or None when the user cancels.
+    """The geometry file the user picks in a file dialog, or None when
+    the dialog is canceled.
 
-    Cancel is an answer, not a failure: a report without a geometry is
-    a report, and its sections stand down on their own.
+    Canceling is allowed: a report is still written without a geometry,
+    and the sections that need one are left out.
     """
     from PySide6.QtWidgets import QFileDialog
 

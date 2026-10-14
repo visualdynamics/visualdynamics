@@ -421,8 +421,7 @@ the keychain item and keeps its store in Application Support.) The
 order in full is REMAINING-TASKS.md "Release". The release
 workflow's `site` job writes
 `web/launch/latest.json` from the published release and redeploys the
-site; nothing is edited by hand. (`web/public/latest.json` is the
-pre-release holding page's copy.)
+site; nothing is edited by hand.
 
     {"version": "0.1.0",
      "url": "https://github.com/visualdynamics/visualdynamics/releases",

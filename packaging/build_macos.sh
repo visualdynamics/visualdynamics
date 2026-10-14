@@ -189,8 +189,19 @@ mkdir "$STAGE/.background"
 "$PYTHON" packaging/dmg_background.py "$STAGE/.background/background.png"
 
 RW="dist/rw-$$.dmg"
-hdiutil create -volname "Visual Dynamics ${VERSION}" -srcfolder "$STAGE" \
-  -ov -format UDRW "$RW" >/dev/null
+# the create, too, on the Intel runner: "create failed - Resource busy"
+# a few minutes after a notarized app (a50, 2026-10-14), so it waits and
+# tries again as the convert below does
+for attempt in 1 2 3 4 5; do
+  hdiutil create -volname "Visual Dynamics ${VERSION}" -srcfolder "$STAGE" \
+    -ov -format UDRW "$RW" >/dev/null && break
+  if (( attempt == 5 )); then
+    hdiutil info >&2
+    exit 1
+  fi
+  echo "create failed (attempt $attempt): waiting for the disk to be free" >&2
+  sleep $((attempt * 5))
+done
 rm -rf "$STAGE"
 MOUNT=$(hdiutil attach -readwrite -noverify -noautoopen "$RW" |
         awk -F'\t' '/\/Volumes\//{print $3}')

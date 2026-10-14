@@ -73,6 +73,21 @@ def test_the_ratio_stage_divides_in_decibels():
     plotter.close()
 
 
+def test_the_ratio_stage_draws_the_picked_channels_as_the_flat_plot_does():
+    """Records picked in the louder density's grid: the flat ratio drew
+    their channels and the stage divided every shared one (2026-10-14).
+    Both keep the picks now, and every channel when none is shared."""
+    from visualdynamics.viz.paired import paired_stage_curves
+
+    loud, quiet = _pair()
+    ratio = paired_stage_curves(loud, quiet, loud_records=[0, 2], mode='ratio')
+    assert [run['label'] for run in ratio['runs']] == ['101Z+', '110Z+']
+    assert ratio['drawn'] == 2
+    lonely, _ = _pair(channels=('101Z+', '104Z+', '110Z+', '999X+'))
+    every = paired_stage_curves(lonely, quiet, loud_records=[3], mode='ratio')
+    assert ratio['drawn'] == 2 and every['drawn'] == 3, 'none shared: every channel'
+
+
 def test_two_selected_densities_default_to_the_stage(window, pump):
     loud, quiet = _pair()
     window.add_object('Excitation PSDs', loud)

@@ -2692,17 +2692,12 @@ def build_ratio(layout: Any, signal: Any, floor: Any,
     import pyqtgraph as pg
     from PySide6.QtCore import Qt
 
-    from ..core.snr import signal_to_noise
+    from ..core.snr import picked, signal_to_noise
 
     colors = resolve_theme(theme)
     abscissa, rows, dofs, _dims = signal_to_noise(signal, floor)
-    if records is not None:
-        keep = {str(signal.response_dof[k]) for k in records}
-        picked = [(row, dof) for row, dof in zip(rows, dofs)
-                  if dof in keep]
-        if picked:
-            rows = np.asarray([row for row, _dof in picked])
-            dofs = [dof for _row, dof in picked]
+    kept = picked(signal, records, dofs)
+    rows, dofs = np.asarray(rows)[kept], [dofs[k] for k in kept]
     plot = layout.addPlot(row=0, col=0)
     # linear frequency, like nearly every plot in this GUI — the first
     # cut logged it out of habit and read as a different instrument

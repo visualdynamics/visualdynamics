@@ -1,13 +1,16 @@
-# visualdynamics.org — the holding page
+# visualdynamics.org
 
-**`public/` is the holding page and `launch/` is the site from the
-first release; everything else here is neither.** Only one of those
-two directories is ever deployed, because a note like this one served
-at `visualdynamics.org/README.md` is an internal document on a public
-host. Keep new assets inside them and new notes outside.
+**`launch/` is the site; everything else here is notes.** Only that
+directory is deployed, because a note like this one served at
+`visualdynamics.org/README.md` would be an internal document on a public
+host. Keep new assets inside it and new notes outside.
 
-One self-contained page. No build step, no framework, no third-party
-request: the CSS is inline and the only assets are three PNGs beside it.
+Plain HTML pages with one stylesheet (`site.css`), the documentation
+the release workflow builds into `documentation/`, and one Pages
+Function (`functions/api/requests.js`). No framework and no build step
+for the pages themselves. The only third-party request is the
+downloads page's call to GitHub's API for the release files, made from
+the visitor's browser.
 
 ## The mark is generated, not drawn
 
@@ -23,9 +26,9 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QBuffer, QByteArray
 app = QApplication.instance() or QApplication([])
 from visualdynamics.gui.app_icon import draw_app_icon
-for size, name in ((512, 'web/public/mark.png'),
-                   (180, 'web/public/apple-touch-icon.png'),
-                   (64, 'web/public/favicon.png')):
+for size, name in ((512, 'web/launch/mark.png'),
+                   (180, 'web/launch/apple-touch-icon.png'),
+                   (64, 'web/launch/favicon.png')):
     store = QByteArray(); buf = QBuffer(store)
     buf.open(QBuffer.OpenModeFlag.WriteOnly)
     draw_app_icon(size).save(buf, 'PNG'); buf.close()
@@ -54,8 +57,7 @@ Functions from `./functions` relative to where it runs, not from the
 directory it deploys — deployed from the repo root, the pages went up
 without `/api/requests` and the site served `index.html` in its place
 (2026-09-14). "Uploading Functions bundle" in the output is the line
-that says the function shipped. (`web/public/` was the holding page
-the site served until the first release.) This is a token for pushing assets, which is a
+that says the function shipped. This is a token for pushing assets, which is a
 narrower grant than the GitHub connection ruled out below — Cloudflare
 never sees the source.
 
@@ -122,7 +124,7 @@ first, every time.
 
 1. Cloudflare dashboard → Workers & Pages → Create → Pages → *Upload
    assets*.
-2. Drag `web/public/` in — that folder only. Name the project
+2. Drag `web/launch/` in — that folder only. Name the project
    `visualdynamics`.
 3. Custom domains → add `visualdynamics.org` and `www`. Cloudflare
    writes the DNS itself because the domain is already there.
@@ -157,36 +159,6 @@ minutes. Previewing locally needs `npx wrangler pages dev web/launch`
 rather than a plain file server, or the page shows the could-not-load
 note.
 
-## What belongs on the holding page
-
-`public/index.html` was the page that stood in for a project that was
-not yet public (it has been, since 2026-09-14; `web/launch` is what
-the site serves now), and its rule is kept for the record:
-narrow — the name, the mark, a way to make contact. **Not what the thing
-does** — that is deliberate, and it has to be kept out of the places
-that are read by machines rather than people: `<meta name=description>`,
-`og:description`, and the image's `alt`. A sentence deleted from the
-body while it still sits in a meta tag has not been deleted.
-
-- **No screenshots of real data.** Nothing from `stressdata/`, nothing
-  from a customer's run. If a picture is ever wanted, the demonstration
-  drone is the only safe subject — it is synthetic and it is ours.
-- **No feature list and no dates.** Both are promises, and neither
-  helps a holding page do its one job.
-- **The address is a role, not a person.** `contact@` can be deleted
-  and remade in Email Routing the day it is buried in spam; a personal
-  address on a public page cannot be taken back. Catch-all stays off
-  for the same reason — it turns every dictionary attack into inbox.
-  The rule generalized on 2026-08-27: the domain now also carries
-  `quickbooks-dev@`, forwarding to the same inbox, so that the Intuit
-  developer app's public pages could stop printing a personal address.
-  Both are literal rules in Cloudflare Email Routing; adding another
-  costs nothing and is the right answer any time a page needs a
-  contact.
-- **Keep the copyright line.** Publishing the name under a dated notice
-  is the cheapest evidence of first use there is, which matters if the
-  mark is ever worth registering.
-
 ## Before deploying `web/launch`
 
 `web/launch/downloads/` is where `packaging/stage_downloads.py` hardlinks
@@ -218,8 +190,7 @@ tiles and `latest.json` both read — keeps naming the newest version.
 
 `latest.json` is what the application's *File → Check for Updates…*
 reads (`src/visualdynamics/update.py`): a version, a URL to open, a
-line of notes. `web/public/latest.json` is the holding page's copy,
-saying 0.0.1. From the first release on, the release workflow's
+line of notes. The release workflow's
 `site` job writes `web/launch/latest.json` from the published release
 and deploys it with the site — so it can never name assets that do
 not exist yet, which is the whole rule. It is a check, not an

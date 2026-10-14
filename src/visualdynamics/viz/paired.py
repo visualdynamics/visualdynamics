@@ -103,11 +103,11 @@ def paired_stage_curves(loud: Any, quiet: Any,
     the number of stations.
 
     In 'ratio' the division is `snr.signal_to_noise` at full resolution,
-    the same call the flat plot and the report's flat figure use, so all
-    the views of a pair agree. It divides every channel the two objects
-    share, whatever `loud_records`, `quiet_records` and `page` say, with
-    only `quantity` narrowing it, and the axis title becomes
-    'signal to noise [dB]'.
+    the same call the flat plot and the report's flat figure use, and
+    the channels are the flat plot's too (`snr.picked`): those of the
+    `loud_records` picked, or every shared channel when none of them is
+    shared, with `quantity` narrowing them. One station a channel, not
+    paged. The axis title becomes 'signal to noise [dB]'.
     """
     us = unit_system or DEFAULT_SYSTEM
     arrays = paired_arrays(loud, quiet, loud_records, quiet_records,
@@ -116,10 +116,13 @@ def paired_stage_curves(loud: Any, quiet: Any,
     runs: list[dict[str, Any]] = []
 
     if mode == 'ratio':
+        from ..core.snr import picked
+
         abscissa, rows, dofs, dims = signal_to_noise(loud, quiet)
+        kept = picked(loud, loud_records, dofs)
         with np.errstate(divide='ignore', invalid='ignore'):
             decibels = 10.0 * np.log10(np.real(rows))
-        drawn = [(dof, decibels[k]) for k, dof in enumerate(dofs)
+        drawn = [(dofs[k], decibels[k]) for k in kept
                  if np.isfinite(decibels[k]).any()
                  and (quantity is None or dims[k] == quantity[0])]
         x0, x1 = float(abscissa.min()), float(abscissa.max())

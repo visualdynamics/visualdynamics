@@ -128,6 +128,38 @@ def signal_to_noise(signal: Any, floor: Any):
     return np.asarray(signal.abscissa), np.asarray(rows), dofs, dims
 
 
+def picked(signal: Any, records: Sequence[int] | None,
+           dofs: Sequence[str]) -> list[int]:
+    """Which of the ratio's channels the records picked in the signal's
+    grid name: their positions in `dofs`, or every position when none
+    of the picks is a shared channel (or nothing is picked).
+
+    Parameters
+    ----------
+    signal : DataArray
+        The louder density, whose grid the records are picked in.
+    records : sequence of int or None
+        The picked rows of `signal`.
+    dofs : sequence of str
+        `signal_to_noise`'s channels, in its order.
+
+    Returns
+    -------
+    list of int
+        Positions in `dofs` to keep.
+    """
+    # one rule for every view of a pair: the flat plot kept the picks
+    # and the stage divided every channel (2026-10-14, found by the
+    # docstring pass). Positions, not names: a drive point's force and
+    # acceleration share a DOF name and are two channels
+    every = list(range(len(dofs)))
+    if records is None:
+        return every
+    keep = {str(signal.response_dof[int(k)]) for k in records}
+    chosen = [k for k, dof in enumerate(dofs) if dof in keep]
+    return chosen or every
+
+
 def rms_signal_to_noise(signal: Any, floor: Any,
                         records: Sequence[int] | None = None
                         ) -> tuple[list[tuple[str, float]], list[str]]:

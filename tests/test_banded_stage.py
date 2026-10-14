@@ -400,3 +400,63 @@ def test_the_stage_spans_the_band_not_every_line():
     x0, x1, _z0, _z1 = add_banded_stage(plotter, spec)['extents']
     plotter.close()
     assert 10.0 <= x0 <= 24.0 and 396.0 <= x1 <= 410.0, (x0, x1)
+
+
+def _cross_spectral(channels=('101Z+', '104Z+', '110Z+'), lines=None, cross=1e2):
+    """A measured matrix: each channel's autospectrum flat at the
+    target, and every cross term far above the abort limit."""
+    freq = FREQ if lines is None else np.linspace(20.0, 2000.0, lines)
+    resp = [c for c in channels for _ in channels]
+    ref = [r for _ in channels for r in channels]
+    values = np.array([np.full(len(freq), 1e-2 if a == b else cross)
+                       for a, b in zip(resp, ref)])
+    return Psd(abscissa=freq, ordinate=values, response_dof=resp,
+               reference_dof=ref,
+               ordinate_dim=['acceleration**2/frequency'] * len(resp))
+
+
+def test_a_measured_matrix_stations_each_channels_autospectrum():
+    """Every record wearing a channel was drawn at its station, so a
+    measured cross-spectral matrix drew each channel's cross terms there
+    too, judged against the autospectrum's abort limits (2026-10-14).
+    The station draws the record the comparison pairs with its target."""
+    from visualdynamics.viz.banded import banded_stage_arrays
+
+    arrays = banded_stage_arrays(_specification(), _cross_spectral())
+    assert [len(s['curves']) for s in arrays['stations']] == [1, 1, 1]
+    assert not any(s['exceed'] for s in arrays['stations']), \
+        'the autospectra sit on their targets'
+
+
+def test_every_station_is_drawn_when_the_matrix_is_larger_than_a_scene():
+    """Fifty channels' full matrix at 8000 lines is four scenes of
+    records: the stations past the first scene's records were not drawn
+    and nothing said so. One record a station, every one is drawn."""
+    from visualdynamics.viz.banded import banded_stage_arrays
+
+    channels = [f'{100 + i}Z+' for i in range(50)]
+    lines = 8000
+    freq = np.linspace(20.0, 2000.0, lines)
+    level = np.full((50, lines), 1e-2)
+    spec = Specification(abscissa=freq, ordinate=level, response_dof=channels,
+                         ordinate_dim=['acceleration**2/frequency'] * 50,
+                         abort_upper=level * 4.0)
+    arrays = banded_stage_arrays(spec, _cross_spectral(channels, lines))
+    assert len(arrays['stations']) == 50 and arrays['left_out'] == 0
+
+
+def test_channels_one_stage_cannot_hold_are_said_not_dropped(window, pump,
+                                                             monkeypatch):
+    """Past one scene's records the stage draws the first and the status
+    line says how many more there are."""
+    from visualdynamics.viz import waterfall
+
+    monkeypatch.setattr(waterfall, 'SCENE_BUDGET', 100)
+    window.add_object('Specification', _specification())
+    window.add_object('PSD', _measured())
+    window._item_for_object('Specification').setSelected(True)
+    window._item_for_object('PSD').setSelected(True)
+    pump()
+    said = window.statusBar().currentMessage()
+    assert '1 channel on the stage' in said, said
+    assert '2 more channels not drawn' in said, said

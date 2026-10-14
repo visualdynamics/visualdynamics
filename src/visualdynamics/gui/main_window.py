@@ -16017,6 +16017,11 @@ class MainWindow(QMainWindow):
         boxed = sum(len(s['exceed']) for s in arrays['stations'])
         out = (f', {boxed} record{"s" * (boxed != 1)} outside an '
                'abort limit' if boxed else '')
+        # more channels than one scene holds: said, not dropped quietly
+        missing = arrays.get('left_out', 0)
+        out += (f'; {missing} more channel{"s" * (missing != 1)} not drawn, '
+                'too many for one stage (the flat reading shows each)'
+                if missing else '')
         return (f'{measured_name}{scaled_note} against {spec_name}: '
                 f'{n} channel{"s" * (n != 1)} on the stage{out}{axis_note}')
 

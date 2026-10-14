@@ -203,3 +203,20 @@ def test_known_qt_noise_is_filtered_out():
             _quiet_message_handler(None, None, message)
         _quiet_message_handler(None, None, 'something worth reading')
     assert captured.getvalue().strip() == 'something worth reading'
+
+
+def test_only_the_3d_views_get_native_windows(qt_app):
+    """The stage is a native window, and by default Qt made its siblings
+    native too: the flat plot and the specification sheet, which then
+    stayed black on macOS when the stage was turned off or Edit was
+    pressed (Brandon, 2026-10-14). The launcher keeps siblings ordinary
+    widgets, set before the QApplication is made."""
+    from PySide6.QtCore import QCoreApplication, Qt
+
+    from visualdynamics.gui import before_application
+
+    flag = Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings
+    QCoreApplication.setAttribute(flag, False)
+    before_application()
+    assert QCoreApplication.testAttribute(flag)
+    assert QCoreApplication.applicationName() == 'Visual Dynamics'

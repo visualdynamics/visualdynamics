@@ -52,9 +52,11 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
     """The stage's numbers, before VTK is involved.
 
     One station per channel that the specification and the `measured`
-    records (`records` of it, the first page of `waterfall_arrays`)
-    share, or per specification channel when nothing is measured, in the
-    specification's order. `specification_records` limits the stations
+    records (`records` of it) share, or per specification channel when
+    nothing is measured, in the specification's order. The measured
+    record at a station is the one the comparison pairs with the
+    station's autospectrum (`compliance.matched_records`), so a
+    measured cross-spectral matrix draws its autospectra. `specification_records` limits the stations
     to the channels of those specification records; with nothing
     measured, each picked record is its own station instead, and a cross
     term is drawn as its magnitude and labeled by its pair. A station's
@@ -68,7 +70,9 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
     values: ``spec_x`` and ``spec_x_drawn`` (the specification's lines,
     and the abscissa its curves are drawn along), ``log_scaled``,
     ``xlabel``, ``zlabel``, ``compared`` (whether anything is
-    measured), and the two transforms ``logged`` (level) and ``spread``
+    measured), ``left_out`` (measured records paired with a station
+    but not drawn, past the one scene the stage holds), and the two
+    transforms ``logged`` (level) and ``spread``
     (abscissa) into drawing values.
     """
     from ..core.compliance import outside
@@ -85,15 +89,34 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
         # — the same honesty as the vertical axis's own prefix
         xlabel = f'log10 {xlabel}'
     zlabel = None
+    left_out = 0
+    references = specification.reference_dof
     if measured is not None:
-        arrays = waterfall_arrays(measured, records, us, budget=budget)
+        # the measured record at each station is the one the comparison
+        # pairs with the station's target (`matched_records`, by response,
+        # reference and quantity): every record wearing the channel was
+        # drawn, so a measured cross-spectral matrix put each channel's
+        # cross terms on its station, judged against the autospectrum's
+        # abort limits, and its channels past the waterfall's first page
+        # were not drawn at all (2026-10-14, found by the docstring pass)
+        from ..core.compliance import matched_records
+
+        station_specs = [i for i, dof in enumerate(spec_dofs)
+                         if references is None or str(references[i]) == dof]
+        if specification_records is not None:
+            chosen = {spec_dofs[int(i)] for i in specification_records}
+            station_specs = [i for i in station_specs if spec_dofs[i] in chosen]
+        paired = [m for _label, _s, m in matched_records(
+            specification, measured, station_specs, records)]
+        arrays = waterfall_arrays(measured, paired, us, budget=budget)
+        # paired but not drawn: another quantity, or past the first page
+        # of a set too large for one scene; the window says how many
+        left_out = len(paired) - len(arrays['drawn'])
         log_scaled = arrays['log_scaled']
         xlabel, zlabel = arrays['xlabel'], arrays['zlabel']
         full_x = np.asarray(measured.display_abscissa(us), dtype=float)
         for (cx, cz), index in zip(arrays['curves'], arrays['drawn']):
             dof = str(measured.response_dof[index])
-            if dof not in spec_dofs:
-                continue        # a record the specification never bounds
             full = np.real(np.asarray(
                 measured.display_ordinate(us, [index])[0]))
             drawn_by_dof.setdefault(dof, []).append(
@@ -105,7 +128,6 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
     # cross terms — a virtual point's target with every pair stated
     # put M1/M2, all zeros, on M2's station, and the stage drew one
     # channel of three (Brandon, 2026-09-07)
-    references = specification.reference_dof
     autos: dict[str, int] = {}
     for i, dof in enumerate(spec_dofs):
         if references is None or str(references[i]) == dof:
@@ -228,7 +250,7 @@ def banded_stage_arrays(specification: Any, measured: Any = None,
     return {'stations': out, 'spec_x': spec_x, 'spec_x_drawn': spec_x_drawn,
             'log_scaled': log_scaled,
             'xlabel': xlabel, 'zlabel': zlabel,
-            'compared': measured is not None,
+            'compared': measured is not None, 'left_out': left_out,
             'logged': logged, 'spread': spread}
 
 

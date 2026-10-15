@@ -729,6 +729,11 @@ def project_expectations(
     # was removed the same day.
     from ..names import display_name
 
+    # Each entry's first field says, for the reader of this list, which
+    # object the slot is for ('Octave Band PSD', 'Noise Time History').
+    # It is not shown and nothing matches on it: the shown label is the
+    # class's display name (the return below), and a slot is filled by
+    # class, banding and ordinal (`_expected_narrowly`).
     def raw(project_type):
         from .channel_table import ChannelTable
         from .data import (
@@ -883,17 +888,17 @@ def project_expectations(
                     ('Photos', Photos, 'Photos', 1, True, 'Basis'),
                     ('Channel Table', ChannelTable, 'ChannelTable', 1,
                      True, 'Basis'),
-                    # the two recordings a time-data save streams, named
-                    # for their phases — the same names the import gives
-                    # the objects, so they slide into their own slots
+                    # the two recordings a time-data save streams, the
+                    # ambient first, as the import adds them: the first
+                    # TimeHistory fills the first slot, the second the
+                    # second
                     ('Noise Time History', TimeHistory, 'TimeHistory', 1,
                      True, 'Basis'),
                     ('Excitation Time History', TimeHistory, 'TimeHistory',
                      2, True, 'Basis'),
                     # the ratio is a *reading* of these two, not a third
                     # object (Brandon, 2026-08-25): select both and the
-                    # bar offers overlay or ratio-in-dB. Their names match
-                    # what Compute PSDs derives from the renamed streams.
+                    # bar offers overlay or ratio-in-dB.
                     ('Noise Time History PSDs', Psd, 'Psd', 1, False,
                      'Basis'),
                     ('Excitation Time History PSDs', Psd, 'Psd', 2, False,

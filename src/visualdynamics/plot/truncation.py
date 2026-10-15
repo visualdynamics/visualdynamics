@@ -7,7 +7,9 @@ dragged the same way as the averaging region: by an edge to move that
 time, or by the middle to slide the whole span along the record.
 
 During a drag only the shading moves. `TruncationOverlay.changed` is
-emitted once, when the mouse is released.
+emitted once, when the mouse is released. A `locked` overlay cannot be
+dragged, which is what a standalone plot needs: nothing there would
+keep the span.
 """
 
 from __future__ import annotations
@@ -54,11 +56,13 @@ class TruncationOverlay(QObject):
 
     def __init__(self, plot: Any, truncation: Truncation,
                  first: float, last: float,
-                 colors: Mapping[str, str], parent: Any = None) -> None:
+                 colors: Mapping[str, str], parent: Any = None,
+                 locked: bool = False) -> None:
         super().__init__(parent)
         import pyqtgraph as pg
 
         self.plot: Any = plot
+        self.locked: bool = bool(locked)
         self.truncation: Truncation = truncation
         self.first: float = float(first)
         self.last: float = float(last)
@@ -85,7 +89,8 @@ class TruncationOverlay(QObject):
         # line — the corner line's own dress, because it is the same
         # kind of thing: a draggable boundary that is not data
         self.region: Any = pg.LinearRegionItem(
-            values=(truncation.start, truncation.stop), movable=True,
+            values=(truncation.start, truncation.stop),
+            movable=not self.locked,
             brush=pg.mkBrush(QColor(0, 0, 0, 0)),
             pen=pg.mkPen(self.colors['plot_foreground'], width=2),
             hoverPen=pg.mkPen(self.colors['filter_preview'], width=2),

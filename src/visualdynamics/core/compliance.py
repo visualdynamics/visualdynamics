@@ -49,9 +49,13 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     writes zero on the lines outside its band), and the result is NaN
     below the lowest and above the highest remaining point: extending the
     end segments would add a requirement nobody wrote. A dropped point
-    between two remaining ones is bridged by the line between them. Fewer
-    than two remaining points gives NaN everywhere.
+    between two remaining ones is a gap, NaN up to the remaining points
+    either side of it, as `coverage` counts it. Fewer than two remaining
+    points gives NaN everywhere.
     """
+    # A dropped interior point used to be bridged by the line across it,
+    # so a curve drew (and `bounds` judged) a requirement over lines that
+    # `coverage` said were not written. One rule now: a gap is a gap.
     frequencies = np.asarray(frequencies, dtype=float)
     spec_frequencies = np.asarray(spec_frequencies, dtype=float)
     spec_values = np.asarray(np.real(spec_values), dtype=float)
@@ -71,6 +75,16 @@ def log_interpolate(frequencies: ArrayLike, spec_frequencies: ArrayLike,
     if inside.any():
         out[inside] = 10.0 ** np.interp(np.log10(frequencies[inside]),
                                         known_x, known_y)
+    dropped = np.sort(np.log10(spec_frequencies[
+        ~usable & np.isfinite(spec_frequencies) & (spec_frequencies > 0.0)]))
+    if dropped.size:
+        a, b = known_x[:-1], known_x[1:]
+        holed = (np.searchsorted(dropped, b, 'left')
+                 > np.searchsorted(dropped, a, 'right'))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            at = np.log10(frequencies)
+        for lo, hi in zip(a[holed], b[holed]):
+            out[(at > lo) & (at < hi)] = np.nan
     return out
 
 

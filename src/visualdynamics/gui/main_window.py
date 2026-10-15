@@ -1077,6 +1077,9 @@ class MainWindow(QMainWindow):
         self.table_bar.addAction(self.author_action)
         self.author_action.setVisible(False)
         self._author_wanted: bool = False
+        #: why the sheet just asked for could not be opened, said once
+        #: on the status line of the render that stood it down
+        self._author_refusal: str | None = None
         #: the draft per object it was opened on, kept while the
         #: window lives
         self._drafts: dict[str, Any] = {}
@@ -8733,7 +8736,8 @@ class MainWindow(QMainWindow):
         refused = getattr(self, '_refused_comparison', None)
         if refused:
             parts.append(f'Not compared: {refused}')
-        self._show_status('  |  '.join(part for part in parts if part))
+        refusal, self._author_refusal = self._author_refusal, None
+        self._show_status('  |  '.join(part for part in [*parts, refusal] if part))
 
     def _empty_category(self, geometries):
         """The name of a selected category holding nothing, else None.
@@ -9583,6 +9587,16 @@ class MainWindow(QMainWindow):
             if not (was & now) and not ((was | now) & made):
                 self._author_wanted = False
         wanted = door is not None and self._author_wanted
+        if wanted:
+            # a sheet that cannot be opened stands down, saying why,
+            # and leaves the object's own reading drawn: the refusal
+            # cleared the plot and left a black pane, which read as Edit
+            # not working (Brandon, 2026-10-14)
+            try:
+                self._draft_for(door)
+            except ValueError as refusal:
+                self._author_wanted = wanted = False
+                self._author_refusal = f'{", ".join(self._door_names(door))}: {refusal}'
         self.author_action.setChecked(wanted and not on_plot)
         self.author_data_action.setChecked(wanted and on_plot)
         if not wanted:

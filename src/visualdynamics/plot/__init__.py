@@ -2154,7 +2154,7 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
 
         abscissa = np.asarray(data.abscissa, dtype=float)
         return [TruncationOverlay(plot, held, float(abscissa[0]),
-                                  float(abscissa[-1]), colors)
+                                  float(abscissa[-1]), colors, locked=True)
                 for plot in plots]
     from .averaging import AveragingOverlay
 

@@ -1646,6 +1646,21 @@ def test_a_shift_that_fits_with_nothing_to_spare_is_found():
     assert lag_of(once, spec) == 3
 
 
+
+def test_the_shift_is_searched_about_a_held_start_and_both_ways():
+    """An analysis held three samples past the third playing's first
+    sample is aligned by moving back three. The search used to start at
+    sample 0 whatever the start, and to go forward only."""
+    from dataclasses import replace
+
+    spec = _target()
+    history = _measured(spec, repeats=4)
+    held = replace(Averaging(frame_length=FRAME, overlap=0.0,
+                             window='rectangle', frames=1),
+                   start=(2 * FRAME + 3) / RATE)
+    assert lag_of(history, spec, held) == -3
+    assert rep_playings(history, spec, held)[0]['start'] == 2 * FRAME
+
 def test_nothing_to_align_against_is_no_shift():
     spec = _target()
     short = TimeHistory(np.arange(FRAME // 2) / RATE, spec.ordinate[:, :FRAME // 2],

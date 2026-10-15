@@ -4,6 +4,7 @@ import pytest
 from conftest import fixture_path
 
 import visualdynamics
+from visualdynamics.core.geometry import Geometry
 
 PLATE_NPZ = fixture_path('plate', 'geometry.npz')
 PLATE_EXO = fixture_path('plate', 'geometry.exo')
@@ -462,3 +463,13 @@ def test_a_dofs_direction_reads_through_its_nodes_frame():
     bare = visualdynamics.Geometry(node_id=[7], node_xyz=[[0, 0, 0]])
     assert np.allclose(bare.dof_direction('7Y+'), [0.0, 1.0, 0.0]), \
         'a geometry with only the default frame measures in the global one'
+
+
+def test_node_index_refuses_an_id_the_geometry_lacks():
+    # searchsorted answers where a missing id would go, which is some
+    # other node's row (15 lands on 20's) or one past the end (40)
+    g = Geometry(np.array([10, 30, 20]), np.zeros((3, 3)))
+    assert g.node_index([20, 10]).tolist() == [2, 0]
+    for missing in ([15], [40], [10, 99]):
+        with pytest.raises(KeyError, match=str(missing[-1])):
+            g.node_index(missing)

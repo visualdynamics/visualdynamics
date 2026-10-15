@@ -21,9 +21,10 @@ transform through `Φ⁺` like any response, and its reference columns
 through the force rule, `f = (Φᵀ)⁺ f_m`, when the set covers the
 drives, which gives the virtual point's FRF in both halves. References
 the set does not cover stay physical, and the report says so. A shock
-response spectrum (a maximum) and a coherence (a ratio) do not
-transform at all, and the refusal says to transform the time history
-and compute them again.
+response spectrum (a maximum), a coherence (a ratio) and a sine
+level (read tone by tone beside a noise floor) do not transform at
+all, and the refusal says to transform the time history and compute
+them again.
 
 Records are matched to shape columns by DOF, within each quantity, with
 the sign honored: a `101Z-` channel against a `101Z+` column is
@@ -124,7 +125,15 @@ def modal_dofs(shapes: ShapeSet) -> list[str]:
 def _cannot(data: Any) -> str | None:
     """Why a kind of data does not transform, or None when it does."""
     from .data import DataArray, Srs, _CoherenceBase
+    from .sine import SineLevel, SineLevelSet
 
+    # A SineLevel is a Spectrum, so it used to pass as rows: a tracked
+    # level is a magnitude (track_sine's are real), and an extracted
+    # one carries a noise floor per channel the rows cannot carry.
+    if isinstance(data, (SineLevel, SineLevelSet)):
+        return ('a sine level is read out of the record tone by tone, '
+                'each reading beside its own noise floor — transform the '
+                'time history and extract the levels again')
     if not isinstance(data, DataArray):
         return f'{type(data).__name__} is not a data object'
     if isinstance(data, Srs):
@@ -842,8 +851,8 @@ def to_modal(data: DataArray, shapes: ShapeSet,
     data : DataArray
         The physical record. Motions are fitted, forces projected,
         anything else left out and reported. A density needs every
-        cross term between the shared channels; an SRS or a coherence
-        does not transform at all.
+        cross term between the shared channels; an SRS, a coherence or
+        a sine level does not transform at all.
     shapes : ShapeSet
         The set to transform through. Complex sets are refused: real
         data cannot carry a complex modal coordinate.

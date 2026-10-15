@@ -2082,7 +2082,12 @@ class Project(dict):
         return added
 
     def _transform_pair(self, source, shapes):
+        from .core.sine import SineLevelSet
+        from .core.transform import _cannot
+
         data, shape_set = self[source], self[shapes]
+        if isinstance(data, SineLevelSet):
+            raise TypeError(_cannot(data))
         if not isinstance(data, DataArray):
             raise TypeError(f'{source!r} is not a data object')
         if not isinstance(shape_set, ShapeSet):

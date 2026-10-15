@@ -795,9 +795,8 @@ class Geometry:
     def node_index(self, node_ids: Ids) -> np.ndarray:
         """Positions of the given node ids in the node arrays.
 
-        Every id must be one the geometry has (`contains_nodes` checks);
-        an id that is not present gives a wrong position or an
-        IndexError, not a clear error.
+        Every id must be one the geometry has (`contains_nodes` asks
+        without raising).
 
         Parameters
         ----------
@@ -808,10 +807,25 @@ class Geometry:
         -------
         numpy.ndarray
             Each identifier's row in the node arrays.
+
+        Raises
+        ------
+        KeyError
+            Naming the ids the geometry does not have.
         """
+        ids = np.asarray(node_ids)
         order = np.argsort(self.node_id)
-        pos = np.searchsorted(self.node_id, node_ids, sorter=order)
-        return order[pos]
+        # searchsorted returns where a missing id *would* go: a
+        # neighbor's row, or one past the end. Without the comparison
+        # below a missing id came back as some other node's row.
+        pos = np.searchsorted(self.node_id, ids, sorter=order)
+        rows = order[np.minimum(pos, max(order.size - 1, 0))] if order.size else pos
+        missing = np.atleast_1d(ids)[np.atleast_1d(
+            self.node_id[rows] != ids if order.size else np.ones(ids.shape, bool))]
+        if missing.size:
+            shown = ', '.join(str(i) for i in missing[:5].tolist())
+            raise KeyError(f'the geometry has no node {shown}')
+        return rows
 
     @property
     def extent(self) -> tuple[np.ndarray, np.ndarray]:

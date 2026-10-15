@@ -229,11 +229,15 @@ def lag_of(measured: TimeHistory, specification: DataArray,
     each channel choose its own shift would let a poorly replicated one
     find its most favorable alignment and report the error there. The
     shift is the one that minimizes the total squared difference over
-    the record's first frame, across every control channel at once. It
-    is searched from 0 up to `LAG_FRACTION` of a frame (2 %), since the
-    record cannot be shifted before its first sample. 0 when there is
-    nothing to align.
+    the first frame of the analysis, across every control channel at
+    once. It is searched up to `LAG_FRACTION` of a frame (2 %) either
+    side of where the analysis starts, and never before the record's
+    first sample, so an analysis that starts at 0 is searched forward
+    only. 0 when there is nothing to align.
     """
+    # It used to search 0..reach from sample 0 whatever the averaging
+    # said, so an analysis held at a later start was aligned against a
+    # stretch of the record it does not score, and could not move back.
     averaging = averaging or averaging_for(measured, specification)
     if averaging is None:
         return 0
@@ -248,14 +252,16 @@ def lag_of(measured: TimeHistory, specification: DataArray,
         return 0
     reach = max(1, round(n * LAG_FRACTION))
     total = measured.ordinate.shape[1]
+    first = averaging.start_sample(float(measured.sample_rate))
     best, best_cost = 0, np.inf
-    for shift in range(-reach, reach + 1):
-        if shift < 0 or shift + n > total:
+    for lag in range(-reach, reach + 1):
+        at = first + lag
+        if at < 0 or at + n > total:
             continue
-        cost = sum(float(np.sum((m[shift:shift + n] - s) ** 2))
+        cost = sum(float(np.sum((m[at:at + n] - s) ** 2))
                    for s, m in pairs)
         if cost < best_cost:
-            best, best_cost = shift, cost
+            best, best_cost = lag, cost
     return best
 
 

@@ -608,6 +608,20 @@ def test_from_geometry_turns_any_drawn_shape_into_modes():
     assert list(shapes.frequency[:6]) == [0.0] * 6
 
 
+
+def test_total_mass_is_the_whole_model_with_a_dense_material():
+    # it used to be shared on top of the beams' own density mass, so a
+    # carbon grillage asked for 0.5 kg weighed 0.5 kg plus its members
+    drawn = cube().geometry()
+    dense = fem.Material('frame', youngs_modulus=70e9, density=1600.0)
+    bare = fem.Model.from_geometry(drawn, dense, MEMBER)
+    assert 0.0 < bare.total_mass < 0.5
+    model = fem.Model.from_geometry(drawn, dense, MEMBER, total_mass=0.5)
+    assert model.total_mass == pytest.approx(0.5)
+    with pytest.raises(ValueError, match='already weigh'):
+        fem.Model.from_geometry(drawn, dense, MEMBER,
+                                total_mass=bare.total_mass / 2)
+
 def test_from_geometry_refuses_a_shape_in_pieces():
     """Silently returning twelve zero modes instead of six is the trap;
     the plate geometry is genuinely three pieces, and this is what

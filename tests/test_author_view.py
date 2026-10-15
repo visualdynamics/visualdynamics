@@ -1073,3 +1073,34 @@ def test_the_sheet_stands_down_when_the_selection_moves_on(window, pump):
     assert window.views.sizes()[1] == 0, 'no plot pane split above it'
     # and it is still one toggle away, on the table's own door
     assert window.author_action.isVisible()
+
+
+def test_a_specification_with_undeclared_units_says_so_and_stays_drawn(window, pump):
+    """Edit on a specification whose units were never declared: the sheet
+    refused with "every channel needs a quantity", and the window cleared
+    the plot under it, a black pane that read as Edit not working
+    (Brandon, 2026-10-14). The sheet stands down, the specification
+    stays drawn, and the status line says what to do."""
+    import pyqtgraph as pg
+
+    from visualdynamics.core.data import Specification
+
+    freq = np.linspace(20.0, 2000.0, 50)
+    level = np.full((2, len(freq)), 1e-2)
+    spec = Specification(abscissa=freq, ordinate=level, response_dof=['1X+', '2X+'],
+                         warning_upper=level * 2, abort_upper=level * 4)
+    assert not spec.units_defined
+    window.add_object('Spec', spec)
+    _select(window, pump, 'Spec')
+    pane = window.data_pane
+    pane.waterfall_action.setChecked(False)
+    window.render_current()
+    pump()
+    window.author_data_action.trigger()
+    pump()
+    assert not window.author_data_action.isChecked()
+    assert not pane.author_panel.isVisibleTo(window)
+    plots = [i for i in pane.graphics.ci.items if isinstance(i, pg.PlotItem)]
+    assert sum(len(p.listDataItems()) for p in plots) > 0, 'the specification still drawn'
+    said = window.statusBar().currentMessage()
+    assert 'have no declared units' in said and 'Imported Units' in said, said

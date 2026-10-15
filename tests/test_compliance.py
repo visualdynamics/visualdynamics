@@ -113,6 +113,21 @@ def test_a_line_that_says_nothing_contributes_nothing():
     assert got < compliance.rms(frequencies, np.full(101, 1e-3))
 
 
+
+def test_an_interior_zero_is_a_gap_to_interpolation_as_to_coverage():
+    """A zero between written points is a line the controller did not
+    control. `coverage` counts it a gap, and interpolation used to draw
+    the line across it, a requirement no one wrote."""
+    f = np.array([10.0, 20.0, 40.0, 80.0, 160.0])
+    w = np.array([1.0, 1.0, 0.0, 1.0, 1.0])
+    spec = Specification(f, w[None, :], response_dof=['1Z+'])
+    assert compliance.coverage(spec) == [(10.0, 20.0), (80.0, 160.0)]
+    got = compliance.log_interpolate([15.0, 20.0, 30.0, 40.0, 60.0, 80.0, 120.0], f, w)
+    assert np.isfinite(got).tolist() == [True, True, False, False, False, True, True]
+    # a zero at a written frequency is not between two of them
+    assert np.isfinite(compliance.log_interpolate(
+        [15.0], [10.0, 10.0, 20.0], [1.0, 0.0, 1.0])).all()
+
 # ---- what the table shows -----------------------------------------------
 
 

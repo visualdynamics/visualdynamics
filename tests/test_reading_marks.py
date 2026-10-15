@@ -39,6 +39,21 @@ def test_a_history_s_readings_draw_flat(qt_app, run, tmp_path, reading):
     assert path.stat().st_size > 2000
 
 
+
+@pytest.mark.parametrize('reading', ['averaging', 'truncation'])
+def test_a_standalone_plot_s_marks_cannot_be_dragged(qt_app, run, reading):
+    """Nothing in a standalone plot keeps a dragged span. The cut's
+    region could be dragged there once, and the drag went nowhere."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import _mark, build_plot
+
+    layout = pg.GraphicsLayoutWidget()
+    build_plot(layout, run.time_history)
+    overlays = _mark(layout, run.time_history, reading)
+    assert overlays
+    assert not any(overlay.region.movable for overlay in overlays)
+
 def test_the_octave_steps_draw_flat_one_per_record(qt_app, psd):
     import pyqtgraph as pg
 

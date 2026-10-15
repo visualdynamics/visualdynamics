@@ -619,6 +619,29 @@ def test_an_srs_and_a_coherence_do_not_transform():
         to_modal(forced.compute_multiple_coherence(), rigid)
 
 
+
+def test_a_sine_level_does_not_transform():
+    # a SineLevel is a Spectrum, and passed as rows before it was refused:
+    # a tracked level is a magnitude, and magnitudes do not add linearly
+    from visualdynamics.core.sine import SineLevel, SineLevelSet
+
+    rigid, run = _rigid_and_run()
+    f = np.linspace(10.0, 100.0, 20)
+    level = SineLevel(abscissa=f,
+                      ordinate=np.ones((run.num_records, f.size)),
+                      response_dof=list(run.response_dof),
+                      ordinate_dim=['acceleration'] * run.num_records,
+                      ordinate_unit=['m/s^2'] * run.num_records, tone='T1')
+    for kind in (level, SineLevelSet([level])):
+        with pytest.raises(ValueError, match='extract the levels again'):
+            to_modal(kind, rigid)
+    assert reads_as(level, rigid) is None
+    project = visualdynamics.Project()
+    levels = project.add('Levels', SineLevelSet([level]))
+    shapes = project.add('Rigid', rigid)
+    with pytest.raises(TypeError, match='extract the levels again'):
+        project.transform(levels, shapes)
+
 def test_an_frf_transforms_in_both_halves_and_round_trips():
     rigid, _run = _rigid_and_run(2)
     rng = np.random.default_rng(5)

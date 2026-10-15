@@ -348,8 +348,8 @@ class SpecificationDraft:
         ------
         ValueError
             When a named channel has no autospectrum, the specification
-            has no autospectrum, or fewer than two lines have every
-            autospectrum positive.
+            has no autospectrum, a channel's units are not declared, or
+            fewer than two lines have every autospectrum positive.
         """
         from .data import channel_quantities
 
@@ -368,6 +368,16 @@ class SpecificationDraft:
                              'open as a sheet')
         channels = [spec.response_dof[i] for i in autos]
         dims = [channel_quantities(spec.known_dim(i))[0] for i in autos]
+        # said here, with what to do: the draft's own check said only
+        # "every channel needs a quantity", and the window cleared the
+        # plot under it (Brandon, 2026-10-14)
+        undeclared = [ch for ch, dim in zip(channels, dims) if dim == UNKNOWN or not dim]
+        if undeclared:
+            shown = ', '.join(undeclared[:3]) + (', …' if len(undeclared) > 3 else '')
+            raise ValueError(
+                f'{len(undeclared)} of its channels ({shown}) have no declared '
+                'units, so the sheet cannot tell what its levels are; declare '
+                'them in the Imported Units pane, then press Edit again')
         notes = []
         # a sheet holds positive levels at positive frequencies; a
         # controller's target starts at 0 Hz and rolls off to nothing at

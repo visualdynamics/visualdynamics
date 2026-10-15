@@ -128,9 +128,7 @@ def theme_flag(argv: list[str]) -> tuple[list[str], str | None]:
 
 def before_application() -> None:
     """What has to be set before the QApplication exists: the
-    application's name, and that only the 3-D views get native windows.
-    """
-    from PySide6.QtCore import Qt
+    application's name."""
     from PySide6.QtWidgets import QApplication
 
     # what the machine calls this while it is running — and it must be
@@ -141,15 +139,6 @@ def before_application() -> None:
     # renames the menu bar's title but never those already-built items.
     QApplication.setApplicationName('Visual Dynamics')
     QApplication.setApplicationDisplayName('Visual Dynamics')
-    # A 3-D view is a native window (VTK draws into it), and by default
-    # Qt makes every sibling of a native widget native too: the flat
-    # plot and the specification sheet, which share a splitter with the
-    # stage. Turning the stage off for the flat plot, or pressing Edit,
-    # left the pane black on macOS, the sheet with it (Brandon,
-    # 2026-10-14; macOS hid the stage's view, and the plot's own native
-    # view did not draw again). Siblings stay ordinary widgets, drawn
-    # with the window; only the VTK views are native.
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

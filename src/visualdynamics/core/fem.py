@@ -1373,9 +1373,11 @@ class Model:
         section : Section, optional
             The grillage's section.
         total_mass : float, optional
-            Mass in kg to share over the nodes by the length of beam each
-            carries (`distribute_mass`), as lumped masses added to the
-            elements' own mass. It needs beams to share over.
+            What the model weighs in all, in kg. Whatever the elements and
+            point masses do not already weigh is shared over the nodes by
+            the length of beam each carries (`distribute_mass`), so it
+            needs beams to share over; a model already heavier than this
+            is refused.
         name : str, optional
             The model's name; the geometry's name when not given.
         groups : dict of int to str, optional
@@ -1477,7 +1479,7 @@ class Model:
                 'meant to be separate structures, or the connectivity is '
                 'incomplete')
         if total_mass is not None:
-            model.distribute_mass(total_mass)
+            _bring_to(model, total_mass)
         return model
 
     def pieces(self) -> list[list[int]]:
@@ -2593,8 +2595,24 @@ def _from_groups(model: Model, geometry: Geometry,
             f'the geometry is {len(pieces)} disconnected pieces ({sizes} '
             'nodes); a model is one structure')
     if total_mass is not None:
-        model.distribute_mass(total_mass)
+        _bring_to(model, total_mass)
     return model
+
+
+def _bring_to(model: Model, total_mass: float) -> None:
+    """Make up the difference between what the model already weighs and
+    `total_mass`, shared over the beams (`distribute_mass`)."""
+    # Sharing all of total_mass on top of the elements' own mass made a
+    # model with a dense material weigh more than it was asked to; every
+    # caller so far used a massless material, where the two agree.
+    already = model.total_mass
+    if total_mass < already:
+        raise ValueError(
+            f'the elements and point masses already weigh {already:.4g} kg, '
+            f'more than the {total_mass:.4g} kg asked for: lower the '
+            "materials' densities or leave total_mass out")
+    if total_mass > already:
+        model.distribute_mass(total_mass - already)
 
 
 def _element_by_group(model: Model, geometry: Geometry,

@@ -966,9 +966,11 @@ def test_a_controllers_own_file_reads_placeholders_as_autos(tmp_path):
     np.savez(out, f=f, cpsd=cpsd, coordinate=coordinate)
     assert visualdynamics.import_file(str(out)).num_records == 4, \
         'one meaningful number and every pair is read'
+    # the controller's own file names no channels: they are its order
     np.savez(out, f=f, cpsd=cpsd)
-    with pytest.raises(ValueError, match='names no channels'):
-        visualdynamics.import_file(str(out))
+    bare = visualdynamics.import_file(str(out))
+    assert bare.response_dof == ['1', '1', '2', '2']
+    assert bare.reference_dof == ['1', '2', '1', '2']
     np.savez(out, f=f, cpsd=cpsd[:, :1, :])
     with pytest.raises(ValueError, match='not \\(lines, n, n\\)'):
         visualdynamics.import_file(str(out))

@@ -161,3 +161,39 @@ def test_the_line_after_a_save_names_the_units_the_format_wrote(window, pump,
     assert units_written('adf_time', system) == 'SI'
     assert units_written('threemf', system) == 'meters'
     assert units_written('escdf', system) == 'the units each object was declared in'
+
+
+def test_a_name_with_a_format_s_suffix_is_that_format(window, geometry,
+                                                      monkeypatch, tmp_path):
+    """The filter text is the dialog's to report. When it is not one of
+    ours, the suffix typed still says the format; matched on the text
+    alone, the geometry went out as `out.npz.vdyn` where an sdynpy file
+    was asked for (2026-10-16)."""
+    for suffix in ('.npz', '.unv'):
+        target = tmp_path / f'out{suffix}'
+        offered(window, monkeypatch, (str(target), 'a filter the dialog renamed'))
+        assert target.exists(), suffix
+        assert not (tmp_path / f'out{suffix}.vdyn').exists()
+        assert visualdynamics.import_file(str(target)).num_nodes == geometry.num_nodes
+
+
+def test_a_writer_that_fails_says_so(window, geometry, monkeypatch, tmp_path):
+    """An error a writer raises that is neither a ValueError nor an
+    OSError escaped the slot: no file, and nothing said."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from visualdynamics.gui.main_window import MainWindow
+
+    def broken(*_args, **_kwargs):
+        raise KeyError('a writer bug')
+
+    monkeypatch.setattr('visualdynamics.io.export_file', broken)
+    log = tmp_path / 'save.log'
+    monkeypatch.setattr(MainWindow, 'SAVE_LOG', log)
+    said = []
+    monkeypatch.setattr(QMessageBox, 'warning',
+                        staticmethod(lambda _parent, title, text: said.append(text)))
+    offered(window, monkeypatch, (str(tmp_path / 'out.unv'),
+                                  'Universal file (.unv) (*.unv)'))
+    assert len(said) == 1 and 'KeyError' in said[0] and 'a writer bug' in said[0]
+    assert 'a writer bug' in log.read_text()

@@ -8208,6 +8208,14 @@ class MainWindow(QMainWindow):
             return
         exporter = next((e for e in available
                          if f'{e.description} (*{e.suffix})' == chosen), None)
+        if exporter is None and not path.lower().endswith('.vdyn'):
+            # The filter text is the dialog's to report, and a name
+            # typed with a format's suffix says the format as plainly.
+            # Matched on the text alone, a mismatch wrote the object as
+            # `name.npz.vdyn` where an sdynpy file was asked for
+            # (Brandon, 2026-10-16: "no file gets written").
+            exporter = next((e for e in available
+                             if path.lower().endswith(e.suffix)), None)
         if exporter is None:
             if not path.endswith('.vdyn'):
                 path += '.vdyn'
@@ -8259,6 +8267,25 @@ class MainWindow(QMainWindow):
                            unit_system=self.unit_system, **extras)
         except (ValueError, OSError) as e:
             QMessageBox.warning(self, 'Could not save', str(e))
+            return
+        except Exception as e:  # noqa: BLE001 - a slot: said and logged, never swallowed
+            # Anything else raised in a slot went to a stderr nobody
+            # running the app sees, and the save did nothing at all
+            # (Brandon, 2026-10-16, a geometry to sdynpy and to UNV).
+            import traceback
+
+            try:
+                self.SAVE_LOG.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.SAVE_LOG, 'a', encoding='utf-8') as log:
+                    log.write(f'--- {exporter.name} {path}\n'
+                              f'{traceback.format_exc()}\n')
+            except OSError:
+                pass
+            QMessageBox.warning(
+                self, 'Could not save',
+                f'{os.path.basename(path)} was not written: '
+                f'{type(e).__name__}: {e}\n\nThe details are in '
+                f'{self.SAVE_LOG}.')
             return
         # name the units: most formats cannot record them, so this line
         # is the only place they are stated, and it says what the format
@@ -9800,6 +9827,9 @@ class MainWindow(QMainWindow):
     #: and left the old rows standing, and nothing said why)
     SHEET_LOG: ClassVar[Path] = (Path.home() / 'Library' / 'Logs'
                                  / 'Visual Dynamics' / 'sheet.log')
+    #: the same for a save that failed in a writer
+    SAVE_LOG: ClassVar[Path] = (Path.home() / 'Library' / 'Logs'
+                                / 'Visual Dynamics' / 'save.log')
 
     def _sheet_failed(self, where, exc):
         """Say that a sheet gesture failed, after the render that

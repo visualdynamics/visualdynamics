@@ -486,7 +486,10 @@ kept, none of which Visual Dynamics holds. A file written from Visual
 Dynamics would be a controller run that never happened, so the format
 is import only. The controller's random specification file (`.npz`) is
 different: a specification edited here can be written back out as one
-(see the table).
+(see the table). The controller's own specification files name no
+channels, since it matches them to its channel table by position, so
+their channels are read as '1', '2' and so on in that order, the same
+as a sine specification's.
 
 The one `.nc4` that is written is the run itself, shorter: a truncated
 copy. *Save Truncated Copy…* in the long-run import window below, or

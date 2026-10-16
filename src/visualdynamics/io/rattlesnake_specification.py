@@ -142,9 +142,11 @@ def load(path: str | os.PathLike,
     """Read the controller's target file as a Specification.
 
     Channels come from `dof` when the file has it, otherwise from the
-    diagonal of `coordinate`. A file with neither names no channels and
-    is refused, since the controller matches it to its channel table by
-    order alone. A file with `held` was written by Visual Dynamics, and
+    diagonal of `coordinate`. A file with neither, which is what the
+    controller itself writes, is matched to its channel table by order
+    alone, so its channels are named in that order, '1', '2' and so on,
+    as the sine specification reader names them and as a run through a
+    response transformation records them. A file with `held` was written by Visual Dynamics, and
     the mask says which cross terms were held: those come back, zeros
     included, and the rest are left out. In a file without `held`, the
     cross terms are kept only when at least one off-diagonal value is
@@ -175,10 +177,10 @@ def load(path: str | os.PathLike,
                                    int(diagonal[i, i, 0]['direction']))
                         for i in range(n)]
         else:
-            raise ValueError(f'{os.path.basename(str(path))} names no '
-                             'channels — neither a dof list nor a '
-                             'coordinate array — and the controller matches '
-                             'it to its channel table by order alone')
+            # Refused until Brandon loaded one into a project
+            # (2026-10-16): the controller's own files name no channels,
+            # so the format's commonest file could not be read at all.
+            channels = [str(k + 1) for k in range(n)]
         if len(channels) != n:
             raise ValueError(f'{len(channels)} channel names for a '
                              f'{n}-channel matrix')

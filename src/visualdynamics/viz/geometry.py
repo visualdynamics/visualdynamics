@@ -403,6 +403,45 @@ def dof_axis(direction: str) -> int | None:
     return {'X': 0, 'Y': 1, 'Z': 2}.get(letter)
 
 
+def dof_arrow_vectors(geometry: Geometry, dofs: Sequence[str]
+                      ) -> list[tuple[int, np.ndarray, int] | None]:
+    """For each DOF, (node row, global direction, axis) for its arrow, or
+    None for a DOF at a node the geometry lacks or with no axis.
+
+    The direction is turned by the node's displacement coordinate
+    system the same way the animation turns the motion
+    (`deform.dof_directions`), so '101X+' on a node measured in a turned
+    system points along that system's X. A rotational DOF points along
+    its axis, turned the same way. The axis, which picks the color, is
+    the DOF's own letter, not the nearest global axis.
+    """
+    # The arrows were drawn along global X, Y and Z whatever the node's
+    # displacement system said, so a turned accelerometer was marked
+    # pointing the wrong way while the animation moved it the right one
+    # (Brandon, 2026-10-16).
+    from ..core.data import parse_dof
+    from ..deform import _cs_rotations
+
+    rows = {int(node): i for i, node in enumerate(geometry.node_id)}
+    rotations = _cs_rotations(geometry)
+    out: list[tuple[int, np.ndarray, int] | None] = []
+    for dof in dofs:
+        node, direction = parse_dof(dof)
+        vector = DOF_DIRECTIONS.get(str(direction).upper())
+        axis = dof_axis(direction)
+        if node is None or vector is None or axis is None \
+                or int(node) not in rows:
+            out.append(None)
+            continue
+        row = rows[int(node)]
+        vector = np.asarray(vector, dtype=float)
+        rotation = rotations.get(int(geometry.node_disp_cs[row]))
+        if rotation is not None:
+            vector = vector @ rotation
+        out.append((row, vector, axis))
+    return out
+
+
 def dof_arrow_length(points: ArrayLike, extent: float) -> float:
     """One length for every arrow on a plot: 12 % of `extent`, reduced to
     0.9 times the closest spacing of the arrowed `points` so that arrows
@@ -427,8 +466,9 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    name: str | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
-    One arrow per DOF, colored by the axis it points along: X red,
-    Y green, Z blue, the same colors as the orientation triad. The
+    One arrow per DOF, colored by its axis: X red, Y green, Z blue, the
+    same colors as the orientation triad. It points along that axis of
+    the node's displacement coordinate system (`dof_arrow_vectors`). The
     arrows of one color are built into one mesh, so ten thousand arrows
     are three actors. A response arrow starts at the node and points
     outward, with its label at the tip; with `incoming` (forces) the
@@ -443,26 +483,16 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     """
     import pyvista as pv
 
-    from ..core.data import parse_dof
-
     points, _unit = display_points(geometry, unit_system)
     points = np.asarray(points, dtype=float)
     if not len(points):
         return 0
-    rows = {int(node): i for i, node in enumerate(geometry.node_id)}
     center = points.mean(axis=0)
     extent = float(np.sqrt(((points - center) ** 2)
                            .sum(axis=1).max())) or 1.0
-    entries = []
-    for dof in dofs:
-        node, direction = parse_dof(dof)
-        vector = DOF_DIRECTIONS.get(str(direction).upper())
-        axis = dof_axis(direction)
-        if node is None or vector is None or axis is None \
-                or int(node) not in rows:
-            continue
-        entries.append((points[rows[int(node)]],
-                        np.asarray(vector, dtype=float), axis, dof))
+    entries = [(points[found[0]], found[1], found[2], dof)
+               for dof, found in zip(dofs, dof_arrow_vectors(geometry, dofs))
+               if found is not None]
     if not entries:
         return 0
     length = dof_arrow_length([entry[0] for entry in entries], extent)

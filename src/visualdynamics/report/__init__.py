@@ -1831,30 +1831,29 @@ def _scene_block(block, geometry, shapes, us, objects):
     if quantity:
         # a DOFs scene: labeled arrows where its one named data
         # object measures that quantity
-        from ..core.data import parse_dof
         from ..core.report import (
             EXCITATION_QUANTITIES,
             series_quantity_dofs,
         )
         from ..viz.geometry import (
             AXIS_COLORS,
-            DOF_DIRECTIONS,
             dof_arrow_length,
-            dof_axis,
+            dof_arrow_vectors,
         )
 
         source = objects.get(block.get('dofs_source'))
         if source is None:
             return None
         arrows = []
-        for dof in series_quantity_dofs([('', source, None)], quantity):
-            node, direction = parse_dof(dof)
-            vector = DOF_DIRECTIONS.get(str(direction).upper())
-            axis = dof_axis(direction)
-            if node is None or vector is None or axis is None \
-                    or int(node) not in node_row:
+        dofs = series_quantity_dofs([('', source, None)], quantity)
+        for dof, found in zip(dofs, dof_arrow_vectors(geometry, dofs)):
+            if found is None:
                 continue
-            arrows.append({'node': node_row[int(node)],
+            row, vector, axis = found
+            node = int(geometry.node_id[row])
+            if node not in node_row:
+                continue
+            arrows.append({'node': node_row[node],
                            'vector': [_compact(v) for v in vector],
                            'color': AXIS_COLORS[axis],
                            'label': dof})

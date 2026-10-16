@@ -274,3 +274,66 @@ def test_a_large_bare_geometry_says_why_it_has_no_arrows(window, pump):
     actors('Large', True)
     message = window.statusBar().currentMessage()
     assert f'no DOF arrows on {large.num_nodes:,} nodes' in message, message
+
+
+def _turned():
+    """Two nodes, the first measured in a system turned 90 degrees about
+    Z: its X is global Y, its Y global -X."""
+    from visualdynamics.core.geometry import Geometry
+
+    turned = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0],
+                       [0.0, 0.0, 0.0]])
+    return Geometry(np.array([1, 2]), np.array([[0.0, 0.0, 0.0],
+                                                 [1.0, 0.0, 0.0]]),
+                    node_disp_cs=[2, 1], cs_id=[1, 2], cs_type=[0, 0],
+                    cs_matrix=np.stack([np.vstack([np.eye(3), np.zeros(3)]),
+                                        turned]),
+                    length_unit='m')
+
+
+def test_an_arrow_points_along_its_node_s_displacement_system():
+    """The arrows were drawn along global X, Y and Z whatever the node's
+    displacement system said, while the animation moved the node along
+    the turned axis (Brandon, 2026-10-16). One rule for both now."""
+    import pyvista as pv
+
+    from visualdynamics.deform import dof_directions
+    from visualdynamics.viz.geometry import add_dof_arrows, dof_arrow_vectors
+
+    geometry = _turned()
+    dofs = ['1X+', '1Y+', '2X+', '1RZ-']
+    found = dof_arrow_vectors(geometry, dofs)
+    assert np.allclose(found[0][1], [0.0, 1.0, 0.0])
+    assert np.allclose(found[1][1], [-1.0, 0.0, 0.0])
+    assert np.allclose(found[2][1], [1.0, 0.0, 0.0]), 'the global node is not turned'
+    assert np.allclose(found[3][1], [0.0, 0.0, -1.0])
+    assert [f[2] for f in found] == [0, 1, 0, 2], 'colored by its own axis letter'
+    _rows, moved, _used = dof_directions(geometry, dofs[:3])
+    assert np.allclose(moved, [f[1] for f in found[:3]]), (
+        'the arrow points where the animation moves the node')
+
+    plotter = pv.Plotter(off_screen=True)
+    try:
+        add_dof_arrows(plotter, geometry, ['1X+'], unit_system=visualdynamics.SI,
+                       name='dofs')
+        mesh = plotter.actors['dofs-arrows0'].mapper.dataset
+    finally:
+        plotter.close()
+    x0, x1, y0, y1, _z0, _z1 = mesh.bounds
+    assert y1 - y0 > 3 * (x1 - x0), 'the drawn X+ arrow runs along global Y'
+
+
+def test_a_report_s_arrows_turn_with_the_displacement_system():
+    from visualdynamics.core.data import TimeHistory
+
+    history = TimeHistory(np.arange(8) / 8.0, np.zeros((1, 8)),
+                          response_dof=['1X+'])
+    history.define_units('m/s^2')
+    report = Report('R', [{'kind': 'scene', 'geometry': 'Geometry',
+                           'shapes': '', 'dofs': 'acceleration',
+                           'dofs_source': 'Run', 'caption': 'DOFs'}])
+    payload = json.loads(render_html(
+        report, {'Geometry': _turned(), 'Run': history}).split(
+        'type="application/json">')[1].split('</script>')[0])
+    (arrow,) = payload['blocks'][0]['arrows']
+    assert np.allclose(arrow['vector'], [0.0, 1.0, 0.0])

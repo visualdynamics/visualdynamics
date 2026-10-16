@@ -828,14 +828,14 @@ def _geometry_datasets(geometry, unit_system=None):
         ids: list[int] = []
         for chain in line['chains']:
             ids += ([0] if ids else []) + [int(n) for n in chain]
-        body = (f'{int(line["block"]):10d}{len(ids):10d}'
+        body = (f'{int(line["group"]):10d}{len(ids):10d}'
                 f'{int(line["color"]):10d}\n'
                 f'{str(line["name"])[:80]}\n')
         body += ''.join(
             ''.join(f'{n:10d}' for n in ids[start:start + 8]) + '\n'
             for start in range(0, len(ids), 8))
         out.append(_block(82, body))
-    drawn_blocks = {line['block'] for line in drawn}
+    drawn_blocks = {line['group'] for line in drawn}
 
     if len(geometry.elem_conn):
         elements = []

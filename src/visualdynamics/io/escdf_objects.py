@@ -281,7 +281,7 @@ def _geometry_dataset(name: str, geometry: Geometry) -> escdf.Dataset:
         values['line_connection'] = [np.asarray(chain, dtype=np.uint64)
                                      for _l, chain in runs]
         values['line_color'] = _colors([line['color'] for line, _c in runs])
-    drawn_blocks = {line['block'] for line in drawn}
+    drawn_blocks = {line['group'] for line in drawn}
     rows = [i for i, code in enumerate(geometry.elem_type)
             if int(code) in _ELEMENT_NAMES
             and int(geometry.elem_group[i]) not in drawn_blocks]

@@ -473,3 +473,27 @@ def test_node_index_refuses_an_id_the_geometry_lacks():
     for missing in ([15], [40], [10, 99]):
         with pytest.raises(KeyError, match=str(missing[-1])):
             g.node_index(missing)
+
+
+@pytest.mark.parametrize('fmt', ['sdynpy_geometry', 'unv', 'escdf', 'nastran',
+                                 'exodus', 'matlab'])
+def test_a_geometry_with_drawn_lines_saves_and_reads_back(tmp_path, fmt):
+    """`drawn_lines` names its element group 'group' since blocks became
+    element groups (2026-10-08); the sdynpy, UNV and ESCDF writers still
+    asked for 'block' and raised KeyError on any geometry with
+    tracelines (Brandon, 2026-10-16). No test saved one."""
+    from visualdynamics import io
+
+    geo = visualdynamics.import_file(SURVEY_NPZ)
+    assert geo.drawn_lines(), 'the survey model is drawn lines'
+    suffix = next(e.suffix for e in io.exporters(geo) if e.name == fmt)
+    path = tmp_path / f'survey{suffix}'
+    io.export_file(geo, path, format=fmt)
+    back = visualdynamics.import_file(str(path))
+    if isinstance(back, dict):
+        back = next(obj for obj in back.values() if hasattr(obj, 'node_id'))
+    assert sorted(back.node_id.tolist()) == sorted(geo.node_id.tolist())
+    if fmt in ('sdynpy_geometry', 'unv', 'escdf'):
+        assert sum(len(line['chains']) for line in back.drawn_lines()) == \
+            sum(len(line['chains']) for line in geo.drawn_lines()), \
+            'every run of every drawn line comes back'

@@ -156,12 +156,12 @@ def save(geometry: Geometry, path: str | os.PathLike, unit_system: UnitSystem | 
     drawn = geometry.drawn_lines()
     runs = [(line, chain) for line in drawn for chain in line['chains']]
     traceline = np.zeros(len(runs), dtype=TRACELINE_DTYPE)
-    traceline['id'] = [line['block'] for line, _c in runs]
+    traceline['id'] = [line['group'] for line, _c in runs]
     traceline['color'] = [line['color'] for line, _c in runs]
     traceline['description'] = [str(line['name'])[:40] for line, _c in runs]
     traceline['connectivity'] = _connectivity(
         [np.asarray(chain, dtype=np.int64) for _l, chain in runs])
-    drawn_blocks = {line['block'] for line in drawn}
+    drawn_blocks = {line['group'] for line in drawn}
     kept = [i for i, b in enumerate(geometry.elem_group)
             if int(b) not in drawn_blocks]
 

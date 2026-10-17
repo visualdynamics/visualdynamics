@@ -45,9 +45,11 @@ def label_text(reading: Any, unit: str = '', scale: float = 1.0) -> str:
     the spike reads short for it, or 'uncertain' when a note on the
     reading bears on the amplitude. `scale` converts the amplitude into
     `unit`; the density takes its square."""
+    from ..core.tone_readout import density_label
+
     if not reading.amplitude:
         return 'no tone'
-    density = f'{unit}²/Hz' if unit else '/Hz'
+    density = density_label(unit)
     text = (f'{reading.amplitude * scale:.3g} {unit} peak'.replace('  ', ' ')
             + f'\nspike {reading.spike * scale ** 2:.3g} {density}')
     if reading.uncertain:
@@ -179,14 +181,15 @@ def display_units(data: Any, record: int, unit_system: Any
     """(amplitude scale, density scale, amplitude unit) for showing a
     tone read off record `record` of `data` in `unit_system`: g and
     g²/Hz for an acceleration's autospectrum shown in g, ones and an
-    empty unit for a record whose units are not declared."""
+    empty unit for a record whose units are not declared or that is not
+    an autospectrum."""
+    from ..core.data import channel_quantities
     from ..units import UNKNOWN
 
     dimension = str(data.ordinate_dim[record])
-    suffix = '**2/frequency'
-    if dimension == UNKNOWN or not dimension.endswith(suffix):
+    amplitude, other = channel_quantities(dimension)
+    if dimension == UNKNOWN or amplitude != other:
         return 1.0, 1.0, ''
-    amplitude = dimension[:-len(suffix)]
     return (float(unit_system.from_si(1.0, amplitude)),
             float(unit_system.from_si(1.0, dimension)),
             unit_system.label_text(amplitude))

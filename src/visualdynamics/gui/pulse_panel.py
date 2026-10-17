@@ -112,7 +112,7 @@ class PulsePanel(QWidget):
             'How far the velocity change, integrated from 0.4 durations '
             'before the pulse to 0.1 after it, may sit from the nominal '
             'pulse\'s, in percent. The document the procedure cites '
-            'gives the figure; some older revisions ask for 10')
+            'gives the figure')
         self.quiet_box: DoubleSpinBox = _box(
             0.0, 20.0, 2, 0.5,
             'How long before and after the pulse the record is held to '

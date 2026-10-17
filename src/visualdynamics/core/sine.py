@@ -329,6 +329,32 @@ class SineTone:
                          else f0 + (f1 - f0) * fraction)
         return f
 
+    def time_at(self, frequency: Any, segment: int) -> np.ndarray:
+        """When segment `segment` sweeps through `frequency`, in seconds
+        from the tone's start: `frequency_at` inverted on that segment.
+
+        A frequency outside the segment's span gives a time outside it,
+        on the same law carried on.
+
+        Parameters
+        ----------
+        frequency : array-like
+            Hz.
+        segment : int
+            The segment's index.
+
+        Returns
+        -------
+        ndarray
+            Seconds from the tone's start, the shape of `frequency`.
+        """
+        # added 2026-10-16 for the sweep-rate check, which had its own copy
+        start, length, f0, f1, log = self._segments()[segment]
+        f = np.asarray(frequency, dtype=np.float64)
+        fraction = (np.log(f / f0) / np.log(f1 / f0) if log
+                    else (f - f0) / (f1 - f0))
+        return start + length * fraction
+
     def phase_at(self, t: Any) -> np.ndarray:
         """The cosine argument, radians, at seconds `t` from the
         tone's start.
@@ -470,42 +496,6 @@ class SineTone:
                             / np.log(f1 / f0))
             out[inside] = (values[i]
                            + (values[i + 1] - values[i]) * fraction[:, None])
-        return out
-
-    def level_at(self, t: Any, curve: str = 'amplitude') -> np.ndarray:
-        """The specified level at seconds `t` from the tone's start,
-        shape (len(t), m).
-
-        The same law `target` follows, read against time instead of
-        frequency: linear in time between breakpoints, which is where a
-        dwell's level lives, since over frequency a dwell is one point.
-        `curve` is 'amplitude' or one of `LIMITS`; a limit the tone does
-        not carry raises ValueError. Outside the tone's span the level
-        is NaN, as `target` is outside its sweep.
-
-        Parameters
-        ----------
-        t : array-like
-            Seconds from the tone's start.
-        curve : str, default 'amplitude'
-            Which curve.
-
-        Returns
-        -------
-        ndarray
-            The level, SI, one row per instant and a column per control
-            channel.
-        """
-        values = (self.amplitude if curve == 'amplitude'
-                  else self.limits.get(curve))
-        if values is None:
-            raise ValueError(f'{self.name} carries no {curve}')
-        t = np.atleast_1d(np.asarray(t, dtype=np.float64))
-        edges = np.concatenate(([0.0], np.cumsum(self.segment_seconds())))
-        out = np.full((len(t), values.shape[1]), np.nan)
-        for column in range(values.shape[1]):
-            out[:, column] = np.interp(t, edges, values[:, column],
-                                       left=np.nan, right=np.nan)
         return out
 
     def __eq__(self, other: object) -> bool:

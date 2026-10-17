@@ -23,6 +23,7 @@ verdict is set in bold.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
@@ -97,7 +98,10 @@ def table_html(result: Any, foreground: str) -> str:
     then `verdict_rows`, with each failing verdict and each failing
     segment's name in bold."""
     def cell(text: str, bold: bool = False, tag: str = 'td') -> str:
-        body = f'<b>{text}</b>' if bold else text
+        # a segment's name is the user's text, and a '<' in it would be
+        # read as markup (2026-10-16 review)
+        body = html.escape(text)
+        body = f'<b>{body}</b>' if bold else body
         return (f'<{tag} style="padding: 1px 8px 1px 0px; '
                 f'color: {foreground};">{body}</{tag}>')
 
@@ -130,13 +134,13 @@ def build_replication_segments(layout: Any, measured: Any,
                                unit_system: Any = None, theme: Any = None,
                                **settings: Any) -> Any:
     """Draw one channel of a run against its reference, segments shaded,
-    with the verdict table, and return the judgement
+    with the verdict table, and return the judgment
     (`core.replication_segments.replication_segments`).
 
     Three rows of `layout`: the two traces overlaid (the reference in
     gray, the control in the first curve color) with their legend, the
     difference, control minus reference, on the same time axis, and the
-    table (`verdict_rows`). The settings are the judgement's.
+    table (`verdict_rows`). The settings are the judgment's.
     """
     import pyqtgraph as pg
     from PySide6.QtCore import Qt

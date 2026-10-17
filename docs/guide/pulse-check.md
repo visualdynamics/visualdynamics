@@ -5,7 +5,7 @@ duration: a half-sine, a terminal-peak sawtooth or a trapezoid. It is
 accepted on the measured pulse, point by point against a tolerance
 envelope drawn around the nominal shape, and as a whole on its
 velocity change, the area under it. `visualdynamics.core.classical_pulse`
-makes that judgement, and `plot_pulse_check` and the **Pulse Check**
+makes that judgment, and `plot_pulse_check` and the **Pulse Check**
 reading on a time history's bar draw it.
 
 ## The pulse
@@ -29,15 +29,15 @@ before anything else varies.
 ## What it is judged against
 
 Each tolerance is an argument, because the document the test procedure
-cites decides it. The defaults are an example of what test documents
-commonly ask for:
+cites decides it. The defaults are this package's starting point, not
+any one document's figures:
 
 | Argument | Default | What it holds |
 |---|---|---|
 | `band` | 0.2 | the band either side of the ideal shape on the pulse, and of zero before and after it, as a share of the peak; it holds the measured peak to 0.8 to 1.2 of nominal as well |
 | `duration_tolerance` | 0.1 | the measured duration within a tenth of nominal |
 | `edge_limit` | 0.1 | the sawtooth's fall, or the trapezoid's rise and fall, no longer than a tenth of the duration |
-| `velocity_tolerance` | 0.2 | the velocity change within a fifth of nominal; some older revisions ask for a tenth |
+| `velocity_tolerance` | 0.2 | the velocity change within a fifth of nominal; documents and their revisions differ on this one, so look it up |
 | `quiet` | 2.5 | how many durations before and after the pulse are held to the band |
 | `window` | (0.4, 0.1) | the velocity window, in durations before the pulse starts and after it ends |
 
@@ -64,12 +64,23 @@ start, and every sample from 2.5 durations before it to 2.5 after the
 latest admissible end is judged.
 
 The velocity change is integrated raw, by the trapezoid rule with
-nothing removed, over the window from 0.4 nominal durations before the
-measured start to 0.1 after the measured end. The window is part of
-the rule: a shaker's compensated pulse, with a shallow pulse of the
-other sign either side, changes velocity by nothing over the whole
-record by design, and a mean taken out first would take out exactly the
-area being measured.
+nothing removed (`filters.integrate` with `drift_corner=None`), over
+the window from 0.4 nominal durations before the measured start to 0.1
+after the measured end. The window is part of the rule: a shaker's
+compensated pulse, with a shallow pulse of the other sign either side,
+changes velocity by nothing over the whole record by design, and a mean
+taken out first would take out exactly the area being measured. The
+samples have to be evenly spaced, and a record holding a sample that
+is not a number is refused.
+
+This velocity change is the area under the record across the window:
+the velocity where the window closes, counted from rest where it
+opens. The [shock check](shock-check.md) reports a different number
+under the same name, the span from the lowest velocity to the highest
+across its window. For a lone pulse of one sign the two agree. An
+overshoot of the other sign inside the window takes from the area and
+leaves the span alone, and the part of a compensation pulse that runs
+into the window counts against the area and not against the span.
 
 `check_pulse(history, pulse)` returns a `PulseCheck` with the record
 and the envelope over the judged span, the samples outside, the
@@ -81,7 +92,7 @@ velocity across the window, and these readings:
 | `outside_count`, `points` | samples outside the envelope, of those judged |
 | `peak_ratio`, `duration_ratio` | measured over nominal |
 | `velocity_change`, `nominal_velocity_change`, `velocity_ratio` | the change over the window, the formula's, and the one over the other |
-| `envelope_ok`, `peak_ok`, `duration_ok`, `rise_ok`, `fall_ok`, `velocity_ok` | each part of the judgement |
+| `envelope_ok`, `peak_ok`, `duration_ok`, `rise_ok`, `fall_ok`, `velocity_ok` | each part of the judgment |
 | `covered` | the record reaches across the quiet either side and the velocity window |
 | `passed`, `failures()`, `describe()` | the verdict, what was not met, and both in words |
 
@@ -121,8 +132,8 @@ A 50 g, 11 ms half-sine followed by a fixture ringing at 700 Hz, its
 first swings at 15 g, is flagged: the pulse is in, and 44 samples after
 it are outside the band of 10 g, each marked. The velocity change is
 within a percent of nominal, because only the ringing's first swing
-falls inside the window; the band after the pulse is where it shows, as
-it should, since the article felt it.
+falls inside the window. The band after the pulse is where the ringing
+shows, and it should show somewhere: the test article felt it.
 
 ![A 50 g half-sine with a fixture ringing after it, the samples past the
 band after the pulse marked](images/pulse-check-ringing.png)

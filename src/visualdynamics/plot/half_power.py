@@ -34,6 +34,8 @@ from typing import Any
 
 import numpy as np
 
+from ..core.half_power import _figures
+
 #: the markers' size, pixels
 MARKER_SIZE = 9
 
@@ -49,7 +51,7 @@ def label_text(reading: Any) -> str:
     trusted, in as few words as the plot can carry."""
     if reading.q is None:
         return 'no half-power width'
-    text = f'Q {reading.q:.3g}'
+    text = f'Q {_figures(reading.q, 3)}'
     if not reading.resolved:
         text += f'\n{reading.lines:.2g} lines: too few'
     return text

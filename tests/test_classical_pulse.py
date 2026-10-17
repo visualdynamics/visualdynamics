@@ -88,6 +88,13 @@ def test_a_sawtooth_falling_in_its_whole_allowance_is_a_tenth_over():
     assert round(in_s(check.velocity_change), 1) == 93.4
     assert check.velocity_ratio == pytest.approx(1.10, abs=1e-3)
     assert check.measured.fall == pytest.approx(0.1 * T, abs=1.0 / RATE)
+    # the start and the end, the fall included, read off the record
+    assert check.measured.start == pytest.approx(0.06, abs=1e-6)
+    assert check.measured.end == pytest.approx(0.06 + 1.1 * T, abs=1e-6)
+    # the rise is read to its last sample, the record's nearest to the
+    # crest, which falls between two
+    assert check.measured.duration == pytest.approx(
+        np.floor((0.06 + T) * RATE) / RATE - 0.06, abs=1e-9)
     assert check.fall_ok and check.passed
     assert 'velocity change +10.0 % of nominal' in check.describe()
 
@@ -99,6 +106,11 @@ def test_a_trapezoids_change_counts_half_of_each_edge():
     assert check.velocity_ratio == pytest.approx(1.0, abs=1e-4)
     assert check.measured.rise == pytest.approx(0.001, abs=1e-6)
     assert check.measured.fall == pytest.approx(0.001, abs=1e-6)
+    # each edge extended to zero: the start, the end, and the span
+    # between them the duration
+    assert check.measured.start == pytest.approx(0.06, abs=1e-6)
+    assert check.measured.end == pytest.approx(0.06 + T, abs=1e-6)
+    assert check.measured.duration == pytest.approx(T, abs=1e-6)
 
 
 def test_the_velocity_window_runs_from_0_4_before_to_0_1_after():
@@ -130,6 +142,39 @@ def test_the_velocity_is_integrated_raw():
     check = judge_pulse(t, made, nominal)
     assert check.passed
     assert check.velocity_ratio == pytest.approx(1.0, abs=0.01)
+
+
+def test_the_velocity_goes_through_the_packages_raw_integration(
+        monkeypatch):
+    """One trapezoid rule in the package: the window is integrated by
+    `filters.integrate` with no drift corner, as the shock check
+    integrates, and its answer is the one the check reports."""
+    from visualdynamics.core import filters
+
+    calls = []
+    real = filters.integrate
+
+    def counted(data, drift_corner=filters.DRIFT_CORNER):
+        calls.append(drift_corner)
+        return real(data, drift_corner)
+
+    monkeypatch.setattr(filters, 'integrate', counted)
+    check = judged(pulse(peak=100.0))
+    assert calls == [None]
+    assert round(in_s(check.velocity_change), 1) == 270.4
+
+
+def test_unevenly_spaced_samples_are_refused():
+    """The integration steps by one sample time, so a record whose
+    samples are not evenly spaced is refused rather than integrated as
+    though they were."""
+    t, opens = record()
+    t = t.copy()
+    t[100:] += 0.5 / RATE
+    nominal = pulse()
+    with pytest.raises(ValueError, match='A pulse check needs evenly '
+                                         'spaced time samples'):
+        judge_pulse(t, nominal.at(t - opens), nominal)
 
 
 # ---- the envelope ------------------------------------------------------------
@@ -220,9 +265,8 @@ def test_a_pulse_a_quarter_high_fails_at_its_peak():
 
 def test_a_pulse_15_percent_high_is_held_by_the_velocity_tolerance():
     """Inside a fifth's band at every point (1.15 of the peak is under
-    1.2) and inside a fifth on velocity, so it passes; under the tenth
-    some older revisions ask of the velocity change it fails, on that
-    alone."""
+    1.2) and inside a fifth on velocity, so it passes; held to a tenth
+    on the velocity change it fails, on that alone."""
     nominal = pulse()
     high = pulse(peak=57.5)
     check = judged(nominal, high)
@@ -305,6 +349,41 @@ def test_a_pulse_that_runs_off_the_record_is_refused():
         measure_pulse(t, -pulse().at(t - 0.001), 'half-sine')
 
 
+@pytest.mark.parametrize('bad', [np.nan, np.inf])
+def test_a_sample_that_is_not_a_number_is_refused_for_what_it_is(bad):
+    """One NaN far from the pulse: refused by name, not read as a record
+    that never moves in the pulse's direction."""
+    t, opens = record()
+    nominal = pulse()
+    values = nominal.at(t - opens)
+    values[17] = bad
+    message = ('1 of the record\'s samples are not finite numbers '
+               r'\(NaN or infinite\), the first at sample 17')
+    with pytest.raises(ValueError, match=message):
+        measure_pulse(t, values, 'half-sine')
+    with pytest.raises(ValueError, match=message):
+        judge_pulse(t, values, nominal)
+    with pytest.raises(ValueError, match=message):
+        suggest_pulse(t, values)
+
+
+def test_the_crossings_are_interpolated_between_samples():
+    """A sawtooth at 1 kHz, eleven samples up its rise, starting 0.3 of
+    a sample after one: its rise is straight, so the tenth and nine
+    tenths crossings interpolated between the samples either side of
+    each are exact, and so is the start they extend to. The duration
+    is read to the last sample on the rise, 10.7 ms, since the record
+    has no sample nearer the instant fall."""
+    rate = 1000.0
+    t = np.arange(160) / rate
+    opens = 0.0603
+    measured = measure_pulse(t, pulse('sawtooth', 40.0).at(t - opens),
+                             'sawtooth')
+    assert measured.start == pytest.approx(opens, abs=1e-9)
+    assert measured.duration == pytest.approx(0.0107, abs=1e-9)
+    assert measured.peak_time == pytest.approx(0.071)
+
+
 def test_the_suggestion_is_the_half_sine_the_record_resembles():
     t, opens = record()
     made = pulse(peak=-42.0, duration=0.009)
@@ -312,6 +391,25 @@ def test_the_suggestion_is_the_half_sine_the_record_resembles():
     assert suggested.shape == 'half-sine'
     assert suggested.peak == pytest.approx(-42.0 * G, rel=1e-3)
     assert suggested.duration == pytest.approx(0.009, rel=1e-4)
+
+
+@pytest.mark.parametrize('made', [
+    pulse('sawtooth', 35.0, duration=0.008, edge=0.0006),
+    pulse('trapezoid', -25.0, duration=0.010, edge=0.0015)],
+    ids=['sawtooth', 'trapezoid'])
+def test_the_suggestion_reads_the_edge_of_a_sawtooth_and_a_trapezoid(made):
+    """The sawtooth's fall and the trapezoid's edges are read off the
+    record with the duration, so the suggestion is the pulse made."""
+    t, opens = record()
+    suggested = suggest_pulse(t, made.at(t - opens), made.shape)
+    assert suggested.shape == made.shape
+    assert suggested.peak == pytest.approx(made.peak, rel=1e-3)
+    # a sawtooth's rise is read to its last sample, the nearest to its
+    # crest, which falls between two
+    duration = (np.floor((opens + made.duration) * RATE) / RATE - opens
+                if made.shape == 'sawtooth' else made.duration)
+    assert suggested.duration == pytest.approx(duration, abs=1e-9)
+    assert suggested.edge == pytest.approx(made.edge, abs=1e-6)
 
 
 @pytest.mark.parametrize('args,match', [
@@ -331,6 +429,8 @@ def test_the_pulse_describes_itself():
     assert pulse().describe('g', 1.0 / G) == '50 g, 11 ms half-sine'
     assert (pulse('sawtooth', 40.0, edge=0.0011).describe('g', 1.0 / G)
             == '40 g, 11 ms, 1.1 ms fall sawtooth')
+    assert (pulse('trapezoid', 30.0, edge=0.001).describe('g', 1.0 / G)
+            == '30 g, 11 ms, 1 ms edges trapezoid')
     assert pulse('sawtooth', 40.0).extent == T
     assert pulse('sawtooth', 40.0, edge=0.001).extent == pytest.approx(0.012)
 
@@ -390,7 +490,8 @@ def test_the_view_marks_the_points_outside_and_shades_the_window(qt_app):
     build_pulse_check(layout, check, unit_system=SI, name='1Z+')
     record_plot, velocity_plot = _plots(layout)
     assert 'Flagged' in record_plot.titleLabel.text
-    assert '1Z+: 50 m/s' not in record_plot.titleLabel.text
+    assert record_plot.titleLabel.text.startswith(
+        '1Z+: 490.3 m/s², 11 ms half-sine<br>Flagged: ')
     marks = [item for item in record_plot.listDataItems()
              if getattr(item, 'is_outside_mark', False)]
     assert len(marks) == 1

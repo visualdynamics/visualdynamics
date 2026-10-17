@@ -32,8 +32,10 @@ argument, and the document the procedure cites decides its values):
   within a fifth of the nominal pulse's (`VELOCITY_TOLERANCE`). The
   window is part of the rule: a shaker's compensated pulse changes
   velocity by nothing over the whole record, by design, so the area is
-  taken around the main pulse only. Older revisions of some documents
-  hold the velocity change to a tenth, not a fifth.
+  taken around the main pulse only. The fifth is this package's
+  default, not a document's figure; documents and their revisions
+  differ on this tolerance, so it is set from the one the procedure
+  cites.
 
 The nominal velocity change is the area formula of each shape, with
 `A` the peak and `T` the duration: ``2AT/π`` for the half-sine,
@@ -76,10 +78,23 @@ cannot resolve a time finer than a sample, so the duration and edge
 tolerances are read with half a sample's grace.
 
 The velocity change is integrated raw, by the trapezoid rule with
-nothing removed, over the window placed on the measured pulse: from 0.4
-nominal durations before its start to 0.1 after its end. A mean removed
-or a drift high-pass applied first would take out exactly the net area
-being measured.
+nothing removed (`filters.integrate` with ``drift_corner=None``), over
+the window placed on the measured pulse: from 0.4 nominal durations
+before its start to 0.1 after its end. A mean removed or a drift
+high-pass applied first would take out exactly the net area being
+measured. The integration needs evenly spaced samples, so a record
+whose samples are not evenly spaced is refused, as is one holding a
+sample that is not a number.
+
+The velocity change here is the area over the window: the velocity
+where the window closes, from rest where it opens. The shock check
+(`core.shock_check`) reads a different number under the same name,
+the span from the lowest velocity to the highest across its whole
+window. For a lone one-signed pulse the two agree. They part where the
+record swings the other way: an overshoot of the other sign after the
+pulse, inside the window, takes from the area here and leaves the span
+alone, and compensation that runs into the window is counted here and
+not by the span.
 
 References
 ----------
@@ -112,8 +127,14 @@ if TYPE_CHECKING:                                    # pragma: no cover
 
 # Asked for on 2026-10-16, for a worked example in which a 40 g, 11 ms
 # sawtooth whose fall took its full allowance changed velocity by
-# 93.4 in/s against the formula's 84.9: in tolerance, and a tenth of
-# the way to the edge of it before anything else varied.
+# 93.4 in/s against the formula's 84.9: a tenth over, in tolerance, and
+# half the way to the edge of it before anything else varied.
+#
+# 2026-10-16, on review: the velocity tolerance's default was described
+# as what IEC 60068-2-27 commonly asks for, with older revisions at a
+# tenth. Neither figure was checked against the standard, so the fifth
+# is stated as this package's default and the attribution is gone; the
+# value stands until a source says otherwise.
 
 #: the shapes, as `ClassicalPulse` names them
 SHAPES = ('half-sine', 'sawtooth', 'trapezoid')
@@ -437,8 +458,9 @@ def measure_pulse(time: ArrayLike, acceleration: ArrayLike,
     Raises
     ------
     ValueError
-        If `shape` is not a classical shape, the record never moves in
-        `direction`, or the pulse runs off either end of the record.
+        If `shape` is not a classical shape, a time or a value is not
+        a finite number, the record never moves in `direction`, or the
+        pulse runs off either end of the record.
     """
     if shape not in SHAPES:
         raise ValueError(f'a classical pulse is one of {", ".join(SHAPES)}; '
@@ -449,6 +471,14 @@ def measure_pulse(time: ArrayLike, acceleration: ArrayLike,
     if t.shape != y.shape or t.size < 3:
         raise ValueError('a pulse is read from matching time and value '
                          'arrays of at least three samples')
+    # 2026-10-16, on review: one NaN anywhere made argmax return it, and
+    # the refusal said the record never moved in the pulse's direction
+    broken = np.flatnonzero(~(np.isfinite(t) & np.isfinite(y)))
+    if broken.size:
+        raise ValueError(
+            f'{broken.size} of the record\'s samples are not finite '
+            f'numbers (NaN or infinite), the first at sample '
+            f'{int(broken[0])}; a pulse is not read across them')
     at = int(np.argmax(y))
     peak = float(y[at])
     if not peak > 0.0:
@@ -479,7 +509,6 @@ def measure_pulse(time: ArrayLike, acceleration: ArrayLike,
     return PulseMeasurement(start=start, end=end, duration=end - start,
                             peak=sign * peak, peak_time=float(t[at]),
                             rise=rising, fall=falling)
-
 
 
 def suggest_pulse(time: ArrayLike, acceleration: ArrayLike,
@@ -523,6 +552,7 @@ def suggest_pulse(time: ArrayLike, acceleration: ArrayLike,
         edge = min(max(measured.rise or 0.0, measured.fall or 0.0),
                    0.49 * measured.duration)
     return ClassicalPulse(shape, measured.peak, measured.duration, edge)
+
 
 @dataclass(frozen=True, eq=False)
 class PulseCheck:
@@ -597,7 +627,13 @@ class PulseCheck:
 
     @property
     def velocity_change(self) -> float:
-        """The measured velocity change over the window, SI, signed."""
+        """The measured velocity change over the window, SI, signed.
+
+        The area under the record across the window, the velocity where
+        the window closes. Not the span from the lowest velocity to the
+        highest that `core.shock_check.ShockCheck.velocity_change`
+        reads; the module docstring says where the two differ.
+        """
         return float(self.velocity[-1]) if self.velocity.size else 0.0
 
     @property
@@ -733,12 +769,13 @@ def judge_pulse(time: ArrayLike, acceleration: ArrayLike,
     placed on its measured start (`pulse_envelope`) and every sample
     from `quiet` durations before the start to as long after the latest
     admissible end is judged against it, and the velocity change is
-    integrated raw over `window` and compared with the nominal's.
+    integrated raw over `window` (`filters.integrate`, no drift
+    corner) and compared with the nominal's.
 
     Parameters
     ----------
     time : array_like
-        Each sample's time, in seconds; evenly spaced or not.
+        Each sample's time, in seconds, evenly spaced and in order.
     acceleration : array_like
         The record, in SI.
     pulse : ClassicalPulse
@@ -765,10 +802,12 @@ def judge_pulse(time: ArrayLike, acceleration: ArrayLike,
     Raises
     ------
     ValueError
-        If a tolerance is not a positive share, or the pulse cannot be
-        found in the record (`measure_pulse`).
+        If a tolerance is not a positive share, the samples are not
+        evenly spaced, or the pulse cannot be found in the record
+        (`measure_pulse`).
     """
-    from scipy.integrate import cumulative_trapezoid
+    from .data import TimeHistory, _even_steps
+    from .filters import integrate
 
     for name, value in (('band', band),
                         ('duration tolerance', duration_tolerance),
@@ -785,6 +824,7 @@ def judge_pulse(time: ArrayLike, acceleration: ArrayLike,
     t = np.asarray(time, dtype=float)
     a = np.real(np.asarray(acceleration, dtype=complex))
     measured = measure_pulse(t, a, pulse.shape, pulse.peak)
+    step = _even_steps(t, 'A pulse check')
     duration = pulse.duration
     span = (measured.start - quiet * duration,
             measured.start + admissible_reach(pulse, duration_tolerance,
@@ -801,9 +841,16 @@ def judge_pulse(time: ArrayLike, acceleration: ArrayLike,
              measured.end + window[1] * duration)
     inside = (t >= opens[0]) & (t <= opens[1])
     across = t[inside]
-    velocity = (cumulative_trapezoid(a[inside], across, initial=0.0)
-                if across.size > 1 else np.zeros(across.size))
-    step = float(np.median(np.diff(t))) if t.size > 1 else 0.0
+    # 2026-10-16, on review: integrated through filters.integrate, raw,
+    # as the shock check is, so the package has one trapezoid rule; it
+    # was scipy's cumulative_trapezoid called here, which also took
+    # unevenly spaced samples that nothing else in the package does
+    if across.size > 1:
+        windowed = TimeHistory(across, a[inside], response_dof='1X+',
+                               ordinate_dim='acceleration')
+        velocity = np.real(np.asarray(integrate(windowed, None).ordinate[0]))
+    else:
+        velocity = np.zeros(across.size)
     return PulseCheck(
         pulse=pulse, measured=measured, time=t[judged], acceleration=values,
         lower=lower, upper=upper, outside=outside, velocity_time=across,

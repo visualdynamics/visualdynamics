@@ -463,6 +463,25 @@ def _draw_shocks(painter, color):
                                  (at + 6, 36), (at + 9, 44)]))
 
 
+def _draw_segments(painter, color):
+    """One trace cut into three shaded spans: a steady stretch, a spike,
+    and a stretch that swells.
+
+    The segments reading in miniature: the record whole, marked into
+    pieces each judged on its own. Three spans of unequal width, where
+    the shocks glyph brackets two equal events.
+    """
+    faint = QColor(color)
+    faint.setAlpha(70)
+    for first, last in ((6, 26), (30, 38), (42, 58)):
+        painter.fillRect(QRectF(first, 12, last - first, 40), QBrush(faint))
+    painter.setPen(_pen(color, 4))
+    painter.drawPath(_curve([(6, 32), (10, 28), (14, 36), (18, 28),
+                             (22, 36), (26, 32), (30, 32), (34, 14),
+                             (38, 32), (42, 32), (46, 26), (50, 40),
+                             (54, 22), (58, 32)]))
+
+
 
 def _draw_pulse(painter, color):
     """A half-sine on a baseline inside its tolerance band.
@@ -2056,6 +2075,7 @@ def control_icon(name: str) -> QIcon:
      'waterfall': _draw_waterfall,
      'drive_point': _draw_drive_point, 'cmif': _draw_cmif,
      'averaging': _draw_averaging, 'shocks': _draw_shocks,
+     'segments': _draw_segments,
      'pulse': _draw_pulse,
      'stroke': _draw_stroke,
      'residual': _draw_residual,

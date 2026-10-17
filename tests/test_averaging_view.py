@@ -322,6 +322,11 @@ def test_the_table_says_what_the_averages_are_worth(window, pump):
     panel.frames_box.setValue(10)
     pump()
     assert panel.records == 1
+    # statistical, so not read as the measurement DOFs beside them
+    from PySide6.QtWidgets import QLabel
+
+    names = {label.text() for label in panel.findChildren(QLabel)}
+    assert {'Statistical DOF (2n)', 'Equivalent statistical DOF'} <= names
     assert panel.derived['dof'].text() == '20'
     # Welch's closed form for Hann at half overlap: 36 n² / (19 n - 1)
     assert panel.derived['equivalent'].text() == f'{3600 / 189:.4g}'

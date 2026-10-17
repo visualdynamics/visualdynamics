@@ -7,7 +7,8 @@ each mode for its limits (`plot.signature`). This panel holds what the
 comparison is made under (which of the two is the signature before the
 test, the modes named and which of them count, and the two limits) and,
 under them, what came of it: each mode's frequency and height before
-and after, its two shifts, Q before and after, and its verdict.
+and after, its two shifts, Q before and after, its verdict, and what
+its readings cannot be trusted for.
 
 Every edit redraws the plot at once. Nothing is made: the comparison is
 a reading of two objects that already exist, as the signal-to-noise
@@ -105,7 +106,7 @@ class SignaturePanel(QWidget):
         self.names, self.editors = add_keyed_settings(grid, [
             ('before', 'Before', self.before_box),
             ('modes', 'Modes [Hz]', self.modes_edit),
-            ('find', 'Find [peaks]', self.find_box),
+            ('find', 'Peaks found', self.find_box),
             ('frequency', 'Frequency [±%]', self.frequency_box),
             ('amplitude', 'Amplitude [±%]', self.amplitude_box),
         ])
@@ -140,7 +141,9 @@ class SignaturePanel(QWidget):
 
     def set_pair(self, names: Sequence[str]) -> None:
         """Offer the two selected objects as the signature before,
-        keeping the choice when the same two are selected again."""
+        keeping the choice when the same two are selected again. A new
+        pair clears the modes named, which were named for the last
+        pair's article, so its own are found."""
         names = [str(name) for name in names]
         if [self.before_box.itemText(i)
                 for i in range(self.before_box.count())] == names:
@@ -149,8 +152,10 @@ class SignaturePanel(QWidget):
         try:
             self.before_box.clear()
             self.before_box.addItems(names)
+            self.modes_edit.clear()
         finally:
             self._loading = False
+        self._shown_rows()
 
     def settings(self) -> dict[str, Any]:
         """The comparison's arguments: 'before' (the name chosen),
@@ -192,11 +197,13 @@ class SignaturePanel(QWidget):
             self._loading = False
         self._edited()
 
-    def show_result(self, comparison: Any, scale: float = 1.0) -> None:
+    def show_result(self, comparison: Any, scale: float = 1.0,
+                    unit: str = '') -> None:
         """Write the verdict and each mode's block: its label and
         verdict, then the frequency, height and Q before and after with
-        the two shifts. `scale` takes the heights from SI to the units
-        the plot is drawn in. None clears the readout."""
+        the two shifts, then the mode's notes. `scale` takes the heights
+        from SI to the units the plot is drawn in, and `unit` names
+        them. None clears the readout."""
         from ..plot.signature import percent
 
         if comparison is None:
@@ -217,7 +224,9 @@ class SignaturePanel(QWidget):
                 f'{shift.after.frequency:.1f} Hz, '
                 f'{percent(shift.frequency_shift)}\n'
                 f'  height {shift.before.height * scale:#.3g} to '
-                f'{shift.after.height * scale:#.3g}, '
+                f'{shift.after.height * scale:#.3g}'
+                f'{" " + unit if unit else ""}, '
                 f'{percent(shift.amplitude_shift)}\n'
-                f'  Q {q(shift.before)} to {q(shift.after)}')
+                f'  Q {q(shift.before)} to {q(shift.after)}'
+                + ''.join(f'\n  {note}' for note in shift.notes))
         self.readout.setText('\n'.join(blocks))

@@ -77,7 +77,7 @@ their spacing sum to the mean square is how the estimate is scaled.
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
 
@@ -119,6 +119,21 @@ NO_FLOOR = ('no floor could be read either side of the tone; none is '
 #: the placements the tone's position between lines is searched over,
 #: in lines from the tallest line
 _PLACEMENTS = np.linspace(-0.5, 0.5, 201)
+
+
+def density_label(unit: str = '') -> str:
+    """The unit of a density whose amplitude is in `unit`: 'g²/Hz' for
+    'g', '(m/s²)²/Hz' for 'm/s²', and '/Hz' for no unit."""
+    if not unit:
+        return '/Hz'
+    # a compound unit is squared whole: m/s²²/Hz would square the
+    # seconds only
+    plain = unit.isalpha()
+    return f'{unit}²/Hz' if plain else f'({unit})²/Hz'
+
+
+def _density_text(value: float, unit: str = '') -> str:
+    return f'{value:.3g} {density_label(unit)}'
 
 
 class ToneWarning(UserWarning):
@@ -307,10 +322,12 @@ class ToneReading:
     spacing, `offset` where the tone sits from its nearest line, in
     lines. `lines` is the (first, last) index of the lines summed, and
     `captured` the share of the tone they hold. `notes` holds the
-    warnings the reading raised, as text, and `uncertain` says whether
-    any of them bears on the amplitude (a tone between lines does not;
-    a floor that differs either side, another spike among the tone's
-    lines, or no tone at all does).
+    warnings the reading raised, as text, with any density in them in
+    the units the spectrum is stored in (`notes_in` gives them in
+    others), and `uncertain` says whether any of them bears on the
+    amplitude (a tone between lines does not; a floor that differs
+    either side, another spike among the tone's lines, or no tone at all
+    does).
     """
 
     frequency: float
@@ -328,6 +345,22 @@ class ToneReading:
     captured: float
     notes: tuple[str, ...] = ()
     uncertain: bool = False
+    #: each note as a template and the densities that fill it, kept so
+    #: `notes_in` can write them in display units
+    said: tuple[tuple[str, tuple[float, ...]], ...] = field(
+        default=(), repr=False)
+
+    def notes_in(self, unit: str = '', scale: float = 1.0
+                 ) -> tuple[str, ...]:
+        """The notes with their densities in display units: `scale`
+        converts the amplitude into `unit`, and the densities take its
+        square, as `describe` does."""
+        if not self.said:
+            return self.notes
+        return tuple(
+            text.format(*(_density_text(value * scale ** 2, unit)
+                          for value in values))
+            for text, values in self.said)
 
     @property
     def rms(self) -> float:
@@ -352,7 +385,7 @@ class ToneReading:
         '19.44 Hz: 1.94 g peak; its spike 0.978 g²/Hz (1.26 on a line)
         is not the tone'. `scale` converts the amplitude into `unit`;
         the densities take its square."""
-        density = f'{unit}²/Hz' if unit else '/Hz'
+        density = density_label(unit)
         peak = f'{unit} peak' if unit else 'peak'
         if not self.amplitude:
             return (f'{self.frequency:.4g} Hz: no tone above the floor '
@@ -363,7 +396,12 @@ class ToneReading:
                 'is not the tone')
 
 
-def _evenly_spaced(f: np.ndarray) -> float:
+def line_spacing(frequencies: Any) -> float:
+    """The spacing of evenly spaced lines, in Hz. Lines that are not
+    ascending and evenly spaced (to a millionth of the spacing) raise
+    ValueError: that test decides what a tone can be read off, here and
+    in `Psd.tone_refusal`."""
+    f = np.asarray(frequencies, dtype=np.float64).ravel()
     steps = np.diff(f)
     if not len(steps) or not np.all(steps > 0.0):
         raise ValueError('the frequencies must be ascending')
@@ -409,10 +447,12 @@ def _placement_table(kernel: Leakage) -> np.ndarray:
     return _table(kernel.window, kernel.parameter, len(kernel.shape))
 
 
-def _floor(g: np.ndarray, centre: float, reach: int, count: int
-           ) -> tuple[float, list[float], list[tuple[str, bool]]]:
+def _floor(g: np.ndarray, center: float, reach: int, count: int
+           ) -> tuple[float, list[float],
+                      list[tuple[str, bool, tuple[float, ...]]]]:
     """(floor, each side's floor, notes) under a tone at line position
-    `centre`; each note is (text, whether it bears on the amplitude).
+    `center`; each note is (template, whether it bears on the
+    amplitude, the densities that fill the template's places).
 
     Each side's floor is the median of its `count` lines beyond the
     tone's main lobe and a guard as wide again, leaving out every other
@@ -422,18 +462,18 @@ def _floor(g: np.ndarray, centre: float, reach: int, count: int
     `FLOOR_LEAST` lines left is not read. The floor under the tone is
     the mean of the sides, a straight floor through them.
     """
-    # Other tones are left out because a median of eight neighbours
+    # Other tones are left out because a median of eight neighbors
     # was not enough: four tones 19.44 Hz apart, analyzed at 4 Hz lines,
-    # put half of each tone's neighbouring lines inside another tone's
+    # put half of each tone's neighboring lines inside another tone's
     # lobe, and the floor read as the blade-passage tone's own spike
     # (the 1.944 g tone came back at 1.04 g; 2026-10-16).
     index = np.arange(len(g))
-    away = index - centre
+    away = index - center
     examined = (np.abs(away) > 2 * reach) & (np.abs(away) <= 2 * reach
                                              + count)
-    notes: list[tuple[str, bool]] = []
+    notes: list[tuple[str, bool, tuple[float, ...]]] = []
     if not examined.any():
-        return 0.0, [], [(NO_FLOOR, True)]
+        return 0.0, [], [(NO_FLOOR, True, ())]
     quartile = float(np.percentile(g[examined], 25.0))
     keep = examined.copy()
     # a spike just outside the lines examined still reaches into them
@@ -450,19 +490,18 @@ def _floor(g: np.ndarray, centre: float, reach: int, count: int
         if lines.sum() < FLOOR_LEAST:
             text = (f'fewer than {FLOOR_LEAST} lines of floor {word} the '
                     f'tone: the floor is read from {other} it')
-            notes.append((text, False))
+            notes.append((text, False, ()))
             continue
         sides.append(float(np.median(g[lines])))
     if not sides:
-        return 0.0, [], [*notes, (NO_FLOOR, True)]
+        return 0.0, [], [*notes, (NO_FLOOR, True, ())]
     if len(sides) == 2:
         low, high = sorted(sides)
         if high > FLOOR_RATIO * max(low, 0.0):
-            text = (f'the floor differs either side of the tone '
-                    f'({sides[0]:.3g} below, {sides[1]:.3g} above): the '
-                    'floor under it is a guess between them, and its '
-                    'reading is uncertain')
-            notes.append((text, True))
+            text = ('the floor differs either side of the tone '
+                    '({} below, {} above): the floor under it is a guess '
+                    'between them, and its reading is uncertain')
+            notes.append((text, True, (sides[0], sides[1])))
     return float(np.mean(sides)), sides, notes
 
 
@@ -470,18 +509,18 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
               window: Any = 'hann', length: int | None = None,
               parameter: float | None = None,
               floor_lines: int = FLOOR_LINES, snap: bool = True,
-              warn: bool = True) -> ToneReading:
+              unit: str = '', warn: bool = True) -> ToneReading:
     """Read the tone near `frequency` off an averaged autospectrum, as
     an amplitude, beside the spike it stands at.
 
     The tone's line is the tallest within the window's main lobe of
     `frequency`, and where the tone sits between lines is fitted from
     the lines about it; with `snap=False` the tone is taken to be at
-    `frequency` exactly, as a tone table states it. The lines within the main lobe of the tone, less
-    the floor estimated from the lines either side, times the
-    spacing, are its mean square (divided by the share of the tone those
-    lines hold, which the window's shape gives); the amplitude is root
-    two times its root. See the module's notes for the method and for
+    `frequency` exactly, as a tone table states it. The lines within the
+    main lobe of the tone, less the floor estimated from the lines
+    either side, times the spacing, are its mean square (divided by the
+    share of the tone those lines hold, which the window's shape gives);
+    the amplitude is root two times its root. See the module's notes for the method and for
     what is warned.
 
     Parameters
@@ -507,6 +546,10 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
         Find the tone's own spike near `frequency` and where it sits
         between lines, as a cursor wants; False reads the lines about
         `frequency` itself, as a tone table at known frequencies does.
+    unit : str, optional
+        The tone's unit as `density` holds it ('g' for g²/Hz), which the
+        notes name their densities in. `ToneReading.notes_in` writes
+        them in another.
     warn : bool, default True
         Warn the notes as `ToneWarning` as well as keeping them. A
         display that reads on every mouse move passes False.
@@ -521,7 +564,8 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
     ------
     ValueError
         When the lines and the values differ in length, hold too few
-        lines, are not evenly spaced, or `frequency` is outside them.
+        lines, are not evenly spaced, hold no finite value, or
+        `frequency` is outside them.
     """
     f = np.asarray(frequencies, dtype=np.float64).ravel()
     g = np.asarray(density)
@@ -537,17 +581,23 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
     if len(f) < 2 * reach + 3:
         raise ValueError(f'{len(f)} lines are too few to read a tone '
                          f'under a {kernel.window} window')
-    spacing = _evenly_spaced(f)
+    spacing = line_spacing(f)
     asked = float(frequency)
     if not f[0] - spacing / 2 <= asked <= f[-1] + spacing / 2:
         raise ValueError(f'{asked:g} Hz is outside the spectrum, '
                          f'{f[0]:g} to {f[-1]:g} Hz')
-    g = np.where(np.isfinite(g), g, 0.0)
-    notes: list[str] = []
+    finite = np.isfinite(g)
+    if not finite.any():
+        raise ValueError('no line of this spectrum holds a number')
+    g = np.where(finite, g, 0.0)
+    said: list[tuple[str, tuple[float, ...]]] = []
     doubts: list[str] = []
 
-    def say(text: str, doubtful: bool = True) -> None:
-        notes.append(text)
+    def say(text: str, doubtful: bool = True,
+            densities: tuple[float, ...] = ()) -> None:
+        # `text` is a template: each {} is filled by a density, in
+        # whatever unit the reading is shown in (`notes_in`)
+        said.append((text, tuple(float(d) for d in densities)))
         if doubtful:
             doubts.append(text)
 
@@ -562,17 +612,17 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
            and (top == len(f) - 1 or g[top] >= g[top + 1]))
     if snap and own:
         floor, _sides, _said = _floor(g, float(top), reach, floor_lines)
-        centre = top + _placement(kernel, g, top, floor)
+        center = top + _placement(kernel, g, top, floor)
     else:
-        centre = float(position)
+        center = float(position)
         if snap:
             say(f'no spike stands at {asked:.4g} Hz: the lines rise '
-                'toward a larger neighbour, and the lines at the '
+                'toward a larger neighbor, and the lines at the '
                 'frequency asked are read as they are')
-    floor, _sides, said = _floor(g, centre, reach, floor_lines)
-    for text, doubtful in said:
-        say(text, doubtful)
-    under = np.flatnonzero(np.abs(np.arange(len(f)) - centre)
+    floor, _sides, floor_notes = _floor(g, center, reach, floor_lines)
+    for text, doubtful, densities in floor_notes:
+        say(text, doubtful, densities)
+    under = np.flatnonzero(np.abs(np.arange(len(f)) - center)
                            <= reach + 1e-9)
     if not len(under):
         under = np.array([nearest])
@@ -587,10 +637,10 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
         if (peak_line == edge and 0 <= beyond < len(f)
                 and g[beyond] > g[edge]):
             # the tallest of the lines summed is the edge one, and the
-            # lines climb on past it: they are a larger neighbour's
+            # lines climb on past it: they are a larger neighbor's
             say(f'the lines of a larger spike, at {f[beyond]:.4g} Hz and '
                 'beyond, reach into the lines read at '
-                f'{f[0] + centre * spacing:.4g} Hz: its mean square is '
+                f'{f[0] + center * spacing:.4g} Hz: its mean square is '
                 'summed with this one\'s')
     for i in under:
         if abs(i - peak_line) < 2 or not 0 < i < len(f) - 1:
@@ -608,26 +658,34 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
     # edge leaks a line or two into the lines summed and hides there.
     # A tenth, not a half: a floor line of a lightly averaged spectrum
     # falls under half its mean often, under a tenth seldom
-    guard = np.flatnonzero(np.abs(np.arange(len(f)) - centre)
+    guard = np.flatnonzero(np.abs(np.arange(len(f)) - center)
                            <= 2 * reach + 1e-9)
     hollow = guard[g[guard] < floor / SPIKE_RATIO]
     if floor > 0.0 and len(hollow):
         say(f'the line at {f[hollow[0]]:.4g} Hz, beside the tone, reads '
-            f'{g[hollow[0]]:.3g}, far under the floor of {floor:.3g}: the '
-            'floor does not run under this tone (a tone at the edge of the '
-            'floor\'s band), and its reading is uncertain')
-    captured = float(np.sum(kernel.share(under - centre)))
+            '{}, far under the floor of {}: the floor does not run under '
+            'this tone (a tone at the edge of the floor\'s band), and its '
+            'reading is uncertain', densities=(g[hollow[0]], floor))
+    # a line that holds no number was read as zero; among the tone's
+    # lines or its floor's that is a reading of nothing
+    read = np.abs(np.arange(len(f)) - center) <= 3 * reach + floor_lines + 1
+    missing = int(np.count_nonzero(read & ~finite))
+    if missing:
+        say(f'{missing} of the lines read about '
+            f'{f[0] + center * spacing:.4g} Hz hold no number and are read '
+            'as zero: its reading is uncertain')
+    captured = float(np.sum(kernel.share(under - center)))
     total = float(np.sum(g[under] - floor)) * spacing
     mean_square = max(total, 0.0) / captured
     amplitude = float(np.sqrt(2.0 * mean_square))
-    tone_frequency = float(f[0] + centre * spacing)
-    offset = float(centre - round(centre))
+    tone_frequency = float(f[0] + center * spacing)
+    offset = float(center - round(center))
     height = mean_square / spacing * kernel.peak_share(offset)
     spike = float(np.max(g[under]))
     if not mean_square or height < floor:
         say(f'nothing at {tone_frequency:.4g} Hz stands clear of the '
-            f'floor ({floor:.3g}/Hz): this is no tone, or one too small to '
-            'read at this spacing')
+            'floor ({}): this is no tone, or one too small to read at this '
+            'spacing', densities=(floor,))
     reading = ToneReading(
         frequency=tone_frequency, asked=asked, amplitude=amplitude,
         mean_square=mean_square, spike=spike, height=height, floor=floor,
@@ -641,7 +699,9 @@ def read_tone(frequencies: Any, density: Any, frequency: float, *,
             f'of a line from the nearest line ({spacing:.3g} Hz apart): '
             f'its spike reads {100 * lost:.0f} % under its height on a '
             'line; the amplitude read from the lines does not move', False)
+    reading = replace(reading, said=tuple(said), uncertain=bool(doubts))
+    notes = reading.notes_in(unit)
     if warn:
         for note in notes:
             warnings.warn(note, ToneWarning, stacklevel=2)
-    return replace(reading, notes=tuple(notes), uncertain=bool(doubts))
+    return replace(reading, notes=notes)

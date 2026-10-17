@@ -807,6 +807,8 @@ class DataArray:
         # would describe the wrong channels' averages
         counts = getattr(self, 'statistical_dof', None)
         if counts is not None:
+            # typed here as well as on Psd: the annotations test reads the
+            # first assignment it meets, which for a DataArray is this one
             self.statistical_dof: np.ndarray | None = np.asarray(counts)[keep]
         if self.block is not None:
             # repeated-measurement labels renumber to contiguous —
@@ -1607,6 +1609,13 @@ class TimeHistory(DataArray):
     #: object, not in the call.
     shocks = None
 
+    #: which stretches of this record are which kind of motion, for
+    #: judging a replication of it segment by segment: marks as
+    #: `replication_segments.replication_segments` takes them, on this
+    #: record's own clock. Set by the segments reading, kept with the
+    #: record so a reference is marked once.
+    segments = None
+
     #: the stretch this history would be cut to, when something
     #: knows. Set in the truncate view; Truncate Data cuts with
     #: whatever is here at the time.
@@ -1801,11 +1810,11 @@ class TimeHistory(DataArray):
     def time_statistics(self, record: int = 0, **options: Any
                         ) -> TimeStatistics:
         """Read one channel's statistics in the time domain: the
-        moments, the crest factor and its peak, the samples at the peak
-        and on the rail, the tails beyond 3, 4 and 5 sigma against the
-        Gaussian's, the crossing rate counted and from the spectrum, the
-        expected largest peak and the kurtosis frame by frame, each
-        judged against its band.
+        moments, the crest factor and its peak, the excursions at the
+        peak, the samples on the rail and those not finite, the tails
+        beyond 3, 4 and 5 sigma against the Gaussian's, the crossing
+        rate counted and from the spectrum, the expected largest peak
+        and the kurtosis frame by frame, each judged against its band.
 
         `core.time_statistics.record_statistics` does the reading, over
         the span the kurtosis bars read, and says how;
@@ -2828,6 +2837,16 @@ class TimeHistory(DataArray):
         return out
 
 
+def _read_half_power(data: Any, near: float, record: int,
+                     within: tuple[float, float] | None,
+                     warn: bool) -> HalfPower:
+    """`Spectrum.half_power` and `Frf.half_power`: one reading of one
+    record's magnitude, warned at the line that called the method."""
+    from .half_power import read_half_power
+    return read_half_power(data.abscissa, data.ordinate[record], near,
+                           within=within, warn=warn, stacklevel=3)
+
+
 class Spectrum(DataArray):
     """A linear spectrum: amplitude and phase at each frequency line.
 
@@ -2893,9 +2912,7 @@ class Spectrum(DataArray):
             The peak's frequency and height (in SI, as the record is
             stored), its half-power crossings, Q and damping ratio.
         """
-        from .half_power import read_half_power
-        return read_half_power(self.abscissa, self.ordinate[record], near,
-                               within=within, warn=warn)
+        return _read_half_power(self, near, record, within, warn)
 
 
 class Frf(DataArray):
@@ -2992,9 +3009,7 @@ class Frf(DataArray):
             The peak's frequency and height (in SI, as the record is
             stored), its half-power crossings, Q and damping ratio.
         """
-        from .half_power import read_half_power
-        return read_half_power(self.abscissa, self.ordinate[record], near,
-                               within=within, warn=warn)
+        return _read_half_power(self, near, record, within, warn)
 
     def animate(self, geometry: Any, frequency: float | None = None,
                 **kwargs: Any) -> Any:
@@ -3282,12 +3297,14 @@ class Psd(_Bands, DataArray):
     #: The statistical degrees of freedom of each record's average,
     #: discounted for overlap (`core.averaging.statistical_dof`): one
     #: number per record, or None when nothing says how the spectrum
-    #: was averaged. `TimeHistory.compute_psds` sets it. A spectrum
-    #: read from a file, banded onto octaves or merged from several
-    #: has none, because its count is not the one its source frames
-    #: had: banding sums lines and raises it, and a guess would draw a
-    #: band the data does not have. These are statistical degrees of
-    #: freedom, not the measurement DOFs in `response_dof`.
+    #: was averaged. `TimeHistory.compute_psds` sets it. Merging
+    #: spectra keeps their counts when every one has them, since each
+    #: record's average is unchanged. A spectrum read from a file or
+    #: banded onto octaves has none, because its count is not the one
+    #: its source frames had: banding sums lines and raises it, and a
+    #: guess would draw a band the data does not have. These are
+    #: statistical degrees of freedom, not the measurement DOFs in
+    #: `response_dof`.
     statistical_dof: np.ndarray | None = None
 
     def confidence_band(self, level: float = 0.90,
@@ -3328,13 +3345,20 @@ class Psd(_Bands, DataArray):
         # A cross term's magnitude has a different error law, and a
         # band drawn on it as if chi-square would be a claim nobody
         # computed. Refused rather than skipped, so the caller knows.
+        # A record is an autospectrum only when its two DOFs are one
+        # and its two quantities are one: force against acceleration
+        # at a drive point names 1X+ twice and is still a cross term,
+        # whose real part alone the band would otherwise have been
+        # drawn on (2026-10-16).
         from .averaging import chi_square_factors
 
-        if self.reference_dof is not None and any(
-                r != d for r, d in zip(self.reference_dof,
-                                       self.response_dof)):
-            raise ValueError('a chi-square band is on an autospectrum; '
-                             'this PSD holds cross terms')
+        for i in range(self.num_records):
+            response, reference = self.record_pair(i)
+            first, second = channel_quantities(self.ordinate_dim[i])
+            if response != reference or first != second:
+                raise ValueError('a chi-square band is on an '
+                                 'autospectrum; this PSD holds cross '
+                                 f'terms ({self.record_label(i)})')
         counts = self.statistical_dof if dof is None else dof
         if counts is None:
             raise ValueError(
@@ -3347,7 +3371,8 @@ class Psd(_Bands, DataArray):
         edges = []
         for column, word in ((0, 'lower'), (1, 'upper')):
             fields = self.record_fields()
-            fields['comment'] = [f'{level:.0%} {word} bound'] * self.num_records
+            fields['comment'] = ([f'{round(level * 100)} % {word} bound']
+                                 * self.num_records)
             edge = Psd(self.abscissa.copy(),
                        values * factors[:, column][:, None],
                        bandwidth=(None if self.bandwidth is None
@@ -3464,9 +3489,68 @@ class Psd(_Bands, DataArray):
                         response_dof=dofs).animate(
             geometry, frequency, **kwargs)
 
+    def tone_refusal(self, record: int = 0) -> str | None:
+        """Why a tone cannot be read off record `record`, or None when
+        it can: `read_tone` raises this as its ValueError, and the
+        application offers the reading only where it is None.
+
+        A tone is read off an autospectrum (a record whose response and
+        reference are one channel, with no phase) on evenly spaced
+        lines; an octave-band spectrum, one written at breakpoints and
+        a cross spectrum are refused.
+
+        Parameters
+        ----------
+        record : int, default 0
+            Which record.
+
+        Returns
+        -------
+        str or None
+            The reason, in words, or None.
+        """
+        from .tone_readout import line_spacing
+
+        if self.bandwidth is not None or self.interpolation != 'bin':
+            return ('a tone is read off the evenly spaced lines of an '
+                    'averaged spectrum; this one is banded or written at '
+                    'breakpoints')
+        response = self.response_dof[record]
+        reference = (response if self.reference_dof is None
+                     else self.reference_dof[record])
+        # a cross spectrum's real part is not a density of one signal,
+        # and its imaginary part is the phase between two
+        if reference != response or has_phase(self.ordinate[record]):
+            return (f'record {record} ({response}/{reference}) is a cross '
+                    'spectrum; a tone is read off an autospectrum')
+        try:
+            line_spacing(self.abscissa)
+        except ValueError as refusal:
+            return str(refusal)
+        # five: the rectangle's lobe of a line either side and a line of
+        # floor beyond each, the fewest any window reads a tone from
+        if len(self.abscissa) < 5:
+            return f'{len(self.abscissa)} lines are too few to read a tone'
+        return None
+
+    def can_read_tone(self, record: int = 0) -> bool:
+        """Whether a tone can be read off record `record`
+        (`tone_refusal` says why not).
+
+        Parameters
+        ----------
+        record : int, default 0
+            Which record.
+
+        Returns
+        -------
+        bool
+        """
+        return self.tone_refusal(record) is None
+
     def read_tone(self, frequency: float, record: int = 0, *,
-             window: Any = 'hann', snap: bool = True,
-             warn: bool = True) -> ToneReading:
+                  window: Any = 'hann', parameter: float | None = None,
+                  snap: bool = True, warn: bool = True) -> ToneReading:
         """Read the tone near `frequency` off one record of this
         autospectrum, as an amplitude beside the spike it stands at.
 
@@ -3485,6 +3569,9 @@ class Psd(_Bands, DataArray):
             The window this spectrum was averaged with, or the
             `Averaging` itself; a project gives the one a computed PSD
             was made with as `Project.averaging_of`.
+        parameter : float, optional
+            The Tukey window's alpha or the Kaiser window's beta, when
+            `window` is a name; an `Averaging` carries its own.
         snap : bool, default True
             Find the tone's own spike near `frequency`; False reads the
             lines at `frequency` exactly, as a tone table states it.
@@ -3497,21 +3584,27 @@ class Psd(_Bands, DataArray):
         ToneReading
             The tone's amplitude in the square root of this spectrum's
             units (SI, as the spectrum is stored), the spike, the floor
-            and the notes.
+            and the notes, whose densities are in SI too
+            (`ToneReading.notes_in` writes them in others).
 
         Raises
         ------
         ValueError
-            For a spectrum on uneven lines (octave bands) or written at
-            breakpoints, which has no line spacing to undo.
+            For a record `tone_refusal` refuses: a spectrum on uneven
+            lines (octave bands) or written at breakpoints, which has no
+            line spacing to undo, or a cross spectrum.
         """
         from .tone_readout import read_tone
-        if self.bandwidth is not None or self.interpolation != 'bin':
-            raise ValueError('a tone is read off the evenly spaced lines of '
-                             'an averaged spectrum; this one is banded or '
-                             'written at breakpoints')
+
+        refusal = self.tone_refusal(record)
+        if refusal is not None:
+            raise ValueError(refusal)
+        dimension = str(self.ordinate_dim[record])
+        unit = ('' if dimension == UNKNOWN
+                else SI.label_text(channel_quantities(dimension)[0]))
         return read_tone(self.abscissa, self.ordinate[record], frequency,
-                         window=window, snap=snap, warn=warn)
+                         window=window, parameter=parameter, snap=snap,
+                         unit=unit, warn=warn)
 
     def area(self, record: int = 0, low: float | None = None,
              high: float | None = None) -> float:
@@ -4438,7 +4531,9 @@ class ShockSpecification(Bounded, Srs):
         the breakpoints draw (`compliance.log_interpolate`). That
         spacing is the one a tolerance is counted at, so a measured
         spectrum computed at the same `per_octave` from the same lowest
-        frequency lands on the requirement's points one for one.
+        frequency lands on the requirement's points. Its last point can
+        fall past the last breakpoint, where nothing is required, and is
+        not judged.
 
         Each band, given as dB below and above the requirement, becomes
         a pair of limit curves: `warning` the warning limits and `abort`
@@ -4479,8 +4574,10 @@ class ShockSpecification(Bounded, Srs):
         ------
         ValueError
             For fewer than two breakpoints, frequencies that are not
-            positive and increasing, levels that are not positive, or a
-            band whose lower edge is not below its upper.
+            positive and increasing, levels that are not positive, a
+            number of level rows other than one or one per DOF, a
+            spacing that is not a whole number of points to the octave,
+            or a band whose lower edge is not below its upper.
         """
         from .compliance import _band_db, log_interpolate
         from .srs import DEFAULT_Q, PER_OCTAVE
@@ -4500,7 +4597,15 @@ class ShockSpecification(Bounded, Srs):
         if ordinate_unit is not None:
             scale, offset = si_transform(ordinate_unit, ordinate_dim)
             rows = rows * scale + offset
-        step = PER_OCTAVE if per_octave is None else int(per_octave)
+        # refused rather than truncated (2026-10-16): int(6.5) is 6,
+        # and the requirement would be read onto a spacing nobody asked
+        # for without a word
+        step = PER_OCTAVE if per_octave is None else per_octave
+        if (isinstance(step, bool) or float(step) != int(step)
+                or int(step) < 1):
+            raise ValueError(f'{per_octave!r} is not a whole number of '
+                             'points to the octave')
+        step = int(step)
         # whole steps only, so the last point stays on the curve: the
         # nearest whole number of steps, as `octave_frequencies` takes,
         # can land past the last breakpoint, where nothing is written
@@ -4512,8 +4617,15 @@ class ShockSpecification(Bounded, Srs):
         points = np.minimum(points, corners[-1])
         ordinate = np.vstack([log_interpolate(points, corners, row)
                               for row in rows])
-        dofs = ([response_dof] * ordinate.shape[0]
-                if isinstance(response_dof, str) else list(response_dof))
+        dofs = ([response_dof] if isinstance(response_dof, str)
+                else list(response_dof))
+        if ordinate.shape[0] not in (1, len(dofs)):
+            # two rows at one DOF used to make two records at that DOF,
+            # and every reading takes the first a DOF names, so the
+            # second was never read (2026-10-16)
+            raise ValueError(f'{ordinate.shape[0]} rows of levels for '
+                             f'{len(dofs)} DOF{"s" * (len(dofs) != 1)}; '
+                             'give one row, or one per DOF')
         if ordinate.shape[0] == 1 and len(dofs) > 1:
             # one requirement at several channels, as a shock is often
             # required alike on every axis

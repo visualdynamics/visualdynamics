@@ -10,7 +10,10 @@ crossings a second (sqrt(2 ln 60,000) and sqrt(2 ln 3,600,000), about
 the flat 0.04 g^2/Hz profile at 5,120 samples a second through a 25 g
 range reads 8.83 grms, a crest factor of 2.83, a kurtosis of 2.86 and
 287 samples, 0.47 %, on the rail. That record passes a kurtosis band of
-2 to 4, and the rail count and the crest factor are what flag it.
+2 to 4, and the rail count and the crest factor are what flag it. And
+clean records that are not broadband or sampled near their band, a
+single 2 % damped mode at 100 Hz and a 20 to 200 Hz band at 20,480
+samples a second, read inside every band, seed after seed.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import pytest
 from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.kurtosis import HIGH, LOW, channel_kurtosis
 from visualdynamics.core.time_statistics import (
+    FRAME_PRODUCT,
     KURTOSIS_BAND,
     MIN_EXPECTED,
     STATISTICS,
@@ -28,6 +32,7 @@ from visualdynamics.core.time_statistics import (
     gaussian_share,
     rice_rate,
     statistic_name,
+    statistical_bandwidth,
     time_statistics,
 )
 
@@ -45,6 +50,15 @@ def flat_random(seconds, rate, seed, low=20.0, high=2000.0, level=0.04):
     gain = np.where((f >= low) & (f <= high),
                     np.sqrt(level / (2.0 / rate)), 0.0)
     return np.fft.irfft(spectrum * gain, n)
+
+
+def mode(seconds, rate, seed, frequency=100.0, damping=0.02):
+    """The response of one mode to white noise: a narrow-band Gaussian
+    record, its statistical bandwidth 2 pi zeta fn, 12.6 Hz."""
+    n = round(seconds * rate)
+    spectrum = np.fft.rfft(np.random.default_rng(seed).standard_normal(n))
+    r = np.fft.rfftfreq(n, 1.0 / rate) / frequency
+    return np.fft.irfft(spectrum / (1.0 - r ** 2 + 2j * damping * r), n)
 
 
 @pytest.fixture(scope='module')
@@ -208,8 +222,9 @@ def test_without_a_range_the_rail_is_not_judged(clean):
     assert stats.rail is None and stats.rail_share is None
     assert stats.headroom is None
     assert 'rail' not in stats.flags()
-    # the samples at its own peak still say it: a flat top
-    assert stats.at_peak == 287 and stats.flags()['at_peak']
+    # the excursions at its own peak still say it: 287 samples on 278
+    # flat tops
+    assert stats.at_peak == 278 and stats.flags()['at_peak']
 
 
 def test_the_margin_counts_samples_a_code_inside_the_range(clean):
@@ -235,6 +250,33 @@ def test_a_dropout_stands_out_frame_by_frame(clean):
     assert 5.0 <= time <= 5.2
     assert stats.frames_outside >= 1 and stats.flags()['frames']
     assert time_statistics(clean, RATE).frames_outside == 0
+
+
+def test_a_dropout_of_whole_frames_is_outside_its_band(clean):
+    """A second at zero, frame-aligned: five frames with no variance and
+    so no kurtosis, each outside its band, while the record's kurtosis
+    moves only to 3.27."""
+    spoiled = clean.copy()
+    spoiled[25 * 1024:30 * 1024] = 0.0
+    stats = time_statistics(spoiled, RATE)
+    assert stats.kurtosis == pytest.approx(3.27, abs=0.005)
+    assert np.count_nonzero(np.isnan(stats.frame_kurtosis)) == 5
+    assert stats.frames_outside == 5
+    time, value = stats.worst_frame
+    assert time == pytest.approx(5.1) and np.isnan(value)
+    assert stats.flagged == ['frames']
+
+
+def test_samples_that_are_not_finite_are_counted_and_flagged(clean):
+    spoiled = clean.copy()
+    spoiled[[100, 2000, 30000]] = [np.nan, np.inf, -np.inf]
+    stats = time_statistics(spoiled, RATE)
+    assert stats.nonfinite == 3 and stats.samples == clean.size - 3
+    assert stats.kurtosis == pytest.approx(time_statistics(
+        np.delete(clean, [100, 2000, 30000]), RATE).kurtosis)
+    assert stats.flagged == ['nonfinite']
+    assert 'Samples not finite' in stats.describe()
+    assert time_statistics(clean, RATE).nonfinite == 0
 
 
 def test_five_spikes_lift_the_crest_factor_past_six(clean):
@@ -311,9 +353,15 @@ def test_the_largest_excursion_is_counted_from_the_mean():
     assert stats.crest == pytest.approx(abs(stats.peak) / stats.rms)
 
 
-def test_the_share_at_the_peak_is_of_the_samples_read(clean):
-    stats = time_statistics(np.clip(clean, -25.0, 25.0), RATE)
-    assert stats.at_peak_share == pytest.approx(287 / clean.size)
+def test_a_peak_sampled_several_times_over_is_one_excursion():
+    """A 20 to 200 Hz record at 20,480 a second puts three samples
+    within the margin of its one largest peak; that is one excursion,
+    and not flagged."""
+    x = flat_random(30.0, 20480.0, 1, 20.0, 200.0)
+    top = np.abs(x).max()
+    assert np.count_nonzero(np.abs(x) >= 0.999 * top) == 3
+    stats = time_statistics(x, 20480.0)
+    assert stats.at_peak == 1 and stats.flags()['at_peak'] is False
 
 
 def test_two_samples_at_the_peak_pass_and_three_are_flagged():
@@ -402,15 +450,85 @@ def test_a_rate_from_two_lines_is_the_trapezoids():
 def test_a_tail_a_gaussian_barely_reaches_is_not_judged(clean):
     stats = time_statistics(clean, RATE)
     for tail in stats.tails:
-        assert tail.judged == (tail.expected * stats.samples
-                               >= MIN_EXPECTED)
+        assert tail.independent == pytest.approx(
+            tail.expected * 2.0 * stats.bandwidth * stats.record_length)
+        assert tail.judged == (tail.independent >= MIN_EXPECTED)
+    assert [round(tail.independent, 1) for tail in stats.tails] == [
+        128.9, 3.0, 0.0]
     assert not stats.tails[2].judged and not stats.tails[2].flagged
     assert 'beyond_5' not in stats.flags()
 
 
+def test_a_tail_is_judged_by_independent_values_not_samples():
+    """A Gaussian puts 166 of a 12 s, 100 Hz mode's samples beyond
+    three sigma, and they come from under one independent value: the
+    tail is not judged."""
+    stats = time_statistics(mode(12.0, RATE, 0), RATE)
+    beyond_3 = stats.tails[0]
+    assert round(beyond_3.expected * stats.samples) == 166
+    assert beyond_3.independent == pytest.approx(0.75, abs=0.01)
+    assert not beyond_3.judged and 'beyond_3' not in stats.flags()
+
+
+def test_a_flat_band_is_its_own_width_and_a_mode_two_pi_zeta_fn():
+    assert statistical_bandwidth([20.0, 2000.0], [1.0, 1.0]) == \
+        pytest.approx(1980.0)
+    f = np.linspace(0.0, 1000.0, 200001)
+    r = f / 100.0
+    square = 1.0 / np.abs(1.0 - r ** 2 + 0.04j * r) ** 2
+    assert statistical_bandwidth(f, square) == pytest.approx(
+        2 * np.pi * 0.02 * 100.0, rel=0.01)
+    assert np.isnan(statistical_bandwidth([1.0, 2.0], [0.0, 0.0]))
+    assert np.isnan(statistical_bandwidth([1.0], [1.0]))
+
+
+def test_a_records_bandwidth_is_read_from_its_own_spectrum(clean):
+    assert time_statistics(clean, RATE).bandwidth == pytest.approx(
+        1980.0, rel=0.01)
+    # the periodogram of two minutes of one mode puts about 1,500 lines
+    # in its band, and the estimate scatters by about a tenth
+    widths = np.array([
+        time_statistics(mode(120.0, 2048.0, seed), 2048.0).bandwidth
+        for seed in range(5)])
+    assert np.all(np.abs(widths / 12.57 - 1.0) < 0.15)
+    assert np.mean(widths) == pytest.approx(12.57, rel=0.05)
+
+
+def test_the_frame_is_sized_from_the_bandwidth():
+    """At least 0.2 s, and long enough to hold `FRAME_PRODUCT`
+    bandwidth-seconds: about 1.9 s for a 20 to 200 Hz record, and
+    longer than a 12 s record of one 100 Hz mode, which then has no
+    frames to judge."""
+    banded = time_statistics(flat_random(30.0, 20480.0, 0, 20.0, 200.0),
+                             20480.0)
+    assert banded.frame_length == round(FRAME_PRODUCT / banded.bandwidth
+                                        * 20480.0)
+    assert banded.frame_length / 20480.0 == pytest.approx(1.94, abs=0.01)
+    narrow = time_statistics(mode(12.0, RATE, 0), RATE)
+    assert narrow.frame_kurtosis.size == 0 and narrow.worst_frame is None
+    assert 'frames' not in narrow.flags()
+    # a frame given is the frame used
+    assert time_statistics(mode(12.0, RATE, 0), RATE,
+                           frame=0.5).frame_length == 2560
+
+
+@pytest.mark.parametrize('seed', range(5))
+def test_a_clean_narrow_band_record_reads_inside_every_band(seed):
+    """A single mode, 100 Hz and 2 % damped, over 12 s and a minute,
+    and a 20 to 200 Hz band sampled at 20,480 a second: Gaussian
+    records whose neighboring samples are far from independent."""
+    for values, rate in ((mode(12.0, RATE, seed), RATE),
+                         (mode(60.0, 2048.0, seed), 2048.0),
+                         (flat_random(30.0, 20480.0, seed, 20.0, 200.0),
+                          20480.0)):
+        stats = time_statistics(values, rate)
+        assert stats.describe() == 'Every statistic is inside its band.'
+
+
 def test_every_flag_has_a_name():
-    assert set(STATISTICS) >= {'mean', 'skewness', 'kurtosis', 'crest',
-                               'at_peak', 'rail', 'frames'}
+    assert set(STATISTICS) >= {'nonfinite', 'mean', 'skewness',
+                               'kurtosis', 'crest', 'at_peak', 'rail',
+                               'frames'}
     assert statistic_name('beyond_3.5') == 'Beyond 3.5σ'
     with pytest.raises(KeyError):
         statistic_name('nothing')
@@ -599,6 +717,47 @@ def test_frames_outside_their_band_are_filled_triangles(qt_app, clean):
     layout.close()
 
 
+def test_a_frame_with_no_variance_is_marked(qt_app, clean):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.time_statistics import build_time_statistics
+
+    spoiled = clean.copy()
+    spoiled[25 * 1024:30 * 1024] = 0.0
+    record = history(spoiled)
+    stats = record.time_statistics()
+    layout = pg.GraphicsLayoutWidget()
+    build_time_statistics(layout, record, stats)
+    frames = _plots(layout)[2]
+    dead = [item for item in frames.listDataItems()
+            if item.opts.get('symbol') == 't1']
+    assert len(dead) == 1 and dead[0].name() == 'frame with no variance'
+    times, levels = dead[0].getData()
+    assert times == pytest.approx([5.1, 5.3, 5.5, 5.7, 5.9])
+    assert np.all(levels == stats.frame_band[0])
+    assert '5 of 60 frames outside' in _titles(layout)[2]
+    assert 'no variance at 5.1 s' in _titles(layout)[2]
+    layout.close()
+
+
+def test_the_view_draws_times_in_the_unit_systems_units(qt_app, clean):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.time_statistics import build_time_statistics
+    from visualdynamics.units import SI
+
+    record = history(clean)
+    stats = record.time_statistics()
+    layout = pg.GraphicsLayoutWidget()
+    build_time_statistics(layout, record, stats,
+                          unit_system=SI.with_units(time='ms'))
+    trace, _bell, frames = _plots(layout)
+    times = trace.listDataItems()[0].xData
+    assert times[-1] == pytest.approx(1000.0 * (clean.size - 1) / RATE)
+    assert frames.listDataItems()[0].xData[0] == pytest.approx(100.0)
+    layout.close()
+
+
 def test_the_view_draws_to_a_file(qt_app, tmp_path, clean):
     from visualdynamics.plot import plot_time_statistics
 
@@ -689,6 +848,51 @@ def test_the_settings_survive_a_redraw(window, pump, clean):
     pump()
     assert pane.statistics_panel.frame_box.value() == 0.5
     assert pane.statistics_panel.values['frames'].text() == '0 of 24'
+
+
+def test_the_panel_counts_samples_not_finite(window, pump, clean):
+    spoiled = clean.copy()
+    spoiled[[100, 200]] = np.nan
+    panel = _statistics(window, pump, history(spoiled)).statistics_panel
+    assert panel.values['nonfinite'].text() == '2'
+    assert panel.values['nonfinite'].font().bold()
+    assert 'Samples not finite' in panel.verdict.text()
+
+
+def test_the_panel_states_times_and_rates_in_the_unit_systems_units(
+        qt_app, clean):
+    from visualdynamics.gui.statistics_panel import StatisticsPanel
+
+    stats = time_statistics(clean, RATE, start=1.0)
+    panel = StatisticsPanel()
+    panel.show_statistics(stats, (G, 0.0), 'g', (0.001, 'ms'))
+    assert panel.values['peak_time'].text() == (
+        f'{1000.0 * stats.peak_time:.4g} ms')
+    assert panel.row_names['crossings'].text() == 'Crossings /ms'
+    assert panel.values['spectral_crossings'].text() == (
+        f'{stats.spectral_crossings / 1000.0:.4g}')
+    assert panel.values['std'].text() == f'{stats.std / G:.4g} g'
+    panel.close()
+
+
+def test_statistics_is_offered_where_the_averaging_is(window):
+    pane = window.data_pane
+    controls = {'map_wanted': None, 'diagonal': None, 'cmif': False,
+                'complex_data': False, 'pair': False}
+    pane.show_controls(**controls, averaging=False, shocks=True)
+    assert not pane.statistics_action.isVisible()
+    assert pane.kurtosis_action.isVisible()
+    pane.show_controls(**controls, averaging=True, shocks=True)
+    assert pane.statistics_action.isVisible()
+
+
+def test_the_frame_is_sized_from_the_band_until_one_is_typed(
+        window, pump, clean):
+    pane = _statistics(window, pump, history(clean))
+    panel = pane.statistics_panel
+    assert panel.frame_box.text() == 'from band'
+    assert panel.settings()['frame'] is None
+    assert 'frame=None' in window.project.journal[-1]
 
 
 def test_the_statistics_reading_is_flat(window, pump, clean):

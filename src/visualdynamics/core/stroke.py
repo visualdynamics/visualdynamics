@@ -33,22 +33,27 @@ back to rest is a record to fix before its stroke is believed.
 
 The reading is the peak acceleration, the peak velocity, the velocity
 change, and the displacement each way from rest with its peak to peak.
-Three corrections are carried with it:
+The travel, the velocity and the force are judged by the rule in
+`core.shaker`, the one the replication fit judges by, and three
+corrections are carried with it:
 
-- The shaker body. The stroke rating is the armature's travel relative
-  to the body, and a body on isolation mounts moves the other way by
-  the ratio of the moving mass to its own, so the travel that reaches
-  the stops is the table's displacement times one plus that ratio. The
-  compensation is low in frequency, where the body moves most. Given
-  `mass_ratio`, the travel is counted that way.
+- The shaker body. The ratings are the armature's motion relative to
+  the body, and a body on isolation mounts moves the other way by the
+  ratio of the moving mass to its own, so the travel that reaches the
+  stops, and the velocity the coil moves at, are the table's times one
+  plus that ratio. The compensation is low in frequency, where the body
+  moves most. Given the body mass with the moving mass, both are
+  counted that way.
 - The stops each way. The stroke is peak to peak, and the armature
   rests at the middle of it, held there by its suspension, so the stops
   are half the stroke away on each side. The symmetric arrangement
   above travels one way only, to its full peak to peak and back, so it
   can be inside the stroke peak to peak and still reach a stop. The
-  travel each way from center against half the stroke is what the
-  stops see, and the reading judges that. Centering the travel is the
-  controller's compensation, an asymmetric pre- and post-pulse.
+  stroke share is therefore the larger travel each way from center
+  over half the stroke, what the stops see, and the peak to peak is
+  reported as a number without a verdict. When the peak to peak fits
+  and the share is over, the reading says so: centering the travel is
+  the controller's compensation, an asymmetric pre- and post-pulse.
 - The first check. The peak to peak of the nominal arrangement is
   close to A T^2 / 2 for a half-sine of peak A and duration T, which in
   the units shock is specified in is about 193 A T^2 inches with A in g
@@ -74,9 +79,6 @@ are where the arrangement and the integration are set out.
    Volume 2: Mechanical Shock*, 2nd ed. ISTE and Wiley. Shocks on a
    shaker with pre- and post-pulses, the velocity and displacement
    they need, and why the table must end at rest.
-2. ISO 18431-2:2004, *Mechanical vibration and shock - Signal
-   processing - Part 2: Time domain windows for Fourier Transform
-   analysis*, read with ISO 18431-1:2005 on time-domain integration.
 """
 
 from __future__ import annotations
@@ -85,6 +87,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from .shaker import ShakerRating, acceleration_channel, each_way, finite
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
@@ -95,6 +99,14 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # 50 g, 11 ms half-sine's stroke 3.9 % high (1.212 in against 1.1661 in
 # raw) and moved its displacement off rest at both ends. The integration
 # here is the same raw path `core.shock_check` takes, not a second rule.
+#
+# On review (2026-10-16) the ratings became `core.shaker.ShakerRating`,
+# shared with the replication fit, the mass ratio became the body mass
+# that type takes, and the stroke share became the larger one-way travel
+# over half the stroke: as peak to peak over the stroke it read
+# "within, 58 %" on the line above one saying the pulse reached a stop
+# at 117 %. The ISO 18431-2 reference went with it; that part is about
+# time windows, not integration.
 
 #: the compensation pulses' height as a share of the main pulse's peak,
 #: the share test documents commonly allow. Each compensation pulse then
@@ -102,9 +114,11 @@ if TYPE_CHECKING:                                    # pragma: no cover
 COMPENSATION_SHARE = 0.2
 
 #: the half-sine rule's constant in SI: the peak to peak of the
-#: symmetric arrangement is about this times A T^2, with A in m/s^2 and
-#: T in s. Times standard gravity over an inch it is 193.04, the
-#: "193 A T^2" of the lab's units
+#: symmetric arrangement compensated at a fifth of its peak is about
+#: this times A T^2, with A in m/s^2 and T in s (at another share the
+#: arrangement travels further, 1.80 times at a tenth, and the constant
+#: does not hold). Times standard gravity over an inch it is 193.04,
+#: the "193 A T^2" of US customary units
 RULE = 0.5
 
 
@@ -215,11 +229,10 @@ class StrokeReading:
 
     The arrays are the acceleration, and the velocity and displacement
     integrated from it raw, in SI (m/s^2, m/s and m), from rest at the
-    record's first sample. The ratings are in SI too and None where
-    none was given; a rating that is None is not judged. `stroke` is
-    the shaker's shock stroke, peak to peak, the travel of the armature
-    relative to the body; `mass_ratio` is the moving mass over the
-    body's mass, and None or zero counts the table alone.
+    record's first sample. `rating` holds the shaker's shock ratings and
+    the masses, in SI, with None where none was given; a rating that is
+    None is not judged. Its stroke is the shaker's shock stroke, peak to
+    peak, the travel of the armature relative to the body.
     """
 
     #: the channel's DOF, as the record names it
@@ -234,17 +247,8 @@ class StrokeReading:
     velocity: np.ndarray
     #: the table's displacement, m, from rest at the first sample
     displacement: np.ndarray
-    #: the shaker's shock stroke, peak to peak, m
-    stroke: float | None = None
-    #: the shaker's shock velocity, m/s
-    velocity_rating: float | None = None
-    #: the shaker's shock force, N
-    force_rating: float | None = None
-    #: everything that moves: armature, table or expander, fixture and
-    #: article, kg
-    moving_mass: float | None = None
-    #: the moving mass over the shaker body's mass
-    mass_ratio: float | None = None
+    #: the shaker's shock ratings and the masses it carries
+    rating: ShakerRating
 
     @property
     def time(self) -> np.ndarray:
@@ -263,8 +267,15 @@ class StrokeReading:
 
     @property
     def peak_velocity(self) -> float:
-        """The largest velocity either way, in m/s."""
+        """The table's largest velocity either way, in m/s."""
         return float(np.abs(self.velocity).max())
+
+    @property
+    def relative_velocity(self) -> float:
+        """The armature's largest velocity against the body, in m/s:
+        `peak_velocity` with the body counted, what the velocity rating
+        is judged against."""
+        return float(self.rating.relative(self.peak_velocity))
 
     @property
     def velocity_change(self) -> float:
@@ -280,13 +291,13 @@ class StrokeReading:
     def lowest(self) -> float:
         """The table's furthest travel below where it started, in m:
         zero or negative."""
-        return min(float(self.displacement.min()), 0.0)
+        return -each_way(self.displacement)[0]
 
     @property
     def highest(self) -> float:
         """The table's furthest travel above where it started, in m:
         zero or positive."""
-        return max(float(self.displacement.max()), 0.0)
+        return each_way(self.displacement)[1]
 
     @property
     def peak_to_peak(self) -> float:
@@ -294,28 +305,29 @@ class StrokeReading:
         return float(np.ptp(self.displacement))
 
     @property
-    def body_factor(self) -> float:
-        """One plus the mass ratio: what the table's displacement is
-        multiplied by to give the travel relative to the body."""
-        return 1.0 + (self.mass_ratio or 0.0)
+    def counts_body(self) -> bool:
+        """Whether the body's motion is counted: the body mass and the
+        moving mass were both given."""
+        return self.rating.body_share > 0.0
 
     @property
     def travel(self) -> float:
         """The armature's peak-to-peak travel relative to the body, in
-        m: the table's peak to peak with the body counted."""
-        return self.body_factor * self.peak_to_peak
+        m: the table's peak to peak with the body counted. A number, not
+        judged: the stops see the travel each way."""
+        return float(self.rating.relative(self.peak_to_peak))
 
     @property
     def travel_down(self) -> float:
         """The relative travel below center, where the armature rests,
         in m, positive."""
-        return -self.body_factor * self.lowest
+        return each_way(self.rating.relative(self.displacement))[0]
 
     @property
     def travel_up(self) -> float:
         """The relative travel above center, where the armature rests,
         in m, positive."""
-        return self.body_factor * self.highest
+        return each_way(self.rating.relative(self.displacement))[1]
 
     @property
     def equivalent_duration(self) -> float:
@@ -340,44 +352,48 @@ class StrokeReading:
     def force(self) -> float | None:
         """The force the coil must make, the moving mass times the peak
         acceleration, in N; None without a moving mass."""
-        if self.moving_mass is None:
-            return None
-        return self.moving_mass * self.peak_acceleration
+        return self.rating.force_needed(self.peak_acceleration)
 
     def shares(self) -> dict[str, float | None]:
-        """Each demand as a share of its rating: 'stroke' (the relative
-        travel against the stroke), 'velocity' and 'force'. None where
-        the rating, or for the force the moving mass, was not given."""
-        def share(demand, rating):
-            if demand is None or rating is None or not rating > 0.0:
-                return None
-            return demand / rating
-
-        return {'stroke': share(self.travel, self.stroke),
-                'velocity': share(self.peak_velocity, self.velocity_rating),
-                'force': share(self.force, self.force_rating)}
+        """Each demand as a share of its rating, by `core.shaker`'s rule:
+        'stroke' (the larger travel each way from center over half the
+        stroke, so one is a stop), 'velocity' (counted against the body)
+        and 'force'. None where the rating, or for the force the moving
+        mass, was not given."""
+        return {'stroke': self.rating.stroke_share(self.travel_down,
+                                                   self.travel_up),
+                'velocity': self.rating.velocity_share(self.peak_velocity),
+                'force': self.rating.force_share(self.peak_acceleration)}
 
     @property
     def fits(self) -> bool | None:
-        """Whether every rating given holds the pulse, the stroke each
-        way from center as well as peak to peak (`fits_centered`); None
-        when no rating was given."""
+        """Whether every rating given holds the pulse; None when no
+        rating was given."""
         judged = [value for value in self.shares().values()
                   if value is not None]
         if not judged:
             return None
-        return (all(value <= 1.0 for value in judged)
-                and self.fits_centered is not False)
+        return all(value <= 1.0 for value in judged)
 
     @property
-    def fits_centered(self) -> bool | None:
+    def fits_stroke(self) -> bool | None:
         """Whether the travel stays inside half the stroke each way from
         center, where the armature rests and the stops are half the
         stroke away; None without a stroke."""
-        if self.stroke is None:
-            return None
-        half = 0.5 * self.stroke
-        return self.travel_down <= half and self.travel_up <= half
+        share = self.shares()['stroke']
+        return None if share is None else share <= 1.0
+
+    def _travel_name(self) -> str:
+        """'one-sided travel', 'travel down' or 'travel up', with the
+        body when it is counted."""
+        down, up = self.travel_down, self.travel_up
+        # one-sided when the other way is under a hundredth of it: the
+        # symmetric arrangement's other way is zero to the sampling
+        if min(down, up) < 0.01 * max(down, up):
+            name = 'one-sided travel'
+        else:
+            name = f'travel {"down" if down >= up else "up"}'
+        return name + ' with the body' * self.counts_body
 
     def to_the_stop(self, unit_system: UnitSystem | None = None
                     ) -> str | None:
@@ -386,68 +402,62 @@ class StrokeReading:
         1.25 in to the stop'; None without a stroke."""
         from ..units import DEFAULT_SYSTEM
 
-        if self.stroke is None:
+        if self.rating.room is None:
             return None
         us = DEFAULT_SYSTEM if unit_system is None else unit_system
-        down, up = self.travel_down, self.travel_up
-        larger = max(down, up)
-        # one-sided when the other way is under a hundredth of it: the
-        # symmetric arrangement's other way is zero to the sampling
-        if min(down, up) < 0.01 * larger:
-            name = 'one-sided travel'
-        else:
-            name = f'travel {"down" if down >= up else "up"}'
-
-        def amount(value):
-            return (f'{number(float(us.from_si(value, "length")))} '
-                    f'{us.label_text("length")}')
-
-        return (f'{name} {amount(larger)} against '
-                f'{amount(0.5 * self.stroke)} to the stop')
+        larger = max(self.travel_down, self.travel_up)
+        return (f'{self._travel_name()} {_amount(larger, "length", us)} '
+                f'against {_amount(self.rating.room, "length", us)} to the '
+                'stop')
 
     def describe(self, unit_system: UnitSystem | None = None) -> list[str]:
         """The reading in lines, the numbers in `unit_system`
-        (`units.DEFAULT_SYSTEM` when omitted): the travel, the velocity
-        and the force each against its rating, the displacement each
-        way, and the half-sine rule beside the integration."""
+        (`units.DEFAULT_SYSTEM` when omitted): the travel to the stop,
+        the velocity and the force each against its rating, the
+        displacement each way, and the peak to peak beside the half-sine
+        rule."""
         from ..units import DEFAULT_SYSTEM
 
         us = DEFAULT_SYSTEM if unit_system is None else unit_system
         shares = self.shares()
 
-        def amount(value, dimension):
-            return (f'{number(float(us.from_si(value, dimension)))} '
-                    f'{us.label_text(dimension)}')
-
-        def against(name, demand, rating, key):
-            line = f'{name} {amount(demand, dims[key])}'
+        def verdict(line, key):
             if shares[key] is None:
                 return line
-            verdict = 'within' if shares[key] <= 1.0 else 'OVER'
-            return (f'{line} against {amount(rating, dims[key])}: '
-                    f'{verdict}, {100.0 * shares[key]:.0f} %')
+            word = 'within' if shares[key] <= 1.0 else 'OVER'
+            return f'{line}: {word}, {100.0 * shares[key]:.0f} %'
 
-        dims = {'stroke': 'length', 'velocity': 'velocity', 'force': 'force'}
-        travel = ('Travel with the body' if self.body_factor != 1.0
-                  else 'Travel')
-        lines = [against(travel, self.travel, self.stroke, 'stroke'),
-                 against('Peak velocity', self.peak_velocity,
-                         self.velocity_rating, 'velocity')]
+        def against(name, demand, rating, key, dimension):
+            line = f'{name} {_amount(demand, dimension, us)}'
+            if shares[key] is not None:
+                line += f' against {_amount(rating, dimension, us)}'
+            return verdict(line, key)
+
+        rating = self.rating
+        if rating.room is None:
+            travel = (f'{_sentence(self._travel_name())} '
+                      f'{_amount(max(self.travel_down, self.travel_up), "length", us)}')
+        else:
+            travel = verdict(_sentence(self.to_the_stop(us)), 'stroke')
+        lines = [travel]
+        if self.fits_stroke is False and self.travel <= rating.stroke:
+            lines.append(f'Centered, the travel would fit: '
+                         f'{_amount(self.travel, "length", us)} peak to peak '
+                         f'against {_amount(rating.stroke, "length", us)}. '
+                         'Centering the travel is the controller\'s '
+                         'compensation, an asymmetric pre- and post-pulse')
+        lines.append(against('Peak velocity'
+                             + ' with the body' * self.counts_body,
+                             self.relative_velocity, rating.velocity,
+                             'velocity', 'velocity'))
         if self.force is not None:
-            lines.append(against('Force', self.force, self.force_rating,
-                                 'force'))
+            lines.append(against('Force', self.force, rating.force,
+                                 'force', 'force'))
         lines.append(f'Each way from center: '
-                     f'{amount(self.travel_down, "length")} down, '
-                     f'{amount(self.travel_up, "length")} up')
-        if self.fits_centered is False:
-            stop = self.to_the_stop(us)
-            share = max(self.travel_down, self.travel_up) / (0.5 * self.stroke)
-            lines.append(f'{stop[0].upper()}{stop[1:]}: OVER, '
-                         f'{100.0 * share:.0f} %. Centering the travel is '
-                         'the controller\'s compensation, an asymmetric '
-                         'pre- and post-pulse')
-        lines.append(f'Peak to peak {amount(self.peak_to_peak, "length")} '
-                     f'integrated, {amount(self.rule, "length")} by the '
+                     f'{_amount(self.travel_down, "length", us)} down, '
+                     f'{_amount(self.travel_up, "length", us)} up')
+        lines.append(f'Peak to peak {_amount(self.peak_to_peak, "length", us)} '
+                     f'integrated, {_amount(self.rule, "length", us)} by the '
                      'half-sine rule')
         return lines
 
@@ -456,21 +466,21 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
                 stroke: float | None = None, velocity: float | None = None,
                 force: float | None = None,
                 moving_mass: float | None = None,
-                mass_ratio: float | None = None) -> StrokeReading:
+                body_mass: float | None = None) -> StrokeReading:
     """Integrate one acceleration channel twice, raw, and read it
     against the shaker's shock ratings.
 
         reading = read_stroke(compensated_half_sine(50.0, 0.011, 102400.0,
                                                     unit='g'),
                               stroke=0.0635, velocity=1.778,
-                              mass_ratio=0.25)
+                              moving_mass=45.4, body_mass=181.4)
 
     The record is integrated from rest at its first sample with nothing
     removed (`filters.integrate` with ``drift_corner=None``; the module
     docstring says why raw), over its whole length, so a record of one
     event should open before the event and close after it. Every rating
     is optional, and one not given, or given as zero, is reported
-    without a verdict.
+    without a verdict. The ratings are judged by `core.shaker`'s rule.
 
     Parameters
     ----------
@@ -479,7 +489,7 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
         `compensated_half_sine`.
     channel : int or str, optional
         The record's index or its DOF; its first acceleration channel
-        when omitted.
+        when omitted. Only a channel whose unit is declared counts.
     stroke : float, optional
         The shaker's shock stroke, peak to peak, in m: the armature's
         travel relative to the body.
@@ -489,9 +499,10 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
         The shaker's shock force, in N.
     moving_mass : float, optional
         Everything that moves, in kg; with `force`, the force is checked.
-    mass_ratio : float, optional
-        The moving mass over the shaker body's mass, counted into the
-        travel; the table alone when omitted.
+    body_mass : float, optional
+        The shaker body's mass, in kg; with `moving_mass`, the body's
+        motion is counted into the travel and the velocity. The table
+        alone when omitted.
 
     Returns
     -------
@@ -503,38 +514,33 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
     ------
     ValueError
         If the channel is not an acceleration channel of the record, the
-        record has none, or a rating or mass is negative.
+        record has none, the channel holds a sample that is not finite,
+        or a rating or mass is negative or not finite.
     """
     from .data import TimeHistory
     from .filters import integrate
 
-    for name, value in (('stroke', stroke), ('velocity', velocity),
-                        ('force', force), ('moving mass', moving_mass),
-                        ('mass ratio', mass_ratio)):
-        if value is not None and not float(value) >= 0.0:
-            raise ValueError(f'the {name} ({float(value):g}) cannot be '
-                             'negative')
-    index = _channel(history, channel)
-    rows = np.real(np.asarray(history.ordinate))[[index]]
-    one = TimeHistory(history.abscissa, rows,
-                      response_dof=[history.response_dof[index]],
+    rating = ShakerRating(force=_rating(force), stroke=_rating(stroke),
+                          velocity=_rating(velocity),
+                          moving_mass=_rating(moving_mass),
+                          body_mass=_rating(body_mass))
+    index = acceleration_channel(history, channel)
+    dof = str(history.response_dof[index])
+    rows = finite(history.ordinate[index], dof)[None]
+    one = TimeHistory(history.abscissa, rows, response_dof=[dof],
                       ordinate_dim=['acceleration'])
     # twice through the one trapezoid rule the package has, raw
     moving = integrate(one, None)
     travel = integrate(moving, None)
     return StrokeReading(
-        dof=str(history.response_dof[index]),
-        sample_rate=history.sample_rate,
-        start=float(history.abscissa[0]),
-        acceleration=rows[0],
+        dof=dof, sample_rate=history.sample_rate,
+        start=float(history.abscissa[0]), acceleration=rows[0],
         velocity=np.asarray(moving.ordinate[0].real, dtype=float),
         displacement=np.asarray(travel.ordinate[0].real, dtype=float),
-        stroke=_rating(stroke), velocity_rating=_rating(velocity),
-        force_rating=_rating(force), moving_mass=_rating(moving_mass),
-        mass_ratio=_rating(mass_ratio))
+        rating=rating)
 
 
-def number(value: float) -> str:
+def _number(value: float) -> str:
     """A reading's number as the panel and the plot write it: three
     significant figures, and whole numbers with a thousands separator
     from a thousand up, where three figures would read as 5e+03."""
@@ -543,32 +549,22 @@ def number(value: float) -> str:
     return f'{value:.3g}'
 
 
+def _amount(value: float, dimension: str, unit_system: UnitSystem) -> str:
+    """`value`, in SI, as a number and a unit in `unit_system`, as the
+    panel and the plot write it."""
+    return (f'{_number(float(unit_system.from_si(value, dimension)))} '
+            f'{unit_system.label_text(dimension)}')
+
+
+def _sentence(text: str) -> str:
+    """`text` with its first letter capitalized."""
+    return text[:1].upper() + text[1:]
+
+
 def _rating(value: Any) -> float | None:
     """A rating as the reading keeps it: None for none, and zero is
     none too, as the panel's empty box is (a stroke of zero would put
     both stops at rest and fail every pulse for a number nobody
-    meant)."""
+    meant). Anything else, a negative or a NaN included, goes to
+    `ShakerRating`, which refuses it by name."""
     return None if value is None or float(value) == 0.0 else float(value)
-
-
-def _channel(history: TimeHistory, channel: int | str | None) -> int:
-    """The record index of `channel`, which must be acceleration."""
-    accelerations = [i for i in range(history.num_records)
-                     if history.known_dim(i) == 'acceleration']
-    if not accelerations:
-        raise ValueError('a stroke is read by integrating acceleration, '
-                         'and this record holds none')
-    if channel is None:
-        return accelerations[0]
-    if isinstance(channel, str):
-        found = [i for i in accelerations
-                 if str(history.response_dof[i]) == channel]
-        if not found:
-            raise ValueError(f'{channel} is not an acceleration channel '
-                             'of this record')
-        return found[0]
-    index = int(channel)
-    if index not in accelerations:
-        raise ValueError(f'record {index} is not an acceleration channel '
-                         'of this record')
-    return index

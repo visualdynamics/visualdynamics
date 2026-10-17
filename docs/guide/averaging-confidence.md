@@ -16,7 +16,7 @@ DOFs, the node and direction, that a channel is taken at.
 A single frame's spectrum has two degrees of freedom at each line, the
 real and the imaginary part of the line's transform. An average of n
 frames that share no samples has 2n. This is the nominal count, shown
-as **DOF (2n)**.
+as **Statistical DOF (2n)**.
 
 Frames that overlap share part of the record, so they vary together,
 and an average of them steadies less than the same number of
@@ -27,8 +27,8 @@ variance of the average grows by a factor of
 
 where c(j) is how much the window lets two frames j hops apart share
 (their overlap correlation), and the equivalent count is 2n divided by
-that factor. This is shown as **Equivalent DOF**. With no overlap the
-two counts are equal.
+that factor. This is shown as **Equivalent statistical DOF**. With no
+overlap the two counts are equal.
 
 The window matters, because a tapered window gives little weight to
 the samples two overlapped frames share. For many frames, the
@@ -79,9 +79,10 @@ a sign that anything is wrong.
 
 ## In the Averaging view
 
-Below the settings, beside **Averages**, the view shows **DOF (2n)**,
-**Equivalent DOF**, and the **90 % band** in decibels that the
-equivalent count gives. They follow every change to the frame length,
+Below the settings, beside **Averages**, the view shows **Statistical
+DOF (2n)**, **Equivalent statistical DOF**, and the **90 % band** in
+decibels that the equivalent count gives. They follow every change to
+the frame length,
 overlap, window and frame count, and every drag of the analyzed span,
 so the cost of a setting is seen while it is chosen. A PSD computed with
 **Compute PSDs** carries the same count.
@@ -121,11 +122,13 @@ arrays.
 
 ## What has no count, and what the count leaves out
 
-A spectrum read from a file, banded onto octaves, or merged from
-several carries no count, because its count is not the one its source
-frames had: banding sums lines and raises the count. Its band is
-refused rather than guessed. Pass the count yourself
-(`psd.confidence_band(0.9, dof=...)`) when you know it.
+A spectrum read from a file or banded onto octaves carries no count,
+because its count is not the one its source frames had: banding sums
+lines and raises the count. Its band is refused rather than guessed.
+Pass the count yourself (`psd.confidence_band(0.9, dof=...)`) when you
+know it. Spectra merged into one keep their counts, record by record,
+when every one of them has a count; if any of them lacks one, the
+merged spectrum has none.
 
 The band belongs to an autospectrum. A cross-spectrum, an FRF and a
 coherence have errors that follow other laws, and a PSD holding cross

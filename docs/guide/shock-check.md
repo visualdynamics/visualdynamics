@@ -47,11 +47,14 @@ and these readings:
 | `drifting` | the velocity is still changing when the window closes |
 
 The tolerance is a tenth of the peak by default (`RETURN_SHARE`), and an
-argument: a procedure that names its own figure passes it. A good
-record's velocity does not end at exactly zero, because the sensor's
-noise is integrated too and walks over a long record. In the example
-below, a ringing shock with a noise floor ends at about 6 % of its
-peak velocity.
+argument: a procedure that names its own figure passes it. A tenth is a
+judgment; no standard gives the figure. A good record's velocity does
+not end at exactly zero, because the sensor's noise is integrated too
+and walks: by about the noise's standard deviation times the square
+root of the number of samples times the sample interval. A zero shift
+worth catching ramps the velocity well past its pulse. In the example
+below, the ringing shock with its noise floor ends at 0.04 % of its
+peak velocity, and with its zero shift at 100 %.
 
 A flagged check says which of two things the velocity did.
 Still changing when the record stops is a zero shift or an offset, and
@@ -74,7 +77,7 @@ one that went both ways.
 ## An example
 
 A ringing shock, four decaying tones from 600 Hz to 6 kHz peaking near
-600 g, sampled at 102.4 kHz for a quarter of a second, with a 4 g zero
+400 g, sampled at 102.4 kHz for a quarter of a second, with a 4 g zero
 shift from the moment it arrives:
 
 ```python
@@ -84,7 +87,7 @@ from visualdynamics.units import IN_LBF_S
 
 check, = check_shock(history)
 check.flagged                  # True
-check.end_velocity / 0.0254    # 356.3 in/s: no table did that
+check.end_velocity / 0.0254    # 355.2 in/s: no table did that
 print(summarize([check]))
 
 plot_shock_check(history, low=10.0, high=10000.0,
@@ -93,18 +96,18 @@ plot_shock_check(history, low=10.0, high=10000.0,
 ```
 
 On the acceleration the shift is hard to see. On the velocity it is a
-ramp to 356 in/s, far outside the band the velocity has to end in,
+ramp to 355 in/s, far outside the band the velocity has to end in,
 and the verdict says so. The positive spectrum stands on a shelf near
-8 g below about 100 Hz that the shock does not have, and the negative
+7.4 g below about 100 Hz that the shock does not have, and the negative
 spectrum, which the step does not reach, falls away there:
 
 ![A ringing shock with a 4 g zero shift: the record, its raw velocity
-ramping away to 356 in/s with the verdict above it, and its positive
+ramping away to 355 in/s with the verdict above it, and its positive
 spectrum standing on a false shelf below 100 Hz where the negative
 falls away](images/shock-check-shifted.png)
 
 The same record without the shift passes, its velocity ending at
-about 1 in/s. A 50 g, 11 ms half-sine compensated by a 2.5 g half-sine
+0.007 in/s. A 50 g, 11 ms half-sine compensated by a 2.5 g half-sine
 either side, the shaker's way of bringing the table back to rest,
 passes too: the velocity runs down to −67.6 in/s through the
 pre-pulse, up through the main pulse to +67.6 in/s, a velocity change
@@ -123,7 +126,12 @@ settings and before **Compute SRS**: one line when every channel
 returns to rest in every window, and otherwise how many do not and the
 verdict of the worst, by channel and shock. It is the same
 `check_shock` over the same windows, read again whenever a window is
-detected, added, dragged or typed in.
+detected, added, dragged or typed in. A record with no shocks marked
+(and no averaging) is not checked yet, because Compute SRS detects
+its windows before it computes and the check would otherwise speak for
+windows it was not read over; the view says so. A window holding a
+sample that is not a finite number is refused, and the view says
+which channel.
 
 ## Where judgment lives
 

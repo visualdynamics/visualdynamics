@@ -50,20 +50,36 @@ def display_scale(dimension: str, unit_system: Any = None) -> float:
     return float(_shown(np.array([1.0]), dimension, us)[0])
 
 
+def display_unit(dimension: str, unit_system: Any = None) -> str:
+    """The unit a record of `dimension` is drawn in, as plain text ('g/g',
+    'g/lbf'); empty for a record whose units are undeclared."""
+    from ..units import DEFAULT_SYSTEM, UNKNOWN
+
+    if dimension == UNKNOWN:
+        return ''
+    us = DEFAULT_SYSTEM if unit_system is None else unit_system
+    return us.label_text(dimension)
+
+
 def percent(value: float) -> str:
     """A shift as the table writes it: '−3.3 %'."""
     return f'{value:+.1f} %'.replace('-', '−')
 
 
 def table_html(comparison: Any, scale: float = 1.0,
-               color: str | None = None) -> str:
+               color: str | None = None, unit: str = '') -> str:
     """The comparison as an HTML table: one row per mode, with its
     frequency and height before and after, the two shifts, Q before and
-    after, and the verdict, then the limits and the overall verdict.
-    `scale` takes the heights from SI to the units drawn."""
+    after, and the verdict, then the limits, the overall verdict and
+    the readings' notes. `scale` takes the heights from SI to the units
+    drawn, and `unit` names those units."""
+    from html import escape
+
     style = f' style="color:{color}"' if color else ''
+    height = f'height before, after [{escape(unit)}]' if unit \
+        else 'height before, after'
     head = ('<tr><th align="left">mode</th><th>Hz before, after</th>'
-            '<th>shift</th><th>height before, after</th><th>shift</th>'
+            f'<th>shift</th><th>{height}</th><th>shift</th>'
             '<th>Q before, after</th><th align="left">verdict</th></tr>')
     rows = []
     for shift in comparison.shifts:
@@ -71,7 +87,7 @@ def table_html(comparison: Any, scale: float = 1.0,
             return '—' if reading.q is None else f'{reading.q:.3g}'
 
         rows.append(
-            f'<tr><td>{shift.mode.label()}</td>'
+            f'<tr><td>{escape(shift.mode.label())}</td>'
             f'<td align="right">{shift.before.frequency:.1f}, '
             f'{shift.after.frequency:.1f}</td>'
             f'<td align="right">{percent(shift.frequency_shift)}</td>'
@@ -85,6 +101,8 @@ def table_html(comparison: Any, scale: float = 1.0,
     limits = (f'frequency limit {percent(f_low)} to {percent(f_high)}<br/>'
               f'amplitude limit {percent(a_low)} to {percent(a_high)}<br/>'
               f'{comparison.describe()}')
+    for note in comparison.notes:
+        limits += f'<br/>{escape(note)}'
     return (f'<table cellspacing="0" cellpadding="2"{style}>{head}'
             + ''.join(rows) + f'</table><br/><span{style}>{limits}</span>')
 
@@ -149,6 +167,7 @@ def build_signature(layout: Any, before: Any, after: Any, modes: Any, *,
     # the scale from SI to what is drawn, read off one value, so the
     # boxes and the table land on the curves whatever the unit system
     scale = display_scale(dimension, us)
+    unit = display_unit(dimension, us)
     foreground = colors['plot_foreground']
     for shift in comparison.shifts:
         f_low, f_high, h_low, h_high = shift.box()
@@ -195,7 +214,7 @@ def build_signature(layout: Any, before: Any, after: Any, modes: Any, *,
     extents.frame_y(plot)
     extents.lock(plot)
     if table:
-        text = pg.LabelItem(table_html(comparison, scale, foreground),
+        text = pg.LabelItem(table_html(comparison, scale, foreground, unit),
                             justify='left', size='8pt')
         text.is_signature_table = True
         layout.addItem(text, row=0, col=1)
@@ -205,4 +224,3 @@ def build_signature(layout: Any, before: Any, after: Any, modes: Any, *,
         grid.setColumnStretchFactor(0, 2)
         grid.setColumnStretchFactor(1, 1)
     return comparison
-

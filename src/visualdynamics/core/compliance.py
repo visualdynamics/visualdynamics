@@ -1315,8 +1315,14 @@ def sine_errors(specification, levels):
 # as it was, because a bar per channel of how far it strayed is still
 # the right overview of a run.
 
-#: the inner band an SRS is commonly held to, in dB below and above the
-#: requirement: from 0.84 to 1.41 times it at each point
+# 2026-10-16: this read "the band an SRS is commonly held to", which
+# the ShockSpecification docstring's "usually +6/-3 dB" contradicted;
+# neither is a citation, so neither claims to be the convention now
+
+#: the inner band used when neither the call nor the requirement gives
+#: one, in dB below and above the requirement: from 0.84 to 1.41 times
+#: it at each point. A starting point to edit, not a standard; the test
+#: plan names the band that applies
 SRS_INNER_DB = (-1.5, 3.0)
 
 #: the share of the points, in percent, that the default rule asks to
@@ -1350,6 +1356,87 @@ def _band_db(name: str, band: Any) -> tuple[float, float]:
     return below, above
 
 
+def _rule_checked(rule: str, percent: float) -> float:
+    """The percentage as a float, after refusing a rule or share that
+    cannot be read."""
+    if rule not in SRS_RULES:
+        raise ValueError(f'{rule!r} is not a rule; the rules are '
+                         + ', '.join(repr(r) for r in SRS_RULES))
+    percent = float(percent)
+    if not 0.0 <= percent <= 100.0:
+        raise ValueError(f'{percent:g} percent is not a share of the points')
+    return percent
+
+
+def _judge(frequencies: np.ndarray, got: np.ndarray, target: np.ndarray,
+           inner: tuple[Any, Any], outer: tuple[Any, Any] | None,
+           rule: str, percent: float) -> dict[str, Any]:
+    """The count and the verdict, for `srs_points` and `srs_tolerance`.
+
+    Each band edge is a number of dB, or an array of them, one per
+    measured point, when the band is read from a requirement's limit
+    curves. A point is judged where the requirement and the inner band
+    are both written there, and an outer edge that is not written at a
+    point does not hold that point.
+    """
+    low, high = inner
+    if rule == 'above_lower':
+        # the rule has no ceiling, so the band has none: the counts,
+        # the marks and the legend then all read the one band the rule
+        # applies (2026-10-16: the +3 dB edge was still applied here,
+        # and the plot, the panel and the legend each undid it on
+        # their own)
+        high = np.inf
+    with np.errstate(invalid='ignore', divide='ignore'):
+        judged = (np.isfinite(frequencies) & np.isfinite(target)
+                  & np.isfinite(got) & (target > 0.0) & (got > 0.0)
+                  & ~np.isnan(low) & ~np.isnan(high))
+    db = np.full(frequencies.shape, np.nan)
+    db[judged] = 20.0 * np.log10(got[judged] / target[judged])
+    with np.errstate(invalid='ignore'):
+        under = judged & (db < low - SRS_EDGE_DB)
+        over = judged & (db > high + SRS_EDGE_DB)
+        beyond = np.zeros(frequencies.shape, dtype=bool)
+        if outer is not None:
+            beyond = judged & ((db < outer[0] - SRS_EDGE_DB)
+                               | (db > outer[1] + SRS_EDGE_DB))
+    inside = judged & ~under & ~over
+    points = int(judged.sum())
+    count = int(inside.sum())
+
+    out: dict[str, Any] = {
+        'judged': judged, 'db': db, 'inside': inside, 'over': over,
+        'under': under, 'beyond_outer': beyond,
+        'points': points, 'inside_count': count,
+        'inside_percent': 100.0 * count / points if points else float('nan'),
+        'over_count': int(over.sum()), 'under_count': int(under.sum()),
+        'outer_count': int(beyond.sum()),
+        'inner': (low, high), 'outer': outer, 'rule': rule,
+        'percent': percent,
+        'passed': None, 'worst_frequency': float('nan'),
+        'worst_db': float('nan'), 'worst_margin_db': float('nan'),
+    }
+    if not points:
+        return out
+    # counted, not divided: 90 percent of 92 points is 82.8, and the
+    # rule is met by 83 inside, which a comparison of rounded
+    # percentages could get wrong either way
+    met = (count * 100.0 >= percent * points if rule == 'share'
+           else not under.any())
+    out['passed'] = bool(met and not beyond.any())
+    # the worst point is the one farthest outside the band the rule
+    # applies, which is not the largest distance from the requirement:
+    # under the default band a point 2.5 dB over is inside and one
+    # 2 dB under is not
+    with np.errstate(invalid='ignore'):
+        margin = np.where(judged, np.maximum(low - db, db - high), -np.inf)
+    worst = int(np.argmax(margin))
+    out['worst_frequency'] = float(frequencies[worst])
+    out['worst_db'] = float(db[worst])
+    out['worst_margin_db'] = float(margin[worst])
+    return out
+
+
 def srs_points(frequencies: ArrayLike, values: ArrayLike,
                spec_frequencies: ArrayLike, spec_values: ArrayLike, *,
                inner: tuple[float, float] = SRS_INNER_DB,
@@ -1375,9 +1462,11 @@ def srs_points(frequencies: ArrayLike, values: ArrayLike,
     inside the inner band; a rule that asks for a share of the points
     above the requirement is this one with a band from 0 dB up,
     ``inner=(0.0, numpy.inf)``. 'above_lower' passes when every judged
-    point is at or above the inner band's lower edge, and does not
-    apply its upper edge. Under either rule, when `outer` is given
-    every judged point must also lie inside it.
+    point is at or above the inner band's lower edge; the band has no
+    upper edge under it, so every point at or above the lower edge is
+    inside, and 'inner' in the result is (lower edge, inf). Under
+    either rule, when `outer` is given every judged point must also lie
+    inside it.
 
     Parameters
     ----------
@@ -1420,77 +1509,118 @@ def srs_points(frequencies: ArrayLike, values: ArrayLike,
         edge is not below its upper edge, or a percentage outside 0 to
         100.
     """
-    if rule not in SRS_RULES:
-        raise ValueError(f'{rule!r} is not a rule; the rules are '
-                         + ', '.join(repr(r) for r in SRS_RULES))
-    low, high = _band_db('inner', inner)
+    percent = _rule_checked(rule, percent)
+    band = _band_db('inner', inner)
     reach = None if outer is None else _band_db('outer', outer)
-    percent = float(percent)
-    if not 0.0 <= percent <= 100.0:
-        raise ValueError(f'{percent:g} percent is not a share of the points')
-
     frequencies = np.asarray(frequencies, dtype=float)
     got = np.asarray(np.real(values), dtype=float)
     target = log_interpolate(frequencies, spec_frequencies,
                              np.real(np.asarray(spec_values)))
-    with np.errstate(invalid='ignore'):
-        judged = (np.isfinite(frequencies) & np.isfinite(target)
-                  & np.isfinite(got) & (target > 0.0) & (got > 0.0))
-    db = np.full(frequencies.shape, np.nan)
-    db[judged] = 20.0 * np.log10(got[judged] / target[judged])
-    with np.errstate(invalid='ignore'):
-        under = judged & (db < low - SRS_EDGE_DB)
-        over = judged & (db > high + SRS_EDGE_DB)
-        beyond = np.zeros(frequencies.shape, dtype=bool)
-        if reach is not None:
-            beyond = judged & ((db < reach[0] - SRS_EDGE_DB)
-                               | (db > reach[1] + SRS_EDGE_DB))
-    inside = judged & ~under & ~over
-    points = int(judged.sum())
-    count = int(inside.sum())
+    return _judge(frequencies, got, target, band, reach, rule, percent)
 
-    out: dict[str, Any] = {
-        'judged': judged, 'db': db, 'inside': inside, 'over': over,
-        'under': under, 'beyond_outer': beyond,
-        'points': points, 'inside_count': count,
-        'inside_percent': 100.0 * count / points if points else float('nan'),
-        'over_count': int(over.sum()), 'under_count': int(under.sum()),
-        'outer_count': int(beyond.sum()),
-        'inner': (low, high), 'outer': reach, 'rule': rule,
-        'percent': percent,
-        'passed': None, 'worst_frequency': float('nan'),
-        'worst_db': float('nan'), 'worst_margin_db': float('nan'),
-    }
-    if not points:
-        return out
-    if rule == 'share':
-        # counted, not divided: 90 percent of 92 points is 82.8, and the
-        # rule is met by 83 inside, which a comparison of rounded
-        # percentages could get wrong either way
-        met = count * 100.0 >= percent * points
-        margin = np.maximum(low - db, db - high)
-    else:
-        met = not under.any()
-        margin = low - db
-    out['passed'] = bool(met and not beyond.any())
-    # the worst point is the one farthest outside the band the rule
-    # applies, which is not the largest distance from the requirement:
-    # under the default band a point 2.5 dB over is inside and one
-    # 2 dB under is not
-    margin = np.where(judged, margin, -np.inf)
-    worst = int(np.argmax(margin))
-    out['worst_frequency'] = float(frequencies[worst])
-    out['worst_db'] = float(db[worst])
-    out['worst_margin_db'] = float(margin[worst])
-    return out
+
+#: how far apart, in dB, a limit curve may sit from the requirement
+#: along the band and still be read as one number of dB: a band
+#: written as dB and stored as the curves reads back to rounding
+SRS_STEADY_DB = 1e-6
+
+
+def _limit_band(specification: Any, record: int, frequencies: np.ndarray,
+                target: np.ndarray, lower: str, upper: str
+                ) -> tuple[Any, Any] | None:
+    """(below, above) in dB at each measured point, read log-log from a
+    requirement's `lower` and `upper` limit curves; None when it does
+    not have both written anywhere in the band.
+
+    An edge that is the same number of dB at every point the
+    requirement is written at is returned as that number, so a band
+    written in dB reads back as it was written; an edge that varies
+    along the band is the array.
+    """
+    limits = getattr(specification, 'limits', None) or {}
+    if lower not in limits or upper not in limits:
+        return None
+    written = np.isfinite(target) & (target > 0.0)
+    edges = []
+    for name in (lower, upper):
+        curve = np.atleast_2d(limits[name])[record]
+        at = log_interpolate(frequencies, specification.abscissa, curve)
+        with np.errstate(invalid='ignore', divide='ignore'):
+            db = np.where(written, 20.0 * np.log10(at / target), np.nan)
+        if not np.isfinite(db).any():
+            return None
+        steady = (np.isfinite(db[written]).all()
+                  and np.ptp(db[written]) < SRS_STEADY_DB)
+        edges.append(float(np.mean(db[written])) if steady else db)
+    return edges[0], edges[1]
+
+
+def srs_limit_bands(specification: DataArray, record: int = 0
+                    ) -> tuple[tuple[Any, Any] | None,
+                               tuple[Any, Any] | None]:
+    """(inner, outer): the bands a requirement's own warning and abort
+    limits set, read at its points as `srs_tolerance` reads them.
+
+    Parameters
+    ----------
+    specification : ShockSpecification
+        The requirement.
+    record : int, default 0
+        Which record.
+
+    Returns
+    -------
+    tuple
+        Each band as (dB below, dB above), an edge an array of dB at
+        the requirement's points where its limit curve is not a fixed
+        number of dB from it; None for a band the requirement has no
+        limits for.
+    """
+    frequencies = np.asarray(specification.abscissa, dtype=float)
+    target = np.asarray(
+        np.real(np.atleast_2d(specification.ordinate)[record]), dtype=float)
+    return tuple(_limit_band(specification, record, frequencies, target,
+                             f'{name}_lower', f'{name}_upper')
+                 for name in ('warning', 'abort'))
+
+
+def _srs_refusal(specification: Any, measured: Any, spec_record: int,
+                 measured_record: int) -> str | None:
+    """Why this pair of records cannot be judged one against the other,
+    or None when they can: another Q, another quantity, or a quantity
+    that is not declared."""
+    from ..units import UNKNOWN
+
+    q_spec = getattr(specification, 'q', None)
+    q_measured = getattr(measured, 'q', None)
+    if (q_spec is not None and q_measured is not None
+            and not np.isclose(q_spec, q_measured)):
+        return (f'the requirement is at Q={q_spec:g} and the spectrum at '
+                f'Q={q_measured:g}; compute the spectrum at the Q the '
+                'requirement names')
+    # values are held in SI, so one quantity on both sides is the one
+    # condition for the ratio to mean anything (2026-10-16: an SRS of
+    # undeclared units read 0 of 92 inside a requirement in g, and a
+    # velocity SRS passed an acceleration requirement)
+    wanted = str(specification.ordinate_dim[spec_record])
+    held = str(measured.ordinate_dim[measured_record])
+    if UNKNOWN in (wanted, held):
+        side = 'the requirement' if wanted == UNKNOWN else 'the spectrum'
+        return (f'the units of {side} are not declared, so its levels '
+                'cannot be read against the other; set its units first')
+    if wanted != held:
+        return (f'the requirement is of {wanted} and the spectrum of '
+                f'{held}; judge a spectrum of the quantity required')
+    return None
 
 
 def srs_tolerance(specification: DataArray, measured: DataArray,
                   spec_record: int = 0, measured_record: int = 0, *,
-                  inner: tuple[float, float] = SRS_INNER_DB,
+                  inner: tuple[float, float] | None = None,
                   outer: tuple[float, float] | None = None,
                   rule: str = 'share',
-                  percent: float = SRS_POINTS_PERCENT) -> dict[str, Any]:
+                  percent: float = SRS_POINTS_PERCENT,
+                  limits: bool = True) -> dict[str, Any]:
     """One record of a measured SRS judged point by point against one
     record of the SRS it was required to meet.
 
@@ -1504,11 +1634,20 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
     dip can be well inside 3 dB in RMS while every point in the dip is
     outside the band, and only a count of the points says so.
 
+    A band not given is read from the requirement's own limit curves
+    when it has them, so the judgement is against the curves the
+    comparison draws: the warning limits are the inner band and the
+    abort limits the outer one, each read log-log at every measured
+    point. An inner band neither given nor written is `SRS_INNER_DB`;
+    an outer band neither given nor written is not applied. With
+    `limits` False only the bands given are used.
+
     The spectrum is judged as it is, in whichever polarity it holds
     (`Srs.kind`): to judge a positive and a negative spectrum against
     one maximax requirement, judge each. Both curves must be at the
-    same Q, since a spectrum at another Q is a different curve and no
-    band can make up the difference.
+    same Q and of the same declared quantity, since a spectrum at
+    another Q or of another quantity is a different curve and no band
+    can make up the difference.
 
     Parameters
     ----------
@@ -1518,43 +1657,72 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
         The measured spectra.
     spec_record, measured_record : int, default 0
         Which record of each.
-    inner, outer, rule, percent
-        The band and the rule, as for `srs_points`.
+    inner, outer : (float, float), optional
+        The bands in dB below and above the requirement, as for
+        `srs_points`; see above for a band not given.
+    rule, percent
+        The rule, as for `srs_points`.
+    limits : bool, default True
+        Read a band not given from the requirement's limit curves.
 
     Returns
     -------
     dict
         What `srs_points` returns, with 'dof' and 'event' (the measured
         record's DOF and block label, None without one), 'kind' (its
-        polarity) and 'q'. A pair at different Q returns
+        polarity), 'q' and 'limits' (True when a band was read from the
+        requirement's limit curves). 'inner' and 'outer' hold the bands
+        as judged: each edge a number of dB, or an array of dB at each
+        measured point when a limit curve is not a fixed number of dB
+        from the requirement. A pair at different Q, of different
+        quantities, or with either quantity undeclared returns
         {'points': 0, 'passed': None, 'refused': reason}.
+
+    Raises
+    ------
+    ValueError
+        As `srs_points` does, for a rule or a band that cannot be read.
     """
-    q_spec = getattr(specification, 'q', None)
-    q_measured = getattr(measured, 'q', None)
-    if (q_spec is not None and q_measured is not None
-            and not np.isclose(q_spec, q_measured)):
-        return {'points': 0, 'passed': None,
-                'refused': f'the requirement is at Q={q_spec:g} and the '
-                           f'spectrum at Q={q_measured:g}; compute the '
-                           'spectrum at the Q the requirement names'}
-    out = srs_points(measured.abscissa,
-                     np.atleast_2d(measured.ordinate)[measured_record],
-                     specification.abscissa,
-                     np.atleast_2d(specification.ordinate)[spec_record],
-                     inner=inner, outer=outer, rule=rule, percent=percent)
+    percent = _rule_checked(rule, percent)
+    band = None if inner is None else _band_db('inner', inner)
+    reach = None if outer is None else _band_db('outer', outer)
+    refused = _srs_refusal(specification, measured, spec_record,
+                           measured_record)
+    if refused is not None:
+        return {'points': 0, 'passed': None, 'refused': refused}
+
+    frequencies = np.asarray(measured.abscissa, dtype=float)
+    got = np.asarray(np.real(np.atleast_2d(measured.ordinate)[measured_record]),
+                     dtype=float)
+    target = log_interpolate(
+        frequencies, specification.abscissa,
+        np.real(np.atleast_2d(specification.ordinate)[spec_record]))
+    read = False
+    if limits and band is None:
+        band = _limit_band(specification, spec_record, frequencies, target,
+                           'warning_lower', 'warning_upper')
+        read = band is not None
+    if limits and reach is None:
+        reach = _limit_band(specification, spec_record, frequencies, target,
+                            'abort_lower', 'abort_upper')
+        read = read or reach is not None
+    out = _judge(frequencies, got, target,
+                 SRS_INNER_DB if band is None else band, reach, rule, percent)
     out['dof'] = str(measured.response_dof[measured_record])
     out['event'] = (None if measured.block is None
                     else measured.block[measured_record])
     out['kind'] = getattr(measured, 'kind', None)
-    out['q'] = q_measured
+    out['q'] = getattr(measured, 'q', None)
+    out['limits'] = read
     return out
 
 
 def srs_tolerance_all(specification: DataArray, measured: DataArray, *,
-                      inner: tuple[float, float] = SRS_INNER_DB,
+                      inner: tuple[float, float] | None = None,
                       outer: tuple[float, float] | None = None,
                       rule: str = 'share',
-                      percent: float = SRS_POINTS_PERCENT
+                      percent: float = SRS_POINTS_PERCENT,
+                      limits: bool = True
                       ) -> list[tuple[str, str | None, dict[str, Any]]]:
     """[(dof, event, result)] for every measured record the
     specification names, each result from `srs_tolerance`.
@@ -1570,8 +1738,8 @@ def srs_tolerance_all(specification: DataArray, measured: DataArray, *,
         The requirement.
     measured : Srs
         The measured spectra, one record per channel per event.
-    inner, outer, rule, percent
-        The band and the rule, as for `srs_points`.
+    inner, outer, rule, percent, limits
+        The bands and the rule, as for `srs_tolerance`.
 
     Returns
     -------
@@ -1581,7 +1749,8 @@ def srs_tolerance_all(specification: DataArray, measured: DataArray, *,
     out = []
     for dof, j, i, block in _srs_pairs(specification, measured):
         result = srs_tolerance(specification, measured, j, i, inner=inner,
-                               outer=outer, rule=rule, percent=percent)
+                               outer=outer, rule=rule, percent=percent,
+                               limits=limits)
         if result['points'] or 'refused' in result:
             out.append((dof, block, result))
     return out

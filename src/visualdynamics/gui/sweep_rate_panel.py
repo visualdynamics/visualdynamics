@@ -8,7 +8,7 @@ as frequency against time with each mode's half-power band across it
 is made against: the modes, each a natural frequency and a Q, typed as
 pairs, and the multiple of the rule's rate at which a pass is flagged.
 Under them are the counts that follow, and, where a tracked level of
-the tone is selected with the specification, the judgement of the Q
+the tone is selected with the specification, the judgment of the Q
 read off that level at each mode (`core.sweep_rate.read_swept_q`).
 
 Every finished edit redraws the plot and the table. Nothing is made:
@@ -96,8 +96,9 @@ class SweepRatePanel(QWidget):
         self.margin_box.setValue(MARGIN)
         self.margin_box.setToolTip(
             'Flag a pass whose rate is above this multiple of the '
-            'rule\'s rate, 87 fn / Q² oct/min on a log sweep. At 1 a '
-            'mode reads about 95 percent of its steady height')
+            'rule\'s rate, 87 fn / Q² oct/min on a log sweep or '
+            'fn² / Q² Hz/s on a linear one. At 1 a mode reads about '
+            '94 percent of its steady height')
         commit_on_enter(self.margin_box)
         self.names, self.editors = add_keyed_settings(grid, [
             ('modes', 'Modes [Hz Q]', self.modes_box),

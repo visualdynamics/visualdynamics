@@ -34,7 +34,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.compliance import SRS_INNER_DB, SRS_POINTS_PERCENT
+from ..core.compliance import SRS_POINTS_PERCENT
 
 #: the marker each polarity wears, in the order the spectra are given
 SYMBOLS = ('o', 's', 'd', 't1', 'star')
@@ -63,17 +63,30 @@ def _shown(values: Any, dimension: str, unit_system: Any) -> np.ndarray:
     return np.asarray(unit_system.from_si(values, dimension), dtype=float)
 
 
-def band_text(inner: tuple[float, float],
-              outer: tuple[float, float] | None) -> str:
+def _db(value: Any) -> str:
+    """One band edge in words, '−1.5 dB'; an edge read from a limit
+    curve that is not a fixed number of dB from the requirement is
+    'the limit'."""
+    if np.ndim(value):
+        return 'the limit'
+    return f'{value:+g} dB'.replace('-', '\u2212')
+
+
+def band_text(inner: tuple[Any, Any],
+              outer: tuple[Any, Any] | None) -> str:
     """The band in words, as the title and the legend give it:
-    '−1.5/+3 dB', or '−1.5/+3 dB within −3/+6 dB' with an outer band."""
-    def pair(band):
+    '−1.5/+3 dB', or '−1.5/+3 dB within −3/+6 dB' with an outer band.
+    A band read from limit curves that vary along it is named for
+    them, 'the warning limits' and 'the abort limits'."""
+    def pair(band, name):
         below, above = band
+        if np.ndim(below) or np.ndim(above):
+            return f'the {name} limits'
         top = 'up' if np.isinf(above) else f'{above:+g}'
         return f'{below:+g}/{top} dB'.replace('-', '\u2212')
 
-    text = pair(inner)
-    return text if outer is None else f'{text} within {pair(outer)}'
+    text = pair(inner, 'warning')
+    return text if outer is None else f'{text} within {pair(outer, "abort")}'
 
 
 def describe(result: dict[str, Any]) -> str:
@@ -82,39 +95,33 @@ def describe(result: dict[str, Any]) -> str:
     'maximax: 85/92 inside (92.4 %), passes'. Short, because it is a
     legend entry beside two or three others."""
     name = result.get('kind') or 'measured'
-    points = result['points']
-    if result['rule'] == 'above_lower':
-        held = points - result['under_count']
-        where = f'at or above {result["inner"][0]:+g} dB'.replace(
-            '-', '\u2212')
-        share = 100.0 * held / points if points else float('nan')
-    else:
-        held = result['inside_count']
-        where = 'inside'
-        share = result['inside_percent']
+    # the counts are the judgement's own under either rule: 'above_lower'
+    # has no ceiling, so inside is at or above the lower edge
+    where = ('inside' if result['rule'] == 'share'
+             else f'at or above {_db(result["inner"][0])}')
     verdict = {True: 'passes', False: 'fails', None: 'not judged'}[
         result['passed']]
-    return f'{name}: {held}/{points} {where} ({share:.1f} %), {verdict}'
+    return (f'{name}: {result["inside_count"]}/{result["points"]} {where} '
+            f'({result["inside_percent"]:.1f} %), {verdict}')
 
 
 def outside_points(result: dict[str, Any]) -> np.ndarray:
     """Which points the plot marks: those the rule holds against the
-    spectrum. Under 'share' every point outside the inner band, under
-    'above_lower' every point under its lower edge, and under either
-    every point outside the outer band."""
-    out = result['under'] if result['rule'] == 'above_lower' else (
-        result['judged'] & ~result['inside'])
-    return out | result['beyond_outer']
+    spectrum, every point outside the inner band (under 'above_lower',
+    which has no ceiling, every point under its lower edge) and every
+    point outside the outer band."""
+    return (result['judged'] & ~result['inside']) | result['beyond_outer']
 
 
 def build_srs_tolerance(layout: Any, specification: Any,
                         measured: Any | Sequence[Any], *,
                         channel: str | None = None,
                         event: str | None = None,
-                        inner: tuple[float, float] = SRS_INNER_DB,
+                        inner: tuple[float, float] | None = None,
                         outer: tuple[float, float] | None = None,
                         rule: str = 'share',
                         percent: float = SRS_POINTS_PERCENT,
+                        limits: bool = True,
                         unit_system: Any = None,
                         theme: Any = None) -> list[dict[str, Any]]:
     """Draw one channel's spectra against the requirement and its band,
@@ -123,6 +130,9 @@ def build_srs_tolerance(layout: Any, specification: Any,
     `measured` is one `Srs` or several, one per polarity; each is drawn
     at `channel` (the specification's first DOF by default) and at
     `event` (each spectrum's first record at that channel by default).
+    A band not given is the requirement's own limits when it has them,
+    as `compliance.srs_tolerance` reads it, and the curves drawn are
+    the ones judged against.
     """
     import pyqtgraph as pg
 
@@ -156,7 +166,8 @@ def build_srs_tolerance(layout: Any, specification: Any,
             where = dof if event is None else f'{dof}, {event}'
             raise ValueError(f'a spectrum has no record at {where}')
         result = srs_tolerance(specification, data, j, i, inner=inner,
-                               outer=outer, rule=rule, percent=percent)
+                               outer=outer, rule=rule, percent=percent,
+                               limits=limits)
         if 'refused' in result:
             raise ValueError(result['refused'])
         picked.append((data, i, result))
@@ -170,17 +181,21 @@ def build_srs_tolerance(layout: Any, specification: Any,
 
     x = np.asarray(specification.abscissa, dtype=float)
     required = _shown(specification.ordinate[j], dimension, us)
-    low, high = picked[0][2]['inner']
-    bands = {'warning_lower': required * 10.0 ** (low / 20.0),
-             'warning_upper': required * 10.0 ** (high / 20.0)}
-    if rule == 'above_lower':
-        # that rule puts no ceiling on the inner band, so nothing above
-        # it is shaded as ground to stay out of
-        del bands['warning_upper']
-    if outer is not None:
-        reach = picked[0][2]['outer']
-        bands['abort_lower'] = required * 10.0 ** (reach[0] / 20.0)
-        bands['abort_upper'] = required * 10.0 ** (reach[1] / 20.0)
+    inner_band, outer_band = _bands(picked)
+    edges = dict(zip(('warning_lower', 'warning_upper'), inner_band))
+    if outer_band is not None:
+        edges.update(zip(('abort_lower', 'abort_upper'), outer_band))
+    bands = {}
+    for name, db in edges.items():
+        if np.ndim(db):
+            # an edge that varies along the band came from the
+            # requirement's own limit curve: that curve is drawn
+            bands[name] = _shown(np.atleast_2d(specification.limits[name])[j],
+                                 dimension, us)
+        elif np.isfinite(db):
+            # an open edge (no ceiling under 'above_lower', or a band
+            # from 0 dB up) is not shaded as ground to stay out of
+            bands[name] = required * 10.0 ** (db / 20.0)
     zones = _shade_limit_zones(plot, x, bands, colors)
     for values in bands.values():
         # the bands set how far the view reaches, so an edge above
@@ -219,7 +234,7 @@ def build_srs_tolerance(layout: Any, specification: Any,
             describe(result))
 
     shades = zone_colors(colors)
-    for zone, name in tolerance_key(zones, *_bands(picked), rule):
+    for zone, name in tolerance_key(zones, *_bands(picked)):
         swatch = pg.BarGraphItem(x=[0.0], height=[1.0], width=1.0,
                                  pen=None, brush=pg.mkBrush(shades[zone]))
         swatch.is_zone_edge = True
@@ -250,23 +265,22 @@ def _bands(picked):
     return first['inner'], first['outer']
 
 
-def tolerance_key(zones: set, inner: tuple[float, float],
-                  outer: tuple[float, float] | None,
-                  rule: str = 'share') -> list[tuple[str, str]]:
+def tolerance_key(zones: set, inner: tuple[Any, Any],
+                  outer: tuple[Any, Any] | None) -> list[tuple[str, str]]:
     """The legend entries for the shading, (zone, name), each only when
     it was drawn: `zones` holds any of 'warning', 'above' and 'below',
-    as `_shade_limit_zones` returns them. Under 'above_lower' only the
-    inner band's lower edge is shaded, and the entry says so."""
+    as `_shade_limit_zones` returns them. An inner band with no upper
+    edge (the 'above_lower' rule's) is shaded below its lower edge
+    only, and the entry says so."""
     entries = []
     if 'warning' in zones:
-        name = (f'below {inner[0]:+g} dB'.replace('-', '\u2212')
-                if rule == 'above_lower'
+        open_top = not np.ndim(inner[1]) and np.isinf(inner[1])
+        name = (f'below {_db(inner[0])}' if open_top
                 else f'outside {band_text(inner, None)}')
         entries.append(('warning', name))
     if outer is not None:
         if 'above' in zones:
-            entries.append(('above', f'above {outer[1]:+g} dB'))
+            entries.append(('above', f'above {_db(outer[1])}'))
         if 'below' in zones:
-            entries.append(('below', f'below {outer[0]:+g} dB'.replace(
-                '-', '\u2212')))
+            entries.append(('below', f'below {_db(outer[0])}'))
     return entries

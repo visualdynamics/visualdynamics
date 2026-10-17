@@ -11,7 +11,8 @@ fifth, eleven at a tenth. Its peak to peak is close to A T^2 / 2, about
 peaks at 73.7 in/s and needs 0.694 in against the rule's 0.695; a
 20 g, 30 ms one needs 3.47 in; compensating at a tenth instead needs
 1.80 times the stroke; and a 50 g, 11 ms pulse with a moving mass a
-quarter of the body's needs 1.46 in of travel relative to the body.
+quarter of the body's needs 1.46 in of travel relative to the body,
+and moves 84.5 in/s against it where the table moves 67.6.
 """
 
 from __future__ import annotations
@@ -23,8 +24,8 @@ from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.filters import integrate
 from visualdynamics.core.stroke import (
     COMPENSATION_SHARE,
+    _number,
     compensated_half_sine,
-    number,
     read_stroke,
     rule_stroke,
 )
@@ -84,14 +85,20 @@ def test_compensating_at_a_tenth_takes_eleven_durations_and_1_80_times_the_strok
 
 def test_a_moving_mass_a_quarter_of_the_bodys_needs_1_46_in_of_relative_travel():
     """The 50 g, 11 ms pulse's table moves 1.17 in; the body moves the
-    other way by a quarter of that, so the stops see 1.46 in."""
-    reading = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25)
+    other way by a quarter of that, so the stops see 1.46 in, and the
+    coil moves against the body a quarter faster than the table."""
+    reading = read_stroke(pulse(50.0, 0.011), **BODY)
     assert reading.peak_to_peak / INCH == pytest.approx(1.1661, abs=1e-4)
-    assert reading.body_factor == 1.25
+    assert reading.rating.body_share == 0.25
     assert reading.travel / INCH == pytest.approx(1.46, abs=5e-3)
-    # the table alone without it
-    assert read_stroke(pulse(50.0, 0.011)).travel / INCH == \
-        pytest.approx(1.1661, abs=1e-4)
+    assert reading.peak_velocity / INCH == pytest.approx(67.593, abs=1e-3)
+    assert reading.relative_velocity / INCH == pytest.approx(
+        1.25 * 67.593, abs=1e-3)
+    # the table alone without it, and without the moving mass beside it
+    for alone in ({}, {'body_mass': 400.0 * LB}):
+        plain = read_stroke(pulse(50.0, 0.011), **alone)
+        assert plain.travel / INCH == pytest.approx(1.1661, abs=1e-4)
+        assert plain.relative_velocity == plain.peak_velocity
 
 
 @pytest.mark.parametrize('peak,duration', [
@@ -157,34 +164,57 @@ def test_the_stroke_is_integrated_raw_not_through_the_drift_high_pass():
 # ---- the ratings -------------------------------------------------------
 
 
+#: 100 lb moving on a body four times as heavy: a quarter
+BODY = {'moving_mass': 100.0 * LB, 'body_mass': 400.0 * LB}
+
+
 def ratings(**overrides):
     given = {'stroke': 2.5 * INCH, 'velocity': 70.0 * INCH,
-             'force': 6000.0 * LBF, 'moving_mass': 100.0 * LB,
-             'mass_ratio': 0.25}
+             'force': 6000.0 * LBF, **BODY}
     given.update(overrides)
     return given
 
 
 def test_each_demand_is_a_share_of_its_rating():
-    """The travel with the body against the stroke, the peak velocity
-    against the shock velocity, and the moving mass times the peak
-    against the force."""
+    """The travel with the body each way against half the stroke, the
+    peak velocity with the body against the shock velocity, and the
+    moving mass times the peak against the force."""
     reading = read_stroke(pulse(50.0, 0.011), **ratings())
     shares = reading.shares()
-    assert shares['stroke'] == pytest.approx(1.4576 / 2.5, abs=1e-4)
-    assert shares['velocity'] == pytest.approx(67.593 / 70.0, abs=1e-4)
+    assert shares['stroke'] == pytest.approx(1.4576 / 1.25, abs=1e-4)
+    assert shares['velocity'] == pytest.approx(1.25 * 67.593 / 70.0,
+                                               abs=1e-4)
     assert reading.force / LBF == pytest.approx(5000.0, rel=1e-6)
     assert shares['force'] == pytest.approx(5000.0 / 6000.0, rel=1e-6)
-    # every share within, and the stroke each way too with room
-    roomy = read_stroke(pulse(50.0, 0.011), **ratings(stroke=4.0 * INCH))
+    # every share within with room each way and a faster shaker
+    roomy = read_stroke(pulse(50.0, 0.011),
+                        **ratings(stroke=4.0 * INCH, velocity=90.0 * INCH))
     assert roomy.fits is True
 
 
+def test_the_stroke_share_is_the_one_the_replication_fit_reads():
+    """One rule: the same travel against the same rating is the same
+    share in both readings, the larger travel each way over half the
+    stroke, not the peak to peak over the stroke."""
+    from visualdynamics.core.shaker import ShakerRating
+
+    reading = read_stroke(pulse(50.0, 0.011), **ratings())
+    rating = ShakerRating(**ratings())
+    assert reading.rating == rating
+    assert reading.shares()['stroke'] == rating.stroke_share(
+        reading.travel_down, reading.travel_up)
+    assert reading.shares()['stroke'] != pytest.approx(
+        reading.travel / rating.stroke)
+
+
 def test_a_rating_exceeded_is_said_over():
-    reading = read_stroke(pulse(50.0, 0.011), **ratings(velocity=60.0 * INCH))
+    reading = read_stroke(pulse(50.0, 0.011), velocity=60.0 * INCH)
     assert reading.fits is False
     assert 'Peak velocity 67.6 in/s against 60 in/s: OVER, 113 %' in \
         reading.describe()
+    counted = read_stroke(pulse(50.0, 0.011), **ratings())
+    assert ('Peak velocity with the body 84.5 in/s against 70 in/s: OVER, '
+            '121 %') in counted.describe()
 
 
 def test_a_rating_not_given_is_not_judged():
@@ -192,9 +222,9 @@ def test_a_rating_not_given_is_not_judged():
     assert reading.shares() == {'stroke': None, 'velocity': None,
                                 'force': None}
     assert reading.fits is None
-    assert reading.fits_centered is None
+    assert reading.fits_stroke is None
     assert reading.force is None
-    assert reading.describe()[0] == 'Travel 1.17 in'
+    assert reading.describe()[0] == 'One-sided travel 1.17 in'
 
 
 def test_a_force_rating_without_a_moving_mass_is_not_judged():
@@ -208,26 +238,37 @@ def test_a_one_sided_travel_reaches_a_stop_inside_the_stroke():
     """The symmetric arrangement travels one way only: 1.46 in down
     with the body counted, inside a 2.5 in stroke peak to peak and past
     the 1.25 in to the stop below center, where the armature rests. The
-    stops see the travel each way, so the pulse does not fit."""
+    stops see the travel each way, so the pulse does not fit, and the
+    words say so once: 117 %, never 'within, 58 %' beside it."""
     reading = read_stroke(pulse(50.0, 0.011), **ratings())
-    assert reading.shares()['stroke'] < 1.0
-    assert reading.fits_centered is False
+    assert reading.travel / (2.5 * INCH) < 1.0
+    assert reading.shares()['stroke'] == pytest.approx(1.166, abs=1e-3)
+    assert reading.fits_stroke is False
     assert reading.fits is False
     assert reading.travel_down / INCH == pytest.approx(1.4576, abs=1e-4)
-    assert reading.travel_up == pytest.approx(0.0, abs=1e-12)
+    assert reading.travel_up == 0.0
     assert not hasattr(reading, 'offset')
     lines = reading.describe()
+    assert lines[0] == ('One-sided travel with the body 1.46 in against '
+                        '1.25 in to the stop: OVER, 117 %')
+    assert lines[1] == ('Centered, the travel would fit: 1.46 in peak to '
+                        'peak against 2.5 in. Centering the travel is the '
+                        'controller\'s compensation, an asymmetric pre- and '
+                        'post-pulse')
     assert 'Each way from center: 1.46 in down, 0 in up' in lines
-    assert ('One-sided travel 1.46 in against 1.25 in to the stop: OVER, '
-            '117 %. Centering the travel is the controller\'s compensation, '
-            'an asymmetric pre- and post-pulse') in lines
-    assert reading.to_the_stop() == ('one-sided travel 1.46 in against '
-                                     '1.25 in to the stop')
+    assert not any('within, 58' in line or '58 %' in line for line in lines)
+    assert reading.to_the_stop() == ('one-sided travel with the body 1.46 in '
+                                     'against 1.25 in to the stop')
     assert not any('rest' in line for line in lines)
-    # with room each way, it is not said
+    # with room each way, the travel is within and no centering is said
     roomy = read_stroke(pulse(50.0, 0.011), **ratings(stroke=4.0 * INCH))
-    assert roomy.fits_centered is True
-    assert not any('to the stop' in line for line in roomy.describe())
+    assert roomy.fits_stroke is True
+    assert roomy.describe()[0].endswith('to the stop: within, 73 %')
+    assert not any('Centered' in line for line in roomy.describe())
+    # and too little stroke even peak to peak: centering is not offered
+    short = read_stroke(pulse(50.0, 0.011), **ratings(stroke=1.0 * INCH))
+    assert short.fits_stroke is False
+    assert not any('Centered' in line for line in short.describe())
 
 
 def test_a_pulse_the_other_way_reaches_the_upper_stop():
@@ -235,10 +276,24 @@ def test_a_pulse_the_other_way_reaches_the_upper_stop():
     record = pulse(50.0, 0.011)
     record.ordinate[0] = -record.ordinate[0]
     reading = read_stroke(record, **ratings())
-    assert reading.travel_down == pytest.approx(0.0, abs=1e-12)
+    assert reading.travel_down == 0.0
     assert reading.travel_up / INCH == pytest.approx(1.4576, abs=1e-4)
-    assert reading.fits_centered is False
-    assert reading.to_the_stop().startswith('one-sided travel 1.46 in')
+    assert reading.fits_stroke is False
+    assert reading.to_the_stop().startswith(
+        'one-sided travel with the body 1.46 in')
+
+
+def test_a_side_never_reached_is_zero_not_minus_zero():
+    """The table never rises above rest on the nominal pulse; that side
+    reads 0.0, and is written '0', never '-0'."""
+    import math
+
+    reading = read_stroke(pulse(50.0, 0.011), **ratings())
+    assert math.copysign(1.0, reading.travel_up) == 1.0
+    assert math.copysign(1.0, reading.highest) == 1.0
+    record = pulse(50.0, 0.011)
+    record.ordinate[0] = -record.ordinate[0]
+    assert math.copysign(1.0, read_stroke(record).travel_down) == 1.0
 
 
 def test_travel_both_ways_names_the_side_that_reaches_the_stop():
@@ -257,24 +312,21 @@ def test_travel_both_ways_names_the_side_that_reaches_the_stop():
 
 
 def test_a_demand_exactly_at_its_rating_is_within_it():
-    """At the rating is inside it, peak to peak and each way."""
-    first = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25)
-    at = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25,
-                     stroke=first.travel, velocity=first.peak_velocity)
+    """At the rating is inside it, each way and against the body."""
+    first = read_stroke(pulse(50.0, 0.011), **BODY)
+    at = read_stroke(pulse(50.0, 0.011), **BODY,
+                     stroke=2.0 * first.travel_down,
+                     velocity=first.relative_velocity)
     assert at.shares()['stroke'] == 1.0
     assert at.shares()['velocity'] == 1.0
-    assert 'within, 100 %' in at.describe()[0]
-    centered = read_stroke(pulse(50.0, 0.011), mass_ratio=0.25,
-                           stroke=2.0 * first.travel_down,
-                           velocity=first.peak_velocity)
-    assert centered.fits_centered is True
-    assert centered.fits is True
+    assert at.describe()[0].endswith('within, 100 %')
+    assert at.fits_stroke is True
+    assert at.fits is True
     record = pulse(50.0, 0.011)
     record.ordinate[0] = -record.ordinate[0]
-    upward = read_stroke(record, mass_ratio=0.25,
-                         stroke=2.0 * first.travel_down)
+    upward = read_stroke(record, **BODY, stroke=2.0 * first.travel_down)
     assert upward.travel_up == first.travel_down
-    assert upward.fits_centered is True
+    assert upward.fits_stroke is True
 
 
 def test_a_rating_of_zero_is_no_rating():
@@ -283,8 +335,8 @@ def test_a_rating_of_zero_is_no_rating():
     reading = read_stroke(pulse(50.0, 0.011), stroke=0.0, velocity=0.0)
     assert reading.shares()['stroke'] is None
     assert reading.shares()['velocity'] is None
-    assert reading.stroke is None
-    assert reading.fits_centered is None
+    assert reading.rating.stroke is None
+    assert reading.fits_stroke is None
 
 
 def test_the_numbers_are_written_in_the_unit_system_given():
@@ -292,16 +344,16 @@ def test_the_numbers_are_written_in_the_unit_system_given():
 
     reading = read_stroke(pulse(50.0, 0.011), **ratings())
     lines = reading.describe(SI)
-    assert lines[0] == ('Travel with the body 0.037 m against 0.0635 m: '
-                        'within, 58 %')
-    assert lines[2].startswith('Force 22,241 N against 26,689 N')
+    assert lines[0] == ('One-sided travel with the body 0.037 m against '
+                        '0.0318 m to the stop: OVER, 117 %')
+    assert lines[3].startswith('Force 22,241 N against 26,689 N')
 
 
 def test_a_reading_number_is_three_figures_or_whole_with_commas():
-    assert number(5000.0) == '5,000'
-    assert number(1000.0) == '1,000'
-    assert number(0.69393) == '0.694'
-    assert number(67.593) == '67.6'
+    assert _number(5000.0) == '5,000'
+    assert _number(1000.0) == '1,000'
+    assert _number(0.69393) == '0.694'
+    assert _number(67.593) == '67.6'
 
 
 # ---- the record --------------------------------------------------------
@@ -344,6 +396,38 @@ def test_a_record_with_no_acceleration_is_refused():
 def test_a_negative_rating_is_refused():
     with pytest.raises(ValueError, match='stroke'):
         read_stroke(pulse(50.0, 0.011), stroke=-1.0)
+
+
+def test_a_rating_that_is_not_a_number_is_refused_as_such():
+    with pytest.raises(ValueError, match='the stroke has to be above zero '
+                       'and finite, not nan'):
+        read_stroke(pulse(50.0, 0.011), stroke=float('nan'))
+    with pytest.raises(ValueError, match='the velocity has to be above zero '
+                       'and finite, not inf'):
+        read_stroke(pulse(50.0, 0.011), velocity=float('inf'))
+
+
+def test_a_record_with_a_sample_that_is_not_a_number_is_refused():
+    """One NaN integrates to a travel of NaN, which would read 'Travel
+    nan in ... OVER, nan %'; the record is refused, saying where."""
+    record = pulse(50.0, 0.011)
+    record.ordinate[0, 100] = np.nan
+    with pytest.raises(ValueError, match='1Z\\+ holds 1 sample that is '
+                       'not finite, the first at index 100'):
+        read_stroke(record, **ratings())
+
+
+def test_an_acceleration_of_undeclared_unit_is_not_read():
+    """Named acceleration by its source and holding the file's raw
+    numbers: integrated as if SI, its travel would be read against the
+    stroke in a scale nobody chose."""
+    record = pulse(50.0, 0.011)
+    hinted = TimeHistory(record.abscissa, record.ordinate / G,
+                         response_dof=['1Z+'],
+                         dimension_hint=['acceleration'])
+    assert hinted.known_dim(0) == 'acceleration'
+    with pytest.raises(ValueError, match='undeclared unit'):
+        read_stroke(hinted)
 
 
 def test_a_record_that_starts_late_is_read_on_its_own_clock():
@@ -425,13 +509,18 @@ def test_the_view_draws_three_rows_with_each_rating_on_its_row(qt_app):
         acceleration, velocity, displacement = _plots(layout)
         assert 'force 5,000 lbf against 6,000 lbf (83 %)' in \
             acceleration.titleLabel.text
-        assert 'peak velocity 67.6 in/s against 70 in/s (97 %)' in \
-            velocity.titleLabel.text
+        assert ('peak velocity with the body 84.5 in/s against 70 in/s '
+                '(121 %)') in velocity.titleLabel.text
         title = displacement.titleLabel.text
-        assert 'travel with the body 1.46 in against a 2.5 in stroke' in title
-        assert 'one-sided travel 1.46 in against 1.25 in to the stop' in title
+        assert title.startswith('one-sided travel with the body 1.46 in '
+                                'against 1.25 in to the stop (117 %)')
+        assert 'stroke (58 %)' not in title
         assert 'table 1.17 in integrated, 1.17 in by the half-sine rule' \
             in title
+        # the velocity against the body dashed beside the table's
+        assert [curve.opts['pen'].style()
+                for curve in velocity.listDataItems()] == [
+            Qt.PenStyle.SolidLine, Qt.PenStyle.DashLine]
 
         def lines(plot):
             return sorted(item.value() for item in plot.items
@@ -473,7 +562,7 @@ def test_the_view_draws_to_a_file(qt_app, tmp_path):
     from visualdynamics.plot import plot_stroke
 
     path = tmp_path / 'stroke.png'
-    plot_stroke(pulse(50.0, 0.011), stroke=2.5 * INCH, mass_ratio=0.25,
+    plot_stroke(pulse(50.0, 0.011), stroke=2.5 * INCH, **BODY,
                 path=str(path), show=False)
     assert path.exists() and path.stat().st_size > 2000
 
@@ -482,13 +571,13 @@ def test_the_summary_says_whether_it_fits():
     from visualdynamics.plot.stroke import summary
 
     record = pulse(50.0, 0.011)
-    assert summary(read_stroke(record, **ratings())).endswith(
-        '; does not fit: one-sided travel 1.46 in against 1.25 in to the '
-        'stop')
+    assert summary(read_stroke(record, **ratings())) == (
+        '1Z+: One-sided travel with the body 1.46 in against 1.25 in to '
+        'the stop: OVER, 117 %; does not fit')
+    assert summary(read_stroke(record, **ratings(stroke=4.0 * INCH,
+                                                 velocity=90.0 * INCH))) \
+        .endswith('within, 73 %; fits')
     assert summary(read_stroke(record, **ratings(stroke=4.0 * INCH))) \
-        .endswith('; fits')
-    assert summary(read_stroke(record, **ratings(velocity=60.0 * INCH,
-                                                 stroke=4.0 * INCH))) \
         .endswith('; does not fit')
     assert summary(read_stroke(record)).endswith('; no ratings given')
 
@@ -526,7 +615,8 @@ def test_a_time_history_offers_the_stroke_reading(window, pump):
     assert panel.derived['force'].text() == '—'
     assert panel.readout.text() == ('No ratings given: the reading stands '
                                     'on its own.')
-    assert window._status_text == '1Z+: Travel 1.17 in; no ratings given'
+    assert window._status_text == ('1Z+: One-sided travel 1.17 in; no '
+                                   'ratings given')
 
 
 def test_the_ratings_redraw_the_reading(window, pump):
@@ -535,19 +625,27 @@ def test_the_ratings_redraw_the_reading(window, pump):
     stroke peak to peak, and reaches the stop 1.25 in below center."""
     pane = _stroke_reading(window, pump)
     panel = pane.stroke_panel
+    mass = window.unit_system.label_text('mass')
     panel.boxes['stroke'].setValue(2.5)
-    panel.boxes['mass_ratio'].setValue(0.25)
+    panel.boxes['moving_mass'].setValue(
+        float(window.unit_system.from_si(100.0 * LB, 'mass')))
+    panel.boxes['body_mass'].setValue(
+        float(window.unit_system.from_si(400.0 * LB, 'mass')))
     pump()
+    assert panel.names['body_mass'].text() == f'Body mass [{mass}]'
     assert pane.stroke_settings['stroke'] == pytest.approx(2.5 * INCH)
-    assert pane.stroke_settings['mass_ratio'] == 0.25
+    # to the box's four places in the window's mass unit
+    assert pane.stroke_settings['body_mass'] == pytest.approx(400.0 * LB,
+                                                              rel=1e-4)
     assert panel.derived['travel'].text() == '1.46 in'
     lines = panel.readout.text().splitlines()
-    assert lines[0] == 'Travel with the body 1.46 in against 2.5 in: within, 58 %'
-    assert lines[1].startswith('One-sided travel 1.46 in against 1.25 in '
-                               'to the stop: OVER, 117 %')
+    assert lines[0] == ('One-sided travel with the body 1.46 in against '
+                        '1.25 in to the stop: OVER, 117 %')
+    assert lines[1].startswith('Centered, the travel would fit: 1.46 in '
+                               'peak to peak against 2.5 in.')
     assert panel.readout.styleSheet() == 'font-weight: 600;'
     title = _plots(pane.graphics)[2].titleLabel.text
-    assert 'against a 2.5 in stroke (58 %)' in title
+    assert 'to the stop (117 %)' in title
     # zero takes the rating away again
     panel.boxes['stroke'].setValue(0.0)
     pump()
@@ -575,20 +673,49 @@ def test_the_ratings_are_restated_in_new_units(window, pump):
 
 def test_the_stroke_reading_is_journaled_as_its_plot_call(window, pump):
     pane = _stroke_reading(window, pump)
-    pane.stroke_panel.boxes['mass_ratio'].setValue(0.25)
+    pane.stroke_panel.boxes['stroke'].setValue(2.5)
     pump()
     lines = [line for line in window.project.journal
              if line.startswith('visualdynamics.plot.plot_stroke(')]
     assert lines == [
         ("visualdynamics.plot.plot_stroke(project['Pulse'], channel=0, "
-         "mass_ratio=0.25, path='stroke.png', show=False)")]
+         f"stroke={2.5 * INCH!r}, path='stroke.png', show=False)")]
 
 
-def test_a_record_with_no_acceleration_says_so(window, pump):
+def _shown(window, pump, history, name):
+    window.add_object(name, history)
+    window.data_pane.waterfall_action.setChecked(False)
+    window.show_object(name)
+    pump()
+    return window.data_pane
+
+
+@pytest.mark.parametrize('kind', ['velocity', 'force', 'undeclared'])
+def test_a_record_with_no_acceleration_does_not_offer_it(window, pump, kind):
+    """Nothing to integrate, so nothing to offer (principle 3): a
+    velocity, a force, or an acceleration whose unit was never declared.
+    The record still offers its other readings."""
     record = pulse(50.0, 0.011)
-    velocity = integrate(record, None)
-    pane = _stroke_reading(window, pump, velocity)
-    assert 'no acceleration channel here' in window._status_text
+    history = {
+        'velocity': lambda: integrate(record, None),
+        'force': lambda: TimeHistory(record.abscissa, record.ordinate,
+                                     response_dof=['1Z+'],
+                                     ordinate_dim=['force']),
+        'undeclared': lambda: TimeHistory(record.abscissa, record.ordinate,
+                                          response_dof=['1Z+'],
+                                          dimension_hint=['acceleration']),
+    }[kind]()
+    pane = _shown(window, pump, history, 'Not acceleration')
+    assert pane.kurtosis_action.isVisible()
+    assert not pane.stroke_action.isVisible()
+    assert not pane.stroke_panel.isVisibleTo(pane)
+
+
+def test_a_record_with_a_sample_that_is_not_a_number_says_so(window, pump):
+    record = pulse(50.0, 0.011)
+    record.ordinate[0, 100] = np.nan
+    pane = _stroke_reading(window, pump, record)
+    assert 'not finite' in window._status_text
     assert pane.stroke_panel.derived['peak'].text() == '—'
 
 

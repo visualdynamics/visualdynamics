@@ -5,7 +5,7 @@ its histogram against the Gaussian and its kurtosis frame by frame
 (`plot.time_statistics`). This panel holds what the reading is made
 with, above the rule: the channel's range when it is known, how close
 to it a sample counts as on the rail, the frame the kurtosis is read
-over, the duration the expected largest peak is for, and the band the
+over (sized from the record's bandwidth at its lowest), the duration the expected largest peak is for, and the band the
 record's kurtosis is judged against, 2 to 4 as the kurtosis bars use
 and settable tighter. Under the rule is the table of every number the
 reading gives (`core.time_statistics`), and under the table the
@@ -19,14 +19,12 @@ already exists, as the kurtosis bars are, so there is no Apply button.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QLabel, QWidget
 
 from ..core.time_statistics import (
-    FRAME_SECONDS,
     KURTOSIS_BAND,
     RAIL_MARGIN,
     TimeStatistics,
@@ -38,7 +36,8 @@ from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_gri
 #: the table under the rule, as (key, name), in the order it reads.
 #: The keys that are also judged statistics (`core.time_statistics.
 #: STATISTICS`) are set in bold when their statistic is flagged.
-ROWS = (('mean', 'Mean'), ('rms', 'RMS'), ('std', 'Std deviation'),
+ROWS = (('nonfinite', 'Not finite'),
+        ('mean', 'Mean'), ('rms', 'RMS'), ('std', 'Std deviation'),
         ('skewness', 'Skewness'), ('kurtosis', 'Kurtosis'),
         ('crest', 'Crest factor'), ('peak', 'Largest peak'),
         ('peak_time', 'At time'), ('peak_sigmas', 'Largest / σ'),
@@ -51,6 +50,10 @@ ROWS = (('mean', 'Mean'), ('rms', 'RMS'), ('std', 'Std deviation'),
 #: how the range field starts the first time it is ticked: unset, so
 #: the first value is the user's, never a guess about the channel
 NO_RANGE = 0.0
+
+#: the frame field at its lowest: the frame sized from the record's
+#: bandwidth (`core.time_statistics.FRAME_PRODUCT`)
+FROM_BAND = 0.0
 
 
 def _spin(low: float, high: float, value: float, decimals: int,
@@ -80,34 +83,29 @@ class StatisticsPanel(QWidget):
         self._loading = False
 
         self.range_box: QCheckBox = QCheckBox()
-        self.range_box.setToolTip(
-            'Count the samples on the channel\'s range, the rail, and '
-            'draw the range across the trace')
+        self.range_box.setToolTip('Count the samples on the channel\'s '
+                                  'range')
         self.range_value: DoubleSpinBox = _spin(
-            0.0, 1e12, NO_RANGE, 4,
-            'The channel\'s range, either way, in the units the trace '
-            'is drawn in')
+            0.0, 1e12, NO_RANGE, 4, 'The channel\'s range, either way')
         self.margin_box: DoubleSpinBox = _spin(
             0.0, 10.0, 100.0 * RAIL_MARGIN, 3,
-            'How close to the range a sample counts as on the rail, and '
-            'to the record\'s own peak as at it, in percent', ' %')
+            'How close to the range, or the peak, counts as on it', ' %')
         self.frame_box: DoubleSpinBox = _spin(
-            0.001, 1e6, FRAME_SECONDS, 3,
-            'Seconds to a frame for the kurtosis against time. A short '
-            'frame scatters more', ' s')
+            FROM_BAND, 1e6, FROM_BAND, 3,
+            'Frame for the kurtosis against time. At its lowest, sized '
+            'from the record\'s bandwidth', ' s')
+        self.frame_box.setSpecialValueText('from band')
         self.duration_box: DoubleSpinBox = _spin(
             0.0, 1e9, 0.0, 1,
             'The run the expected largest peak is for. At its lowest, '
-            'the record\'s own length', ' s')
+            'the record\'s length', ' s')
         self.duration_box.setSpecialValueText('record')
         self.low_box: DoubleSpinBox = _spin(
             0.0, 3.0, KURTOSIS_BAND[0], 2,
-            'The record\'s kurtosis below this is flagged: a clipped '
-            'record reads under 3')
+            'Below this the record\'s kurtosis is flagged')
         self.high_box: DoubleSpinBox = _spin(
             3.0, 100.0, KURTOSIS_BAND[1], 2,
-            'The record\'s kurtosis above this is flagged: spikes and '
-            'rattles read over 3')
+            'Above this the record\'s kurtosis is flagged')
         for box in (self.low_box, self.high_box):
             box.setSingleStep(0.05)
         self.names, self.editors = add_keyed_settings(grid, [
@@ -159,14 +157,15 @@ class StatisticsPanel(QWidget):
     def settings(self) -> dict[str, Any]:
         """The reading's settings: 'full_scale' (in the units the trace
         is drawn in, None while the range is unticked or unset),
-        'margin' as a share, 'frame' and 'duration' in seconds
-        ('duration' None for the record's own length), and
-        'kurtosis_band'."""
+        'margin' as a share, 'frame' and 'duration' in seconds ('frame'
+        None to size it from the bandwidth, 'duration' None for the
+        record's own length), and 'kurtosis_band'."""
         given = self.range_box.isChecked() and self.range_value.value() > 0
         duration = self.duration_box.value()
+        frame = self.frame_box.value()
         return {'full_scale': self.range_value.value() if given else None,
                 'margin': self.margin_box.value() / 100.0,
-                'frame': self.frame_box.value(),
+                'frame': frame if frame > FROM_BAND else None,
                 'duration': duration if duration > 0.0 else None,
                 'kurtosis_band': (self.low_box.value(),
                                   self.high_box.value())}
@@ -184,7 +183,7 @@ class StatisticsPanel(QWidget):
                 self.range_value.setValue(full_scale)
             self.margin_box.setValue(100.0 * settings.get('margin',
                                                           RAIL_MARGIN))
-            self.frame_box.setValue(settings.get('frame', FRAME_SECONDS))
+            self.frame_box.setValue(settings.get('frame') or FROM_BAND)
             self.duration_box.setValue(settings.get('duration') or 0.0)
             low, high = settings.get('kurtosis_band', KURTOSIS_BAND)
             self.low_box.setValue(low)
@@ -194,12 +193,15 @@ class StatisticsPanel(QWidget):
         self._shown_rows()
 
     def show_statistics(self, stats: TimeStatistics | None,
-                        shown: Callable[[float], float] | None = None,
-                        unit: str = '') -> None:
+                        transform: tuple[float, float] = (1.0, 0.0),
+                        unit: str = '',
+                        time: tuple[float, str] = (1.0, 's')) -> None:
         """Fill the table from `stats`, its values put into the display
-        units by `shown` and labeled `unit`; a flagged statistic is set
-        in bold, and the words under the table say what is flagged.
-        None clears the table."""
+        units by `transform` (the unit system's (scale, offset), SI =
+        value * scale + offset) and labeled `unit`, its times and rates
+        by `time`, (scale, label); a flagged statistic is set in bold,
+        and the words under the table say what is flagged. None clears
+        the table."""
         for key in self.values:
             self.values[key].setText('—')
             self._bold(key, False)
@@ -207,17 +209,24 @@ class StatisticsPanel(QWidget):
             self.verdict.setText('')
             return
 
+        scale, offset = transform
+        tscale, tunit = time
+
         def convert(value):
-            return float(shown(value)) if shown is not None else float(value)
+            return (float(value) - offset) / scale
 
         def size(value):
             # an rms and a spread are magnitudes, so they convert by
             # the unit's scale alone, without the offset a temperature
             # would carry
-            return abs(convert(value) - convert(0.0))
+            return abs(float(value) / scale)
 
         after = f' {unit}' if unit else ''
+        self.row_names['crossings'].setText(f'Crossings /{tunit}')
+        self.row_names['spectral_crossings'].setText(
+            f'From spectrum /{tunit}')
         text = {
+            'nonfinite': f'{stats.nonfinite}',
             'mean': f'{convert(stats.mean):.4g}{after}',
             'rms': f'{size(stats.rms):.4g}{after}',
             'std': f'{size(stats.std):.4g}{after}',
@@ -225,11 +234,12 @@ class StatisticsPanel(QWidget):
             'kurtosis': f'{stats.kurtosis:.3f}',
             'crest': f'{stats.crest:.3f}',
             'peak': f'{convert(stats.peak):.4g}{after}',
-            'peak_time': f'{stats.peak_time:.4g} s',
+            'peak_time': f'{stats.peak_time / tscale:.4g} {tunit}',
             'peak_sigmas': f'{stats.peak_sigmas:.2f}',
             'at_peak': f'{stats.at_peak}',
-            'crossings': f'{stats.crossings:.4g}',
-            'spectral_crossings': f'{stats.spectral_crossings:.4g}',
+            'crossings': f'{stats.crossings * tscale:.4g}',
+            'spectral_crossings':
+                f'{stats.spectral_crossings * tscale:.4g}',
             'expected_peak': f'{stats.expected_peak:.2f} σ',
             'frames': (f'{stats.frames_outside} of '
                        f'{stats.frame_kurtosis.size}'),
@@ -247,17 +257,17 @@ class StatisticsPanel(QWidget):
             key = f'beyond_{tail.sigmas:g}'
             if key in self.values:
                 self.values[key].setText(percent(tail.share))
-                tip = (f'{tail.count} samples, {percent(tail.share)}, '
-                       f'where a Gaussian puts {percent(tail.expected)}'
-                       + ('' if tail.judged else
-                          '; too few expected to judge'))
+                tip = (f'{tail.count} samples; a Gaussian puts '
+                       f'{percent(tail.expected)}'
+                       + ('' if tail.judged else ', too few to judge'))
                 self.values[key].setToolTip(tip)
                 self.row_names[key].setToolTip(tip)
         self.values['expected_peak'].setToolTip(
-            f'Expected largest peak of a Gaussian record over '
-            f'{stats.duration:.4g} s at {stats.spectral_crossings:.4g} '
-            'crossings a second: sqrt(2 ln(rate × duration)). Over the '
-            f'record\'s own length it is {stats.expected_peak_here:.2f} σ')
+            f'Over {stats.duration / tscale:.4g} {tunit}; over the '
+            f'record, {stats.expected_peak_here:.2f} σ')
+        self.values['frames'].setToolTip(
+            f'Frames of {stats.frame_length / stats.sample_rate / tscale:.3g}'
+            f' {tunit}')
         found = stats.flags()
         for key in self.values:
             self._bold(key, bool(found.get(key)))

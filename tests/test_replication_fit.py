@@ -11,7 +11,9 @@ a bracket, 2 grms with a 14 g pothole, logged with an offset of a
 thousandth of a g, whose displacement as logged walks off to hundreds
 of inches, which with its mean taken out still spans 48.6 in, and which
 high-passed at 2, 3, 5 and 8 Hz spans 1.40, 0.71, 0.43 and 0.20 in for
-1.25, 2.02, 3.33 and 5.10 percent of its mean square.
+1.25, 2.02, 3.33 and 5.10 percent of its mean square. A record that
+does not start at rest is tapered before it is filtered, so a tone at
+full amplitude from its first sample still moves the table A/(2πf)².
 """
 
 from __future__ import annotations
@@ -26,9 +28,12 @@ from visualdynamics.core.data import TimeHistory
 from visualdynamics.core.filters import integrate
 from visualdynamics.core.replication_fit import (
     CUTOFFS,
+    SHORTEST,
+    FitCase,
     ShakerRating,
     _percent,
     replication_fit,
+    taper,
 )
 
 G = 9.80665
@@ -236,12 +241,34 @@ def test_the_velocity_rating_can_rule_out_the_lowest_cutoff():
 
 def test_the_2_hz_candidate_is_the_default_drift_control(road_fit):
     """The cutoff's filter is the drift high-pass `integrate` applies by
-    default, second order, so the two readings of the record at 2 Hz
-    agree to five thousandths of an inch at every sample."""
+    default, second order, so away from the ends the candidate tapers
+    the two readings of the record at 2 Hz agree to a thousandth of an
+    inch at every sample (they differ by 0.00013 in); in the last
+    second, where the default has no taper and the record has not come
+    back to rest, they part by 0.056 in."""
     default = integrate(integrate(logged()))
     drift = np.real(default.ordinate[0])
-    assert np.max(np.abs(drift - road_fit.case(2.0).displacement)) \
-        < 0.005 * INCH
+    apart = np.abs(drift - road_fit.case(2.0).displacement)
+    inside = slice(round(2.0 * RATE), round(58.0 * RATE))
+    assert np.max(apart[inside]) < 0.001 * INCH
+    assert np.max(apart) / INCH == pytest.approx(0.056, abs=0.001)
+
+
+def test_a_record_cut_short_is_not_failed_on_its_own_edges():
+    """The road record cut to 10-40 s starts and ends mid-motion.
+    Untapered, the filters' start-up transients ran its 2 Hz travel to
+    2.07 in down and failed a 2 in stroke at 2 and 3 Hz; tapered, every
+    candidate fits, the 2 Hz span 1.09 in."""
+    whole = logged()
+    cut = slice(round(10.0 * RATE), round(40.0 * RATE))
+    piece = TimeHistory(whole.abscissa[cut], whole.ordinate[:, cut],
+                        response_dof=['1Z+'], ordinate_dim=['acceleration'])
+    fit = replication_fit(piece, rating())
+    assert all(case.fits_stroke for case in fit.cases)
+    assert inches(fit.case(2.0).peak_to_peak) == pytest.approx(1.09,
+                                                               abs=0.01)
+    assert inches(fit.case(2.0).travel_down) == pytest.approx(0.56,
+                                                              abs=0.01)
 
 
 # ---- hand values --------------------------------------------------------
@@ -278,6 +305,37 @@ def test_a_tone_moves_the_table_a_over_omega_squared():
                                                rel=1e-3)
 
 
+@pytest.mark.parametrize('cutoff', [1.0, 2.0])
+def test_a_tone_from_its_first_sample_still_moves_the_table_a_over_omega_squared(
+        cutoff):
+    """1 g at 10 Hz for a minute, at full amplitude from the first
+    sample: 2.48 mm of travel each way. Untapered, the high-pass's start-up
+    transient read 18.2 mm at 1 Hz and 8.7 mm at 2 Hz, and a negative
+    mean square removed at 1 Hz; tapered, the travel is A/ω² to a fifth
+    of a percent and the price is the filter's own."""
+    t = np.arange(round(60.0 * RATE)) / RATE
+    w = 2.0 * np.pi * 10.0
+    fit = replication_fit(record(G * np.sin(w * t)), rating(),
+                          cutoffs=(cutoff,))
+    case = fit.case(cutoff)
+    assert G / w ** 2 * 1e3 == pytest.approx(2.484, abs=0.001)
+    assert max(case.travel_up, case.travel_down) == pytest.approx(
+        G / w ** 2, rel=2e-3)
+    assert case.mean_square_removed == pytest.approx(
+        1.0 - butterworth_twice(10.0, cutoff) ** 2, rel=0.02)
+
+
+def test_the_taper_is_a_half_cosine_over_each_end():
+    window = taper(10, 4.0)
+    assert window[:4] == pytest.approx(0.5 - 0.5 * np.cos(
+        np.pi * np.arange(4) / 4))
+    assert window[4:6] == pytest.approx([1.0, 1.0])
+    assert window[6:] == pytest.approx(window[:4][::-1])
+    # never more than half the record at each end
+    assert taper(10, 100.0)[:5] == pytest.approx(taper(10, 5.0)[:5])
+    assert taper(10, 0.0) == pytest.approx(np.ones(10))
+
+
 def test_the_mean_square_removed_is_one_less_the_gain_squared():
     """At a tenth of the tone the filter passes (10⁴/(1 + 10⁴)), so it
     removes two parts in ten thousand of the mean square; at half the
@@ -298,7 +356,14 @@ def test_the_body_adds_its_share_of_the_travel():
     assert counted.rating.body_share == pytest.approx(0.1)
     assert np.allclose(counted.travel, 1.1 * counted.displacement)
     assert counted.travel_up == pytest.approx(1.1 * plain.travel_up)
+    # the table's velocity is the table's; the coil's against the body,
+    # which the rating is judged by, counts the body the same way
     assert counted.peak_velocity == plain.peak_velocity
+    assert plain.relative_velocity == plain.peak_velocity
+    assert counted.relative_velocity == pytest.approx(
+        1.1 * plain.peak_velocity)
+    assert counted.velocity_share == pytest.approx(
+        1.1 * plain.velocity_share)
 
 
 def lift(height=1.4 * INCH, seconds=10.0, sign=1.0):
@@ -370,6 +435,47 @@ def test_a_rating_met_exactly_is_met():
     assert met.case(2.0).fits
 
 
+def test_each_cutoff_judges_the_force_at_its_own_peak(road_fit):
+    """A force rating 2 % under the record's largest peak fails the
+    cutoffs that leave the peak within 2 % (2 and 3 Hz take 0.44 and
+    1.34 % off it) and passes the ones that take more, so the lowest
+    cutoff that fits moves up to 5 Hz, and the panel's verdict says so."""
+    fit = replication_fit(logged(), rating(force=0.98 * road_fit.force))
+    assert [case.fits_force for case in fit.cases] == [False, False,
+                                                       True, True]
+    assert all(case.fits_stroke and case.fits_velocity
+               for case in fit.cases)
+    assert fit.case(2.0).force == pytest.approx(
+        150.0 * LB * fit.case(2.0).peak_acceleration)
+    assert fit.case(2.0).force_share == pytest.approx(1.0159, abs=1e-4)
+    assert fit.lowest_fitting is fit.case(5.0)
+    assert fit.case(2.0).describe() == ('2 Hz: does not fit; the force is '
+                                        '102 % of the rating.')
+
+
+def test_the_verdicts_are_worded_in_full(road_fit):
+    assert road_fit.case(2.0).describe() == (
+        '2 Hz: fits, using 71 % of the room, 34 % of the velocity rating '
+        'and 52 % of the force rating.')
+    assert road_fit.as_logged.describe() == (
+        'As logged: does not fit; the travel up is 664 times the room.')
+    assert road_fit.describe() == (
+        'The force at the largest peak is 52 % of the rating. As logged, '
+        'the travel runs to 664 times the room and leaves it 0.653 s in. '
+        'The lowest cutoff that fits is 2 Hz, removing 1.25 % of the mean '
+        'square.')
+
+
+def test_a_travel_equal_both_ways_is_said_each_way():
+    case = FitCase(cutoff=None, rating=rating(), start=0.0, sample_rate=1.0,
+                   velocity=np.zeros(3),
+                   displacement=np.array([0.0, 1.5, -1.5]) * INCH,
+                   mean_square_removed=0.0, peak_change=0.0,
+                   peak_acceleration=0.0)
+    assert case.describe() == ('As logged: does not fit; the travel each '
+                               'way is 150 % of the room.')
+
+
 def test_a_record_that_fails_only_on_velocity_says_so():
     """As logged inside the stroke but too fast: the words name the
     velocity, not a travel that never left the room."""
@@ -430,6 +536,45 @@ def test_the_cutoffs_are_worked_lowest_first_and_once_each():
     with pytest.raises(KeyError, match='not one of the candidate'):
         fit.case(3.0)
     assert fit.case(None) is fit.as_logged
+
+
+def test_a_record_with_a_sample_that_is_not_a_number_is_refused():
+    """A NaN would integrate to a travel of NaN, which is neither inside
+    the room nor over it; the record is refused, saying where."""
+    values = tone().ordinate[0].real.copy()
+    values[300] = np.nan
+    with pytest.raises(ValueError, match='1Z\\+ holds 1 sample that is '
+                       'not finite, the first at index 300'):
+        replication_fit(record(values), rating())
+
+
+def test_an_acceleration_of_undeclared_unit_is_not_checked():
+    """Named acceleration by its source and holding the file's raw
+    numbers, say in g: integrated as if SI, the travel would be judged
+    against the stroke at a tenth of its size."""
+    history = tone()
+    hinted = TimeHistory(history.abscissa, history.ordinate / G,
+                         response_dof=['1Z+'], dimension_hint=['acceleration'])
+    assert hinted.known_dim(0) == 'acceleration'
+    with pytest.raises(ValueError, match='undeclared unit'):
+        replication_fit(hinted, rating())
+
+
+def test_a_record_too_short_to_filter_says_so():
+    with pytest.raises(ValueError, match=f'a record of {SHORTEST - 1} '
+                       'samples is too short to high-pass'):
+        replication_fit(record(np.ones(SHORTEST - 1)), rating(),
+                        cutoffs=(100.0,))
+    replication_fit(record(np.ones(SHORTEST)), rating(), cutoffs=(100.0,))
+
+
+def test_a_rating_the_fit_needs_is_asked_for():
+    with pytest.raises(ValueError, match='the replication fit needs the '
+                       'force and the velocity as well'):
+        replication_fit(tone(), ShakerRating(stroke=0.05, moving_mass=10.0))
+    with pytest.raises(ValueError, match='needs the force, the stroke, the '
+                       'velocity and the moving mass as well'):
+        replication_fit(tone(), ShakerRating())
 
 
 @pytest.mark.parametrize('cutoffs', [(), (0.0,), (RATE / 2.0,)])
@@ -556,6 +701,11 @@ def test_the_reading_is_offered_for_acceleration_only(window, pump):
                 name='Force')
     assert not window.data_pane.fit_action.isVisible(), \
         'nothing to integrate, so nothing to offer'
+    hinted = TimeHistory(np.arange(4096) / RATE, np.ones((1, 4096)),
+                         response_dof=['1Z+'], dimension_hint=['acceleration'])
+    _looking_at(window, pump, hinted, name='Undeclared')
+    assert not window.data_pane.fit_action.isVisible(), \
+        'raw numbers, so nothing to judge in SI'
 
 
 def test_the_panel_tabulates_the_check(window, pump):
@@ -663,6 +813,11 @@ def test_the_reading_is_a_call_a_session_replays(window, pump, tmp_path,
     assert line.startswith("visualdynamics.plot.plot_replication_fit("
                            "project['Time History'], {'force': ")
     assert "path='replication_fit.png'" in line
+    # by its record index, as the stroke's is: a DOF can repeat
+    history = window.project['Time History']
+    first = next(i for i, dim in enumerate(history.ordinate_dim)
+                 if dim == 'acceleration')
+    assert f', channel={first}, cutoffs=' in line
     monkeypatch.chdir(tmp_path)
     exec(window.project.session_script(), {})              # noqa: S102
     assert (tmp_path / 'replication_fit.png').stat().st_size > 2000

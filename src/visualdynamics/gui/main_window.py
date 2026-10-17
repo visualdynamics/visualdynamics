@@ -1016,7 +1016,7 @@ class MainWindow(QMainWindow):
         self.data_pane.pair_chosen.connect(self.render_current)
         self.data_pane.replication_chosen.connect(
             lambda _which: self.render_current())
-        # the segment marks and tolerances redraw the judgement at once:
+        # the segment marks and tolerances redraw the judgment at once:
         # the plot is the preview of the marks being made
         self.data_pane.segments_panel.changed.connect(
             lambda _settings: self.render_current())
@@ -1039,10 +1039,11 @@ class MainWindow(QMainWindow):
         #: cursor, the overlay and how the tone is read; None while the
         #: reading is not up
         self._tone: dict[str, Any] | None = None
-        #: a window chosen in the tone pane, by spectrum name, over the
-        #: one its averaging records; and where each spectrum's cursor
-        #: was left, so a redraw finds it where it was
-        self._tone_windows: dict[str, str] = {}
+        #: a window chosen in the tone pane, (name, Tukey or Kaiser
+        #: parameter or None), by spectrum name, over the one its
+        #: averaging records; and where each spectrum's cursor was left,
+        #: so a redraw finds it where it was
+        self._tone_windows: dict[str, tuple[str, float | None]] = {}
         self._tone_frequencies: dict[str, float] = {}
         #: and the shock windows, the same way
         self.shock_overlays: list[Any] = []
@@ -10958,19 +10959,16 @@ class MainWindow(QMainWindow):
 
     def _tone_source(self, series):
         """(name, spectrum, records) when the selection is one plain
-        autospectrum the tone readout can read: real, on evenly spaced
-        lines, not banded and not written at breakpoints. None
-        otherwise, which is also what hides the button."""
+        autospectrum the tone readout can read (`Psd.can_read_tone`, for
+        every record on the plot). None otherwise, which is also what
+        hides the button."""
         if len(series) != 1:
             return None
         name, data, records = series[0]
-        if (not isinstance(data, Psd) or isinstance(data, Specification)
-                or data.bandwidth is not None or data.interpolation != 'bin'
-                or self._has_imaginary_part(data, records)
-                or len(data.abscissa) < 8):
+        if not isinstance(data, Psd) or isinstance(data, Specification):
             return None
-        steps = np.diff(np.asarray(data.abscissa, dtype=float))
-        if not np.all(steps > 0) or np.ptp(steps) > 1e-6 * steps.mean():
+        shown = range(data.num_records) if records is None else records
+        if not all(data.can_read_tone(int(r)) for r in shown):
             return None
         return name, data, records
 
@@ -11000,18 +10998,24 @@ class MainWindow(QMainWindow):
                      if name in self.project else None)
         chosen = self._tone_windows.get(name)
         if chosen is not None:
-            window, source = chosen, 'chosen'
+            (window, parameter), source = chosen, 'chosen'
         elif averaging is not None:
             window, source = averaging.window, 'the averaging'
+            parameter = averaging.window_parameter
         else:
-            window, source = 'hann', 'assumed'
-        panel.set_window(window, source)
+            window, parameter, source = 'hann', None, 'assumed'
+        panel.set_window(window, source, parameter)
         f = np.asarray(psd.abscissa, dtype=float)
         frequency = self._tone_frequencies.get(name)
         if frequency is None or not f[0] <= frequency <= f[-1]:
-            # the tallest line off DC: the tone most worth reading first
+            # the tallest line off DC: the tone most worth reading first;
+            # a record with no number off DC starts at its middle, and
+            # the reading says what it can
             values = np.abs(np.asarray(psd.ordinate[record]))[1:]
-            frequency = float(f[1 + int(np.nanargmax(values))])
+            finite = np.isfinite(values)
+            frequency = (float(f[1 + int(np.argmax(
+                np.where(finite, values, -np.inf)))]) if finite.any()
+                else float(f[len(f) // 2]))
         log_x = plot.getViewBox().state['logMode'][0]
         color = resolve_theme(self.theme_name)['plot_foreground']
         cursor = pg.InfiniteLine(
@@ -11023,8 +11027,7 @@ class MainWindow(QMainWindow):
         self._tone = {
             'name': name, 'psd': psd, 'record': record, 'plot': plot,
             'cursor': cursor, 'overlay': ToneOverlay(plot, color),
-            'window': (averaging if averaging is not None
-                       and averaging.window == window else window),
+            **self._tone_window(averaging, window, parameter),
             'scale': scale, 'dense': dense, 'unit': unit,
             'log_x': log_x, 'reading': None}
         cursor.sigPositionChanged.connect(self._tone_moved)
@@ -11050,7 +11053,9 @@ class MainWindow(QMainWindow):
             # warn=False: this reads on every tick of a drag, and the
             # notes reach the user through the pane and the label
             reading = psd.read_tone(frequency, record,
-                                    window=state['window'], warn=False)
+                                    window=state['window'],
+                                    parameter=state['parameter'],
+                                    warn=False)
         except ValueError as refusal:
             state['reading'] = None
             state['overlay'].clear()
@@ -11076,12 +11081,22 @@ class MainWindow(QMainWindow):
         state = self._tone
         if state is None:
             return
-        self._tone_windows[state['name']] = window
+        parameter = self.data_pane.tone_panel.parameter()
+        self._tone_windows[state['name']] = (window, parameter)
         averaging = self.project.averaging_of(state['name']) \
             if state['name'] in self.project else None
-        state['window'] = (averaging if averaging is not None
-                           and averaging.window == window else window)
+        state.update(self._tone_window(averaging, window, parameter))
         self._tone_moved()
+
+    @staticmethod
+    def _tone_window(averaging, window, parameter):
+        """{'window', 'parameter'} to read with: the averaging itself
+        when it is this window with this parameter, which carries the
+        frame length too, and the name and the parameter otherwise."""
+        if (averaging is not None and averaging.window == window
+                and averaging.window_parameter == parameter):
+            return {'window': averaging, 'parameter': None}
+        return {'window': window, 'parameter': parameter}
 
     def _journal_tone(self, state, reading):
         """The tone reading, journaled as the headless call that draws
@@ -11092,6 +11107,8 @@ class MainWindow(QMainWindow):
         window = state['window']
         given = (f'project.averaging_of({name!r})'
                  if not isinstance(window, str) else repr(window))
+        if state['parameter'] is not None:
+            given += f', parameter={state["parameter"]!r}'
         prefix = f'visualdynamics.plot.plot_tone_readout(project[{name!r}]'
         self._journal_view(
             prefix,
@@ -11248,14 +11265,33 @@ class MainWindow(QMainWindow):
         the windows the SRS would be computed from."""
         from ..core.shock_check import check_shock, summarize
 
-        try:
-            checks = check_shock(history)
-        except ValueError:
+        panel = self.data_pane.shock_panel
+        if not any(history.known_dim(i) == 'acceleration'
+                   for i in range(history.num_records)):
             # nothing here is acceleration, so there is nothing to
             # integrate and nothing to say
-            checks = []
-        self.data_pane.shock_panel.show_check(
-            summarize(checks), any(check.flagged for check in checks))
+            panel.show_check('')
+            return
+        # the condition `Project.compute_srs` detects shocks under: with
+        # none marked, the spectrum is computed over windows that are
+        # not on the plot yet, and a check of the whole record would
+        # speak for windows it was not read over (2026-10-16, review of
+        # #141)
+        if (not history.shocks and history.averaging is None
+                and not isinstance(history, TransientSpecification)):
+            panel.show_check('No shocks are marked, so the velocity check '
+                             'waits for them. Detect marks them, and so '
+                             'does Compute SRS before it computes.')
+            return
+        try:
+            checks = check_shock(history)
+        except ValueError as refusal:
+            # a window that cannot be read is stated, not passed over
+            panel.show_check(f'The velocity check cannot be read: '
+                             f'{refusal}.', flagged=True)
+            return
+        panel.show_check(summarize(checks),
+                         any(check.flagged for check in checks))
 
     def _clear_shocks(self):
         self._clear_overlays('shock_overlays')
@@ -11508,9 +11544,11 @@ class MainWindow(QMainWindow):
                                      is not None,
                                      tone=self._tone_source(series)
                                      is not None,
+                                     # a declared unit, as the readings
+                                     # require (`core.shaker`)
                                      fit=history is not None and any(
-                                         history.known_dim(i) == 'acceleration'
-                                         for i in range(history.num_records)))
+                                         dim == 'acceleration'
+                                         for dim in history.ordinate_dim))
         if history is not None and self.data_pane.showing_fit:
             return self._render_replication_fit(history, series[0][0],
                                                 series[0][2])
@@ -11551,7 +11589,9 @@ class MainWindow(QMainWindow):
         # shape as the transient comparison — several playings of one
         # target — so it gets the same grid and the same two readings
         spectra = self._srs_found(series)
-        self.data_pane.show_srs_views(spectra is not None)
+        self.data_pane.show_srs_views(
+            spectra is not None,
+            readings=None if spectra is None else self._srs_readings(spectra[4]))
         if spectra is not None:
             return self._render_srs(*spectra)
         # two signatures of one article, before and after a test: drawn
@@ -14761,7 +14801,7 @@ class MainWindow(QMainWindow):
             (scene_y - rect.top()) / rect.height(), 0.0, 1.0))
         top, bottom = self._fit_damping_range
         self.fit.override_damping(top * (bottom / top) ** fraction)
-        self._move_fit_parabola()
+        self._move_fit_parabola(read=False)
         self._fit_synthesis_stale = True
         self._fit_settle.start(self.FIT_SETTLE_MS)
         row = len(self.fit.modes)
@@ -14773,15 +14813,19 @@ class MainWindow(QMainWindow):
             self._fit_updating = False
         self._fit_status()
 
-    def _move_fit_parabola(self):
+    def _move_fit_parabola(self, read: bool = True):
         """Redraw the SDOF curve under the cursor — closed form, no SVD,
         cheap enough for every tick of a drag — and the damping figure
-        at its crown, since the number is what the drag is setting."""
+        at its crown, since the number is what the drag is setting.
+
+        With `read` False the half-power readout is left as it stands:
+        it reads the residual CMIF at the cursor's line, which a change
+        of damping alone does not move."""
         if self.fit is None or self._fit_parabola is None:
             return
         frequencies, values = self.fit.pending_curve(self.unit_system)
         self._fit_parabola.setData(frequencies, values)
-        if self._fit_half_power is not None:
+        if self._fit_half_power is not None and read:
             # warn=False: this reads on every tick of a drag, and the
             # notes reach the user through the label and the status line
             try:
@@ -14852,7 +14896,9 @@ class MainWindow(QMainWindow):
                 # drag is holding it — then the parabola above already
                 # told the whole truth
                 self.fit.move_to(self._fit_cursor.value())
-                self._move_fit_parabola()
+                # the cheap tier read the half-power width at this line
+                # already, and the damping search does not move it
+                self._move_fit_parabola(read=False)
                 # the shape too, and the dashed curve that shows it —
                 # so the synthesis follows the cursor and snaps onto a
                 # peak as it crosses one, which is the thing the whole
@@ -15811,30 +15857,16 @@ class MainWindow(QMainWindow):
             self._select_records(name, [channel])
         us = self.unit_system
         dimension = history.ordinate_dim[channel]
-        if dimension == UNKNOWN:
-            # raw numbers, shown as they are, and a range typed in them
-            unit = ''
-
-            def shown(values):
-                return values
-
-            def to_si(value):
-                return value
-        else:
-            unit = us.label_text(dimension)
-
-            def shown(values):
-                return us.from_si(values, dimension)
-
-            def to_si(value):
-                # a range is a size either way, so it converts by the
-                # unit's scale alone
-                return float(us.to_si(value, dimension)
-                             - us.to_si(0.0, dimension))
+        # an undefined dimension is raw numbers, (1, 0), and its range
+        # is typed in them
+        transform = us.transform(dimension)
+        unit = '' if dimension == UNKNOWN else us.label_text(dimension)
         panel.set_unit(unit)
         full_scale = settings['full_scale']
+        # a range is a size either way, so it converts by the unit's
+        # scale alone
         options = {'full_scale': (None if full_scale is None
-                                  else to_si(full_scale)),
+                                  else full_scale * transform[0]),
                    'margin': settings['margin'],
                    'frame': settings['frame'],
                    'duration': settings['duration'],
@@ -15852,7 +15884,9 @@ class MainWindow(QMainWindow):
         build_time_statistics(self.data_pane.graphics, history, stats,
                               channel, unit_system=us,
                               theme=self.theme_name)
-        panel.show_statistics(stats, shown, unit)
+        panel.show_statistics(stats, transform, unit,
+                              (us.transform('time')[0],
+                               us.label_text('time')))
         if name is not None:
             call = 'visualdynamics.plot.plot_time_statistics'
             given = ', '.join(f'{key}={value!r}'
@@ -16097,7 +16131,8 @@ class MainWindow(QMainWindow):
         The channel is the picked record when it is an acceleration,
         the record's first acceleration otherwise.
         """
-        from ..core.replication_fit import ShakerRating, replication_fit
+        from ..core.replication_fit import replication_fit
+        from ..core.shaker import ShakerRating, acceleration_channel
         from ..plot.replication_fit import build_replication_fit
 
         panel = self.data_pane.replication_fit_panel
@@ -16109,9 +16144,10 @@ class MainWindow(QMainWindow):
         self.data_pane.show_waterfall(False)
         self.data_pane.graphics.clear()
         picked = [i for i in (records or [])
-                  if history.known_dim(i) == 'acceleration']
-        channel = picked[0] if picked else None
+                  if history.ordinate_dim[i] == 'acceleration']
         try:
+            channel = acceleration_channel(
+                history, picked[0] if picked else None)
             fit = replication_fit(history, ShakerRating(**panel.rating()),
                                   cutoffs=settings['cutoffs'],
                                   channel=channel)
@@ -16130,12 +16166,14 @@ class MainWindow(QMainWindow):
                                      theme=self.theme_name)
         panel.show_fit(fit, case)
         if name is not None:
-            self._journal_replication_fit(name, fit, settings, cutoff)
+            self._journal_replication_fit(name, channel, settings, cutoff)
         return f'{fit.dof}: {case.describe()}'
 
-    def _journal_replication_fit(self, name, fit, settings, cutoff):
+    def _journal_replication_fit(self, name, channel, settings, cutoff):
         """The fit, journaled as the headless call that draws it
-        (`_journal_view`)."""
+        (`_journal_view`). The channel is its record index, as the
+        stroke's is: two records may share a DOF, and an index names
+        one."""
         rating = {key: settings[key] for key in (
             'force', 'stroke', 'velocity', 'moving_mass', 'body_mass')}
         prefix = ("visualdynamics.plot.plot_replication_fit("
@@ -16143,7 +16181,7 @@ class MainWindow(QMainWindow):
         drawn = '' if cutoff is ... else f'cutoff={cutoff!r}, '
         self._journal_view(
             prefix,
-            f'{prefix}, {rating!r}, channel={fit.dof!r}, '
+            f'{prefix}, {rating!r}, channel={channel}, '
             f"cutoffs={tuple(settings['cutoffs'])!r}, {drawn}"
             "path='replication_fit.png', show=False)")
 
@@ -16169,12 +16207,10 @@ class MainWindow(QMainWindow):
         self.data_pane.offer_waterfall(False)
         self.data_pane.show_waterfall(False)
         self.data_pane.graphics.clear()
+        # offered only where a declared acceleration channel is, so
+        # there is one to read
         accelerations = [i for i in range(history.num_records)
-                         if history.known_dim(i) == 'acceleration']
-        if not accelerations:
-            panel.show_reading(None)
-            return ('no acceleration channel here: a stroke is read by '
-                    'integrating acceleration')
+                         if history.ordinate_dim[i] == 'acceleration']
         channel = (records[0] if records and records[0] in accelerations
                    else accelerations[0])
         if name is not None and len(history.response_dof) > 1 \
@@ -16184,7 +16220,13 @@ class MainWindow(QMainWindow):
                 item.setExpanded(True)
             self._select_records(name, [channel])
         settings = panel.settings()
-        reading = read_stroke(history, channel, **settings)
+        try:
+            reading = read_stroke(history, channel, **settings)
+        except ValueError as error:
+            # a channel with a sample that is not a number: the reason,
+            # and no numbers that would read as a verdict
+            panel.show_reading(None)
+            return str(error)
         build_stroke(self.data_pane.graphics, reading,
                      unit_system=self.unit_system, theme=self.theme_name)
         panel.show_reading(reading)
@@ -16233,21 +16275,22 @@ class MainWindow(QMainWindow):
         return measured[0][0], specs[0][0], channels
 
     def _render_replication(self, measured, specification, channels):
-        """A transient record against its target: the event, or the
-        waveform error of it.
+        """A transient record against its target: the event, the
+        waveform error of it, or the event judged segment by segment.
 
-        Both readings describe the same repeat — the one the event box
+        Every reading describes the same repeat — the one the event box
         points at. Nothing here names a repeat the worst: which one that
         is depends on the reading you care about and on what the article
         is for, and the numbers are all on screen to decide with.
 
-        Two readings and only two. A level error wants two PSDs and an
-        SRS deviation wants two spectra, and those are reached by
-        computing them and selecting the pair, where the
+        No whole-record level or spectrum reading. A level error wants
+        two PSDs and an SRS deviation wants two spectra, and those are
+        reached by computing them and selecting the pair, where the
         specification's own PSD is a `Specification` and its SRS a
         `ShockSpecification` — so the app still knows which is which,
         and there is one way to each number rather than two that agree
-        only by luck.
+        only by luck. The segments reading's spectra are of each marked
+        segment, which no computed object holds.
         """
         from ..core import replication as rep
 
@@ -16342,19 +16385,40 @@ class MainWindow(QMainWindow):
         verdict table under the plot and the verdicts in the panel
         beside it.
 
-        One channel at a time, the first picked, because the judgement
+        One channel at a time, the first picked, because the judgment
         is of one trace against one reference; the waveform grid under
         the plot still holds every channel at every playing. The marks
         and tolerances are the panel's, and every number is
         `core.replication_segments.replication_segments`'s.
+
+        The marks are kept on the reference, as its `segments`, the way
+        a record's shocks are kept on it: a reference shown again brings
+        its marks back to the panel, and an edit in the panel is stored
+        on it and journaled as the assignment.
         """
+        from ..core.replication_segments import as_segments
         from ..plot.replication_segments import build_replication_segments
 
         panel = self.data_pane.segments_panel
         panel.show()
         panel.duration = (specification.ordinate.shape[1]
                           / float(specification.sample_rate))
-        marks = panel.segments()
+        # 2026-10-16 review: the marks were the panel's alone, lost with
+        # the session and carried over to whatever reference came next
+        try:
+            known = tuple(as_segments(
+                getattr(specification, 'segments', None) or ()))
+        except (TypeError, ValueError, IndexError):
+            # marks a script stored that are not marks: the panel
+            # starts empty rather than refusing the reading
+            known = ()
+        if getattr(self, '_segments_reference', None) is not specification:
+            self._segments_reference = specification
+            panel.set_segments(known, emit=False)
+        marks = tuple(panel.marks())
+        if marks != known:
+            specification.segments = marks
+            self._record_segments(specification)
         settings = panel.settings()
         self.data_pane.graphics.clear()
         try:
@@ -16372,6 +16436,19 @@ class MainWindow(QMainWindow):
         self._journal_replication_segments(measured, specification, marks,
                                            channel, playing, settings)
         return f'{channel}: {result.describe()}'
+
+    def _record_segments(self, specification):
+        """Journal the reference's marks as their assignment, settling
+        in place. The segments reading's own plot line follows the
+        assignment it was drawn from, so it is stepped over: otherwise
+        every edit would leave one assignment more."""
+        journal = self.project.journal
+        held = (journal.pop() if journal and journal[-1].startswith(
+            'visualdynamics.plot.plot_replication_segments(') else None)
+        self.project.record_setting(specification, 'segments',
+                                    specification.segments)
+        if held is not None:
+            journal.append(held)
 
     def _journal_replication_segments(self, measured, specification, marks,
                                       channel, playing, settings):
@@ -16393,8 +16470,10 @@ class MainWindow(QMainWindow):
             target = self.project.name_of(specification)
         except (KeyError, ValueError):
             return
-        given = ', '.join(f'({number(a)}, {number(b)}, {kind!r})'
-                          for a, b, kind in marks)
+        given = ', '.join(
+            f'({number(m[0])}, {number(m[1])}, {m[2]!r}'
+            + (f', {m[3]!r})' if len(m) > 3 and m[3] else ')')
+            for m in marks)
         prefix = ('visualdynamics.plot.plot_replication_segments('
                   f'project[{run!r}], project[{target!r}]')
         tolerances = ', '.join(
@@ -16528,9 +16607,9 @@ class MainWindow(QMainWindow):
         Several measured spectra of different polarities (a positive
         and a negative, a maximax beside them) are one measurement read
         each way: `polarities` holds them all, in the order selected,
-        for the points rule, which judges each; the other readings read
-        the first. Two of the same polarity are two measurements, and
-        not this comparison."""
+        and the points rule, which judges each, is the one reading
+        offered for them (`_srs_readings`). Two of the same polarity
+        are two measurements, and not this comparison."""
         from ..core.data import ShockSpecification, Srs
 
         specs = [(data, records) for _n, data, records in series
@@ -16588,7 +16667,11 @@ class MainWindow(QMainWindow):
         `core.signature.compare_signatures`'s.
         """
         from ..core.signature import find_modes
-        from ..plot.signature import build_signature, display_scale
+        from ..plot.signature import (
+            build_signature,
+            display_scale,
+            display_unit,
+        )
 
         pane = self.data_pane
         panel = pane.signature_panel
@@ -16630,13 +16713,19 @@ class MainWindow(QMainWindow):
             # reason, and no numbers that would read as a verdict
             panel.show_result(None)
             return f'Signature: {error}'
-        panel.show_result(comparison, display_scale(
-            before.ordinate_dim[record], self.unit_system))
+        dimension = before.ordinate_dim[record]
+        panel.show_result(comparison,
+                          display_scale(dimension, self.unit_system),
+                          display_unit(dimension, self.unit_system))
         self._journal_signature(before, after, comparison, record,
                                 settings)
         how = '' if named else ' (modes found)'
+        # the first of the readings' notes rides on the status line, so
+        # a verdict that rests on a doubtful reading never reads clean;
+        # the panel lists them all (2026-10-16)
+        said = f'. {comparison.notes[0]}' if comparison.notes else ''
         return (f'{before_name} before, {after_name} after, at '
-                f'{comparison.dof}{how}: {comparison.describe()}')
+                f'{comparison.dof}{how}: {comparison.describe()}{said}')
 
     @staticmethod
     def _signature_label(data, record):
@@ -16668,6 +16757,16 @@ class MainWindow(QMainWindow):
             f'names={names!r}, '
             "path='signature.png', show=False)")
 
+    @staticmethod
+    def _srs_readings(polarities):
+        """The readings offered for these measured spectra: all of them
+        for one, the points rule alone for several."""
+        # the spectra and the bars draw and score one measurement, so
+        # with a positive and a negative selected they showed the first
+        # and dropped the other without a word (2026-10-16); the points
+        # rule is the reading built to take each polarity
+        return None if len(polarities) < 2 else ('points',)
+
     def _render_srs(self, measured, specification, channels, picked_events=None,
                     polarities=None):
         """Measured shock spectra against the one they had to meet.
@@ -16693,14 +16792,20 @@ class MainWindow(QMainWindow):
             self.data_pane.graphics.clear()
             return ('the records picked share no channel — pick the '
                     'same DOF on both, or pick on one side only')
-        rows = srs_errors(specification, measured)
-        # narrowed to what was picked: the channels either side named,
-        # and the events the measured side named — the curves, the
-        # bars and the table all read the same rows
-        if channels:
-            rows = [row for row in rows if row[0] in channels]
-        if picked_events is not None:
-            rows = [row for row in rows if row[1] in picked_events]
+        polarities = polarities or [measured]
+
+        def scored(spectrum):
+            # narrowed to what was picked: the channels either side
+            # named, and the events the measured side named — the
+            # curves, the bars and the table all read the same rows
+            rows = srs_errors(specification, spectrum)
+            if channels:
+                rows = [row for row in rows if row[0] in channels]
+            if picked_events is not None:
+                rows = [row for row in rows if row[1] in picked_events]
+            return rows
+
+        rows = scored(measured)
         if not rows:
             return 'no channel in common to compare'
         blocks = sorted({block for _d, block, _v in rows if block},
@@ -16713,11 +16818,28 @@ class MainWindow(QMainWindow):
         index = {block: i for i, block in enumerate(blocks)}
         values = {(dof, index.get(block, 0)): value
                   for dof, block, value in rows}
-        if self.data_pane.srs_view == 'points':
+        view = self.data_pane.srs_reading(
+            readings=self._srs_readings(polarities))
+        table = [{'label': dof, 'frame': e, 'zero_target': False,
+                  'waveform': values[(dof, e)]}
+                 for dof in dofs for e in events if (dof, e) in values]
+        labels = dofs
+        if len(polarities) > 1:
+            # every polarity's RMS deviation, a row per channel per
+            # polarity, rather than the first one's alone
+            table, labels = [], []
+            for spectrum in polarities:
+                for dof, block, value in scored(spectrum):
+                    label = f'{dof} {spectrum.kind}'
+                    if label not in labels:
+                        labels.append(label)
+                    table.append({'label': label,
+                                  'frame': index.get(block, 0),
+                                  'zero_target': False, 'waveform': value})
+        if view == 'points':
             message = self._render_srs_points(
-                polarities or [measured], specification, dofs,
-                picked_events)
-        elif self.data_pane.srs_view == 'curves':
+                polarities, specification, dofs, picked_events)
+        elif view == 'curves':
             # every channel at once is the three-dimensional default:
             # the stage shows all events of all channels with their
             # bands, and the 2D/3D toggle stands down to the flat
@@ -16783,11 +16905,7 @@ class MainWindow(QMainWindow):
                 plot, shown, resolve_theme(self.theme_name), 'srs_rms',
                 low=low, high=high, changed=self._srs_bounds_moved)
             message = self.bar_chart.summary.toPlainText()
-        self._show_replication_table(
-            [{'label': dof, 'frame': e, 'zero_target': False,
-              'waveform': values[(dof, e)]}
-             for dof in dofs for e in events if (dof, e) in values],
-            dofs, events, units='dB')
+        self._show_replication_table(table, labels, events, units='dB')
         return message
 
     def _render_srs_points(self, polarities, specification, dofs,
@@ -16803,6 +16921,7 @@ class MainWindow(QMainWindow):
         settings are the panel's, and every number is
         `core.compliance.srs_tolerance`'s.
         """
+        from ..core.compliance import srs_limit_bands
         from ..plot.srs_tolerance import build_srs_tolerance, describe
 
         panel = self.data_pane.srs_tolerance_panel
@@ -16825,6 +16944,14 @@ class MainWindow(QMainWindow):
              for dof, block in pairs])
         chosen = self.data_pane.chosen_event() or 0
         dof, block = pairs[min(chosen, len(pairs) - 1)]
+        # the requirement's own limits are the bands until the panel is
+        # told otherwise, so the judgement is against the curves the
+        # Spectra reading shades (2026-10-16: it judged the panel's
+        # -1.5/+3 dB while the curves beside it shaded the spec's -3/+6)
+        record = next((j for j in range(specification.num_records)
+                       if str(specification.response_dof[j]) == dof), 0)
+        panel.offer_limits((id(specification), record),
+                           *srs_limit_bands(specification, record))
         settings = panel.settings()
         self.data_pane.graphics.clear()
         try:
@@ -16847,13 +16974,13 @@ class MainWindow(QMainWindow):
                             settings):
         """The points reading, journaled as the headless call that
         draws it (`_journal_view`)."""
-        def number(value):
-            # an open edge is written so the line still runs
-            return "float('inf')" if value == float('inf') else repr(value)
-
         def band(pair):
-            return (None if pair is None
-                    else f'({number(pair[0])}, {number(pair[1])})')
+            return None if pair is None else f'({pair[0]!r}, {pair[1]!r})'
+
+        # the keyword only where it changes the call: a requirement
+        # with limits, judged against the panel's bands instead
+        limits = (', limits=False' if not settings['limits']
+                  and getattr(specification, 'limits', None) else '')
 
         try:
             spectra = [self.project.name_of(data) for data in polarities]
@@ -16868,8 +16995,8 @@ class MainWindow(QMainWindow):
             f'{prefix}, channel={dof!r}, event={block!r}, '
             f"inner={band(settings['inner'])}, "
             f"outer={band(settings['outer'])}, "
-            f"rule={settings['rule']!r}, percent={settings['percent']!r}, "
-            "path='srs_tolerance.png', show=False)")
+            f"rule={settings['rule']!r}, percent={settings['percent']!r}"
+            f"{limits}, path='srs_tolerance.png', show=False)")
 
     def _render_banded(self, spec_name, spec, spec_records,
                        measured=None, measured_name=None,
@@ -17176,12 +17303,13 @@ class MainWindow(QMainWindow):
         checks = build_sweep_rate(pane.graphics, spec, settings['modes'],
                                   tone=tone, margin=settings['margin'],
                                   theme=self.theme_name)
-        swept = []
+        swept, read = [], []
         for level in levels:
-            for i in range(level.num_records):
+            records = [i for i in range(level.num_records)
+                       if dofs is None or str(level.response_dof[i]) in dofs]
+            read.append((level, records))
+            for i in records:
                 dof = str(level.response_dof[i])
-                if dofs is not None and dof not in dofs:
-                    continue
                 for frequency, q in settings['modes']:
                     reading = read_swept_q(level, spec, frequency, record=i,
                                            margin=settings['margin'])
@@ -17189,7 +17317,7 @@ class MainWindow(QMainWindow):
                         swept.append((dof, frequency, q, reading))
         panel.show_results(checks, [reading for *_rest, reading in swept])
         self._show_sweep_rate_table(tone, checks, swept)
-        self._journal_sweep_rate(spec, tone, settings)
+        self._journal_sweep_rate(spec, tone, settings, read)
         if not settings['modes']:
             return f'{tone}: give the modes to check the sweep against'
         fast = sum(check.too_fast for check in checks)
@@ -17209,9 +17337,13 @@ class MainWindow(QMainWindow):
         rows = sweep_rate_rows(tone, checks, swept)
         self._set_table_model(sweep_rate_model(rows, self))
 
-    def _journal_sweep_rate(self, spec, tone, settings):
+    def _journal_sweep_rate(self, spec, tone, settings, read=()):
         """The sweep-rate reading, journaled as the headless call that
-        draws it (`_journal_view`)."""
+        draws it (`_journal_view`), and the Q read off each level
+        `read` names, as (level, records), as the `read_swept_q` calls
+        that read it, one settling line per level."""
+        # the levels' readings journaled since 2026-10-16; the plot call
+        # alone left a replay without the Qs the table had judged
         try:
             name = self.project.name_of(spec)
         except (KeyError, ValueError):
@@ -17225,6 +17357,21 @@ class MainWindow(QMainWindow):
             f'{prefix}, [{modes}], tone={tone!r}, '
             f"margin={settings['margin']!r}, path='sweep_rate.png', "
             'show=False)')
+        frequencies = [frequency for frequency, _q in settings['modes']]
+        for level, records in read:
+            try:
+                level_name = self.project.name_of(level)
+            except (KeyError, ValueError):
+                continue
+            if not (records and frequencies):
+                continue
+            prefix = ('[visualdynamics.core.sweep_rate.read_swept_q('
+                      f'project[{level_name!r}], project[{name!r}]')
+            self._journal_view(
+                prefix,
+                f'{prefix}, frequency, record=record, '
+                f"margin={settings['margin']!r}) "
+                f'for record in {records!r} for frequency in {frequencies!r}]')
 
     def _srs_bounds_moved(self, low, high):
         self.data_pane.srs_bounds = (low, high)

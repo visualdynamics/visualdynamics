@@ -50,9 +50,6 @@ mixed = SineTone('Search and hold', 0.0, [10.0, 20.0, 20.0 + hair, 40.0],
 mixed.dwell_segments()                                   # [1]
 ```
 
-`level_at(t)` reads the specified level against time, where a dwell
-lives.
-
 ## The reading
 
 `read_dwell` places the tone on the recording (by matched filter on the
@@ -65,14 +62,14 @@ control at its level and the control does not build) with the peak over
 each cycle, unfiltered; `setting=` takes any band and detector
 [the tracking readings](sine-tracking.md) take. It reports:
 
-- the **steady level**, the median of the readings over the last
-  quarter of the dwell;
-- the **build-up**, the cycles from the dwell's start until the level
-  first reaches a share of the steady level, 95 % by default (`share=`);
-- the **ring-down**, the cycles after the stop until it first falls to
-  the rest of that share, 5 %;
-- whether the level had **settled**, and notes on anything the numbers
-  cannot be trusted for.
+- the steady level, the median of the readings over the last quarter
+  of the dwell;
+- the build-up, the cycles from the dwell's start until the level first
+  reaches a share of the steady level, 95 % by default (`share=`);
+- the ring-down, the cycles after the stop until it first falls to the
+  rest of that share, 5 %;
+- whether the level had settled (`settled`), and notes on anything the
+  numbers cannot be trusted for.
 
 Take a 1 g tone at 20 Hz on a one-mass resonator of
 Q 30, held ninety cycles and then stopped:
@@ -80,14 +77,17 @@ Q 30, held ninety cycles and then stopped:
 ```python
 from visualdynamics.core.dwell import read_dwell
 from visualdynamics.plot import plot_dwell
+from visualdynamics.units import DEFAULT_SYSTEM
 
 reading = read_dwell(history, spec, onset=0.0)          # 101Z+, the response
 reading.level[29] / 9.80665, reading.seconds[29]        # 28.72 g at 1.50 s
 reading.share_at(30), reading.share_at(60)              # 0.957, 0.998
 reading.remaining_at(30)                                # 0.043, e to the -pi
 print(reading.describe())
-# steady 294.3 m/s**2, 95 % in 28.6 cycles (1.43 s), down to 5 % 28.6
+# steady 294.3 m/s², 95 % in 28.6 cycles (1.43 s), down to 5 % 28.6
 # cycles after the stop
+print(reading.describe(DEFAULT_SYSTEM))
+# steady 30.01 g, 95 % in 28.6 cycles (1.43 s), ...
 
 plot_dwell(history, spec, onset=0.0, path='dwell.png')
 ```
@@ -114,28 +114,32 @@ again and is journaled as the `plot_dwell` call that draws it.
 
 ## Where judgment lives
 
-- **A reading is reported after the instant it stands for.** The peak
-  over a cycle is reported at the cycle's end, but in a decay the
-  largest value is at the cycle's start, a whole cycle earlier; RMS
-  and mean stand for the middle of what they average. Counted on the
-  reported clock, the ring-down to 5 % read 29.6 cycles against 28.6
-  for the build-up to 95 %, and thirty cycles after the stop it said
-  4.8 % where the response is at 4.3 %. So every number the reading
-  gives (the counts, `share_at`, `remaining_at` and the plot) places
-  each reading where it stands (`reading.stands`): the build-up and the
-  ring-down of one Q read alike, and each number is the response's,
-  whatever the detector.
-- **The steady level is the record's, not the mode's.** A dwell too short
+- A reading is reported after the instant it stands for. The peak over
+  a cycle is reported at the cycle's end, but in a decay the largest
+  value is at the cycle's start, a whole cycle earlier; RMS and mean
+  stand for the middle of what they average. Counted on the reported
+  clock, the ring-down would read a cycle longer than the build-up. So
+  every number the reading gives (the counts, `share_at`,
+  `remaining_at` and the plot) places each reading where it stands
+  (`reading.stands`): the build-up and the ring-down of one Q read
+  alike, and each number is the response's, whatever the detector.
+- The steady level is the record's, not the mode's. A dwell too short
   to settle, or a resonance that moved during it as the article warmed
   or cracked, reaches a level that is not the mode's steady response.
   The reading says so (`settled`, and a note) rather than borrowing a
   number from the formula above.
-- **A dwell between sweeps does not start from rest or stop.** A sweep
+- A dwell between sweeps does not start from rest or stop. A sweep
   that runs into the dwell leaves a response the build-up starts from,
   and a sweep that leaves it keeps driving, so nothing rings down from a
   stop and no ring-down count is read.
-- **The matched filter places a held tone's start to within a quarter of
-  a cycle.** A pure tone looks the same one cycle along, so its edges
+- A record that starts after the dwell has built holds no build-up. Its
+  first reading is already over the share, so no count is given and a
+  note says how many cycles into the dwell the record starts. A channel
+  that reads no level at all over the dwell's last quarter, as a dead
+  one does, is refused; read anyway, its zero would pass for a build-up
+  done in one cycle.
+- The matched filter places a held tone's start to within a quarter of
+  a cycle. A pure tone looks the same one cycle along, so its edges
   place it, and the specification's phase sets where in the cycle it
   lands; that is enough to move each count by about a quarter cycle. Give
   `onset=` when the start is known to the sample.

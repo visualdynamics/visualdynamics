@@ -11,8 +11,9 @@ shown together because a spike's height moves with the spacing and the
 window while the amplitude does not, and the plot alone invites reading
 one as the other.
 
-One setting is made here, the window, because a spectrum does not carry
-the one it was averaged with: a PSD computed in the project has it in
+One setting is made here, the window (with its alpha or beta for a
+Tukey or Kaiser window), because a spectrum does not carry the one it
+was averaged with: a PSD computed in the project has it in
 its provenance (`Project.averaging_of`), and the panel starts from that
 and says so; an imported one is read as Hann, the common choice, and the
 panel says that too. Nothing is made, so there is no Apply button: the
@@ -27,7 +28,9 @@ from typing import Any
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
 
-from ..core.averaging import WINDOWS
+from ..core.averaging import WINDOW_PARAMETERS, WINDOWS
+from ..core.tone_readout import density_label
+from .editors import DoubleSpinBox
 from .settings_panel import add_derived, add_rule, add_settings, panel_grid
 
 #: the readings under the rule, in order: key and row name
@@ -40,9 +43,9 @@ ROWS = (('source', 'Window from'), ('channel', 'Channel'),
 
 class TonePanel(QWidget):
     """The window setting and the reading. Edits are emitted as the
-    window's name."""
+    window's name; `parameter` gives its alpha or beta."""
 
-    #: the window was changed; here is its name now
+    #: the window or its parameter was changed; here is its name now
     changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -59,18 +62,53 @@ class TonePanel(QWidget):
             'a tone leaks and how tall its spike stands, so a reading '
             'under the wrong window reads the spike wrong, though the '
             'amplitude summed from the lines barely moves')
-        add_settings(grid, [('Window', self.window_box)])
-        add_rule(grid, 2)
+        # a Tukey's alpha or a Kaiser's beta, shown only while such a
+        # window is chosen, as the averaging pane shows it
+        self.parameter_box: DoubleSpinBox = DoubleSpinBox()
+        self.parameter_box.setDecimals(2)
+        self.parameter_box.setToolTip(
+            "The window's own number: Tukey's alpha, the tapered "
+            "fraction, or Kaiser's beta")
+        names = add_settings(grid, [('Window', self.window_box),
+                                    ('Alpha', self.parameter_box)])
+        self._parameter_label: QLabel = names[1]
+        add_rule(grid, 3)
         self.derived: dict[str, QLabel] = {
             key: value for key, (_name, value)
-            in add_derived(grid, ROWS, 3).items()}
+            in add_derived(grid, ROWS, 4).items()}
         # what the reading warns, in words, under the numbers: a tone
         # between lines, a floor that differs either side, no tone
         self.notes: QLabel = QLabel('')
         self.notes.setWordWrap(True)
-        grid.addWidget(self.notes, 3 + len(ROWS), 0, 1, 2)
-        grid.setRowStretch(4 + len(ROWS), 1)
-        self.window_box.currentIndexChanged.connect(self._edited)
+        grid.addWidget(self.notes, 4 + len(ROWS), 0, 1, 2)
+        grid.setRowStretch(5 + len(ROWS), 1)
+        self._restate_parameter(None)
+        self.window_box.currentIndexChanged.connect(self._window_edited)
+        self.parameter_box.valueChanged.connect(self._edited)
+
+    def _restate_parameter(self, value: float | None) -> None:
+        """Fit the parameter row to the window: named for its number and
+        set to `value`, or its default when None; hidden for a window
+        that takes none."""
+        settings = WINDOW_PARAMETERS.get(self.window())
+        self._parameter_label.setVisible(settings is not None)
+        self.parameter_box.setVisible(settings is not None)
+        if settings is None:
+            return
+        what, default, (lowest, highest) = settings
+        was, self._loading = self._loading, True
+        try:
+            self._parameter_label.setText(what.capitalize())
+            self.parameter_box.setRange(lowest, highest)
+            self.parameter_box.setSingleStep((highest - lowest) / 20.0)
+            self.parameter_box.setValue(default if value is None else value)
+        finally:
+            self._loading = was
+
+    def _window_edited(self, *_args: Any) -> None:
+        if not self._loading:
+            self._restate_parameter(None)
+        self._edited()
 
     def _edited(self, *_args: Any) -> None:
         if not self._loading:
@@ -81,12 +119,22 @@ class TonePanel(QWidget):
         """The window chosen, one of `core.averaging.WINDOWS`."""
         return str(self.window_box.currentData())
 
-    def set_window(self, name: str, source: str) -> None:
-        """Show `name` as the window without emitting, and say where it
-        came from ('the averaging', 'chosen', or 'assumed')."""
+    def parameter(self) -> float | None:
+        """The Tukey window's alpha or the Kaiser window's beta; None
+        for a window that takes none."""
+        if self.window() not in WINDOW_PARAMETERS:
+            return None
+        return float(self.parameter_box.value())
+
+    def set_window(self, name: str, source: str,
+                   parameter: float | None = None) -> None:
+        """Show `name` as the window, with `parameter` for a Tukey or
+        Kaiser window (its default when None), without emitting, and say
+        where it came from ('the averaging', 'chosen', or 'assumed')."""
         self._loading = True
         try:
             self.window_box.setCurrentIndex(self.window_box.findData(name))
+            self._restate_parameter(parameter)
         finally:
             self._loading = False
         self.derived['source'].setText(source)
@@ -99,7 +147,8 @@ class TonePanel(QWidget):
         None clears them."""
         values = dict.fromkeys(key for key, _name in ROWS if key != 'source')
         if reading is not None:
-            density = f'{unit}²/Hz' if unit else '/Hz'
+            density = density_label(unit)
+            bandwidth = f'{reading.noise_bandwidth:.3g}'
             amplitude = ('none' if not reading.amplitude else
                          f'{reading.amplitude * scale:.4g} {unit} peak')
             values.update(
@@ -112,9 +161,12 @@ class TonePanel(QWidget):
                          f' {density}'),
                 floor=f'{reading.floor * density_scale:.4g} {density}',
                 spacing=f'{reading.spacing:.4g} Hz',
-                bandwidth=f'{reading.noise_bandwidth:.3g} lines',
+                bandwidth=(f'{bandwidth} line' if bandwidth == '1'
+                           else f'{bandwidth} lines'),
                 offset=f'{abs(reading.offset):.2f} of a line')
         for key, value in values.items():
             self.derived[key].setText('—' if value is None else value)
+        # the notes' densities in the same units as the rows above them
         self.notes.setText('' if reading is None else '\n'.join(
-            note[0].upper() + note[1:] + '.' for note in reading.notes))
+            note[0].upper() + note[1:] + '.'
+            for note in reading.notes_in(unit, scale)))

@@ -160,8 +160,11 @@ class AveragingPanel(QWidget):
         # count alone hides that overlapped frames are not independent,
         # and the band is what the count means on the plot
         level = CONFIDENCE_LEVELS[0]
-        derived = (('averages', 'Averages'), ('dof', 'DOF (2n)'),
-                   ('equivalent', 'Equivalent DOF'),
+        # named statistical, since a DOF elsewhere in the app is a
+        # node and direction (2026-10-16)
+        derived = (('averages', 'Averages'),
+                   ('dof', 'Statistical DOF (2n)'),
+                   ('equivalent', 'Equivalent statistical DOF'),
                    ('band', f'{round(level * 100)} % band'),
                    ('resolution', 'Δf'),
                    ('duration', 'Frame'), ('stop', 'Ends'))

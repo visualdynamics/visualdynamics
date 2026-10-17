@@ -62,6 +62,15 @@ def history(*rows, dims=None):
                        ordinate_dim=dims or ['acceleration'] * n)
 
 
+def same_dof(span=0.4):
+    """A velocity and an acceleration both at 1Z+, the velocity first."""
+    t = times(span)
+    return TimeHistory(t, np.vstack([np.full_like(t, 3.0),
+                                     compensated(t, span / 2.0)]),
+                       response_dof=['1Z+', '1Z+'],
+                       ordinate_dim=['velocity', 'acceleration'])
+
+
 # ---- the velocity ------------------------------------------------------
 
 
@@ -83,7 +92,7 @@ def test_a_half_sine_reports_the_area_under_it():
 
 def test_the_displacement_runs_on_from_the_pulses_middle():
     """After a half-sine the table coasts at its velocity change, so
-    by the end it has travelled that velocity times the time since the
+    by the end it has traveled that velocity times the time since the
     pulse's middle, which is where a symmetric pulse's area acts."""
     t = times(0.25)
     check, = check_shock(history(half_sine(t, 0.05)))
@@ -165,6 +174,41 @@ def test_each_window_is_read_from_its_own_start():
                        rtol=0, atol=1e-12)
 
 
+def test_a_sample_that_is_not_a_number_is_refused():
+    """A NaN integrates to a velocity that is NaN from there on, whose
+    share of its NaN peak would read as zero: refused, by channel and
+    by where, rather than passed as having returned to rest."""
+    t = times(0.4)
+    clean = compensated(t, 0.2)
+    broken = clean.copy()
+    broken[round(0.3 * RATE)] = np.nan
+    with pytest.raises(ValueError, match=r'2Z\+ holds a sample that is not '
+                       r'a finite number between 0 s and 0\.4 s'):
+        check_shock(history(clean, broken))
+
+
+def test_a_window_reads_only_its_own_samples():
+    """A NaN outside every window is no part of any of them: each
+    window is integrated on its own, so the second event reads exactly
+    as the record would without the bad sample."""
+    t = times(1.0)
+    clean = compensated(t, 0.2) + compensated(t, 0.8)
+    broken = clean.copy()
+    broken[round(0.5 * RATE)] = np.nan
+    windows = [Shock(0.6, 0.4)]
+    check, = check_shock(history(broken), shocks=windows)
+    expected, = check_shock(history(clean), shocks=windows)
+    assert np.array_equal(check.velocity, expected.velocity)
+    assert check.end_velocity_share < 1e-4
+
+
+def test_each_check_names_its_channel_by_index():
+    """Two channels can share a DOF, an accelerometer's velocity beside
+    its acceleration: the check carries which record it read."""
+    check, = check_shock(same_dof())
+    assert (check.dof, check.record) == ('1Z+', 1)
+
+
 def test_a_window_that_never_moved_is_at_rest():
     check, = check_shock(history(np.zeros(1000)))
     assert check.end_velocity_share == 0.0
@@ -184,7 +228,8 @@ def test_drifting_is_the_tails_change_carried_across_the_window(
     velocity = np.full(101, 2.0)
     velocity[-30:] -= rate * np.arange(1, 31)
     velocity[0] = 0.0
-    check = ShockCheck(dof='1Z+', window=0, start=0.0, sample_rate=100.0,
+    check = ShockCheck(dof='1Z+', record=0, window=0, start=0.0,
+                       sample_rate=100.0,
                        velocity=velocity, displacement=np.zeros(101))
     assert check.drifting is drifting
 
@@ -370,20 +415,99 @@ def test_the_view_refuses_a_window_the_record_does_not_have(qt_app):
                          show=False, path='unused.png')
 
 
-def test_the_shock_panel_states_the_check(window, pump):
-    """Opening a shifted record as shocks says so beside the table,
-    before anyone presses Compute SRS."""
-    t = times(0.4)
-    name = window.add_object(
-        'Shifted', history(compensated(t, 0.2)
-                           + np.where(t >= 0.08, 4.0 * G, 0.0)))
+def _shock_view(window, pump, record):
+    name = window.add_object('Shifted', record)
     window.data_pane.waterfall_action.setChecked(False)
     window.show_object(name)
     pump()
     if not window.data_pane.shocks_action.isChecked():
         window.data_pane.shocks_action.trigger()
     pump()
-    label = window.data_pane.shock_panel.check_label
+    return window.data_pane.shock_panel.check_label
+
+
+def test_the_shock_panel_states_the_check(window, pump):
+    """Opening a shifted record as shocks says so beside the table,
+    before anyone presses Compute SRS."""
+    t = times(0.4)
+    record = history(compensated(t, 0.2) + np.where(t >= 0.08, 4.0 * G, 0.0))
+    record.shocks = (Shock(0.0, 0.4),)
+    label = _shock_view(window, pump, record)
     assert not label.isHidden()
     assert '1 of 1 do not return to rest.' in label.text()
     assert 'zero shift' in label.text()
+
+
+def test_the_shock_panel_waits_for_shocks_to_be_marked(window, pump):
+    """With none marked, Compute SRS detects windows before it computes,
+    so a check of the whole record would speak for windows it was not
+    read over. The panel says the check is waiting instead."""
+    t = times(0.4)
+    label = _shock_view(window, pump, history(
+        compensated(t, 0.2) + np.where(t >= 0.08, 4.0 * G, 0.0)))
+    assert not label.isHidden()
+    assert label.text().startswith('No shocks are marked')
+    assert 'return to rest' not in label.text()
+
+
+def test_the_shock_panel_states_a_refusal(window, pump):
+    t = times(0.4)
+    values = compensated(t, 0.2)
+    values[round(0.3 * RATE)] = np.nan
+    record = history(values)
+    record.shocks = (Shock(0.0, 0.4),)
+    label = _shock_view(window, pump, record)
+    assert label.text().startswith('The velocity check cannot be read: '
+                                   '1Z+ holds a sample that is not')
+    assert 'font-weight: 600' in label.styleSheet()
+
+
+def test_the_shock_panel_offers_every_kind_maximax_first(qt_app,
+                                                          monkeypatch):
+    from visualdynamics.gui.shock_panel import ShockPanel
+
+    monkeypatch.setattr(srs, 'KINDS', (*srs.KINDS, 'absolute'))
+    panel = ShockPanel()
+    offered = [panel.kind_box.itemData(i)
+               for i in range(panel.kind_box.count())]
+    assert offered == ['maximax', 'positive', 'negative', 'absolute']
+    assert panel.srs_settings()['kind'] == 'maximax'
+    panel.close()
+
+
+def test_the_view_draws_the_checked_channel_not_the_first_of_its_dof(
+        qt_app):
+    """The velocity at 1Z+ comes first; the view draws the acceleration
+    at 1Z+, its trace and its spectrum, not the velocity's."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.shock_check import build_shock_check
+    from visualdynamics.units import SI
+
+    record = same_dof()
+    check, = check_shock(record)
+    spectra = record.compute_srs_polarities()
+    layout = pg.GraphicsLayoutWidget()
+    build_shock_check(layout, record, check, spectra, unit_system=SI)
+    plots = [item for item in layout.ci.items
+             if isinstance(item, pg.PlotItem)]
+    trace = plots[0].listDataItems()[0].getData()[1]
+    assert np.allclose(trace, record.ordinate[1].real)
+    # the spectra's axes are logarithmic, and pyqtgraph hands back the
+    # logarithm it plots
+    positive = 10.0 ** plots[2].listDataItems()[0].getData()[1]
+    assert np.allclose(positive, spectra['positive'].ordinate[1].real)
+    layout.close()
+
+
+def test_the_view_refuses_a_dof_two_accelerations_share(qt_app, tmp_path):
+    from visualdynamics.plot import plot_shock_check
+
+    t = times(0.1)
+    record = TimeHistory(t, np.vstack([half_sine(t, 0.01)] * 2),
+                         response_dof=['1Z+', '1Z+'],
+                         ordinate_dim=['acceleration'] * 2)
+    with pytest.raises(ValueError, match='2 acceleration channels of this '
+                       r'record are named 1Z\+'):
+        plot_shock_check(record, show=False,
+                         path=str(tmp_path / 'unused.png'))

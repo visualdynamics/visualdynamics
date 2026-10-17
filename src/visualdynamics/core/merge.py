@@ -377,6 +377,14 @@ def _merge_data(objects):
         comment=listed('comment'),
         dimension_hint=listed('dimension_hint'),
         **extras)
+    # stacking keeps every record's average whole, so each count still
+    # describes its record; one source without counts leaves the merge
+    # without, since a band on part of it would be a guess about the
+    # rest (2026-10-16)
+    counts = [getattr(obj, 'statistical_dof', None) for obj in objects]
+    if all(count is not None for count in counts):
+        merged.statistical_dof = np.concatenate(
+            [np.asarray(count, dtype=np.float64) for count in counts])
     return merged
 
 

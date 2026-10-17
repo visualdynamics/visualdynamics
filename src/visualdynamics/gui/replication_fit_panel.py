@@ -8,8 +8,10 @@ the moving mass, the body's mass when its share of the motion is to be
 counted, and the candidate cutoffs. Under
 them it reads out the record's largest peak and the force it asks for,
 then a table with a column per candidate, the record as logged first:
-the travel each way, the peak velocity, the share of the mean square
-the cutoff removed, the change in the largest peak, and the verdict.
+the travel each way, the peak velocity (both with the body counted
+when its mass is given), the share of the mean square the cutoff
+removed, the change in the largest peak, and the verdict on the stroke,
+the velocity and the force at that cutoff's largest peak.
 Clicking a column draws that cutoff.
 
 Every edit redraws at once, so the effect of a rating or a cutoff is
@@ -267,7 +269,7 @@ class ReplicationFitPanel(QWidget):
                 cells = (
                     f'{float(us.from_si(case.travel_down, "length")):.3g}',
                     f'{float(us.from_si(case.travel_up, "length")):.3g}',
-                    f'{float(us.from_si(case.peak_velocity, "velocity")):.3g}',
+                    f'{float(us.from_si(case.relative_velocity, "velocity")):.3g}',
                     f'{100.0 * case.mean_square_removed:.2f}',
                     f'{100.0 * case.peak_change:+.2f}',
                     'yes' if case.fits else 'no')

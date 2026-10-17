@@ -37,16 +37,23 @@ and the count says whether a spectrum met its tolerance.
 2. The distance. Each point's distance from the requirement is
    twenty log ten of the ratio, since an SRS is an amplitude. A point
    on a band's edge is inside it.
-3. The bands. The inner band defaults to −1.5 dB below and +3 dB
-   above the requirement. An outer band is optional; when it is given,
-   every point must lie inside it whatever the rule says.
+3. The bands. A specification that carries limits is judged against
+   them: its warning limits are the inner band and its abort limits
+   the outer one, read at each point the way the comparison shades
+   them. A band given in the call replaces the limits, and
+   `limits=False` sets them aside. Without either, the inner band is
+   −1.5 dB below and +3 dB above the requirement, and there is no
+   outer band. When there is an outer band, every point must lie
+   inside it whatever the rule says.
 4. The count. Two rules are offered, as examples of the kinds of rule
    test documents ask for. The test plan states which one applies and
    with which numbers.
     - `rule='share'` (the default) passes when at least `percent` of
       the points (90 by default) lie inside the inner band.
     - `rule='above_lower'` passes when every point is at or above the
-      inner band's lower edge, and puts no ceiling on it.
+      inner band's lower edge. The band has no upper edge under this
+      rule, so every point at or above the lower edge counts as
+      inside.
 
    A rule that asks for a share of the points above the requirement is
    the share rule with a band from 0 dB up:
@@ -57,9 +64,12 @@ and the count says whether a spectrum met its tolerance.
    −1.5/+3 dB, a point 2.5 dB over is inside and one 2 dB under is
    not.
 
-The Q must match. A spectrum computed at another Q is a different
-curve, so a pair at different Q is refused with the reason instead of
-judged.
+The Q and the quantity must match. A spectrum computed at another Q
+is a different curve, and a spectrum of velocity says nothing about a
+requirement in acceleration, so such a pair is refused with the reason
+instead of judged. A spectrum or a requirement whose units are not
+declared is refused the same way: its numbers cannot be read against
+the other's until its units are set.
 
 ## Each polarity
 
@@ -75,14 +85,21 @@ larger of the two at every point, hides that.
 Select the shock specification and a measured SRS together, and choose
 **Points Rule** on the bar, beside **Spectra** and **SRS Error**. To
 judge several polarities at once, select the positive, negative or
-maximax spectra together with the specification; spectra of one
-polarity are one measurement each and are compared one at a time. The
-plot is the picture below, at the channel and event chosen in the box
-on the bar. The panel beside it holds the rule (a share inside, or
-every point at or above the lower edge), the share asked for, the
-inner band and, when ticked, the outer band. Under them, for each
-polarity, are the count and share of its points inside, the verdict,
-and its worst point with its distance from the requirement in dB.
+maximax spectra together with the specification. **Points Rule** is
+then the only reading on the bar, because the spectra and the bars
+read one measurement at a time; the table under the plot gives each
+polarity's RMS deviation on its own row. Spectra of one polarity are
+one measurement each and are compared one at a time. The plot is the
+picture below, at the channel and event chosen in the box on the bar.
+The panel beside it holds the rule (a share inside, or every point at
+or above the lower edge) and the share asked for. When the
+specification carries limits, **Spec limits** is ticked and the
+judgement is against them; untick it to set the bands by hand,
+starting from the specification's own numbers. Otherwise the panel
+holds the inner band and, when ticked, the outer band. Under them,
+for each polarity, are the count and share of its points inside, the
+verdict, and its worst point with its distance from the requirement
+in dB.
 Every edit redraws the judgement at once. Nothing is made, so there is
 no Apply button; the console records the `plot_srs_tolerance` call
 that draws what is on screen.
@@ -106,26 +123,28 @@ positive = history.compute_srs(low=10.0, per_octave=12, q=10.0,
 negative = history.compute_srs(low=10.0, per_octave=12, q=10.0,
                                kind='negative')
 
-result = srs_tolerance(spec, positive, outer=(-3.0, 6.0))
+# the bands are the specification's limits, -1.5/+3 dB inside -3/+6 dB
+result = srs_tolerance(spec, positive)
 print(result['inside_count'], 'of', result['points'], 'inside;',
       'passed' if result['passed'] else 'failed',
       f"worst {result['worst_db']:+.1f} dB at {result['worst_frequency']:.0f} Hz")
 
 # every channel and event, paired as srs_errors pairs them
-for dof, event, row in srs_tolerance_all(spec, negative, outer=(-3.0, 6.0)):
+for dof, event, row in srs_tolerance_all(spec, negative):
     print(dof, event, row['inside_percent'], row['passed'])
 
-plot_srs_tolerance([positive, negative], spec, outer=(-3.0, 6.0),
-                   path='tolerance.png')
+plot_srs_tolerance([positive, negative], spec, path='tolerance.png')
 ```
 
 `ShockSpecification.from_breakpoints` reads the breakpoints onto the
 points of the spacing, from the first breakpoint up, so a spectrum
 computed at the same spacing from the same lowest frequency lands on
-the requirement's points one for one. Each band given becomes a pair
-of limit curves, so the specification carries its tolerance and the
-comparison the application draws when the spectrum and the
-specification are selected together shades it.
+the requirement's points. The spectrum's last point can fall past the
+last breakpoint, where nothing is required, and is not judged. Each
+band given becomes a pair of limit curves, so the specification
+carries its tolerance, the comparison the application draws when the
+spectrum and the specification are selected together shades it, and
+the judgement reads it.
 `visualdynamics.core.compliance.srs_points` is the same judgement on
 plain arrays.
 

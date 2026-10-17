@@ -9,9 +9,10 @@ selected one, and Same length for all gives every window one length.
 
 Below the table are the SRS settings (Q, which peak, and lines per
 octave), the band the windows support, and the velocity check of every
-acceleration channel over every window (`core.shock_check`). Compute SRS computes the
-spectra with whatever is set at that moment, through the project verb a
-script calls, as the averaging panel does for a PSD.
+acceleration channel over every window (`core.shock_check`). Compute
+SRS computes the spectra with whatever is set at that moment, through
+the project verb a script calls, as the averaging panel does for a
+PSD.
 """
 
 from __future__ import annotations
@@ -137,7 +138,7 @@ class ShockPanel(QWidget):
         # mass setting because the standard SRS has none: the SDOF's
         # mass cancels for base-input response, so Q, spacing and
         # which peak are the whole parameter space.
-        from ..core.srs import DEFAULT_Q, PER_OCTAVE
+        from ..core.srs import DEFAULT_Q, KINDS, PER_OCTAVE
         from .editors import DoubleSpinBox, SpinBox, commit_on_enter
 
         grid = QGridLayout()
@@ -151,10 +152,9 @@ class ShockPanel(QWidget):
             'The oscillator amplification, Q = 1/(2ζ): 10 is 5% '
             'damping, the shock-test convention')
         self.kind_box: QComboBox = QComboBox()
-        for key, label in (('maximax', 'Maximax'),
-                           ('positive', 'Positive'),
-                           ('negative', 'Negative')):
-            self.kind_box.addItem(label, key)
+        # every peak `core.srs` keeps, maximax first as the default
+        for key in sorted(KINDS, key=lambda kind: kind != 'maximax'):
+            self.kind_box.addItem(key.capitalize(), key)
         self.kind_box.setToolTip(
             'Which peak each oscillator reports: the largest magnitude '
             'of either sign (maximax), or the positive or negative '

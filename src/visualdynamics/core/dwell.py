@@ -53,9 +53,9 @@ falling level it is the first crest, at its start, a whole cycle before
 the reading is reported. RMS and mean average the span and stand for
 its middle either way; the band's own output stands at its instant, its
 lag the filter's and the same both ways. Counted on the reported clock,
-the peak detector's ring-down to 5 % read 29.6 cycles at Q 30 against
-28.6 for the build-up to 95 %, a cycle long for no reason in the
-response. So each reading is also placed at the instant it stands for
+the peak detector's ring-down would read a cycle longer than the
+build-up for no reason in the response. So each reading is also placed
+at the instant it stands for
 (`DwellReading.stands`, the reported time less `LAG_RISING` or
 `LAG_FALLING` spans), and every number the reading gives is read on that
 clock: the two counts, `share_at` and `remaining_at`, and the plot. The
@@ -89,8 +89,14 @@ from typing import Any
 import numpy as np
 
 from .data import _even_steps
-from .sine import SineSweepSpecification, _control_rows, find_environment
-from .sine_tracking import SineTracking, _Demodulated, _detect
+from .sine import SineSweepSpecification, _control_rows
+from .sine_tracking import SineTracking, _Demodulated, _detect, _rows, _tone_at
+
+# On the reported clock the peak detector's ring-down to 5 % read 29.6
+# cycles at Q 30 against 28.6 for the build-up to 95 %, and 4.8 % Q
+# cycles after the stop where the response is at 4.3 %: the measurement
+# behind the `stands` clock (Kevin Cross, 2026-10-16; the narration moved
+# here from the docstring on review, 2026-10-16).
 
 #: the share of the steady level the build-up is read to, and whose
 #: complement the ring-down is read to: 95 %, the share a resonance
@@ -130,8 +136,10 @@ class DwellReading:
     half's). `built` is the cycles from the dwell's start to `share` of
     it and `rung` the cycles from the stop down to 1 - `share` of it,
     each interpolated on the `stands` clock, or None where the record
-    does not say (a dwell that a sweep leaves, a record that ends
-    first).
+    does not say (a record that starts after the dwell has built, a
+    dwell that a sweep leaves, a record that ends first).
+    `unit` is the unit the record declared, kept as metadata; the
+    numbers are SI whatever it says.
     `notes` holds what the reading cannot be trusted for, as text, empty
     when it is clean. Two of these compare equal only if they are the
     same object, as `TrackedWaveform` does, since the arrays have no
@@ -239,13 +247,21 @@ class DwellReading:
                      f'record, which ends {x[-1]:g} cycles after it')
         return float(np.interp(cycles, x, y) / self.steady)
 
-    def describe(self) -> str:
-        """The reading in one line, in the record's own units, such as
-        'steady 294.3 m/s**2, 95 % in 28.6 cycles (1.43 s), down to 5 %
-        28.6 cycles after the stop'."""
+    def describe(self, unit_system: Any = None) -> str:
+        """The reading in one line, such as 'steady 294.3 m/s², 95 % in
+        28.6 cycles (1.43 s), down to 5 % 28.6 cycles after the stop'.
+
+        The steady level is in SI by default, or in a unit system's
+        display units when one is given.
+        """
+        from ..units import SI
+
+        us = SI if unit_system is None else unit_system
+        steady = float(us.from_si(self.steady, self.dimension))
+        unit = us.label_text(self.dimension)
         percent = f'{100.0 * self.share:g} %'
         rest = f'{100.0 * (1.0 - self.share):g} %'
-        words = [f'steady {self.steady:.4g} {self.unit or ""}'.rstrip()]
+        words = [f'steady {steady:.4g} {unit}'.rstrip()]
         if self.built is not None:
             words.append(f'{percent} in {self.built:.1f} cycles '
                          f'({self.built_seconds:.3g} s)')
@@ -351,8 +367,10 @@ def read_dwell(history: Any, specification: SineSweepSpecification, *,
 
     Raises ValueError when no tone holds a dwell, when the named tone or
     segment is not one, when `share` is not between zero and one, when
-    the recording is not evenly sampled or lacks the channel, or when it
-    holds no whole cycle of the dwell.
+    the recording is not evenly sampled or lacks the channel, when it
+    holds no whole cycle of the dwell, or when the channel reads no level
+    over the dwell's last quarter (zero, as a dead channel reads, or not
+    a number).
 
     Parameters
     ----------
@@ -398,20 +416,16 @@ def read_dwell(history: Any, specification: SineSweepSpecification, *,
     rate = 1.0 / dt
     chosen, segment = _chosen(specification, tone, segment)
     dofs = [str(dof) for dof in history.response_dof]
-    if channel is None:
-        row = _default_row(history, specification)
-    elif str(channel) in dofs:
-        row = dofs.index(str(channel))
-    else:
-        raise ValueError(f'the recording carries no record for {channel!r}')
+    row = (_default_row(history, specification) if channel is None
+           else _rows(history, specification, [str(channel)])[0])
+    rows = [row]
     if onset is None:
         try:
             rows = _control_rows(history, specification)
         except ValueError:
-            rows = [row]          # no control channel: place it on this one
-        onset = (find_environment([history.ordinate[r] for r in rows], dt,
-                                  [chosen]) + chosen.start_time)
-    onset = float(onset)
+            pass                  # no control channel: place it on this one
+    chosen, onset = _tone_at(history, specification, rows, chosen.name,
+                             onset, dt)
 
     starts = np.concatenate(([0.0], np.cumsum(chosen.segment_seconds())))
     frequency = float(chosen.frequency[segment])
@@ -437,6 +451,9 @@ def read_dwell(history: Any, specification: SineSweepSpecification, *,
     instants = np.concatenate((held, ringing))
     first = max(round(begins / dt), 0)
     last = min(round(end / dt) + 1, length)
+    if last - first < 2:
+        raise ValueError(f'{chosen.name}: the recording holds no whole cycle '
+                         'of the dwell to read')
     reads = np.round(instants / dt).astype(np.int64) - first
     keep = (reads >= 0) & (reads < last - first)
     reads, instants = reads[keep], instants[keep]
@@ -478,6 +495,11 @@ def read_dwell(history: Any, specification: SineSweepSpecification, *,
     if not tail.any():
         tail = inside & (cycles == in_dwell[-1])
     steady = float(np.median(level[tail]))
+    if not np.isfinite(steady) or steady <= 0.0:
+        raise ValueError(
+            f'{dofs[row]} reads no level over the last quarter of the dwell '
+            f'(steady {steady:g}): a dead channel, or readings that are not '
+            'numbers, give no build-up to count')
     # settled: the tail's second half holds where its first half was, to
     # within half the complement of the share. Halves' medians rather
     # than the extremes, so one stray cycle neither moves the steady
@@ -501,8 +523,18 @@ def read_dwell(history: Any, specification: SineSweepSpecification, *,
     rise = LAG_RISING[setting.detector] * spans
     fall = LAG_FALLING[setting.detector] * spans
     stands = instants - np.where(inside, rise, fall) * period
-    built = _crossing(in_dwell - rise, level[inside], share * steady,
-                      rising=True)
+    # a record that starts after the dwell has built holds no crossing:
+    # its first reading is already over the share, and the count would
+    # be wherever the record happens to start
+    if round(begins / dt) < 0 and level[inside][0] >= share * steady:
+        built = None
+        notes.append(f'the record starts {-begins * frequency:.1f} cycles '
+                     f'into the dwell, after the level had reached '
+                     f'{100.0 * share:g} % of its steady value, so no '
+                     'build-up is read')
+    else:
+        built = _crossing(in_dwell - rise, level[inside], share * steady,
+                          rising=True)
     rung = None
     if not stops:
         notes.append('a sweep leaves the dwell, so the tone does not stop '

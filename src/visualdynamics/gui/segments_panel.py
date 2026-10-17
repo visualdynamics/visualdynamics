@@ -11,11 +11,14 @@ whole-record rms error, then each segment's verdict and the checks it
 failed.
 
 Every edit redraws the plot at once, so a mark or a tolerance is seen
-on the record while it is set. Nothing is made: the judgement is a
+on the record while it is set. Nothing is made: the judgment is a
 reading of two objects that already exist, as the waveform error bars
 are, so there is no Apply button to press. The same call a script
 makes, `core.replication_segments.replication_segments`, gives every
 number shown here.
+
+The marks are kept on the reference as its `segments`, so they are
+saved with the project and come back when the reference is shown again.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from ..core.replication_segments import (
     SRS_DB,
     TAPER_PERCENT,
     VARIANCE_PERCENT,
+    Segment,
 )
 from .editors import DoubleSpinBox
 from .icons import control_icon
@@ -76,7 +80,7 @@ ROWS_FOR = {'asd': ('stationary', 'transient'),
 def _spin(low: float, high: float, value: float, step: float,
           tip: str) -> DoubleSpinBox:
     """A field reporting only a finished edit, since each report
-    redraws the judgement."""
+    redraws the judgment."""
     box = DoubleSpinBox()
     box.setRange(low, high)
     box.setDecimals(2)
@@ -156,8 +160,10 @@ class SegmentsPanel(QWidget):
             0.01, 1e6, BAND_HZ[0], 1.0, 'The test band\'s lower edge, Hz')
         self.band_high: DoubleSpinBox = _spin(
             0.01, 1e6, BAND_HZ[1], 10.0, 'The test band\'s upper edge, Hz')
+        # the tolerances start a little above zero: a band of ±0 is no
+        # band, and the judgment would refuse it (2026-10-16 review)
         self.asd_box: DoubleSpinBox = _spin(
-            0.0, 40.0, ASD_DB[1], 0.5,
+            0.1, 40.0, ASD_DB[1], 0.5,
             'A stationary segment\'s ASD and a transient segment\'s '
             'normalized ASD, dB either side of the reference\'s at every '
             'line')
@@ -166,7 +172,7 @@ class SegmentsPanel(QWidget):
             'How far over the reference\'s a stationary segment\'s mean '
             'square may be, percent')
         self.envelope_box: DoubleSpinBox = _spin(
-            0.0, 40.0, ENVELOPE_DB[1], 0.5,
+            0.1, 40.0, ENVELOPE_DB[1], 0.5,
             'A transient segment\'s short-time rms, dB either side of the '
             'reference\'s in every window')
         self.window_box: DoubleSpinBox = _spin(
@@ -179,10 +185,10 @@ class SegmentsPanel(QWidget):
             -40.0, 0.0, SRS_DB[0], 0.5,
             'A shock\'s SRS, dB below the reference\'s, each polarity')
         self.srs_high: DoubleSpinBox = _spin(
-            0.0, 40.0, SRS_DB[1], 0.5,
+            0.1, 40.0, SRS_DB[1], 0.5,
             'A shock\'s SRS, dB above the reference\'s, each polarity')
         self.peaks_box: DoubleSpinBox = _spin(
-            0.0, 100.0, PEAK_PERCENT, 5.0,
+            0.1, 100.0, PEAK_PERCENT, 5.0,
             'How far each of a shock\'s major peaks may be from the '
             'reference\'s, percent')
         self.names, self.editors = add_keyed_settings(grid, [
@@ -227,11 +233,15 @@ class SegmentsPanel(QWidget):
         box.currentIndexChanged.connect(self._edited)
         return box
 
-    def _append(self, start: float, end: float, kind: str) -> None:
+    def _append(self, start: float, end: float, kind: str,
+                name: str = '') -> None:
         row = self.table.rowCount()
         self.table.insertRow(row)
         for column, value in ((0, start), (1, end)):
             self.table.setItem(row, column, QTableWidgetItem(f'{value:g}'))
+        # a name given in a script rides with its row, unseen, so the
+        # plot and the stored marks keep it through an edit of the times
+        self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, name)
         self.table.setCellWidget(row, 2, self._kind_box(kind))
 
     def add_segment(self) -> None:
@@ -264,6 +274,12 @@ class SegmentsPanel(QWidget):
     def segments(self) -> list[tuple[float, float, str]]:
         """The marks, (start, end, kind), in the table's order. A row
         whose times do not read as numbers is left out."""
+        return [mark[:3] for mark in self.marks()]
+
+    def marks(self) -> list[Segment]:
+        """The marks as `Segment`s, with any name they were given, in
+        the table's order. A row whose times do not read as numbers is
+        left out."""
         out = []
         for row in range(self.table.rowCount()):
             try:
@@ -275,19 +291,27 @@ class SegmentsPanel(QWidget):
             if box is None:
                 # a row being made: its times are in, its kind not yet
                 continue
-            out.append((start, end, str(box.currentData())))
+            name = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            out.append(Segment(start, end, str(box.currentData()),
+                               str(name or '')))
         return out
 
-    def set_segments(self, marks: Sequence[Sequence[Any]]) -> None:
-        """Replace the marks, each (start, end, kind), then emit once."""
+    def set_segments(self, marks: Sequence[Sequence[Any]],
+                     emit: bool = True) -> None:
+        """Replace the marks, each (start, end, kind[, name]), then emit
+        once, or not at all when `emit` is False."""
         self._loading = True
         try:
             self.table.setRowCount(0)
             for mark in marks:
-                self._append(float(mark[0]), float(mark[1]), str(mark[2]))
+                self._append(float(mark[0]), float(mark[1]), str(mark[2]),
+                             str(mark[3]) if len(mark) > 3 else '')
         finally:
             self._loading = False
-        self._edited()
+        if emit:
+            self._edited()
+        else:
+            self._shown_rows()
 
     # ---- the settings -------------------------------------------------------
 
@@ -310,7 +334,7 @@ class SegmentsPanel(QWidget):
             self.changed.emit(self.settings())
 
     def settings(self) -> dict[str, Any]:
-        """The judgement's tolerances as `judge_segments` takes them:
+        """The judgment's tolerances as `judge_segments` takes them:
         'taper_percent', 'band' (None when unticked), 'asd_db',
         'variance_percent', 'envelope_db', 'window' (None at its
         lowest), 'srs_db' and 'peak_percent'."""

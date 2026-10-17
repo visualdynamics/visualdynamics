@@ -81,9 +81,6 @@ The readings on a time history's bar have their own calls in
 `visualdynamics.plot`: `plot_scalogram(history)` (the wavelet reading,
 drawn at a picture's width whatever the record's length; the
 [wavelet guide](wavelet.md) explains how), `plot_kurtosis(history)`,
-`plot_shock_check(history)` (a shock record's raw velocity beside its
-positive and negative spectra; see
-[checking a shock record](shock-check.md)),
 `plot_time_statistics(history, record)` (one channel's trace, histogram
 against the Gaussian and kurtosis frame by frame; see
 [time statistics](time-statistics.md)),
@@ -98,6 +95,10 @@ specification)`, `plot_comparison(...)`, `plot_ratio(...)`,
 app shows, and each takes `path=`. `plot_srs_tolerance(...)` draws a
 shock response spectrum against its tolerance band, point by point
 ([Judging an SRS against its tolerance](srs-tolerance.md)).
+`plot_shock_check(history)` draws a shock record's raw velocity beside
+its positive and negative spectra, a figure the app does not show: the
+Shocks view states the same check in words
+([checking a shock record](shock-check.md)).
 `plot_half_power(frf, 180.0)` draws one record with the half-power
 reading of a peak on it, the reading the fitting screen's cursor shows
 ([Reading Q from a peak's half-power width](half-power.md)).

@@ -30,7 +30,7 @@ reading.q, reading.damping           # 19.9, 0.0251
 reading.low, reading.high            # the two crossings, Hz
 reading.lines                        # lines across the width
 print(reading.describe())
-# Q 19.9 at 180.1 Hz, half-power 175.8 to 184.8 Hz (9.03 Hz, 40.1 lines)
+# Q 19.9 at 180.1 Hz, half-power 175.8 to 184.8 Hz (9.03 Hz, 40 lines)
 
 visualdynamics.plot.plot_half_power(frf, 180.0, path='q.png')
 ```
@@ -50,7 +50,11 @@ across the width, and any notes.
 line at 0.707 of the peak, a hollow circle on each crossing, a filled
 diamond on the top as read between lines, and the Q beside the lower
 crossing. A reading is drawn so it can be checked; a crossing placed on
-a shoulder is obvious on the plot and invisible in a number.
+a shoulder is obvious on the plot and invisible in a number. It takes
+an FRF or a spectrum and refuses a PSD, an SRS or a coherence. A PSD
+is a power, whose half-power level is half its peak, not 0.707 of it;
+read at 0.707, a PSD of a Q 20 resonance reads a Q of about 31. An SRS
+and a coherence are not a response's magnitude at all.
 
 ## In the app
 
@@ -59,6 +63,13 @@ cursor sits on is read from the residual CMIF the cursor works on, drawn
 in the cursor's red, and written at the end of the status line. It moves
 with every step of a drag, beside the dashed SDOF curve and the damping
 the fit searched.
+
+Until a mode is confirmed the residual CMIF is the measured one, and
+the reading sits on the solid curve. A confirmed mode is taken out of
+the residual, so near it the residual falls below the measured curve,
+and so do the level and crossings read from it. The **Residual** toggle
+draws the residual CMIF, gray and dashed; turn it on to see the curve
+the reading was taken from.
 
 The two dampings are different things and are shown together on
 purpose. The half-power reading is the curve's own width. The fit's

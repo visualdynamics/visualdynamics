@@ -14,7 +14,9 @@ armature, the head expander or slip table, the fixture and the article)
 times the record's largest absolute acceleration, read from the record
 and not estimated from its rms. A record with impacts has a crest
 factor well past the three sigma a Gaussian test would suggest, and the
-force at that one peak is what goes against the rating.
+force at that one peak is what goes against the rating. Each cutoff
+changes the largest peak a little, so each case judges the force at
+its own.
 
 The velocity and the displacement come from integrating the record
 twice, and they live at the bottom of its band: a component of
@@ -26,8 +28,11 @@ own low-frequency limit what the record holds is the chain's response,
 not the vehicle's. So the low end is edited before the integration: a
 zero-phase high-pass at a cutoff below the band of interest.
 
-Each candidate cutoff is worked the same way. The record is high-passed
-(a second-order Butterworth run forward and backward, `filters.filtered`,
+Each candidate cutoff is worked the same way. The record, with its
+offset taken out, has its ends tapered: a half-cosine from zero over
+two periods of the cutoff, 2/fc seconds, at each end (half the record
+each when it is shorter than that). It is then high-passed (a
+second-order Butterworth run forward and backward, `filters.filtered`,
 so nothing moves in time), integrated raw to velocity, the velocity
 high-passed again at the same cutoff, and integrated raw to
 displacement. The velocity is filtered too because an integration from
@@ -37,25 +42,29 @@ integration is `filters.integrate` with ``drift_corner=None``, the
 trapezoid rule with nothing removed: the cutoff here is the edit being
 priced, so the integrator adds no high-pass of its own.
 
+The taper is there because a record cut out of a longer one does not
+start or end at rest. A tone at full amplitude from its first sample
+integrates to a velocity with a constant in it, and the high-pass's own
+start-up transient turns that constant into a displacement offset of
+about v0/(2π fc), which at a low cutoff is many times the tone's true
+motion. Eased in and out over two periods of the cutoff, the same tone
+moves the table A/ω² to a fifth of a percent.
+
 Each cutoff has a price, paid by the article: the share of the record's
 mean square the filter removed, and the change in its largest peak.
-Both are measured against the record with its offset taken out, so the
-offset is not counted as content the filter removed. The record is
-also integrated as logged, with no cutoff at all, so that a logger
-offset shows as the drift it is, and the offset alone is integrated
-beside it.
+Both are measured against the same tapered record with its offset
+taken out, so neither the offset nor the taper is counted as content
+the filter removed. The record is also integrated as logged, with no
+taper and no cutoff, so that a logger offset shows as the drift it is,
+and the offset alone is integrated beside it.
 
-The displacement goes against the stroke with the body's share
-counted. The shaker body moves opposite the armature by the ratio of
-the moving mass to the body's mass, so the travel that reaches the
-stops is the table's displacement times one plus that ratio, and the
-body moves most at low frequency, exactly where a replication record's
-displacement lives. The armature rests at the middle of its stroke,
-held there by its suspension, so the travel is checked each way from
-the middle against half the stroke: a record that dips into a hole and
-climbs out is not symmetric about zero, and its span alone can fit a
-stroke its one-sided excursion does not. The velocity goes against the
-rating as the table's peak velocity.
+The travel, the velocity and the force are judged by the rule in
+`core.shaker`, which the stroke readout uses too: the armature's motion
+against the body is the table's times one plus the body's share, the
+travel is read each way from the middle against half the stroke, and
+the force is the moving mass times the peak. A record that dips into a
+hole and climbs out is not symmetric about zero, and its span alone
+can fit a stroke its one-sided excursion does not.
 
 References
 ----------
@@ -85,6 +94,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .shaker import ShakerRating, acceleration_channel, each_way, finite
+
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
 
@@ -98,6 +109,13 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # the sweep. The raw path is the one the shock check takes
 # (`drift_corner=None`), for the opposite reason: there the drift is the
 # fault looked for, here the cutoff is the edit priced.
+#
+# The taper was added on review (2026-10-16): untapered, a 1 g, 10 Hz
+# tone of a minute, true travel 2.48 mm, read 18.2 mm at a 1 Hz cutoff
+# and 8.7 mm at 2 Hz, and the road record cut to 10-40 s failed a 2 in
+# stroke at 2 and 3 Hz on a start-up transient. The ratings type and the
+# travel rule moved to `core.shaker` the same day, shared with the
+# stroke readout.
 
 #: the candidate high-pass cutoffs, in Hz, when none are given: a few
 #: steps across the bottom of a shaker's band, where the stroke is
@@ -109,54 +127,14 @@ CUTOFFS = (2.0, 3.0, 5.0, 8.0)
 #: so the default integration and the 2 Hz candidate are one filter
 ORDER = 2
 
+#: how long the half-cosine taper at each end of the record is, in
+#: periods of the cutoff
+TAPER_PERIODS = 2.0
 
-@dataclass(frozen=True, kw_only=True)
-class ShakerRating:
-    """What a shaker can do, and what it carries, in SI.
-
-    `force` is the peak force rating in N, `stroke` the travel between
-    the stops in m peak to peak, `velocity` the peak velocity rating in
-    m/s, and `moving_mass` everything the shaker accelerates in kg: the
-    armature, the head expander or slip table, the fixture and the
-    article. `body_mass`, in kg, counts the body's motion opposite the
-    armature when it is given. The armature rests at the middle of the
-    stroke, so the room each way is half of it (`room`).
-    """
-
-    force: float
-    stroke: float
-    velocity: float
-    moving_mass: float
-    body_mass: float | None = None
-
-    def __post_init__(self) -> None:
-        for name in ('force', 'stroke', 'velocity', 'moving_mass'):
-            value = float(getattr(self, name))
-            if not value > 0.0:
-                raise ValueError(f'the {name.replace("_", " ")} has to be '
-                                 f'above zero, not {value:g}')
-            object.__setattr__(self, name, value)
-        if self.body_mass is not None:
-            body = float(self.body_mass)
-            if not body > 0.0:
-                raise ValueError(f'the body mass has to be above zero, '
-                                 f'not {body:g}; leave it out to count '
-                                 'no body motion')
-            object.__setattr__(self, 'body_mass', body)
-
-    @property
-    def body_share(self) -> float:
-        """The moving mass over the body's, the share of the table's
-        displacement the body adds to the travel; zero when the body
-        mass is not given."""
-        return 0.0 if self.body_mass is None \
-            else self.moving_mass / self.body_mass
-
-    @property
-    def room(self) -> float:
-        """The travel available each way from the middle of the stroke,
-        where the armature rests: half the stroke, in m."""
-        return self.stroke / 2.0
+#: the fewest samples a record can have and be filtered at zero phase:
+#: one more than `scipy.signal.sosfiltfilt` pads each end with, three
+#: times one more than twice the second-order sections
+SHORTEST = 3 * (2 * ((ORDER + 1) // 2) + 1) + 1
 
 
 @dataclass(frozen=True, eq=False)
@@ -167,8 +145,9 @@ class FitCase:
     from rest at the record's first sample. `cutoff` is the high-pass in
     Hz, None for the record integrated as logged. `mean_square_removed`
     and `peak_change` are the price of the cutoff, as shares of the
-    record with its offset out; both are zero as logged, where nothing
-    was edited.
+    tapered record with its offset out; both are zero as logged, where
+    nothing was edited. The travel, the velocity and the force are
+    judged by `core.shaker.ShakerRating`'s rule.
     """
 
     #: the high-pass cutoff in Hz, None for the record as logged
@@ -187,6 +166,9 @@ class FitCase:
     mean_square_removed: float
     #: the change in the record's largest peak, as a share of it
     peak_change: float
+    #: the largest absolute acceleration the shaker is asked for at this
+    #: cutoff, m/s**2: the record's own as logged, the edited one's here
+    peak_acceleration: float
 
     @property
     def time(self) -> np.ndarray:
@@ -198,19 +180,19 @@ class FitCase:
     def travel(self) -> np.ndarray:
         """The armature's travel against the body, in m: the table's
         displacement times one plus the body's share."""
-        return self.displacement * (1.0 + self.rating.body_share)
+        return self.rating.relative(self.displacement)
 
     @property
     def travel_up(self) -> float:
         """The largest travel above the middle, in m; zero if it never
         rises."""
-        return max(float(self.travel.max()), 0.0)
+        return each_way(self.travel)[1]
 
     @property
     def travel_down(self) -> float:
         """The largest travel below the middle, in m, as a positive
         number; zero if it never falls."""
-        return max(-float(self.travel.min()), 0.0)
+        return each_way(self.travel)[0]
 
     @property
     def peak_to_peak(self) -> float:
@@ -228,6 +210,13 @@ class FitCase:
         return float(np.abs(self.velocity).max())
 
     @property
+    def relative_velocity(self) -> float:
+        """The armature's largest velocity against the body, in m/s:
+        `peak_velocity` with the body's share counted, what the velocity
+        rating is judged against."""
+        return float(self.rating.relative(self.peak_velocity))
+
+    @property
     def up_share(self) -> float:
         """The travel up as a share of the room, half the stroke."""
         return self.travel_up / self.rating.room
@@ -241,12 +230,23 @@ class FitCase:
     def stroke_share(self) -> float:
         """The larger of `up_share` and `down_share`: one is at the
         stop."""
-        return max(self.up_share, self.down_share)
+        return self.rating.stroke_share(self.travel_down, self.travel_up)
 
     @property
     def velocity_share(self) -> float:
-        """The peak velocity as a share of the rating."""
-        return self.peak_velocity / self.rating.velocity
+        """The peak velocity, counted against the body, as a share of
+        the rating."""
+        return self.rating.velocity_share(self.peak_velocity)
+
+    @property
+    def force(self) -> float:
+        """The moving mass times `peak_acceleration`, in N."""
+        return self.rating.force_needed(self.peak_acceleration)
+
+    @property
+    def force_share(self) -> float:
+        """The force as a share of the rating."""
+        return self.rating.force_share(self.peak_acceleration)
 
     @property
     def fits_stroke(self) -> bool:
@@ -259,10 +259,16 @@ class FitCase:
         return bool(self.velocity_share <= 1.0)
 
     @property
+    def fits_force(self) -> bool:
+        """Whether the force at this cutoff's largest peak is inside the
+        rating."""
+        return bool(self.force_share <= 1.0)
+
+    @property
     def fits(self) -> bool:
-        """Whether the record fits the stroke and the velocity at this
-        cutoff."""
-        return self.fits_stroke and self.fits_velocity
+        """Whether the record fits the stroke, the velocity and the
+        force at this cutoff."""
+        return self.fits_stroke and self.fits_velocity and self.fits_force
 
     def first_past_stroke(self) -> float | None:
         """When the travel first leaves the room either way, in seconds,
@@ -274,23 +280,35 @@ class FitCase:
         """'as logged', or the cutoff such as '3 Hz'."""
         return 'as logged' if self.cutoff is None else f'{self.cutoff:g} Hz'
 
-    def describe(self) -> str:
-        """The verdict in words, as shares of the ratings, as the view
-        and the panel state it."""
-        if self.fits:
-            return (f'{_sentence(self.name())}: fits, using '
-                    f'{_of(self.stroke_share, "the room")} and '
-                    f'{_of(self.velocity_share, "the velocity rating")}.')
+    def shortfalls(self) -> list[str]:
+        """Each rating this case is over, in words, such as 'the
+        travel up is 140 % of the room'; empty when it fits."""
         short = []
         if not self.fits_stroke:
-            side = 'up' if self.up_share >= self.down_share else 'down'
+            if self.up_share == self.down_share:
+                side = 'each way'
+            else:
+                side = 'up' if self.up_share > self.down_share else 'down'
             short.append(f'the travel {side} is '
                          f'{_of(self.stroke_share, "the room")}')
         if not self.fits_velocity:
             short.append('the velocity is '
                          f'{_of(self.velocity_share, "the rating")}')
+        if not self.fits_force:
+            short.append('the force is '
+                         f'{_of(self.force_share, "the rating")}')
+        return short
+
+    def describe(self) -> str:
+        """The verdict in words, as shares of the ratings, as the view
+        and the panel state it."""
+        if self.fits:
+            return (f'{_sentence(self.name())}: fits, using '
+                    f'{_of(self.stroke_share, "the room")}, '
+                    f'{_of(self.velocity_share, "the velocity rating")} '
+                    f'and {_of(self.force_share, "the force rating")}.')
         return (f'{_sentence(self.name())}: does not fit; '
-                + ' and '.join(short) + '.')
+                + ' and '.join(self.shortfalls()) + '.')
 
 
 @dataclass(frozen=True, eq=False)
@@ -299,7 +317,8 @@ class ReplicationFit:
 
     `as_logged` is the record integrated with no cutoff, and `cases`
     the record worked at each candidate cutoff, lowest first. The force,
-    the offset and its drift are read from the record as logged.
+    the offset and its drift are read from the record as logged; each
+    case also judges the force at its own largest peak.
     """
 
     #: the channel's DOF, as the record names it
@@ -324,12 +343,12 @@ class ReplicationFit:
     @property
     def force(self) -> float:
         """The moving mass times the largest peak, in N."""
-        return self.rating.moving_mass * self.peak_acceleration
+        return self.rating.force_needed(self.peak_acceleration)
 
     @property
     def force_share(self) -> float:
         """The force at the largest peak as a share of the rating."""
-        return self.force / self.rating.force
+        return self.rating.force_share(self.peak_acceleration)
 
     @property
     def fits_force(self) -> bool:
@@ -373,9 +392,9 @@ class ReplicationFit:
 
     @property
     def lowest_fitting(self) -> FitCase | None:
-        """The lowest cutoff at which the record fits the stroke and the
-        velocity, the one that takes least out of the record; None when
-        none does."""
+        """The lowest cutoff at which the record fits the stroke, the
+        velocity and the force, the one that takes least out of the
+        record; None when none does."""
         return next((case for case in self.cases if case.fits), None)
 
     def describe(self) -> str:
@@ -392,9 +411,8 @@ class ReplicationFit:
                      f'{_of(logged.stroke_share, "the room")} and leaves '
                      f'it {logged.first_past_stroke():.3g} s in.')
         else:
-            drift = ('As logged, the travel stays inside the room and the '
-                     'velocity is '
-                     f'{_of(logged.velocity_share, "the rating")}.')
+            drift = ('As logged, the travel stays inside the room and '
+                     + ' and '.join(logged.shortfalls()) + '.')
         fitting = self.lowest_fitting
         if fitting is None:
             fit = 'No candidate cutoff fits.'
@@ -436,24 +454,28 @@ def replication_fit(history: TimeHistory, rating: ShakerRating, *,
     """Check one channel of a reference record against a shaker.
 
     The force at the record's largest peak, the record integrated as
-    logged, and the record worked at each candidate cutoff: high-passed
-    at zero phase, integrated raw to velocity, high-passed again,
-    integrated raw to displacement (the module docstring says why each
-    step). Each case carries the travel each way with the body counted,
-    the peak velocity, the share of the mean square the cutoff removed,
-    the change in the largest peak, and its verdict.
+    logged, and the record worked at each candidate cutoff: its ends
+    tapered over two periods of the cutoff, high-passed at zero phase,
+    integrated raw to velocity, high-passed again, integrated raw to
+    displacement (the module docstring says why each step). Each case
+    carries the travel each way with the body counted, the peak
+    velocity, the force at its own largest peak, the share of the mean
+    square the cutoff removed, the change in the largest peak, and its
+    verdict.
 
     Parameters
     ----------
     history : TimeHistory
         The reference record.
     rating : ShakerRating
-        The shaker's ratings and what it carries.
+        The shaker's ratings and what it carries; the force, stroke and
+        velocity ratings and the moving mass are all needed.
     cutoffs : sequence of float, default `CUTOFFS`
         The candidate high-pass cutoffs, in Hz; worked lowest first.
     channel : str or int, optional
         The acceleration channel, by DOF or record index; the record's
-        first acceleration channel by default.
+        first acceleration channel by default. Only a channel whose unit
+        is declared counts (`core.shaker.acceleration_channel`).
 
     Returns
     -------
@@ -464,13 +486,16 @@ def replication_fit(history: TimeHistory, rating: ShakerRating, *,
     ------
     ValueError
         If the record holds no acceleration channel, `channel` is not
-        one, no cutoff is given, or a cutoff is not between zero and
-        the Nyquist frequency.
+        one, the channel holds a sample that is not finite, the record
+        is too short to filter, a rating is missing, no cutoff is given,
+        or a cutoff is not between zero and the Nyquist frequency.
     """
     from .data import TimeHistory
     from .filters import Filtering, filtered, integrate
 
-    row = _channel(history, channel)
+    rating.require('force', 'stroke', 'velocity', 'moving_mass',
+                   reading='the replication fit')
+    row = acceleration_channel(history, channel)
     rate = history.sample_rate
     cutoffs = sorted({float(cutoff) for cutoff in cutoffs})
     if not cutoffs:
@@ -480,24 +505,30 @@ def replication_fit(history: TimeHistory, rating: ShakerRating, *,
             raise ValueError(f'the cutoff ({cutoff:g} Hz) must sit between '
                              'zero and the Nyquist frequency '
                              f'({rate / 2.0:g} Hz)')
-    values = np.real(np.asarray(history.ordinate[row], dtype=complex))
-    # one channel on its own, so a force or a second accelerometer
-    # beside it is neither filtered nor integrated for nothing
-    record = TimeHistory(history.abscissa, values[None],
-                         response_dof=[history.response_dof[row]],
-                         ordinate_dim=['acceleration'])
+    dof = str(history.response_dof[row])
+    values = finite(history.ordinate[row], dof)
+    if values.size < SHORTEST:
+        raise ValueError(f'a record of {values.size} samples is too short '
+                         'to high-pass at zero phase; it needs at least '
+                         f'{SHORTEST}')
     centered = values - values.mean()
-    mean_square = float(np.mean(centered ** 2))
-    largest = float(np.abs(centered).max())
     start = float(history.abscissa[0])
 
-    def worked(source, cutoff, edited):
+    def alone(rows):
+        # one channel on its own, so a force or a second accelerometer
+        # beside it is neither filtered nor integrated for nothing
+        return TimeHistory(history.abscissa, rows[None],
+                           response_dof=[dof], ordinate_dim=['acceleration'])
+
+    def worked(source, cutoff, reference, edited, peak):
         if cutoff is None:
             velocity = integrate(source, None)
         else:
             cut = Filtering(low=cutoff, order=ORDER)
             velocity = filtered(integrate(source, None), cut)
         displacement = integrate(velocity, None)
+        mean_square = float(np.mean(reference ** 2))
+        largest = float(np.abs(reference).max())
         return FitCase(
             cutoff=cutoff, rating=rating, start=start, sample_rate=rate,
             velocity=np.real(velocity.ordinate[0]).copy(),
@@ -506,47 +537,43 @@ def replication_fit(history: TimeHistory, rating: ShakerRating, *,
                 _share(1.0 - np.mean(edited ** 2) / mean_square)
                 if mean_square > 0.0 else 0.0),
             peak_change=(_share(np.abs(edited).max() / largest - 1.0)
-                         if largest > 0.0 else 0.0))
+                         if largest > 0.0 else 0.0),
+            peak_acceleration=peak)
 
-    as_logged = worked(record, None, centered)
+    as_logged = worked(alone(values), None, centered, centered,
+                       float(np.abs(values).max()))
     cases = []
     for cutoff in cutoffs:
-        source = filtered(record, Filtering(low=cutoff, order=ORDER))
-        cases.append(worked(source, cutoff, np.real(source.ordinate[0])))
+        tapered = centered * taper(values.size, TAPER_PERIODS / cutoff * rate)
+        source = filtered(alone(tapered), Filtering(low=cutoff, order=ORDER))
+        edited = np.real(source.ordinate[0])
+        cases.append(worked(source, cutoff, tapered, edited,
+                            float(np.abs(edited).max())))
     peak = int(np.argmax(np.abs(values)))
     return ReplicationFit(
-        dof=str(history.response_dof[row]), rating=rating,
+        dof=dof, rating=rating,
         peak_acceleration=float(abs(values[peak])),
         peak_time=float(history.abscissa[peak]),
-        rms=float(np.sqrt(mean_square)),
+        rms=float(np.sqrt(np.mean(centered ** 2))),
         offset=float(values.mean()),
         duration=(values.size - 1) / rate,
         as_logged=as_logged, cases=tuple(cases))
+
+
+def taper(samples: int, length: float) -> np.ndarray:
+    """A window of `samples` that rises from zero over `length` samples
+    by a half-cosine at each end and is one between; each end is at
+    most half the window, where the two meet as a Hann window."""
+    ramp = int(min(round(length), samples // 2))
+    window = np.ones(samples)
+    if ramp > 0:
+        rise = 0.5 - 0.5 * np.cos(np.pi * np.arange(ramp) / ramp)
+        window[:ramp] = rise
+        window[samples - ramp:] = rise[::-1]
+    return window
 
 
 def _share(value: float) -> float:
     """A share, with the rounding of a subtraction near zero kept
     out of the sign."""
     return 0.0 if abs(value) < 1e-12 else float(value)
-
-
-def _channel(history: TimeHistory, channel: str | int | None) -> int:
-    """The record index of the acceleration channel asked for."""
-    accelerations = [i for i in range(history.num_records)
-                     if history.known_dim(i) == 'acceleration']
-    if not accelerations:
-        raise ValueError('the fit is checked by integrating acceleration, '
-                         'and this record holds none')
-    if channel is None:
-        return accelerations[0]
-    if isinstance(channel, str):
-        named = [i for i in accelerations
-                 if history.response_dof[i] == channel]
-        if not named:
-            raise ValueError(f'{channel} is not an acceleration channel of '
-                             'this record')
-        return named[0]
-    index = int(channel)
-    if index not in accelerations:
-        raise ValueError(f'record {index} is not an acceleration channel')
-    return index

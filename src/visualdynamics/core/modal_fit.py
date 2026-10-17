@@ -41,6 +41,7 @@ it and the indicator driving it are set out.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -653,12 +654,10 @@ class ModalFitSession:
         HalfPower
             The reading.
         """
-        from dataclasses import replace
-
         near = (self.pending['frequency'] if frequency is None
                 else float(frequency))
         reading = read_half_power(self.frequencies, self._residual_cmif(),
-                                  near, warn=warn)
+                                  near, warn=warn, stacklevel=2)
         height = float(self._displayed(np.array([reading.height]),
                                        unit_system)[0])
         return replace(reading, height=height)

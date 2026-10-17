@@ -6,7 +6,7 @@ whole record. That number can look fine while the one event in the
 record most likely to break something was missed. This page describes
 how Visual Dynamics judges a replicated run segment by segment, each
 segment by the rule for its kind of motion, and how to run the
-judgement from a script.
+judgment from a script.
 
 ## Why the whole record hides a segment
 
@@ -42,20 +42,26 @@ plan states the ones that apply.
 | transient | a long non-stationary stretch, its spectrum steady while its level changes: braking, a run-up | its short-time rms envelope against the reference's, window by window; its normalized ASD, the segment's own mean square divided out | ±1 dB in every window; ±3 dB at every line |
 | shock | a short event: an impact, a pothole | its shock response spectrum in each polarity against the reference's; its major peaks, the reference's largest crests and troughs, against the control at the same samples | −6/+3 dB at every point; ±20 % at each peak |
 
-A few details are fixed by the judgement and worth knowing:
+A few details are fixed by the judgment and worth knowing:
 
-1. The taper. Each segment is weighted by a tapered cosine window
-   before its spectra and its mean square are computed: 10 percent of
-   the segment by default, half rising at the start and half falling
-   at the end, the middle weighted by one. Without it the segment's
-   abrupt ends would enter its spectra as content the record does not
-   have. The envelope and the peaks are read on the segment as
-   recorded, because they are ratios of the two traces at one place,
-   from which a weight on both cancels.
+1. The taper. A stationary or transient segment is weighted by a
+   tapered cosine window before its ASD and its mean square are
+   computed: 10 percent of the segment by default, half rising at the
+   start and half falling at the end, the middle weighted by one.
+   Without it the segment's abrupt ends would enter its spectrum as
+   content the record does not have. A shock's SRS is computed on the
+   segment as recorded. The SRS is a peak response, and a shock marked
+   tight on its event would put the event's first and largest cycles
+   under the taper; both traces would be weighted down there alike, and
+   a miss would shrink in their ratio. Marked from 31.99 s, the pothole
+   below would read 3.2 dB low at worst under a taper and pass; read
+   as recorded it is 7.4 dB low and fails. The envelope and the peaks are read on the segment as
+   recorded too, because they are ratios of the two traces at one
+   place, from which a weight on both cancels.
 2. The test band. The run and the reference should be band-limited
    alike to the test band before they are judged
    (`visualdynamics.core.filters`), and the same band should be given
-   to the judgement as `band`. The ASD is then judged at the lines
+   to the judgment as `band`. The ASD is then judged at the lines
    inside it and the SRS computed at natural frequencies across it,
    up to a fifth of the sample rate. Outside the band the reference
    holds only the filters' skirts, and a control that leaks a little
@@ -80,8 +86,15 @@ A few details are fixed by the judgement and worth knowing:
    `variance_percent=(-10.0, 10.0)`.
 
 A segment passes when every one of its checks does, and the record
-passes when every segment does. Each check reports its readings, how
-many fell outside its tolerance, and its verdict.
+passes when every segment does. A check with nothing to judge, such as
+an SRS when the test band lies above a fifth of the sample rate, is
+not judged, and its segment is not judged unless another of its
+checks fails; the record's line counts such a segment apart and does
+not call it a pass. A control that holds nothing where the reference
+asks for something reads minus infinity decibels there and fails.
+A trace holding a NaN or an infinity is refused with an error. Each
+check reports its readings, how many fell outside its tolerance, and
+its verdict.
 
 ## In the app
 
@@ -93,8 +106,10 @@ each with where the segment starts and ends on the reference's clock
 and its kind, with buttons to add and remove one; then the taper, the
 test band when ticked, and the tolerances of the kinds that are
 marked. Under them are the whole-record rms error and each segment's
-verdict, with the checks it failed. Every edit redraws the judgement
-at once. Nothing is made, so there is no Apply button; the console
+verdict, with the checks it failed. Every edit redraws the judgment
+at once. The marks are kept on the reference, as its `segments`, so
+they are saved with the project and come back when the reference is
+selected again. Nothing is made, so there is no Apply button; the console
 records the `plot_replication_segments` call that draws what is on
 screen. The waveform grid under the plot still holds every channel at
 every playing.
@@ -127,12 +142,14 @@ plot_replication_segments(run, reference, marks, band=(5.0, 400.0),
                           window=0.5, path='segments.png')
 ```
 
-`judge_segments` in the same module is the judgement on two plain
+`judge_segments` in the same module is the judgment on two plain
 arrays, already aligned; `replication_segments` takes the run and its
 reference as objects, at a channel and over one playing, and aligns
 them by the one shift the transient workflow's comparison uses.
 `tapered_cosine` and `major_peaks` are the window and the peak rule on
-their own.
+their own. Marks set in the app are the reference's `segments`, and
+`replication_segments(run, reference, reference.segments)` judges by
+them.
 
 ## The picture
 

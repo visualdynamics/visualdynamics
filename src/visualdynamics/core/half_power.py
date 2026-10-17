@@ -58,6 +58,7 @@ peak interpolation are described.
 
 from __future__ import annotations
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import Any
@@ -81,6 +82,22 @@ MIN_LINES = 4
 HALF_POWER = 1.0 / np.sqrt(2.0)
 
 
+def _figures(value: float, figures: int) -> str:
+    """`value` to `figures` significant figures, never in exponent form:
+    '180.1', '10240', '0.0125'. A reading is copied into reports and
+    spreadsheets, where 1.024e+04 Hz is a number to re-type."""
+    if not value or not math.isfinite(value):
+        return f'{value:g}'
+    decimals = max(0, figures - 1 - math.floor(math.log10(abs(value))))
+    text = f'{value:.{decimals}f}'
+    return text.rstrip('0').rstrip('.') if '.' in text else text
+
+
+def _lines(lines: float) -> str:
+    """A count of lines: two figures below ten, whole lines past it."""
+    return f'{lines:.2g}' if lines < 10.0 else f'{lines:.0f}'
+
+
 class HalfPowerWarning(UserWarning):
     """Warned when a half-power reading is missing a crossing or rests
     on too few lines. The reading is returned either way; the warning
@@ -99,6 +116,8 @@ class HalfPower:
     are None too. `lines` is the width over the line spacing at the
     peak: how many lines the reading rests on. `notes` holds the
     warnings the reading raised, as text, empty when it raised none.
+    `min_lines` is the count `resolved` is judged against: the
+    `min_lines` the reading was taken with.
     """
 
     frequency: float
@@ -107,6 +126,7 @@ class HalfPower:
     high: float | None
     spacing: float
     notes: tuple[str, ...] = ()
+    min_lines: float = MIN_LINES
 
     @property
     def level(self) -> float:
@@ -141,25 +161,32 @@ class HalfPower:
 
     @property
     def resolved(self) -> bool:
-        """True when both crossings were found and at least `MIN_LINES`
+        """True when both crossings were found and at least `min_lines`
         lines span the width."""
+        # 2026-10-16: read the module's MIN_LINES until review found a
+        # reading taken with min_lines=2 calling itself unresolved at
+        # three lines, after warning nothing
         lines = self.lines
-        return lines is not None and lines >= MIN_LINES
+        return lines is not None and lines >= self.min_lines
 
     def describe(self) -> str:
         """The reading in one line, as the application shows it:
         'Q 19.9 at 179.9 Hz, half-power 175.3 to 184.3 Hz (9.03 Hz,
-        14 lines)'."""
-        where = f'{self.frequency:.4g} Hz'
+        14 lines)'. Numbers are given to four figures (the width and Q
+        to three) and never in exponent form."""
+        where = f'{_figures(self.frequency, 4)} Hz'
         if self.low is None and self.high is None:
             return f'peak at {where}: no half-power width can be read'
         if self.q is None:
             side = ('below' if self.low is None else 'above')
             return (f'peak at {where}: no half-power crossing {side} it '
                     'inside the curve')
-        return (f'Q {self.q:.3g} at {where}, half-power '
-                f'{self.low:.4g} to {self.high:.4g} Hz '
-                f'({self.width:.3g} Hz, {self.lines:.3g} lines)')
+        assert self.low is not None and self.high is not None
+        assert self.width is not None and self.lines is not None
+        return (f'Q {_figures(self.q, 3)} at {where}, half-power '
+                f'{_figures(self.low, 4)} to {_figures(self.high, 4)} Hz '
+                f'({_figures(self.width, 3)} Hz, {_lines(self.lines)} '
+                'lines)')
 
 
 def crossings(frequencies: Any, magnitude: Any, index: int,
@@ -180,31 +207,44 @@ def crossings(frequencies: Any, magnitude: Any, index: int,
         raise ValueError(f'a level of {level:g} is above the line it is '
                          f'measured down from ({m[index]:g})')
 
-    def side(step: int) -> float | None:
-        i = index
-        while 0 <= i + step < len(m):
-            if m[i + step] < level:
-                # m[i] >= level > m[i + step], so the step is never flat
-                fraction = (m[i] - level) / (m[i] - m[i + step])
-                return float(f[i] + fraction * (f[i + step] - f[i]))
-            i += step
-        return None
+    # 2026-10-16: these were Python loops a line at a time, 6 ms on
+    # 40 000 lines across a broad peak, and the fitting screen reads on
+    # every tick of a drag; one comparison over the array is the same
+    # rule at a small fraction of that
+    def between(i: int, j: int) -> float:
+        # m[i] >= level > m[j], so the step is never flat
+        fraction = (m[i] - level) / (m[i] - m[j])
+        return float(f[i] + fraction * (f[j] - f[i]))
 
-    return side(-1), side(+1)
+    below = np.flatnonzero(m[:index] < level)
+    above = np.flatnonzero(m[index + 1:] < level)
+    low = between(int(below[-1]) + 1, int(below[-1])) if len(below) \
+        else None
+    high = (between(index + int(above[0]), index + int(above[0]) + 1)
+            if len(above) else None)
+    return low, high
 
 
 def _climb(m: np.ndarray, index: int) -> int:
-    """From line `index`, uphill to the top of the peak it sits on."""
+    """From line `index`, uphill to the top of the peak it sits on.
+
+    The way is chosen at the first line, toward the taller neighbor
+    (down in frequency on a tie), and the climb goes on that way while
+    each next line is strictly taller. It never turns back: having
+    stepped one way, the line behind is lower than the one stood on.
+    """
+    # 2026-10-16: a step at a time until review measured it among the
+    # loops costing a drag tick; the run of rises is found in one pass
     last = len(m) - 1
-    while True:
-        below = m[index - 1] if index > 0 else -np.inf
-        above = m[index + 1] if index < last else -np.inf
-        if below > m[index] and below >= above:
-            index -= 1
-        elif above > m[index]:
-            index += 1
-        else:
-            return index
+    below = m[index - 1] if index > 0 else -np.inf
+    above = m[index + 1] if index < last else -np.inf
+    if below > m[index] and below >= above:
+        falls = np.flatnonzero(~(m[:index][::-1] > m[1:index + 1][::-1]))
+        return index - (int(falls[0]) if len(falls) else index)
+    if above > m[index]:
+        falls = np.flatnonzero(~(m[index + 1:] > m[index:-1]))
+        return index + (int(falls[0]) if len(falls) else last - index)
+    return index
 
 
 def _top(f: np.ndarray, m: np.ndarray, i: int) -> tuple[float, float]:
@@ -232,7 +272,7 @@ def _top(f: np.ndarray, m: np.ndarray, i: int) -> tuple[float, float]:
 def read_half_power(frequencies: Any, magnitude: Any, near: float, *,
                     within: tuple[float, float] | None = None,
                     min_lines: float = MIN_LINES,
-                    warn: bool = True) -> HalfPower:
+                    warn: bool = True, stacklevel: int = 1) -> HalfPower:
     """Read Q from the half-power width of the peak nearest `near`.
 
     The peak is the one the line nearest `near` sits on, found by
@@ -270,6 +310,11 @@ def read_half_power(frequencies: Any, magnitude: Any, near: float, *,
         warning.
     warn : bool, default True
         Warn the notes as `HalfPowerWarning` as well as keeping them.
+    stacklevel : int, default 1
+        Which line the warning names: 1 is the line that called this
+        function, 2 its caller, as for `warnings.warn`. A function that
+        reads on its caller's behalf passes 2, so the warning points at
+        the caller's code and not its own.
 
     Returns
     -------
@@ -316,26 +361,32 @@ def read_half_power(frequencies: Any, magnitude: Any, near: float, *,
         # crossing can be placed. Both crossings would land on the
         # tallest line, a width of zero and a Q of infinity.
         below = above = None
-        notes.append(f'the peak at {peak:.4g} Hz is narrower than its '
-                     f'lines, {spacing:.3g} Hz apart: its half-power '
-                     'level is above every line, and no width or Q is read')
+        notes.append(f'the peak at {_figures(peak, 4)} Hz is narrower '
+                     f'than its lines, {_figures(spacing, 3)} Hz apart: '
+                     'its half-power level is above every line, and no '
+                     'width or Q is read')
     else:
         below, above = crossings(f, m, i, height * HALF_POWER)
     for crossing, word, end in ((below, 'below', f[0]),
                                 (above, 'above', f[-1])):
         if crossing is None and not narrow:
-            notes.append(f'the curve ends at {end:.4g} Hz before falling '
-                         f'to half power {word} the peak at {peak:.4g} Hz; '
-                         'no width or Q is read')
-    reading = HalfPower(peak, height, below, above, spacing)
+            notes.append(f'the curve ends at {_figures(end, 4)} Hz before '
+                         f'falling to half power {word} the peak at '
+                         f'{_figures(peak, 4)} Hz; no width or Q is read')
+    reading = HalfPower(peak, height, below, above, spacing,
+                        min_lines=min_lines)
     lines = reading.lines
     if lines is not None and lines < min_lines:
-        notes.append(f'the half-power width of the peak at {peak:.4g} Hz '
-                     f'is {reading.width:.3g} Hz, {lines:.2g} lines of '
-                     f'{spacing:.3g} Hz; with fewer than {min_lines:g} '
-                     'lines across it the top is missed and the flanks '
-                     'are cut straight, and Q is biased, usually low')
+        assert reading.width is not None
+        notes.append(f'the half-power width of the peak at '
+                     f'{_figures(peak, 4)} Hz is '
+                     f'{_figures(reading.width, 3)} Hz, {_lines(lines)} lines '
+                     f'of {_figures(spacing, 3)} Hz; with fewer than '
+                     f'{min_lines:g} lines across it the top is missed and '
+                     'the flanks are cut straight, and Q is biased, '
+                     'usually low')
     if warn:
         for note in notes:
-            warnings.warn(note, HalfPowerWarning, stacklevel=2)
-    return HalfPower(peak, height, below, above, spacing, tuple(notes))
+            warnings.warn(note, HalfPowerWarning, stacklevel=stacklevel + 1)
+    return HalfPower(peak, height, below, above, spacing, tuple(notes),
+                     min_lines)

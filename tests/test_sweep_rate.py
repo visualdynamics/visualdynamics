@@ -68,7 +68,7 @@ def test_a_linear_sweeps_rule_is_fn_over_q_squared_in_hz_per_second():
     assert rule_rate(400.0, 20.0, LINEAR) == pytest.approx(400.0)
 
 
-def test_the_band_is_fn_over_q_wide_and_centred():
+def test_the_band_is_fn_over_q_wide_and_centered():
     low, high = half_power_band(22.0, 40.0)
     assert (low, high) == pytest.approx((21.725, 22.275))
     assert high - low == pytest.approx(22.0 / 40.0)
@@ -156,10 +156,17 @@ def test_a_sweep_down_reads_the_peak_below_the_mode():
     assert reading.q_read == pytest.approx(22.0, abs=0.3)
 
 
-def test_a_linear_sweep_at_the_rule_reads_about_95_percent():
-    reading = simulate_sweep(100.0, 30.0, rule_rate(100.0, 30.0, LINEAR),
-                             LINEAR)
-    assert 0.92 < reading.peak_share < 0.96
+@pytest.mark.parametrize('kind', [LOG, LINEAR])
+@pytest.mark.parametrize('q', [20.0, 40.0, 100.0, 300.0])
+@pytest.mark.parametrize('sign', [1.0, -1.0])
+def test_at_the_rule_a_mode_reads_about_94_percent_and_its_q_20_low(kind, q,
+                                                                    sign):
+    """What the docstrings and the guide say of the rule's own rate,
+    measured: 93.0 to 94.8 % of the height for a Q of 20 up, the Q 18.5
+    to 22.5 % low, on either law and in either direction."""
+    reading = simulate_sweep(100.0, q, sign * rule_rate(100.0, q, kind), kind)
+    assert 0.929 < reading.peak_share < 0.948
+    assert -0.225 < reading.q_bias < -0.185
 
 
 def test_a_rate_far_under_the_rule_is_taken_as_steady():
@@ -172,7 +179,33 @@ def test_a_rate_far_under_the_rule_is_taken_as_steady():
     under = simulate_sweep(22.0, 40.0,
                            0.5 * STEADY_RATIO * rule_rate(22.0, 40.0))
     assert not under.simulated
-    assert under.peak_share == 1.0 and under.q_read == 40.0
+    # the steady curve's own reading: a transmissibility peaks a hair
+    # over Q sqrt(1 + 1/Q**2), a hair under fn, and a hair narrow
+    assert under.peak_share == pytest.approx(1.0000780, abs=1e-6)
+    assert under.peak_frequency == pytest.approx(21.99656, abs=1e-4)
+    assert under.q_read == pytest.approx(39.9875, abs=1e-3)
+
+
+def test_a_low_q_reads_the_same_either_side_of_the_steady_ratio():
+    """At a Q of 3 the steady curve peaks 1.15 % over the height at fn
+    and reads a Q of 2.85; the reading taken as steady says so, rather
+    than the mode's own 1 and 3, so it does not jump where the
+    simulation takes over."""
+    q = 3.0
+    zeta = 1 / (2 * q)
+    r = np.linspace(0.5, 1.5, 200001)
+    curve = np.sqrt((1 + (2 * zeta * r) ** 2)
+                    / ((1 - r ** 2) ** 2 + (2 * zeta * r) ** 2))
+    expected = curve.max() / (q * np.sqrt(1 + 1 / q ** 2))
+    under = simulate_sweep(10.0, q, 0.98 * STEADY_RATIO * rule_rate(10.0, q))
+    over = simulate_sweep(10.0, q, 1.02 * STEADY_RATIO * rule_rate(10.0, q))
+    assert not under.simulated and over.simulated
+    assert under.peak_share == pytest.approx(expected, abs=1e-5)
+    assert under.peak_frequency == pytest.approx(10.0 * r[curve.argmax()],
+                                                 abs=1e-3)
+    assert under.q_read == pytest.approx(2.853, abs=0.001)
+    assert under.q_read == pytest.approx(over.q_read, rel=0.001)
+    assert under.peak_share == pytest.approx(over.peak_share, abs=0.005)
 
 
 def test_the_reading_depends_on_the_rate_over_the_frequency_only():
@@ -219,21 +252,21 @@ def test_the_reading_says_how_far_low_it_reads():
 def test_the_peak_is_placed_between_readings_and_its_width_between_lines():
     """On a Gaussian, whose logarithm is a parabola, the top is placed
     exactly however coarsely it is sampled, and the half-power width is
-    2 s sqrt(ln 2)."""
+    2 s sqrt(ln 2); read the same in sweep order down as up."""
     from visualdynamics.core.sweep_rate import _read_peak
 
     f = np.arange(0.0, 2.0, 0.0005)
     s = 0.01
     level = 5.0 * np.exp(-((f - 1.000137) ** 2) / (2 * s ** 2))
-    top, height, q = _read_peak(f, level, np.arange(len(f)))
-    assert top == pytest.approx(1.000137, abs=1e-9)
-    assert height == pytest.approx(5.0, rel=1e-9)
-    assert q == pytest.approx(1.000137 / (2 * s * np.sqrt(np.log(2))),
-                              rel=1e-4)
+    for curve in ((f, level), (f[::-1], level[::-1])):
+        top, height, q = _read_peak(*curve, (0.0, 2.0))
+        assert top == pytest.approx(1.000137, abs=1e-9)
+        assert height == pytest.approx(5.0, rel=1e-9)
+        assert q == pytest.approx(1.000137 / (2 * s * np.sqrt(np.log(2))),
+                                  rel=1e-4)
     # a peak at the end of what was read has no crossings beyond it
-    assert _read_peak(f, level, np.array([0, 1]))[2] is None
     edge = level[:1999]
-    assert _read_peak(f[:1999], edge, np.arange(1999))[2] is None
+    assert _read_peak(f[:1999], edge, (0.0, 2.0))[2] is None
 
 
 @pytest.mark.parametrize('args', [(0.0, 40.0, 4.0), (22.0, 0.5, 4.0),
@@ -280,6 +313,18 @@ def test_the_margin_moves_the_flag():
     assert check.too_fast
 
 
+def test_a_tone_says_when_a_segment_sweeps_through_a_frequency():
+    """`SineTone.time_at`, the inverse of `frequency_at` on a segment,
+    which the passes are timed by."""
+    sweep = tone([10.0, 40.0, 20.0], [4.0, -2.0], [LOG, LINEAR])
+    assert sweep.time_at(20.0, 0) == pytest.approx(15.0)
+    assert sweep.time_at(30.0, 1) == pytest.approx(30.0 + 5.0)
+    t = np.array([3.0, 17.0, 33.0, 39.0])
+    for i, segment in enumerate([0, 0, 1, 1]):
+        assert sweep.time_at(sweep.frequency_at(t[i]), segment) == \
+            pytest.approx(t[i])
+
+
 def test_a_mode_outside_the_sweep_has_no_row():
     checks = check_sweep_rate(tone([10.0, 40.0], [4.0]),
                               [(5.0, 20.0), (22.0, 40.0), (60.0, 20.0)])
@@ -294,21 +339,37 @@ def test_a_sweep_up_and_back_passes_each_mode_twice():
     assert checks[1].start > checks[0].start + checks[0].seconds
 
 
-def test_a_band_across_a_breakpoint_is_one_pass_at_the_rate_holding_the_mode():
+def test_a_band_across_a_breakpoint_is_one_pass_judged_at_the_faster_rate():
     """The rate changes at 22.1 Hz, inside a 22 Hz, Q 40 band: one pass,
-    its time the two segments' together, its rate the one at 22 Hz."""
+    its time the two segments' together, judged at 4 oct/min, the
+    faster, though the mode itself is swept at 1."""
     sweep = tone([10.0, 22.1, 40.0], [1.0, 4.0])
     check, = check_sweep_rate(sweep, [(22.0, 40.0)])
-    assert check.rate == 1.0 and check.crossed
+    assert check.rate == 4.0 and check.crossed and check.too_fast
+    assert round(100 * check.peak_share) == 81
     expected = (60 * np.log2(22.1 / 21.725) / 1.0
                 + 60 * np.log2(22.275 / 22.1) / 4.0)
     assert check.seconds == pytest.approx(expected)
 
 
-def test_the_rate_checked_is_the_one_on_the_segment_holding_the_mode():
+def test_the_rate_checked_is_the_faster_of_the_segments_in_the_band():
     sweep = tone([10.0, 21.9, 40.0], [1.0, 4.0])
     check, = check_sweep_rate(sweep, [(22.0, 40.0)])
     assert check.rate == 4.0
+    sweep = tone([10.0, 21.9, 40.0], [4.0, 1.0])
+    check, = check_sweep_rate(sweep, [(22.0, 40.0)])
+    assert check.rate == 4.0
+
+
+def test_a_log_and_a_linear_segment_are_compared_as_multiples_of_the_rule():
+    """1 Hz/s is 3.3 times a 22 Hz, Q 40 mode's linear rule
+    (22**2 / 40**2 = 0.3025 Hz/s) and 2 oct/min 1.7 times its log rule
+    (1.19 oct/min): the linear segment is the faster, though its rate is
+    the smaller number."""
+    sweep = tone([10.0, 22.1, 40.0], [2.0, 1.0], [LOG, LINEAR])
+    check, = check_sweep_rate(sweep, [(22.0, 40.0)])
+    assert check.segment_type == LINEAR and check.rate == 1.0
+    assert check.ratio == pytest.approx(1.0 / 0.3025)
 
 
 def test_a_sweep_that_reads_no_peak_says_so():
@@ -339,11 +400,11 @@ def test_each_tone_of_a_specification_is_checked_unless_one_is_named():
 def test_a_shape_sets_modes_are_checked_with_q_from_their_damping():
     from visualdynamics.core.shapes import ShapeSet
 
-    # a rigid-body mode, with or without damping, and an undamped one
-    # have no band, and are left out
-    shapes = ShapeSet([0.0, 0.0, 22.0, 30.0, 35.0],
-                      [0.0, 0.02, 0.0125, 0.0, 0.05], ['1Z+'],
-                      np.ones((5, 1)))
+    # a rigid-body mode, with or without damping, an undamped one and
+    # one at or past critical damping have no band, and are left out
+    shapes = ShapeSet([0.0, 0.0, 22.0, 30.0, 35.0, 25.0, 28.0],
+                      [0.0, 0.02, 0.0125, 0.0, 0.05, 1.0, 1.5], ['1Z+'],
+                      np.ones((7, 1)))
     checks = check_sweep_rate(tone([10.0, 40.0], [4.0]), shapes)
     assert [(check.frequency, check.q) for check in checks] == \
         [(22.0, pytest.approx(40.0)), (35.0, pytest.approx(10.0))]
@@ -391,17 +452,19 @@ def test_a_q_wider_than_any_mode_can_read_is_said_to_be_unreadable():
     assert 'too fast to read any Q' in judged.describe()
 
 
-def _tracked(rate=4.0):
+def _tracked(rate=4.0, frequencies=(10.0, 40.0), rates=None, lines=4000):
     """The chapter's record: a 1 g sweep from 10 to 40 Hz at `rate`
-    through a 22 Hz, Q 40 mode, and its response tracked with the rms
-    detector 4000 times along the sweep."""
+    (or over `frequencies` at `rates`) through a 22 Hz, Q 40 mode, and
+    its response tracked with the rms detector `lines` times along the
+    sweep."""
     from scipy.signal import lfilter
 
     from visualdynamics.core.data import TimeHistory
     from visualdynamics.core.sine_tracking import SineTracking, track_sine
     from visualdynamics.core.srs import damping_for, ramp_invariant
 
-    sweep = tone([10.0, 40.0], [rate], name=f'{rate:g} oct/min')
+    sweep = tone(list(frequencies), [rate] if rates is None else list(rates),
+                 name=f'{rate:g} oct/min')
     spec = specification(sweep)
     fs = 2048.0
     t = np.arange(0.0, sweep.duration(), 1.0 / fs)
@@ -413,7 +476,7 @@ def _tracked(rate=4.0):
                           ordinate_dim=['acceleration'] * 2,
                           ordinate_unit=['g'] * 2)
     level, = track_sine(history, spec, SineTracking(detector='rms'),
-                        channels=['101Z+'], onset=0.0, lines=4000)
+                        channels=['101Z+'], onset=0.0, lines=lines)
     return spec, level
 
 
@@ -450,6 +513,44 @@ def test_no_peak_in_the_window_gives_no_reading():
     assert read_swept_q(level, spec, 35.0) is None
 
 
+def test_readings_under_the_noise_floor_are_not_read():
+    """A level whose readings around the mode are all under their floor
+    has no peak there to read, though their values stand."""
+    spec, level = _tracked()
+    level.below_floor = np.zeros(np.shape(level.ordinate), dtype=bool)
+    level.below_floor[0, np.abs(level.abscissa - 22.0) < 4.4] = True
+    assert read_swept_q(level, spec, 22.0) is None
+    level.below_floor[:] = False
+    assert read_swept_q(level, spec, 22.0).height / G == pytest.approx(
+        32.6, abs=0.1)
+
+
+def test_a_level_of_a_tone_the_specification_lacks_is_refused():
+    spec, level = _tracked()
+    other = specification(tone([10.0, 40.0], [1.0], name='Other'))
+    with pytest.raises(KeyError, match="no tone named '4 oct/min'"):
+        read_swept_q(level, other, 22.0)
+    # given the tone itself, the caller has chosen it
+    assert read_swept_q(level, spec.tones[0], 22.0).rate == 4.0
+
+
+def test_a_sweep_up_and_back_is_read_on_the_pass_that_holds_the_peak():
+    """Up at 4 oct/min and back at 1: the tracked level, sorted by
+    frequency, holds the two passes interleaved. Read by its clock, the
+    tallest peak is the slow pass's, below the mode, at 1 oct/min down,
+    with the Q a 1 oct/min sweep reads (33, not 22)."""
+    spec, level = _tracked(frequencies=(10.0, 40.0, 10.0), rates=(4.0, -1.0),
+                           lines=12000)
+    judged = read_swept_q(level, spec, 22.0)
+    assert judged.rate == -1.0
+    assert judged.frequency == pytest.approx(21.78, abs=0.03)
+    assert judged.q_read == pytest.approx(33.0, abs=0.7)
+    assert judged.q_true == pytest.approx(40.0, rel=0.06)
+    # without its clock the two passes cannot be told apart
+    level.seconds = None
+    assert read_swept_q(level, spec, 22.0) is None
+
+
 # ---- the plot ------------------------------------------------------------------
 
 
@@ -480,6 +581,26 @@ def test_the_plot_marks_each_crossing_by_its_verdict(qt_app):
     assert any('builds' in text for text in labels)
     bands = [item for item in plot.items if getattr(item, 'is_band', False)]
     assert len(bands) == 2
+
+
+def test_a_strip_is_tinted_for_its_modes_worst_pass(qt_app):
+    """Up at a quarter octave a minute, which the 22 Hz, Q 40 mode
+    builds under, and back at 4, which is too fast: the strip is the
+    warning's tint, though the first pass builds."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.sweep_rate import build_sweep_rate
+    from visualdynamics.theme import theme
+
+    layout = pg.GraphicsLayoutWidget()
+    checks = build_sweep_rate(layout, tone([5.0, 100.0, 5.0], [0.25, -4.0]),
+                              [(22.0, 40.0)], theme='light')
+    assert [check.too_fast for check in checks] == [False, True]
+    band, = [item for item in layout.getItem(0, 0).items
+             if getattr(item, 'is_band', False)]
+    assert band.too_fast
+    warning = pg.mkColor(theme('light')['limit_warning'])
+    assert band.brush.color().rgb() == warning.rgb()
 
 
 def test_plot_sweep_rate_renders_headless(qt_app, tmp_path):
@@ -606,6 +727,38 @@ def test_the_reading_is_journaled_as_its_plot_call(window, pump):
         "visualdynamics.plot.plot_sweep_rate(project['Sweep'], "
         "[(22.0, 40.0)], tone='Search', margin=1.0, "
         "path='sweep_rate.png', show=False)")
+
+
+def test_the_qs_read_off_a_level_are_journaled_as_their_calls(window, pump):
+    """A settling line per level beside the plot call, which a script
+    replays to the same judgments, and which brings its import."""
+    import visualdynamics
+    import visualdynamics.core.sweep_rate
+
+    spec, level = _tracked()
+    window.add_object('Sweep', spec)
+    window.add_object('Level', level)
+    select_objects(window, pump, 'Sweep', 'Level')
+    window.render_current()
+    pump()
+    _sweep_rate(window, pump, '22 40, 35 10')
+    line = window.project.journal[-1]
+    assert line == (
+        "[visualdynamics.core.sweep_rate.read_swept_q(project['Level'], "
+        "project['Sweep'], frequency, record=record, margin=1.0) "
+        "for record in [0] for frequency in [22.0, 35.0]]")
+    assert window.project.journal[-2].startswith(
+        "visualdynamics.plot.plot_sweep_rate(project['Sweep'], "
+        "[(22.0, 40.0), (35.0, 10.0)]")
+    judged, skirt = eval(line, {'visualdynamics': visualdynamics,
+                                'project': window.project})
+    assert judged.q_read == pytest.approx(22.0, abs=0.2) and skirt is None
+    assert 'import visualdynamics.core.sweep_rate' in \
+        window.project.session_script()
+    # a redraw settles the line rather than adding one
+    _sweep_rate(window, pump, '22 40')
+    assert window.project.journal[-1].endswith('for frequency in [22.0]]')
+    assert sum('read_swept_q' in each for each in window.project.journal) == 1
 
 
 def test_putting_it_away_brings_the_specification_back(window, pump):

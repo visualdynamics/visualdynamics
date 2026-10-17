@@ -240,6 +240,45 @@ def test_each_level_is_named_and_dashed_its_own_way(qt_app, averaged):
     assert len(styles) == 2, 'told apart by more than the shading'
 
 
+def test_a_zero_line_leaves_the_rest_of_the_band_shaded(qt_app, averaged):
+    """A line at zero has no place on a log axis; the band either side
+    of it is still shaded, and a record that is zero throughout draws
+    nothing and warns of nothing."""
+    import copy
+    import warnings
+
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import build_plot, confidence_preview
+    from visualdynamics.theme import theme
+
+    holed = copy.copy(averaged)
+    holed.ordinate = averaged.ordinate.copy()
+    middle = holed.ordinate.shape[1] // 2
+    holed.ordinate[1, middle] = 0.0
+    holed.ordinate[2] = 0.0
+    layout = pg.GraphicsLayoutWidget()
+    build_plot(layout, holed, records=[1, 2])
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        drawn = confidence_preview(layout.ci.items, holed, theme('light'),
+                                   records=[1, 2], levels=[0.9])
+    fills = [item for _plot, item in drawn
+             if isinstance(item, pg.FillBetweenItem)]
+    assert len(fills) == 2, 'shaded on each side of the hole'
+    edges = [item for _plot, item in drawn
+             if isinstance(item, pg.PlotDataItem)]
+    assert len(edges) == 4
+    assert all(np.isfinite(edge.getData()[1]).all() for edge in edges)
+
+
+def test_levels_belong_to_the_confidence_mark(qt_app, psd):
+    with pytest.raises(ValueError, match="levels are the confidence of "
+                                         "marks='confidence'"):
+        visualdynamics.plot.plot_data(psd, marks='octave', levels=[0.8],
+                                      path='never.png', show=False)
+
+
 def test_a_band_needs_a_psd_that_knows_its_average(qt_app, run, psd):
     with pytest.raises(TypeError, match='drawn on a PSD'):
         visualdynamics.plot.plot_data(run.time_history, marks='confidence',

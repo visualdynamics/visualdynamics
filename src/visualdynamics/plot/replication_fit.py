@@ -11,7 +11,8 @@ is even while an edited record is drawn.
 
 The bottom row is the sweep across the candidate cutoffs, three plots
 on one cutoff axis: the travel each way against the room on each side,
-the peak velocity against the rating, and the price of the filter (the
+the peak velocity against the rating (the armature's against the body,
+as the travel is), and the price of the filter (the
 share of the mean square it removed and what it took off the largest
 peak). The cutoff drawn above is marked on each. A marker filled is a
 cutoff that fits and a marker hollow one that does not, and each
@@ -121,7 +122,7 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
                        anchor=(1 if late else 0, 1 if travel[at] >= 0 else 0))
     mark.setPos(float(case.time[at]), float(travel[at]))
     travel_plot.addItem(mark, ignoreBounds=True)
-    counted = ('travel, body counted' if rating.body_mass is not None
+    counted = ('travel, body counted' if rating.body_share > 0.0
                else 'travel')
     travel_plot.setLabel('left', f'{counted} [{us.label_html("length")}]')
     travel_plot.setLabel('bottom', f'time [{us.label_html("time")}]')
@@ -159,14 +160,16 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
     stroke_plot.setTitle(f'travel [{length}]: ▲ up, ▼ down',
                          color=foreground, size='9pt')
 
+    # the velocity the rating is judged against: the armature's against
+    # the body, the table's when no body is counted
     series(velocity_plot,
-           shown([c.peak_velocity for c in fit.cases], 'velocity'),
+           shown([c.relative_velocity for c in fit.cases], 'velocity'),
            SYMBOLS['velocity'], colors['response_curve'],
            [c.fits_velocity for c in fit.cases])
     limit(velocity_plot, float(shown(rating.velocity, 'velocity')))
     velocity_plot.setTitle(
-        f'peak velocity [{us.label_text("velocity")}]', color=foreground,
-        size='9pt')
+        f'peak velocity{", body counted" * (rating.body_share > 0.0)} '
+        f'[{us.label_text("velocity")}]', color=foreground, size='9pt')
 
     every = [True] * len(fit.cases)
     series(price_plot, 100.0 * np.array([c.mean_square_removed

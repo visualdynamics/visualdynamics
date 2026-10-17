@@ -10,7 +10,9 @@ Gaussian bell with the record's own mean and standard deviation, with
 record beyond each against the Gaussian's. At the bottom the kurtosis
 frame by frame, the frame band shaded behind it, the frames outside the
 band drawn filled where the rest are hollow, and the record's own
-kurtosis as a dashed line across.
+kurtosis as a dashed line across. A frame that does not vary, a
+dropout, has no kurtosis to draw; it is marked at the band's low edge
+with an upward triangle of its own.
 
 Each row is titled with what it found in words, and the top row with
 the judgement of the whole reading (`TimeStatistics.describe`), so the
@@ -18,6 +20,7 @@ plot carries its verdict. Nothing is told apart by hue alone: the
 Gaussian is dashed where the histogram is solid, the rail samples are
 crosses, the frames outside their band are filled triangles where the
 others are hollow circles, and every mark is named in its legend.
+Levels and times are drawn in the unit system's units.
 """
 
 from __future__ import annotations
@@ -56,19 +59,6 @@ def histogram(values: np.ndarray, bins: int = BINS
     return edges, density
 
 
-def _display(history: Any, record: int, unit_system: Any
-             ) -> tuple[str, Any]:
-    """(dimension, convert) for one channel: the display dimension and a
-    function from the stored SI values to the display units, or the
-    raw numbers for a channel whose units are undefined."""
-    from ..units import UNKNOWN
-
-    dimension = history.ordinate_dim[record]
-    if dimension == UNKNOWN:
-        return dimension, lambda values: values
-    return dimension, lambda values: unit_system.from_si(values, dimension)
-
-
 def build_time_statistics(layout: Any, history: Any, stats: Any,
                           record: int = 0, *, unit_system: Any = None,
                           theme: Any = None) -> None:
@@ -91,13 +81,20 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     foreground = colors['plot_foreground']
     alarm = colors['limit_abort']
-    dimension, shown = _display(history, record, us)
+    dimension = history.ordinate_dim[record]
+    # an undefined dimension transforms as (1, 0): the raw numbers
+    scale, offset = us.transform(dimension)
+
+    def shown(values):
+        return (values - offset) / scale
+
+    tscale = us.transform('time')[0]
     hint = (history.dimension_hint[record]
             if dimension == UNKNOWN and history.dimension_hint else None)
     level_label = axis_label(dimension, us, hint)
     spans, phrase = analyzed_span(history)
     ordinate = np.real(np.asarray(history.ordinate)[record])
-    clock = np.asarray(history.abscissa, dtype=float)
+    clock = np.asarray(history.abscissa, dtype=float) / tscale
     hollow = pg.mkBrush(0, 0, 0, 0)
 
     # ---- the trace, over the span read -----------------------------
@@ -110,10 +107,10 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
         curve.setDownsampling(auto=True, method='peak')
         curve.setClipToView(True)
     if stats.full_scale is not None:
-        reach = float(shown(stats.full_scale))
         rail_pen = pg.mkPen(colors['limit_abort'], width=1.5,
                             style=pg.QtCore.Qt.PenStyle.DashLine)
-        for k, at in enumerate((reach, -reach)):
+        for at in (float(shown(stats.full_scale)),
+                   float(shown(-stats.full_scale))):
             line = pg.InfiniteLine(pos=at, angle=0, pen=rail_pen,
                                    movable=False)
             trace.addItem(line, ignoreBounds=False)
@@ -134,7 +131,8 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
                        symbolPen=pg.mkPen(alarm, width=1.5),
                        symbolBrush=pg.mkBrush(alarm),
                        name=f'on the rail ({stats.rail})')
-    trace.plot([stats.peak_time], [float(shown(stats.peak))], pen=None,
+    trace.plot([stats.peak_time / tscale], [float(shown(stats.peak))],
+               pen=None,
                symbol='d', symbolSize=MARKER_SIZE + 2,
                symbolPen=pg.mkPen(foreground), symbolBrush=hollow,
                name='largest peak')
@@ -160,7 +158,7 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
     mean = float(shown(stats.mean))
     # a standard deviation is a difference, so it converts by the
     # unit's scale alone, without the offset a temperature would carry
-    sigma = float(abs(shown(stats.mean + stats.std) - shown(stats.mean)))
+    sigma = stats.std / scale
     if sigma > 0.0:
         reach = max(abs(edges[0] - mean), abs(edges[-1] - mean),
                     (max(SIGMAS) + 0.5) * sigma)
@@ -213,21 +211,30 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
     legend.addItem(pg.PlotDataItem([], [], pen=pg.mkPen(shade, width=8)),
                    f'frame band {low:g} to {high:g}')
     color = curve_color(0, colors)
-    t, k_values = stats.frame_times, stats.frame_kurtosis
+    t, k_values = stats.frame_times / tscale, stats.frame_kurtosis
+    time_unit = us.label_text('time')
     if t.size:
+        seconds = stats.frame_length / stats.sample_rate / tscale
         frames.plot(t, k_values, pen=pg.mkPen(color, width=1.5),
                     symbol='o', symbolSize=MARKER_SIZE - 2,
                     symbolPen=pg.mkPen(color), symbolBrush=hollow,
-                    name=f'each {stats.frame_length / stats.sample_rate:g} s '
-                         'frame')
-        outside = np.isfinite(k_values) & ((k_values < low)
-                                           | (k_values > high))
+                    name=f'each {seconds:.3g} {time_unit} frame')
+        outside = stats.frames_outside_mask & np.isfinite(k_values)
         if outside.any():
             frames.plot(t[outside], k_values[outside], pen=None,
                         symbol='t', symbolSize=MARKER_SIZE + 2,
                         symbolPen=pg.mkPen(alarm),
                         symbolBrush=pg.mkBrush(alarm),
                         name='frame outside its band')
+        # a frame that does not vary has no kurtosis; it is outside its
+        # band all the same, and is marked where the band begins
+        dead = ~np.isfinite(k_values)
+        if dead.any():
+            frames.plot(t[dead], np.full(int(dead.sum()), low), pen=None,
+                        symbol='t1', symbolSize=MARKER_SIZE + 2,
+                        symbolPen=pg.mkPen(alarm),
+                        symbolBrush=pg.mkBrush(alarm),
+                        name='frame with no variance')
     frames.addItem(pg.InfiniteLine(
         pos=NOMINAL, angle=0, movable=False,
         pen=pg.mkPen(foreground, width=1,
@@ -246,8 +253,12 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
     words = (f'{stats.frames_outside} of {t.size} frames outside '
              f'{low:g} to {high:g}' if t.size
              else 'the record is shorter than one frame')
-    if worst is not None:
-        words += f'; furthest from 3 at {worst[0]:.4g} s, {worst[1]:.3f}'
+    if worst is not None and not np.isfinite(worst[1]):
+        words += (f'; no variance at {worst[0] / tscale:.4g} '
+                  f'{time_unit}')
+    elif worst is not None:
+        words += (f'; furthest from 3 at {worst[0] / tscale:.4g} '
+                  f'{time_unit}, {worst[1]:.3f}')
     frames.setTitle(f'Kurtosis frame by frame: {words}',
                     color=alarm if stats.frames_outside else foreground,
                     size='9pt')

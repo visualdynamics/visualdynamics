@@ -394,6 +394,27 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     if found:
         group.create_dataset('shocks', data=np.array(
             [[s.start, s.duration] for s in found], dtype=float))
+    # the segment marks, as the shocks are: a row of (start, end) per
+    # mark, with its kind and its name beside it (2026-10-16 review)
+    marks = getattr(data, 'segments', None)
+    if marks:
+        group.create_dataset('segments', data=np.array(
+            [[m[0], m[1]] for m in marks], dtype=float))
+        _write_strings(group, 'segment_kinds', [str(m[2]) for m in marks])
+        _write_strings(group, 'segment_names',
+                       [str(m[3]) if len(m) > 3 else '' for m in marks])
+
+
+def _load_segments(group):
+    if 'segments' not in group:
+        return None
+    from ..core.replication_segments import Segment
+
+    return tuple(Segment(float(start), float(end), kind, name)
+                 for (start, end), kind, name
+                 in zip(group['segments'][()],
+                        _read_strings(group, 'segment_kinds'),
+                        _read_strings(group, 'segment_names')))
 
 
 def _load_shocks(group):
@@ -511,6 +532,9 @@ def load_data(group: h5py.Group) -> DataArray:
     found = _load_shocks(group)
     if found is not None:
         data.shocks = found
+    marks = _load_segments(group)
+    if marks is not None:
+        data.segments = marks
     return data
 
 

@@ -23,6 +23,7 @@ from visualdynamics.core.half_power import (
     HalfPowerWarning,
     read_half_power,
 )
+from visualdynamics.plot.half_power import label_text
 
 FN = 180.0
 
@@ -260,7 +261,87 @@ def test_a_reading_names_itself():
     # an accelerance peaks a hair above its natural frequency, at
     # fn / sqrt(1 - 2 zeta^2): 180.1 Hz here
     assert text == ('Q 19.9 at 180.1 Hz, half-power 175.8 to 184.8 Hz '
-                    '(9.03 Hz, 40.1 lines)')
+                    '(9.03 Hz, 40 lines)')
+
+
+def test_a_reading_names_itself_without_exponents():
+    """A peak at 10 kHz with a Q of 1500, read across 1500 lines: the
+    numbers in four figures and three, the lines whole, and none of
+    them in exponent form."""
+    fn, q = 10240.0, 1500.0
+    f = lines_across(fn, q, 1500, 0.37)
+    f = f[(f > 0.98 * fn) & (f < 1.02 * fn)]
+    reading = read_half_power(f, accelerance(f, fn, q), fn)
+    text = reading.describe()
+    assert 'e+' not in text and 'e-' not in text, text
+    assert text == ('Q 1500 at 10240 Hz, half-power 10237 to 10243 Hz '
+                    '(6.83 Hz, 1500 lines)')
+    assert label_text(reading) == 'Q 1500'
+
+
+def test_the_lines_a_reading_is_trusted_at_are_its_own():
+    """A reading taken with a lower `min_lines` calls itself resolved by
+    that count, not the module's, so it does not say it is unresolved
+    after warning nothing."""
+    f = lines_across(FN, 20.0, 3.0, 0.25)
+    curve = accelerance(f, FN, 20.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', HalfPowerWarning)
+        reading = read_half_power(f, curve, FN, min_lines=2)
+    assert 2 < reading.lines < MIN_LINES
+    assert reading.resolved and reading.notes == ()
+    assert reading.min_lines == 2
+    default = read_half_power(f, curve, FN, warn=False)
+    assert not default.resolved and len(default.notes) == 1
+
+
+def _climb_a_line_at_a_time(m, index):
+    """The climb as it was first written, a line at a time: the
+    reference the array version is held to."""
+    last = len(m) - 1
+    while True:
+        below = m[index - 1] if index > 0 else -np.inf
+        above = m[index + 1] if index < last else -np.inf
+        if below > m[index] and below >= above:
+            index -= 1
+        elif above > m[index]:
+            index += 1
+        else:
+            return index
+
+
+def _crossings_a_line_at_a_time(f, m, index, level):
+    def side(step):
+        i = index
+        while 0 <= i + step < len(m):
+            if m[i + step] < level:
+                fraction = (m[i] - level) / (m[i] - m[i + step])
+                return float(f[i] + fraction * (f[i + step] - f[i]))
+            i += step
+        return None
+
+    return side(-1), side(+1)
+
+
+def test_the_climb_and_the_crossings_are_the_rule_they_were():
+    """The climb and the crossings run over the array at once, for a
+    drag that reads on every tick; on rough curves, plateaus and peaks
+    at the ends they land where the line-at-a-time rule landed."""
+    from visualdynamics.core.half_power import _climb, crossings
+
+    rng = np.random.default_rng(7)
+    f = np.arange(60, dtype=float)
+    curves = [rng.random(60), np.round(rng.random(60), 1),
+              np.r_[np.arange(30.0), np.arange(30.0)[::-1]],
+              np.arange(60.0), np.arange(60.0)[::-1], np.ones(60)]
+    for m in curves:
+        for start in range(60):
+            top = _climb(m, start)
+            assert top == _climb_a_line_at_a_time(m, start), (m, start)
+            for share in (0.3, 0.7, 1.0):
+                level = share * m[top]
+                assert crossings(f, m, top, level) == \
+                    _crossings_a_line_at_a_time(f, m, top, level)
 
 
 @pytest.mark.parametrize('f,m,within,match', [
@@ -309,9 +390,9 @@ def _tracked(q, octaves_per_minute, fn=60.0, rate=2048.0):
 
 
 def test_a_slow_sweeps_tracked_level_reads_the_resonators_q():
-    """At 1 oct/min a 60 Hz mode with a Q of 20 has about ten times the
-    cycles it needs to build inside its half-power band (87 fn / Q^2 is
-    13 oct/min), and its level reads the Q within one percent."""
+    """At 1 oct/min a 60 Hz mode with a Q of 20 has about thirteen times
+    the cycles it needs to build inside its half-power band (87 fn / Q^2
+    is 13 oct/min), and its level reads the Q within one percent."""
     level = _tracked(20.0, 1.0)
     reading = level.half_power(60.0)
     assert reading.q == pytest.approx(20.0, rel=0.01)
@@ -360,6 +441,9 @@ def test_the_fit_seed_finds_its_crossings_where_the_readout_does():
     reading = session.half_power(FN)
     assert session.estimate_damping(FN) == pytest.approx(reading.damping,
                                                          rel=0.005)
+    # and both are the resonator's: agreeing on a wrong width would
+    # pass the line above
+    assert session.estimate_damping(FN) == pytest.approx(0.025, rel=0.01)
 
 
 def test_the_fitting_screen_draws_the_reading_and_says_it(window, pump):
@@ -389,6 +473,24 @@ def test_the_fitting_screen_draws_the_reading_and_says_it(window, pump):
     def refuse(**_kwargs):
         raise ValueError('the frequencies must be ascending')
 
+    # a drag tick reads once, and a vertical drag (the damping alone)
+    # not at all: the reading is of the residual at the cursor's line,
+    # which neither the damping search nor a held damping moves
+    reads = []
+    session_read = window.fit.half_power
+
+    def counted(**kwargs):
+        reads.append(kwargs)
+        return session_read(**kwargs)
+
+    window.fit.half_power = counted
+    window._fit_dear_cost = 0.0
+    window._fit_cursor.setValue(FN + 2.0)
+    pump()
+    assert len(reads) == 1
+    window._fit_cursor_dragged(
+        window._fit_plot.getViewBox().sceneBoundingRect().center().y())
+    assert len(reads) == 1
     window.fit.half_power = refuse
     window._move_fit_parabola()
     window._fit_status()
@@ -427,8 +529,55 @@ def test_a_time_history_has_no_half_power_width():
 
     t = np.linspace(0.0, 1.0, 100)
     history = TimeHistory(t, np.sin(t)[None], response_dof=['1Z+'])
-    with pytest.raises(ValueError, match='against frequency'):
+    with pytest.raises(TypeError, match='against frequency'):
         plot_half_power(history, 0.5, show=False, path='never.png')
+
+
+def test_a_power_quantity_is_refused_not_read_at_the_wrong_level(
+        tmp_path):
+    """A PSD, an SRS and a coherence are against frequency too, but none
+    is a response's magnitude. A PSD is a power: its half-power level is
+    half its peak, and read at 0.707 of it the Q 20 resonance reads
+    Q 31."""
+    from visualdynamics.core.data import Coherence, Psd, Srs
+    from visualdynamics.plot import plot_half_power
+
+    f = lines_across(FN, 20.0, 40, 0.37)
+    power = np.abs(accelerance(f, FN, 20.0)) ** 2
+    assert read_half_power(f, power, FN).q == pytest.approx(31.1, abs=0.1)
+    for refused in (
+            Psd(f, power[None], response_dof=['1Z+'],
+                ordinate_dim='acceleration'),
+            Srs(f, power[None], response_dof=['1Z+'],
+                ordinate_dim='acceleration'),
+            Coherence(f, np.clip(power / power.max(), 0, 1)[None],
+                      response_dof=['1Z+'], reference_dof=['2Z+'])):
+        with pytest.raises(TypeError, match=type(refused).__name__):
+            plot_half_power(refused, FN, show=False,
+                            path=tmp_path / 'never.png')
+
+
+@pytest.mark.parametrize('how', ['frf', 'spectrum', 'session', 'plot'])
+def test_every_way_in_warns_at_the_callers_line(how, tmp_path):
+    """The warning names the line that asked for the reading, through
+    each method that reads on the caller's behalf."""
+    from visualdynamics.core.data import Spectrum
+    from visualdynamics.core.modal_fit import ModalFitSession
+    from visualdynamics.plot import plot_half_power
+
+    frf = one_mass_frf(20.0, lines=1.5, offset=0.5)
+    spectrum = Spectrum(frf.abscissa, np.abs(frf.ordinate),
+                        response_dof=['1Z+'], ordinate_dim='acceleration')
+    read = {
+        'frf': lambda: frf.half_power(FN),
+        'spectrum': lambda: spectrum.half_power(FN),
+        'session': lambda: ModalFitSession(frf).half_power(FN),
+        'plot': lambda: plot_half_power(frf, FN, show=False,
+                                        path=tmp_path / 'q.png'),
+    }[how]
+    with pytest.warns(HalfPowerWarning) as caught:
+        read()
+    assert {w.filename for w in caught} == {__file__}
 
 
 def test_the_drawn_reading_sits_on_the_curve_in_display_units():

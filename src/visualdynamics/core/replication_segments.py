@@ -37,13 +37,22 @@ documents commonly write a replication's tolerance:
 The tolerances are examples of what test documents ask for, not any
 one document's requirement; every one is an argument.
 
-Each segment is weighted by a tapered cosine window before its spectra
-and its mean square are computed (10 percent of it by default, half at
-each end), so the segment's abrupt ends do not enter its spectra as
-content the record does not have. The two local readings, the
-envelope and the peaks, are read on the segment as recorded: they are
-ratios of the two traces at one place, from which a weight applied to
-both cancels, so weighting them would change nothing but the levels.
+A stationary or transient segment is weighted by a tapered cosine
+window before its ASD and its mean square are computed (10 percent of
+it by default, half at each end), so the segment's abrupt ends do not
+enter its spectrum as content the record does not have. A shock's SRS
+is computed on the segment as recorded: the SRS is a peak response,
+not an average, and a mark drawn tight on the event would put the
+event's first and largest cycles under the taper, weighting down the
+reference and the control alike there and hiding a miss in the
+ratio. The two local readings, the envelope and the peaks, are read
+on the segment as recorded too: they are ratios of the two traces at
+one place, from which a weight applied to both cancels.
+
+A segment is judged only on samples that are numbers. A trace holding
+a NaN or an infinity is refused, and a control that is zero where the
+reference asks for something reads minus infinity decibels there and
+fails, so a dead channel never reads as a pass.
 
 The comparison assumes the two traces are on like terms. The reference
 and the control should be band-limited alike to the test band
@@ -73,7 +82,8 @@ are set out.
    with the Discrete Fourier Transform." *Proceedings of the IEEE*,
    66(1), 51-83.
    [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
-   The tapered cosine window each segment is weighted by.
+   The tapered cosine window a stationary or transient segment is
+   weighted by.
 """
 
 from __future__ import annotations
@@ -229,8 +239,9 @@ class SegmentResult:
     share of the reference's mean square over the whole record, and
     `rms_error` its own rms error, both in percent and both read on the
     segment as recorded: together they say how much the segment can
-    move the whole-record figure. `passed` is every check passing, None
-    when none could be judged.
+    move the whole-record figure. `passed` is False when any check
+    fails, None when none fails and one or more could not be judged,
+    and True only when every check passes.
     """
 
     segment: Segment
@@ -264,8 +275,9 @@ class SegmentedReplication:
     `segments` are the results in the order the marks were given.
     `rms_error` is the whole record's rms error in percent, the figure a
     controller reports, kept beside the segments because it is the one
-    that hides a segment's miss. `passed` is every segment passing, None
-    with no segment judged. `channel` and `lag` say which record was
+    that hides a segment's miss. `passed` is False when any segment
+    fails, None when none fails and one or more could not be judged (or
+    none is marked), and True only when every segment passes. `channel` and `lag` say which record was
     read and how far it was shifted to align it (None and 0 for arrays
     given directly). `settings` are the tolerances it was judged under,
     as `judge_segments` took them.
@@ -285,20 +297,34 @@ class SegmentedReplication:
         """The segments that failed, in order."""
         return [result for result in self.segments if result.passed is False]
 
+    @property
+    def not_judged(self) -> list[SegmentResult]:
+        """The segments that could not be judged, in order."""
+        return [result for result in self.segments if result.passed is None]
+
     def describe(self) -> str:
         """The record in a line: the whole-record rms error, and the
-        verdict by segment."""
+        verdict by segment. The counts are of the segments judged; a
+        segment that could not be judged is named on its own."""
         head = f'whole-record rms error {self.rms_error:.2f} %'
         if not self.segments:
             return f'{head}; no segment marked'
-        failed = self.failed
+        failed, unjudged = self.failed, self.not_judged
+        judged = len(self.segments) - len(unjudged)
         if failed:
             names = ', '.join(result.label for result in failed)
-            return (f'{head}; {len(failed)} of {len(self.segments)} '
-                    f'segments fail ({names})')
-        if self.passed:
-            return f'{head}; all {len(self.segments)} segments pass'
-        return f'{head}; not judged'
+            text = (f'{head}; {len(failed)} of {judged} segments fail '
+                    f'({names})')
+        elif not judged:
+            text = f'{head}; not judged'
+        elif not unjudged:
+            return f'{head}; all {judged} segments pass'
+        else:
+            text = f'{head}; {judged} of {len(self.segments)} segments pass'
+        if unjudged and judged:
+            names = ', '.join(result.label for result in unjudged)
+            text += f', {len(unjudged)} not judged ({names})'
+        return text
 
 
 def _signed(value: float, unit: str) -> str:
@@ -335,7 +361,8 @@ def _band(name: str, band: Any) -> tuple[float, float]:
 
 def tapered_cosine(samples: int, percent: float = TAPER_PERCENT
                    ) -> np.ndarray:
-    """The weights of a tapered cosine window over `samples` samples.
+    """The weights of a tapered cosine (Tukey) window over `samples`
+    samples.
 
     `percent` of the window is under the cosine, half rising from zero
     at the start and half falling to zero at the end; the middle is
@@ -349,45 +376,42 @@ def tapered_cosine(samples: int, percent: float = TAPER_PERCENT
     ValueError
         For fewer than one sample, or a share outside 0 to 100.
     """
+    from scipy.signal import windows
+
     samples = int(samples)
     if samples < 1:
         raise ValueError('a window needs at least one sample')
     share = float(percent) / 100.0
     if not 0.0 <= share <= 1.0:
         raise ValueError(f'{percent:g} percent is not a share of a segment')
-    weights = np.ones(samples)
-    edge = int(share * samples / 2.0)       # samples under each end
-    if edge > 0:
-        rise = 0.5 - 0.5 * np.cos(np.pi * np.arange(edge) / edge)
-        weights[:edge] = rise
-        weights[samples - edge:] = rise[::-1]
-    return weights
+    # scipy's, not a second one written here (2026-10-16 review)
+    return windows.tukey(samples, share, sym=True)
 
 
 def _asd(x: np.ndarray, sample_rate: float, frame: int
          ) -> tuple[np.ndarray, np.ndarray]:
-    """(frequencies, ASD) of `x`: Hann frames of `frame` samples at half
-    overlap, averaged.
+    """(frequencies, ASD) of `x`: `TimeHistory.compute_psds` over Hann
+    frames of `frame` samples at half overlap, as many as fit.
 
-    The same estimator as `TimeHistory.compute_psds` (2|X|²/(fs·S), DC
-    and Nyquist not doubled), on a bare array, because the segments are
-    cut from two records of one channel that the object form would pool
-    as one channel. `tests/test_replication_segments.py` holds the two
-    to agreement.
+    Each trace is made a one-channel history of its own, because the
+    reference and the control are records of one channel, which one
+    history holding both would pool into one average.
     """
-    from .averaging import window_shape
+    from ..units import UNKNOWN
+    from .averaging import Averaging
+    from .data import TimeHistory
 
-    window = window_shape('hann', frame)
-    hop = max(frame // 2, 1)
-    starts = np.arange(0, x.size - frame + 1, hop)
-    frames = np.stack([x[s:s + frame] for s in starts]) * window
-    power = np.abs(np.fft.rfft(frames, axis=1)) ** 2
-    scale = 2.0 / (sample_rate * float(np.sum(window ** 2)))
-    asd = np.mean(power, axis=0) * scale
-    asd[0] /= 2.0
-    if frame % 2 == 0:
-        asd[-1] /= 2.0
-    return np.fft.rfftfreq(frame, 1.0 / sample_rate), asd
+    # 2026-10-16 review: this was a second Welch estimator beside
+    # compute_psds, held to it only by a test; now it is compute_psds
+    rate = float(sample_rate)
+    shape = Averaging(frame, 0.5, 'hann')
+    averaging = replace(shape, frames=max(shape.most_frames(x.size, rate),
+                                          1))
+    history = TimeHistory(np.arange(x.size) / rate, x[None],
+                          response_dof=['1X+'], ordinate_dim=[UNKNOWN])
+    psd = history.compute_psds(averaging)
+    return (np.asarray(psd.abscissa, dtype=float),
+            np.asarray(psd.ordinate[0].real, dtype=float))
 
 
 def _judged_lines(frequencies: np.ndarray, reference: np.ndarray,
@@ -436,10 +460,24 @@ def _spectral(reading: str, reference: np.ndarray, control: np.ndarray,
     if normalized:
         df = frequencies[1] - frequencies[0]
         want = want / (np.sum(want) * df)
-        got = got / (np.sum(got) * df)
-    keep = _judged_lines(frequencies, want, band) & (got > 0.0)
-    db = 10.0 * np.log10(got[keep] / want[keep])
-    return _check(reading, 'dB', tolerance, frequencies[keep], db, percent)
+        # a control with no power has no shape to compare; it stays
+        # zero, and reads minus infinity at every line
+        total = np.sum(got) * df
+        got = got / total if total > 0.0 else got
+    # judged where the reference asks for something, whatever the
+    # control holds there: a dead control is minus infinity and fails
+    # (2026-10-16 review: filtering on the control too let an all-zero
+    # control pass on no lines)
+    keep = _judged_lines(frequencies, want, band)
+    return _check(reading, 'dB', tolerance, frequencies[keep],
+                  _db(got[keep], want[keep], 10.0), percent)
+
+
+def _db(got: np.ndarray, want: np.ndarray, factor: float) -> np.ndarray:
+    """`factor`·log10(got/want), minus infinity where `got` is zero."""
+    with np.errstate(divide='ignore'):
+        return factor * np.log10(np.asarray(got, dtype=float)
+                                 / np.asarray(want, dtype=float))
 
 
 def _envelope(reference: np.ndarray, control: np.ndarray, window: int,
@@ -454,8 +492,8 @@ def _envelope(reference: np.ndarray, control: np.ndarray, window: int,
     for s in starts:
         want = float(np.mean(reference[s:s + window] ** 2))
         got = float(np.mean(control[s:s + window] ** 2))
-        if want > 0.0 and got > 0.0:
-            db.append(10.0 * np.log10(got / want))
+        if want > 0.0:
+            db.append(float(_db(got, want, 10.0)))
             kept.append(s)
     return _check('envelope', 'dB', tolerance,
                   (first + np.asarray(kept, dtype=float)) / sample_rate, db)
@@ -482,14 +520,16 @@ def _srs_checks(reference: np.ndarray, control: np.ndarray,
     out = []
     for kind, want, got in (('positive', want_up, got_up),
                             ('negative', -want_down, -got_down)):
-        keep = np.isfinite(want) & (want > 0.0) & (got > 0.0)
+        # where the reference asks for something, whatever the control
+        # holds: a control with no response there fails
+        keep = np.isfinite(want) & (want > 0.0)
         if keep.any():
             # only where the reference asks for something, as the
             # whole-record comparison judges (`replication._srs_db`)
             keep &= want >= want[keep].max() * 10.0 ** (-SRS_FLOOR_DB / 20.0)
-        db = 20.0 * np.log10(got[keep] / want[keep])
+        got = np.clip(got, 0.0, None)
         out.append(_check(f'SRS {kind}', 'dB', tolerance,
-                          frequencies[keep], db))
+                          frequencies[keep], _db(got[keep], want[keep], 20.0)))
     return out
 
 
@@ -607,8 +647,9 @@ def judge_segments(reference: ArrayLike, control: ArrayLike,
         The marks, each a `Segment` or (start, end, kind[, name]),
         start and end in seconds from the first sample.
     taper_percent : float, default `TAPER_PERCENT`
-        The share of each segment under its tapered cosine window's
-        ends, before its spectra and mean square are computed.
+        The share of a stationary or transient segment under its
+        tapered cosine window's ends, before its ASD and mean square
+        are computed. A shock's SRS is read untapered.
     band : (float, float), optional
         The test band in Hz: the lines an ASD is judged at and the
         natural frequencies an SRS is computed at. By default an ASD is
@@ -650,9 +691,9 @@ def judge_segments(reference: ArrayLike, control: ArrayLike,
     Raises
     ------
     ValueError
-        For traces of different lengths, a segment outside the record
-        or too short to judge, an unknown kind, or a tolerance that is
-        not a band.
+        For traces of different lengths or holding samples that are not
+        numbers, a segment outside the record or too short to judge, an
+        unknown kind, or a tolerance that is not a band.
     """
     from .srs import DEFAULT_Q, PER_OCTAVE
 
@@ -661,6 +702,14 @@ def judge_segments(reference: ArrayLike, control: ArrayLike,
     if r.size != c.size:
         raise ValueError(f'the reference has {r.size} samples and the '
                          f'control {c.size}; align them first')
+    # a NaN would be dropped from a ratio as if it were not there, and
+    # a run with a dead half would pass on the half that is
+    # (2026-10-16 review)
+    for name, x in (('reference', r), ('control', c)):
+        bad = int(np.sum(~np.isfinite(x)))
+        if bad:
+            raise ValueError(f'the {name} holds {bad} samples that are '
+                             'not numbers')
     rate = float(sample_rate)
     marks = as_segments(segments)
     settings = {
@@ -733,21 +782,31 @@ def judge_segments(reference: ArrayLike, control: ArrayLike,
                                 settings['asd_db'], settings['asd_percent'],
                                 True)]
         else:
-            checks = [*_srs_checks(rw, cw, rate, settings['band'],
+            # untapered: a taper over a mark drawn tight on the event
+            # weights down its largest cycles in both traces and hides
+            # a miss in their ratio (2026-10-16 review)
+            checks = [*_srs_checks(rs, cs, rate, settings['band'],
                                    settings['srs_db'], settings['q'],
                                    settings['per_octave']),
                       _peak_check(rs, cs, first, rate, settings['peaks'],
                                   settings['peak_percent'])]
-        verdicts = [check.passed for check in checks
-                    if check.passed is not None]
         results.append(SegmentResult(
             segment, label, first, n, share, error, tuple(checks),
-            all(verdicts) if verdicts else None))
-    judged = [result.passed for result in results
-              if result.passed is not None]
+            _verdict([check.passed for check in checks])))
     return SegmentedReplication(
         tuple(results), whole, rate, int(r.size),
-        all(judged) if judged else None, settings)
+        _verdict([result.passed for result in results]), settings)
+
+
+def _verdict(verdicts: Sequence[bool | None]) -> bool | None:
+    """Failing when any fails; otherwise None when any could not be
+    judged (or there is none), and passing only when every one passes.
+    A reading that could not be made is not a pass."""
+    if any(v is False for v in verdicts):
+        return False
+    if not verdicts or any(v is None for v in verdicts):
+        return None
+    return True
 
 
 def aligned_traces(measured: TimeHistory, specification: DataArray,

@@ -328,6 +328,53 @@ def test_cross_terms_have_no_chi_square_band():
         cpsd.confidence_band(dof=12.0)
 
 
+def test_a_cross_term_at_a_drive_point_has_no_chi_square_band():
+    """Force against acceleration at one DOF names 1X+ twice and is
+    still a cross term: refused, not banded on its real part."""
+    lines = np.linspace(10.0, 100.0, 4)
+    cross = Psd(lines, np.full((1, 4), 2.0 + 1.0j), response_dof=['1X+'],
+                reference_dof=['1X+'],
+                ordinate_dim='acceleration*force/frequency')
+    with pytest.raises(ValueError, match=r'cross terms \(1X\+/1X\+\)'):
+        cross.confidence_band(dof=12.0)
+    # the same, with no reference written down
+    cross.reference_dof = None
+    with pytest.raises(ValueError, match='cross terms'):
+        cross.confidence_band(dof=12.0)
+    # an autospectrum whose reference is written as its own DOF is one
+    auto = Psd(lines, np.full((1, 4), 2.0), response_dof=['1X+'],
+               reference_dof=['1X+'],
+               ordinate_dim='acceleration**2/frequency')
+    lower, _upper = auto.confidence_band(0.9, dof=12.0)
+    assert np.allclose(lower.ordinate, 2.0 * chi_square_factors(12.0)[0])
+
+
+def test_each_edge_says_its_level_and_side():
+    history, _averaging = _white(frames=10, overlap=0.5, channels=1)
+    lower, upper = history.compute_psds().confidence_band(0.95)
+    assert lower.comment == ['95 % lower bound']
+    assert upper.comment == ['95 % upper bound']
+
+
+def test_merged_spectra_keep_their_counts():
+    """Stacking leaves each record's average whole, so its count goes
+    with it; a source without one leaves the merge without."""
+    from visualdynamics.core.merge import merge
+
+    first, _averaging = _white(frames=10, overlap=0.5, channels=2)
+    second, _averaging = _white(frames=4, overlap=0.0, channels=1)
+    second.response_dof = ['9Z+']
+    a, b = first.compute_psds(), second.compute_psds()
+    merged = merge([a, b])
+    assert np.allclose(merged.statistical_dof,
+                       [*a.statistical_dof, 8.0])
+    lower, _upper = merged.confidence_band(0.9)
+    assert np.allclose(lower.ordinate[2],
+                       b.ordinate[0] * chi_square_factors(8.0)[0])
+    b.statistical_dof = None
+    assert merge([a, b]).statistical_dof is None
+
+
 def test_deleting_records_keeps_each_count_with_its_channel():
     history, _averaging = _white(frames=10, overlap=0.5, channels=3)
     psd = history.compute_psds()

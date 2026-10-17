@@ -117,7 +117,7 @@ def test_the_lines_of_any_placement_hold_the_whole_tone():
 
 
 def test_the_spike_height_goes_as_one_over_the_spacing():
-    """The chapter's arithmetic: 1.944 g peak is 1.89 g², which stands
+    """The guide's arithmetic: 1.944 g peak is 1.89 g², which stands
     at 1.26 g²/Hz at 1 Hz lines under Hann and a quarter of that at
     4 Hz."""
     assert spike_height(1.944, 1.0) == pytest.approx(1.2598, abs=1e-4)
@@ -131,7 +131,7 @@ def test_the_spike_height_goes_as_one_over_the_spacing():
         spike_height(1.0, 0.0)
 
 
-# ---- the chapter's composite ------------------------------------------
+# ---- the guide's composite ------------------------------------------
 
 def test_the_same_tone_reads_the_same_at_either_spacing(composite):
     """The blade-passage tone at 1 Hz and at 4 Hz lines: its spike reads
@@ -192,7 +192,7 @@ def test_a_tone_between_lines_is_warned_and_its_amplitude_is_not(
 
 def test_a_tone_at_the_floor_s_edge_is_called_uncertain(composite):
     """The 0.12 g tone at 4.86 Hz sits at the floor's lower edge, with no
-    floor under it on one side: the chapter's 'not a reading'."""
+    floor under it on one side: the guide's 'not a reading'."""
     asd, averaging = composite[2048]
     reading = asd.read_tone(4.86, window=averaging, warn=False)
     assert reading.uncertain
@@ -216,7 +216,7 @@ def test_a_frequency_with_no_tone_reads_none(composite):
     assert any('stands clear' in note for note in reading.notes)
 
 
-def test_a_flat_top_s_lobe_swallowing_a_neighbour_is_said(composite):
+def test_a_flat_top_s_lobe_swallowing_a_neighbor_is_said(composite):
     """Under a flat top at 4 Hz lines the main lobe is five lines either
     side, and the tones 19.44 Hz apart fall inside each other's."""
     history = _history()
@@ -368,3 +368,115 @@ def test_the_overlay_stands_at_the_height_in_display_units(composite,
                                  'between lines']
     overlay.clear()
     assert not overlay.top.isVisible()
+
+
+# ---- the notes' units, what is refused, and the window's parameter -----
+
+def test_the_notes_name_their_densities_in_the_units_shown(composite):
+    """The no-tone note gives the floor: in SI from a script, as the
+    spectrum is stored, and in g²/Hz when the pane shows g, the same
+    number the floor row shows."""
+    asd, averaging = composite[2048]
+    reading = asd.read_tone(300.0, window=averaging, warn=False)
+    note = next(note for note in reading.notes if 'stands clear' in note)
+    assert f'({reading.floor:.3g} (m/s²)²/Hz)' in note
+    shown = next(note for note in reading.notes_in('g', 1.0 / G)
+                 if 'stands clear' in note)
+    assert f'({reading.floor / G ** 2:.3g} g²/Hz)' in shown
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter('always', ToneWarning)
+        asd.read_tone(300.0, window=averaging)
+    assert any(f'({reading.floor:.3g} (m/s²)²/Hz)' in str(w.message)
+               for w in warned), 'the warning says what the note says'
+
+
+def test_the_floor_s_two_sides_are_written_in_the_units_shown():
+    """A tone at a step in the floor: both sides named in g²/Hz."""
+    f = np.arange(0.0, 200.0, 1.0)
+    density = np.where(f < 60.0, 0.001, 0.004) * G ** 2
+    density = density + (2.0 * G) ** 2 / 2.0 * leakage('hann').share(
+        np.arange(len(f)) - 60.0)
+    reading = read_tone(f, density, 60.0, unit='m/s²', warn=False)
+    note = next(note for note in reading.notes_in('g', 1.0 / G)
+                if 'differs either side' in note)
+    assert '(0.001 g²/Hz below, 0.004 g²/Hz above)' in note
+    assert '(m/s²)²/Hz below' in next(
+        note for note in reading.notes if 'differs either side' in note)
+
+
+def test_a_compound_unit_is_squared_whole():
+    from visualdynamics.core.tone_readout import density_label
+
+    assert density_label('g') == 'g²/Hz'
+    assert density_label('m/s²') == '(m/s²)²/Hz'
+    assert density_label('') == '/Hz'
+    assert density_label('µm') == 'µm²/Hz'
+
+
+def test_a_cross_spectrum_is_refused():
+    """A CPSD's off-diagonal record is not a density of one signal,
+    though its values are real here; its diagonal is read."""
+    f = np.arange(0.0, 64.0)
+    cpsd = Psd(f, np.ones((2, 64)), response_dof=['1Z+', '1Z+'],
+               reference_dof=['1Z+', '2Z+'],
+               ordinate_dim=['acceleration**2/frequency',
+                             'acceleration*acceleration/frequency'])
+    assert cpsd.can_read_tone(0) and not cpsd.can_read_tone(1)
+    with pytest.raises(ValueError, match='cross spectrum'):
+        cpsd.read_tone(20.0, 1, warn=False)
+    cpsd.read_tone(20.0, 0, warn=False)
+
+
+def test_lines_without_a_number_are_said_or_refused():
+    f = np.arange(0.0, 200.0, 1.0)
+    density = 0.002 + 2.0 ** 2 / 2.0 * leakage('hann').share(
+        np.arange(len(f)) - 60.25)
+    holed = density.copy()
+    holed[64] = np.nan
+    reading = read_tone(f, holed, 60.0, warn=False)
+    assert reading.uncertain
+    assert any('1 of the lines read' in note for note in reading.notes)
+    far = density.copy()
+    far[180] = np.nan
+    clear = read_tone(f, far, 60.0, warn=False)
+    assert not clear.uncertain and not clear.notes
+    with pytest.raises(ValueError, match='holds a number'):
+        read_tone(f, np.full(len(f), np.nan), 60.0, warn=False)
+
+
+def test_a_kaiser_s_beta_reaches_the_reading(composite):
+    asd, _averaging = composite[2048]
+    six = asd.read_tone(19.44, window='kaiser', parameter=6.0, warn=False)
+    fourteen = asd.read_tone(19.44, window='kaiser', warn=False)
+    assert six.noise_bandwidth == pytest.approx(
+        noise_bandwidth('kaiser', parameter=6.0))
+    assert six.noise_bandwidth < fourteen.noise_bandwidth - 0.2
+
+
+def test_the_plot_s_title_comes_from_the_spectrum_with_no_tones(composite,
+                                                                qt_app):
+    from visualdynamics.plot import plot_tone_readout
+
+    asd, averaging = composite[512]
+    pane = plot_tone_readout(asd, [], window=averaging, show=False)
+    try:
+        assert pane.windowTitle() == '1Z+: tones at 4 Hz lines, hann window'
+    finally:
+        pane.close()
+        pane.deleteLater()
+        qt_app.processEvents()
+
+
+def test_the_display_units_of_a_record(composite):
+    from visualdynamics.plot.tone_readout import display_units
+    from visualdynamics.units import DEFAULT_SYSTEM, SI
+
+    asd, _averaging = composite[2048]
+    scale, dense, unit = display_units(asd, 0, DEFAULT_SYSTEM)
+    assert unit == 'g' and scale == pytest.approx(1.0 / G)
+    assert dense == pytest.approx(1.0 / G ** 2)
+    assert display_units(asd, 0, SI) == (1.0, 1.0, 'm/s²')
+    cross = Psd(np.arange(0.0, 64.0), np.ones((1, 64)),
+                response_dof=['1Z+'], reference_dof=['2X+'],
+                ordinate_dim='acceleration*force/frequency')
+    assert display_units(cross, 0, DEFAULT_SYSTEM) == (1.0, 1.0, '')

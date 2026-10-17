@@ -18,10 +18,15 @@ the numbers that reading is made of:
   0 and a (Pearson) kurtosis of 3 (`core.kurtosis`).
 - The crest factor, the largest excursion over the rms, with the
   largest peak and the time it happened.
-- How many samples sit at the record's own peak, and, when the
-  channel's range is given, how many sit on the rail: within a stated
-  margin of the range. A Gaussian record has one sample at its peak; a
-  clipped one has a flat top on every excursion that reached the edge.
+- How many separate excursions reach the record's own peak, and, when
+  the channel's range is given, how many samples sit on the rail:
+  within a stated margin of the range. A Gaussian record reaches its
+  peak once; a clipped one has a flat top on every excursion that
+  reached the edge. Excursions are counted, not samples, because a
+  record sampled well above its band puts several samples on the top
+  of every peak.
+- How many samples are not finite. They are left out of every other
+  number, and counted so that leaving them out is never silent.
 - The share of samples beyond 3, 4 and 5 standard deviations, beside
   the share a Gaussian puts there (0.27 %, 0.0063 % and 0.000057 %).
 - The rate the record crosses its mean going upward, counted, and the
@@ -32,7 +37,9 @@ the numbers that reading is made of:
   with the length of a run, slowly: at 1,000 crossings a second about
   4.7 for a minute and 5.5 for an hour.
 - The kurtosis frame by frame. A short fault barely moves the kurtosis
-  of a long record, and the frame it is in stands out.
+  of a long record, and the frame it is in stands out. A frame that
+  does not vary at all, a dropout, has no kurtosis and is outside its
+  band.
 
 `record_statistics` reads one channel of a `TimeHistory` (also
 `TimeHistory.time_statistics`) over the same span `core.kurtosis` reads
@@ -56,7 +63,13 @@ here can make it for the reader:
   estimator's standard error is about sqrt(24/N), 0.02 at 60,000
   samples), so 2.9 to 3.1 holds a clean record of ordinary length.
 - the kurtosis of each frame, `FRAME_BAND`, 2 to 4, `core.kurtosis`'s
-  own band: a frame of 1,024 samples scatters by about 0.15.
+  own band. A frame's scatter is set by how many independent values it
+  holds, which is its length times the record's statistical bandwidth
+  (`statistical_bandwidth`), so the frame is sized from the bandwidth:
+  at least `FRAME_SECONDS`, and long enough to hold `FRAME_PRODUCT`
+  bandwidth-seconds, where its kurtosis scatters by about 0.15. A
+  narrow-band record needs long frames, and a record shorter than one
+  frame has none to judge.
 - the skewness, `SKEWNESS_BAND`, and the mean as a share of the
   standard deviation, `OFFSET_SHARE`.
 - the crest factor, `CREST_BAND`, 3 to 6. Below 3 the peaks were cut
@@ -64,11 +77,18 @@ here can make it for the reader:
   spikes do.
 - the samples on the rail, `RAIL_SAMPLES`: none. A sample that reached
   the edge of the range is a sample whose true value is not known.
-- the samples at the record's own peak, `PEAK_SAMPLES`: two, since two
-  samples can straddle one peak.
+- the excursions at the record's own peak, `PEAK_RUNS`: two, since a
+  second peak can come within the margin of the first.
+- the samples that are not finite: none.
 - the share beyond each sigma, judged against the Gaussian's share when
-  a Gaussian would put at least `MIN_EXPECTED` samples there, and
-  flagged when the two differ by more than `TAIL_RATIO` either way.
+  a Gaussian would put at least `MIN_EXPECTED` independent values
+  there, and flagged when the two differ by more than `TAIL_RATIO`
+  either way. Independent values, not samples, because neighboring
+  samples of a record are not independent: one excursion beyond the
+  level puts several samples there, and a narrow-band record's
+  excursions come in clumps, a few cycles of one swell of its
+  envelope. A record holds about twice its statistical bandwidth times
+  its length in independent values, however fast it was sampled.
 
 References
 ----------
@@ -78,8 +98,9 @@ largest peak are standard results; these are where they are set out.
 1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
    Measurement Procedures*, 4th ed. Wiley. The moments of a record, the
    Gaussian probability density, Rice's zero-crossing rate from the
-   spectrum's moments, and the expected largest peak of a stationary
-   Gaussian process over a duration.
+   spectrum's moments, the expected largest peak of a stationary
+   Gaussian process over a duration, and the statistical bandwidth
+   that sets how many independent values a stretch of record holds.
 2. Newland, D. E. (1993). *An Introduction to Random Vibrations,
    Spectral and Wavelet Analysis*, 3rd ed. Longman. The crossing rate
    and the distribution of the largest peak in a run, and how slowly it
@@ -144,9 +165,12 @@ RAIL_MARGIN = 0.001
 #: the most samples that may sit on the rail before it is flagged
 RAIL_SAMPLES = 0
 
-#: the most samples that may sit at the record's own peak: one peak can
-#: fall midway between two samples and put both at it
-PEAK_SAMPLES = 2
+#: the most separate excursions that may reach the record's own peak:
+#: a second peak can come within the margin of the first
+PEAK_RUNS = 2
+# Excursions, not samples (2026-10-16, on review): counted as samples, a
+# clean 20 to 200 Hz record at 20,480 a second put three samples on the
+# top of its one largest peak and was flagged in three seeds of five.
 
 #: the multiples of the standard deviation the tails are counted beyond
 SIGMAS = (3, 4, 5)
@@ -155,18 +179,47 @@ SIGMAS = (3, 4, 5)
 #: ratio either way, before it is flagged
 TAIL_RATIO = 2.0
 
-#: the fewest samples a Gaussian would put beyond a sigma for that tail
-#: to be judged at all: fewer, and the count is mostly chance
+#: the fewest independent values a Gaussian would put beyond a sigma
+#: for that tail to be judged at all: fewer, and the count is mostly
+#: chance
 MIN_EXPECTED = 10.0
+# Independent values, not samples (2026-10-16, on review). Judged by
+# samples, a clean 100 Hz, 2 % damped response flagged its three-sigma
+# tail in three seeds of ten and a clean 20 to 200 Hz record at 20,480
+# a second its four-sigma tail in three of ten. Judged by the expected
+# crossings into the tail, 2 nu0 T exp(-k^2/2), as the review proposed,
+# the 100 Hz response (27 crossings beyond three sigma in 12 s) still
+# flagged it in 21 seeds of 100: its log ratio scattered by 0.62 where
+# 27 independent crossings would scatter by 0.2, because the crossings
+# of a narrow-band record clump. Twice the statistical bandwidth times
+# the length times the Gaussian's share (0.8 for that record, unjudged)
+# is smaller than both counts for every record tried and was never
+# looser than the scatter measured.
 
-#: seconds to a frame for the kurtosis against time. A time, not a
-#: count of samples, because a frame's scatter is set by how many
-#: independent values it holds, which goes with its length in time and
-#: the record's band, not with its sample count: a clean record of the
-#: 20 to 2,000 Hz flat profile read in frames of 1,024 samples at
+#: the shortest frame for the kurtosis against time, in seconds. A
+#: time, not a count of samples, because a frame's scatter is set by how
+#: many independent values it holds, which goes with its length in time
+#: and the record's band, not with its sample count: a clean record of
+#: the 20 to 2,000 Hz flat profile read in frames of 1,024 samples at
 #: 20,480 a second (0.05 s) put one frame in 1,200 above 4.0, and in
 #: frames of 0.2 s none reached 3.5 (measured 2026-10-16, three seeds).
 FRAME_SECONDS = 0.2
+
+#: the bandwidth-seconds a frame holds at least, by default: its length
+#: times the record's statistical bandwidth. A 0.2 s frame of the flat
+#: 20 to 2,000 Hz profile holds 396, so that record keeps 0.2 s frames,
+#: and a frame's kurtosis scatters by about 0.15 whatever the band.
+FRAME_PRODUCT = 350.0
+# Sized from the bandwidth (2026-10-16, on review): at a fixed 0.2 s, a
+# clean 100 Hz, 2 % damped response (a bandwidth of 12.6 Hz, two or
+# three independent values to a frame) put frames outside 2 to 4 in
+# every seed of ten, and a clean 20 to 200 Hz record in eight of ten.
+# Sized this way, 100 seeds each of the flat profile (0.2 s frames), a
+# 20 to 200 Hz band (1.9 s) and the 100 Hz mode over two minutes (28 s)
+# scattered by 0.15, 0.14 and 0.12, and no frame of any reached 3.9.
+# Keeping the frames out of the default verdict was the other way, and
+# it would have left a dropout found by nothing: a whole second at zero
+# moves the record's kurtosis only from 3 to 3.27.
 
 
 def gaussian_share(sigmas: float) -> float:
@@ -197,6 +250,30 @@ def rice_rate(frequency: ArrayLike, density: ArrayLike) -> float:
     return math.sqrt(m2 / m0)
 
 
+def statistical_bandwidth(frequency: ArrayLike, density: ArrayLike
+                          ) -> float:
+    """The statistical bandwidth of a process with this one-sided
+    spectrum, in Hz: the square of its area over the area of its
+    square, (integral G)^2 / integral G^2.
+
+    It is the width of the flat band that holds as many independent
+    values a second, and so it sets how much an estimate made over a
+    stretch of the record scatters. A flat band is its own width; a
+    single mode of natural frequency fn and damping ratio zeta is
+    2 pi zeta fn, 12.6 Hz at 100 Hz and 2 %. NaN when the spectrum has
+    no area.
+    """
+    f = np.asarray(frequency, dtype=float)
+    g = np.abs(np.asarray(density, dtype=float))
+    if f.size < 2:
+        return float('nan')
+    area = float(np.trapezoid(g, f))
+    square = float(np.trapezoid(g ** 2, f))
+    if not square > 0.0:
+        return float('nan')
+    return area ** 2 / square
+
+
 def expected_largest_peak(rate: float, duration: float) -> float:
     """The expected largest peak of a Gaussian process, in standard
     deviations, over `duration` seconds at `rate` upward crossings a
@@ -218,10 +295,11 @@ class Tail:
     """The samples beyond one multiple of the standard deviation.
 
     `share` is the record's, `expected` the Gaussian's, both as
-    fractions of the samples read. `judged` says a Gaussian would put
-    enough samples there for the comparison to mean something
-    (`MIN_EXPECTED`), and `flagged` that it was judged and the two
-    differ by more than `ratio` either way.
+    fractions of the samples read. `independent` is how many
+    independent values a Gaussian of the record's bandwidth and length
+    would put there; `judged` says that is enough for the comparison
+    to mean something (`MIN_EXPECTED`), and `flagged` that it was judged
+    and the two shares differ by more than `ratio` either way.
     """
 
     sigmas: float
@@ -230,6 +308,7 @@ class Tail:
     expected: float
     judged: bool
     ratio: float = TAIL_RATIO
+    independent: float = float('nan')
 
     @property
     def flagged(self) -> bool:
@@ -266,7 +345,8 @@ class TimeStatistics:
     peak_time: float
     #: the largest excursion from the mean, in standard deviations
     peak_sigmas: float
-    #: the samples within `margin` of the record's own peak
+    #: the separate excursions within `margin` of the record's own
+    #: peak: each run of neighboring samples there counts once
     at_peak: int
     #: the samples within `margin` of `full_scale`, or None without one
     rail: int | None
@@ -279,6 +359,8 @@ class TimeStatistics:
     spectral_crossings: float
     #: the duration the expected largest peak is for, in seconds
     duration: float
+    #: the record's statistical bandwidth from its own spectrum, in Hz
+    bandwidth: float
     #: samples to a frame, each frame's middle on the record's clock,
     #: and its kurtosis
     frame_length: int
@@ -290,7 +372,10 @@ class TimeStatistics:
     offset_share: float = OFFSET_SHARE
     crest_band: tuple[float, float] = CREST_BAND
     rail_samples: int = RAIL_SAMPLES
-    peak_samples: int = PEAK_SAMPLES
+    peak_runs: int = PEAK_RUNS
+    #: the samples in the span read that are not finite, left out of
+    #: every other number
+    nonfinite: int = 0
 
     # ---- what is read from the numbers ---------------------------------
 
@@ -303,11 +388,6 @@ class TimeStatistics:
     def crest(self) -> float:
         """The crest factor: the largest excursion over the rms."""
         return abs(self.peak) / self.rms if self.rms > 0.0 else float('nan')
-
-    @property
-    def at_peak_share(self) -> float:
-        """The samples at the record's own peak, as a share."""
-        return self.at_peak / self.samples if self.samples else 0.0
 
     @property
     def rail_share(self) -> float | None:
@@ -340,29 +420,42 @@ class TimeStatistics:
     @property
     def worst_frame(self) -> tuple[float, float] | None:
         """(time, kurtosis) of the frame furthest from 3; None when the
-        record is shorter than a frame."""
+        record is shorter than a frame. A frame with no kurtosis (one
+        that does not vary, a dropout) is furthest of all, and is given
+        with a kurtosis of NaN."""
         values = self.frame_kurtosis
-        finite = np.isfinite(values)
-        if not finite.any():
+        if not values.size:
             return None
-        k = int(np.nanargmax(np.where(finite, np.abs(values - NOMINAL),
-                                      -np.inf)))
+        dead = np.flatnonzero(~np.isfinite(values))
+        if dead.size:
+            k = int(dead[0])
+        else:
+            k = int(np.argmax(np.abs(values - NOMINAL)))
         return float(self.frame_times[k]), float(values[k])
 
     @property
-    def frames_outside(self) -> int:
-        """How many frames read outside `frame_band`."""
+    def frames_outside_mask(self) -> np.ndarray:
+        """Which frames are outside `frame_band`, a frame with no
+        kurtosis among them."""
         low, high = self.frame_band
-        values = self.frame_kurtosis[np.isfinite(self.frame_kurtosis)]
-        return int(np.count_nonzero((values < low) | (values > high)))
+        values = self.frame_kurtosis
+        with np.errstate(invalid='ignore'):
+            return ~((values >= low) & (values <= high))
+
+    @property
+    def frames_outside(self) -> int:
+        """How many frames read outside `frame_band`, a frame with no
+        kurtosis counted as outside it."""
+        return int(np.count_nonzero(self.frames_outside_mask))
 
     # ---- the judgement --------------------------------------------------
 
     def flags(self) -> dict[str, bool]:
         """Each judged statistic, by key, and whether it fell outside
         its band. The keys are `STATISTICS` keys; the rail is judged
-        only when a range was given, and a tail only where a Gaussian
-        puts enough samples for the count to mean something. A moment
+        only when a range was given, the frames only when the record
+        holds one, and a tail only where a Gaussian crosses into it
+        often enough for the count to mean something. A moment
         that has no value (a dead channel's kurtosis, a crest factor
         with no rms) is outside its band: a record with no variance is
         not a Gaussian one."""
@@ -371,13 +464,15 @@ class TimeStatistics:
                         or not band[0] <= value <= band[1])
 
         found = {
+            'nonfinite': self.nonfinite > 0,
             'mean': bool(abs(self.mean) > self.offset_share * self.std),
             'skewness': outside(self.skewness, self.skewness_band),
             'kurtosis': outside(self.kurtosis, self.kurtosis_band),
             'crest': outside(self.crest, self.crest_band),
-            'at_peak': self.at_peak > self.peak_samples,
-            'frames': self.frames_outside > 0,
+            'at_peak': self.at_peak > self.peak_runs,
         }
+        if self.frame_kurtosis.size:
+            found['frames'] = self.frames_outside > 0
         if self.rail is not None:
             found['rail'] = self.rail > self.rail_samples
         for tail in self.tails:
@@ -407,11 +502,12 @@ class TimeStatistics:
 #: every statistic that is judged, by key, and the name a table gives
 #: it, in the order a table lists them
 STATISTICS: dict[str, str] = {
+    'nonfinite': 'Samples not finite',
     'mean': 'Mean',
     'skewness': 'Skewness',
     'kurtosis': 'Kurtosis',
     'crest': 'Crest factor',
-    'at_peak': 'Samples at the peak',
+    'at_peak': 'Excursions at the peak',
     'rail': 'Samples on the rail',
     'beyond_3': 'Beyond 3σ',
     'beyond_4': 'Beyond 4σ',
@@ -451,11 +547,20 @@ def _spans(n: int, spans: Sequence[tuple[int, int]] | None
     return kept
 
 
-def _moments_rate(pieces: Sequence[np.ndarray], rate: float) -> float:
-    """Rice's rate from the pieces' own spectra: each piece's
-    periodogram weighted by its length, so the moments are those of
-    the samples read and not of the joins between them."""
+def _spectral(pieces: Sequence[np.ndarray], rate: float
+              ) -> tuple[float, float]:
+    """(Rice's rate, statistical bandwidth) from the pieces' own
+    spectra, each piece's periodogram weighted by its length, so the
+    moments are those of the samples read and not of the joins between
+    them.
+
+    A periodogram line of a Gaussian record scatters as much as it is
+    large, so the mean of its square is twice the square of its mean,
+    and the area of the spectrum's square is half the periodogram's.
+    The bandwidth is the length-weighted mean of each piece's.
+    """
     m0 = m2 = 0.0
+    width = weight = 0.0
     for piece in pieces:
         if piece.size < 4:
             continue
@@ -463,7 +568,13 @@ def _moments_rate(pieces: Sequence[np.ndarray], rate: float) -> float:
         f = np.fft.rfftfreq(piece.size, 1.0 / rate)
         m0 += float(np.sum(power))
         m2 += float(np.sum(f ** 2 * power))
-    return math.sqrt(m2 / m0) if m0 > 0.0 else float('nan')
+        square = float(np.sum(power ** 2))
+        if square > 0.0:
+            width += (piece.size * 2.0 * float(np.sum(power)) ** 2
+                      / square * rate / piece.size)
+            weight += piece.size
+    return (math.sqrt(m2 / m0) if m0 > 0.0 else float('nan'),
+            width / weight if weight else float('nan'))
 
 
 def time_statistics(values: ArrayLike, sample_rate: float, *,
@@ -471,7 +582,7 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
                     spans: Sequence[tuple[int, int]] | None = None,
                     full_scale: float | None = None,
                     margin: float = RAIL_MARGIN,
-                    frame: float = FRAME_SECONDS,
+                    frame: float | None = None,
                     duration: float | None = None,
                     kurtosis_band: Sequence[float] | None = None,
                     frame_band: Sequence[float] | None = None,
@@ -479,13 +590,13 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
                     offset_share: float = OFFSET_SHARE,
                     crest_band: Sequence[float] | None = None,
                     rail_samples: int = RAIL_SAMPLES,
-                    peak_samples: int = PEAK_SAMPLES,
+                    peak_runs: int = PEAK_RUNS,
                     sigmas: Sequence[float] = SIGMAS,
                     tail_ratio: float = TAIL_RATIO) -> TimeStatistics:
     """Read one record's statistics in the time domain.
 
-    The moments, the crest factor and its peak, the samples at the peak
-    and on the rail, the tails beyond each sigma, the crossing rates,
+    The moments, the crest factor and its peak, the excursions at the
+    peak, the samples on the rail and those not finite, the tails beyond each sigma, the crossing rates,
     the expected largest peak and the kurtosis frame by frame, each
     judged against its band (the module docstring says what each is and
     why its band is where it is).
@@ -495,6 +606,7 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     values : array_like
         The record, one channel, evenly sampled. Complex values are
         read by their real part, as `core.kurtosis` reads them.
+        Samples that are not finite are left out and counted.
     sample_rate : float
         Samples per second.
     start : float, default 0.0
@@ -511,9 +623,11 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     margin : float, default `RAIL_MARGIN`
         How close to the range, and to the record's own peak, a sample
         counts as on it, as a share.
-    frame : float, default `FRAME_SECONDS`
+    frame : float, optional
         Seconds to a frame for the kurtosis against time; rounded to
-        whole samples.
+        whole samples. By default it is sized from the record's
+        statistical bandwidth: `FRAME_PRODUCT` over the bandwidth, and
+        at least `FRAME_SECONDS`.
     duration : float, optional
         Seconds the expected largest peak is for; the record's length
         by default.
@@ -523,8 +637,10 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     offset_share : float, default `OFFSET_SHARE`
         How far the mean may sit from zero, as a share of the standard
         deviation.
-    rail_samples, peak_samples : int
-        The most samples allowed on the rail and at the peak.
+    rail_samples : int, default `RAIL_SAMPLES`
+        The most samples allowed on the rail.
+    peak_runs : int, default `PEAK_RUNS`
+        The most separate excursions allowed at the record's own peak.
     sigmas : sequence of float, default `SIGMAS`
         The multiples of the standard deviation the tails are counted
         beyond.
@@ -548,11 +664,12 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     rate = float(sample_rate)
     if not rate > 0.0:
         raise ValueError('the sample rate has to be above zero')
-    length = round(float(frame) * rate)
-    if length < 2:
-        raise ValueError(f'a frame of {frame:g} s holds {length} sample'
-                         f'{"s" * (length != 1)} at {rate:g} a second, and '
-                         'a kurtosis needs at least two')
+    if frame is not None:
+        length = round(float(frame) * rate)
+        if length < 2:
+            raise ValueError(f'a frame of {frame:g} s holds {length} '
+                             f'sample{"s" * (length != 1)} at {rate:g} a '
+                             'second, and a kurtosis needs at least two')
     if full_scale is not None and not float(full_scale) > 0.0:
         raise ValueError('the range is how far either way the channel '
                          'reads, and has to be above zero')
@@ -572,6 +689,7 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     if np.count_nonzero(finite) < 2:
         raise ValueError('a record needs two finite samples to have a '
                          'distribution')
+    nonfinite = int(data.size - np.count_nonzero(finite))
     data = data[finite]
     n = data.size
 
@@ -596,21 +714,19 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
             best, where = float(size[k]), low + k
     peak = float(x[where])
     peak_time = float(start) + where / rate
-    at_peak = int(np.count_nonzero(np.abs(data) >= (1.0 - margin) * best))
+    # separate excursions at the peak: each run of neighboring samples
+    # within the margin counts once, so a peak sampled several times
+    # over is one peak and a clipped record's flat tops are many
+    at_peak = 0
+    for piece in pieces:
+        with np.errstate(invalid='ignore'):
+            near = (np.isfinite(piece)
+                    & (np.abs(piece) >= (1.0 - margin) * best))
+        at_peak += int(near[0]) + int(np.count_nonzero(near[1:] & ~near[:-1]))
     rail = None
     if full_scale is not None:
         rail = int(np.count_nonzero(
             np.abs(data) >= (1.0 - margin) * float(full_scale)))
-
-    tails = []
-    for k in sigmas:
-        count = (int(np.count_nonzero(np.abs(centered) > k * std))
-                 if std > 0.0 else 0)
-        expected = gaussian_share(k)
-        tails.append(Tail(sigmas=float(k), count=count, share=count / n,
-                          expected=expected,
-                          judged=expected * n >= MIN_EXPECTED,
-                          ratio=float(tail_ratio)))
 
     # upward crossings of the mean, counted within each piece so a join
     # between two windows is not read as a crossing
@@ -618,8 +734,28 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     for piece in pieces:
         d = piece[np.isfinite(piece)] - mean
         crossings += int(np.count_nonzero((d[:-1] < 0.0) & (d[1:] >= 0.0)))
-    spectral = _moments_rate(
+    spectral, bandwidth = _spectral(
         [piece[np.isfinite(piece)] - mean for piece in pieces], rate)
+
+    tails = []
+    for k in sigmas:
+        count = (int(np.count_nonzero(np.abs(centered) > k * std))
+                 if std > 0.0 else 0)
+        expected = gaussian_share(k)
+        # a record holds about 2 B T independent values, never more
+        # than its samples
+        independent = expected * min(n, 2.0 * bandwidth * n / rate
+                                     if bandwidth > 0.0 else n)
+        tails.append(Tail(sigmas=float(k), count=count, share=count / n,
+                          expected=expected,
+                          judged=independent >= MIN_EXPECTED,
+                          ratio=float(tail_ratio), independent=independent))
+
+    if frame is None:
+        seconds = FRAME_SECONDS
+        if bandwidth > 0.0:
+            seconds = max(seconds, FRAME_PRODUCT / bandwidth)
+        length = max(round(seconds * rate), 2)
 
     # the kurtosis frame by frame, tiling each piece from its start; a
     # tail shorter than a frame is left out, as an averaged spectrum
@@ -641,11 +777,12 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
         margin=float(margin), tails=tuple(tails),
         crossings=crossings / (n / rate), spectral_crossings=spectral,
         duration=float(n / rate if duration is None else duration),
+        bandwidth=bandwidth,
         frame_times=np.asarray(times, dtype=float),
         frame_kurtosis=np.asarray(frames, dtype=float),
         frame_length=length, offset_share=float(offset_share),
-        rail_samples=int(rail_samples), peak_samples=int(peak_samples),
-        **bands)
+        rail_samples=int(rail_samples), peak_runs=int(peak_runs),
+        nonfinite=nonfinite, **bands)
 
 
 def record_statistics(history: TimeHistory, record: int = 0,

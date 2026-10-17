@@ -2123,6 +2123,14 @@ def octave_preview(items: Iterable[Any], steps: tuple[Any, Any, Any],
 BAND_STYLES = ('dash', 'dot', 'dashdot')
 
 
+def _finite_runs(finite: np.ndarray) -> list[slice]:
+    """The stretches of two or more points where `finite` holds."""
+    padded = np.concatenate(([False], finite, [False]))
+    changes = np.flatnonzero(np.diff(padded.astype(np.int8)))
+    return [slice(start, stop) for start, stop
+            in zip(changes[::2], changes[1::2]) if stop - start >= 2]
+
+
 def confidence_preview(items: Iterable[Any], psd: Any,
                        colors: Mapping[str, str],
                        records: Sequence[int] | None = None,
@@ -2198,23 +2206,32 @@ def confidence_preview(items: Iterable[Any], psd: Any,
                 # is zero wide anyway
                 low = np.where(low > 0.0, low, np.nan)
                 high = np.where(high > 0.0, high, np.nan)
-                edges = []
-                for values in (low, high):
-                    edge = pg.PlotDataItem(x, values, pen=pen,
-                                           connect='finite')
-                    edge.setZValue(-2)       # behind the data it bounds
-                    edge.is_zone_edge = True  # a band, not a measurement
-                    item.addItem(edge)
-                    edges.append(edge)
-                    drawn.append((item, edge))
-                if np.isfinite(low).all() and np.isfinite(high).all():
+                finite = np.isfinite(low) & np.isfinite(high)
+                if not finite.any():
+                    # a record that is zero throughout has no band to
+                    # draw, and nanmin of it would only warn
+                    continue
+                # drawn run by run between the lines that say something:
+                # one zero line once took the whole record's shading
+                # with it (2026-10-16), and a fill across the hole would
+                # be the gapped path the limit zones keep away from
+                for run in _finite_runs(finite):
+                    edges = []
+                    for values in (low, high):
+                        edge = pg.PlotDataItem(x[run], values[run],
+                                               pen=pen)
+                        edge.setZValue(-2)    # behind the data it bounds
+                        edge.is_zone_edge = True  # a band, not a curve
+                        item.addItem(edge)
+                        edges.append(edge)
+                        drawn.append((item, edge))
                     fill = pg.FillBetweenItem(edges[0], edges[1],
                                               brush=pg.mkBrush(shade))
                     fill.setZValue(-10)
                     item.addItem(fill)
                     drawn.append((item, fill))
-                reach.extend(v for v in (np.nanmin(low), np.nanmax(high))
-                             if np.isfinite(v))
+                reach.extend((float(np.min(low[finite])),
+                              float(np.max(high[finite]))))
         if not reach:
             continue
         legend = getattr(item, 'legend', None)
@@ -2254,6 +2271,11 @@ def _mark(layout, data, marks, theme=None, per_octave=None,
 
     from ..viz.marks import held_reading, octave_steps
 
+    if levels is not None and marks != 'confidence':
+        # a level given to a mark that has none would be dropped without
+        # a word (2026-10-16)
+        raise ValueError("levels are the confidence of marks='confidence'"
+                         f', not of marks={marks!r}')
     if marks is None:
         return []
     colors = resolve_theme(theme)
@@ -2325,7 +2347,7 @@ def plot_data(data: DataArray, unit_system: UnitSystem | None = None,
     averaged PSD, 'confidence' shades the chi-square band the true
     spectrum lies in (`confidence_preview`), at the confidence `levels`
     given, 90 and 95 percent by default, from the degrees of freedom
-    the PSD was averaged to.
+    the PSD was averaged to. `levels` with any other mark is refused.
     """
     # the pane owns which part of a complex ordinate is drawn, so the
     # draw reads it back rather than being told once at the call
@@ -2820,10 +2842,14 @@ def plot_half_power(data: Any, near: float, record: int = 0, *,
     `core.half_power.read_half_power` and drawn over it by
     `plot.half_power.add_half_power`: the 0.707 level, the two
     crossings, the top as read between lines, and the Q beside the
-    peak. Works on anything with a magnitude against frequency: an FRF,
-    a transmissibility, a tracked sine level. A reading with a missing
-    crossing or too few lines warns as `read_half_power` does, and the
-    label on the plot says so too.
+    peak. Works on an FRF (a transmissibility among them) and a
+    spectrum (a tracked sine level among them): a magnitude against
+    frequency, whose half-power level is 0.707 of the peak. A PSD is
+    refused, since it is a power, whose half-power level is half the
+    peak, and read at 0.707 its Q comes out wrong; so are an SRS and a
+    coherence, which are not a response's magnitude. A reading with a
+    missing crossing or too few lines warns as `read_half_power` does,
+    and the label on the plot says so too.
 
     Parameters
     ----------
@@ -2842,15 +2868,24 @@ def plot_half_power(data: Any, near: float, record: int = 0, *,
     -------
     object
         The pane, or the path written.
+
+    Raises
+    ------
+    TypeError
+        When `data` is not an FRF or a spectrum.
     """
+    from ..core.data import Frf, Spectrum
     from ..core.half_power import read_half_power
     from .half_power import add_half_power
 
-    if getattr(data, 'abscissa_dim', None) != 'frequency':
-        raise ValueError('a half-power width is read against frequency; '
-                         f'this is a {type(data).__name__}')
+    # 2026-10-16: the guard was abscissa_dim == 'frequency', which let a
+    # PSD through; a PSD of the Q 20 accelerance's |H|^2 read Q 31
+    if not isinstance(data, (Frf, Spectrum)):
+        raise TypeError('a half-power width is read off an FRF or a '
+                        'spectrum, a magnitude against frequency; this '
+                        f'is a {type(data).__name__}')
     reading = read_half_power(data.abscissa, data.ordinate[record], near,
-                              within=within)
+                              within=within, stacklevel=2)
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     dimension = data.ordinate_dim[record]
     # drawn in display units, read in SI: the conversion of a magnitude
@@ -2876,7 +2911,7 @@ def plot_half_power(data: Any, near: float, record: int = 0, *,
 
 def plot_tone_readout(data: Any, tones: float | Sequence[float],
                       record: int = 0, *, window: Any = 'hann',
-                      snap: bool = True,
+                      parameter: float | None = None, snap: bool = True,
                       band: tuple[float, float] | None = None,
                       unit_system: UnitSystem | None = None,
                       theme: Any = None,
@@ -2907,6 +2942,9 @@ def plot_tone_readout(data: Any, tones: float | Sequence[float],
     window : str or Averaging, default 'hann'
         The window the spectrum was averaged with, or its `Averaging`
         (`Project.averaging_of` gives a computed one's).
+    parameter : float, optional
+        The Tukey window's alpha or the Kaiser window's beta, when
+        `window` is a name.
     snap : bool, default True
         Find each tone's own spike near its frequency; False reads at
         the frequencies as given.
@@ -2921,11 +2959,16 @@ def plot_tone_readout(data: Any, tones: float | Sequence[float],
     object
         The pane, or the path written.
     """
+    from ..core.tone_readout import leakage, line_spacing
     from .tone_readout import add_tone_readout, display_units
 
+    refusal = data.tone_refusal(record)
+    if refusal is not None:
+        raise ValueError(refusal)
     frequencies = ([float(tones)] if np.ndim(tones) == 0
                    else [float(f) for f in tones])
-    readings = [data.read_tone(f, record, window=window, snap=snap)
+    readings = [data.read_tone(f, record, window=window,
+                               parameter=parameter, snap=snap)
                 for f in frequencies]
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     scale, dense, unit = display_units(data, record, us)
@@ -2958,8 +3001,10 @@ def plot_tone_readout(data: Any, tones: float | Sequence[float],
         elif len(shown):
             plot.setYRange(0.0, 1.6 * shown.max(), padding=0.0)
 
-    spacing = readings[0].spacing if readings else 0.0
-    window_name = readings[0].window if readings else ''
+    # from the spectrum and the window, not the first reading: a call
+    # with no tones has none to take them from
+    spacing = line_spacing(data.abscissa)
+    window_name = leakage(window, parameter=parameter).window
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or (f'{data.response_dof[record]}: '
                                         f'tones at {spacing:.3g} Hz lines, '
@@ -3191,6 +3236,7 @@ def plot_srs_tolerance(measured: Any, specification: Any, *,
                        outer: tuple[float, float] | None = None,
                        rule: str = 'share',
                        percent: float | None = None,
+                       limits: bool = True,
                        unit_system: UnitSystem | None = None,
                        theme: Any = None,
                        path: str | os.PathLike | None = None,
@@ -3226,10 +3272,10 @@ def plot_srs_tolerance(measured: Any, specification: Any, *,
     event : str, optional
         The event drawn, by block label; each spectrum's first record
         at the channel by default.
-    inner, outer, rule, percent
-        The band and the rule, as for `core.compliance.srs_points`;
-        `inner` and `percent` default to `SRS_INNER_DB` and
-        `SRS_POINTS_PERCENT` there.
+    inner, outer, rule, percent, limits
+        The bands and the rule, as for `core.compliance.srs_tolerance`:
+        a band not given is the requirement's own limits when it has
+        them, and `percent` defaults to `SRS_POINTS_PERCENT`.
     unit_system, theme, path, show, title, size
         As for every standalone plot.
 
@@ -3238,12 +3284,12 @@ def plot_srs_tolerance(measured: Any, specification: Any, *,
     object
         The pane, or the path written.
     """
-    from ..core.compliance import SRS_INNER_DB, SRS_POINTS_PERCENT
+    from ..core.compliance import SRS_POINTS_PERCENT
     from .srs_tolerance import build_srs_tolerance
 
-    settings = {'inner': SRS_INNER_DB if inner is None else inner,
-                'outer': outer, 'rule': rule,
-                'percent': SRS_POINTS_PERCENT if percent is None else percent}
+    settings = {'inner': inner, 'outer': outer, 'rule': rule,
+                'percent': SRS_POINTS_PERCENT if percent is None else percent,
+                'limits': limits}
 
     def build(widget: Any) -> Any:
         widget.clear()
@@ -3470,7 +3516,8 @@ def plot_replication_fit(history: Any,
     share counted, inside the band the stroke allows, with the verdict
     and what the record does integrated as logged written above it. The
     bottom row is the sweep across the candidate cutoffs: the travel
-    each way against the room, the peak velocity against the rating,
+    each way against the room, the peak velocity against the rating
+    (the body counted, as in the travel),
     and the share of the mean square removed with the change in the
     largest peak. A filled marker fits and a hollow one does not.
 
@@ -3479,9 +3526,8 @@ def plot_replication_fit(history: Any,
     history : TimeHistory
         The reference record.
     rating : ShakerRating or mapping
-        The shaker's ratings in SI, as a
-        `core.replication_fit.ShakerRating` or the keyword arguments
-        that make one.
+        The shaker's ratings in SI, as a `core.shaker.ShakerRating` or
+        the keyword arguments that make one.
     channel : str or int, optional
         The acceleration channel, by DOF or index; the first by default.
     cutoffs : sequence of float, optional
@@ -3507,7 +3553,8 @@ def plot_replication_fit(history: Any,
     KeyError
         If `cutoff` is not one of the candidates.
     """
-    from ..core.replication_fit import CUTOFFS, ShakerRating, replication_fit
+    from ..core.replication_fit import CUTOFFS, replication_fit
+    from ..core.shaker import ShakerRating
     from .replication_fit import build_replication_fit, default_cutoff
 
     if not isinstance(rating, ShakerRating):
@@ -3532,7 +3579,7 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
                 stroke: float | None = None, velocity: float | None = None,
                 force: float | None = None,
                 moving_mass: float | None = None,
-                mass_ratio: float | None = None,
+                body_mass: float | None = None,
                 unit_system: UnitSystem | None = None, theme: Any = None,
                 path: str | os.PathLike | None = None,
                 show: bool = True, title: str | None = None,
@@ -3541,16 +3588,16 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
     against the shaker's shock ratings.
 
         visualdynamics.plot.plot_stroke(pulse, stroke=0.0635,
-                                        velocity=1.778, mass_ratio=0.25,
-                                        path='stroke.png')
+                                        velocity=1.778, moving_mass=45.4,
+                                        body_mass=181.4, path='stroke.png')
 
     Three rows on one clock for one channel, read by
     `core.stroke.read_stroke`: the acceleration titled with its peak
     and the force it asks for, the velocity integrated raw with the
     shock velocity drawn either side of zero, and the displacement with
     the stops drawn half the stroke either side of center, where the
-    armature rests. With `mass_ratio` the travel relative to the body
-    is drawn beside the table's, dashed. Each row's title is its
+    armature rests. With `body_mass` and `moving_mass` the motion
+    relative to the body is drawn beside the table's, dashed. Each row's title is its
     reading in words, against its rating where one was given.
 
     Parameters
@@ -3561,7 +3608,7 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
     channel : int or str, optional
         The record's index or DOF; its first acceleration channel by
         default.
-    stroke, velocity, force, moving_mass, mass_ratio : float, optional
+    stroke, velocity, force, moving_mass, body_mass : float, optional
         The shaker's shock ratings and the masses, in SI, as
         `core.stroke.read_stroke` takes them.
     unit_system, theme, path, show, title, size
@@ -3575,15 +3622,15 @@ def plot_stroke(history: Any, channel: int | str | None = None, *,
     Raises
     ------
     ValueError
-        If the record has no acceleration channel, or `channel` is not
-        one.
+        If the record has no acceleration channel, `channel` is not
+        one, or a rating is negative.
     """
     from ..core.stroke import read_stroke
     from .stroke import build_stroke
 
     reading = read_stroke(history, channel, stroke=stroke,
                           velocity=velocity, force=force,
-                          moving_mass=moving_mass, mass_ratio=mass_ratio)
+                          moving_mass=moving_mass, body_mass=body_mass)
 
     def build(widget: Any) -> Any:
         widget.clear()
@@ -3695,7 +3742,7 @@ def plot_shock_check(history: Any, channel: str | None = None, *,
     ------
     ValueError
         If the record has no acceleration channel, `channel` is not
-        one, or `shock` names no window.
+        one or names more than one, or `shock` names no window.
     """
     from dataclasses import replace
 
@@ -3716,7 +3763,11 @@ def plot_shock_check(history: Any, channel: str | None = None, *,
     if not found:
         raise ValueError(f'{dof} is not an acceleration channel of this '
                          'record, and only acceleration is checked')
-    check = found[0]
+    if len(found) > 1:
+        raise ValueError(f'{len(found)} acceleration channels of this '
+                         f'record are named {dof}, so which to draw is '
+                         'not clear')
+    check, = found
     spectra = history.compute_srs_polarities(window, low, high,
                                              per_octave, q)
     # the check counts windows within the one it was given; named back
@@ -4314,7 +4365,7 @@ def plot_replication_segments(measured: Any, specification: Any,
                              (41.0, 51.0, 'transient', 'braking')],
             band=(5.0, 400.0), path='segments.png')
 
-    The judgement is `core.replication_segments.replication_segments`'s,
+    The judgment is `core.replication_segments.replication_segments`'s,
     and every setting it takes is passed through (`taper_percent`,
     `band`, `asd_db`, `variance_percent`, `envelope_db`, `window`,
     `srs_db`, `peak_percent` and the rest). The reference stands back

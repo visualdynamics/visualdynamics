@@ -12,7 +12,8 @@ import numpy as np
 import pytest
 
 from visualdynamics.core.averaging import Averaging
-from visualdynamics.core.data import TimeHistory
+from visualdynamics.core.data import Psd, TimeHistory
+from visualdynamics.core.tone_readout import noise_bandwidth
 
 G = 9.80665
 FS = 2048.0
@@ -132,7 +133,7 @@ def test_a_window_chosen_in_the_pane_reads_again_under_it(window, pump):
     box.setCurrentIndex(box.findData('boxcar'))
     pump()
     boxcar = window._tone['reading']
-    assert pane.tone_panel.derived['bandwidth'].text() == '1 lines'
+    assert pane.tone_panel.derived['bandwidth'].text() == '1 line'
     assert pane.tone_panel.derived['source'].text() == 'chosen'
     assert boxcar.window == 'boxcar' and hann.window == 'hann'
     assert boxcar.on_line > hann.on_line, \
@@ -141,7 +142,7 @@ def test_a_window_chosen_in_the_pane_reads_again_under_it(window, pump):
     window.render_current()
     pump()
     assert window._tone['reading'].window == 'boxcar'
-    assert window._tone_windows[name] == 'boxcar'
+    assert window._tone_windows[name] == ('boxcar', None)
 
 
 def test_the_stage_stands_down_while_the_tones_are_read(window, pump):
@@ -176,3 +177,76 @@ def test_the_reading_is_journaled_as_its_plot_call(window, pump):
     lines = [line for line in window.project.journal
              if line.startswith('visualdynamics.plot.plot_tone_readout(')]
     assert len(lines) == 1 and '58.3' in lines[0]
+
+
+def test_the_pane_s_notes_are_in_the_rows_units(window, pump):
+    """At 300 Hz there is no tone; the note gives the floor in g²/Hz,
+    the number the floor row shows, not the SI value."""
+    _name, _asd, pane = _tones_on(window, pump)
+    state = window._tone
+    state['cursor'].setValue(np.log10(300.0) if state['log_x'] else 300.0)
+    pump()
+    reading = window._tone['reading']
+    notes = pane.tone_panel.notes.text()
+    assert f'({reading.floor / G ** 2:.3g} g²/Hz)' in notes
+    assert '(m/s²)²' not in notes
+
+
+def test_a_kaiser_s_beta_is_set_in_the_pane(window, pump):
+    name, _asd, pane = _tones_on(window, pump)
+    panel = pane.tone_panel
+    assert panel.parameter_box.isHidden(), 'Hann takes no number'
+    panel.window_box.setCurrentIndex(panel.window_box.findData('kaiser'))
+    pump()
+    assert not panel.parameter_box.isHidden()
+    assert panel._parameter_label.text() == 'Beta'
+    assert panel.parameter_box.value() == 14.0
+    panel.parameter_box.setValue(6.0)
+    pump()
+    reading = window._tone['reading']
+    assert reading.noise_bandwidth == pytest.approx(
+        noise_bandwidth('kaiser', parameter=6.0))
+    assert window._tone_windows[name] == ('kaiser', 6.0)
+    line = next(line for line in window.project.journal
+                if line.startswith('visualdynamics.plot.plot_tone_readout('))
+    assert "window='kaiser', parameter=6.0" in line
+    # kept across a redraw, the number with the window
+    window.render_current()
+    pump()
+    assert panel.parameter_box.value() == 6.0
+    assert window._tone['reading'].noise_bandwidth == pytest.approx(
+        reading.noise_bandwidth)
+
+
+def test_a_cross_spectrum_is_not_offered_the_reading(window, pump):
+    """A real-valued off-diagonal record has no phase to show, but it
+    is still not a density of one signal."""
+    f = np.arange(0.0, 64.0)
+    cross = Psd(f, np.ones((1, 64)), response_dof=['1Z+'],
+                reference_dof=['2Z+'],
+                ordinate_dim='acceleration*acceleration/frequency')
+    window.add_object('Cross', cross)
+    window.show_object('Cross')
+    pump()
+    window.render_current()
+    pump()
+    assert not window.data_pane.tone_action.isVisible()
+
+
+def test_a_record_with_no_number_is_said_not_read(window, pump):
+    f = np.arange(0.0, 64.0)
+    empty = Psd(f, np.full((1, 64), np.nan), response_dof=['1Z+'],
+                ordinate_dim='acceleration**2/frequency')
+    window.add_object('Empty', empty)
+    window.show_object('Empty')
+    pump()
+    pane = window.data_pane
+    if pane.waterfall_action.isChecked():
+        pane.waterfall_action.trigger()
+    window.render_current()
+    pump()
+    pane.tone_action.trigger()
+    pump()
+    assert window._tone is not None and window._tone['reading'] is None
+    assert window.statusBar().currentMessage() == \
+        'No tone read: no line of this spectrum holds a number'

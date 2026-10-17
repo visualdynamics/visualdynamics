@@ -116,8 +116,6 @@ def test_a_sweep_and_a_dwell_share_one_tone():
     cycles = tone.phase_at([2.0, 5.0]) / (2.0 * np.pi)
     assert cycles[1] - cycles[0] == pytest.approx(60.0, rel=2e-6), \
         'the phase runs on through the dwell at 20 Hz'
-    assert tone.level_at([1.0, 3.5, 5.5])[:, 0] == pytest.approx([1.5, 2.0, 3.0])
-    assert np.isnan(tone.level_at([7.0])[0, 0])
     assert tone.dwell_segments() == [1]
 
 
@@ -309,6 +307,71 @@ def test_what_cannot_be_read_is_refused():
     reading = read_dwell(history, spec, onset=0.0)
     with pytest.raises(ValueError, match='outside the dwell'):
         reading.share_at(200.0)
+
+
+def _remade(history, ordinate, *, abscissa=None, unit='m/s**2'):
+    """`history` with another ordinate (SI), clock or declared unit."""
+    return TimeHistory(history.abscissa if abscissa is None else abscissa,
+                       ordinate, response_dof=list(history.response_dof),
+                       ordinate_dim=['acceleration'] * 2,
+                       ordinate_unit=[unit] * 2)
+
+
+def test_the_line_names_the_si_unit_whatever_the_record_declared():
+    """The numbers are SI; a record declared in g still reads 294.3
+    m/s², not '294.3 g', and in g only through a unit system."""
+    from visualdynamics.units import DEFAULT_SYSTEM
+
+    history, spec = _dwell_record(30.0)
+    reading = read_dwell(_remade(history, history.ordinate, unit='g'), spec,
+                         onset=0.0)
+    assert reading.unit == 'g'
+    assert reading.describe().startswith('steady 294.3 m/s², 95 % in 28.6 ')
+    assert reading.describe(DEFAULT_SYSTEM).startswith('steady 30.01 g, ')
+
+
+def test_a_record_that_starts_after_the_dwell_built_reads_no_build_up():
+    """Cut 2 s (40 cycles) into the dwell, the first reading is already
+    over 95 %: no count, and a note, rather than '95 % in 41.0 cycles'.
+    Cut half a second in, the crossing is still in the record and reads
+    the 28.6 cycles of the whole one."""
+    history, spec = _dwell_record(30.0)
+    for cut, built in ((2.0, None), (0.5, 28.6)):
+        k = round(cut * RATE)
+        late = _remade(history, history.ordinate[:, k:],
+                       abscissa=history.abscissa[:-k])
+        reading = read_dwell(late, spec, onset=-cut)
+        assert reading.cycles[0] == pytest.approx(cut * FN + 1.0)
+        if built is None:
+            assert reading.built is None
+            assert reading.notes == (
+                ('the record starts 40.0 cycles into the dwell, after the '
+                 'level had reached 95 % of its steady value, so no build-up '
+                 'is read'),)
+            assert reading.rung == pytest.approx(28.6, abs=0.1)
+        else:
+            assert reading.built == pytest.approx(built, abs=0.1)
+            assert reading.notes == ()
+
+
+def test_a_dead_channel_or_a_gap_in_the_tail_is_refused():
+    """A channel at zero would read 'steady 0, 95 % in 1.0 cycles,
+    settled'; a NaN in the last quarter would make every number NaN."""
+    history, spec = _dwell_record(30.0)
+    dead = history.ordinate.copy()
+    dead[1] = 0.0
+    with pytest.raises(ValueError, match=r'101Z\+ reads no level .*steady 0\)'):
+        read_dwell(_remade(history, dead), spec, onset=0.0)
+    gap = history.ordinate.copy()
+    gap[1, 85 * 200] = np.nan
+    with pytest.raises(ValueError, match=r'reads no level .*steady nan\)'):
+        read_dwell(_remade(history, gap), spec, onset=0.0)
+
+
+def test_a_dwell_past_the_records_end_is_refused_as_such():
+    history, spec = _dwell_record(30.0)
+    with pytest.raises(ValueError, match='holds no whole cycle of the dwell'):
+        read_dwell(history, spec, onset=100.0)
 
 
 # ---- the plot -----------------------------------------------------------------

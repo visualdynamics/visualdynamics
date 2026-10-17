@@ -21,11 +21,17 @@ which a sweep only just lets it build:
 
 A linear sweep at ``r`` Hz/s crosses the band, ``fn/Q`` Hz wide, in
 ``fn / (Q r)`` seconds, and the same equation gives ``r = fn**2 / Q**2``
-Hz/s. At the rule's rate a mode still reads only about 95 % of its
-steady height, so the rule is a ceiling to stay well under, not a
-target. That is the reason the rule here flags a rate above it rather
-than near it, and the reason each check also reports what a mode of
-that Q would actually read at that rate.
+Hz/s. At the rule's rate a mode still reads only about 94 % of its
+steady height, and the Q read from its width comes out about 20 % low,
+so the rule is a ceiling to stay well under, not a target. That is the
+reason the rule here flags a rate above it rather than near it, and the
+reason each check also reports what a mode of that Q would actually
+read at that rate.
+
+The rule is this package's criterion, worked out as above from the
+cycles a mode needs to build. It is not taken from a published
+standard; the references below are for the effect it guards against
+and for the simulation, not for the rule.
 
 What a mode reads at a rate is found by simulating it: the one-mass
 resonator (`srs.ramp_invariant`, the shock spectrum's filter) driven
@@ -33,8 +39,8 @@ through the sweep at the segment's rate and law, its response read once
 per cycle of the drive as that cycle's rms reported as the peak of a
 sine (the rms detector a controller uses), and the peak and the
 half-power width of that swept curve read the way they would be read
-off a plot. The simulation is made at a natural frequency of 1 Hz,
-since a sweep's effect on a mode depends on the rate only through
+off a plot (`half_power.read_half_power`). The simulation is made at a
+natural frequency of 1 Hz, since a sweep's effect on a mode depends on the rate only through
 ``R / fn`` (log) or ``r / fn**2`` (linear), so its cost does not grow
 with the mode's frequency.
 
@@ -89,8 +95,8 @@ from .sine import LINEAR, LOG, SineSweepSpecification, SineTone
 RULE_CONSTANT = 60.0 / np.log(2.0)
 
 #: the rate, as a multiple of the rule's, above which a check is
-#: flagged too fast. At the rule's own rate a mode reads about 95 % of
-#: its steady height, so 1 already allows a 5 % under-read
+#: flagged too fast. At the rule's own rate a mode reads about 94 % of
+#: its steady height, so 1 already allows a 6 % under-read
 MARGIN = 1.0
 
 #: below this share of the rule's rate the sweep reads the steady peak
@@ -135,7 +141,7 @@ def _q(value: Any) -> float:
 
 def half_power_band(frequency: float, q: float) -> tuple[float, float]:
     """The mode's half-power band, ``fn (1 - 1/(2Q))`` to
-    ``fn (1 + 1/(2Q))`` in Hz: ``fn/Q`` wide, centred on the mode.
+    ``fn (1 + 1/(2Q))`` in Hz: ``fn/Q`` wide, centered on the mode.
 
     The band the sweep's time and cycles are counted in. It is the
     width the mode's Q defines, not the crossings of any measured
@@ -164,9 +170,10 @@ def rule_rate(frequency: float, q: float,
     its half-power band holds just the Q cycles it needs to build.
 
     ``(60 / ln 2) fn / Q**2`` oct/min for a logarithmic sweep (about
-    ``87 fn / Q**2``), and ``fn**2 / Q**2`` Hz/s for a linear one. A
-    sweep should run well below it: at this rate a mode reads about 95 %
-    of its steady height.
+    ``87 fn / Q**2``), and ``fn**2 / Q**2`` Hz/s for a linear one. This
+    is the package's own criterion (see the module's notes). A sweep
+    should run well below it: at this rate a mode reads about 94 % of
+    its steady height and a Q about 20 % low.
 
     Parameters
     ----------
@@ -209,7 +216,7 @@ class SweptReading:
     swept curve's half-power width, None where the curve did not fall
     to 0.707 of its peak inside the simulated stretch. `simulated` is
     False where the rate was under `STEADY_RATIO` of the rule's and the
-    steady values were taken instead.
+    steady curve, the transmissibility, was read the same way instead.
     """
 
     frequency: float
@@ -233,40 +240,49 @@ class SweptReading:
 
 
 def _read_peak(f: np.ndarray, level: np.ndarray,
-               candidates: np.ndarray) -> tuple[float, float, float | None]:
-    """(frequency, height, Q) of the tallest of `candidates` on a curve
-    given in sweep order: the top placed by a parabola through the log
-    of it and its two neighbors, the half-power crossings found by
-    walking out along the sweep and interpolating in frequency. Q is
-    None where a side never falls to 0.707 of the top."""
-    # The half-power reading of the curve as the eye would make it. A
-    # half-power reader of any curve is a separate contribution; this
-    # one reads only the swept curves here, which are in sweep order
-    # (not sorted by frequency), one reading per cycle.
-    i = int(candidates[np.argmax(level[candidates])])
-    if i == 0 or i == len(level) - 1:
-        return float(f[i]), float(level[i]), None
-    a, b, c = np.log(level[i - 1:i + 2])
-    bend = a - 2.0 * b + c
-    p = 0.5 * (a - c) / bend if bend < 0.0 else 0.0
-    top = float(f[i] + p * (f[i + 1] - f[i - 1]) / 2.0)
-    height = float(np.exp(b - 0.25 * (a - c) * p))
-    half = height / np.sqrt(2.0)
+               within: tuple[float, float]) -> tuple[float, float, float | None]:
+    """(frequency, height, Q) of the tallest reading inside `within` (Hz)
+    on a curve given in sweep order, one way only: the package's
+    half-power reading (`half_power.read_half_power`), its crossings
+    found by walking out along the sweep. Q is None where a side never
+    falls to 0.707 of the top."""
+    # One half-power reader for the package (2026-10-16): this module
+    # carried its own copy, which placed the top on a parabola in the
+    # reading's index rather than in frequency. The readings are in
+    # sweep order, so a sweep down is turned round to ascend.
+    from .half_power import read_half_power
 
-    def crossing(step):
-        k = i
-        while 0 <= k + step < len(level):
-            k += step
-            if level[k] < half:
-                back = k - step
-                return float(np.interp(half, [level[k], level[back]],
-                                       [f[k], f[back]]))
-        return None
+    if f[-1] < f[0]:
+        f, level = f[::-1], level[::-1]
+    reading = read_half_power(f, level, float(np.mean(within)),
+                              within=within, warn=False)
+    return reading.frequency, reading.height, reading.q
 
-    before, after = crossing(-1), crossing(+1)
-    if before is None or after is None or after == before:
-        return top, height, None
-    return top, height, abs(top / (after - before))
+
+def _transmissibility(q: float, r: np.ndarray) -> np.ndarray:
+    """The one-mass base-excitation transmissibility at frequency ratio
+    `r`: the curve the resonator below draws when it is held at each
+    frequency long enough to build."""
+    two_zeta_r = r / q
+    return np.sqrt((1.0 + two_zeta_r ** 2)
+                   / ((1.0 - r ** 2) ** 2 + two_zeta_r ** 2))
+
+
+@lru_cache(maxsize=512)
+def _steady(q: float) -> tuple[float, float, float | None]:
+    """The steady curve of a 1 Hz mode, read as a swept one is: (peak
+    frequency, share of ``Q sqrt(1 + 1/Q**2)``, Q read)."""
+    # Read off the steady curve since 2026-10-16. The shortcut returned
+    # the mode's own fn, 1 and Q, but a slow sweep reads the curve, and
+    # at a low Q the two part: a Q 3 mode's curve peaks 1.15 % over the
+    # height at fn and reads a Q of 2.85, so the reading jumped at
+    # STEADY_RATIO.
+    half = 0.5 / q
+    r = np.linspace(max(1.0 - 8.0 * half, 0.05), 1.0 + 8.0 * half, 8001)
+    top, height, q_read = _read_peak(r, _transmissibility(q, r),
+                                     (r[0], r[-1]))
+    return (float(top), float(height / (q * np.sqrt(1.0 + 1.0 / q ** 2))),
+            None if q_read is None else float(q_read))
 
 
 @lru_cache(maxsize=512)
@@ -284,9 +300,9 @@ def _simulated(q: float, normalized: float, segment_type: int,
     linear = segment_type == LINEAR
     rule = 1.0 / q ** 2 if linear else RULE_CONSTANT / q ** 2
     ratio = normalized / rule
-    steady = q * np.sqrt(1.0 + 1.0 / q ** 2)
     if ratio < STEADY_RATIO:
-        return 1.0, 1.0, q, False
+        return (*_steady(q), False)
+    steady = q * np.sqrt(1.0 + 1.0 / q ** 2)
     half = 0.5 / q
     widths = max(WINDOW_WIDTHS, 8.0 * ratio)
     near, far = 1.0 - widths * half, 1.0 + widths * half
@@ -306,26 +322,24 @@ def _simulated(q: float, normalized: float, segment_type: int,
         near = min(near, before)
     near, far = max(near, 0.5), min(far, 2.0)
     start, end = (far, near) if down else (near, far)
-    if linear:
-        slope = normalized if not down else -normalized
-        duration = (end - start) / slope
-    else:
-        duration = np.log(end / start) / (kappa if not down else -kappa)
-    n = int(np.ceil(duration * SAMPLES_PER_CYCLE)) + 1
+    # the sweep's own law, the one a specification's tone is run on: a
+    # segment from start to end at the rate, at a 1 Hz mode's scale
+    sweep = SineTone('', 0.0, [start, end], [[1.0], [1.0]],
+                     [segment_type], [-normalized if down else normalized])
+    n = int(np.floor(sweep.duration() * SAMPLES_PER_CYCLE)) + 1
     tau = np.arange(n) / SAMPLES_PER_CYCLE
-    if linear:
-        f = start + slope * tau
-        cycles = start * tau + slope * tau ** 2 / 2.0
-    else:
-        k = kappa if not down else -kappa
-        f = start * np.exp(k * tau)
-        cycles = start * np.expm1(k * tau) / k
-    drive = np.sin(2.0 * np.pi * cycles)
+    f = sweep.frequency_at(tau)
+    phase = sweep.phase_at(tau)
+    cycles = phase / (2.0 * np.pi)
+    drive = np.sin(phase)
     b, a = ramp_invariant([1.0], SAMPLES_PER_CYCLE, damping_for(q))
     response = lfilter(b[0], a[0], drive)
     # one reading per cycle of the drive, as each cycle's rms reported
     # as a sine's peak, against the cycle's mean frequency: the rms
-    # detector, read once a cycle
+    # detector, read once a cycle. Not sine_tracking's detector, which
+    # reads a measured record at chosen samples over a span of phase,
+    # upsampling each span; here every cycle is read, on a drive
+    # sampled finely enough already, and the block sums run at once
     edges = np.r_[0, np.flatnonzero(np.diff(np.floor(cycles))) + 1]
     count = np.diff(np.r_[edges, n])
     level = np.sqrt(2.0 * np.add.reduceat(response ** 2, edges) / count)
@@ -333,13 +347,14 @@ def _simulated(q: float, normalized: float, segment_type: int,
     # the last cycle is cut short by the end of the run; leave it out
     level, centers = level[:-1], centers[:-1]
     # the peak is looked for near the mode, never in the start's ringing
-    candidates = np.flatnonzero(np.abs(centers - 1.0) < (widths - 1.0) * half)
-    if candidates.size < 3:
+    band = (widths - 1.0) * half
+    if np.count_nonzero(np.abs(centers - 1.0) <= band) < 3:
         # a sweep through an octave either side in a few cycles leaves
         # nothing to read a peak from; NaN, since zero would read as a
         # mode that did not respond
         return 1.0, float('nan'), None, True
-    top, height, q_read = _read_peak(centers, level, candidates)
+    top, height, q_read = _read_peak(centers, level,
+                                     (1.0 - band, 1.0 + band))
     return (float(top), float(height / steady),
             None if q_read is None else float(q_read), True)
 
@@ -400,8 +415,9 @@ class SweepRateCheck:
     """One pass of one tone through one mode's half-power band:
     `check_sweep_rate`'s row.
 
-    `rate` is the specification's rate on the segment at the mode, as
-    written (oct/min for a log segment, Hz/s for a linear one, negative
+    `rate` is the specification's rate on the pass's fastest segment
+    (the largest multiple of the rule's), as written (oct/min for a log
+    segment, Hz/s for a linear one, negative
     sweeping down); `limit` is the rule's rate for the mode in the same
     unit. `start` is when the sweep enters the band, in seconds from
     the tone's start; `seconds` and `cycles` are how long it stays and
@@ -483,25 +499,12 @@ class SweepRateCheck:
 
 
 def _segment_table(tone: SineTone):
-    """(start s, length s, f0, f1, type, rate) for each segment."""
-    rows, start = [], 0.0
-    for i, length in enumerate(tone.segment_seconds()):
-        rows.append((start, float(length), float(tone.frequency[i]),
-                     float(tone.frequency[i + 1]),
-                     int(tone.segment_type[i]), float(tone.segment_rate[i])))
-        start += float(length)
-    return rows
-
-
-def _time_at(segment, f):
-    """When a segment's sweep is at frequency `f`, s from the tone's
-    start: the inverse of its law."""
-    start, length, f0, f1, kind, _rate = segment
-    if kind == LINEAR:
-        fraction = (f - f0) / (f1 - f0)
-    else:
-        fraction = np.log(f / f0) / np.log(f1 / f0)
-    return start + length * float(fraction)
+    """(index, start s, length s, f0, f1, type, rate) for each segment,
+    timed by the tone's own law."""
+    return [(i, start, length, f0, f1, int(tone.segment_type[i]),
+             float(tone.segment_rate[i]))
+            for i, (start, length, f0, f1, _log)
+            in enumerate(tone._segments())]
 
 
 def _passages(tone: SineTone, low: float, high: float):
@@ -512,13 +515,14 @@ def _passages(tone: SineTone, low: float, high: float):
     out = []
     current = None
     for segment in _segment_table(tone):
-        start, length, f0, f1, _kind, _rate = segment
+        index, start, length, f0, f1, _kind, _rate = segment
         lo, hi = max(low, min(f0, f1)), min(high, max(f0, f1))
         if lo >= hi:
             current = None
             continue
         enter, leave = (lo, hi) if f1 > f0 else (hi, lo)
-        t_in, t_out = _time_at(segment, enter), _time_at(segment, leave)
+        t_in, t_out = (float(tone.time_at(enter, index)),
+                       float(tone.time_at(leave, index)))
         joins = (current is not None
                  and abs(current[1] - start) <= 1e-9 * max(1.0, start)
                  and abs(t_in - start) <= 1e-9 * max(1.0, start))
@@ -536,24 +540,30 @@ def _passages(tone: SineTone, low: float, high: float):
     return [tuple(passage) for passage in out]
 
 
-def _at_mode(segments, frequency):
-    """The segment of a stretch whose span holds the mode; failing
-    that (the sweep stops short of it), the one longest in the band."""
-    for segment in segments:
-        f0, f1 = segment[2], segment[3]
-        if min(f0, f1) <= frequency <= max(f0, f1):
-            return segment
-    return max(segments, key=lambda segment: segment[1])
+def _fastest(segments, frequency, q):
+    """The segment of a stretch whose rate is the largest multiple of
+    the rule's for the mode: the one a pass is judged on."""
+    # Judged on the fastest since 2026-10-16. The rate on the segment
+    # holding the mode was checked before, so a band crossed half at
+    # 1 oct/min and half at 4 read "builds" at 1 while its time in the
+    # band was counted across both.
+    return max(segments, key=lambda segment: abs(segment[6]) / rule_rate(
+        frequency, q, segment[5]))
 
 
 def _modes(modes: Any) -> list[tuple[float, float]]:
     """(frequency, Q) pairs from pairs or from a `ShapeSet` (its
-    damping is a fraction of critical; rigid-body and undamped modes,
-    which have no band, are left out)."""
+    damping is a fraction of critical; rigid-body, undamped and
+    critically damped modes, which have no band, are left out)."""
+    from .srs import q_for
+
     if hasattr(modes, 'frequency') and hasattr(modes, 'damping'):
-        return [(float(f), 0.5 / float(z))
+        # a mode at or past critical damping (Q 0.5) is left out like a
+        # rigid-body one, not refused: refused, it took every other mode
+        # of the set down with it
+        return [(float(f), q_for(z))
                 for f, z in zip(modes.frequency, modes.damping)
-                if f > 0.0 and z > 0.0]
+                if f > 0.0 and 0.0 < z < 1.0]
     out = []
     for mode in modes:
         frequency, q = mode
@@ -587,9 +597,9 @@ def check_sweep_rate(specification: SineSweepSpecification | SineTone,
     cycles that is against the Q the mode needs, the rule's rate for
     the mode (`rule_rate`) and the specification's as a multiple of it,
     what a mode of that Q reads at that rate (`simulate_sweep`), and
-    whether the rate is too fast. The rate checked is the one written on
-    the segment holding the mode; a band that straddles a breakpoint is
-    one pass, counted across both segments.
+    whether the rate is too fast. A band that straddles a breakpoint is
+    one pass, counted across both segments, and judged on the faster of
+    them: the one whose rate is the larger multiple of the rule's.
 
         checks = check_sweep_rate(spec, [(22.0, 40.0), (180.0, 20.0)])
         for check in checks:
@@ -606,7 +616,7 @@ def check_sweep_rate(specification: SineSweepSpecification | SineTone,
         Check only the tone of this name.
     margin : float
         The multiple of the rule's rate above which a pass is flagged
-        too fast; 1 by default, where a mode reads about 95 %.
+        too fast; 1 by default, where a mode reads about 94 %.
 
     Returns
     -------
@@ -621,8 +631,8 @@ def check_sweep_rate(specification: SineSweepSpecification | SineTone,
             low, high = half_power_band(frequency, q)
             for entry, leave, f_in, f_out, segments in _passages(
                     each, low, high):
-                segment = _at_mode(segments, frequency)
-                kind, rate = segment[4], segment[5]
+                segment = _fastest(segments, frequency, q)
+                kind, rate = segment[5], segment[6]
                 cycles = float(np.diff(each.phase_at([entry, leave]))[0]
                                / (2.0 * np.pi))
                 crossed = {f_in, f_out} == {low, high}
@@ -683,13 +693,13 @@ class SweptQ:
         be inferred at all, the sweep was too fast for the Q it implies,
         or the Q it implies is more than `Q_TOLERANCE` above the one
         read. The last catches a sweep under the rule's rate that still
-        spreads the width: at the rule's rate a peak reads 95 % of its
-        height but its Q reads about 17 % low."""
+        spreads the width: at the rule's rate a peak reads about 94 % of
+        its height but its Q reads about 20 % low."""
         return bool(self.q_true is None or self.ratio > self.margin
                     or self.q_true > self.q_read * (1.0 + Q_TOLERANCE))
 
     def describe(self) -> str:
-        """The judgement in a line: 'Q 21.6 read at 22.6 Hz from a sweep
+        """The judgment in a line: 'Q 21.6 read at 22.6 Hz from a sweep
         at 4 oct/min: reads low; a mode reads this low at a Q of about
         40, for which the rate is 3.4 times the rule's'."""
         head = (f'Q {self.q_read:.3g} read at {self.frequency:.4g} Hz from '
@@ -796,26 +806,48 @@ def swept_q(frequency: float, q_read: float, rate: float,
                   height=None if height is None else float(height))
 
 
+def _one_way(f: np.ndarray, i: int) -> tuple[int, int]:
+    """(first, last) index of the run of readings around `i` that sweep
+    one way: the pass of an up-and-back sweep that reading `i` is on."""
+    step = np.sign(np.diff(f))
+    if not len(step):
+        return i, i
+    way = step[min(i, len(step) - 1)]
+    first = last = i
+    while first > 0 and step[first - 1] == way:
+        first -= 1
+    while last < len(step) and step[last] == way:
+        last += 1
+    return first, last
+
+
 def read_swept_q(level: Any, specification: SineSweepSpecification | SineTone,
                  near: float, *, record: int = 0, within: float = 0.2,
                  margin: float = MARGIN) -> SweptQ | None:
     """Read the peak nearest `near` on a tracked sine level and judge its
     Q against the rate the level was swept at.
 
-    The peak is the tallest reading within `within` (a fraction) of
-    `near`, its top placed between readings and its half-power
-    crossings found by walking out along the sweep; the rate is the
-    tone's (`level.tone`) on the segment holding the peak. Returns None
-    where the window holds no peak (no readings, or the tallest at its
-    edge, the flank of a peak elsewhere) or a crossing is missing, since
-    then there is no Q to judge.
+    The level's readings are put back in sweep order by their clock
+    (`level.seconds`), and lines under the noise floor (`level.resolved`)
+    are not read. The peak is the tallest reading within `within` (a
+    fraction) of `near`, read on the one pass of the sweep that holds
+    it (`half_power.read_half_power`): its top placed between readings
+    and its half-power crossings found by walking out along that pass.
+    The rate is the one on the segment the tone was sweeping when that
+    reading was made. Returns None where the window holds no peak (no
+    readings, or the tallest at its edge, the flank of a peak
+    elsewhere) or a crossing is missing, since then there is no Q to
+    judge; and for a level kept without its clock, read off a tone that
+    sweeps both ways, whose two passes cannot be told apart.
 
     Parameters
     ----------
     level : SineLevel
-        A tracked or extracted level, readings in sweep order.
+        A tracked or extracted level.
     specification : SineSweepSpecification or SineTone
-        The sweep the level was read from.
+        The sweep the level was read from. A specification's tone is
+        the level's own (`level.tone`); a KeyError says when it holds
+        no tone of that name.
     near : float
         Hz, the mode looked for.
     record : int
@@ -828,35 +860,57 @@ def read_swept_q(level: Any, specification: SineSweepSpecification | SineTone,
     Returns
     -------
     SweptQ or None
-        The judgement, with the peak's height in the level's units.
+        The judgment, with the peak's height in the level's units.
     """
+    # The clock, the floor and the tone's name are read since
+    # 2026-10-16. Before, a tracked level (sorted by frequency) of a
+    # sweep up and back read its two passes interleaved, a reading
+    # under the floor could be the peak, and a tone the specification
+    # did not hold was quietly read against its first one.
     near = _positive(near, 'a frequency')
-    tones = _tones(specification, None)
-    name = getattr(level, 'tone', '')
-    tone = next((t for t in tones if t.name == name), tones[0])
+    tone = (specification if isinstance(specification, SineTone)
+            else _tones(specification, getattr(level, 'tone', ''))[0])
     f = np.asarray(level.abscissa, dtype=float)
     values = np.abs(np.asarray(level.ordinate)[record]).astype(float)
     keep = np.isfinite(values) & (values > 0.0)
-    candidates = np.flatnonzero(keep & (np.abs(f - near) <= within * near))
-    if candidates.size < 3:
+    resolved = getattr(level, 'resolved', None)
+    if resolved is not None:
+        keep &= np.asarray(resolved)[record]
+    seconds = getattr(level, 'seconds', None)
+    rates = np.sign(tone.segment_rate)
+    if seconds is None and rates.min() != rates.max():
         return None
+    order = (np.arange(len(f)) if seconds is None
+             else np.argsort(np.asarray(seconds), kind='stable'))
+    f, values, keep = f[order], np.where(keep, values, 0.0)[order], keep[order]
+    window = keep & (np.abs(f - near) <= within * near)
+    if np.count_nonzero(window) < 3:
+        return None
+    tallest = int(np.flatnonzero(window)[np.argmax(values[window])])
+    first, last = _one_way(f, tallest)
+    inside = np.flatnonzero(window[first:last + 1]) + first
     # the tallest reading at an end of the window is the flank of some
     # other peak, not a peak here (a 35 Hz window on a 22 Hz mode's
     # level read a Q of 4 off its skirt)
-    tallest = candidates[np.argmax(np.where(keep, values, 0.0)[candidates])]
-    if tallest in (candidates[0], candidates[-1]):
+    if inside.size < 3 or tallest in (inside[0], inside[-1]):
         return None
-    top, height, q_read = _read_peak(f, np.where(keep, values, 0.0),
-                                     candidates)
+    top, height, q_read = _read_peak(
+        f[first:last + 1], values[first:last + 1],
+        ((1.0 - within) * near, (1.0 + within) * near))
     if q_read is None or q_read <= 0.5:
         return None
     rows = _segment_table(tone)
-    segment = next((row for row in rows
-                    if min(row[2], row[3]) <= top <= max(row[2], row[3])),
-                   None)
+    if seconds is None:
+        segment = next((row for row in rows
+                        if min(row[3], row[4]) <= top <= max(row[3], row[4])),
+                       None)
+    else:
+        when = float(np.asarray(seconds)[order][tallest]) - level.onset
+        segment = next((row for row in rows if when <= row[1] + row[2]),
+                       rows[-1])
     if segment is None:
         return None
-    return swept_q(top, q_read, segment[5], segment[4], margin=margin,
+    return swept_q(top, q_read, segment[6], segment[5], margin=margin,
                    height=height)
 
 

@@ -14,7 +14,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from visualdynamics.core import compliance
 from visualdynamics.core.compliance import (
     SRS_ERROR_DB,
     SRS_INNER_DB,
@@ -164,7 +163,14 @@ def test_the_above_lower_rule_puts_no_ceiling_on_the_band():
     assert srs_tolerance(spec, high)['passed'] is False
     above = srs_tolerance(spec, high, rule='above_lower')
     assert above['passed'] is True
-    assert above['inside_count'] == 0         # still not inside the band
+    # the band has no ceiling under this rule, so every point at or
+    # above the lower edge is inside it and none is over
+    assert above['inside_count'] == POINTS
+    assert above['over_count'] == 0
+    assert above['inner'] == (-1.5, np.inf)
+    assert srs_points(spec.abscissa, high.ordinate[0], spec.abscissa,
+                      spec.ordinate[0], rule='above_lower')[
+        'inside_count'] == POINTS
     db = np.zeros(POINTS)
     db[0] = -1.6
     one_under = srs_tolerance(spec, measured(spec, db), rule='above_lower')
@@ -373,12 +379,129 @@ def test_a_requirement_that_cannot_be_drawn_is_refused(frequencies, levels,
         ShockSpecification.from_breakpoints(frequencies, levels, '1X+')
 
 
-def test_the_judgement_lives_beside_the_rms_reading():
-    """One module holds both readings of a shock against its
-    requirement, and the RMS one is unchanged by the second."""
-    assert compliance.srs_tolerance is srs_tolerance
-    assert compliance.SRS_INNER_DB == (-1.5, 3.0)
-    assert compliance.SRS_POINTS_PERCENT == 90.0
+@pytest.mark.parametrize('levels, dofs, per_octave, message', [
+    ([[1.0, 1.0], [2.0, 2.0]], '1X+', None, '2 rows of levels for 1 DOF'),
+    ([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]], ['1X+', '1Y+'], None,
+     '3 rows of levels for 2 DOFs'),
+    ([1.0, 1.0], '1X+', 6.5, 'not a whole number'),
+    ([1.0, 1.0], '1X+', 0, 'not a whole number'),
+])
+def test_a_requirement_whose_rows_or_spacing_cannot_be_read_is_refused(
+        levels, dofs, per_octave, message):
+    """Two rows at one DOF would leave the second with no channel, and
+    6.5 to the octave would be read as 6 without a word."""
+    with pytest.raises(ValueError, match=message):
+        ShockSpecification.from_breakpoints([20.0, 2000.0], levels, dofs,
+                                            per_octave=per_octave)
+    assert ShockSpecification.from_breakpoints(
+        [20.0, 2000.0], [[1.0, 1.0], [2.0, 2.0]], ['1X+', '1Y+'],
+        per_octave=6.0).num_records == 2
+
+
+# ---- the quantity -----------------------------------------------------------
+
+
+def test_a_spectrum_of_undeclared_units_is_refused_not_failed():
+    """Held as it came, a spectrum with no units is not in SI, and read
+    against a requirement in g it put every point 20 dB and more under."""
+    spec = requirement()
+    raw = Srs(spec.abscissa, (spec.ordinate[0] / 9.80665)[None],
+              response_dof=['101Z+'], ordinate_dim=['unknown'], q=spec.q)
+    result = srs_tolerance(spec, raw)
+    assert result['points'] == 0
+    assert result['passed'] is None
+    assert 'units of the spectrum are not declared' in result['refused']
+    (_dof, _event, row), = srs_tolerance_all(spec, raw)
+    assert 'not declared' in row['refused']
+
+
+def test_a_spectrum_of_another_quantity_is_refused():
+    """A velocity SRS whose numbers happen to sit on an acceleration
+    requirement is not inside its band."""
+    spec = requirement()
+    velocity = Srs(spec.abscissa, spec.ordinate, response_dof=['101Z+'],
+                   ordinate_dim=['velocity'], q=spec.q)
+    result = srs_tolerance(spec, velocity)
+    assert result['passed'] is None
+    assert result['refused'] == ('the requirement is of acceleration and '
+                                 'the spectrum of velocity; judge a '
+                                 'spectrum of the quantity required')
+
+
+# ---- the requirement's own limits ------------------------------------------
+
+
+def test_a_requirements_limits_are_its_bands_when_none_is_given():
+    """Warning limits at -3/+6 dB and abort at -6/+9: +5 dB everywhere is
+    inside them, where the default -1.5/+3 dB would fail every point,
+    and one point at +10 dB is past the abort limits."""
+    spec = requirement(warning=(-3.0, 6.0), abort=(-6.0, 9.0))
+    db = np.full(POINTS, 5.0)
+    result = srs_tolerance(spec, measured(spec, db))
+    assert result['limits'] is True
+    assert result['inner'] == pytest.approx((-3.0, 6.0))
+    assert result['outer'] == pytest.approx((-6.0, 9.0))
+    assert (result['inside_count'], result['passed']) == (POINTS, True)
+    db[30] = 10.0
+    result = srs_tolerance(spec, measured(spec, db))
+    assert (result['outer_count'], result['passed']) == (1, False)
+    # a band given wins over the limits, and limits=False ignores them
+    given = srs_tolerance(spec, measured(spec, 5.0), inner=(-1.5, 3.0))
+    assert (given['inside_count'], given['outer'][1]) == (0, pytest.approx(9.0))
+    plain = srs_tolerance(spec, measured(spec, db), limits=False)
+    assert (plain['limits'], plain['outer'], plain['inside_count']) == (
+        False, None, 0)
+    assert srs_tolerance(requirement(), measured(spec))['limits'] is False
+
+
+def _stepped_requirement():
+    """A requirement whose warning limits are 0.5 times it below and
+    1.2 times it above under 100 Hz, 3 times it above from 100 Hz up:
+    not a fixed number of dB."""
+    plain = requirement()
+    f = plain.abscissa
+    target = plain.ordinate
+    upper = target * np.where(f < 100.0, 1.2, 3.0)
+    return ShockSpecification(f, target, response_dof=['101Z+'],
+                              ordinate_dim=['acceleration'], q=plain.q,
+                              warning_lower=target * 0.5,
+                              warning_upper=upper)
+
+
+def test_limits_that_vary_along_the_band_are_read_at_each_point():
+    """+5 dB everywhere is over 1.2 times (1.6 dB) and under 3 times
+    (9.5 dB): outside the band below 100 Hz and inside it above."""
+    spec = _stepped_requirement()
+    result = srs_tolerance(spec, measured(spec, 5.0))
+    above = spec.abscissa >= 100.0
+    assert result['inside_count'] == int(above.sum())
+    assert np.array_equal(result['over'], ~above)
+    upper = result['inner'][1]
+    assert np.ndim(upper) == 1
+    assert upper[0] == pytest.approx(20 * np.log10(1.2))
+    assert result['inner'][0] == pytest.approx(20 * np.log10(0.5))
+
+
+def test_the_overlay_draws_the_limits_it_judged_against(qt_app):
+    """A varying limit is drawn as the curve itself, in the plot's
+    units, and named for it."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.srs_tolerance import build_srs_tolerance
+
+    spec = _stepped_requirement()
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        build_srs_tolerance(layout, spec, measured(spec, 5.0))
+        plot = layout.getItem(0, 0)
+        edges = _zone_edges(plot)
+        assert _has_curve(edges, spec.limits['warning_upper'][0] / 9.80665)
+        names = [label.text for _sample, label in plot.legend.items]
+        assert 'outside the warning limits' in names
+        assert plot.titleLabel.text.startswith(
+            '101Z+ against the warning limits;')
+    finally:
+        layout.close()
 
 
 # ---- the overlay -----------------------------------------------------------
@@ -559,12 +682,15 @@ def test_the_legend_counts_what_the_rule_counts():
 # ---- the reading in the window -----------------------------------------------
 
 
-def _shock_pair(window, pump, *spectra):
+def _shock_pair(window, pump, *spectra, bands=None):
     """The requirement and these spectra in the window, selected, on
-    the Points reading."""
+    the Points reading. The requirement's limits are -1.5/+3 dB and
+    -3/+6 dB unless `bands` gives others, or {} for none."""
     from conftest import select_objects
 
-    spec = requirement(warning=(-1.5, 3.0), abort=(-3.0, 6.0))
+    if bands is None:
+        bands = {'warning': (-1.5, 3.0), 'abort': (-3.0, 6.0)}
+    spec = requirement(**bands)
     window.add_object('Requirement', spec)
     names = []
     for k, (db, kind) in enumerate(spectra):
@@ -615,8 +741,9 @@ def test_the_panels_band_and_rule_redraw_the_judgement(window, pump):
     """+5 dB everywhere fails a share of -1.5/+3 dB, passes it with the
     band widened to +6, and passes 'All above lower' outright; the
     rows that do not apply to a rule are not shown."""
-    _shock_pair(window, pump, (5.0, 'maximax'))
+    _shock_pair(window, pump, (5.0, 'maximax'), bands={})
     panel = window.data_pane.srs_tolerance_panel
+    assert not panel.limits_box.isVisibleTo(panel)    # nothing to offer
     assert panel.readout.text().startswith('maximax: 0/92 inside')
     panel.inner_high.setValue(6.0)
     pump()
@@ -642,18 +769,83 @@ def test_the_panels_band_and_rule_redraw_the_judgement(window, pump):
 
 
 def test_the_points_reading_is_journaled_as_its_plot_call(window, pump):
+    """Against the requirement's limits the call names no band; with
+    them set aside it names the panel's bands and says so."""
     _shock_pair(window, pump, (0.0, 'positive'), (-2.0, 'negative'))
     panel = window.data_pane.srs_tolerance_panel
-    panel.set_settings(rule='above_lower', outer=(-3.0, 6.0))
-    pump()
-    lines = [line for line in window.project.journal
-             if line.startswith('visualdynamics.plot.plot_srs_tolerance(')]
-    assert lines == [
+
+    def journaled():
+        return [line for line in window.project.journal
+                if line.startswith('visualdynamics.plot.plot_srs_tolerance(')]
+
+    assert journaled() == [
         ("visualdynamics.plot.plot_srs_tolerance([project['SRS 1'], "
+         "project['SRS 2']], project['Requirement'], channel='101Z+', "
+         "event=None, inner=None, outer=None, rule='share', percent=90.0, "
+         "path='srs_tolerance.png', show=False)")]
+    panel.set_settings(rule='above_lower', outer=(-3.0, 6.0), limits=False)
+    pump()
+    assert journaled()[-1] == (
+        "visualdynamics.plot.plot_srs_tolerance([project['SRS 1'], "
         "project['SRS 2']], project['Requirement'], channel='101Z+', "
-        "event=None, inner=(-1.5, float('inf')), outer=(-3.0, 6.0), "
-        "rule='above_lower', percent=90.0, path='srs_tolerance.png', "
-        'show=False)')]
+        "event=None, inner=(-1.5, 3.0), outer=(-3.0, 6.0), "
+        "rule='above_lower', percent=90.0, limits=False, "
+        "path='srs_tolerance.png', show=False)")
+
+
+def test_the_panel_judges_against_the_requirements_limits(window, pump):
+    """A requirement with -3/+6 dB warning limits: the panel starts on
+    them, the band fields put away and seeded with them, so +5 dB
+    passes as the Spectra reading's shading says it does; set aside,
+    the fields hold -3/+6 and the same verdict follows."""
+    _shock_pair(window, pump, (5.0, 'maximax'),
+                bands={'warning': (-3.0, 6.0)})
+    panel = window.data_pane.srs_tolerance_panel
+    assert panel.limits_box.isVisibleTo(panel)
+    assert panel.limits_box.isChecked()
+    assert not panel.inner_low.isVisibleTo(panel)
+    assert panel.settings()['inner'] is None
+    assert panel.readout.text().startswith(
+        'maximax: 92/92 inside (100.0 %), passes')
+    assert (panel.inner_low.value(), panel.inner_high.value()) == (-3.0, 6.0)
+    panel.limits_box.setChecked(False)
+    pump()
+    assert panel.settings()['inner'] == (-3.0, 6.0)
+    assert panel.readout.text().startswith('maximax: 92/92 inside')
+    # redrawn for the same requirement, the choice made is kept
+    window.render_current()
+    pump()
+    assert not panel.limits_box.isChecked()
+
+
+def test_several_polarities_are_read_by_the_points_rule_alone(window, pump):
+    """The spectra and the bars read one measurement, so with a positive
+    and a negative selected they are not offered: the points rule is
+    shown whatever was chosen last, judges both, and the table holds
+    both polarities' RMS deviations. The choice itself is kept."""
+    from conftest import select_objects
+
+    spec = requirement(warning=(-1.5, 3.0))
+    window.add_object('Requirement', spec)
+    window.add_object('Positive', measured(spec, kind='positive'))
+    window.add_object('Negative', measured(spec, -2.0, kind='negative'))
+    pane = window.data_pane
+    pane.srs_view = 'error'
+    select_objects(window, pump, 'Requirement', 'Positive', 'Negative')
+    assert not pane.srs_actions['curves'].isVisible()
+    assert not pane.srs_actions['error'].isVisible()
+    assert pane.srs_actions['points'].isChecked()
+    assert pane.srs_view == 'error'
+    lines = pane.srs_tolerance_panel.readout.text().splitlines()
+    assert lines[0] == 'positive: 92/92 inside (100.0 %), passes'
+    assert lines[2] == 'negative: 0/92 inside (0.0 %), fails'
+    held = window._replication_holder
+    assert held.channels == ['101Z+ positive', '101Z+ negative']
+    assert held.values[('101Z+ negative', 0)] == pytest.approx(-2.0)
+    # one spectrum with the requirement is offered every reading again
+    select_objects(window, pump, 'Requirement', 'Positive')
+    assert pane.srs_actions['error'].isVisible()
+    assert pane.srs_actions['error'].isChecked()
 
 
 def test_the_points_rule_is_not_offered_for_sine_levels(qt_app):

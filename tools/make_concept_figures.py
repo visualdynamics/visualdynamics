@@ -396,28 +396,40 @@ def shock_check():
     # four decaying tones from 600 Hz to 6 kHz arriving at 20 ms, the
     # ringing a structure answers a pyrotechnic event with. Each is the
     # rate of change of a decaying sine velocity, so the motion it
-    # describes starts and ends at rest, as a structure's does
+    # describes starts and ends at rest, as a structure's does. The
+    # velocity rises over half a millisecond, as sin² of the time since
+    # arrival, so the acceleration starts from zero: tones that started
+    # on a step (590 g, 2026-10-16) left the trapezoid rule half a
+    # sample of it, 1.11 in/s, and the good record ended at 6 % of its
+    # peak for that reason alone
     after = np.clip(t - 0.02, 0.0, None)
+    rise = 0.0005
+    onset = np.where(after < rise, np.sin(np.pi * after / (2 * rise)) ** 2,
+                     1.0)
+    onset_rate = np.where(after < rise, np.pi / (2 * rise)
+                          * np.sin(np.pi * after / rise), 0.0)
 
     def tone(f, level, decay):
         w = 2 * np.pi * f
-        return level * np.exp(-after / decay) * (
-            np.cos(w * after) - np.sin(w * after) / (w * decay))
+        fading = level * np.exp(-after / decay)
+        return (onset * fading * (np.cos(w * after)
+                                  - np.sin(w * after) / (w * decay))
+                + onset_rate * fading * np.sin(w * after) / w)
 
     ringing = sum(tone(f, level, decay)
                   for f, level, decay in ((600.0, 120.0, 0.012),
                                           (1500.0, 200.0, 0.008),
                                           (3000.0, 160.0, 0.005),
-                                          (6000.0, 110.0, 0.003)))
-    ringing = np.where(t >= 0.02, ringing, 0.0) * g
+                                          (6000.0, 110.0, 0.003))) * g
     noise = 0.05 * g * np.random.default_rng(11).standard_normal(t.size)
     shift = np.where(t >= 0.02, 4.0 * g, 0.0)
     for name, values in (('good', ringing + noise),
                          ('shifted', ringing + noise + shift)):
         history = record(values)
         check, = check_shock(history)
-        print(f'{name:>8}: ends at {check.end_velocity / 0.0254:7.2f} in/s, '
-              f'{100 * check.end_velocity_share:5.1f} % of its peak, '
+        print(f'{name:>8}: ends at {check.end_velocity / 0.0254:7.3f} in/s, '
+              f'{100 * check.end_velocity_share:6.2f} % of its peak, '
+              f'peak {np.abs(values).max() / g:.0f} g, '
               f'{"flagged" if check.flagged else "passes"}')
         if name == 'shifted':
             plot_shock_check(history, low=10.0, high=10000.0,
@@ -706,10 +718,8 @@ def replication_fit():
     import numpy as np
 
     from visualdynamics.core.data import TimeHistory
-    from visualdynamics.core.replication_fit import (
-        ShakerRating,
-        replication_fit,
-    )
+    from visualdynamics.core.replication_fit import replication_fit
+    from visualdynamics.core.shaker import ShakerRating
     from visualdynamics.plot import plot_replication_fit
     from visualdynamics.units import IN_LBF_S
 
@@ -767,7 +777,7 @@ def stroke_readout():
                'velocity': float(to_si(70.0, 'in/s')),
                'force': float(to_si(6000.0, 'lbf')),
                'moving_mass': float(to_si(100.0, 'lb')),
-               'mass_ratio': 0.25}
+               'body_mass': float(to_si(400.0, 'lb'))}
     reading = read_stroke(pulse, **ratings)
     for line in reading.describe(DEFAULT_SYSTEM):
         print(f'  {line}')

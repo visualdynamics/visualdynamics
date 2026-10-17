@@ -27,6 +27,7 @@ from visualdynamics.core.signature import (
     as_modes,
     compare_signatures,
     find_modes,
+    matching_record,
     mode_windows,
     read_peak,
     signature_shifts,
@@ -157,6 +158,23 @@ def test_a_shift_on_a_limits_edge_is_inside():
     assert past.passed is False
 
 
+def test_a_shift_on_a_limits_lower_edge_is_inside():
+    """The curve after 20 percent lower and 5 percent lower in
+    frequency: the amplitude shift computes as -19.999999999999996 and
+    the frequency shift as -4.999999999999993, on both lower edges, and
+    inside; a hair further down in height is outside."""
+    m = np.abs(transmissibility(F, BEFORE))
+    on = signature_shifts(F, m, 0.8 * m, [84.0], after_frequencies=0.95 * F)
+    shift = on.shifts[0]
+    assert shift.frequency_shift == pytest.approx(-5.0, abs=1e-9)
+    assert shift.amplitude_shift == pytest.approx(-20.0, abs=1e-9)
+    assert shift.frequency_inside and shift.amplitude_inside
+    past = signature_shifts(F, m, 0.7999 * m, [84.0],
+                            after_frequencies=0.95 * F).shifts[0]
+    assert past.frequency_inside and not past.amplitude_inside
+    assert past.passed is False
+
+
 def test_a_limit_written_as_a_pair_holds_a_drop_and_a_rise_apart():
     """A plan that allows a 30 percent drop in height but only a 10
     percent rise passes the worked case, and fails the same article
@@ -209,6 +227,15 @@ def test_modes_are_read_from_numbers_pairs_named_modes_and_shape_sets():
         as_modes([0.0])
 
 
+def test_a_shape_sets_rigid_body_mode_is_left_out():
+    """A free-free fit holds a mode at 0 Hz, which has no peak to
+    compare: the shape set names the others."""
+    class Shapes:
+        frequency = np.array([0.0, 412.0, 84.0])
+
+    assert as_modes(Shapes()) == [SignatureMode(84.0), SignatureMode(412.0)]
+
+
 def test_a_window_stops_halfway_to_the_next_mode_named():
     """A fifth either side, cut at the geometric mean of two
     neighbors, so two modes named close together are read apart."""
@@ -235,6 +262,107 @@ def test_a_peak_outside_its_window_is_said_to_be():
     assert any('window\'s edge' in note for note in reading.notes)
 
 
+def test_a_top_placed_outside_its_window_is_said_to_be():
+    """Two modes named at 100 and 110 Hz, the first moved to 106 after
+    the test: its window stops at 104.9 Hz, the tallest line is on that
+    edge, and the top placed between lines lands at 105 Hz, past it."""
+    m = np.abs(transmissibility(F, [(100.0, 30.0, 0.5), (110.0, 30.0, 0.5)]))
+    moved = np.abs(transmissibility(F, [(106.0, 30.0, 0.5),
+                                        (110.0, 30.0, 0.5)]))
+    first = signature_shifts(F, m, moved, [100.0, 110.0]).shifts[0]
+    assert first.after.frequency == 105.0
+    assert first.window[1] == pytest.approx(104.88, abs=0.01)
+    assert first.after.notes == (
+        ("the tallest line between 80 and 104.9 Hz is on the window's "
+         'edge, at 104.8 Hz: the peak there may be outside the window, and '
+         'its top, placed between lines, is at 105 Hz, outside it'),)
+
+
+def test_two_modes_read_on_one_peak_are_said_to_be():
+    """The same pair: after the test the second mode's window holds the
+    first mode's peak, taller than its own, and reads a shift of -4.1
+    percent that passes; the shift is not the second mode's, and both
+    modes say they were read on one peak."""
+    m = np.abs(transmissibility(F, [(100.0, 30.0, 0.5), (110.0, 30.0, 0.5)]))
+    moved = np.abs(transmissibility(F, [(106.0, 30.0, 0.5),
+                                        (110.0, 30.0, 0.5)]))
+    result = signature_shifts(F, m, moved, [100.0, 110.0])
+    second = result.shifts[1]
+    assert round(second.frequency_shift, 1) == -4.1
+    assert second.passed is True
+    assert second.notes == (
+        ('after the test: read on the same peak as 100 Hz, which tops at '
+         '105.7 Hz'),)
+    assert result.shifts[0].notes[-1] == (
+        'after the test: read on the same peak as 110 Hz, which tops at '
+        '105.7 Hz')
+    assert result.notes[-1] == (
+        '110 Hz, after the test: read on the same peak as 100 Hz, which '
+        'tops at 105.7 Hz')
+    assert len(result.notes) == 3
+    assert result.describe() == (
+        'fails: 1 of 2 modes that count flagged; 3 notes')
+    # read apart before the test, so nothing is said of it there
+    assert not any('before' in note for note in result.notes)
+
+
+def test_a_mode_moved_out_of_its_window_carries_its_note_to_the_comparison():
+    """100 Hz moved to 75, past the window's low end at 80: the reading
+    after is the window's edge, a shift of -20 percent where the mode
+    moved 25, and the comparison says so rather than reading clean."""
+    m = np.abs(transmissibility(F, [(100.0, 30.0, 1.0)]))
+    moved = np.abs(transmissibility(F, [(75.0, 30.0, 1.0)]))
+    result = signature_shifts(F, m, moved, [100.0])
+    assert round(result.shifts[0].frequency_shift) == -20
+    assert result.notes == (
+        ("100 Hz, after the test: the tallest line between 80 and 120 Hz is "
+         "on the window's edge, at 80 Hz: the peak there may be outside the "
+         'window'),)
+    assert result.describe().endswith('; 1 note')
+    records = compare_signatures(
+        Spectrum(F, m[None], response_dof=['101X+']),
+        Spectrum(F, moved[None], response_dof=['101X+']), [100.0])
+    assert records.notes == result.notes
+
+
+def test_a_line_with_no_value_in_the_window_is_said():
+    """A NaN on the peak's flank is read as no part of it, and said: the
+    crossing beside it is placed at the last line read."""
+    m = np.abs(transmissibility(F, BEFORE))
+    m[np.argmin(np.abs(F - 83.0))] = np.nan
+    reading = read_peak(F, m, (70.0, 100.0))
+    assert reading.low == 83.25
+    assert reading.notes == (
+        ('1 line between 70 and 100 Hz holds no value (NaN or infinite) '
+         'and is read as no part of the peak'),)
+    m[np.argmin(np.abs(F - 90.0))] = np.inf
+    assert read_peak(F, m, (70.0, 100.0)).notes[0].startswith(
+        '2 lines between 70 and 100 Hz hold no value')
+
+
+def test_a_window_with_nothing_above_zero_is_refused():
+    """A curve before the test that is zero across the mode's window has
+    no peak, and its height of zero would divide the amplitude shift."""
+    zero = np.abs(transmissibility(F, BEFORE))
+    zero[(F >= 60.0) & (F <= 110.0)] = 0.0
+    with pytest.raises(ValueError, match='no line there stands above zero'):
+        signature_shifts(F, zero, np.abs(transmissibility(F, AFTER)), [84.0])
+
+
+def test_signatures_of_different_quantities_are_refused():
+    """An accelerance against a transmissibility: the heights are not
+    one scale, and the amplitude shift would be a number of nothing."""
+    accelerance = Frf(F, transmissibility(F, AFTER)[None],
+                      response_dof=['101X+'], reference_dof=['1X+'],
+                      ordinate_dim=['acceleration/force'])
+    with pytest.raises(ValueError, match='acceleration/acceleration and the '
+                       'one after is acceleration/force'):
+        compare_signatures(signature(BEFORE), accelerance, MODES)
+    # a record with undeclared units is taken as the other's
+    level = signature(AFTER, cls=Spectrum)
+    assert compare_signatures(signature(BEFORE), level, MODES).passed is False
+
+
 def test_a_window_with_no_line_in_it_is_refused():
     with pytest.raises(ValueError, match='no line of the curve'):
         compare_signatures(signature(BEFORE), signature(AFTER),
@@ -247,7 +375,9 @@ def test_a_peak_with_no_half_power_crossing_reads_no_q():
     m = np.abs(transmissibility(F, BEFORE))[keep]
     reading = read_peak(F[keep], m, (70.0, 85.0))
     assert reading.high is None and reading.q is None
-    assert any('half-power' in note for note in reading.notes)
+    assert reading.notes == (
+        ('the curve ends at 85 Hz before falling to half power above the '
+         'peak at 84 Hz; no width or Q is read'),)
 
 
 def test_a_tracked_sweep_on_an_uneven_axis_reads_the_worked_case():
@@ -284,6 +414,19 @@ def test_the_record_after_is_the_one_at_the_same_dof():
     assert result.passed is False                # read at 101X+, not 202X+
     forced = compare_signatures(before, after, MODES, after_record=0)
     assert forced.passed is True
+
+
+def test_with_no_record_at_the_same_dof_the_same_index_is_compared():
+    before = signature(BEFORE, dof='101X+')
+    after = signature(AFTER, dof='303X+')
+    assert matching_record(before, 0, after) == 0
+    assert compare_signatures(before, after, MODES).passed is False
+    two = Frf(F, np.vstack([transmissibility(F, BEFORE)] * 2),
+              response_dof=['101X+', '102X+'], reference_dof=['1X+'] * 2,
+              ordinate_dim=['acceleration/acceleration'] * 2)
+    with pytest.raises(ValueError, match=r'no record at 102X\+ and no '
+                       'record 1'):
+        matching_record(two, 1, after)
 
 
 # ---- finding the modes -------------------------------------------------------
@@ -324,6 +467,28 @@ def test_the_modes_a_modal_fit_confirmed_can_be_compared():
     result = compare_signatures(project['Before'], project['After'], shapes)
     assert [round(s.before.frequency) for s in result.shifts] == [84, 412]
     assert [s.verdict for s in result.shifts] == ['flag', 'flag']
+
+
+def test_a_peak_inside_the_width_of_one_taken_is_the_same_mode():
+    """A ripple on the flank of a broad mode, inside its half-power
+    width, is a local peak and stands out from its surroundings; it is
+    the same mode, and is passed over. (The broad mode's top reads 99
+    Hz: a Q of 5 sits that far below its natural frequency.)"""
+    broad = np.abs(transmissibility(F, [(100.0, 5.0, 1.0)]))
+    ripple = broad * (1.0 + 0.1 * np.exp(-0.5 * ((F - 106.0) / 0.4) ** 2))
+    curve = Spectrum(F, ripple[None], response_dof=['101X+'])
+    i = int(np.argmin(np.abs(F - 106.0)))
+    assert ripple[i] > ripple[i - 1] and ripple[i] > ripple[i + 1]
+    assert [round(f) for f in find_modes(curve, count=2)] == [99]
+
+
+def test_the_modes_are_found_within_bounds():
+    """Bounds leave out a peak outside them, given either way round."""
+    curve = signature(BEFORE)
+    assert [round(f) for f in find_modes(curve, bounds=(600.0, 200.0))] == [
+        412]
+    assert [round(f) for f in find_modes(curve, bounds=(50.0, 100.0))] == [84]
+    assert find_modes(curve, bounds=(500.0, 1000.0)) == []
 
 
 def test_a_curve_with_no_peak_finds_none():
@@ -380,6 +545,7 @@ def test_the_view_draws_a_window_on_each_mode_and_says_its_verdict(qt_app):
         assert table.is_signature_table
         assert 'not judged' in table.text and '−27.6 %' in table.text
         assert 'fails: 1 of 1 mode that counts flagged' in table.text
+        assert 'height before, after [g/g]' in table.text
     finally:
         layout.close()
 
@@ -427,7 +593,7 @@ def test_the_signature_is_a_reading_of_two_frfs(window, pump):
     assert panel.readout.text().splitlines()[:4] == [
         '84 Hz: flag',
         '  84.0 to 81.2 Hz, −3.3 %',
-        '  height 18.0 to 13.0, −27.6 %',
+        '  height 18.0 to 13.0 g/g, −27.6 %',
         '  Q 21.1 to 15.2']
     assert window._status_text == (
         'Before before, After after, at 101X+ (modes found): '
@@ -538,3 +704,72 @@ def test_the_event_box_picks_the_point_compared(window, pump):
     pump()
     assert 'at 202X+' in window._status_text
     assert pane.signature_panel.derived['verdict'].text() == 'passes'
+
+
+def test_a_readings_notes_are_in_the_panel_the_status_and_the_table(
+        window, pump):
+    """The mode named at 100 Hz moved to 75, out of its window: the
+    panel lists the note under the mode, the status line carries it
+    after the verdict, and the table the view draws ends with it."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.signature import build_signature
+
+    note = ("100 Hz, after the test: the tallest line between 80 and 120 Hz "
+            "is on the window's edge, at 80 Hz: the peak there may be "
+            'outside the window')
+    panel = _signatures(window, pump, before=[(100.0, 30.0, 1.0)],
+                        after=[(75.0, 30.0, 1.0)])
+    panel.set_settings(modes='100')
+    pump()
+    assert panel.readout.text().splitlines()[4] == (
+        '  after the test: ' + note.split('after the test: ')[1])
+    assert window._status_text == (
+        'Before before, After after, at 101X+: fails: 1 of 1 mode that '
+        f'counts flagged; 1 note. {note}')
+    layout = pg.GraphicsLayoutWidget()
+    try:
+        build_signature(layout, signature([(100.0, 30.0, 1.0)]),
+                        signature([(75.0, 30.0, 1.0)]), [100.0])
+        assert layout.getItem(0, 1).text.endswith(
+            '<br/>' + note.replace("'", '&#x27;') + '</span>')
+    finally:
+        layout.close()
+
+
+def test_signatures_of_different_quantities_say_why_in_the_window(
+        window, pump):
+    from conftest import select_objects
+
+    window.add_object('Before', signature(BEFORE))
+    window.add_object('After', Frf(F, transmissibility(F, AFTER)[None],
+                                   response_dof=['101X+'],
+                                   reference_dof=['1X+'],
+                                   ordinate_dim=['acceleration/force']))
+    select_objects(window, pump, 'Before', 'After')
+    window.data_pane.signature_action.trigger()
+    pump()
+    panel = window.data_pane.signature_panel
+    assert panel.derived['verdict'].text() == '—'
+    assert window._status_text == (
+        'Signature: the signature before is acceleration/acceleration and '
+        'the one after is acceleration/force: two signatures of one '
+        'quantity are compared')
+
+
+def test_a_new_pair_clears_the_modes_named_for_the_last(window, pump):
+    """Modes typed for one article are not carried to the next pair
+    selected: its own are found, and the peak count is offered again."""
+    from conftest import select_objects
+
+    panel = _signatures(window, pump)
+    panel.set_settings(modes='84, (412)')
+    pump()
+    assert panel.names['find'].text() == 'Peaks found'
+    assert not panel.find_box.isVisibleTo(panel)
+    window.add_object('Again', signature(AFTER))
+    select_objects(window, pump, 'Before', 'Again')
+    pump()
+    assert panel.modes_edit.text() == ''
+    assert panel.find_box.isVisibleTo(panel)
+    assert '(modes found)' in window._status_text

@@ -41,7 +41,12 @@ that moves out of its window between the two signatures is read as
 whatever peak is tallest in the window after; the window is wide (a
 fifth of the frequency either side by default) and is narrowed to stop
 halfway, on a log scale, to the next mode named, so two modes named
-are never read as one.
+are never read as one. What a reading cannot be trusted for is said in
+its notes, and the comparison gathers them: a peak on its window's
+edge, a top placed outside the window, lines that hold no value, a
+half-power width that cannot be read, and two modes read on one peak.
+Two signatures of different quantities (an accelerance and a
+transmissibility) are refused, since their heights are not one scale.
 
 References
 ----------
@@ -82,10 +87,6 @@ SEARCH = 0.2
 #: floating point, and a shift on the edge is inside
 EDGE_PERCENT = 1e-9
 
-#: 1/sqrt(2): the half-power level as a share of the peak
-HALF_POWER = 1.0 / np.sqrt(2.0)
-
-
 @dataclass(frozen=True)
 class SignatureMode:
     """A mode named for the comparison: a frequency near it, and
@@ -113,9 +114,9 @@ class PeakReading:
     """One mode read off one curve: the peak's frequency and height,
     and its half-power crossings.
 
-    `low` and `high` are None where the curve ends before it falls to
-    0.707 of the peak on that side, and `q` is then None. `notes` says
-    what the reading cannot be trusted for, as text.
+    `low` and `high` are None where no half-power crossing can be read
+    on that side, and `q` is then None. `notes` says what the reading
+    cannot be trusted for, as text.
     """
 
     frequency: float
@@ -139,7 +140,10 @@ class ModeShift:
     The shifts are in percent of the reading before the test, negative
     for a drop. The limits are (below, above) in percent, as the
     comparison was made with them. `passed` is None for a mode that
-    does not count, which is reported and not judged.
+    does not count, which is reported and not judged. `notes` holds the
+    two readings' notes, each said 'before the test' or 'after the
+    test', and a note when this mode is read on the same peak as
+    another.
     """
 
     mode: SignatureMode
@@ -148,6 +152,7 @@ class ModeShift:
     after: PeakReading
     frequency_limit: tuple[float, float]
     amplitude_limit: tuple[float, float]
+    notes: tuple[str, ...] = ()
 
     @property
     def frequency_shift(self) -> float:
@@ -217,7 +222,8 @@ class SignatureComparison:
 
     `shifts` holds one `ModeShift` per mode, in ascending frequency.
     `dof` names the record compared when the comparison was of records,
-    and is empty for plain arrays.
+    and is empty for plain arrays. `notes` gathers every mode's notes,
+    each led by the mode's label.
     """
 
     shifts: tuple[ModeShift, ...]
@@ -246,10 +252,14 @@ class SignatureComparison:
 
     def describe(self) -> str:
         """The verdict in one line: 'fails: 1 of 1 mode that counts
-        flagged; 1 not judged'."""
+        flagged; 1 not judged', and how many notes the readings carry
+        ('; 2 notes')."""
         judged, flagged = len(self.judged), len(self.flagged)
         others = len(self.shifts) - judged
         tail = f'; {others} not judged' if others else ''
+        if self.notes:
+            count = len(self.notes)
+            tail += f'; {count} note' if count == 1 else f'; {count} notes'
         if not judged:
             return f'no mode counts{tail}'
         verdict = 'passes' if not flagged else 'fails'
@@ -285,10 +295,13 @@ def as_modes(modes: Any) -> list[SignatureMode]:
     Each may be a `SignatureMode`, a frequency in Hz (a mode that
     counts), or a (frequency, counts) pair. A shape set (anything with a
     `frequency` array, as the modal fit makes) names every mode it
-    holds, all counting.
+    holds, all counting, except a rigid-body mode at 0 Hz, which has no
+    peak to compare and is left out. A mode named by number at a
+    frequency that is not positive is refused.
     """
     if hasattr(modes, 'frequency') and not isinstance(modes, SignatureMode):
-        modes = [float(f) for f in np.atleast_1d(modes.frequency)]
+        modes = [float(f) for f in np.atleast_1d(modes.frequency)
+                 if float(f) > 0.0]
     elif isinstance(modes, (SignatureMode, int, float, np.floating)):
         modes = [modes]
     out = []
@@ -335,35 +348,23 @@ def mode_windows(modes: Sequence[SignatureMode],
     return out
 
 
-def _crossings(f: np.ndarray, m: np.ndarray, index: int,
-               level: float) -> tuple[float | None, float | None]:
-    """Where the curve first falls below `level` on each side of line
-    `index`, interpolated linearly; None where it never does."""
-    def side(step: int) -> float | None:
-        i = index
-        while 0 <= i + step < len(m):
-            if m[i + step] < level:
-                fraction = (m[i] - level) / (m[i] - m[i + step])
-                return float(f[i] + fraction * (f[i + step] - f[i]))
-            i += step
-        return None
-
-    return side(-1), side(+1)
-
-
 def read_peak(frequencies: ArrayLike, magnitude: ArrayLike,
               within: tuple[float, float]) -> PeakReading:
     """The tallest peak inside a band, read by its top and its
     half-power width.
 
-    The peak is the tallest line between `within`'s two frequencies.
-    Its top is placed between lines by the parabola through the
-    logarithms of that line and its two neighbors, fitted in local
-    frequency so an uneven axis (a tracked sweep's) is honored, and
-    the two crossings of 0.707 of that height are interpolated
-    linearly, on the whole curve, not only inside the band. A tallest
-    line on the band's edge is a peak outside it still rising, and the
-    reading says so in its notes.
+    The reading is `core.half_power.read_half_power`'s for the band:
+    the peak is the tallest line between `within`'s two frequencies,
+    its top is placed between lines by the parabola through the
+    logarithms of that line and its two neighbors, and the two
+    crossings of 0.707 of that height are interpolated linearly, on the
+    whole curve, not only inside the band. Its notes are kept, and
+    three more are said here. A tallest line on the band's edge is a
+    peak outside it still rising. A top placed outside the band, which
+    a peak on the edge can have, is a reading of something outside the
+    window. A line that holds no value (NaN or infinite) is no part of
+    the peak, and one inside the band or between the crossings is
+    said, since the top or a crossing beside it is placed without it.
 
     Parameters
     ----------
@@ -382,41 +383,64 @@ def read_peak(frequencies: ArrayLike, magnitude: ArrayLike,
     Raises
     ------
     ValueError
-        When no line of the curve lies inside the band.
+        When no line of the curve lies inside the band, or no line
+        there stands above zero, so there is no peak to read.
     """
-    # The half-power reading proper (`read_half_power`, with its
-    # warnings about resolution) is offered separately; this is the
-    # least of it the comparison needs, kept to the same rules so the
-    # two read a peak alike: the log parabola through the top, and
-    # linear crossings from the tallest line outward.
+    from .half_power import read_half_power
+
     f = np.asarray(frequencies, dtype=np.float64).ravel()
     m = np.abs(np.asarray(magnitude)).astype(np.float64).ravel()
-    m = np.where(np.isfinite(m), m, 0.0)
     low, high = sorted(float(v) for v in within)
     band = np.flatnonzero((f >= low) & (f <= high))
     if not len(band):
         raise ValueError(f'no line of the curve lies between {low:.4g} and '
                          f'{high:.4g} Hz')
-    i = int(band[np.argmax(m[band])])
-    peak, height = float(f[i]), float(m[i])
+    finite = np.isfinite(m)
+    # a band of zeros (or of lines that hold no value) has no peak, and
+    # a height of zero before the test would divide the amplitude shift
+    if not np.any(finite[band] & (m[band] > 0.0)):
+        raise ValueError(f'no peak can be read between {low:.4g} and '
+                         f'{high:.4g} Hz: no line there stands above zero')
+    # the tallest line as read_half_power finds it, a line with no value
+    # never the tallest, for the edge note
+    i = int(band[np.argmax(np.where(finite, m, -np.inf)[band])])
+    reading = read_half_power(f, m, f[i], within=(low, high), warn=False)
     notes = []
-    if 0 < i < len(m) - 1 and np.all(m[i - 1:i + 2] > 0.0):
-        x = f[i - 1:i + 2] - f[i]
-        a, b, c = np.polyfit(x, np.log(m[i - 1:i + 2]), 2)
-        if a < 0.0:
-            vertex = float(np.clip(-b / (2.0 * a), x[0], x[2]))
-            peak = float(f[i] + vertex)
-            height = float(np.exp(np.polyval((a, b, c), vertex)))
+    outside = not low <= reading.frequency <= high
     if i in (band[0], band[-1]) and len(band) > 1:
-        notes.append(f'the tallest line between {low:.4g} and {high:.4g} Hz '
-                     f'is on the window\'s edge, at {f[i]:.4g} Hz: the peak '
-                     'there may be outside the window')
-    level = height * HALF_POWER
-    below, above = (None, None) if level > m[i] else \
-        _crossings(f, m, i, level)
-    if below is None or above is None:
-        notes.append(f'no half-power width can be read at {peak:.4g} Hz')
-    return PeakReading(peak, height, below, above, tuple(notes))
+        note = (f'the tallest line between {low:.4g} and {high:.4g} Hz '
+                f'is on the window\'s edge, at {f[i]:.4g} Hz: the peak '
+                'there may be outside the window')
+        if outside:
+            note += (f', and its top, placed between lines, is at '
+                     f'{reading.frequency:.4g} Hz, outside it')
+        notes.append(note)
+    elif outside:
+        notes.append(f'the top, placed between lines, is at '
+                     f'{reading.frequency:.4g} Hz, outside the window '
+                     f'{low:.4g} to {high:.4g} Hz')
+    # what the reading touched: the band, and out to the crossings
+    span_low = low if reading.low is None else min(low, reading.low)
+    span_high = high if reading.high is None else max(high, reading.high)
+    unread = int(np.count_nonzero(~finite & (f >= span_low)
+                                  & (f <= span_high)))
+    if unread:
+        lines, hold, are = (('line', 'holds', 'is') if unread == 1
+                            else ('lines', 'hold', 'are'))
+        notes.append(f'{unread} {lines} between {span_low:.4g} and '
+                     f'{span_high:.4g} Hz {hold} no value (NaN or infinite) '
+                     f'and {are} read as no part of the peak')
+    return PeakReading(reading.frequency, reading.height, reading.low,
+                       reading.high, tuple(notes) + reading.notes)
+
+
+def _top_line(f: np.ndarray, m: np.ndarray, frequency: float) -> float:
+    """The top of the peak a reading at `frequency` sits on, found by
+    climbing uphill from the nearest line: two readings with the same
+    top are on one peak."""
+    from .half_power import read_half_power
+
+    return read_half_power(f, m, frequency, warn=False).frequency
 
 
 def signature_shifts(frequencies: ArrayLike, before: ArrayLike,
@@ -459,15 +483,16 @@ def signature_shifts(frequencies: ArrayLike, before: ArrayLike,
     Returns
     -------
     SignatureComparison
-        One `ModeShift` per mode, and the verdict over the modes that
-        count.
+        One `ModeShift` per mode, the verdict over the modes that
+        count, and the readings' notes.
 
     Raises
     ------
     ValueError
         For a limit that does not hold zero, a mode at a frequency that
         is not positive, curves whose lengths do not match their
-        frequencies, or a mode's window with no line of a curve in it.
+        frequencies, or a mode's window with no line of a curve in it or
+        no line above zero.
     """
     f_limit = _limit('frequency', frequency_limit)
     a_limit = _limit('amplitude', amplitude_limit)
@@ -487,12 +512,32 @@ def signature_shifts(frequencies: ArrayLike, before: ArrayLike,
         order = np.argsort(x, kind='stable')
         curves.append((x[order], y[order]))
     named = as_modes(modes)
-    shifts = []
-    for mode, window in zip(named, mode_windows(named, search)):
-        readings = [read_peak(x, y, window) for x, y in curves]
-        shifts.append(ModeShift(mode, window, readings[0], readings[1],
-                                f_limit, a_limit))
-    return SignatureComparison(tuple(shifts), f_limit, a_limit)
+    windows = mode_windows(named, search)
+    readings = [[read_peak(x, y, window) for x, y in curves]
+                for window in windows]
+    notes: list[list[str]] = [
+        [f'{when} the test: {note}'
+         for when, reading in zip(('before', 'after'), pair)
+         for note in reading.notes] for pair in readings]
+    # two modes read on one peak: a mode that has moved into its
+    # neighbor's window is read as the neighbor, or the neighbor as it,
+    # and neither shift is the mode's own. Said, on both modes.
+    for side, (when, (x, y)) in enumerate(zip(('before', 'after'), curves)):
+        tops = [_top_line(x, y, pair[side].frequency) for pair in readings]
+        for k, top in enumerate(tops):
+            for j, other in enumerate(tops):
+                if j != k and other == top:
+                    notes[k].append(
+                        f'{when} the test: read on the same peak as '
+                        f'{named[j].label()}, which tops at {top:.4g} Hz')
+    shifts = tuple(
+        ModeShift(mode, window, pair[0], pair[1], f_limit, a_limit,
+                  tuple(said))
+        for mode, window, pair, said in zip(named, windows, readings, notes))
+    return SignatureComparison(
+        shifts, f_limit, a_limit,
+        notes=tuple(f'{s.mode.label()}, {note}' for s in shifts
+                    for note in s.notes))
 
 
 def matching_record(data: Any, record: int, other: Any) -> int:
@@ -532,7 +577,10 @@ def compare_signatures(before: Any, after: Any, modes: Any, *,
     index when there is none. The comparison itself is
     `signature_shifts`'s, which says how each mode is read and judged;
     `find_modes` names the modes from the curve before when the test
-    plan does not.
+    plan does not. The two records must be of one quantity: an
+    accelerance and a transmissibility are not one scale, and a pair
+    whose declared dimensions differ is refused. A record whose units
+    are undeclared is taken as the other's.
 
     Parameters
     ----------
@@ -552,9 +600,23 @@ def compare_signatures(before: Any, after: Any, modes: Any, *,
     SignatureComparison
         One `ModeShift` per mode, the verdict, and `dof`, the record's
         response DOF.
+
+    Raises
+    ------
+    ValueError
+        For the two records' declared dimensions differing, and for
+        anything `signature_shifts` refuses.
     """
+    from ..units import UNKNOWN
+
     if after_record is None:
         after_record = matching_record(before, record, after)
+    dims = (str(before.ordinate_dim[record]),
+            str(after.ordinate_dim[after_record]))
+    if UNKNOWN not in dims and dims[0] != dims[1]:
+        raise ValueError(f'the signature before is {dims[0]} and the one '
+                         f'after is {dims[1]}: two signatures of one '
+                         'quantity are compared')
     result = signature_shifts(
         before.abscissa, np.atleast_2d(before.ordinate)[record],
         np.atleast_2d(after.ordinate)[after_record], modes,
@@ -563,7 +625,8 @@ def compare_signatures(before: Any, after: Any, modes: Any, *,
         search=search)
     return SignatureComparison(result.shifts, result.frequency_limit,
                                result.amplitude_limit,
-                               dof=str(before.response_dof[record]))
+                               dof=str(before.response_dof[record]),
+                               notes=result.notes)
 
 
 def find_modes(data: Any, record: int = 0, count: int = 2, *,
@@ -601,6 +664,7 @@ def find_modes(data: Any, record: int = 0, count: int = 2, *,
         The peaks' frequencies in Hz, placed between lines, ascending.
         Fewer than `count` when the curve has fewer peaks.
     """
+    from .half_power import HALF_POWER, crossings, read_half_power
     from .modal_fit import prominence, prominence_window
 
     f = np.asarray(data.abscissa, dtype=np.float64)
@@ -622,9 +686,14 @@ def find_modes(data: Any, record: int = 0, count: int = 2, *,
         i = peaks[int(k)]
         if any(lo <= f[i] <= hi for _f, lo, hi in taken):
             continue
-        reading = read_peak(f, m, (f[i], f[i]))
-        lo, hi = _crossings(f, m, i, m[i] * HALF_POWER)
-        taken.append((reading.frequency,
+        top = read_half_power(f, m, f[i], within=(f[i], f[i]),
+                              warn=False).frequency
+        # the width a neighbor is passed over inside is measured down
+        # from the line, not the top placed between lines: a top that
+        # stands more than 3 dB over its line would give no crossing,
+        # and a width of the whole curve would pass over every peak
+        lo, hi = crossings(f, m, i, m[i] * HALF_POWER)
+        taken.append((top,
                       f[0] if lo is None else lo,
                       f[-1] if hi is None else hi))
     return sorted(frequency for frequency, _lo, _hi in taken)

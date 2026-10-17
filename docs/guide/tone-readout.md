@@ -40,8 +40,8 @@ name = project.compute_psds('Run')
 asd = project[name]
 reading = asd.read_tone(19.44, window=project.averaging_of(name))
 reading.amplitude / 9.80665          # 1.942, the tone in g peak
-reading.spike / 9.80665 ** 2         # 0.978, the spike in g²/Hz
-reading.on_line / 9.80665 ** 2       # 1.258, its height were it on a line
+reading.spike / 9.80665  2         # 0.978, the spike in g²/Hz
+reading.on_line / 9.80665  2       # 1.258, its height were it on a line
 reading.offset                       # 0.44 of a line off the nearest
 print(reading.describe('g', 1 / 9.80665))
 # 19.44 Hz: 1.94 g peak; its spike 0.978 g²/Hz (1.26 on a line) is not the tone
@@ -118,8 +118,9 @@ with the notes under them. The status line says the same in one line.
 The window is the one the PSD's averaging recorded when the PSD was
 computed (the pane says "the averaging"). A PSD that was imported
 carries none, and is read as Hann, the pane saying "assumed". Another
-window can be chosen in the pane, and the tone is read again under it;
-the choice is kept for that PSD. The reading is of one record, the
+window can be chosen in the pane, with its alpha or beta for a Tukey
+or Kaiser window, and the tone is read again under it; the choice is
+kept for that PSD. The reading is of one record, the
 first on the plot: pick a channel in the tree to read another. While
 the tones are read the plot stays flat, because the cursor works on the
 flat spectrum's lines.
@@ -133,23 +134,25 @@ Each note is warned as a `ToneWarning` from a script and listed in the
 pane, and a reading whose amplitude it bears on is marked `uncertain`
 (the plot's words say so):
 
-- **A tone between lines.** Its spike reads short, by the share the
+- A tone between lines. Its spike reads short, by the share the
   note gives. The amplitude does not move, so this one leaves the
   reading certain; the plot says "between lines".
-- **A tone at the edge of the floor's band.** A line beside the tone
+- A tone at the edge of the floor's band. A line beside the tone
   reads far under the floor, so there is no floor under the tone to
   take away.
-- **A floor that differs either side.** The floor under the tone is a
+- A floor that differs either side. The floor under the tone is a
   guess between the two.
-- **Another spike among the tone's lines.** Two tones closer than the
+- Another spike among the tone's lines. Two tones closer than the
   window's main lobe are summed together. Finer lines or a narrower
   window part them; under the flat top at 4 Hz lines, tones 19.44 Hz
   apart cannot be parted.
-- **Nothing standing clear of the floor.** No tone, or one too small
+- Nothing standing clear of the floor. No tone, or one too small
   for this spacing: the 0.12 g tone above at 4 Hz lines.
+- Lines that hold no number. A line of the record that is not a
+  number is read as zero, and one among the tone's lines or its floor's
+  makes the reading uncertain. A record with no number in it is not
+  read at all.
 
-The width of the region left out of a floor reading around each tone,
-in a mixed random and sine test, is the same question from the other
-side ([The random and sine workflow](workflows/mixed-workflow.md)):
-a tone's leakage reaches across the window's main lobe, two lines either
-side under Hann, and lines inside it are not floor.
+A note that names a density gives it in the units the reading is shown
+in: SI from a script, as the spectrum is stored, and the display units
+in the pane.

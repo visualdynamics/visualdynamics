@@ -4708,6 +4708,8 @@ class Project(dict):
          'from visualdynamics.core.sine import SineExtraction'),
         ('Truncation(', 'from visualdynamics.core.truncate import Truncation'),
         ('Shock(', 'from visualdynamics.core.shocks import Shock'),
+        ('Segment(',
+         'from visualdynamics.core.replication_segments import Segment'),
         ('Photos(', 'from visualdynamics.core.photos import Photos'),
         ('MassProperties(',
          'from visualdynamics.core.rigid import MassProperties'),
@@ -4717,6 +4719,8 @@ class Project(dict):
         ('np.array(', 'import numpy as np'),
         ('visualdynamics.viz.scalogram.',
          'import visualdynamics.viz.scalogram'),
+        ('visualdynamics.core.sweep_rate.',
+         'import visualdynamics.core.sweep_rate'),
         ('GroupProperties(',
          ('from visualdynamics.core.fem import RIGID, GroupProperties, '
           'Material, Section')),

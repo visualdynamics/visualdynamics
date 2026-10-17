@@ -17,7 +17,9 @@ over acceleration), or the level a tracked sine sweep reads. The
 signature before and the signature after are measured the same way:
 the same level, the same channels, the same resolution or sweep rate.
 They do not have to share their frequency lines, and a sweep read
-downward is read the same as one read upward.
+downward is read the same as one read upward. They do have to be of one
+quantity: an accelerance compared with a transmissibility is refused,
+since the two heights are not on one scale.
 
 The modes compared are named by a frequency near each, and by whether
 each one counts. The modes that count are usually the global modes, in
@@ -37,12 +39,21 @@ still reported, with its shifts, and is not judged.
    window. Its top is placed between lines by a parabola through the
    logarithms of that line and its two neighbors, and its Q is read
    from the half-power width, the two crossings of 0.707 of the top.
+   It is the same reading as [the half-power readout](half-power.md).
 3. The shifts. The frequency shift and the amplitude shift are in
    percent of the reading before the test, negative for a drop.
 4. The verdict. A mode that counts passes when both shifts are inside
    their limits, and is flagged when either is outside. A shift on a
    limit's edge is inside it. The comparison passes when every mode
    that counts passes.
+5. The notes. A reading that cannot be fully trusted says so, and the
+   comparison keeps every note beside its verdict: the tallest line on
+   the window's edge (the mode may have moved out of its window), a
+   top placed outside the window, lines that hold no value (NaN), a
+   half-power width that cannot be read, and two modes read on one
+   peak. A mode that has moved into its neighbor's window is read as
+   the neighbor, and the shift it gives is not its own, so a verdict
+   with notes needs a look at the plot.
 
 The limits default to plus or minus 5 percent in frequency and plus or
 minus 20 percent in amplitude, as an example of what test documents
@@ -76,12 +87,15 @@ table:
 - **Modes [Hz]**: the modes, a frequency near each, separated by
   commas, with a mode that does not count in parentheses:
   `84, (412)`. Empty, the most prominent peaks of the signature before
-  are found (**Find** says how many) and all of them count.
+  are found (**Peaks found** says how many) and all of them count.
+  Selecting another pair clears the field, so the new pair's own peaks
+  are found.
 - **Frequency [±%]** and **Amplitude [±%]**: the limits.
 
 Under them the panel gives the verdict and, for each mode, its
-frequency, height and Q before and after, with the two shifts. Every
-edit redraws the plot. When the signature before holds several
+frequency, height and Q before and after, with the two shifts and the
+mode's notes. The status line gives the verdict, the number of notes
+and the first of them. Every edit redraws the plot. When the signature before holds several
 records, the box on the bar picks the one compared, and the record
 after is the one at the same DOF.
 
@@ -97,6 +111,8 @@ print(result.describe())
 for shift in result.shifts:
     print(shift.mode.label(), shift.describe(),
           shift.before.q, shift.after.q)
+for note in result.notes:
+    print(note)
 plot_signature(before, after, modes, path='signature.png', show=False)
 ```
 
@@ -130,7 +146,7 @@ record, ranked the way the modal fit's suggestion ranks them, by how
 far each stands above its surroundings rather than by height. Its
 answer is a suggestion; which modes count is the plan's. The modes a
 modal fit has confirmed can be compared directly by passing its shape
-set as the modes:
+set as the modes (a rigid-body mode at 0 Hz is left out):
 
 ```python
 shapes = project[project.fit_modes('Before', limit=2)]

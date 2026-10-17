@@ -4,10 +4,11 @@ The Stroke reading of a time history draws the record's acceleration,
 its velocity and its displacement, integrated raw, on one clock
 (`plot.stroke`). This panel holds what the pulse is judged against (the
 shaker's shock stroke, velocity and force, the moving mass, and the
-moving mass over the body's mass) and, under them, what the reading
-came to: the peak acceleration and velocity, the table's peak to peak
-beside the half-sine rule, the travel with the body counted, each way
-from center, and the force, then each demand against its rating in words.
+body's mass) and, under them, what the reading came to: the peak
+acceleration and velocity, the table's peak to peak beside the
+half-sine rule, the travel with the body counted, peak to peak and each
+way from center, and the force, then each demand against its rating in
+words.
 
 Every edit redraws the plot at once, so a rating is seen against the
 pulse while it is typed. Nothing is made: the reading is of a record
@@ -47,18 +48,19 @@ RATINGS = (
       'the peak. Zero is no rating')),
     ('moving_mass', 'Moving mass', 'mass',
      ('Everything that moves: armature, table or expander, fixture and '
-      'article. Zero leaves the force out')),
-    ('mass_ratio', 'Mass ratio', None,
-     ('The moving mass over the shaker body\'s mass. The body moves the '
-      'other way by this share of the table\'s motion, so the travel the '
-      'stops see is the table\'s times one plus it. Zero counts the '
-      'table alone')),
+      'article. Zero leaves the force and the body out')),
+    ('body_mass', 'Body mass', 'mass',
+     ('The shaker body\'s mass. Given with the moving mass, the body '
+      'moves the other way by the moving mass over this mass, as a share '
+      'of the table\'s motion, so the travel the stops see and the '
+      'velocity the coil moves at are the table\'s times one plus that '
+      'share. Zero counts the table alone')),
 )
 
 #: the readings under the rule, as (key, name)
 READINGS = (('peak', 'Peak'), ('peak_velocity', 'Peak velocity'),
             ('peak_to_peak', 'Peak to peak'), ('rule', 'Half-sine rule'),
-            ('travel', 'Travel'), ('each_way', 'Down / up'),
+            ('travel', 'Travel p-p'), ('each_way', 'Down / up'),
             ('force', 'Force'))
 
 
@@ -112,7 +114,7 @@ class StrokePanel(QWidget):
 
     def settings(self) -> dict[str, float | None]:
         """The ratings as `core.stroke.read_stroke` takes them, in SI:
-        'stroke', 'velocity', 'force', 'moving_mass' and 'mass_ratio',
+        'stroke', 'velocity', 'force', 'moving_mass' and 'body_mass',
         each None where it is not given."""
         return dict(self._ratings)
 
@@ -128,8 +130,8 @@ class StrokePanel(QWidget):
         """Show the ratings in `unit_system`'s units."""
         self.unit_system = unit_system
         for key, name, dimension, _tip in RATINGS:
-            unit = '' if dimension is None else unit_system.label_text(dimension)
-            self.names[key].setText(f'{name} [{unit}]' if unit else name)
+            self.names[key].setText(
+                f'{name} [{unit_system.label_text(dimension)}]')
         self._restate()
 
     def _restate(self) -> None:
@@ -138,7 +140,7 @@ class StrokePanel(QWidget):
         try:
             for key, _name, dimension, _tip in RATINGS:
                 value = self._ratings.get(key)
-                if value is not None and dimension is not None:
+                if value is not None:
                     value = float(self.unit_system.from_si(value, dimension))
                 self.boxes[key].setValue(0.0 if value is None else value)
         finally:
@@ -155,8 +157,6 @@ class StrokePanel(QWidget):
         value = self.boxes[key].value()
         if value <= 0.0:
             self._ratings[key] = None
-        elif dimension is None:
-            self._ratings[key] = value
         else:
             self._ratings[key] = float(self.unit_system.to_si(value, dimension))
         self.changed.emit(self.settings())
@@ -166,7 +166,7 @@ class StrokePanel(QWidget):
     def show_reading(self, reading: StrokeReading | None) -> None:
         """Write what `reading` came to under the ratings, in the units
         shown; None clears it."""
-        from ..core.stroke import number
+        from ..core.stroke import _amount, _number
 
         if reading is None:
             for value in self.derived.values():
@@ -177,8 +177,7 @@ class StrokePanel(QWidget):
         us = self.unit_system
 
         def amount(value, dimension):
-            return (f'{number(float(us.from_si(value, dimension)))} '
-                    f'{us.label_text(dimension)}')
+            return _amount(value, dimension, us)
 
         self.derived['peak'].setText(
             amount(reading.peak_acceleration, 'acceleration'))
@@ -190,8 +189,8 @@ class StrokePanel(QWidget):
         self.derived['travel'].setText(amount(reading.travel, 'length'))
         length = us.label_text('length')
         self.derived['each_way'].setText(
-            f'{number(float(us.from_si(reading.travel_down, "length")))} / '
-            f'{number(float(us.from_si(reading.travel_up, "length")))} '
+            f'{_number(float(us.from_si(reading.travel_down, "length")))} / '
+            f'{_number(float(us.from_si(reading.travel_up, "length")))} '
             f'{length}')
         self.derived['force'].setText(
             '—' if reading.force is None else amount(reading.force, 'force'))

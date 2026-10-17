@@ -185,7 +185,7 @@ def build_pulse_check(layout: Any, check: Any, *, unit_system: Any = None,
 
 def _plot(layout: Any, row: int) -> Any:
     """A plot in `row` of the layout, gridded, with no SI scaling: the
-    units are in the labels (`plot.shock_check` gives the history)."""
+    units are in the labels."""
     plot = layout.addPlot(row=row, col=0)
     plot.showGrid(x=True, y=True, alpha=0.2)
     for side in ('left', 'bottom'):

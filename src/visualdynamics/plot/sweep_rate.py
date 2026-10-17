@@ -99,6 +99,10 @@ def build_sweep_rate(layout: Any, specification: Any,
         return color
 
     banded = set()
+    # a strip is tinted for its mode's worst pass, not its first: a
+    # sweep up slowly and back fast was tinted as building (2026-10-16)
+    rushed = {(check.frequency, check.q) for check in checks
+              if check.too_fast}
     for check in checks:
         fast = check.too_fast
         key = (check.frequency, check.q)
@@ -108,11 +112,12 @@ def build_sweep_rate(layout: Any, specification: Any,
             strip = pg.LinearRegionItem(
                 values=(np.log10(lower), np.log10(upper)),
                 orientation='horizontal', movable=False,
-                brush=pg.mkBrush(tinted('limit_warning' if fast
+                brush=pg.mkBrush(tinted('limit_warning' if key in rushed
                                         else 'specification_curve')),
                 pen=pg.mkPen(None))
             strip.setZValue(-10)
             strip.is_band = True
+            strip.too_fast = key in rushed
             plot.addItem(strip)
             low, high = min(low, lower), max(high, upper)
         color = colors['limit_abort'] if fast else colors['response_curve']

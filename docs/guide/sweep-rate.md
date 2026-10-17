@@ -36,8 +36,14 @@ of a given Q, so it gives a high mode more cycles than a low one; a
 linear sweep spends the same time in every hertz, so it rushes the low
 modes and lingers on the high ones.
 
+This rule is Visual Dynamics' own criterion, worked out above from the
+cycles a mode needs to build. It is not taken from a published
+standard; the references in `core.sweep_rate` are for the effect it
+guards against, not for the rule.
+
 The rule is a ceiling to stay well under, not a target. At the rule's
-rate a mode still reads only about 95 % of its steady height. Simulated
+rate a mode still reads only about 94 % of its steady height, and the Q
+read from its width comes out about 20 % low. Simulated
 for one mode at 22 Hz with a Q of 40, whose rule rate is 1.19 oct/min:
 
 | Sweep up | Time in band | Cycles | Rate over the rule's | Peak read | At | Q read |
@@ -94,7 +100,8 @@ segment holding the mode, the rule's rate as `limit` in the same unit,
 `reading.peak_frequency`, and `too_fast`, which is the ratio over
 `margin` (1 by default). A tone swept up and back passes each mode
 twice, and each pass is a row; a band that straddles a breakpoint is one
-pass at the rate of the segment holding the mode; a sweep that starts,
+pass, judged at the faster of the two rates (the larger multiple of the
+rule's); a sweep that starts,
 ends or turns inside a band is marked `crossed=False`. A mode the sweep
 never reaches has no row.
 
@@ -124,8 +131,11 @@ needed, the rate over the rule's and the verdict in words.
 Most Qs in a sine test are read off a swept level, so most of them carry
 the bias above. `read_swept_q(level, spec, near)` reads the peak nearest
 `near` on a tracked or extracted level, its top placed between readings
-and its half-power crossings found along the sweep, and judges the Q
-against the rate the level was swept at. `swept_q(frequency, q_read,
+and its half-power crossings found along the pass of the sweep that
+holds it, and judges the Q against the rate the level was swept at. The
+level's clock puts its readings back in sweep order, so a tone swept up
+and back is read one pass at a time, and readings under the noise floor
+are left out. `swept_q(frequency, q_read,
 rate)` does the same for a Q read some other way.
 
 ```python
@@ -138,7 +148,7 @@ print(judged.describe())
 #   times the rule's
 ```
 
-The judgement inverts the simulation: it finds the Q a mode would need
+The judgment inverts the simulation: it finds the Q a mode would need
 to read this low at this rate. The swept Q rises with the true one to a
 ceiling the rate sets, so a reading near the ceiling implies a wide
 range of true Qs, and a reading above it implies none (`q_true` is None
@@ -162,9 +172,10 @@ Select a tracked or extracted level of the tone with the specification,
 and each mode's Q is also read off the level and judged against its
 sweep: a row per level and mode, named for the level's DOF, with the Q
 read and, where it reads low, the Q it implies. The panel repeats each
-judgement in words, and the status line counts the passes too fast and
+judgment in words, and the status line counts the passes too fast and
 the readings flagged.
 
 The reading makes nothing, so there is no button to press. The console
 records it as the `plot_sweep_rate` call that draws it, with the modes
-and the margin set.
+and the margin set, and the Q read off each level as the `read_swept_q`
+calls that read it.

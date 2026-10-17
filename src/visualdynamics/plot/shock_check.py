@@ -40,9 +40,10 @@ def build_shock_check(layout: Any, history: Any, check: Any,
     """Draw one channel's check over one window into `layout`.
 
     `check` is a `core.shock_check.ShockCheck` of `history`, and
-    `spectra` is `TimeHistory.compute_srs_polarities` over the same
-    window, from which the curve at the check's channel is drawn. The
-    acceleration and the velocity share their time axis.
+    `spectra` is `TimeHistory.compute_srs_polarities` over that one
+    window, so it holds one curve per channel in the record's order and
+    the check's channel is drawn by its index. The acceleration and the
+    velocity share their time axis.
     """
     import pyqtgraph as pg
     from PySide6.QtGui import QColor
@@ -56,7 +57,9 @@ def build_shock_check(layout: Any, history: Any, check: Any,
     colors = resolve_theme(theme)
     us = DEFAULT_SYSTEM if unit_system is None else unit_system
     foreground = colors['plot_foreground']
-    record = list(history.response_dof).index(check.dof)
+    # by index, not DOF: an acceleration and a velocity can share one
+    # (2026-10-16, review of #141, which found the first of two taken)
+    record = check.record
     rate = check.sample_rate
     first = round((check.start - float(history.abscissa[0])) * rate)
     time = check.time
@@ -100,13 +103,12 @@ def build_shock_check(layout: Any, history: Any, check: Any,
     srs_plot.setLogMode(x=True, y=True)
     legend = legend_below(layout, srs_plot, 2, colors)
     first_curve = next(iter(spectra.values()))
-    row = _row(first_curve, check)
     frequencies = np.asarray(first_curve.abscissa, dtype=float)
     hollow = pg.mkBrush(0, 0, 0, 0)
     reached = []
     for k, ((kind, name), symbol) in enumerate(zip(NAMES, SYMBOLS)):
         color = curve_color(k, colors)
-        values = us.from_si(np.asarray(spectra[kind].ordinate[row].real,
+        values = us.from_si(np.asarray(spectra[kind].ordinate[record].real,
                                        dtype=float), 'acceleration')
         # a log axis has no zero: a polarity that never responded is a
         # gap, not a line drawn at the bottom of the plot
@@ -169,22 +171,3 @@ def _sentences(text: str) -> list[str]:
     return [part if part.endswith('.') else part + '.'
             for part in text.split('. ') if part]
 
-
-def _row(spectrum: Any, check: Any) -> int:
-    """Which curve of `spectrum` is the check's channel and window.
-
-    `compute_srs_polarities` gives one curve per channel per window,
-    window by window within each channel, so with several windows the
-    curve is found by its DOF and its 'shock n' block, and with one by
-    its DOF alone.
-    """
-    wanted = f'shock {check.window + 1}'
-    for k, dof in enumerate(spectrum.response_dof):
-        if dof != check.dof:
-            continue
-        block = None if spectrum.block is None else spectrum.block[k]
-        if block is None or not str(block).startswith('shock ') \
-                or block == wanted:
-            return k
-    raise ValueError(f'no spectrum of {check.dof} in window '
-                     f'{check.window + 1}')

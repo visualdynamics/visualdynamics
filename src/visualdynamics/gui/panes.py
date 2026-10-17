@@ -362,7 +362,7 @@ class DataPane(QWidget):
         self.statistics_panel: StatisticsPanel = StatisticsPanel()
         self.statistics_panel.hide()
         self.statistics_panel.changed.connect(self._statistics_edited)
-        # the pulse a record is judged against, beside the judgement
+        # the pulse a record is judged against, beside the judgment
         self.pulse_panel: PulsePanel = PulsePanel()
         self.pulse_panel.hide()
         self.pulse_panel.changed.connect(self._pulse_edited)
@@ -661,7 +661,7 @@ class DataPane(QWidget):
                 ('waveform', 'bars', 'Waveform Error',
                  ('How far each channel is from the target waveform, '
                   'as a share of the target')),
-                ('segments', 'shocks', 'Segments',
+                ('segments', 'segments', 'Segments',
                  ('Each marked segment judged by the rule for its kind: '
                   'a stationary stretch by its ASD and variance, a long '
                   'transient by its envelope, a shock by its SRS and '
@@ -821,10 +821,8 @@ class DataPane(QWidget):
             control_icon('statistics'), 'Statistics', self)
         self.statistics_action.setCheckable(True)
         self.statistics_action.setToolTip(
-            'One channel read in the time domain: mean, rms, skewness, '
-            'kurtosis, crest factor, samples on the rail, the tails '
-            'against the Gaussian and the kurtosis frame by frame, each '
-            'flagged outside its band')
+            'One channel read in the time domain, each statistic judged '
+            'against its band')
         self.statistics_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.statistics_action)
         # and the same for the events in a transient record: the windows
@@ -928,7 +926,8 @@ class DataPane(QWidget):
         self.sweep_rate_action.setToolTip(
             'Check the sweep rate against the modes it passes: the '
             'time and cycles in each half-power band, and whether the '
-            'rate is under 87 fn / Q\u00b2 oct/min')
+            'rate is under 87 fn / Q\u00b2 oct/min on a log sweep, '
+            'fn\u00b2 / Q\u00b2 Hz/s on a linear one')
         self.sweep_rate_action.triggered.connect(self._choose_sweep_rate)
         # offered by the render that draws a sine specification, and by
         # nothing else, so it starts put away
@@ -1315,18 +1314,22 @@ class DataPane(QWidget):
                             'reach, RMS across the sweep in dB'))},
     }
 
-    def show_srs_views(self, offered: bool, kind: str = 'srs') -> None:
+    def show_srs_views(self, offered: bool, kind: str = 'srs',
+                       readings: Sequence[str] | None = None) -> None:
         """Show or hide the readings of a shock-spectrum
         comparison, or, with `kind` 'sine', of sine levels against their
         specification. The points rule is a shock's alone, so the sine
-        comparison has two. While shown, the three comparison readings
-        are hidden."""
+        comparison has two. `readings` narrows the ones offered, as
+        several spectra of different polarities are read by the points
+        rule alone. While shown, the three comparison readings are
+        hidden."""
         labels = self.SRS_LABELS[kind]
         for key, action in self.srs_actions.items():
             text, tip = labels.get(key, (action.text(), action.toolTip()))
             action.setText(text)
             action.setToolTip(tip)
-            action.setVisible(offered and key in labels)
+            action.setVisible(offered and key in labels
+                              and (readings is None or key in readings))
         if not offered or 'points' not in labels:
             self.srs_tolerance_panel.hide()
         if offered:
@@ -1334,15 +1337,20 @@ class DataPane(QWidget):
                 action.setVisible(False)
             self.toolbar.setVisible(True)
             # a reading this comparison does not have stands for its
-            # curves, as `srs_reading` says
-            self.srs_actions[self.srs_reading(kind)].setChecked(True)
+            # first, as `srs_reading` says
+            self.srs_actions[self.srs_reading(kind, readings)].setChecked(True)
 
-    def srs_reading(self, kind: str = 'srs') -> str:
+    def srs_reading(self, kind: str = 'srs',
+                    readings: Sequence[str] | None = None) -> str:
         """The reading a comparison of `kind` shows: the sticky choice,
-        or 'curves' when the choice is one this kind does not have (the
-        points rule, carried from a shock to a sine comparison)."""
-        return (self.srs_view if self.srs_view in self.SRS_LABELS[kind]
-                else 'curves')
+        or the first one offered when the choice is one this comparison
+        does not have (the points rule, carried from a shock to a sine
+        comparison, reads as its curves). `readings` narrows the ones
+        offered, as for `show_srs_views`. The sticky choice is kept, so
+        the comparison it belongs to shows it again."""
+        offered = [key for key in self.SRS_LABELS[kind]
+                   if readings is None or key in readings]
+        return self.srs_view if self.srs_view in offered else offered[0]
 
     def _choose_replication(self, which: str) -> None:
         """Which reading of a transient replication the plot shows."""
@@ -1806,8 +1814,9 @@ class DataPane(QWidget):
         offers the readings of a time history (averaging, filter,
         truncate, kurtosis, scalogram), `sine` adds the sine reading to
         them for a record with a sweep specification, and `shocks` offers
-        the shock view and kurtosis. `fit` offers the replication fit,
-        for a record with acceleration to integrate. `octave` offers the
+        the shock view and kurtosis. `fit` offers the replication fit and
+        the stroke readout, for a record with acceleration in a declared
+        unit to integrate. `octave` offers the
         octave bands of a plain density, `tone` the tone readout of a plain
         autospectrum, and `residual` the fit's residual CMIF. The pair,
         3-D, frequency-axis, quantity and page controls are hidden here;
@@ -1884,10 +1893,13 @@ class DataPane(QWidget):
         # record, and a record is what has channels to be Gaussian
         self.kurtosis_action.setVisible(reading)
         self.kurtosis_action.setChecked(reading and self.kurtosis_wanted)
-        # beside it, offered where it is and for the same reason
-        self.statistics_action.setVisible(reading)
-        self.statistics_action.setChecked(reading and self.statistics_wanted)
-        if not reading or not self.statistics_wanted:
+        # beside it, but offered where the averaging is, as the
+        # scalogram is: its bands are for a record meant to be Gaussian
+        # random, which a shock record is not (2026-10-16, on review)
+        self.statistics_action.setVisible(averaging)
+        self.statistics_action.setChecked(averaging
+                                          and self.statistics_wanted)
+        if not averaging or not self.statistics_wanted:
             self.statistics_panel.hide()
         # the scalogram is offered wherever the averaging is, and for
         # the same reason: both are readings of a record
@@ -1924,11 +1936,11 @@ class DataPane(QWidget):
         self.pulse_action.setChecked(shocks and self.pulse_wanted)
         if not shocks or not self.pulse_wanted:
             self.pulse_panel.hide()
-        # the stroke is offered wherever the shocks are: it reads a
-        # record's pulse, and a record is what has one
-        self.stroke_action.setVisible(reading)
-        self.stroke_action.setChecked(reading and self.stroke_wanted)
-        if not reading or not self.stroke_wanted:
+        # the stroke integrates acceleration, as the replication fit
+        # does, so it is offered where the fit is and nowhere else
+        self.stroke_action.setVisible(fit)
+        self.stroke_action.setChecked(fit and self.stroke_wanted)
+        if not fit or not self.stroke_wanted:
             self.stroke_panel.hide()
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(

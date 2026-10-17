@@ -213,7 +213,8 @@ project.save('shock.vdyn')
   carries its own band, and the shading in every comparison comes from
   the specification object, not from a setting. The rule about how
   many points must lie inside it is the test document's, and is given
-  to `srs_tolerance` as its arguments.
+  to `srs_tolerance` as its arguments; the band it counts against is
+  the specification's own unless one is given.
 - Q, and what the spectrum means. An SRS is computed at one
   amplification: a spectrum at Q = 10 says nothing about what the same
   shock does to a Q = 50 article. The Q is stored on the spectrum and

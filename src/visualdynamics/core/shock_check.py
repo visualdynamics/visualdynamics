@@ -24,13 +24,11 @@ called with ``drift_corner=None``, so there is one trapezoid rule in
 the package and this is a second, explicit path through it rather
 than a second rule.
 
-Each window is read from its own start, so every event begins from
-rest whatever the record did before it. The whole record is integrated
-once, as `core.filters` integrates it, and each window's velocity is
-the record's minus its value where the window opens (and its
-displacement likewise, less the velocity it opened with times the time
-since). The trapezoid rule is additive, so that is exactly the window
-integrated on its own.
+Each window is integrated on its own, from its first sample, so every
+event begins from rest whatever the record did before it, and only the
+samples the windows cover are integrated. A window holding a sample
+that is not a finite number is refused rather than read, since its
+velocity from that sample on is not a number either.
 
 The reading, per channel and per window, is the velocity change (the
 span from the lowest velocity to the highest, which for a one-signed
@@ -44,13 +42,13 @@ or an offset does.
 
 References
 ----------
-The check is a standard one; these set it out and say why a record
-that fails it is not reported.
+The check itself is integration and the arithmetic above; these set
+out the tests a record like this comes from and the spectrum the
+check is made before.
 
 1. MIL-STD-810H (2019), *Environmental Engineering Considerations and
-   Laboratory Tests*, Method 516.8, Shock. Every shock record is
-   integrated to velocity before its peak or spectrum is read, and a
-   record that shows a zero shift is discarded.
+   Laboratory Tests*, Method 516 (Shock) and Method 517 (Pyroshock).
+   Laboratory shock tests, specified as shock response spectra.
 2. ISO 18431-4:2007, *Mechanical vibration and shock - Signal
    processing - Part 4: Shock-response spectrum analysis*. The
    spectrum the check is made before.
@@ -76,16 +74,21 @@ if TYPE_CHECKING:                                    # pragma: no cover
 # every classical pulse with the mean.
 
 #: how far from rest a velocity may end, as a share of its largest
-#: excursion, before the record is flagged. A tenth: a good record's
+#: excursion, before the record is flagged. A tenth, which is a
+#: judgment rather than a figure from a standard: a good record's
 #: velocity does not end at exactly zero, because the sensor's noise is
-#: integrated too and walks over a long record, and a zero shift worth
-#: catching ramps the velocity well past its pulse. A procedure that
-#: names its own figure passes it as `tolerance`.
+#: integrated too and walks, by about its standard deviation times the
+#: square root of the sample count times the sample interval, and a
+#: zero shift worth catching ramps the velocity well past its pulse. A
+#: procedure that names its own figure passes it as `tolerance`.
 RETURN_SHARE = 0.1
-# Measured on the guide's example (2026-10-16): the ringing shock with
-# a noise floor ends at 6.1 % of its peak velocity, so a twentieth
-# would have flagged a good record; with its 4 g zero shift it ends at
-# 100 %, still climbing.
+# Measured on the guide's example (2026-10-16), once its tones were
+# given a smooth onset: the ringing shock with a noise floor ends at
+# 0.04 % of its peak velocity, and with its 4 g zero shift at 100 %,
+# still climbing. The 6.1 % first measured here was the trapezoid
+# rule's half-sample error on tones that started on a 590 g step
+# (590 g × dt / 2 = 1.11 in/s against an 18 in/s peak), not noise;
+# the noise alone walks to about 0.16 % over the quarter second.
 
 #: the stretch at the end of a window, as a share of it, read to tell a
 #: velocity that holds from one that is still changing
@@ -106,6 +109,9 @@ class ShockCheck:
 
     #: the channel's DOF, as the record names it
     dof: str
+    #: the channel's index in the record, which tells apart two
+    #: channels that share a DOF
+    record: int
     #: which window, counting from 0 in `TimeHistory.srs_windows` order
     window: int
     #: the window's first instant on the record's clock, in seconds
@@ -260,8 +266,9 @@ def check_shock(history: TimeHistory, *,
     Raises
     ------
     ValueError
-        If the record holds no acceleration channel, or `tolerance` is
-        not a positive share.
+        If the record holds no acceleration channel, `tolerance` is
+        not a positive share, or a window holds a sample that is not a
+        finite number.
     """
     from .filters import integrate
 
@@ -269,39 +276,53 @@ def check_shock(history: TimeHistory, *,
     if not tolerance > 0.0:
         raise ValueError(f'the tolerance ({tolerance:g}) is a share of the '
                          'peak and has to be above zero')
-    if not any(history.known_dim(i) == 'acceleration'
-               for i in range(history.num_records)):
+    # velocity channels would integrate to displacement and are left
+    # out: a velocity read as though it were one is the mistake this
+    # check exists to catch, not to make
+    accelerations = [i for i in range(history.num_records)
+                     if history.known_dim(i) == 'acceleration']
+    if not accelerations:
         raise ValueError('a shock record is checked by integrating its '
                          'acceleration, and this one holds none')
+    from .data import TimeHistory
+
     rate = history.sample_rate
-    # velocity channels integrate to displacement and are dropped here:
-    # a velocity read as though it were one is the mistake this check
-    # exists to catch, not to make
-    moving = integrate(history, None)
-    velocity = [k for k in range(moving.num_records)
-                if moving.known_dim(k) == 'velocity']
-    travel = integrate(moving, None)
-    v_rows = np.real(np.asarray(moving.ordinate))[velocity]
-    d_rows = np.real(np.asarray(travel.ordinate))
+    ordinate = np.asarray(history.ordinate)
+    dofs = [history.response_dof[i] for i in accelerations]
     origin = float(history.abscissa[0])
     dt = 1.0 / rate
 
-    checks = []
-    for row, k in enumerate(velocity):
-        for index, window in enumerate(history.srs_windows(shocks)):
-            first, last = window.bounds(rate)
-            opened = v_rows[row, first]
-            v = v_rows[row, first:last] - opened
-            # the displacement less where it was and how fast it was
-            # going when the window opened: the trapezoid rule is
-            # additive, so this is the window integrated on its own
-            d = (d_rows[row, first:last] - d_rows[row, first]
-                 - opened * dt * np.arange(last - first))
-            checks.append(ShockCheck(
-                dof=moving.response_dof[k], window=index,
+    # Each window integrated on its own (2026-10-16, review of #141).
+    # It was the whole record integrated twice and each window read off
+    # it less its opening values, identical by the trapezoid rule's
+    # additivity but 0.43 s on the GUI thread, on every drag, for 32
+    # channels of a million samples and two 0.1 s windows; this is
+    # 0.01 s. The finite test is from the same review: a NaN passed as
+    # "returns to rest: 0.0 %", its peak being NaN and NaN > 0 false.
+    found = {}
+    for index, window in enumerate(history.srs_windows(shocks)):
+        first, last = window.bounds(rate)
+        cut = np.real(ordinate[accelerations, first:last])
+        bad = ~np.isfinite(cut).all(axis=-1)
+        if bad.any():
+            raise ValueError(
+                f'{dofs[int(np.argmax(bad))]} holds a sample that is not '
+                f'a finite number between {origin + first * dt:g} s and '
+                f'{origin + last * dt:g} s, so its velocity there cannot '
+                'be read')
+        piece = TimeHistory(np.arange(last - first) * dt, cut,
+                            response_dof=dofs,
+                            ordinate_dim=['acceleration'] * len(dofs))
+        moving = integrate(piece, None)
+        travel = integrate(moving, None)
+        for row, (v, d) in enumerate(zip(
+                np.real(np.asarray(moving.ordinate)),
+                np.real(np.asarray(travel.ordinate)))):
+            found[row, index] = ShockCheck(
+                dof=dofs[row], record=accelerations[row], window=index,
                 start=origin + first * dt, sample_rate=rate,
-                velocity=v, displacement=d, tolerance=tolerance))
-    return checks
+                velocity=v, displacement=d, tolerance=tolerance)
+    return [found[key] for key in sorted(found)]
 
 
 def summarize(checks: Sequence[ShockCheck], most: int = 3) -> str:

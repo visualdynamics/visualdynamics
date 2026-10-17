@@ -2,13 +2,14 @@
 
 `replication.compare` reads a run as a whole, and a short event's miss
 hides in that figure because the event carries a small share of the
-record's mean square. These pin the segmented judgement: each kind's
+record's mean square. These pin the segmented judgment: each kind's
 readings against hand values (a control that is its reference, one a
 known number of decibels over, one that misses a known share of a
-peak), the taper and the major peaks by construction, the estimator
-against the package's own PSD, and then the case the judgement exists
-for, a rough-road record whose whole-record rms error reads under five
-percent while its pothole fails by its spectrum and its peaks.
+peak), the taper, the floors, the windows and the major peaks by
+construction, a dead or unjudged reading never counted as a pass, and
+then the case the judgment exists for, a rough-road record whose
+whole-record rms error reads under five percent while its pothole
+fails by its spectrum and its peaks.
 """
 
 from __future__ import annotations
@@ -107,8 +108,13 @@ def road(seed=SEED, missed=MISSED, error=ERROR):
 
 
 @pytest.fixture(scope='module')
-def judged_road():
-    reference, control = road()
+def road_traces():
+    return road()
+
+
+@pytest.fixture(scope='module')
+def judged_road(road_traces):
+    reference, control = road_traces
     return judge_segments(reference, control, FS, ROAD, band=(5.0, 400.0),
                           window=0.5)
 
@@ -138,10 +144,11 @@ def test_the_taper_rises_over_its_share_and_holds_one_between():
     assert np.all(w[5:95] == 1.0)
     assert np.allclose(w, w[::-1])
     assert np.all(tapered_cosine(50, 0.0) == 1.0)
-    # all of it under the cosine is a symmetric Hann window
+    # all of it under the cosine is a symmetric Hann window, zero at
+    # both ends
     n = 64
-    hann = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n // 2) / n)
-    assert np.allclose(tapered_cosine(n, 100.0)[:n // 2], hann)
+    hann = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n) / (n - 1))
+    assert np.allclose(tapered_cosine(n, 100.0), hann)
 
 
 @pytest.mark.parametrize('samples, percent', [(0, 10.0), (10, -1.0),
@@ -240,21 +247,148 @@ def test_the_asd_share_counts_lines_rather_than_requiring_every_one():
     assert asd.passed and asd.needed == int(np.ceil(0.95 * asd.judged))
 
 
-def test_the_asd_is_the_packages_own_estimator():
-    """The segment's ASD is `TimeHistory.compute_psds` on the same
-    frames, to rounding."""
-    from visualdynamics.core.averaging import Averaging
-    from visualdynamics.core.data import TimeHistory
-
-    rate, frame = 1024.0, 1024
+def test_the_asd_is_a_density_at_the_line_spacing_asked_for():
+    """A 2-amplitude tone at 100 Hz in frames of 512 samples at
+    1024 Hz: lines 2 Hz apart, the peak at 100 Hz, and the spectrum
+    summing to the tone's mean square, 2. Judged with `lines=2`, the
+    lines start at 2 Hz and step by 2."""
+    rate = 1024.0
+    t = np.arange(int(8 * rate)) / rate
+    f, asd = rs._asd(2.0 * np.sin(2.0 * np.pi * 100.0 * t), rate, 512)
+    df = f[1] - f[0]
+    assert df == 2.0 and f[np.argmax(asd)] == 100.0
+    assert np.sum(asd) * df == pytest.approx(2.0, rel=1e-3)
     x = noise(rate=rate)
-    f, asd = rs._asd(x, rate, frame)
-    frames = (x.size - frame) // (frame // 2) + 1
-    history = TimeHistory(np.arange(x.size) / rate, x[None],
-                          response_dof=['1Z+'], ordinate_dim=['acceleration'])
-    psd = history.compute_psds(Averaging(frame, 0.5, 'hann', frames))
-    assert np.allclose(f, psd.abscissa)
-    assert np.allclose(asd, psd.ordinate[0].real, rtol=1e-10)
+    result = judge_segments(x, x, rate, [(0.0, 8.0, 'stationary')],
+                            lines=2.0)
+    asd_check = _check(result, 0, 'ASD')
+    assert list(asd_check.where[:3]) == [2.0, 4.0, 6.0]
+    assert asd_check.judged == 256
+
+
+def test_lines_far_below_the_references_highest_are_not_judged():
+    """A reference low-passed hard at 100 Hz and a control leaking a
+    hundredth of white noise past it: unfloored, the lines past the
+    skirt would read over 120 dB high. Only the lines within 40 dB of
+    the reference's highest are judged, 1 to 126 Hz, and it passes."""
+    rate = 1024.0
+    x = noise(rate=rate)
+    reference = sosfiltfilt(butter(8, 100.0, fs=rate, output='sos'), x)
+    control = reference + 1e-2 * noise(rate=rate, seed=9)
+    result = judge_segments(reference, control, rate,
+                            [(1.0, 7.0, 'stationary')], taper_percent=0.0)
+    asd = _check(result, 0, 'ASD')
+    f, want = rs._asd(reference[1024:7168], rate, 1024)
+    floor = want[f > 0].max() * 10.0 ** (-rs.ASD_FLOOR_DB / 10.0)
+    assert np.array_equal(asd.where, f[(f > 0) & (want >= floor)])
+    assert (asd.where[0], asd.where[-1], asd.judged) == (1.0, 126.0, 126)
+    assert asd.passed
+
+
+def test_srs_points_far_below_the_references_highest_are_not_judged():
+    """A 150 Hz ring and a control with a 1 Hz drift under it: at the
+    lowest natural frequencies the drift is all the control holds and
+    would read 14 dB over. Points more than 40 dB under the reference's
+    highest are not judged; the first judged is 10.68 Hz, and it
+    passes. With no band the SRS runs from one cycle in the segment,
+    0.5 Hz, to a fifth of the sample rate."""
+    from visualdynamics.core.srs import octave_frequencies, peaks
+
+    rate = 1024.0
+    t = np.arange(int(8 * rate)) / rate
+    hit = ring(t, 1.5, 5.0, 150.0)
+    drift = 0.02 * np.sin(2.0 * np.pi * t)
+    result = judge_segments(hit, hit + drift, rate, [(1.0, 3.0, 'shock')])
+    srs = _check(result, 0, 'SRS positive')
+    every = octave_frequencies(0.5, 204.8)
+    up, _down = peaks(hit[1024:3072], every, rate)
+    kept = every[up >= up.max() * 10.0 ** (-40.0 / 20.0)]
+    assert np.array_equal(srs.where, kept)
+    assert srs.where[0] == pytest.approx(10.6787, abs=1e-4)
+    assert srs.where[-1] == pytest.approx(every[-1]) and every[0] == 0.5
+    assert srs.judged == 52 and srs.passed
+    # the same with the reference's own content: every point judged
+    x = noise(rate=rate)
+    whole = _check(judge_segments(x, x, rate, [(2.0, 4.0, 'shock')]), 0,
+                   'SRS positive')
+    assert whole.where[0] == 0.5
+    assert whole.where[-1] == pytest.approx(203.187, abs=1e-3)
+
+
+def test_the_envelope_window_is_a_hundredth_of_the_record_by_default():
+    """8 s at 1024 Hz: windows of 82 samples, 74 whole ones in a
+    segment from 1 to 7 s, each placed at its start on the reference's
+    clock."""
+    x = noise()
+    result = judge_segments(x, x, 1024.0, [(1.0, 7.0, 'transient')])
+    envelope = _check(result, 0, 'envelope')
+    assert envelope.judged == 74
+    assert envelope.where[0] == 1.0
+    assert np.allclose(np.diff(envelope.where), 82 / 1024.0)
+
+
+def test_the_peaks_are_placed_on_the_references_clock():
+    """One crest at sample 2100 and one trough at 2500, judged in a
+    segment from 2 s: the peaks are read at 2.051 and 2.441 s."""
+    y = np.zeros(8192)
+    y[2100], y[2500] = 3.0, -2.0
+    result = judge_segments(y, y, 1024.0, [(2.0, 3.0, 'shock')])
+    peaks = _check(result, 0, 'major peaks')
+    assert list(peaks.where) == [2100 / 1024.0, 2500 / 1024.0]
+
+
+# ---- what is not a pass ----------------------------------------------------------
+
+
+@pytest.mark.parametrize('kind', ['stationary', 'transient', 'shock'])
+def test_a_dead_control_fails_every_kind(kind):
+    """A control of zeros reads minus infinity wherever the reference
+    asks for something, and every spectral and level check fails."""
+    x = noise()
+    result = judge_segments(x, np.zeros_like(x), 1024.0, [(1.0, 7.0, kind)])
+    (segment,) = result.segments
+    assert segment.passed is False and result.passed is False
+    for check in segment.checks:
+        if check.reading in ('variance', 'major peaks'):
+            assert np.all(check.values == -100.0)
+            continue
+        assert check.judged > 0 and np.all(check.values == -np.inf)
+        assert check.passed is False, check.reading
+
+
+def test_samples_that_are_not_numbers_are_refused():
+    """A control with a dead half recorded as NaN would pass on the
+    half that holds numbers; it is refused instead."""
+    x = noise()
+    dead = x.copy()
+    dead[x.size // 2:] = np.nan
+    with pytest.raises(ValueError, match='control holds 4096 samples'):
+        judge_segments(x, dead, 1024.0, [(0.0, 8.0, 'stationary')])
+    with pytest.raises(ValueError, match='reference holds 1 samples'):
+        judge_segments(np.r_[x[:-1], np.inf], x, 1024.0,
+                       [(0.0, 8.0, 'stationary')])
+
+
+def test_a_segment_not_judged_is_not_counted_as_passing():
+    """A test band above a fifth of the sample rate leaves a shock's
+    SRS with nothing to judge: the shock is not judged though its peaks
+    pass, the record is not judged, and the line counts it apart. A
+    failing check still fails its segment."""
+    x = noise()
+    marks = [(0.5, 3.5, 'stationary'), (4.0, 6.0, 'shock')]
+    result = judge_segments(x, x, 1024.0, marks, band=(300.0, 400.0))
+    stationary, shock = result.segments
+    assert stationary.passed is True
+    assert [c.passed for c in shock.checks] == [None, None, True]
+    assert shock.passed is None and result.passed is None
+    assert [s.label for s in result.not_judged] == ['shock 1']
+    assert result.describe() == ('whole-record rms error 0.00 %; 1 of 2 '
+                                 'segments pass, 1 not judged (shock 1)')
+    assert shock.describe() == 'shock 1 (shock, 4 to 6 s): not judged'
+    louder = judge_segments(x, 2.0 * x, 1024.0, marks, band=(300.0, 400.0))
+    assert louder.segments[1].passed is False and louder.passed is False
+    assert louder.describe().endswith('2 of 2 segments fail '
+                                      '(stationary 1, shock 1)')
 
 
 def test_an_unnamed_segment_is_called_by_its_kind_and_place():
@@ -288,7 +422,7 @@ def test_traces_of_different_lengths_are_refused():
         judge_segments(x, x[:-1], 1024.0, [(1.0, 2.0, 'shock')])
 
 
-# ---- the case the judgement is for -------------------------------------------
+# ---- the case the judgment is for -------------------------------------------
 
 
 def test_the_whole_record_figure_is_small_while_the_pothole_fails(
@@ -302,21 +436,49 @@ def test_the_whole_record_figure_is_small_while_the_pothole_fails(
     assert result.passed is False
     assert [s.label for s in result.failed] == ['pothole']
     pothole = result.segments[1]
-    # the pothole holds a percent or two of the record's mean square,
-    # which is why its own error of about 15 percent hides
-    assert pothole.share < 2.0 and pothole.rms_error > 12.0
+    # the pothole holds a percent and a half of the record's mean
+    # square, which is why its own error of 17.53 percent hides
+    assert pothole.share == pytest.approx(1.4905, abs=1e-4)
+    assert pothole.rms_error == pytest.approx(17.530, abs=1e-3)
     for kind in ('positive', 'negative'):
         srs = _check(result, 1, f'SRS {kind}')
         assert srs.passed is False
         assert -8.0 < srs.low < -6.5, (kind, srs.low)
         # short at the top, where the 250 Hz ring was under-driven,
-        # and on the reference below 60 Hz
+        # and near the reference below 60 Hz
         assert np.all((srs.where[srs.values < -6.0] > 200.0)
                       & (srs.where[srs.values < -6.0] < 340.0))
-        assert np.all(np.abs(srs.values[srs.where < 60.0]) < 0.5)
+        assert np.all(np.abs(srs.values[srs.where < 60.0]) < 0.6)
     peaks = _check(result, 1, 'major peaks')
     assert peaks.judged == 4 and peaks.outside == 2
     assert np.sum(peaks.values < -20.0) == 2
+    # the hit and its first rebounds, on the reference's clock
+    assert np.round(peaks.where * FS).astype(int).tolist() == [
+        65536, 65601, 65548, 66798]
+
+
+def test_a_pothole_marked_tight_is_judged_on_its_whole_spectrum(
+        road_traces):
+    """The pothole marked from 31.99 s, a hundredth of a second before
+    the hit: under a taper its first and largest cycles would be
+    weighted down in both traces alike and the SRS would read about
+    3 dB low and pass. The SRS is read untapered, so it is 7.38 and
+    6.72 dB low and fails, and the taper does not move it."""
+    reference, control = road_traces
+    tight = [(31.99, 32.7, 'shock', 'pothole')]
+    readings = []
+    for taper in (rs.TAPER_PERCENT, 0.0):
+        result = judge_segments(reference, control, FS, tight,
+                                band=(5.0, 400.0), taper_percent=taper)
+        readings.append([_check(result, 0, f'SRS {kind}').values
+                         for kind in ('positive', 'negative')])
+        positive = _check(result, 0, 'SRS positive')
+        negative = _check(result, 0, 'SRS negative')
+        assert positive.low == pytest.approx(-7.377, abs=1e-3)
+        assert negative.low == pytest.approx(-6.720, abs=1e-3)
+        assert positive.passed is False and negative.passed is False
+    for tapered, untapered in zip(*readings):
+        assert np.array_equal(tapered, untapered)
 
 
 def test_the_stationary_and_transient_segments_pass_with_room(judged_road):
@@ -327,11 +489,13 @@ def test_the_stationary_and_transient_segments_pass_with_room(judged_road):
     assert abs(_check(judged_road, 0, 'variance').values[0]) < 1.0
     envelope = _check(judged_road, 2, 'envelope')
     assert envelope.judged == 20 and max(-envelope.low, envelope.high) < 0.2
+    # the windows are placed on the reference's clock, 0.5 s apart
+    assert np.allclose(envelope.where, 41.0 + 0.5 * np.arange(20))
 
 
 def test_the_whole_record_spectrum_cannot_see_the_pothole():
     """The same run read the controller's way, `replication.compare`
-    over the whole record: the waveform error is the judgement's
+    over the whole record: the waveform error is the judgment's
     whole-record figure, and the maximax spectrum's worst deviation is
     nowhere near the pothole's."""
     from visualdynamics.core.data import TimeHistory, TransientSpecification
@@ -357,7 +521,7 @@ def test_the_whole_record_spectrum_cannot_see_the_pothole():
 
 def test_a_run_late_on_its_reference_is_aligned_before_it_is_judged():
     """The control three samples late: `lag_of` finds the shift, and
-    the judgement is the aligned one's."""
+    the judgment is the aligned one's."""
     from visualdynamics.core.data import TimeHistory, TransientSpecification
 
     rate = 1024.0
@@ -549,7 +713,7 @@ def test_segments_is_a_reading_of_a_replication(window, pump):
                 if hasattr(item, 'segment')]) == 6   # three regions, three labels
 
 
-def test_the_panels_marks_and_tolerances_redraw_the_judgement(window, pump):
+def test_the_panels_marks_and_tolerances_redraw_the_judgment(window, pump):
     """Widening the peak tolerance past the miss passes the shock, and
     the rows shown follow the kinds marked."""
     _segments_reading(window, pump)
@@ -607,6 +771,93 @@ def test_the_segments_reading_is_journaled_as_its_plot_call(window, pump,
     replay = lines[0].replace("'replication_segments.png'", repr(str(out)))
     exec(replay, room)  # noqa: S102 — the journal's own line
     assert out.stat().st_size > 2000
+
+
+def test_the_marks_are_kept_on_the_reference_and_saved_with_it(
+        window, pump, tmp_path):
+    """The marks are the reference's: stored on it as `Segment`s,
+    journaled as one settling assignment ahead of the plot call, saved
+    and read back with it, and brought back to the panel when it is
+    shown again after another reference."""
+    import visualdynamics
+    from visualdynamics.core.data import TransientSpecification
+
+    _run, reference = _segments_reading(window, pump)
+    panel = window.data_pane.segments_panel
+    assert reference.segments == tuple(Segment(*m[:3]) for m in SMALL)
+    panel.set_segments([(2.9, 3.4, 'shock')])
+    pump()
+    assert reference.segments == (Segment(2.9, 3.4, 'shock'),)
+    journal = window.project.journal
+    assigned = [k for k, line in enumerate(journal)
+                if line.startswith("project['Reference'].segments = ")]
+    assert len(assigned) == 1
+    assert journal[assigned[0]] == (
+        "project['Reference'].segments = (Segment(start=2.9, end=3.4, "
+        "kind='shock', name=''),)")
+    assert journal[assigned[0] + 1].startswith(
+        'visualdynamics.plot.plot_replication_segments(')
+    assert ('from visualdynamics.core.replication_segments import Segment'
+            in window.project.session_script())
+
+    reference.segments = (Segment(2.9, 3.4, 'shock', 'hit'),)
+    visualdynamics.save(reference, tmp_path / 'reference')
+    back = visualdynamics.load(tmp_path / 'reference.vdyn')
+    assert back.segments == (Segment(2.9, 3.4, 'shock', 'hit'),)
+
+    # another reference, unmarked: the panel empties, and the first
+    # one's marks come back with it, its name kept
+    other = TransientSpecification(
+        reference.abscissa, reference.ordinate,
+        response_dof=['1Z+'], ordinate_dim=['acceleration'],
+        ordinate_unit=['g'])
+    from conftest import select_objects
+
+    window.add_object('Other', other)
+    select_objects(window, pump, 'Run', 'Other')
+    pump()
+    assert panel.segments() == [] and other.segments is None
+    select_objects(window, pump, 'Run', 'Reference')
+    pump()
+    assert panel.marks() == [Segment(2.9, 3.4, 'shock', 'hit')]
+    assert panel.readout.text().splitlines()[1].startswith(
+        'hit (shock, 2.9 to 3.4 s): ')
+
+
+def test_the_reading_wears_its_own_glyph(window, pump):
+    from visualdynamics.gui.icons import control_icon
+
+    ours = control_icon('segments').pixmap(32).toImage()
+    assert ours != control_icon('shocks').pixmap(32).toImage()
+    assert ours != control_icon('no-such-glyph').pixmap(32).toImage()
+    action = window.data_pane.replication_actions['segments']
+    assert action.icon().pixmap(32).toImage() == ours
+
+
+def test_a_tolerance_field_cannot_be_set_to_no_band(window, pump):
+    """At their lowest the tolerance fields still make a band, so the
+    judgment never refuses what the panel offers."""
+    _segments_reading(window, pump)
+    panel = window.data_pane.segments_panel
+    for box in (panel.asd_box, panel.envelope_box, panel.srs_high,
+                panel.peaks_box):
+        box.setValue(box.minimum())
+    pump()
+    settings = panel.settings()
+    assert settings['asd_db'] == (-0.1, 0.1)
+    assert settings['envelope_db'] == (-0.1, 0.1)
+    assert settings['srs_db'][1] == 0.1 and settings['peak_percent'] == 0.1
+    assert panel.readout.text().startswith('whole-record rms error')
+
+
+def test_a_segment_name_is_written_as_text_in_the_table():
+    """A name holding markup is shown as typed, not read as markup."""
+    from visualdynamics.plot.replication_segments import table_html
+
+    x = noise()
+    result = judge_segments(x, x, 1024.0, [(1.0, 2.0, 'shock', '<i>a&b')])
+    text = table_html(result, '#000000')
+    assert '&lt;i&gt;a&amp;b' in text and '<i>' not in text
 
 
 def test_another_reading_puts_the_panel_away(window, pump):

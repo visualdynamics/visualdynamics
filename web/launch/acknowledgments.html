@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acknowledgments — Visual Dynamics</title>
+<meta name="description" content="Who wrote Visual Dynamics, and the people and projects its ideas came from.">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:title" content="Acknowledgments — Visual Dynamics">
+<meta property="og:description" content="Who wrote Visual Dynamics, and the people and projects its ideas came from.">
+<meta property="og:image" content="mark.png">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<div class="top">
+  <a class="home" href="index.html"><img src="favicon.png" alt="">Visual Dynamics</a>
+  <nav>
+    <a href="index.html">Home</a>
+    <a href="workflows.html">Workflows</a>
+    <a href="examples.html">Examples</a>
+    <a href="documentation/">Documentation</a>
+    <a href="downloads.html">Downloads</a>
+    <a href="requests.html">Requests</a>
+    <a href="about.html">About</a>
+  </nav>
+</div>
+<main>
+  <header><h1>Acknowledgments</h1></header>
+
+  <p class="lede">
+    Two people have written the code in Visual Dynamics. Many more
+    gave it ideas, and this page thanks them.
+  </p>
+
+  <h2>Contributors</h2>
+  <p>
+    Dr. Brandon Zwink started the project and maintains it.
+  </p>
+  <p>
+    Kevin Cross contributed the sine tracking, which reads a sweep the
+    way a controller's tracking filter does, and thirteen of the
+    readings a test is judged by: the SRS points rule, Q from a peak's
+    half-power width, the shock check, the confidence band on an
+    averaged PSD, the tone read off an ASD, the time statistics, the
+    replication read segment by segment, the classical pulse check, the
+    sweep rate against the modes, the signature comparison, the
+    replication fit, the stroke readout and the dwell.
+  </p>
+
+  <h2>Ideas and inspiration</h2>
+  <p>
+    These people and projects did not write code for Visual Dynamics,
+    but the ideas they offered or showed are in it, and it is better
+    for them.
+  </p>
+  <ul>
+    <li>
+      <a href="https://github.com/sandialabs/sdynpy">sdynpy</a>, the
+      structural dynamics library for Python. Many of the ideas here
+      were first seen in it.
+    </li>
+    <li>
+      <a href="https://github.com/sandialabs/rattlesnake-vibration-controller">Rattlesnake</a>,
+      the vibration controller, whose runs this toolset was first built
+      to read.
+    </li>
+    <li>
+      Dr. Pete Avitabile (UMass Lowell) had the idea of plotting data
+      in 3-D.
+    </li>
+    <li>
+      Dr. Dan Rohe, for showing what open-source tools for structural
+      dynamics can be.
+    </li>
+    <li>
+      Dr. Ryan Schultz, whose implementations of bandwidth averaging,
+      in his own tools and in sdynpy, inspired the bandwidth averaging
+      here.
+    </li>
+    <li>
+      Angela Montoya suggested including the wavelet computation.
+    </li>
+    <li>
+      Thomas Brown, for the inspiration behind the report formats.
+    </li>
+    <li>
+      Dr. Chris Beale, for the inspiration behind the report plots.
+    </li>
+  </ul>
+  <p class="note">
+    No code from sdynpy, Rattlesnake or any other project is used in
+    Visual Dynamics. Their ideas were studied, and the methods were
+    written here independently.
+  </p>
+</main>
+<footer>
+  <a href="mailto:contact@visualdynamics.org">contact@visualdynamics.org</a><br>
+  &copy; 2026 Brandon Zwink.
+</footer>
+</body>
+</html>

@@ -44,7 +44,9 @@
     or compute them from the time data, fit modes to them on the
     fitting screen, and animate the shapes on the test geometry. The
     report includes the coherence and the drive-point FRFs, so a poor
-    channel can be found before it affects a fit.
+    channel can be found before it affects a fit. On the fitting
+    screen, a peak's Q can also be read straight from its half-power
+    width, with a note when the peak has too few lines to read it.
   </p>
 
   <h2>Random vibration test analysis</h2>
@@ -53,7 +55,11 @@
     window, compared against the specification with its warning and
     abort lines, channel by channel. Octave-band levels, multiple
     coherence and RMS error bars in decibels are part of the same
-    reading.
+    reading. Each PSD shows the degrees of freedom its averages are
+    worth and the confidence band they give, and each channel can be
+    read in the time domain first, its moments, tails and kurtosis
+    checked against a Gaussian record's. A tone in the random is read
+    in g peak off the PSD's lines, not off the height of its spike.
   </p>
 
   <h2>Shock test analysis</h2>
@@ -62,7 +68,12 @@
     velocity and displacement, compute a shock response spectrum for
     each channel and each event, and compare them against the required
     spectrum and its tolerance band. Signed error bars in decibels
-    show which events under-tested or over-tested.
+    show which events under-tested or over-tested, and the points rule
+    counts how many points of each spectrum fall inside the band.
+    Before the spectrum, each record's velocity is checked for a zero
+    shift. A classical pulse is judged against its envelope and its
+    velocity change, and a pulse can be checked against a shaker's
+    stroke, velocity and force ratings before it is run.
   </p>
 
   <h2>Transient environment analysis</h2>
@@ -71,7 +82,9 @@
     was asked to reproduce, one control channel at a time. Each playing
     is overlaid on the target where it actually landed, the waveform
     error is shown for every channel and playing, and the PSDs of both
-    compare the levels.
+    compare the levels. A run can also be judged segment by segment,
+    each stretch by the rule for its kind, and a reference record can
+    be checked against a shaker's ratings before its first pass.
   </p>
 
   <h2>Sine sweep test analysis</h2>
@@ -80,7 +93,10 @@
     amplitude, so the test article sees each frequency in turn. The
     level each tone actually reached is extracted from the recording
     and compared against the level it was required to reach, tone by
-    tone and channel by channel, with the difference in decibels.
+    tone and channel by channel, with the difference in decibels. The
+    sweep rate is checked against the modes it passes, a dwell is read
+    against time with its build-up and ring-down, and two signature
+    sweeps, before and after a test, are compared mode by mode.
   </p>
 
   <h2>Random and sine</h2>

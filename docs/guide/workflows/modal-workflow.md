@@ -125,6 +125,13 @@ width shows the damping. The algorithm, and how it differs from the
 batch polynomial methods, is described in
 [How the mode fitting works](../modal-fitting.md).
 
+The peak under the cursor is also read by its half-power width: the
+0.707 line, its two crossings and the Q they give are drawn on the
+residual CMIF and written at the end of the status line. It is a check
+on the fit's damping, read straight off the data, and it says when the
+peak has too few lines for the width to be trusted
+([Reading Q from a peak's half-power width](../half-power.md)).
+
 ![Mid-fit: two modes confirmed and bookmarked, the cursor's parabola
 on the 647 Hz peak at 1.98% damping, the confirmed modes in the table
 with the auto-MAC beside them](../images/modal-fit.png)

@@ -21,7 +21,7 @@ does.
 
 | Layer | Modules | Qt? | What lives there |
 |---|---|---|---|
-| Data model | `core/` | no | The objects a test holds (`Geometry`, `TimeHistory`, `Spectrum`, `Frf`, `Psd`, `Srs`, `ShapeSet`, `ChannelTable`, the specifications) and every computation on them: spectral estimates, FRFs, shock response, kurtosis, the wavelet, filters, modal fitting, rigid-body modes, transforms, the finite element model and the solids and meshes it is built from, and reports as data. |
+| Data model | `core/` | no | The objects a test holds (`Geometry`, `TimeHistory`, `Spectrum`, `Frf`, `Psd`, `Srs`, `ShapeSet`, `ChannelTable`, the specifications) and every computation on them: spectral estimates, FRFs, shock response, kurtosis, the wavelet, filters, modal fitting, the checks a test is judged by (the SRS points rule, the shock and pulse checks, the time statistics, replication by segment, the sweep rate, the stroke and the fit to a shaker), rigid-body modes, transforms, the finite element model and the solids and meshes it is built from, and reports as data. |
 | Units | `units.py`, `core/unit_choices.py` | no | Every quantity is stored in SI and displayed in the chosen system; an object imported without units stays unit-less until it is told its units. |
 | Project | `project.py` | no | The `Project`: named objects, links, roles, the verbs and the journal (both below). This is the one workflow that the app and a script both drive. |
 | Formats | `io/` | no | One module per format, each a reader and nearly always a writer, listed in a small registry so that a new format touches nothing else. `native.py` is `.vdyn`. |
@@ -88,7 +88,12 @@ in step. There are three standards, enforced by
   section: the shock response spectrum's filter, the octave bands, the
   FRF estimators, the multiple coherence, the wavelet, the averaging,
   the kurtosis, the modal assurance criterion, the beam, plate and
-  solid elements, the modal fit, the filters and the tracking filter.
+  solid elements, the modal fit, the filters, the tracking filter, the
+  half-power width and the signature comparison built on it, the
+  classical shock pulses, the velocity check of a shock record, a tone
+  read off an autospectrum, the time statistics, the replication read
+  by segment and the fit of its reference to a shaker, the stroke, the
+  sweep rate, and the build-up and decay of a dwell.
   A reader has to be able to check the equations against the source
   they came from, and the next person to work on the code has to know
   which of several formulations was chosen. Each entry says what it is

@@ -25,6 +25,7 @@ shapes.animate_pair(geometry, 2, fem_shapes, 3, fem_geometry)
                                         # cell animates them
 
 history.animate(geometry)               # time records on the geometry
+history.animate(geometry, quantity='force')   # one quantity of a mixed record
 history.animate(geometry, movie='run.mp4', seconds=10.0)
 
 frf.animate(geometry)                   # the operating deflection shape,
@@ -52,8 +53,7 @@ channel reaches, with no claim about when it reaches it. Size shows
 each line at full scale. Color is absolute: each node is colored in dB
 below the loudest node at any line, down to a floor of 40 dB, so a
 quiet line still shows its shape but is colored as quiet. Play moves
-the cursor up the spectrum. One quantity deflects at a time (the box
-on the toolbar picks it). A node measured along two axes deflects to
+the cursor up the spectrum. A node measured along two axes deflects to
 the in-phase diagonal of the two, because two copies of the geometry
 cannot show anything else.
 
@@ -70,6 +70,14 @@ power at that frequency. Picking a reference column in the grid reads
 the shape relative to that one channel instead, and picking only
 autospectra falls back to the envelope, since phase relative to
 nothing is not defined.
+
+Every animation shows one quantity at a time, because a node moved by
+an acceleration and the next one moved by a force would show neither.
+A record of accelerations and forces animates its accelerations, or
+whichever quantity it holds most of, and a box on the toolbar offers
+the others. The plot under the animation shows only the quantity being
+animated, and the cursor is on that plot. In a script, `quantity=`
+picks it, as in the examples above.
 
 ```python
 coherence.plot_map()                    # frequency across, channel down

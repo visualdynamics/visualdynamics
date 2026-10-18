@@ -1290,6 +1290,8 @@ class TimeHistory(DataArray):
             (`animation_records`).
         **kwargs
             Passed to `visualdynamics.viz.animate.animate_time`:
+            `quantity=` picks which measurement moves the geometry in a
+            mixed record (the most common one by default),
             `screenshot=` saves a still at the sample with the largest
             deflection, `movie=` saves the record once through as an MP4,
             `seconds=` sets how long that takes.

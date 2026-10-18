@@ -630,3 +630,106 @@ def test_a_one_sided_pick_still_names_the_channel_for_both(window, pump):
              if isinstance(it, pg.PlotItem)]
     drawn = [c.name() for p in plots for c in p.listDataItems()]
     assert drawn == ['Event 1: 104Z+', 'Specification: 104Z+'], drawn
+
+
+# ---- one quantity at a time ------------------------------------------------
+
+
+def _plotted_quantities(window):
+    """The quantity of every plot stacked under the animation, top down,
+    and the one the cursor rides."""
+    rows, riding, row = [], None, 0
+    while (plot := window.data_pane.graphics.getItem(row, 0)) is not None:
+        key = getattr(plot, 'series_key', None)
+        if key is not None:
+            rows.append(key[1])
+            if window._cursor in plot.items:
+                riding = key[1]
+        row += 1
+    return rows, riding
+
+
+def test_the_quantity_box_picks_what_animates_what_is_plotted_and_where_the_cursor_is(
+        window, pump):
+    """A record of accelerations and forces with a geometry: the box
+    offers both without the DOF arrows on, and the one chosen is the one
+    the geometry moves by, the one plot drawn under it, and the plot the
+    cursor rides (Brandon, 2026-10-18: every quantity's plot was drawn,
+    and the cursor sat on the top one whatever was animated)."""
+    loaded(window)
+    window.tree.clearSelection()
+    for name in ('Geometry', 'Time History'):
+        window._item_for_object(name).setSelected(True)
+    pump()
+    assert not window.dofs_action.isChecked()
+    assert window.dofs_combo_action.isVisible()
+    offered = [window.dofs_combo.itemData(i)
+               for i in range(window.dofs_combo.count())]
+    assert offered == ['acceleration', 'force']
+    assert _plotted_quantities(window) == (['acceleration'], 'acceleration')
+    message = window.statusBar().currentMessage()
+    assert 'animating avg 1 of 20 averages' in message, message
+    assert 'other quantities not shown' in message
+
+    window.dofs_combo.setCurrentIndex(offered.index('force'))
+    pump()
+    assert _plotted_quantities(window) == (['force'], 'force')
+    message = window.statusBar().currentMessage()
+    assert 'deflection proportional to N' in message
+    assert 'curves from 40 force records' in message, 'not "selected"'
+
+
+def test_a_record_of_one_quantity_offers_no_box(window, pump):
+    """No choice, no box (principle 3): a single quantity animates and
+    plots as it always has."""
+    loaded(window)
+    history = window.objects['Time History']
+    accelerations = [i for i in range(history.num_records)
+                     if history.known_dim(i) == 'acceleration']
+    window.add_object('Accelerations', TimeHistory(
+        history.abscissa, history.ordinate[accelerations],
+        response_dof=[history.response_dof[i] for i in accelerations],
+        ordinate_dim='acceleration', ordinate_unit='m/s**2'))
+    window.tree.clearSelection()
+    for name in ('Geometry', 'Accelerations'):
+        window._item_for_object(name).setSelected(True)
+    pump()
+    assert window.play_action.isEnabled()
+    assert not window.dofs_combo_action.isVisible()
+
+
+def test_the_headless_time_animation_takes_one_quantity():
+    """The script's call follows the same rule as the window: the most
+    common quantity by default, another by name, and a quantity no
+    record measures refused."""
+    from visualdynamics.deform import first_capture, quantity_records
+
+    mixed = TimeHistory(np.arange(4.0), np.ones((3, 4)),
+                        response_dof=['1Z+', '2Z+', '3Z+'],
+                        ordinate_dim=['acceleration', 'force',
+                                      'acceleration'])
+    assert quantity_records(mixed) == ([0, 2], 'acceleration', 1)
+    assert quantity_records(mixed, None, 'force') == ([1], 'force', 2)
+    # a tie goes to the first record's quantity, the same every run
+    assert quantity_records(mixed, [1, 2], None)[1] == 'force'
+    assert quantity_records(mixed, None, 'velocity') == ([], 'velocity', 3)
+    indices, note = first_capture(blocked(), None)
+    assert indices == [0, 3] and 'avg 1 of 3' in note
+    assert first_capture(blocked(), [1, 4]) == ([1, 4], '')
+
+
+def test_the_headless_calls_refuse_a_quantity_no_record_measures():
+    """Refused before anything is drawn, with the quantity named."""
+    from visualdynamics.core.data import Spectrum
+    from visualdynamics.viz.animate import animate_ods, animate_time
+
+    mixed = TimeHistory(np.arange(4.0), np.ones((2, 4)),
+                        response_dof=['1Z+', '2Z+'],
+                        ordinate_dim=['acceleration', 'force'])
+    with pytest.raises(ValueError, match="no records measure 'velocity'"):
+        animate_time(None, mixed, quantity='velocity', show=False)
+    spectrum = Spectrum(np.arange(1.0, 5.0), np.ones((2, 4)) * (1 + 1j),
+                        response_dof=['1Z+', '2Z+'],
+                        ordinate_dim=['acceleration', 'force'])
+    with pytest.raises(ValueError, match="no records measure 'velocity'"):
+        animate_ods(None, spectrum, quantity='velocity', show=False)

@@ -1882,7 +1882,9 @@ class MainWindow(QMainWindow):
         self.dofs_action.setVisible(False)
         self._dof_series = []
         self.dofs_combo: QComboBox = QComboBox()
-        self.dofs_combo.setToolTip("Which quantity's DOFs to mark")
+        self.dofs_combo.setToolTip(
+            'Which quantity the geometry moves by and the plot shows, '
+            'and whose DOFs the arrows mark')
         self.dofs_combo.currentIndexChanged.connect(
             lambda _index: self.render_current())
         self.dofs_combo_action: QAction = toolbar.addWidget(self.dofs_combo)
@@ -2394,15 +2396,22 @@ class MainWindow(QMainWindow):
         # something happened to measure along them.
         offered = bool(self._dof_series) or bool(geometries)
         self.dofs_action.setVisible(offered)
-        # an envelope in view chooses a quantity even with the arrows
-        # off — the deflection itself is per-quantity, and one combo
-        # serves both rather than two saying the same thing
-        envelope = (len(geometries) == 1 and len(self._dof_series) == 1
-                    and isinstance(self._dof_series[0][1], Psd))
-        quantities = (series_dof_quantities(self._dof_series)
-                      if self._dof_series
-                      and (self.dofs_action.isChecked() or envelope)
-                      else [])
+        # an animation chooses a quantity even with the arrows off: a
+        # deflection is one quantity at a time (`deform.quantity_records`),
+        # and one combo serves both rather than two saying the same
+        # thing. Offered for an animation only when there is a choice:
+        # the quantities its records respond in, more than one of them
+        # (Brandon, 2026-10-18: the box picks the plot and the cursor
+        # too). The arrows mark reference DOFs as well, so with them on
+        # the box offers every quantity the data names.
+        arrows = self.dofs_action.isChecked()
+        animating = len(geometries) == 1 and len(self._dof_series) == 1
+        if self._dof_series and arrows:
+            quantities = series_dof_quantities(self._dof_series)
+        elif animating:
+            quantities = self._response_quantities(*self._dof_series[0][1:])
+        else:
+            quantities = []
         previous = self.dofs_combo.currentData()
         self.dofs_combo.blockSignals(True)
         self.dofs_combo.clear()
@@ -2411,7 +2420,23 @@ class MainWindow(QMainWindow):
         if previous in quantities:
             self.dofs_combo.setCurrentIndex(quantities.index(previous))
         self.dofs_combo.blockSignals(False)
-        self.dofs_combo_action.setVisible(bool(quantities))
+        self.dofs_combo_action.setVisible(
+            len(quantities) > (0 if arrows else 1))
+
+    @staticmethod
+    def _response_quantities(data, records):
+        """The quantities `records` of `data` respond in, sorted: what an
+        animation of them can show (`deform.quantity_records`). Unknown
+        dimensions and cross terms are left out, as the arrows' list
+        leaves them out."""
+        from ..core.report import base_quantity
+        from ..units import UNKNOWN
+
+        wanted = range(data.num_records) if records is None else records
+        kinds = {base_quantity(data.known_dim(i)) for i in wanted}
+        return sorted(kind for kind in kinds - {UNKNOWN, 'frequency',
+                                                 'dimensionless'}
+                      if '*' not in kind)
 
     def _scheme_changed(self, _scheme) -> None:
         """The platform switched light and dark: restate the theme —
@@ -8757,7 +8782,11 @@ class MainWindow(QMainWindow):
         if deflection is not None:
             parts.append(deflection)
             if series:
-                parts.append(self._render_series(series, cursor=True))
+                animated = self._animated_series(series)
+                parts.append(self._render_series(
+                    animated, cursor=True,
+                    chosen=('selected' if animated is series
+                            else self._cursor_dimension)))
         else:
             if geometries:
                 parts.append(self._render_geometries(list(geometries.items())))
@@ -10141,7 +10170,9 @@ class MainWindow(QMainWindow):
                                      showing=showing)
         if data.abscissa_dim != 'time':
             return None
-        indices, notes = animation_records(data, records)
+        of_kind, notes = self._quantity_records(data, records)
+        indices, more = animation_records(data, of_kind)
+        notes += more
         dofs = [data.response_dof[i] for i in indices]
         fit = self._fit_note(geometry, dofs)
         if fit is None:
@@ -10161,6 +10192,57 @@ class MainWindow(QMainWindow):
                                   for i in indices}))
         return (f'{name} — deflection proportional to {units}; '
                 f'drag the cursor or press Play{fit}{notes}')
+
+    def _animated_series(self, series):
+        """`series` with only the animated quantity's records, for the
+        plot under an animation.
+
+        A mixed object stacks a plot per quantity, and with all of them
+        drawn the plot did not say which one the geometry was showing,
+        and the cursor sat on the top one whatever was animated
+        (Brandon, 2026-10-18). The quantity box picks the one plot, and
+        the cursor rides it. Cross records have no quantity of their own
+        and are left to the plot of the object on its own.
+        """
+        from ..core.report import base_quantity
+
+        quantity = self._cursor_dimension
+        if quantity is None or len(series) != 1:
+            return series
+        name, data, records = series[0]
+        wanted = (list(range(data.num_records)) if records is None
+                  else list(records))
+        kept = [i for i in wanted
+                if base_quantity(data.known_dim(i)) == quantity]
+        if not kept or len(kept) == len(wanted):
+            return series
+        return [(name, data, kept)]
+
+    def _quantity_records(self, data, records):
+        """The records of the one quantity an animation shows, and a
+        note when others were left out (`deform.quantity_records`).
+
+        The quantity is the box's, or the most common one when the box
+        names one this object does not measure: the box rides the
+        toolbar across selections, and a stale choice should not leave
+        an empty scene. The plot under the animation shows the same
+        quantity, and its cursor rides that plot.
+        """
+        from ..deform import first_capture, quantity_records
+
+        # the capture first: a whole object of stacked averages animates
+        # its first, and a list of its records would lose that rule
+        captured, notes = first_capture(data, records)
+        chosen = self.dofs_combo.currentData()
+        of_kind, quantity, left_out = quantity_records(data, captured,
+                                                       chosen)
+        if not of_kind and chosen is not None:
+            of_kind, quantity, left_out = quantity_records(data, captured)
+        self._cursor_dimension = quantity
+        if left_out:
+            notes += (f' — {left_out} records of other quantities not '
+                      'shown (the quantity box picks)')
+        return of_kind, notes
 
     def _cpsd_column(self, data, records):
         """The picked records as one CPSD reference column, or None.
@@ -10252,7 +10334,9 @@ class MainWindow(QMainWindow):
         """Complex spectra deflect the geometry at one frequency line —
         the operating deflection shape, swept in phase like a complex
         mode. The plot cursor picks the line; Play sweeps the phase."""
-        indices, notes = animation_records(data, records)
+        of_kind, notes = self._quantity_records(data, records)
+        indices, more = animation_records(data, of_kind)
+        notes += more
         dofs = [data.response_dof[i] for i in indices]
         units = ', '.join(sorted(
             {(f'{data.ordinate_unit[i]}/{data.reference_unit[i]}'
@@ -11515,7 +11599,7 @@ class MainWindow(QMainWindow):
             return ' — the 0 Hz line is off the log axis'
         return ''
 
-    def _render_series(self, series, cursor=False):
+    def _render_series(self, series, cursor=False, chosen='selected'):
         wants_map = self._map_wanted(series)
         diagonals = self._drive_points_for(series)
         all_frf = bool(series) and all(isinstance(data, Frf)
@@ -11885,7 +11969,10 @@ class MainWindow(QMainWindow):
             elif records is not None and len(records) == 1:
                 message = data.record_label(records[0])
             elif records is not None:
-                message = f'{drawn} curves from {len(records)} selected records'
+                # `chosen` says who chose them: the user, or the
+                # quantity box under an animation
+                message = (f'{drawn} curves from {len(records)} {chosen} '
+                           'records')
             else:
                 message = self._status_for(data)
                 if pages > 1:

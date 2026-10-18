@@ -59,17 +59,7 @@ def animation_records(data: DataArray, records: Sequence[int] | None
     append to a status line, saying what was left out. Dropping records
     is reported, never refused.
     """
-    notes = ''
-    if records is None and data.block is not None:
-        first = data.block[0]
-        indices = [i for i in range(data.num_records)
-                   if data.block[i] == first]
-        distinct = len(dict.fromkeys(data.block))
-        notes += (f' — animating {first} of {distinct} averages; pick a '
-                  'grid column for another')
-    else:
-        indices = list(range(data.num_records) if records is None
-                       else records)
+    indices, notes = first_capture(data, records)
     seen, kept, collided = set(), [], 0
     for i in indices:
         if data.response_dof[i] in seen:
@@ -81,6 +71,54 @@ def animation_records(data: DataArray, records: Sequence[int] | None
         notes += (f' — {collided} records repeat an animated DOF and are '
                   'not shown')
     return kept, notes
+
+
+def first_capture(data: DataArray, records: Sequence[int] | None
+                  ) -> tuple[list[int], str]:
+    """The records an animation starts from, as (indices, note): the
+    first capture of a whole object that holds repeated captures (its
+    `block` labels), with a note saying how to pick another, and
+    otherwise `records` (every record for None) with no note. The first
+    step of `animation_records`, and run on its own before
+    `quantity_records`, which needs the capture chosen first."""
+    if records is None and data.block is not None:
+        first = data.block[0]
+        distinct = len(dict.fromkeys(data.block))
+        note = (f' — animating {first} of {distinct} averages; pick a '
+                'grid column for another')
+        return ([i for i in range(data.num_records)
+                 if data.block[i] == first], note)
+    return (list(range(data.num_records) if records is None
+                 else records), '')
+
+
+def quantity_records(data: DataArray, records: Sequence[int] | None = None,
+                     quantity: str | None = None
+                     ) -> tuple[list[int], str | None, int]:
+    """The records of one quantity, as (indices, quantity, other-quantity
+    records dropped).
+
+    A deflection shows one quantity at a time: newtons and meters per
+    second squared do not share a scale, and an animation that moved
+    one node by an acceleration and the next by a force would show
+    neither. A record's quantity is its response quantity
+    (`core.report.base_quantity`), so an FRF of acceleration per force
+    is acceleration. When `quantity` is None it is the most common one
+    among `records`, the first of them on a tie; a quantity no record measures gives no indices.
+    The order of `records` is kept, so `animation_records` still keeps
+    the first record of each DOF.
+    """
+    from .core.report import base_quantity
+
+    initial = (list(records) if records is not None
+               else list(range(data.num_records)))
+    kinds = [base_quantity(data.known_dim(i)) for i in initial]
+    if quantity is None and kinds:
+        # over the list, not a set: a tie goes to the first record's
+        # quantity, where a set's order changed from run to run
+        quantity = max(kinds, key=kinds.count)
+    of_kind = [i for i, kind in zip(initial, kinds) if kind == quantity]
+    return of_kind, quantity, len(initial) - len(of_kind)
 
 
 def envelope_records(data: DataArray, records: Sequence[int] | None = None,
@@ -101,8 +139,6 @@ def envelope_records(data: DataArray, records: Sequence[int] | None = None,
     """
     # The filter order broke twice before the app and the headless call
     # shared this one function.
-    from .core.report import base_quantity
-
     initial = (list(records) if records is not None
                else list(range(data.num_records)))
     # a PSD computed here has no reference list at all — every record
@@ -111,12 +147,8 @@ def envelope_records(data: DataArray, records: Sequence[int] | None = None,
             else [i for i in initial
                   if not data.reference_dof[i]
                   or data.reference_dof[i] == data.response_dof[i]])
-    kinds = [base_quantity(data.known_dim(i)) for i in kept]
-    if quantity is None and kinds:
-        quantity = max(set(kinds), key=kinds.count)
-    of_kind = [i for i, kind in zip(kept, kinds) if kind == quantity]
-    return (of_kind, quantity,
-            len(initial) - len(kept), len(kept) - len(of_kind))
+    of_kind, quantity, left_out = quantity_records(data, kept, quantity)
+    return of_kind, quantity, len(initial) - len(kept), left_out
 
 
 def dof_directions(geometry: Geometry, dofs: Sequence[str]

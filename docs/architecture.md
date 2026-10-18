@@ -67,6 +67,15 @@ in the window is a verb on the project.
   the view, with its derived readings), a live preview drawn over the
   data, and an apply button that runs the verb. The filter, the
   truncation and the wavelet are good examples to follow.
+- A reading of a time history is one row. The data bar's readings are
+  `Reading` rows in `DataPane._READINGS` in `gui/panes.py`, and the
+  pane offers and puts away every reading by looping over that table.
+  A new reading needs its row and its action on the pane, and a render
+  method in `main_window.py`.
+- An animation shows one quantity. `deform.quantity_records` picks the
+  records of one quantity for every deflection the app or a script
+  draws, so a node is never moved by a force beside one moved by an
+  acceleration.
 - Staleness comes from provenance. A derived object records the
   settings it was made with. When its source's settings change, it
   shows a refresh badge with the reason. Recomputing is an act and is

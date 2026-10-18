@@ -602,6 +602,7 @@ def animate_envelope(geometry: Geometry, data: Any,
 def animate_ods(geometry: Geometry, data: Any,
                 records: Any = None, *,
                 frequency: float | None = None,
+                quantity: str | None = None,
                 unit_system: UnitSystem | None = None,
                 scale: float = 1.0, colormap: bool = True,
                 cycle_seconds: float = SECONDS_PER_CYCLE,
@@ -614,21 +615,33 @@ def animate_ods(geometry: Geometry, data: Any,
 
     The shape is the records' complex values at `frequency` (the first
     line at or above it), or at the strongest line when none is given,
-    swept in phase like a complex mode. The records follow
+    swept in phase like a complex mode. One `quantity` at a time, as
+    the envelope is, by default the most common one among the
+    `records` (`quantity_records`). The records follow
     `animation_records`: one record per DOF, and the first reference of a
     whole FRF. `screenshot` and `movie` save it as `animate_shape` does,
     and otherwise a window plays it.
 
-    Raises ValueError for real data, which has no phase, and when none
-    of the records is at a node of this geometry.
+    Raises ValueError for real data, which has no phase, when no record
+    measures the quantity, and when none of the records is at a node of
+    this geometry.
     """
-    from ..deform import OdsDeflection, animation_records
+    from ..deform import (
+        OdsDeflection,
+        animation_records,
+        first_capture,
+        quantity_records,
+    )
     from ..theme import theme as resolve_theme
 
     if not np.iscomplexobj(data.ordinate):
         raise ValueError('an operating deflection needs phase — '
                          'this data is real')
-    indices, _notes = animation_records(data, records)
+    captured, _note = first_capture(data, records)
+    of_kind, quantity, _left_out = quantity_records(data, captured, quantity)
+    if not of_kind:
+        raise ValueError(f'no records measure {quantity!r}')
+    indices, _notes = animation_records(data, of_kind)
     dofs = [data.response_dof[i] for i in indices]
     deflection = OdsDeflection(geometry, dofs,
                                np.asarray(data.ordinate)[list(indices)])
@@ -648,6 +661,7 @@ def animate_ods(geometry: Geometry, data: Any,
 
 
 def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
+                 quantity: str | None = None,
                  unit_system: UnitSystem | None = None,
                  scale: float = 1.0, colormap: bool = True,
                  seconds: float = SECONDS_PER_RECORD, theme: Any = None,
@@ -656,7 +670,9 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
                  show: bool = True) -> Any:
     """Time records moving on a geometry, as the app plays them: the
     record once through in `seconds`, one record per DOF
-    (`animation_records`). A window plays it on a loop.
+    (`animation_records`) and one `quantity`, by default the most common
+    one among the `records` (`quantity_records`). A window plays it on
+    a loop.
 
     With `screenshot` the still is the sample where some record is
     furthest from zero, because the first sample is usually at rest and
@@ -664,13 +680,22 @@ def animate_time(geometry: Geometry, data: Any, records: Any = None, *,
     record is saved once through as an MP4 (H.264) and the path is
     returned.
 
-    Raises ValueError when none of the records is at a node of this
-    geometry.
+    Raises ValueError when no record measures the quantity, or none of
+    the records is at a node of this geometry.
     """
-    from ..deform import TimeDeflection, animation_records
+    from ..deform import (
+        TimeDeflection,
+        animation_records,
+        first_capture,
+        quantity_records,
+    )
     from ..theme import theme as resolve_theme
 
-    indices, _notes = animation_records(data, records)
+    captured, _note = first_capture(data, records)
+    of_kind, quantity, _left_out = quantity_records(data, captured, quantity)
+    if not of_kind:
+        raise ValueError(f'no records measure {quantity!r}')
+    indices, _notes = animation_records(data, of_kind)
     dofs = [data.response_dof[i] for i in indices]
     ordinate = np.asarray(data.ordinate)[list(indices)].real
     deflection = TimeDeflection(geometry, dofs, ordinate)

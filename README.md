@@ -159,9 +159,9 @@ Questions are welcome at
 [contact@visualdynamics.org](mailto:contact@visualdynamics.org).
 
 Help that is not code is welcome too: advice, review, measurements, or
-a bug report that turns out to be a real one. It is recorded in
-[ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md), as thanks rather than
-authorship.
+a bug report that turns out to be a real one. It is thanked on the
+website's [acknowledgments](https://visualdynamics.org/acknowledgments.html)
+page, as thanks rather than authorship.
 
 ## License
 

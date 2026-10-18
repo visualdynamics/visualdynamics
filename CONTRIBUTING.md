@@ -57,9 +57,10 @@ Any contributed code has to meet two conditions:
   `tests/test_license_boundary.py` checks this on every run for the
   packages the Project is closest to.
 
-Help that is not code counts too, and is recorded in
-[`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md). That file is a thank-you,
-not a record of rights.
+Help that is not code counts too, and is thanked on the website's
+[acknowledgments](https://visualdynamics.org/acknowledgments.html)
+page. That page is a thank-you, not a record of rights
+([`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md) says so).
 
 ## Licensing
 

@@ -7,6 +7,11 @@ no stabilization diagram. You choose each pole while looking at the
 CMIF, and the solver fits a mode at that pole. This page describes
 each part of the fit in the order the loop runs.
 
+The way of working, one mode at a time with the analyst choosing each
+pole and judging a synthesis against the measurement, was inspired by
+SMAC (Synthesize Modes And Correlate), described in the last section.
+The computations here are different.
+
 ## The CMIF and the residual
 
 The fitting screen shows the CMIF: at every frequency line, the
@@ -362,3 +367,19 @@ In exchange, every mode on the screen was chosen by a person and fit
 at the pole that was chosen, there is no model order to sweep and no
 computational poles to remove, and the complete fit state is kept in
 the published shape set, which can be reopened and edited at any time.
+
+## Where the approach comes from
+
+SMAC, the Synthesize Modes And Correlate method of Klenke and Mayes,
+also fits modes one at a time with the analyst in the loop: a trial
+root's synthesized single-mode response is correlated with the
+measured data, and the roots, dampings and shapes are found mode by
+mode. The fitting screen grew from experience with that way of
+working. The computations here are not SMAC's: the next mode is the
+largest peak of the residual CMIF, its shape is the first singular
+vector at that peak, and its pole is the one that leaves the least
+residual over a band, as the sections above describe.
+
+1. Klenke, S. E., & Mayes, R. L. (1999). "The SMAC Modal Parameter
+   Extraction Package." *International Modal Analysis Conference*,
+   Orlando, FL. [OSTI 1063](https://www.osti.gov/biblio/1063).

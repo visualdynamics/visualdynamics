@@ -36,6 +36,15 @@ it and the indicator driving it are set out.
 3. Maia, N. M. M., & Silva, J. M. M. (1997). *Theoretical and
    Experimental Modal Analysis*. Research Studies Press. Residue to
    mode-shape scaling, including the unit-modal-mass convention.
+
+The way of working, one mode at a time with the analyst choosing each
+pole, was inspired by SMAC; its computations are not the ones here.
+
+4. Klenke, S. E., & Mayes, R. L. (1999). "The SMAC Modal Parameter
+   Extraction Package." *International Modal Analysis Conference*,
+   Orlando, FL. Synthesize Modes And Correlate, which fits modes one
+   at a time by correlating a trial root's synthesized response with
+   the measured data.
 """
 
 from __future__ import annotations

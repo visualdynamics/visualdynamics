@@ -22,7 +22,10 @@ Being thanked here is not a claim on anything — authorship, ownership or other
 ## Author
 
 Visual Dynamics is written by Brandon Zwink, who holds the copyright
-in it — see [`LICENSE`](LICENSE).
+in it apart from contributed code. A contributor keeps the copyright in
+their own work and offers it under the same MIT License (see
+[`LICENSE`](LICENSE) and [`CONTRIBUTING.md`](CONTRIBUTING.md)); who
+wrote what is in the history.
 
 
 ## With thanks to
@@ -42,9 +45,17 @@ in it — see [`LICENSE`](LICENSE).
      - **Name** — for asking why the SRS was drawn on a linear axis.
 -->
 
-*Nobody yet — this page was written before there was anyone on it, so
-that the policy would be settled before the first case rather than
-decided about a particular person.*
+- **Dr. Chris Beale**, for the inspiration behind the report plots.
+- **Kevin Cross**, for the sine tracking and thirteen of the readings a
+  test is judged by, from the SRS points rule to the dwell, which he
+  contributed.
+- **Matt McDowell**, for the inspiration behind the project tree.
+- **Dr. Angela Montoya**, for suggesting the wavelet computation.
+- **Dr. Dan Rohe**, for showing what open-source tools for structural
+  dynamics can be.
+- **Dr. Ryan Schultz**, whose implementations of bandwidth averaging,
+  in his own tools and in sdynpy, inspired the bandwidth averaging
+  here.
 
 
 ## Organizations
@@ -74,8 +85,9 @@ what shaped it.
   readings of a term it went with theirs.
 - The **UFF dataset 58** convention, for a fifty-year-old format that
   still says what a channel is and what it measures.
-- **sdynpy**, **Rattlesnake** and **forcefinder**, for showing what
-  these tools should do. Nothing is taken from them: all three are
+- **[sdynpy](https://github.com/sandialabs/sdynpy)**,
+  **[Rattlesnake](https://github.com/sandialabs/rattlesnake-vibration-controller)**
+  and **forcefinder**, for showing what these tools should do. Nothing is taken from them: all three are
   GPL-3.0, and their code could not have been taken into an
   MIT project — so their methods were read and then written from
   scratch here. `tests/test_license_boundary.py`

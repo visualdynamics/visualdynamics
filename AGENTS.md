@@ -18,9 +18,9 @@ Brandon Zwink, published under the **MIT License** (`LICENSE`).
 Contributions are welcome: bug reports, and pull requests from anyone,
 offered under the same MIT License. A
 pull request that keeps the rules in this file, `PRINCIPLES.md`,
-`docs/architecture.md` and `CONTRIBUTING.md` will be merged; for
-anything substantial, an issue first is a courtesy to the
-contributor's own time. The owner reviews and merges. An agent working
+`docs/architecture.md` and `CONTRIBUTING.md` will be merged. Bug
+fixes, improvements and additions are all wanted, and an issue first is
+never required. The owner reviews and merges. An agent working
 in this tree does not accept contributions, make licensing claims or
 speak for the project; it helps the person it is working with make a
 change that keeps those rules.

@@ -150,12 +150,12 @@ what you did, what happened, and what you expected. A `.vdyn` project
 file or a small script that reproduces the problem makes the fastest
 bug report.
 
-Code contributions are welcome too. A pull request that keeps the
-project's rules will be merged; [CONTRIBUTING.md](CONTRIBUTING.md) says
-what they are and where they are written. For anything substantial,
-opening an issue first can save you from writing something that is
-already half-built or that goes somewhere the project is not going.
-You can also write to
+Pull requests are welcome from anyone: bug fixes, improvements and new
+additions alike, with no invitation needed. A pull request that keeps
+the project's rules will be merged; [CONTRIBUTING.md](CONTRIBUTING.md)
+says what they are and where they are written. An issue first is never
+required, though for a large addition a short one can save you time.
+Questions are welcome at
 [contact@visualdynamics.org](mailto:contact@visualdynamics.org).
 
 Help that is not code is welcome too: advice, review, measurements, or

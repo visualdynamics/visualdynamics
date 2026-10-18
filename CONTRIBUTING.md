@@ -2,26 +2,32 @@
 
 Thanks for taking a look.
 
-Contributions are welcome: bug reports, fixes, features, documentation
-and tests. Open an issue or a pull request; nobody needs an invitation.
-
-A bug report is the easiest place to start, and I will try to fix what
-is reported promptly. Say what you did, what happened, and what you
-expected. Reports of things that are wrong are worth a great deal to
-this project, because finding them is the part I cannot do alone.
+Pull requests are welcome from anyone. Bug fixes, improvements to
+something that is already here, and new additions are all wanted, and
+you do not need an invitation or anyone's permission to open one. If
+something got in your way while you were using Visual Dynamics, the
+fix for it is a good first pull request.
 
 A pull request that keeps the project's rules will be merged. The rules
 are written down, and every change here is held to them, mine
 included: the principles (`PRINCIPLES.md`), the architecture and its
 conventions (`docs/architecture.md`), the rules for working in the tree
 (`AGENTS.md`) and the two conditions below. A review checks a change
-against them. When a change is declined or needs more work, the review
-says which rule and why.
+against them. When a change needs more work, the review says which rule
+and why, and helps get it there. Leave *Allow edits by maintainers*
+ticked on the pull request, so that a small fix or a rebase onto `main`
+can be made on your branch instead of being sent back to you.
 
-For anything substantial, open an issue first. It is optional, and it
-can save you time: a sentence about what you would like to change
-and why can keep you from writing something that is already half-built,
-or that goes somewhere the project is not going. You can also write to
+Small contributions count as much as large ones: a fix for one wrong
+number, a test for a case nobody covered, a clearer sentence in a
+guide, a reader for one more file format. A bug report is welcome too,
+and I will try to fix what is reported promptly. Say what you did, what
+happened, and what you expected.
+
+An issue before a pull request is never required. For a large
+addition, a short issue saying what you plan can still save you time,
+since it may already be half-built or there may be a simpler place for
+it. Questions are welcome at
 [contact@visualdynamics.org](mailto:contact@visualdynamics.org).
 
 [`docs/architecture.md`](docs/architecture.md) describes how the

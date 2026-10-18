@@ -163,6 +163,16 @@ def test_the_navigation_wraps_on_a_phone():
         'a URL in inline code must break rather than widen the page'
 
 
+def test_the_home_page_points_at_the_acknowledgments():
+    """The acknowledgments page was reached only through About, where
+    nobody looked for it (Brandon, 2026-10-18). The home page links it
+    now, and About keeps its link."""
+    for name in ('index', 'about'):
+        page = (LAUNCH / f'{name}.html').read_text(encoding='utf-8')
+        assert '<a href="acknowledgments.html">' in page, \
+            f'{name}: links the acknowledgments'
+
+
 def test_the_downloads_page_links_every_example_set_the_tool_cuts():
     """The example projects are a release of their own, cut and
     uploaded by tools/cut_examples.py, and the downloads page links

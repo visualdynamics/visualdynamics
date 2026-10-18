@@ -59,7 +59,8 @@ mass to the body's mass, so the travel that reaches the stops, and the
 velocity the coil moves at against the body, are the table's times one
 plus that ratio. The body moves most at low frequency, which is where a
 replication record's displacement lives. Give the body's mass and both
-count it; leave it out and they are the table's alone. The travel is
+count it; leave it out, as for a body bolted to a seismic mass, and
+they are the table's alone. The travel is
 checked each way from the middle of the stroke against half the
 stroke: a record that dips into a hole and climbs out is not symmetric
 about zero, and a span inside the stroke can still run one way past a

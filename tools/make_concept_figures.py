@@ -764,20 +764,20 @@ def replication_fit():
 
 
 def stroke_readout():
-    """Whether a pulse fits on the shaker: the 50 g, 11 ms half-sine
+    """Whether a pulse fits on the shaker: the 40 g, 13 ms half-sine
     compensated at a fifth of its peak, against a 2.5 in stroke and a
-    70 in/s shock velocity, with a moving mass of 100 lb on a body four
-    times as heavy and a 6,000 lbf force rating."""
+    70 in/s shock velocity, with a moving mass of 100 lb on a body of
+    3,000 lb and a 6,000 lbf force rating."""
     from visualdynamics.core.stroke import compensated_half_sine, read_stroke
     from visualdynamics.plot import plot_stroke
     from visualdynamics.units import DEFAULT_SYSTEM, to_si
 
-    pulse = compensated_half_sine(50.0, 0.011, 102400.0, unit='g')
+    pulse = compensated_half_sine(40.0, 0.013, 102400.0, unit='g')
     ratings = {'stroke': float(to_si(2.5, 'in')),
                'velocity': float(to_si(70.0, 'in/s')),
                'force': float(to_si(6000.0, 'lbf')),
                'moving_mass': float(to_si(100.0, 'lb')),
-               'body_mass': float(to_si(400.0, 'lb'))}
+               'body_mass': float(to_si(3000.0, 'lb'))}
     reading = read_stroke(pulse, **ratings)
     for line in reading.describe(DEFAULT_SYSTEM):
         print(f'  {line}')

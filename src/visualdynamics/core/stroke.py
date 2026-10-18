@@ -479,7 +479,7 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
         reading = read_stroke(compensated_half_sine(50.0, 0.011, 102400.0,
                                                     unit='g'),
                               stroke=0.0635, velocity=1.778,
-                              moving_mass=45.4, body_mass=181.4)
+                              moving_mass=45.4, body_mass=1361.0)
 
     The record is integrated from rest at its first sample with nothing
     removed (`filters.integrate` with ``drift_corner=None``; the module
@@ -508,7 +508,8 @@ def read_stroke(history: TimeHistory, channel: int | str | None = None, *,
     body_mass : float, optional
         The shaker body's mass, in kg; with `moving_mass`, the body's
         motion is counted into the travel and the velocity. The table
-        alone when omitted.
+        alone when omitted, which is right for a body bolted to a
+        seismic mass.
 
     Returns
     -------

@@ -58,7 +58,8 @@ class ShakerRating:
     m/s, and `moving_mass` everything the shaker accelerates in kg: the
     armature, the head expander or slip table, the fixture and the
     article. `body_mass`, in kg, counts the body's motion opposite the
-    armature when it is given with the moving mass.
+    armature when it is given with the moving mass; leave it out for a
+    body bolted to a seismic mass, which barely moves.
 
     Each is optional, and a rating left out is not judged: a reading
     that needs one says so. One that is given must be a finite number

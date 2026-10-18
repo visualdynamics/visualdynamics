@@ -32,7 +32,7 @@ with nothing removed, from rest at the record's first sample: the same
 `filters.integrate` the Integrate act uses, called with
 `drift_corner=None`. The default 2 Hz drift high-pass is no longer
 transparent here, because the displacement of a compensated pulse is
-content at a few hertz. With it, the 50 g, 11 ms pulse below reads
+content at a few hertz. With it, a 50 g, 11 ms pulse reads
 1.212 in peak to peak instead of 1.166 in, 3.9 % high, and its
 displacement no longer starts and ends at rest. A stroke estimate is
 integrated raw.
@@ -61,9 +61,13 @@ not a number is refused. The ratings are judged by the rules in
 
 The body is counted because the ratings are the armature's motion
 relative to the body, and a body on isolation mounts moves the other
-way by the ratio of the moving mass to its own. Given both masses, the
-travel and the velocity count it. The compensation is low in
-frequency, where the body moves most.
+way by the ratio of the moving mass to its own. The stops are on the
+body, and the back voltage the amplifier works against comes from the
+coil's velocity through the body's magnet, so the travel and the
+velocity both count it when both masses are given. The compensation
+is low in frequency, where the body moves most. A body bolted to a
+seismic mass or a rigid floor barely moves: leave `body_mass` out for
+it, and the travel and the velocity are the table's own.
 
 The stroke share is the larger travel each way from center over half
 the stroke, because the armature rests at center, held there by its
@@ -87,39 +91,40 @@ controller's own prediction and to a measurement.
 
 ## An example
 
-The 50 g, 11 ms half-sine compensated at a fifth, on a shaker with a
+The 40 g, 13 ms half-sine compensated at a fifth, on a shaker with a
 2.5 in shock stroke, a 70 in/s shock velocity and a 6,000 lbf shock
-force, with 100 lb moving on a body of 400 lb:
+force, with 100 lb moving on a body of 3,000 lb:
 
 ```python
 from visualdynamics.core.stroke import compensated_half_sine, read_stroke
 from visualdynamics.plot import plot_stroke
 from visualdynamics.units import to_si
 
-pulse = compensated_half_sine(50.0, 0.011, 102400.0, unit='g')
+pulse = compensated_half_sine(40.0, 0.013, 102400.0, unit='g')
 ratings = {'stroke': float(to_si(2.5, 'in')),
            'velocity': float(to_si(70.0, 'in/s')),
            'force': float(to_si(6000.0, 'lbf')),
            'moving_mass': float(to_si(100.0, 'lb')),
-           'body_mass': float(to_si(400.0, 'lb'))}
+           'body_mass': float(to_si(3000.0, 'lb'))}
 reading = read_stroke(pulse, **ratings)
 print('\n'.join(reading.describe()))
 plot_stroke(pulse, **ratings, path='stroke.png')
 ```
 
-The table moves 1.17 in peak to peak and the body adds a quarter, so
-the travel against the body is 1.46 in. It runs 1.46 in down from
-center and none up, against 1.25 in to the stop each way: 117 % of the
-room, so the pulse as compensated here reaches a stop. The 1.46 in peak
+The table moves 1.30 in peak to peak and the body adds a thirtieth, so
+the travel against the body is 1.35 in. It runs 1.35 in down from
+center and none up, against 1.25 in to the stop each way: 108 % of the
+room, so the pulse as compensated here reaches a stop. The 1.35 in peak
 to peak is inside the 2.5 in stroke, so compensation that centers the
-travel would put about 0.73 in each way, inside the stops. The table's
-velocity peaks at 67.6 in/s, and with the body's quarter the coil moves
-84.5 in/s against the body, 121 % of the 70 in/s rating; the force is
-5,000 lbf, 83 % of its own. So the pulse does not fit as compensated
-here, and on its velocity it would not fit centered either.
+travel would put about 0.67 in each way, inside the stops. The table's
+velocity peaks at 63.9 in/s, and the coil moves 66.0 in/s against the
+body, 94 % of the 70 in/s rating; the force is 4,000 lbf, 67 % of its
+own. So the pulse fits once the controller centers its travel. With
+the body bolted down and `body_mass` left out, the travel is 104 % of
+the room and the velocity 91 % of its rating.
 
-![The compensated 50 g, 11 ms half-sine in three rows: the pulse, its
-velocity with the velocity against the body dashed past the 70 in/s
+![The compensated 40 g, 13 ms half-sine in three rows: the pulse, its
+velocity with the velocity against the body dashed inside the 70 in/s
 rating lines, and the table's displacement with the travel relative to
 the body dashed beneath it, past the lower stop half the stroke below
 center](images/stroke-readout.png)

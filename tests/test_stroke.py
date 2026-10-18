@@ -101,6 +101,34 @@ def test_a_moving_mass_a_quarter_of_the_bodys_needs_1_46_in_of_relative_travel()
         assert plain.relative_velocity == plain.peak_velocity
 
 
+def test_the_guides_example_reads_what_the_guide_says():
+    """The guide's 40 g, 13 ms pulse with 100 lb on a 3,000 lb body:
+    108 % of the room one way, fits centered, the velocity 94 % against
+    the body and 91 % with the body left out. The example was a 400 lb
+    body once, a ratio no shaker that size has, which put the velocity
+    at 121 % (Brandon, 2026-10-18)."""
+    from pathlib import Path
+
+    ratings = {'stroke': 2.5 * INCH, 'velocity': 70.0 * INCH,
+               'force': 6000.0 * LBF, 'moving_mass': 100.0 * LB}
+    counted = read_stroke(pulse(40.0, 0.013), **ratings,
+                          body_mass=3000.0 * LB)
+    shares = counted.shares()
+    assert round(shares['stroke'] * 100) == 108
+    assert round(shares['velocity'] * 100) == 94
+    assert round(shares['force'] * 100) == 67
+    assert counted.travel <= 2.5 * INCH, 'centered, it fits'
+    alone = read_stroke(pulse(40.0, 0.013), **ratings).shares()
+    assert (round(alone['stroke'] * 100), round(alone['velocity'] * 100)) \
+        == (104, 91)
+    guide = (Path(__file__).resolve().parent.parent / 'docs' / 'guide'
+             / 'stroke.md').read_text(encoding='utf-8')
+    for said in ("compensated_half_sine(40.0, 0.013, 102400.0, unit='g')",
+                 "float(to_si(3000.0, 'lb'))", '108 % of the',
+                 '94 % of the 70 in/s', '104 % of', '91 % of its rating'):
+        assert said in ' '.join(guide.split()), f'the guide says {said!r}'
+
+
 @pytest.mark.parametrize('peak,duration', [
     (20.0, 0.011), (50.0, 0.011), (100.0, 0.011), (30.0, 0.018),
     (10.0 * np.pi, 0.011), (100.0, 0.006), (20.0, 0.030)])

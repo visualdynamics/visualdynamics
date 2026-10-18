@@ -51,6 +51,11 @@ def test_every_documentation_link_resolves():
             if target.startswith(('http', 'mailto')):
                 continue
             resolved = (page.parent / target).resolve()
+            if resolved == api:
+                # the section itself, as the top-level navigation names
+                # it (docs/SUMMARY.md): the generator writes its index
+                # and its own SUMMARY, so it is there whenever they are
+                continue
             if api in resolved.parents:
                 assert resolved.name in generated, f'{page.name} -> {target}'
             else:

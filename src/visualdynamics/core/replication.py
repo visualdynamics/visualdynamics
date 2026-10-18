@@ -360,13 +360,21 @@ def compare(measured: TimeHistory, specification: DataArray,
     is more than `ZERO_TARGET_DB` (120 dB) below the loudest control
     channel's gets NaN for every metric, with `zero_target` True,
     because every metric is a ratio against the target. A control
-    channel with no matching record is left out.
+    channel with no record at its DOF is left out.
+
+    A record and its target are compared by `compliance.units_check`.
+    A control channel recorded only as another quantity, or with only
+    one side's units declared, gets a row per playing with every metric
+    NaN and `refused` saying why, so it shows as not scored instead of
+    vanishing. With neither side's units declared the rows are scored
+    and carry `note` (`compliance.RAW_NOTE`).
     """
     # Every repeat is reported: an earlier version reduced these to the
     # worst repeat per channel and labeled it so, which is a judgment
     # and not a measurement. `metrics` exists because a screen showing a
     # grid of waveform errors was spending two seconds an update on
     # sixty shock spectra nobody had asked to see.
+    from .compliance import units_check
     from .srs import DEFAULT_Q, maximax
 
     metrics = tuple(metrics)
@@ -401,12 +409,30 @@ def compare(measured: TimeHistory, specification: DataArray,
     for c, dof in enumerate(dofs):
         row = rows[c]
         if row is None:
+            # recorded, but only as another quantity or with only one
+            # side's units declared: a row per playing that says why,
+            # where the channel used to drop out without a word
+            # (Brandon, 2026-10-18)
+            other = next((i for i in range(measured.num_records)
+                          if measured.channel_key(i)[0] == dof), None)
+            if other is None:
+                continue
+            refused, _note = units_check(dim, measured.ordinate_dim[other],
+                                         wanted_name='the target',
+                                         held_name='the record')
+            for playing in found_playings:
+                out.append({'label': dof, 'frame': playing['frame'],
+                            'zero_target': False, 'refused': refused,
+                            **dict.fromkeys(metrics, float('nan'))})
             continue
+        _refused, note = units_check(dim, measured.ordinate_dim[row])
         whole = specification.ordinate[c]
         silent = scales[c] <= floor
         for playing in found_playings:
             k, a, m = playing['frame'], playing['start'], playing['samples']
             found = {'label': dof, 'frame': k, 'zero_target': bool(silent)}
+            if note is not None:
+                found['note'] = note
             if silent:
                 found.update(dict.fromkeys(metrics, float('nan')))
                 out.append(found)

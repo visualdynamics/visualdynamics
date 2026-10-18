@@ -1565,6 +1565,9 @@ def specification_model(rows: Any,
 
 
 def _number(value):
+    # words pass through: a cell that could not be scored says why
+    if isinstance(value, str):
+        return value
     return '' if value is None else f'{value:.4g}'
 
 
@@ -1578,26 +1581,28 @@ class ReplicationRows:
     shows both. In it, a channel that is poor in every event and an
     event that was poor on every channel are easy to tell apart.
 
-    `values` maps `(channel, event)` to the error. `plotted` is the set
+    `values` maps `(channel, event)` to the error, or to a sentence
+    saying why that pair has none. `plotted` is the set
     of `(channel, event)` pairs on screen, because picking a cell picks
     both at once.
     """
 
     def __init__(self, channels: Sequence[str], events: Sequence[int],
-                 values: Mapping[tuple[str, int], float],
+                 values: Mapping[tuple[str, int], float | str],
                  plotted: Sequence[tuple[str, int]] | None = None) -> None:
         self.channels: list[str] = list(channels)
         self.events: list[int] = list(events)
-        self.values: dict[tuple[str, int], float] = dict(values)
+        self.values: dict[tuple[str, int], float | str] = dict(values)
         self.plotted: set[tuple[str, int]] = set(plotted or ())
 
     def __len__(self) -> int:
         return len(self.channels)
 
-    def value(self, row: int, column: int) -> float | None:
+    def value(self, row: int, column: int) -> float | str | None:
         """The value at a row and an event's column (counted from zero,
-        without the channel column), or None where there is no value
-        for that channel and event."""
+        without the channel column), the words for why it was not
+        scored, or None where there is no value for that channel and
+        event."""
         if not 0 <= row < len(self.channels):
             return None
         if not 0 <= column < len(self.events):

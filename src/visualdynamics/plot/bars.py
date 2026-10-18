@@ -94,7 +94,11 @@ class BarChart:
     `baseline` the value the bars grow from (the nominal three for
     kurtosis, zero otherwise), and `summary` where the count is written:
     'over' the bars, 'title' above the plot, or 'none'. `label` and
-    `units` name the bottom axis.
+    `units` name the bottom axis. `notes` maps a row's index to a
+    sentence written along that row in place of a bar: why it has no
+    number. A row with a note is left out of the count and named in it
+    as not scored. `note` is a remark the count ends with, such as
+    that the values were compared as raw numbers.
 
     Raises `ValueError` when `summary` or `side` is not one of its
     values.
@@ -106,7 +110,9 @@ class BarChart:
                  label: str = '', units: str = '',
                  neutral: str = 'response_curve',
                  baseline: float = 0.0, summary: str = 'over',
-                 side: str = 'over') -> None:
+                 side: str = 'over',
+                 notes: Mapping[int, str] | None = None,
+                 note: str | None = None) -> None:
         self.plot: Any = plot
         self.rows: list[Any] = list(rows)
         self.colors: dict[str, str] = colors
@@ -145,6 +151,10 @@ class BarChart:
         if side not in ('over', 'under'):
             raise ValueError(f"side {side!r}: 'over' or 'under'")
         self.side: str = side
+        #: row index -> why that row has no bar, written where it would be
+        self.notes: dict[int, str] = dict(notes or {})
+        #: a remark the count ends with
+        self.note: str | None = note
         #: the bars themselves, one item holding all of them
         self.bars: Any = None
         self.lines: list[Any] = []
@@ -271,6 +281,11 @@ class BarChart:
             brushes=[self._brush(v) for v in values],
             pen=pg.mkPen(None))
         self.plot.addItem(self.bars)
+        for row, note in self.notes.items():
+            text = pg.TextItem(note, anchor=(0.0, 0.5),
+                               color=self.colors['plot_foreground'])
+            text.setPos(self.baseline, float(row))
+            self.plot.addItem(text, ignoreBounds=True)
         axis = self.plot.getAxis('left')
         axis.setTicks([[(i, label) for i, (label, _v) in enumerate(self.rows)]])
         # wide enough for the longest channel name, said outright:
@@ -356,12 +371,16 @@ class BarChart:
                        .rstrip() if top else ''))
         share = self.share()
         out = sum(1 for v in self.values() if self.beyond(v))
+        scored = len(self.rows) - len(self.notes)
+        unscored = (f'; {len(self.notes)} not scored' if self.notes
+                    else '')
         where = (f'outside {self.low:g} to {self.high:g}{self.units}'
                  if self.high is not None
                  else f'under {self.low:g}{self.units}'
                  if self.side == 'under'
                  else f'over {self.low:g}{self.units}')
-        return f'{out} of {len(self.rows)} channels {where} — {share:.0f}%'
+        return (f'{out} of {scored} channels {where} — {share:.0f}%'
+                + unscored + (f'; {self.note}' if self.note else ''))
 
     def key(self, legend: Any) -> None:
         """Add a key for the colors to `legend` (from `plot.legend_below`).

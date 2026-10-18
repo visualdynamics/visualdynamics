@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import itertools
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -295,6 +295,64 @@ def comparable(specification: Specification, measured: DataArray) -> str | None:
             return (f'a specification on 1/{asked}-octave bands compares only '
                     f'with a response on 1/{asked}-octave bands, not 1/{held}')
     return None
+
+
+#: what a comparison says beside its result when neither side's units
+#: are declared: both hold the numbers they came with, so the ratio
+#: means something only if they came in the same units
+RAW_NOTE = 'units not declared on either side; compared as raw numbers'
+
+
+def units_check(wanted: str, held: str, *,
+                wanted_name: str = 'the requirement',
+                held_name: str = 'the measurement'
+                ) -> tuple[str | None, str | None]:
+    """(refused, note): whether a quantity held can be compared with
+    the one required, from the two records' declared quantities.
+
+    Values are held in SI once their units are declared and as they
+    came otherwise, so the rule has three cases. Both declared: they
+    must be the same quantity, since an acceleration says nothing about
+    a velocity requirement. One declared: refused, since one side is in
+    SI and the other is not, and the ratio is off by the unit's scale.
+    Neither declared: compared, on the reading that whoever compares
+    two sets of raw numbers knows they share a unit, with `RAW_NOTE`
+    returned so the result can say so. Every comparison of a
+    measurement against what it had to meet uses this one rule.
+
+    Parameters
+    ----------
+    wanted, held : str
+        The two quantities, as `ordinate_dim` spells them; 'unknown'
+        where the units are not declared.
+    wanted_name, held_name : str
+        How the reason names each side.
+
+    Returns
+    -------
+    tuple of (str or None, str or None)
+        Why the pair is refused, or None; and `RAW_NOTE` when neither
+        side is declared, or None.
+    """
+    # One rule for every comparison (Brandon, 2026-10-18): a PSD of
+    # velocity scored 0 dB against an acceleration specification, and a
+    # PSD of undeclared units read a perfect match as -19.8 dB, the
+    # same two faults the SRS readings had refused since 2026-10-16
+    from ..units import UNKNOWN
+
+    wanted, held = str(wanted), str(held)
+    if wanted == UNKNOWN and held == UNKNOWN:
+        return None, RAW_NOTE
+    if UNKNOWN in (wanted, held):
+        side = wanted_name if wanted == UNKNOWN else held_name
+        reason = (f'the units of {side} are not declared, so its levels '
+                  'cannot be read against the other; set its units first')
+        return reason, None
+    if wanted != held:
+        reason = (f'{wanted_name} is of {wanted} and {held_name} of '
+                  f'{held}, which cannot be compared')
+        return reason, None
+    return None, None
 
 
 def cells(specification: Specification, measured: DataArray,
@@ -765,6 +823,10 @@ def detect_scale_db(specification: Specification, measured: DataArray,
         if wanted is not None and label not in wanted and str(
                 specification.response_dof[spec_index]) not in wanted:
             continue
+        # a pair the comparison refuses has no level to read a scale from
+        if units_check(specification.ordinate_dim[spec_index],
+                       measured.ordinate_dim[measured_index])[0] is not None:
+            continue
         # band by band, the same cells the comparison is judged on —
         # each a density: the power asked and held over the same band,
         # over its width
@@ -828,7 +890,9 @@ def matched_records(specification: Specification, measured: DataArray,
 
     Records are paired by response and reference DOF and by quantity, in
     the specification's order. A record of unknown quantity pairs with
-    any quantity, and an exact match is preferred. The label is the DOF,
+    any quantity, and an exact match is preferred. A DOF measured only
+    in another quantity is still paired, so that `compare` refuses it
+    with the reason rather than the channel vanishing. The label is the DOF,
     or 'response/reference' for a cross term. `compare_all` and the
     scale detection both pair channels here, so the detection uses
     exactly the channels the comparison compares."""
@@ -859,6 +923,11 @@ def matched_records(specification: Specification, measured: DataArray,
                       if key[:2] == pair[:2]
                       and (key[2] == pair[2]
                            or 'unknown' in (key[2], pair[2]))]
+        if not candidates:
+            # measured, but only as another quantity: paired anyway, so
+            # the comparison says why it is refused (2026-10-18; before,
+            # a velocity PSD's channel simply did not appear)
+            candidates = [key for key in theirs if key[:2] == pair[:2]]
         if not candidates:
             continue
         exact = [key for key in candidates if key[2] == pair[2]]
@@ -913,9 +982,12 @@ def compare(specification: Specification, measured: DataArray,
     fraction of its bin that was judged, so a band at the top of the
     range counts the same as one at the bottom.
 
-    A pair of objects that cannot be compared (`comparable`) returns
-    {'lines': 0, 'refused': reason}, and one with nothing to compare
-    returns {'lines': 0}.
+    A pair of objects that cannot be compared (`comparable`), or a pair
+    of records of different quantities or with only one side's units
+    declared (`units_check`), returns {'lines': 0, 'refused': reason},
+    and one with nothing to compare returns {'lines': 0}. With neither
+    side's units declared the pair is compared and the result carries
+    'note' (`RAW_NOTE`).
 
     Every number is of the scaled measurement: `scale_db` is resolved
     through `comparison_scale_db` unless given, and is returned so a
@@ -929,6 +1001,11 @@ def compare(specification: Specification, measured: DataArray,
     # specification comes out at nothing rather than a quarter of a
     # percent over
     refused = comparable(specification, measured)
+    if refused is not None:
+        return {'lines': 0, 'refused': refused}
+    refused, note = units_check(specification.ordinate_dim[spec_record],
+                                measured.ordinate_dim[measured_record],
+                                wanted_name='the specification')
     if refused is not None:
         return {'lines': 0, 'refused': refused}
     level = judge(specification, measured, spec_record, measured_record,
@@ -997,6 +1074,8 @@ def compare(specification: Specification, measured: DataArray,
         out[f'{pair}_percent'] = (100.0 * float(share[beyond].sum())
                                   / float(share[counted].sum())
                                   if counted.any() else 0.0)
+    if note is not None:
+        out['note'] = note
     return out
 
 
@@ -1064,21 +1143,59 @@ def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
             'rms_percent': rms_percent}
 
 
+def _charted(rows: Sequence[tuple[str, dict[str, Any]]]
+             ) -> list[tuple[str, dict[str, Any]]]:
+    """The rows a bar chart draws: those compared, and those refused,
+    which keep their place to say why. Channels with nothing to compare
+    are left out, since a bar at zero would read as a channel that
+    matched."""
+    return [(label, result) for label, result in rows
+            if result.get('lines') or result.get('refused')]
+
+
 def channel_errors(rows: Sequence[tuple[str, dict[str, Any]]]
                    ) -> list[tuple[str, float, float]]:
     """[(label, dB out, percent of lines outside abort)] for a bar chart.
 
     One row per channel, in the specification's order, from the rows
     `compare_all` returned. Channels with nothing to compare are left
-    out, since a bar at zero would read as a channel that matched.
+    out, since a bar at zero would read as a channel that matched. A
+    refused channel keeps its row with both values NaN, and
+    `channel_refusals` says why, by the same index.
     """
     out = []
-    for label, result in rows:
-        if not result.get('lines'):
+    for label, result in _charted(rows):
+        if result.get('refused'):
+            out.append((label, float('nan'), float('nan')))
             continue
         out.append((label, float(result.get('difference_db', float('nan'))),
                     float(result.get('abort_percent') or 0.0)))
     return out
+
+
+def channel_refusals(rows: Sequence[tuple[str, dict[str, Any]]]
+                     ) -> dict[int, str]:
+    """{index: 'not compared: reason'} for the rows of `channel_errors`
+    that were refused, indexed as `channel_errors` orders them."""
+    return {i: f'not compared: {result["refused"]}'
+            for i, (_label, result) in enumerate(_charted(rows))
+            if result.get('refused')}
+
+
+def comparison_note(results: Sequence[Any]) -> str | None:
+    """`RAW_NOTE` when any of these comparisons was made with neither
+    side's units declared, else None. Takes the result dicts of
+    `compare`, `compare_all`'s (label, result) rows, or `SrsError`
+    rows."""
+    for result in results:
+        if isinstance(result, tuple) and len(result) == 2 \
+                and isinstance(result[1], dict):
+            result = result[1]
+        note = (result.get('note') if isinstance(result, dict)
+                else getattr(result, 'note', None))
+        if note:
+            return note
+    return None
 
 
 def outside_fraction(values: Sequence[float], low: float,
@@ -1155,9 +1272,26 @@ def compare_all(specification: Specification, measured: DataArray,
 SRS_ERROR_DB = 3.0
 
 
+class SrsError(NamedTuple):
+    """One channel and event of `srs_errors`: its signed RMS deviation
+    in dB, or why it could not be scored."""
+
+    #: the response DOF
+    dof: str
+    #: the measurement's block label for the record, None without one
+    event: str | None
+    #: the signed RMS deviation in dB; NaN when `refused`
+    db: float
+    #: why the pair was not scored (another Q, another quantity, or
+    #: only one side's units declared), None when it was
+    refused: str | None = None
+    #: `RAW_NOTE` when neither side's units are declared, else None
+    note: str | None = None
+
+
 def srs_errors(specification: DataArray, measured: DataArray
-               ) -> list[tuple[str, str | None, float]]:
-    """[(label, event, RMS dB deviation)] for a shock response spectrum
+               ) -> list[SrsError]:
+    """[SrsError(dof, event, db, refused)] for a shock response spectrum
     against the one it was required to meet.
 
     The deviation is in dB, RMS across the band, and signed
@@ -1183,6 +1317,13 @@ def srs_errors(specification: DataArray, measured: DataArray
     frequencies, and only where it is written. Channels are paired by
     response DOF, and the event is the measurement's block label for the
     record, None when it has none.
+
+    A pair at another Q, or one `units_check` refuses (another quantity,
+    or only one side's units declared), keeps its row with `db` NaN and
+    `refused` saying why, so the channel shows as not scored instead of
+    disappearing or reading 20 dB out. With neither side declared the
+    pair is scored and `note` says it was compared as raw numbers. The
+    rule is the one `srs_tolerance` refuses by.
     """
     # Why dB: on the airplane run the relative norm passed every channel
     # at 20 % while one of them was 25 dB over, 99.5 % of its norm coming
@@ -1191,8 +1332,18 @@ def srs_errors(specification: DataArray, measured: DataArray
     # +5, the bar chart shaded it past the ceiling, and the reader
     # concluded the shock was too hard when the machine had under-hit
     # (Brandon, on the drone stress set, 2026-08-20).
+    # Refused rather than scored (Brandon, 2026-10-18): a requirement of
+    # undeclared units, written in g, scored an identical shock in m/s^2
+    # at +19.8 dB, which is 20 log10(9.81); the points rule refused the
+    # same pair from 2026-10-16
     out = []
     for dof, j, i, block in _srs_pairs(specification, measured):
+        refused = _srs_refusal(specification, measured, j, i)
+        if refused is not None:
+            out.append(SrsError(dof, block, float('nan'), refused))
+            continue
+        _refused, note = units_check(specification.ordinate_dim[j],
+                                     measured.ordinate_dim[i])
         target = log_interpolate(
             measured.abscissa, specification.abscissa,
             specification.ordinate[j])
@@ -1201,7 +1352,9 @@ def srs_errors(specification: DataArray, measured: DataArray
                 & (target > 0.0) & (got > 0.0))
         if not good.any():
             continue
-        out.append((dof, block, signed_rms_db(got[good], target[good])))
+        out.append(SrsError(dof, block,
+                            signed_rms_db(got[good], target[good]),
+                            note=note))
     return out
 
 
@@ -1256,9 +1409,25 @@ def signed_rms_db(got: np.ndarray, wanted: np.ndarray) -> float:
     return float(np.copysign(magnitude, deviation.mean()))
 
 
-def sine_errors(specification, levels):
-    """[(dof, tone, RMS dB deviation)] for extracted sine levels
-    against the tones they were controlled to.
+class SineError(NamedTuple):
+    """One tone at one channel in `sine_errors`: its signed RMS
+    deviation in dB, or why it could not be scored."""
+
+    #: the control channel's DOF
+    dof: str
+    #: the tone's name
+    tone: str
+    #: the signed RMS deviation in dB; NaN when `refused`
+    db: float
+    #: why the pair was not scored (`units_check`), None when it was
+    refused: str | None = None
+    #: `RAW_NOTE` when neither side's units are declared, else None
+    note: str | None = None
+
+
+def sine_errors(specification, levels) -> list[SineError]:
+    """[SineError(dof, tone, db, refused, note)] for extracted sine
+    levels against the tones they were controlled to.
 
     The same value `srs_errors` gives a shock spectrum, for the same
     reasons: in dB so every part of the sweep counts alike, RMS so one
@@ -1271,8 +1440,22 @@ def sine_errors(specification, levels):
     are zero readings. `levels` is a `SineLevelSet` or a sequence of
     `SineLevel`; a tone or channel the specification does not have is
     skipped.
+
+    A level and its tone are compared by `units_check`: a level of
+    another quantity, or with only one side's units declared, keeps its
+    row with `db` NaN and `refused` saying why, and with neither
+    declared the row is scored and carries `note`. A specification
+    whose `ordinate_unit` is None has its units undeclared, whatever
+    its `ordinate_dim` names.
     """
+    from ..units import UNKNOWN
+
     levels = getattr(levels, 'levels', levels)
+    # a sine specification keeps its quantity named while its units are
+    # undeclared, with the unit None (`SineSweepSpecification`), so its
+    # amplitudes are as written exactly when the unit is missing
+    asked = (UNKNOWN if getattr(specification, 'ordinate_unit', None) is None
+             else str(specification.ordinate_dim))
     out = []
     for level in levels:
         try:
@@ -1284,6 +1467,13 @@ def sine_errors(specification, levels):
             try:
                 column = specification.response_dof.index(str(dof))
             except ValueError:
+                continue
+            refused, note = units_check(asked, level.ordinate_dim[row],
+                                        wanted_name='the tone',
+                                        held_name='the level')
+            if refused is not None:
+                out.append(SineError(str(dof), level.tone, float('nan'),
+                                     refused))
                 continue
             wanted = target[:, column]
             got = np.abs(level.ordinate[row])
@@ -1297,8 +1487,9 @@ def sine_errors(specification, levels):
                 good &= np.asarray(resolved)[row]
             if not good.any():
                 continue
-            out.append((str(dof), level.tone,
-                        signed_rms_db(got[good], wanted[good])))
+            out.append(SineError(str(dof), level.tone,
+                                 signed_rms_db(got[good], wanted[good]),
+                                 note=note))
     return out
 
 
@@ -1587,10 +1778,8 @@ def srs_limit_bands(specification: DataArray, record: int = 0
 def _srs_refusal(specification: Any, measured: Any, spec_record: int,
                  measured_record: int) -> str | None:
     """Why this pair of records cannot be judged one against the other,
-    or None when they can: another Q, another quantity, or a quantity
-    that is not declared."""
-    from ..units import UNKNOWN
-
+    or None when they can: another Q, or a pair `units_check`
+    refuses."""
     q_spec = getattr(specification, 'q', None)
     q_measured = getattr(measured, 'q', None)
     if (q_spec is not None and q_measured is not None
@@ -1601,17 +1790,13 @@ def _srs_refusal(specification: Any, measured: Any, spec_record: int,
     # values are held in SI, so one quantity on both sides is the one
     # condition for the ratio to mean anything (2026-10-16: an SRS of
     # undeclared units read 0 of 92 inside a requirement in g, and a
-    # velocity SRS passed an acceleration requirement)
-    wanted = str(specification.ordinate_dim[spec_record])
-    held = str(measured.ordinate_dim[measured_record])
-    if UNKNOWN in (wanted, held):
-        side = 'the requirement' if wanted == UNKNOWN else 'the spectrum'
-        return (f'the units of {side} are not declared, so its levels '
-                'cannot be read against the other; set its units first')
-    if wanted != held:
-        return (f'the requirement is of {wanted} and the spectrum of '
-                f'{held}; judge a spectrum of the quantity required')
-    return None
+    # velocity SRS passed an acceleration requirement); since
+    # 2026-10-18 the rule is `units_check`, shared by every comparison,
+    # and two undeclared sides are compared with a note
+    refused, _note = units_check(specification.ordinate_dim[spec_record],
+                                 measured.ordinate_dim[measured_record],
+                                 held_name='the spectrum')
+    return refused
 
 
 def srs_tolerance(specification: DataArray, measured: DataArray,
@@ -1675,8 +1860,9 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
         as judged: each edge a number of dB, or an array of dB at each
         measured point when a limit curve is not a fixed number of dB
         from the requirement. A pair at different Q, of different
-        quantities, or with either quantity undeclared returns
-        {'points': 0, 'passed': None, 'refused': reason}.
+        quantities, or with one side's units undeclared returns
+        {'points': 0, 'passed': None, 'refused': reason}; with neither
+        declared the pair is judged and carries 'note' (`RAW_NOTE`).
 
     Raises
     ------
@@ -1714,6 +1900,10 @@ def srs_tolerance(specification: DataArray, measured: DataArray,
     out['kind'] = getattr(measured, 'kind', None)
     out['q'] = getattr(measured, 'q', None)
     out['limits'] = read
+    _refused, note = units_check(specification.ordinate_dim[spec_record],
+                                 measured.ordinate_dim[measured_record])
+    if note is not None:
+        out['note'] = note
     return out
 
 

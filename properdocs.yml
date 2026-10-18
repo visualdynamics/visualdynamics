@@ -43,7 +43,9 @@ watch:
 
 # No `nav`: the site's navigation is the docs tree itself, so a page
 # added — or a whole API module generated — appears without editing
-# this file. Titles come from each page's own heading.
+# this file. Titles come from each page's own heading. docs/SUMMARY.md
+# keeps the top level in the same order by wildcard, and names the API
+# section, which was otherwise titled from its directory as "Api".
 
 theme:
   name: materialx

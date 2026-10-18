@@ -583,7 +583,12 @@ class SineSweepSpecification:
         The abscissa follows the tone's own sweep: about `lines` points
         evenly spaced in time along it, sorted ascending whichever way it
         swept. The tone's limits come with it as `Bounded` limit curves.
+        A specification whose units are not declared (`ordinate_unit`
+        None) gives a curve of undeclared units, its quantity kept as
+        the dimension hint, since its amplitudes are as written.
         """
+        from ..units import UNKNOWN
+
         tone = self.tone(name)
         _t, f = tone.trajectory(tone.duration() / lines)
         order = np.argsort(f)
@@ -591,11 +596,18 @@ class SineSweepSpecification:
         target = tone.target(frequencies)
         limits = {limit: tone.target(frequencies, curve=limit).T
                   for limit in tone.limits}
+        n = len(self.response_dof)
+        # Undeclared here is a unit of None with the quantity still named,
+        # which a DataArray reads as that quantity in SI and labels so
+        # (m/s**2 on raw numbers, Brandon, 2026-10-18); the curve says
+        # what a DataArray says for raw numbers instead
+        declared = self.ordinate_unit is not None
         return SineTarget(
             abscissa=frequencies, ordinate=target.T,
             response_dof=list(self.response_dof),
-            ordinate_dim=[self.ordinate_dim] * len(self.response_dof),
-            ordinate_unit=[self.ordinate_unit] * len(self.response_dof),
+            ordinate_dim=[self.ordinate_dim if declared else UNKNOWN] * n,
+            ordinate_unit=[self.ordinate_unit] * n,
+            dimension_hint=None if declared else [self.ordinate_dim] * n,
             comment=[f'{name} requirement at {dof}'
                      for dof in self.response_dof],
             tone=name, **limits)

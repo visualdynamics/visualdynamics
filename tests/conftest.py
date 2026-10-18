@@ -50,6 +50,75 @@ def release_modifiers(widget):
     return [] if held == Qt.KeyboardModifier.NoModifier else [held]
 
 
+def held_modifiers():
+    """The keyboard modifiers Qt believes are held, or None when none
+    are, or before this process has made a Qt application at all."""
+    import sys
+
+    widgets = sys.modules.get('PySide6.QtWidgets')
+    if widgets is None or widgets.QApplication.instance() is None:
+        return None
+    from PySide6.QtCore import Qt
+
+    held = widgets.QApplication.keyboardModifiers()
+    return None if held == Qt.KeyboardModifier.NoModifier else held
+
+
+#: a widget of no window's to send key releases to, for a test that has
+#: no window of its own
+_SPARE = []
+
+#: the test that ran last in this process, for the witness line
+_PREVIOUS = {'nodeid': None}
+
+
+@pytest.fixture(autouse=True)
+def modifier_witness(request):
+    """Name whoever leaves a keyboard modifier held, for every test.
+
+    The `window` fixture fails a window test that leaves one held, but a
+    test with no window that does so went unnamed, and the next window
+    test on that worker failed for it. Shift was found held twice on
+    2026-10-18 at the teardown of window tests that press no keys, in
+    files where nothing presses Shift. So, around every test: one that
+    starts with a modifier already held writes a line to
+    `.pytest_cache/d/modifier-witness/witness.log` naming itself and
+    the test before it in this worker, and lets go; and one that leaves
+    a modifier held fails, whether or not it has a window.
+    """
+    from datetime import datetime
+
+    def let_go():
+        from PySide6.QtWidgets import QWidget
+
+        if not _SPARE:
+            _SPARE.append(QWidget())
+        release_modifiers(_SPARE[0])
+
+    held = held_modifiers()
+    if held is not None:
+        log = request.config.cache.mkdir('modifier-witness') / 'witness.log'
+        worker = os.environ.get('PYTEST_XDIST_WORKER', 'main')
+        with open(log, 'a', encoding='utf-8') as handle:
+            handle.write(f'{datetime.now():%Y-%m-%d %H:%M:%S} {worker}: '
+                         f'{request.node.nodeid} started with {held} held; '
+                         f'the test before it here was '
+                         f'{_PREVIOUS["nodeid"]}\n')
+        let_go()
+    previous = _PREVIOUS['nodeid']
+    yield
+    _PREVIOUS['nodeid'] = request.node.nodeid
+    held = held_modifiers()
+    if held is not None:
+        let_go()
+        # the test before is named too: a key queued on a timer by one
+        # test is pressed while the next one runs
+        pytest.fail(f'the test left {held} held — let go of it '
+                    '(QTest.keyRelease, or conftest.release_modifiers) '
+                    'after a modified click or chord; the test before it '
+                    f'here was {previous}')
+
+
 def fixture_path(*parts):
     """A path into testdata/. Not named test* — pytest would collect it."""
     return os.path.join(TESTDATA, *parts)

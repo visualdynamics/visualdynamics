@@ -1304,3 +1304,107 @@ def test_the_sine_stage_with_its_levels_is_a_call(tmp_path, monkeypatch):
                              screenshot=str(tmp_path / 'again.png'))
     assert seen['levels'] == list(levels.levels), 'the set, as its levels'
     assert seen['tones'] == ['Up'] and seen['specification'] is spec
+
+
+# ---- the units rule every comparison follows --------------------------------
+
+
+def _levels_against(spec_dim='acceleration', spec_unit='m/s**2',
+                    history_declared=True):
+    """A clean flat sweep's levels against its specification, with the
+    specification's quantity and unit, and the record's units, set."""
+    history, spec = _flat_sweep(noise=0.1)
+    spec.ordinate_dim, spec.ordinate_unit = spec_dim, spec_unit
+    if not history_declared:
+        history = TimeHistory(history.abscissa, history.ordinate,
+                              response_dof=list(history.response_dof),
+                              ordinate_dim=['unknown'] * 2)
+    return spec, extract_sine(history, spec, cycles=10.0)
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('undeclared tone', ('the units of the tone are not declared, so its '
+     'levels cannot be read against the other; set its units first')),
+    ('velocity tone', ('the tone is of velocity and the level of '
+     'acceleration, which cannot be compared')),
+])
+def test_a_sine_level_that_cannot_be_compared_is_refused(case, reason):
+    """A specification whose unit is None holds its amplitudes as
+    written, so a level in SI cannot be scored against it; nor can a
+    level of another quantity. Each keeps its row and says why."""
+    from visualdynamics.core.compliance import sine_errors
+
+    spec, levels = _levels_against(
+        **({'spec_unit': None} if case == 'undeclared tone'
+           else {'spec_dim': 'velocity'}))
+    rows = sine_errors(spec, levels)
+    assert [(row.dof, row.tone) for row in rows] == [('101Z+', 'Up'),
+                                                     ('104Z+', 'Up')]
+    assert all(np.isnan(row.db) and row.refused == reason for row in rows)
+
+
+def test_two_undeclared_sides_are_scored_and_say_so():
+    from visualdynamics.core.compliance import RAW_NOTE, sine_errors
+
+    spec, levels = _levels_against(spec_unit=None, history_declared=False)
+    rows = sine_errors(spec, levels)
+    assert rows and all(row.refused is None and row.note == RAW_NOTE
+                        for row in rows)
+    assert all(abs(row.db) < 0.5 for row in rows), 'a clean sweep on target'
+    spec, levels = _levels_against()
+    assert all(row.note is None for row in sine_errors(spec, levels))
+
+
+def test_the_sine_bars_say_why_in_the_app_and_the_report(window, pump):
+    """The app's bars and grid and the report's bars carry the reason
+    for a refused tone, and the report's caption the raw-numbers note."""
+    import pyqtgraph as pg
+
+    from visualdynamics.core.compliance import RAW_NOTE
+    from visualdynamics.report import _sine_bars
+
+    spec, levels = _levels_against(spec_dim='velocity')
+    block = _sine_bars({}, spec, levels)
+    assert block['values'] == [None, None]
+    assert all(note.startswith('not scored: the tone is of velocity')
+               for note in block['notes'])
+    raw_spec, raw_levels = _levels_against(spec_unit=None,
+                                           history_declared=False)
+    assert _sine_bars({'caption': 'Sine'}, raw_spec, raw_levels)[
+        'caption'] == f'Sine — {RAW_NOTE}'
+
+    window.add_object('Sine Specification', spec)
+    window.add_object('Sine Levels', levels)
+    window.tree.clearSelection()
+    window._item_for_object('Sine Specification').setSelected(True)
+    window._item_for_object('Sine Levels').setSelected(True)
+    pump()
+    window.data_pane.srs_view = 'error'
+    window.render_current()
+    pump()
+    chart = window.bar_chart
+    assert len(chart.notes) == len(chart.rows) == 2
+    written = [item.toPlainText() for item in chart.plot.items
+               if isinstance(item, pg.TextItem)]
+    assert sum(text.startswith('not scored: the tone is of velocity')
+               for text in written) == 2
+    model = window.table.model()
+    assert model.data(model.index(0, 1)).startswith('the tone is of velocity')
+
+
+def test_an_undeclared_specification_gives_an_undeclared_curve():
+    """A specification whose unit is None holds its amplitudes as
+    written. Its tone curve claimed m/s**2 for them, because a DataArray
+    reads a named quantity with no unit as SI; it is undeclared now,
+    the quantity kept as its hint, and the numbers are unchanged."""
+    _history, spec = _flat_sweep()
+    spec.ordinate_unit = None
+    curve = spec.tone_curve('Up')
+    assert curve.ordinate_dim == ['unknown', 'unknown']
+    assert curve.ordinate_unit == [None, None]
+    assert curve.dimension_hint == ['acceleration', 'acceleration']
+    assert np.allclose(curve.ordinate, 2.0)
+    spec.ordinate_unit = 'm/s**2'
+    declared = spec.tone_curve('Up')
+    assert declared.ordinate_dim == ['acceleration', 'acceleration']
+    assert declared.ordinate_unit == ['m/s**2', 'm/s**2']

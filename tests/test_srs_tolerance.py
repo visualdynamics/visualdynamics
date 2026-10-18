@@ -109,7 +109,8 @@ def test_a_narrow_deep_dip_passes_the_rms_reading_and_fails_the_points_rule():
     db = np.zeros(POINTS)
     db[40:50] = -5.0
     dipped = measured(spec, db)
-    (_dof, _event, rms_db), = srs_errors(spec, dipped)
+    (row,) = srs_errors(spec, dipped)
+    rms_db = row.db
     assert abs(rms_db) < SRS_ERROR_DB
     assert rms_db == pytest.approx(-np.sqrt(10 * 25.0 / POINTS))
     result = srs_tolerance(spec, dipped)
@@ -295,7 +296,7 @@ def test_every_channel_and_event_is_judged_as_the_rms_reading_pairs_them():
     rows = srs_tolerance_all(spec, run)
     assert [(dof, event) for dof, event, _r in rows] == [
         ('101Z+', 'shock 1'), ('101Z+', 'shock 2')]
-    assert [(dof, event) for dof, event, _db in srs_errors(spec, run)] == [
+    assert [(row.dof, row.event) for row in srs_errors(spec, run)] == [
         (dof, event) for dof, event, _r in rows]
     assert [r['passed'] for _dof, _event, r in rows] == [True, False]
     assert rows[1][2]['event'] == 'shock 2'
@@ -424,8 +425,8 @@ def test_a_spectrum_of_another_quantity_is_refused():
     result = srs_tolerance(spec, velocity)
     assert result['passed'] is None
     assert result['refused'] == ('the requirement is of acceleration and '
-                                 'the spectrum of velocity; judge a '
-                                 'spectrum of the quantity required')
+                                 'the spectrum of velocity, which cannot be '
+                                 'compared')
 
 
 # ---- the requirement's own limits ------------------------------------------
@@ -866,3 +867,136 @@ def test_the_points_rule_is_not_offered_for_sine_levels(qt_app):
         assert pane.srs_reading() == 'points'
     finally:
         pane.close()
+
+
+# ---- the RMS reading refuses by the same rule ------------------------------
+
+
+@pytest.mark.parametrize('case', ['another Q', 'undeclared', 'velocity'])
+def test_the_rms_reading_refuses_what_the_points_rule_refuses(case):
+    """`srs_errors` scored every pair, so a requirement written in g
+    with its units undeclared read an identical shock in m/s^2 as
+    +19.8 dB, 20 log10(9.81). It refuses by `srs_tolerance`'s rule now,
+    and keeps the row so the channel says why instead of vanishing."""
+    spec = requirement()
+    run = {'another Q': measured(spec, q=50.0),
+           'undeclared': Srs(spec.abscissa, spec.ordinate,
+                             response_dof=['101Z+'],
+                             ordinate_dim=['unknown'], q=spec.q),
+           'velocity': Srs(spec.abscissa, spec.ordinate,
+                           response_dof=['101Z+'],
+                           ordinate_dim=['velocity'], q=spec.q)}[case]
+    (row,) = srs_errors(spec, run)
+    assert (row.dof, row.event) == ('101Z+', None)
+    assert np.isnan(row.db)
+    assert row.refused == srs_tolerance(spec, run)['refused']
+    (scored,) = srs_errors(spec, measured(spec, 2.0))
+    assert scored.refused is None
+    assert scored.db == pytest.approx(2.0, abs=1e-9)
+
+
+def test_a_refused_srs_row_says_why_on_the_bar_chart(qt_app):
+    """The row keeps its place with the reason written along it, and
+    the count leaves it out and names it as not scored."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot.bars import replication_chart
+    from visualdynamics.theme import theme
+
+    widget = pg.GraphicsLayoutWidget()
+    plot = widget.addPlot(row=0, col=0)
+    chart = replication_chart(
+        plot, [('101Z+', 4.5), ('102Z+', float('nan')), ('103Z+', 0.5)],
+        theme('dark'), 'srs_rms', low=-3.0, high=3.0,
+        notes={1: 'not scored: the units differ'})
+    written = [item.toPlainText() for item in plot.items
+               if isinstance(item, pg.TextItem)]
+    assert 'not scored: the units differ' in written
+    assert chart.summary_text() == ('1 of 2 channels outside -3 to 3dB — '
+                                    '50%; 1 not scored')
+    del widget
+
+
+def test_the_srs_bars_write_the_reason_in_a_script_and_a_report(qt_app):
+    """`plot_bars(mode='srs')` draws a refused pair with its reason, and
+    the report's bars carry the reason beside an empty value."""
+    from visualdynamics.plot import plot_bars
+    from visualdynamics.report import _srs_bars
+
+    spec = requirement()
+    raw = Srs(spec.abscissa, spec.ordinate, response_dof=['101Z+'],
+              ordinate_dim=['unknown'], q=spec.q)
+    import pyqtgraph as pg
+
+    pane = plot_bars(raw, spec, 'srs', show=False)
+    plot = pane.graphics.getItem(0, 0)
+    written = [item.toPlainText() for item in plot.items
+               if isinstance(item, pg.TextItem)]
+    assert any(text.startswith('not scored: the units of the spectrum')
+               for text in written), written
+    block = _srs_bars({}, spec, raw)
+    assert block['values'] == [None]
+    assert block['notes'] == [
+        ('not scored: the units of the spectrum are not declared, so its '
+         'levels cannot be read against the other; set its units first')]
+    scored = _srs_bars({}, spec, measured(spec, 1.0))
+    assert scored['notes'] == [None]
+
+
+def test_the_report_page_writes_the_reason_along_a_refused_row(
+        tmp_path, qt_app):
+    """The page draws no bar for a refused pair, writes the reason
+    where the bar would be, and leaves the row out of its count."""
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    import json
+
+    from conftest import web_close, web_read, web_view
+    from PySide6.QtCore import QUrl
+
+    import visualdynamics
+    from visualdynamics.core.report import Report
+    from visualdynamics.report import render_html
+
+    spec = requirement()
+    raw = Srs(spec.abscissa, spec.ordinate, response_dof=['101Z+'],
+              ordinate_dim=['unknown'], q=spec.q)
+    report = Report('SRS', [{'kind': 'bars', 'source': 'Requirement',
+                             'measured': 'Run', 'caption': 'SRS error'}])
+    path = tmp_path / 'srs.html'
+    path.write_text(render_html(report, {'Requirement': spec, 'Run': raw},
+                                unit_system=visualdynamics.SI),
+                    encoding='utf-8')
+    view = web_view()
+    view.resize(900, 600)
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    try:
+        drawn = web_read(
+            view,
+            "(() => { const c = document.querySelector('canvas.bars');"
+            " return c && c.dataset.bars ? JSON.stringify("
+            "{bars: +c.dataset.bars, out: +c.dataset.out,"
+            " notes: +c.dataset.notes}) : ''; })()")
+    finally:
+        web_close(view)
+    assert drawn, 'the chart never finished drawing'
+    assert json.loads(drawn) == {'bars': 1, 'out': 0, 'notes': 1}
+
+
+def test_two_undeclared_srs_are_compared_and_say_so():
+    """Neither side's units declared: both are raw numbers, compared on
+    trust that they share a unit, and every reading says so."""
+    from visualdynamics.core.compliance import RAW_NOTE
+
+    spec = requirement()
+    bare = Srs(spec.abscissa, spec.ordinate, response_dof=['101Z+'],
+               ordinate_dim=['unknown'], q=spec.q)
+    run = Srs(spec.abscissa, spec.ordinate * 10 ** (1.0 / 20.0),
+              response_dof=['101Z+'], ordinate_dim=['unknown'], q=spec.q)
+    (row,) = srs_errors(bare, run)
+    assert row.refused is None
+    assert row.db == pytest.approx(1.0, abs=1e-9)
+    assert row.note == RAW_NOTE
+    result = srs_tolerance(bare, run)
+    assert result['passed'] is True and result['note'] == RAW_NOTE
+    assert 'note' not in srs_tolerance(spec, measured(spec))

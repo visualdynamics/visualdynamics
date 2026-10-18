@@ -773,3 +773,21 @@ def test_the_stroke_reading_stands_the_trace_marks_down(window, pump):
     pump()
     assert not pane.stroke_action.isChecked()
     assert not pane.stroke_panel.isVisibleTo(pane)
+
+
+def test_the_stroke_and_the_shock_check_read_one_velocity_change(monkeypatch):
+    """The span from the lowest velocity to the highest was written in
+    both readings. It is `shock_check.velocity_span` now, and both read
+    it: a changed rule changes both."""
+    from visualdynamics.core import shock_check
+    from visualdynamics.core.shock_check import check_shock, velocity_span
+
+    record = pulse(50.0, 0.011)
+    stroke = read_stroke(record)
+    (check,) = check_shock(record)
+    assert stroke.velocity_change == pytest.approx(
+        2.0 * 50.0 * G * 0.011 / np.pi, rel=2e-3)
+    assert check.velocity_change == velocity_span(check.velocity)
+    monkeypatch.setattr(shock_check, 'velocity_span', lambda v: -1.0)
+    assert stroke.velocity_change == -1.0
+    assert check.velocity_change == -1.0

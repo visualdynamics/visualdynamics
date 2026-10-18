@@ -775,10 +775,10 @@ def project_expectations(
                     # groups and after them. A group is one *side* of the
                     # comparison; this object names a set on each side, so
                     # it belongs to neither — the same reasoning as the
-                    # report below it. It has to come after the FEM pair
-                    # rather than between the two groups, because a group's
-                    # rows are drawn as one bracket and have to stay
-                    # contiguous.
+                    # report below it. It has to come after the other
+                    # side's pair rather than between the two groups,
+                    # because a group's rows are drawn as one bracket and
+                    # have to stay contiguous.
                     ('Matched Modes', MatchedModes, 'MatchedModes', 1,
                      True, None),
                     ('Report', Report, 'Report', 1, False, None)]

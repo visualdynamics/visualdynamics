@@ -938,7 +938,7 @@ def test_the_srs_reading_scores_only_what_the_specification_names():
                    ordinate_unit='m/s**2', block=['shock 1', 'shock 1'])
     measured.ordinate[0, :5] = 1e6              # below 10 Hz: unscored
     scores = compliance.srs_errors(spec, measured)
-    assert [(dof, block) for dof, block, _db in scores] == [('101Z+', 'shock 1')]
+    assert [(row.dof, row.event) for row in scores] == [('101Z+', 'shock 1')]
     assert scores[0][2] == pytest.approx(20.0 * np.log10(2.0))
 
 
@@ -969,3 +969,140 @@ def test_a_scale_given_is_the_scale_used():
     assert under.all()
     _over, under = compliance.exceedances(limited, low)
     assert not under.any()
+
+
+# --- one units rule for every comparison ------------------------------------
+
+@pytest.mark.parametrize('wanted,held,refused,note', [
+    ('acceleration', 'acceleration', None, None),
+    ('acceleration', 'velocity',
+     ('the requirement is of acceleration and the measurement of velocity, '
+      'which cannot be compared'), None),
+    ('unknown', 'acceleration',
+     ('the units of the requirement are not declared, so its levels cannot '
+      'be read against the other; set its units first'), None),
+    ('acceleration', 'unknown',
+     ('the units of the measurement are not declared, so its levels cannot '
+      'be read against the other; set its units first'), None),
+    ('unknown', 'unknown', None, compliance.RAW_NOTE),
+])
+def test_the_units_rule_has_three_cases(wanted, held, refused, note):
+    """Both declared: the same quantity. One declared: refused, since
+    one side is in SI and the other is not. Neither: compared, and said
+    to be raw numbers."""
+    assert compliance.units_check(wanted, held) == (refused, note)
+
+
+def _psd_pair(spec_dim, measured_dim, measured_scale=1.0):
+    f = np.linspace(20.0, 2000.0, 400)
+    level = 0.01 * 9.80665 ** 2
+    spec = Specification(f, np.full((2, f.size), level),
+                         response_dof=['1X+', '2X+'],
+                         ordinate_dim=[spec_dim] * 2)
+    measured = Psd(f, np.full((2, f.size), level * measured_scale),
+                   response_dof=['1X+', '2X+'],
+                   ordinate_dim=[measured_dim] * 2)
+    return spec, measured
+
+
+def test_a_psd_of_another_quantity_or_one_side_undeclared_is_refused():
+    """A velocity PSD scored 0 dB against an acceleration specification,
+    and a PSD of undeclared units read a perfect match as -19.8 dB."""
+    accel = 'acceleration**2/frequency'
+    spec, velocity = _psd_pair(accel, 'velocity**2/frequency')
+    result = compliance.compare(spec, velocity, scale_db=0)
+    assert result == {'lines': 0, 'refused': (
+        'the specification is of acceleration**2/frequency and the '
+        'measurement of velocity**2/frequency, which cannot be compared')}
+    spec, raw = _psd_pair(accel, 'unknown', measured_scale=9.80665 ** -2)
+    assert 'units of the measurement are not declared' in \
+        compliance.compare(spec, raw, scale_db=0)['refused']
+    assert compliance.verdict(compliance.compare_all(spec, raw,
+                                                     scale_db=0))['passed'] \
+        is None, 'nothing was judged, so there is no verdict'
+
+
+def test_two_undeclared_psds_are_compared_and_say_so():
+    spec, raw = _psd_pair('unknown', 'unknown')
+    result = compliance.compare(spec, raw, scale_db=0)
+    assert result['difference_db'] == pytest.approx(0.0, abs=1e-9)
+    assert result['note'] == compliance.RAW_NOTE
+    rows = compliance.compare_all(spec, raw, scale_db=0)
+    assert compliance.comparison_note(rows) == compliance.RAW_NOTE
+    declared, same = _psd_pair('acceleration**2/frequency',
+                               'acceleration**2/frequency')
+    assert 'note' not in compliance.compare(declared, same, scale_db=0)
+    assert compliance.comparison_note(
+        compliance.compare_all(declared, same, scale_db=0)) is None
+
+
+def test_a_refused_psd_channel_keeps_its_row_on_the_bars():
+    """Refused rows were dropped from the bars, so a channel vanished
+    without a word. They keep their place, NaN, with the reason at the
+    same index."""
+    spec, velocity = _psd_pair('acceleration**2/frequency',
+                               'velocity**2/frequency')
+    rows = compliance.compare_all(spec, velocity, scale_db=0)
+    errors = compliance.channel_errors(rows)
+    assert [label for label, _db, _pct in errors] == ['1X+', '2X+']
+    assert all(np.isnan(db) and np.isnan(pct) for _l, db, pct in errors)
+    notes = compliance.channel_refusals(rows)
+    assert sorted(notes) == [0, 1]
+    assert notes[0].startswith('not compared: the specification is of ')
+
+
+def test_the_psd_bars_write_the_reason_and_the_raw_note(qt_app):
+    """plot_bars draws a refused channel's reason along its row, and a
+    comparison of raw numbers says so in its count."""
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import plot_bars
+
+    spec, velocity = _psd_pair('acceleration**2/frequency',
+                               'velocity**2/frequency')
+    for mode in ('error', 'lines'):
+        pane = plot_bars(velocity, spec, mode, show=False)
+        plot = pane.graphics.getItem(0, 0)
+        written = [item.toPlainText() for item in plot.items
+                   if isinstance(item, pg.TextItem)]
+        assert sum(text.startswith('not compared: the specification is of')
+                   for text in written) == 2, (mode, written)
+    spec, raw = _psd_pair('unknown', 'unknown')
+    pane = plot_bars(raw, spec, 'error', show=False)
+    plot = pane.graphics.getItem(0, 0)
+    written = [item.toPlainText() for item in plot.items
+               if isinstance(item, pg.TextItem)]
+    assert any(text.endswith(compliance.RAW_NOTE) for text in written), \
+        written
+
+
+def test_the_report_bars_carry_the_reason_and_the_raw_note():
+    from visualdynamics.report import _bars_block
+
+    spec, velocity = _psd_pair('acceleration**2/frequency',
+                               'velocity**2/frequency')
+    block = _bars_block({'caption': 'RMS error'}, spec, velocity, None)
+    assert block['values'] == [None, None]
+    assert all(note.startswith('not compared: the specification is of')
+               for note in block['notes'])
+    spec, raw = _psd_pair('unknown', 'unknown')
+    block = _bars_block({'caption': 'RMS error'}, spec, raw, None)
+    assert block['notes'] == [None, None]
+    assert block['caption'] == f'RMS error — {compliance.RAW_NOTE}'
+
+
+def test_a_refused_channel_does_not_set_the_detected_scale():
+    """The scale is read from the channels the comparison judges: a
+    velocity channel 20 dB off pulled the detected level of the whole
+    run before it was left out."""
+    f = np.linspace(20.0, 2000.0, 400)
+    level = 0.01 * 9.80665 ** 2
+    accel = 'acceleration**2/frequency'
+    spec = Specification(f, np.full((2, f.size), level),
+                         response_dof=['1X+', '2X+'],
+                         ordinate_dim=[accel] * 2)
+    measured = Psd(f, np.vstack([np.full(f.size, level * 10 ** -0.6),
+                                 np.full(f.size, level * 100.0)]),
+                   response_dof=['1X+', '2X+'],
+                   ordinate_dim=[accel, 'velocity**2/frequency'])
+    assert compliance.detect_scale_db(spec, measured) == 6.0

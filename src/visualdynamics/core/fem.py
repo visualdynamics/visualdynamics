@@ -2010,7 +2010,9 @@ class Model:
         -------
         ShapeSet
             The modes in ascending frequency, at every degree of freedom
-            (`dof_strings`), with mass in kg.
+            (`dof_strings`), with mass in kg. Each mode's leading component
+            is positive (`signed_modes`), so a model solved twice gives the
+            same shapes.
         """
         # the sparse solver came for the BARC example (Brandon, 2026-09-26):
         # the dense ceiling, deliberate until then, was measured and met
@@ -2031,7 +2033,7 @@ class Model:
         frequency[_strains_nothing(full, stiffness)] = 0.0
 
         order = np.argsort(frequency, kind='stable')
-        frequency, full = frequency[order], full[:, order]
+        frequency, full = frequency[order], signed_modes(full[:, order])
         keep = np.ones(len(frequency), dtype=bool)
         if maximum_frequency is not None:
             keep &= frequency <= float(maximum_frequency)
@@ -2790,6 +2792,36 @@ def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:
     with np.errstate(divide='ignore', invalid='ignore'):
         ratio = np.abs(energy) / magnitude
     return np.nan_to_num(ratio, nan=0.0) < ZERO_ENERGY
+
+
+#: how close to a mode's largest magnitude a component counts as tied with
+#: it when the mode's sign is chosen (`signed_modes`)
+SIGN_TIE = 1e-6
+
+
+def signed_modes(shapes: np.ndarray) -> np.ndarray:
+    """These modes, one per column, each with a definite sign.
+
+    An eigensolver's mode has no sign of its own, and which one comes out
+    can change from one solve of the same model to the next. Each mode is
+    turned so its leading component is positive: the first degree of
+    freedom, in the model's order, whose magnitude is within `SIGN_TIE` of
+    the mode's largest. First within a tolerance rather than the largest
+    outright, because an antisymmetric mode has two components of equal
+    size and opposite sign, and round-off would otherwise pick between
+    them.
+    """
+    # Found on the guide pictures (2026-10-17): fem-mode.png came out with
+    # the mode flipped on alternate regenerations
+    shapes = np.array(shapes, dtype=float, copy=True)
+    if shapes.size == 0:
+        return shapes
+    magnitude = np.abs(shapes)
+    peak = magnitude.max(axis=0)
+    lead = np.argmax(magnitude >= peak * (1.0 - SIGN_TIE), axis=0)
+    signs = np.sign(shapes[lead, np.arange(shapes.shape[1])])
+    signs[signs == 0] = 1.0
+    return shapes * signs
 
 
 # ---- element matrices -----------------------------------------------------

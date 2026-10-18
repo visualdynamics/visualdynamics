@@ -1358,15 +1358,48 @@ def test_the_srs_statistic_is_rms_decibels(window, pump, tmp_path):
     assert window.bar_chart.units == 'dB'
 
 
+def test_a_refused_srs_pair_says_why_in_the_bars_and_the_grid(
+        window, pump, tmp_path):
+    """A requirement whose units are not declared cannot be read
+    against a spectrum held in SI. Each of its channels keeps a row in
+    the bars and the grid, with the reason where the number would be,
+    and the message under the plot says it."""
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.core.data import ShockSpecification
+
+    _srs_pair(window, tmp_path, pump)
+    required = [obj for obj in window.objects.values()
+                if isinstance(obj, ShockSpecification)]
+    assert len(required) == 1
+    required[0].ordinate_dim = ['unknown'] * required[0].num_records
+    window.data_pane.srs_view = 'error'
+    window.render_current()
+    pump()
+    reason = ('not scored: the units of the requirement are not declared, '
+              'so its levels cannot be read against the other; set its '
+              'units first')
+    chart = window.bar_chart
+    assert chart.notes and set(chart.notes.values()) == {reason}
+    assert len(chart.notes) == len(chart.rows), 'every row says why'
+    written = [item.toPlainText() for item in chart.plot.items
+               if isinstance(item, pg.TextItem)]
+    assert written.count(reason) == len(chart.rows)
+    model = window.table.model()
+    assert model.data(model.index(0, 1), Qt.ItemDataRole.DisplayRole) \
+        == reason[len('not scored: '):]
+    assert reason in window._status_text, 'nothing was scored, and why'
+
+
 def test_a_perfect_replication_has_no_srs_deviation():
     from visualdynamics.core.compliance import srs_errors
 
     spec = _target()
     history = _measured(spec, repeats=2)
     history.averaging = averaging_for(history, spec)
-    for _dof, _block, value in srs_errors(spec.compute_srs(),
-                                          history.compute_srs()):
-        assert value == pytest.approx(0.0, abs=1e-9)
+    for row in srs_errors(spec.compute_srs(), history.compute_srs()):
+        assert row.db == pytest.approx(0.0, abs=1e-9)
 
 
 # --- a computed spectrum is a density, whatever class it wears -------
@@ -1584,10 +1617,10 @@ def test_an_under_hit_shock_reads_negative_not_over():
     loud = copy.deepcopy(spec)
     loud.ordinate = spec.ordinate * 10 ** (6.0 / 20.0)     # 6 dB high
 
-    for _dof, _block, value in srs_errors(spec, quiet):
+    for _dof, _block, value, *_ in srs_errors(spec, quiet):
         assert value == pytest.approx(-6.0, abs=1e-6), \
             'an under-hit reads negative'
-    for _dof, _block, value in srs_errors(spec, loud):
+    for _dof, _block, value, *_ in srs_errors(spec, loud):
         assert value == pytest.approx(6.0, abs=1e-6), \
             'an over-test reads positive'
 
@@ -1747,3 +1780,98 @@ def test_an_unknown_reading_is_refused_by_name():
     spec = _target()
     with pytest.raises(ValueError, match="not a reading of a replication: .*'bogus'"):
         compare(_measured(spec, repeats=2), spec, metrics=('waveform', 'bogus'))
+
+
+# --- the units rule every comparison follows ------------------------------
+
+def test_a_channel_recorded_as_another_quantity_is_refused_not_dropped():
+    """The control channel was matched by DOF and quantity, so a record
+    of force at an acceleration target's DOF simply was not there. It
+    gets a row per playing that says why."""
+    spec = _target()
+    history = _measured(spec, repeats=2)
+    history.averaging = averaging_for(history, spec)
+    history.ordinate_dim[0] = 'force'
+    rows = compare(history, spec, metrics=('waveform',))
+    first = str(spec.response_dof[0])
+    refused = [row for row in rows if row['label'] == first]
+    assert [row['frame'] for row in refused] == [0, 1]
+    assert all(np.isnan(row['waveform']) for row in refused)
+    assert refused[0]['refused'] == ('the target is of acceleration and the '
+                                     'record of force, which cannot be '
+                                     'compared')
+    others = [row for row in rows if row['label'] != first]
+    assert others and all(row.get('refused') is None for row in others)
+
+
+def test_a_record_of_undeclared_units_against_a_declared_target_is_refused():
+    spec = _target()
+    history = _measured(spec, repeats=1)
+    history.averaging = averaging_for(history, spec)
+    history.ordinate_dim[:] = ['unknown'] * history.num_records
+    rows = compare(history, spec, metrics=('waveform',))
+    assert rows and all('units of the record are not declared'
+                        in row['refused'] for row in rows)
+
+
+def test_two_undeclared_sides_are_compared_and_say_so():
+    from visualdynamics.core.compliance import RAW_NOTE
+
+    spec = _target()
+    history = _measured(spec, repeats=1)
+    history.averaging = averaging_for(history, spec)
+    history.ordinate_dim[:] = ['unknown'] * history.num_records
+    spec.ordinate_dim[:] = ['unknown'] * spec.num_records
+    rows = compare(history, spec, metrics=('waveform',))
+    assert rows and all(row['note'] == RAW_NOTE and not row.get('refused')
+                        for row in rows)
+    assert all(row['waveform'] == pytest.approx(0.0, abs=1e-6)
+               for row in rows if not row['zero_target'])
+
+
+def test_a_refused_channel_says_why_in_the_plot_and_the_report(qt_app):
+    import pyqtgraph as pg
+
+    from visualdynamics.plot import plot_replication
+    from visualdynamics.report import _replication_bars
+
+    spec = _target()
+    history = _measured(spec, repeats=1)
+    history.averaging = averaging_for(history, spec)
+    history.ordinate_dim[0] = 'force'
+    pane = plot_replication(history, spec, 'waveform', show=False)
+    plot = pane.graphics.getItem(0, 0)
+    written = [item.toPlainText() for item in plot.items
+               if isinstance(item, pg.TextItem)]
+    assert any(text.startswith('not scored: the target is of acceleration')
+               for text in written), written
+    block = _replication_bars({}, spec, history)
+    assert block['values'][0] is None
+    assert block['notes'][0].startswith('not scored: the target is of')
+    assert block['notes'][1:] == [None] * (len(block['notes']) - 1)
+
+
+def test_a_refused_channel_says_why_in_the_bars_and_the_grid(window, pump,
+                                                             tmp_path):
+    """In the app: the channel's bar row and its grid cells carry the
+    reason where the waveform error would be."""
+    import pyqtgraph as pg
+    from PySide6.QtCore import Qt
+
+    _load_transient(window, tmp_path, repeats=2)
+    history = next(o for o in window.objects.values()
+                   if type(o) is TimeHistory)
+    history.ordinate_dim[0] = 'force'
+    window.data_pane.replication_view = 'waveform'
+    window.render_current()
+    pump()
+    chart = window.bar_chart
+    assert chart.notes, 'the first channel is drawn, and refused'
+    reason = next(iter(chart.notes.values()))
+    assert reason.startswith('not scored: the target is of')
+    written = [item.toPlainText() for item in chart.plot.items
+               if isinstance(item, pg.TextItem)]
+    assert reason in written
+    model = window.table.model()
+    assert model.data(model.index(0, 1), Qt.ItemDataRole.DisplayRole) \
+        == reason[len('not scored: '):]

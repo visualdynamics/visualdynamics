@@ -210,6 +210,30 @@ project.set_comparison_scale('Time History PSDs', 6)     # hold +6 dB
 project.set_comparison_scale('Time History PSDs', None)  # detect again
 ```
 
+## Units in a comparison
+
+A specification and a measurement are compared channel by channel, and
+the values are held in SI once their units are declared and as they
+came otherwise. So every comparison (the PSD levels and lines here, the
+SRS readings, the sine levels against their tones and a transient
+against its target) follows one rule, `compliance.units_check`:
+
+- Both sides declared: they must be the same quantity. A velocity PSD
+  says nothing about an acceleration specification, and the pair is
+  refused.
+- One side declared: refused. One side is in SI and the other is not,
+  so the ratio would be off by the unit's scale. Set the other side's
+  units first. A sine specification whose unit is not set counts as
+  undeclared even though it names its quantity.
+- Neither side declared: compared, on the reading that two sets of raw
+  numbers were brought in the same unit. The result carries a note,
+  and the bars' count and the report's caption say the values were
+  compared as raw numbers.
+
+A refused channel keeps its row. The bars write the reason along it,
+the table shows it in place of the numbers, the status line names it,
+and the channel is left out of the count and the pass/fail verdict.
+
 ## Checking it
 
 ```python

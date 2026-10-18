@@ -368,7 +368,8 @@ def srs_tolerance():
                        path=str(OUT / 'srs-tolerance.png'))
     for data in (maximax, negative):
         result = srs_tolerance(spec, data, outer=(-3.0, 6.0))
-        (_dof, _event, rms_db), = srs_errors(spec, data)
+        (row,) = srs_errors(spec, data)
+        rms_db = row.db
         print(f'{data.kind:>9}: RMS {rms_db:+.2f} dB, '
               f'{result["inside_count"]}/{result["points"]} inside, '
               f'worst {result["worst_db"]:+.1f} dB at '

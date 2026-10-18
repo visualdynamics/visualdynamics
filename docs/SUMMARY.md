@@ -1,0 +1,3 @@
+- *.md
+- [API reference](api/)
+- [Guide](guide/)

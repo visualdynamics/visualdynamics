@@ -4206,7 +4206,10 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
     exactly the right level and still be out of tolerance across half
     its band, which is why there are both. 'srs' is the shock reading:
     each channel's SRS against its target, as a signed RMS deviation in
-    dB.
+    dB. A pair that cannot be compared (another quantity, only one
+    side's units declared, or for an SRS another Q) is drawn as a row
+    that says why, and a comparison of two sets of undeclared units
+    says so in the count.
 
     `low` and `high` are the thresholds: -3 and +3 dB for 'error', 10 %
     for 'lines' (which has only `low`), and -3 and +3 dB
@@ -4223,7 +4226,9 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
         ERROR_DB,
         LINES_PERCENT,
         channel_errors,
+        channel_refusals,
         compare_all,
+        comparison_note,
     )
     from .bars import (
         ROW_HEIGHT,
@@ -4240,10 +4245,19 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
         # compare: the reading is how far the curve sits from the one
         # it had to meet, RMS across the band in dB
         from ..core.compliance import srs_errors
-        errors = [(f'{dof} {block}' if block else dof, value, 0.0)
-                  for dof, block, value in srs_errors(specification, measured)]
+        scored = srs_errors(specification, measured)
+        errors = [(f'{row.dof} {row.event}' if row.event else row.dof,
+                   row.db, 0.0) for row in scored]
+        # a pair that cannot be compared keeps its row and says why
+        notes = {i: f'not scored: {row.refused}'
+                 for i, row in enumerate(scored) if row.refused}
     else:
-        errors = channel_errors(compare_all(specification, measured))
+        scored = compare_all(specification, measured)
+        errors = channel_errors(scored)
+        notes = channel_refusals(scored)
+    # two sets of raw numbers are compared on trust, and the figure
+    # says so where a reader of it will look
+    raw = comparison_note(scored)
     if not errors:
         raise ValueError('the specification and the measurement have no '
                          'channel in common to compare')
@@ -4258,7 +4272,7 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
             chart = error_chart(plot, errors, colors,
                                 low=-ERROR_DB if low is None else low,
                                 high=ERROR_DB if high is None else high,
-                                summary=summary)
+                                summary=summary, notes=notes, note=raw)
         elif mode == 'srs':
             from ..core.compliance import SRS_ERROR_DB
             # both sides: the deviation is signed, and under-testing
@@ -4267,11 +4281,12 @@ def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
                 plot, [(label, value) for label, value, _p in errors],
                 colors, 'srs_rms',
                 low=-SRS_ERROR_DB if low is None else low,
-                high=SRS_ERROR_DB if high is None else high, summary=summary)
+                high=SRS_ERROR_DB if high is None else high, summary=summary,
+                notes=notes, note=raw)
         else:
             chart = lines_chart(plot, errors, colors,
                                 low=LINES_PERCENT if low is None else low,
-                                summary=summary)
+                                summary=summary, notes=notes, note=raw)
         chart.key(legend_below(widget, plot, 0, colors))
 
     return _plot_window(build, theme=theme, path=path, show=show,
@@ -4320,7 +4335,7 @@ def plot_replication(measured: Any, specification: Any,
     that is not a control channel, or when no channel can be scored.
     Returns the pane, or the path written.
     """
-    from ..core.compliance import ERROR_DB
+    from ..core.compliance import ERROR_DB, comparison_note
     from ..core.replication import WAVEFORM_PERCENT, compare, event_slice
     from .bars import ROW_HEIGHT, replication_chart
 
@@ -4349,8 +4364,13 @@ def plot_replication(measured: Any, specification: Any,
             title=title or (f'{channel}: event {chosen + 1} against its '
                             'specification'))
     rows = compare(measured, specification, frame=event, metrics=(mode,))
-    shown = [(row['label'], float(row[mode])) for row in rows
-             if np.isfinite(row[mode])]
+    # a refused channel keeps its row, with why written along it
+    kept = [row for row in rows
+            if np.isfinite(row[mode]) or row.get('refused')]
+    shown = [(row['label'], float(row[mode])) for row in kept]
+    notes = {i: f"not scored: {row['refused']}"
+             for i, row in enumerate(kept) if row.get('refused')}
+    raw = comparison_note(kept)
     if not shown:
         raise ValueError('no control channel here can be scored against '
                          'its target')
@@ -4367,7 +4387,8 @@ def plot_replication(measured: Any, specification: Any,
         widget.clear()
         plot = widget.addPlot(row=0, col=0)
         replication_chart(plot, shown, colors, mode,
-                          low=bounds[0], high=bounds[1])
+                          low=bounds[0], high=bounds[1], notes=notes,
+                          note=raw)
 
     return _plot_window(build, theme=theme, path=path, show=show,
                         title=title or f'{mode} by control channel',

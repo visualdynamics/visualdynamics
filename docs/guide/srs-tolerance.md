@@ -67,9 +67,14 @@ and the count says whether a spectrum met its tolerance.
 The Q and the quantity must match. A spectrum computed at another Q
 is a different curve, and a spectrum of velocity says nothing about a
 requirement in acceleration, so such a pair is refused with the reason
-instead of judged. A spectrum or a requirement whose units are not
-declared is refused the same way: its numbers cannot be read against
-the other's until its units are set.
+instead of judged. Units follow the rule every comparison uses
+([Units in a comparison](compliance.md#units-in-a-comparison)): a pair
+with only one side's units declared is refused, and a pair with
+neither declared is judged as raw numbers and says so. `srs_errors`
+refuses by the same rules. A refused pair keeps its row, with `db` NaN
+and `refused` giving the reason, and the SRS Error bars, the table
+under them and the report write that reason in the row where the bar
+would be.
 
 ## Each polarity
 

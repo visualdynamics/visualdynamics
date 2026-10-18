@@ -1270,3 +1270,29 @@ def test_a_meshed_plate_computes_its_element_matrices_once(monkeypatch):
     model = square_plate(8)
     model.sparse_matrices()
     assert len(model.plates) == 64 and len(calls) == 1
+
+
+def test_every_mode_comes_out_with_its_leading_component_positive():
+    """A mode's sign is the solver's to choose, and fem-mode.png came
+    out flipped on alternate regenerations. Each mode's first component
+    within a millionth of its largest is positive, on both solvers."""
+    model = straight_beam(1.0, fem.Section.rectangle('bar', 0.02, 0.01), 12,
+                          axis=(0.3, 1.0, 0.2))
+    for solver in ('dense', 'sparse'):
+        shapes = model.eigensolution(fixed=['100'], num_modes=6,
+                                     solver=solver).shape_matrix
+        magnitude = np.abs(shapes)
+        peak = magnitude.max(axis=1, keepdims=True)
+        lead = np.argmax(magnitude >= peak * (1.0 - fem.SIGN_TIE), axis=1)
+        assert all(shapes[i, lead[i]] > 0.0 for i in range(len(shapes))), \
+            solver
+
+
+def test_a_tie_between_two_components_is_broken_by_order_not_round_off():
+    """An antisymmetric mode has two components of equal size and
+    opposite sign; the first of them in order leads, whichever is a
+    hair larger."""
+    mode = np.array([[0.1], [-1.0], [1.0 + 1e-9], [0.2]])
+    assert fem.signed_modes(mode)[:, 0].tolist() == pytest.approx(
+        [-0.1, 1.0, -1.0 - 1e-9, -0.2])
+    assert np.array_equal(fem.signed_modes(-mode), fem.signed_modes(mode))

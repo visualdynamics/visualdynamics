@@ -2771,7 +2771,9 @@ def _bars_block(block, specification, measured, us):
         ERROR_DB,
         LINES_PERCENT,
         channel_errors,
+        channel_refusals,
         compare_all,
+        comparison_note,
     )
     from ..core.data import ShockSpecification, TransientSpecification
 
@@ -2789,10 +2791,11 @@ def _bars_block(block, specification, measured, us):
     measured, specification = _banded_pair(measured, specification, block)
     if measured is None:
         return None
-    rows = channel_errors(compare_all(specification, measured,
-                                      scale_db=scale_db))
+    compared = compare_all(specification, measured, scale_db=scale_db)
+    rows = channel_errors(compared)
     if not rows:
         return None
+    reasons = channel_refusals(compared)
     # the bars judge the scaled data, so the caption says so — an RMS
     # error chart that quietly compared scaled data would read as a
     # claim about the raw run
@@ -2800,12 +2803,18 @@ def _bars_block(block, specification, measured, us):
     if scale_db:
         caption = (caption + f' — measured data scaled {scale_db:+d} dB '
                    'to the specification').strip()
+    # and when neither side's units were declared, that the numbers
+    # were compared as they came
+    raw = comparison_note(compared)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
     lines = block.get('mode') == 'lines'
     return {
         'kind': 'bars', 'caption': caption,
         'labels': [label for label, _db, _pct in rows],
         'values': [_bar_value(pct if lines else db)
                    for _label, db, pct in rows],
+        'notes': [reasons.get(i) for i in range(len(rows))],
         'low': LINES_PERCENT if lines else -ERROR_DB,
         'high': None if lines else ERROR_DB,
         # a share of a band cannot be negative, so the axis does not
@@ -2827,19 +2836,27 @@ def _srs_bars(block, specification, measured):
     RMS across the band, in decibels. An SRS spans decades and is read
     on log axes, so the linear distance a waveform gets is dominated by
     whatever bands are loudest and goes blind to a large ratio error
-    where the target is small — see `core.compliance.srs_errors`.
+    where the target is small — see `core.compliance.srs_errors`. A
+    pair that cannot be compared keeps its row, with no bar and the
+    reason written along it (`notes`).
     """
-    from ..core.compliance import SRS_ERROR_DB, srs_errors
+    from ..core.compliance import SRS_ERROR_DB, comparison_note, srs_errors
 
     rows = srs_errors(specification, measured)
     if not rows:
         return None
-    many = len({block for _d, block, _v in rows if block}) > 1
+    many = len({row.event for row in rows if row.event}) > 1
+    caption = block.get('caption', '')
+    raw = comparison_note(rows)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
     return {
-        'kind': 'bars', 'caption': block.get('caption', ''),
-        'labels': [f'{dof} {name}' if many and name else dof
-                   for dof, name, _value in rows],
-        'values': [_bar_value(value) for _d, _n, value in rows],
+        'kind': 'bars', 'caption': caption,
+        'labels': [f'{row.dof} {row.event}' if many and row.event
+                   else row.dof for row in rows],
+        'values': [_bar_value(row.db) for row in rows],
+        'notes': [f'not scored: {row.refused}' if row.refused else None
+                  for row in rows],
         # both sides: the deviation is signed — over the ceiling the
         # shock was too hard, under the floor it under-hit — and the
         # unsigned reading that once made every miss look like an
@@ -2856,17 +2873,23 @@ def _sine_bars(block, specification, levels):
     for the same reasons — see `core.compliance.sine_errors`. Every
     tone at every control channel, one bar each.
     """
-    from ..core.compliance import SINE_ERROR_DB, sine_errors
+    from ..core.compliance import SINE_ERROR_DB, comparison_note, sine_errors
 
     rows = sine_errors(specification, levels)
     if not rows:
         return None
-    many = len({tone for _d, tone, _v in rows}) > 1
+    many = len({row.tone for row in rows}) > 1
+    caption = block.get('caption', '')
+    raw = comparison_note(rows)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
     return {
-        'kind': 'bars', 'caption': block.get('caption', ''),
-        'labels': [f'{dof} {tone}' if many else dof
-                   for dof, tone, _value in rows],
-        'values': [_bar_value(value) for _d, _t, value in rows],
+        'kind': 'bars', 'caption': caption,
+        'labels': [f'{row.dof} {row.tone}' if many else row.dof
+                   for row in rows],
+        'values': [_bar_value(row.db) for row in rows],
+        'notes': [f'not scored: {row.refused}' if row.refused else None
+                  for row in rows],
         'low': -SINE_ERROR_DB, 'high': SINE_ERROR_DB,
         'units': ' dB',
         'ylabel': 'Sine level deviation, RMS across the sweep [dB]',
@@ -2901,8 +2924,12 @@ def _replication_bars(block, specification, measured):
 
     if block.get('mode', 'waveform') != 'waveform':
         return None
+    from ..core.compliance import comparison_note
+
     rows = compare(measured, specification, metrics=('waveform',))
-    shown = [r for r in rows if np.isfinite(r['waveform'])]
+    # a refused channel keeps its row, with why written along it
+    shown = [r for r in rows
+             if np.isfinite(r['waveform']) or r.get('refused')]
     if not shown:
         return None
     # the repeat only earns a place in the label when there is more
@@ -2913,11 +2940,16 @@ def _replication_bars(block, specification, measured):
     if silent:
         caption = (f'{caption} — {", ".join(silent)} asked for nothing '
                    'and cannot be scored against it').strip(' —')
+    raw = comparison_note(shown)
+    if raw:
+        caption = (caption + f' — {raw}').strip(' —')
     return {
         'kind': 'bars', 'caption': caption,
         'labels': [f"{r['label']} e{r['frame'] + 1}" if many else r['label']
                    for r in shown],
         'values': [_bar_value(r['waveform']) for r in shown],
+        'notes': [f"not scored: {r['refused']}" if r.get('refused')
+                  else None for r in shown],
         # a one-sided reading carries its only threshold in `low` and
         # leaves `high` null, which is how the page tells the two apart
         'low': WAVEFORM_PERCENT, 'high': None, 'floor': 0.0,

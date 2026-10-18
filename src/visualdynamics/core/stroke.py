@@ -285,13 +285,12 @@ class StrokeReading:
 
     @property
     def velocity_change(self) -> float:
-        """The span from the lowest velocity to the highest, in m/s.
+        """The span from the lowest velocity to the highest, in m/s
+        (`core.shock_check.velocity_span`): for a one-signed pulse with
+        compensation either side, the main pulse's change."""
+        from .shock_check import velocity_span
 
-        For a one-signed pulse with compensation either side it is the
-        main pulse's change, 2AT/π for a half-sine, where the record's
-        net change is zero by design.
-        """
-        return float(self.velocity.max() - self.velocity.min())
+        return velocity_span(self.velocity)
 
     @property
     def lowest(self) -> float:

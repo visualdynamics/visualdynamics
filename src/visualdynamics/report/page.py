@@ -435,6 +435,7 @@ function barsBlock(block) {
   };
   function draw() {
     const values = block.values.slice(first, first + shown);
+    let notesDrawn = 0;
     const [g, width, height] = sized(
       canvas, margin.top + margin.bottom + block.values.length * ROW_HEIGHT);
     const plotW = width - margin.left - margin.right;
@@ -475,6 +476,16 @@ function barsBlock(block) {
         const Y = top + step * (k + 0.16), H = step * 0.68;
         const X0 = px(base), X = v === null || !isFinite(v) ? X0 : px(v);
         g.fillRect(Math.min(X, X0), Y, Math.abs(X - X0), H);
+        /* a row that could not be scored says why where its bar would
+           be (an SRS of undeclared units), rather than standing empty */
+        const note = block.notes ? block.notes[first + k] : null;
+        if (note) {
+          g.fillStyle = ink; g.globalAlpha = 0.8;
+          g.font = '10px sans-serif'; g.textAlign = 'left';
+          g.fillText(note, X0 + 4, Y + H * 0.8);
+          g.globalAlpha = 1;
+          notesDrawn += 1;
+        }
         g.fillStyle = ink; g.globalAlpha = 0.8;
         g.font = '10px sans-serif'; g.textAlign = 'right';
         g.fillText(block.labels[first + k], margin.left - 6, Y + H * 0.8);
@@ -530,7 +541,11 @@ function barsBlock(block) {
 
     const all = block.values;
     const out = all.filter(v => beyond(v)).length;
-    const share = all.length ? 100 * out / all.length : 0;
+    /* a row that says why it was not scored is left out of the count
+       and named in it, as the app's chart does */
+    const unscored = block.notes ? block.notes.filter(n => n).length : 0;
+    const scored = all.length - unscored;
+    const share = scored ? 100 * out / scored : 0;
     const where = under
       ? 'under ' + block.low_at.toFixed(1) + block.units
       : block.high_at === null
@@ -538,8 +553,9 @@ function barsBlock(block) {
       : 'outside ' + block.low_at.toFixed(1) + ' to '
         + block.high_at.toFixed(1) + block.units;
     g.fillStyle = ink; g.font = '12px sans-serif'; g.textAlign = 'center';
-    g.fillText(out + ' of ' + all.length + ' channels ' + where
+    g.fillText(out + ' of ' + scored + ' channels ' + where
                + ' — ' + share.toFixed(0) + '%'
+               + (unscored ? '; ' + unscored + ' not scored' : '')
                + (shown < all.length
                   ? ' (rows ' + (first + 1) + ' to ' + (first + shown) + ' shown)'
                   : ''),
@@ -558,6 +574,7 @@ function barsBlock(block) {
     canvas.dataset.out = out;
     canvas.dataset.first = first;
     canvas.dataset.shown = shown;
+    canvas.dataset.notes = notesDrawn;
   }
 
   /* No threshold dragging here. A threshold is a judgment, and the

@@ -420,3 +420,33 @@ def test_negative_bars_fit_inside_their_own_axis(qt_app):
     limits = view.getState()['limits']['xLimits']
     assert limits[0] <= -13.1, 'the fence itself allows the bars'
     surface.close()
+
+
+def test_a_refused_psd_channel_says_why_in_the_bars_and_the_grid(window, pump):
+    """A specification of another quantity cannot be compared. Every
+    channel keeps its row in the bars and the grid with the reason
+    where its numbers would be, and the status line says it."""
+    import pyqtgraph as pg
+
+    spec, _psd = prepared(window, pump)
+    required = window.objects[spec]
+    required.ordinate_dim = (['velocity**2/frequency']
+                             * required.num_records)
+    select(window, spec, _psd)
+    pump()
+    window.data_pane.comparison_actions['error'].trigger()
+    pump()
+    chart = window.bar_chart
+    assert chart.notes and len(chart.notes) == len(chart.rows)
+    reason = next(iter(chart.notes.values()))
+    assert reason.startswith('not compared: the specification is of '
+                             'velocity**2/frequency and the measurement of '
+                             'acceleration**2/frequency')
+    written = [item.toPlainText() for item in chart.plot.items
+               if isinstance(item, pg.TextItem)]
+    assert written.count(reason) == len(chart.rows)
+    assert cell(window, 0, 'RMS error [dB]') == reason
+    assert 'Not compared: the specification is of' in window._status_text
+    window.data_pane.comparison_actions['lines'].trigger()
+    pump()
+    assert window.bar_chart.notes == chart.notes, 'the lines chart says why too'

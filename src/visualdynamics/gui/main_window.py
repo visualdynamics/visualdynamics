@@ -15860,13 +15860,22 @@ class MainWindow(QMainWindow):
         many are out before anything is read at all — which is why the
         table these replaced is gone rather than sitting beside them.
         """
-        from ..core.compliance import ERROR_DB, LINES_PERCENT, channel_errors
+        from ..core.compliance import (
+            ERROR_DB,
+            LINES_PERCENT,
+            channel_errors,
+            channel_refusals,
+            comparison_note,
+        )
         from ..plot.bars import error_chart, lines_chart
 
         rows, _unit = found
         errors = channel_errors(rows)
         if not errors:
             return 'nothing in common to compare'
+        # a refused channel keeps its row and says why along it, and a
+        # comparison of raw numbers says so in the count
+        notes, raw = channel_refusals(rows), comparison_note(rows)
         colors = resolve_theme(self.theme_name)
         self.data_pane.graphics.clear()
         plot = self.data_pane.graphics.addPlot(row=0, col=0)
@@ -15875,14 +15884,14 @@ class MainWindow(QMainWindow):
             low, high = self.data_pane.error_bounds or (-ERROR_DB, ERROR_DB)
             self.bar_chart = error_chart(
                 plot, errors, colors, low=low, high=high,
-                changed=self._error_bounds_moved)
+                changed=self._error_bounds_moved, notes=notes, note=raw)
         else:
             low = (self.data_pane.lines_bound
                    if self.data_pane.lines_bound is not None
                    else LINES_PERCENT)
             self.bar_chart = lines_chart(
                 plot, errors, colors, low=low,
-                changed=self._lines_bound_moved)
+                changed=self._lines_bound_moved, notes=notes, note=raw)
         return self.bar_chart.summary.toPlainText()
 
     def _render_kurtosis(self, history, series):
@@ -16627,13 +16636,18 @@ class MainWindow(QMainWindow):
         rewriting the selection on every drawing means arguing with the
         user about what they just clicked.
         """
-        from ..core.compliance import channel_errors
+        from ..core.compliance import channel_errors, channel_refusals
         from .object_tables import ComplianceGrid, compliance_grid_model
 
         rows, _unit = found
         errors = channel_errors(rows)
         if not errors:
             return
+        # a refused channel's row says why in place of its numbers
+        reasons = channel_refusals(rows)
+        errors = [(label, reasons[i], None) if i in reasons
+                  else (label, db, pct)
+                  for i, (label, db, pct) in enumerate(errors)]
         held = self._compliance_holder
         if (held is not None and self.table.model() is self._compliance_model
                 and held.rows == errors):
@@ -16902,7 +16916,7 @@ class MainWindow(QMainWindow):
         """
         import numpy as np
 
-        from ..core.compliance import SRS_ERROR_DB, srs_errors
+        from ..core.compliance import SRS_ERROR_DB, comparison_note, srs_errors
         from ..plot import build_plots
         from ..plot.bars import replication_chart
 
@@ -16927,16 +16941,18 @@ class MainWindow(QMainWindow):
         rows = scored(measured)
         if not rows:
             return 'no channel in common to compare'
-        blocks = sorted({block for _d, block, _v in rows if block},
+        blocks = sorted({row.event for row in rows if row.event},
                         key=lambda b: (len(b), b))
         events = list(range(max(len(blocks), 1)))
         dofs = []
-        for dof, _block, _value in rows:
-            if dof not in dofs:
-                dofs.append(dof)
+        for row in rows:
+            if row.dof not in dofs:
+                dofs.append(row.dof)
         index = {block: i for i, block in enumerate(blocks)}
-        values = {(dof, index.get(block, 0)): value
-                  for dof, block, value in rows}
+        # a refused pair's cell holds why, in words, where its number
+        # would be: the table and the bars both say it
+        values = {(row.dof, index.get(row.event, 0)): row.refused or row.db
+                  for row in rows}
         view = self.data_pane.srs_reading(
             readings=self._srs_readings(polarities))
         table = [{'label': dof, 'frame': e, 'zero_target': False,
@@ -16948,13 +16964,14 @@ class MainWindow(QMainWindow):
             # polarity, rather than the first one's alone
             table, labels = [], []
             for spectrum in polarities:
-                for dof, block, value in scored(spectrum):
-                    label = f'{dof} {spectrum.kind}'
+                for row in scored(spectrum):
+                    label = f'{row.dof} {spectrum.kind}'
                     if label not in labels:
                         labels.append(label)
                     table.append({'label': label,
-                                  'frame': index.get(block, 0),
-                                  'zero_target': False, 'waveform': value})
+                                  'frame': index.get(row.event, 0),
+                                  'zero_target': False,
+                                  'waveform': row.refused or row.db})
         if view == 'points':
             message = self._render_srs_points(
                 polarities, specification, dofs, picked_events)
@@ -17004,11 +17021,21 @@ class MainWindow(QMainWindow):
                        'against the one required')
         else:
             self.data_pane.show_events([])
-            shown = [(f'{dof} e{e + 1}' if len(events) > 1 else dof,
-                      values[(dof, e)])
-                     for dof in dofs for e in events
-                     if (dof, e) in values
-                     and np.isfinite(values[(dof, e)])]
+            # a refused pair keeps its row, with why written along it
+            # where the bar would be, rather than dropping out of the
+            # chart as a channel with nothing to score does
+            shown, notes = [], {}
+            for dof in dofs:
+                for e in events:
+                    value = values.get((dof, e))
+                    if value is None:
+                        continue
+                    label = f'{dof} e{e + 1}' if len(events) > 1 else dof
+                    if isinstance(value, str):
+                        notes[len(shown)] = f'not scored: {value}'
+                        shown.append((label, float('nan')))
+                    elif np.isfinite(value):
+                        shown.append((label, value))
             if not shown:
                 return 'nothing here can be scored'
             self.data_pane.show_pairs([])
@@ -17022,8 +17049,10 @@ class MainWindow(QMainWindow):
             # project's level error gives
             self.bar_chart = replication_chart(
                 plot, shown, resolve_theme(self.theme_name), 'srs_rms',
-                low=low, high=high, changed=self._srs_bounds_moved)
-            message = self.bar_chart.summary.toPlainText()
+                low=low, high=high, changed=self._srs_bounds_moved,
+                notes=notes, note=comparison_note(rows))
+            message = (notes[0] if len(notes) == len(shown)
+                       else self.bar_chart.summary.toPlainText())
         self._show_replication_table(table, labels, events, units='dB')
         return message
 
@@ -17209,7 +17238,7 @@ class MainWindow(QMainWindow):
         """
         import numpy as np
 
-        from ..core.compliance import SINE_ERROR_DB, sine_errors
+        from ..core.compliance import SINE_ERROR_DB, comparison_note, sine_errors
         from ..plot import build_plots
         from ..plot.bars import replication_chart
         from ..viz.sinespec import add_sine_stage
@@ -17371,15 +17400,26 @@ class MainWindow(QMainWindow):
         if not rows:
             return 'nothing here can be scored' + note
         dofs = []
-        for dof, _tone, _value in rows:
-            if dof not in dofs:
-                dofs.append(dof)
-        values = {(dof, tone): value for dof, tone, value in rows}
-        shown = [(f'{dof} {tone}' if len(tones) > 1 else dof,
-                  values[(dof, tone)])
-                 for dof in dofs for tone in tones
-                 if (dof, tone) in values
-                 and np.isfinite(values[(dof, tone)])]
+        for row in rows:
+            if row.dof not in dofs:
+                dofs.append(row.dof)
+        # a refused pair holds why, in words, where its number would be,
+        # and keeps its row in the bars with the reason along it
+        values = {(row.dof, row.tone): row.refused or row.db for row in rows}
+        shown, notes = [], {}
+        for dof in dofs:
+            for tone in tones:
+                value = values.get((dof, tone))
+                if value is None:
+                    continue
+                label = f'{dof} {tone}' if len(tones) > 1 else dof
+                if isinstance(value, str):
+                    notes[len(shown)] = f'not scored: {value}'
+                    shown.append((label, float('nan')))
+                elif np.isfinite(value):
+                    shown.append((label, value))
+        if not shown:
+            return 'nothing here can be scored' + note
         self.data_pane.show_pairs([])
         self.data_pane.graphics.clear()
         plot = self.data_pane.graphics.addPlot(row=0, col=0)
@@ -17387,7 +17427,8 @@ class MainWindow(QMainWindow):
                      or (-SINE_ERROR_DB, SINE_ERROR_DB))
         self.bar_chart = replication_chart(
             plot, shown, resolve_theme(self.theme_name), 'srs_rms',
-            low=low, high=high, changed=self._srs_bounds_moved)
+            low=low, high=high, changed=self._srs_bounds_moved,
+            notes=notes, note=comparison_note(rows))
         self._show_replication_table(
             [{'label': dof, 'frame': k, 'zero_target': False,
               'waveform': values[(dof, tone)]}
@@ -17526,8 +17567,12 @@ class MainWindow(QMainWindow):
 
         from .object_tables import ReplicationRows, replication_model
 
+        # a cell is a number, None where there is none, or the words for
+        # why a pair was not scored (an SRS of undeclared units)
         values = {(row['label'], row['frame']):
-                  (None if not np.isfinite(row['waveform'])
+                  (row['refused'] if row.get('refused')
+                   else row['waveform'] if isinstance(row['waveform'], str)
+                   else None if not np.isfinite(row['waveform'])
                    else row['waveform'])
                   for row in rows}
         held = self._replication_holder
@@ -17646,10 +17691,13 @@ class MainWindow(QMainWindow):
         """
         import numpy as np
 
+        from ..core.compliance import comparison_note
         from ..core.replication import WAVEFORM_PERCENT
         from ..plot.bars import replication_chart
 
-        usable = [row for row in rows if np.isfinite(row['waveform'])]
+        # a refused channel keeps its bar's row, with why along it
+        usable = [row for row in rows if np.isfinite(row['waveform'])
+                  or row.get('refused')]
         silent = sorted({row['label'] for row in rows
                          if row.get('zero_target')})
         if not usable:
@@ -17658,6 +17706,8 @@ class MainWindow(QMainWindow):
         shown = [(f"{row['label']} e{row['frame'] + 1}" if many
                   else row['label'], float(row['waveform']))
                  for row in usable]
+        notes = {i: f"not scored: {row['refused']}"
+                 for i, row in enumerate(usable) if row.get('refused')}
         # every picked cell is a bar here, so there is nothing to choose
         self.data_pane.show_pairs([])
         colors = resolve_theme(self.theme_name)
@@ -17668,7 +17718,8 @@ class MainWindow(QMainWindow):
                else WAVEFORM_PERCENT)
         self.bar_chart = replication_chart(
             plot, shown, colors, 'waveform', low=low, high=None,
-            changed=self._waveform_bound_moved)
+            changed=self._waveform_bound_moved, notes=notes,
+            note=comparison_note(usable))
         playings = sorted({row['frame'] for row in usable})
         message = (f'event{"s" * (len(playings) != 1)} '
                    f'{", ".join(str(e + 1) for e in playings)} of {count}: '

@@ -68,6 +68,25 @@ import numpy as np
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
 
+
+def velocity_span(velocity: Any) -> float:
+    """The span from the lowest velocity to the highest, in the
+    velocity's unit: a shock's velocity change.
+
+    For one pulse with nothing either side it is the area under the
+    pulse, 2AT/π for a half-sine of peak A and duration T. For a
+    one-signed pulse with compensation pulses before and after it, the
+    velocity runs down through the first, up through the pulse and back
+    through the second, and the span is still the main pulse's change,
+    where the record's net change is zero by design. The shock check and
+    the stroke readout both read it here.
+    """
+    # one rule (2026-10-18): the two readings each had a copy since the
+    # thirteen contributed readings landed
+    velocity = np.asarray(velocity, dtype=float)
+    return float(velocity.max() - velocity.min())
+
+
 # The view was asked for on 2026-10-16, from a worked example in which
 # the default integration ended a 4 g zero shift's velocity at zero
 # where raw it ends at 9.05 m/s, and took the velocity change out of
@@ -132,17 +151,9 @@ class ShockCheck:
 
     @property
     def velocity_change(self) -> float:
-        """The span from the lowest velocity to the highest, in m/s.
-
-        For one pulse with nothing either side it is the area under the
-        pulse, 2AT/π for a half-sine of peak A and duration T. For a
-        one-signed pulse with compensation pulses before and after it,
-        the velocity runs down through the first, up through the pulse
-        and back through the second, and the span is still the main
-        pulse's change, where the record's net change is zero by
-        design.
-        """
-        return float(self.velocity.max() - self.velocity.min())
+        """The span from the lowest velocity to the highest, in m/s
+        (`velocity_span`)."""
+        return velocity_span(self.velocity)
 
     @property
     def peak_velocity(self) -> float:

@@ -152,6 +152,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     os.environ.setdefault('QT_LOGGING_RULES', 'qt.core.qobject.connect=false')
     qInstallMessageHandler(_quiet_message_handler)
 
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Before anything Qt. The GL check is Win32 calls, and a machine
+    # that fails it must never build a QApplication: built on a
+    # Windows machine with no OpenGL, the application crashed on the
+    # way out behind Windows' crash dialog (the 0.1.0a56 release run,
+    # 2026-10-18)
+    from . import opengl
+
+    if '--check-gl' in argv:
+        # the packaged build's other self-check: can this machine draw
+        # the 3-D view? (gui.opengl.check — 0 yes, 2 no, 1 unknown)
+        code, message = opengl.check()
+        print(message, flush=True)
+        return code
+    reason = opengl.missing()
+    if reason is not None:
+        opengl.say(reason)
+        return 2
+
     import signal
 
     from PySide6.QtWidgets import QApplication
@@ -167,7 +186,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from PySide6.QtCore import QTimer
 
-    argv = list(sys.argv[1:] if argv is None else argv)
     # a script that opens the window has read the notice; the flag is
     # its own and is not a file to import
     with_disclaimer = '--no-disclaimer' not in argv
@@ -189,22 +207,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         code, message = check(where[0])
         print(message, flush=True)
         return code
-    from . import opengl
-
-    if '--check-gl' in argv:
-        # the packaged build's other self-check: can this machine draw
-        # the 3-D view? (gui.opengl.check — 0 yes, 2 no)
-        code, message = opengl.check()
-        print(message, flush=True)
-        return code
-    # before the window: building its 3-D view is where a machine with no
-    # OpenGL driver dies, with an access violation and no word
-    reason = opengl.missing()
-    if reason is not None:
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.critical(None, 'Visual Dynamics', reason)
-        return 2
     from .icons import app_icon
 
     app.setWindowIcon(app_icon())

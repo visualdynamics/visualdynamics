@@ -932,7 +932,8 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
     wanted : int
         How many of the lowest modes must converge.
     factor : optional
-        The LU factor of (K - sigma M) (`scipy.sparse.linalg.splu`);
+        The factorization of (K - sigma M), as `sparse_solve.factor_symmetric`
+        gives it (anything with `solve` and `shape`);
         computed when not given.
     ticker : Ticker, optional
         Told one tick per step.
@@ -944,10 +945,11 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
         ascending order, and each mode's residual after the last step.
     """
     from scipy.linalg import eigh as scipy_eigh
-    from scipy.sparse.linalg import splu
+
+    from .sparse_solve import factor_symmetric
 
     if factor is None:
-        factor = splu((stiffness - sigma * mass).tocsc())
+        factor = factor_symmetric((stiffness - sigma * mass).tocsc())
     wanted = min(int(wanted), vectors.shape[1])
     worst = math.inf
     if ticker is not None:
@@ -1978,7 +1980,9 @@ class Model:
         matrices as their nonzeros (`sparse_matrices`) and finds the lowest
         modes by shift-invert Lanczos (ARPACK, `scipy.sparse.linalg.eigsh`),
         the method large finite element codes use, refined by
-        `polish_modes`. It finds the lowest `num_modes`, or every mode up to
+        `polish_modes`. Its one factorization is Accelerate's supernodal
+        Cholesky on a Mac and SuperLU's symmetric LU elsewhere
+        (`sparse_solve.factor_symmetric`). It finds the lowest `num_modes`, or every mode up to
         `maximum_frequency`, and one of the two must be given. Its memory
         grows with the number of nodes instead of its square: a plate model of
         1,500 nodes that needs about 13 GB dense needs tens of megabytes
@@ -2157,7 +2161,9 @@ class Model:
     def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) for the lowest
         modes, by shift-invert Lanczos on the sparse matrices."""
-        from scipy.sparse.linalg import LinearOperator, eigsh, splu
+        from scipy.sparse.linalg import LinearOperator, eigsh
+
+        from .sparse_solve import factor_symmetric
 
         if num_modes is None and maximum_frequency is None:
             raise ValueError(
@@ -2170,11 +2176,14 @@ class Model:
         # the shifted factor, once: eigsh's shift-invert and the polish
         # both solve with it, and eigsh built its own until the bar
         # needed to count the solves (2026-10-01) — the operator ticks
-        # per application against an estimate the bar is kept short of
+        # per application against an estimate the bar is kept short of.
+        # Accelerate's on a Mac, SuperLU's in symmetric mode elsewhere
+        # (`sparse_solve`, 2026-10-18): the factorization and its solves
+        # were 23 of a 270,000-DOF model's 29 seconds, on one core
         if ticker is not None:
             ticker.add(1)
         try:
-            factor = splu((reduced_k - sigma * reduced_m).tocsc())
+            factor = factor_symmetric((reduced_k - sigma * reduced_m).tocsc())
         except RuntimeError as failure:
             empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
                                    & (reduced_k.diagonal() <= 0.0))

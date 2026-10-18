@@ -40,6 +40,21 @@ $exe = Join-Path $target 'VisualDynamics.exe'
 if (-not (Test-Path $exe)) { throw "installed, but $exe is not there" }
 Write-Host "installed to $target"
 
+# A bounded run of the exe: the 0.1.0a56 release run hung in a check
+# behind Windows' crash dialog until the job's forty-minute ceiling,
+# with nothing in the logs. A check that has not exited in time is
+# killed and fails with whatever it wrote.
+function Invoke-Bounded($arguments, $outLog, $errLog, $seconds) {
+    $p = Start-Process -FilePath $exe -PassThru -ArgumentList $arguments `
+        -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+    if (-not $p.WaitForExit($seconds * 1000)) {
+        $p.Kill()
+        Get-Content $errLog | Select-Object -Last 40
+        throw "the application did not exit within $seconds s running: $arguments"
+    }
+    return $p.ExitCode
+}
+
 # 1a. Before Mesa, the runner is the machine a Remote Desktop user has:
 # no OpenGL driver. The launcher must say so (gui.opengl.check, exit 2)
 # instead of dying in VTK with 0xC0000005. Exit 0 means this runner has
@@ -47,15 +62,14 @@ Write-Host "installed to $target"
 # failure. Anything else, the access violation above all, fails.
 $glLog = 'dist\smoke\gl-before-mesa.log'
 $glErr = 'dist\smoke\gl-before-mesa-stderr.log'
-$gl = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList '--check-gl' `
-    -RedirectStandardOutput $glLog -RedirectStandardError $glErr
+$glCode = Invoke-Bounded @('--check-gl') $glLog $glErr 180
 Get-Content $glLog
-switch ($gl.ExitCode) {
+switch ($glCode) {
     2 { Write-Host 'without a driver, the launcher says what is missing' }
     0 { Write-Warning 'this runner has OpenGL of its own: the no-driver path was not exercised' }
     default {
         Get-Content $glErr | Select-Object -Last 40
-        throw "the OpenGL check without a driver failed (exit $($gl.ExitCode))"
+        throw "the OpenGL check without a driver failed (exit $glCode)"
     }
 }
 
@@ -79,13 +93,11 @@ Copy-Item (Join-Path $mesaDir 'x64\*.dll') $target -Force
 if (-not (Test-Path (Join-Path $target 'opengl32.dll'))) { throw 'Mesa did not land beside the exe' }
 Write-Host "Mesa $mesaVersion (llvmpipe) placed beside the exe: the runner has no GPU"
 # and with Mesa there, the same check must find OpenGL it can draw with
-$gl = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList '--check-gl' `
-    -RedirectStandardOutput 'dist\smoke\gl-with-mesa.log' `
-    -RedirectStandardError 'dist\smoke\gl-with-mesa-stderr.log'
+$glCode = Invoke-Bounded @('--check-gl') 'dist\smoke\gl-with-mesa.log' 'dist\smoke\gl-with-mesa-stderr.log' 180
 Get-Content 'dist\smoke\gl-with-mesa.log'
-if ($gl.ExitCode -ne 0) {
+if ($glCode -ne 0) {
     Get-Content 'dist\smoke\gl-with-mesa-stderr.log' | Select-Object -Last 40
-    throw "with Mesa beside the exe, the OpenGL check failed (exit $($gl.ExitCode))"
+    throw "with Mesa beside the exe, the OpenGL check failed (exit $glCode)"
 }
 
 # 1c. Can the installed build save an animation? Its files being there
@@ -96,16 +108,14 @@ if ($gl.ExitCode -ne 0) {
 # warning and the logs, not a failed build; anything else is a failure.
 $movieLog = 'dist\smoke\movie.log'
 $movieErr = 'dist\smoke\movie-stderr.log'
-$check = Start-Process -FilePath $exe -Wait -PassThru `
-    -ArgumentList '--check-movie', "`"$(Join-Path $work 'check.mp4')`"" `
-    -RedirectStandardOutput $movieLog -RedirectStandardError $movieErr
+$movieCode = Invoke-Bounded @('--check-movie', "`"$(Join-Path $work 'check.mp4')`"") $movieLog $movieErr 600
 Get-Content $movieLog
-switch ($check.ExitCode) {
+switch ($movieCode) {
     0 { Write-Host 'saves an animation as H.264' }
     2 { Write-Warning 'no H.264 encoder on this runner: Save Animation is not offered here' }
     default {
         Get-Content $movieErr | Select-Object -Last 40
-        throw "the movie check failed (exit $($check.ExitCode))"
+        throw "the movie check failed (exit $movieCode)"
     }
 }
 

@@ -16,7 +16,7 @@ DOFs, the node and direction, that a channel is taken at.
 A single frame's spectrum has two degrees of freedom at each line, the
 real and the imaginary part of the line's transform. An average of n
 frames that share no samples has 2n. This is the nominal count, shown
-as **Statistical DOF (2n)**.
+as **Stat. DOF (2n)**.
 
 Frames that overlap share part of the record, so they vary together,
 and an average of them steadies less than the same number of
@@ -27,7 +27,7 @@ variance of the average grows by a factor of
 
 where c(j) is how much the window lets two frames j hops apart share
 (their overlap correlation), and the equivalent count is 2n divided by
-that factor. This is shown as **Equivalent statistical DOF**. With no
+that factor. This is shown as **Equivalent DOF**. With no
 overlap the two counts are equal.
 
 The window matters, because a tapered window gives little weight to
@@ -79,8 +79,8 @@ a sign that anything is wrong.
 
 ## In the Averaging view
 
-Below the settings, beside **Averages**, the view shows **Statistical
-DOF (2n)**, **Equivalent statistical DOF**, and the **90 % band** in
+Below the settings, beside **Averages**, the view shows **Stat. DOF
+(2n)**, **Equivalent DOF**, and the **90 % band** in
 decibels that the equivalent count gives. They follow every change to
 the frame length,
 overlap, window and frame count, and every drag of the analyzed span,

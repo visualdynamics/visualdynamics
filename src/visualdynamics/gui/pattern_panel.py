@@ -72,8 +72,12 @@ class PatternPanel(QWidget):
         grid.addWidget(self.reading_label, 6, 0, 1, 3)
         buttons = QHBoxLayout()
         self.pattern_button: QPushButton = QPushButton('Pattern')
+        self.pattern_button.setToolTip('Make the copies the preview shows, '
+                                       'as one solid')
         self.pattern_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
+        self.close_button.setToolTip('Put the pane away without making the '
+                                     'pattern')
         buttons.addWidget(self.pattern_button)
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 7, 0, 1, 3)

@@ -79,10 +79,84 @@ def select(window, *names, current=None):
     pump()
 
 
-def shoot(window, name):
+#: the color of a "click here" mark: an orange that reads against the
+#: light theme's panes and the plot's white alike, and is no data color
+MARK = '#e8590c'
+
+
+def act(window, label):
+    """The visible bar button labeled `label` (an act on the plot's or
+    the 3-D view's bar, or a reading), for a mark."""
+    from PySide6.QtWidgets import QToolBar
+
+    for bar in window.findChildren(QToolBar):
+        for action in bar.actions():
+            if action.text() == label:
+                button = bar.widgetForAction(action)
+                if button is not None and button.isVisible():
+                    return button
+    raise ValueError(f'no visible button is labeled {label!r}')
+
+
+def _marked_rect(window, target):
+    """Where `target` sits in the window: an object's name (its tree
+    row), the project row (`window.test_item`), a QAction, a widget, or
+    `(widget, rect)` for a place the widget paints rather than a widget
+    of its own (a table cell, a link bracket), `rect` in the widget's
+    coordinates."""
+    from PySide6.QtCore import QPoint, QRect
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QTreeWidgetItem
+
+    if isinstance(target, tuple):
+        widget, rect = target
+        return QRect(widget.mapTo(window, rect.topLeft()), rect.size())
+    if isinstance(target, str):
+        target = window._item_for_object(target)
+    if isinstance(target, QTreeWidgetItem):
+        tree = window.tree
+        row = tree.visualItemRect(target)
+        return QRect(tree.viewport().mapTo(window, row.topLeft()), row.size())
+    if isinstance(target, QAction):
+        target = act(window, target.text())
+    if not target.isVisible():
+        raise ValueError(f'{target!r} is not on screen to be marked')
+    return QRect(target.mapTo(window, QPoint(0, 0)), target.size())
+
+
+def shoot(window, name, marks=()):
+    """Grab the window as `name`.png. Each of `marks` (in the order the
+    user clicks them) is boxed in `MARK` with its number beside it, so
+    the picture says where to click; the boxes come from the widgets'
+    own geometry, so a regenerated picture cannot point at the wrong
+    place."""
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QPainter, QPen
+
     pump(20)
     path = OUT / f'{name}.png'
-    window.grab().save(str(path))
+    picture = window.grab()
+    if marks:
+        painter = QPainter(picture)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = QFont(painter.font())
+        font.setBold(True)
+        font.setPixelSize(13)
+        painter.setFont(font)
+        for number, target in enumerate(marks, start=1):
+            box = _marked_rect(window, target).adjusted(-4, -4, 4, 4)
+            painter.setPen(QPen(QColor(MARK), 3))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(box, 6, 6)
+            badge = QRect(max(box.left() - 12, 2), max(box.top() - 12, 2),
+                          24, 24)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(MARK))
+            painter.drawEllipse(badge)
+            painter.setPen(QColor('white'))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, str(number))
+        painter.end()
+    picture.save(str(path))
     print(f'  {name}.png', flush=True)
 
 
@@ -146,8 +220,12 @@ def by_type(window, kind):
 # ---- modal ----------------------------------------------------------------
 
 def modal():
+    from PySide6.QtCore import QRect, QRectF, Qt
+
     print('modal:', flush=True)
     window = fresh_window()
+    # where the survey goes in: dropped on the project tree
+    shoot(window, 'modal-drop', marks=[window.tree])
     window.import_paths([str(PLATE / 'modal_spectra.nc4'),
                          str(PLATE / 'test_geometry.npz')])
     pump(30)
@@ -161,6 +239,13 @@ def modal():
     window.define_units()
     pump(20)
     shoot(window, 'modal-units')
+    table = window.units_table
+    model = table.model()
+    unit = next(column for column in range(model.columnCount())
+                if model.headerData(column, Qt.Orientation.Horizontal)
+                == 'Unit')
+    cell = (table.viewport(), table.visualRect(model.index(0, unit)))
+    shoot(window, 'modal-units-click', marks=[geometry, cell])
     window.close_units_panel()
     window.objects[geometry].define_units('m')
     pump()
@@ -168,8 +253,27 @@ def modal():
     # link the measured side and declare it the basis
     names = list(window.objects)
     select(window, *names)
+    # the rows as one mark: a box and a number on each of five
+    # neighbors buried the names they pointed at
+    tree = window.tree
+    rows = [tree.visualItemRect(window._item_for_object(name))
+            for name in names]
+    picked = (tree.viewport(), QRect(
+        rows[0].left(), min(row.top() for row in rows),
+        rows[0].width(),
+        max(row.bottom() for row in rows) - min(row.top() for row in rows)
+        + 1))
+    shoot(window, 'modal-link-click', marks=[picked, window.link_action])
     window.link_selected()
     pump()
+    span = next(items for _color, items, _bold, _name in tree.link_spans
+                if window._item_for_object(frf) in items)
+    rows = [tree.visualItemRect(item) for item in span if item is not None]
+    rows = [row for row in rows if row.height() > 0]
+    top = min(row.center().y() for row in rows)
+    bottom = max(row.center().y() for row in rows)
+    bracket = (tree.viewport(), QRect(0, top, 12, bottom - top))
+    shoot(window, 'modal-basis-click', marks=[bracket])
     window.set_link_role(frf, 'Basis')
     pump()
     select(window, frf)
@@ -183,17 +287,29 @@ def modal():
 
     history = by_type(window, 'TimeHistory')
     select(window, history)
+    pane = window.data_pane
+    pane.averaging_action.trigger()
+    pump(20)
+    shoot(window, 'modal-psds-click',
+          marks=[history, pane.averaging_action,
+                 pane.averaging_panel.psds_button])
     window.compute_psds()
     pump(20)
     shoot(window, 'modal-psds')
 
     select(window, frf)
+    pump(20)
+    shoot(window, 'modal-fit-click',
+          marks=[frf, act(window, 'Fit Modal Model')])
     window.start_modal_fit()
     pump(20)
     shoot(window, 'modal-fit-open')
     for _ in range(2):
         window.confirm_fit_mode()
         pump(10)
+    shoot(window, 'modal-fit-buttons-click',
+          marks=[window.find_mode_button, window.confirm_mode_button,
+                 window.refine_modes_button])
     window.find_next_mode()
     pump(10)
     shoot(window, 'modal-fit')
@@ -204,6 +320,10 @@ def modal():
         pump(10)
 
     fitted = by_type(window, 'ShapeSet')
+    select(window, fitted, frf)
+    pump(20)
+    shoot(window, 'modal-edit-fit-click',
+          marks=[fitted, frf, act(window, 'Edit Fit')])
     # the deflected shape comes from the same scene the app animates,
     # rendered by the headless API: the offscreen window cannot host
     # VTK (see conftest for why), and this is the one figure that is
@@ -229,6 +349,18 @@ def modal():
     select(window, fitted, fem_shapes)
     pump(20)
     shoot(window, 'modal-mac')
+    # the picked square, where the grid drew it: a tall grid puts the
+    # first set across, so its mode is the x of the cell
+    grid = next(item for item in window.mac_view.ci.items
+                if hasattr(item, 'getViewBox'))
+    row, column = window._compare['cell']
+    x, y = (row, column) if window._compare.get('tall') else (column, row)
+    on_scene = grid.getViewBox().mapViewToScene(
+        QRectF(x, y, 1, 1)).boundingRect()
+    square = (window.mac_view.viewport(),
+                  window.mac_view.mapFromScene(on_scene).boundingRect())
+    shoot(window, 'modal-mac-click',
+          marks=[fitted, fem_shapes, square, window.add_matches_action])
 
     matched = window.project.match_modes(fitted, fem_shapes,
                                          threshold=0.7)
@@ -242,6 +374,10 @@ def modal():
         select(window, 'Photos', frf)
         window.link_selected()
         pump()
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'modal-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('modal')
     pump(30)
     report_shot(window, 'modal-report')
@@ -253,12 +389,25 @@ def modal():
 def random():
     print('random:', flush=True)
     window = fresh_window()
+    # where a run goes in: dropped on the project tree
+    shoot(window, 'random-drop', marks=[window.tree])
     window.import_paths([str(PLATE / 'random.nc4')])
     pump(30)
     history = by_type(window, 'TimeHistory')
     select(window, history)
     shoot(window, 'random-import')
 
+    pane = window.data_pane
+    pane.statistics_action.trigger()
+    pump(20)
+    shoot(window, 'random-statistics-click',
+          marks=[history, pane.statistics_action])
+
+    pane.averaging_action.trigger()
+    pump(20)
+    shoot(window, 'random-psds-click',
+          marks=[history, pane.averaging_action,
+                 pane.averaging_panel.psds_button])
     window.compute_psds()
     pump(20)
     shoot(window, 'random-psds')
@@ -266,14 +415,23 @@ def random():
     psd = next(n for n, o in window.objects.items()
                if type(o).__name__ == 'Psd')
     select(window, psd)
-    # the app sets the band spacing in its Octave Bands pane and Apply
-    # Octave Bands calls this verb; its default is the same sixth-octave
+    pane.octave_action.trigger()
+    pump(20)
+    shoot(window, 'random-octave-click',
+          marks=[psd, pane.octave_action, pane.octave_panel.apply_button])
+    # Apply Octave Bands calls this verb; the pane's default spacing is
+    # the same sixth-octave
     banded = window.project.compute_octave(psd)
     window.show_object(banded)
     pump(20)
     shoot(window, 'random-octave')
 
     select(window, history)
+    if not pane.averaging_action.isChecked():
+        pane.averaging_action.trigger()
+        pump(20)
+    shoot(window, 'random-coherence-click',
+          marks=[history, pane.averaging_panel.coherence_button])
     window.compute_multiple_coherence()
     pump(20)
     shoot(window, 'random-coherence')
@@ -281,9 +439,13 @@ def random():
     spec = by_type(window, 'Specification')
     select(window, psd, spec)
     pump(20)
-    shoot(window, 'random-comparison')
+    shoot(window, 'random-comparison', marks=[psd, spec])
 
     add_geometry_and_photos(window, 'random')
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'random-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('random')
     pump(30)
     report_shot(window, 'random-report')
@@ -300,6 +462,8 @@ def transient():
         return
     print('transient:', flush=True)
     window = fresh_window()
+    # where a run goes in: dropped on the project tree
+    shoot(window, 'transient-drop', marks=[window.tree])
     window.import_paths([str(run)])
     pump(30)
     history = by_type(window, 'TimeHistory')
@@ -307,20 +471,48 @@ def transient():
     select(window, history)
     shoot(window, 'transient-import')
 
+    pane = window.data_pane
     select(window, spec)
     pump(20)
-    shoot(window, 'transient-spec')
+    shoot(window, 'transient-spec', marks=[spec])
+
+    # the shaker check is a reading of the target alone; put away
+    # again so the pair below opens on its replication views
+    pane.fit_action.trigger()
+    pump(20)
+    shoot(window, 'transient-fit-click', marks=[spec, pane.fit_action])
+    pane.fit_action.trigger()
+    pump(20)
 
     select(window, history, spec, current=history)
     pump(20)
-    shoot(window, 'transient-overlay')
+    shoot(window, 'transient-overlay', marks=[history, spec])
 
     # the waveform-error reading of the same pair
-    window.data_pane.replication_actions['waveform'].trigger()
+    pane.replication_actions['waveform'].trigger()
     pump(20)
-    shoot(window, 'transient-error')
+    # the bars follow the table's picked cells, and the first cell alone
+    # is picked as it opens: the whole first event, every channel
+    window.table.selectColumn(1)
+    pump(20)
+    shoot(window, 'transient-error',
+          marks=[pane.replication_actions['waveform']])
+
+    pane.replication_actions['segments'].trigger()
+    pump(20)
+    shoot(window, 'transient-segments-click',
+          marks=[pane.replication_actions['segments'],
+                 pane.segments_panel.add_button])
+    pane.replication_actions['overlay'].trigger()
+    pump(20)
 
     select(window, spec)
+    if not pane.averaging_action.isChecked():
+        pane.averaging_action.trigger()
+        pump(20)
+    shoot(window, 'transient-psds-click',
+          marks=[spec, pane.averaging_action,
+                 pane.averaging_panel.psds_button])
     window.compute_psds()
     pump()
     select(window, history)
@@ -333,9 +525,15 @@ def transient():
                   and 'PSD' in n)
     select(window, measured, target)
     pump(20)
-    shoot(window, 'transient-level')
+    # top row first: the tree lists the target's PSDs above the
+    # measured ones, and a lower row's badge drawn first is covered
+    shoot(window, 'transient-level', marks=[target, measured])
 
     add_geometry_and_photos(window, 'transient')
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'transient-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('transient')
     pump(30)
     report_shot(window, 'transient-report')
@@ -349,13 +547,26 @@ def shock():
     window = fresh_window()
     window.import_paths([str(PLATE / 'shock.nc4')])
     pump(30)
-    # the file cannot say it was a shock test; the engineer does
+    # the file cannot say it was a shock test; the engineer does, from
+    # the project row's right-click menu — a popup a window grab does
+    # not hold, so the row is what is marked
+    shoot(window, 'shock-type-click', marks=[window.test_item])
     window.set_project_type('Shock')
     pump()
     history = by_type(window, 'TimeHistory')
     select(window, history)
+    pane = window.data_pane
+    pane.shocks_action.trigger()
+    pump(20)
+    shoot(window, 'shock-detect-click',
+          marks=[history, pane.shocks_action,
+                 pane.shock_panel.detect_button])
+    window._detect_shocks()
+    pump(20)
     shoot(window, 'shock-import')
 
+    shoot(window, 'shock-srs-click',
+          marks=[history, pane.shock_panel.srs_button])
     window.compute_srs()
     pump(20)
     shoot(window, 'shock-srs')
@@ -365,7 +576,8 @@ def shock():
 
     from visualdynamics.core.data import ShockSpecification
 
-    srs = window.objects[by_type(window, 'Srs')]
+    srs_name = by_type(window, 'Srs')
+    srs = window.objects[srs_name]
     frequencies = np.asarray(srs.abscissa, dtype=float)
     top = np.asarray(srs.ordinate, dtype=float).max(axis=0)
     level = 10.0 ** np.interp(
@@ -381,14 +593,60 @@ def shock():
         abort_upper=level[None, :] * 10.0 ** 0.3,
         abort_lower=level[None, :] * 10.0 ** -0.3))
     pump()
-    select(window, by_type(window, 'Srs'), 'Shock Specification')
+    select(window, srs_name, 'Shock Specification')
     pump(20)
     shoot(window, 'shock-spec')
 
+    shoot(window, 'shock-error-click',
+          marks=[srs_name, 'Shock Specification',
+                 pane.srs_actions['error']])
+    pane.srs_actions['error'].trigger()
+    pump(20)
+    shoot(window, 'shock-points-click',
+          marks=[srs_name, 'Shock Specification',
+                 pane.srs_actions['points']])
+    pane.srs_actions['curves'].trigger()
+    pump(20)
+
+    select(window, history)
+    shoot(window, 'shock-pulse-click', marks=[history, pane.pulse_action])
+
     add_geometry_and_photos(window, 'shock')
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'shock-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('shock')
     pump(30)
     report_shot(window, 'shock-report')
+    close(window)
+
+    # the optional filter, integration and stroke, in a window of their
+    # own: applied in the one above, they would change the spectra and
+    # the report the other pictures show
+    window = fresh_window()
+    window.import_paths([str(PLATE / 'shock.nc4')])
+    pump(30)
+    window.set_project_type('Shock')
+    pump()
+    history = by_type(window, 'TimeHistory')
+    select(window, history)
+    pane = window.data_pane
+    pane.filter_action.trigger()
+    pump(20)
+    shoot(window, 'shock-filter-click',
+          marks=[history, pane.filter_action,
+                 pane.filter_panel.apply_button])
+    before = set(window.objects)
+    window.filter_data()
+    pump(20)
+    (filtered,) = set(window.objects) - before
+    select(window, filtered)
+    shoot(window, 'shock-integrate-click',
+          marks=[filtered, act(window, 'Integrate')])
+
+    select(window, history)
+    shoot(window, 'shock-stroke-click', marks=[history, pane.stroke_action])
     close(window)
 
 
@@ -399,33 +657,63 @@ def sine():
         return
     print('sine:', flush=True)
     window = fresh_window()
+    shoot(window, 'sine-drop', marks=[window.tree])
     window.import_paths([str(run)])
     pump(30)
     # the file says what it is: a sine run arrives as a Sine Sweep
     # project, specification and all
     spec = by_type(window, 'SineSweepSpecification')
     select(window, spec)
+    pane = window.data_pane
+    shoot(window, 'sine-spec-click', marks=[spec, pane.waterfall_action])
     shoot(window, 'sine-spec')
+
+    # the Sweep Rate reading of the same specification, which the
+    # judgment section points at
+    shoot(window, 'sine-sweep-rate-click',
+          marks=[spec, pane.sweep_rate_action])
 
     history = by_type(window, 'TimeHistory')
     select(window, history)
     pump(10)
+    shoot(window, 'sine-wavelet-click', marks=[history, pane.wavelet_action])
     # the wavelet reading of the sweep: the four tones' trajectories,
     # drawn where they actually are in time
-    window.data_pane.wavelet_action.trigger()
+    pane.wavelet_action.trigger()
     pump(40)
     shoot(window, 'sine-wavelet')
-    window.data_pane.wavelet_action.trigger()
+    pane.wavelet_action.trigger()
+    pump(10)
+
+    shoot(window, 'sine-extract-click',
+          marks=[history, act(window, 'Extract Sine Levels')])
+    pane.sine_action.trigger()
+    pump(40)
+    panel = pane.sine_panel
+    shoot(window, 'sine-smoothing-click',
+          marks=[history, pane.sine_action, panel.mode_box,
+                 panel.extract_button])
+    pane.sine_action.trigger()
     pump(10)
 
     window.extract_sine_levels()
     pump(30)
     levels = by_type(window, 'SineLevelSet')
+    # the specification first: its row sits just above the levels', and
+    # marked the other way round the second box is drawn over the first
+    # badge
+    select(window, spec)
+    pump(20)
+    shoot(window, 'sine-levels-click', marks=[spec, levels])
     select(window, levels, spec)
     pump(20)
     shoot(window, 'sine-levels')
 
     add_geometry_and_photos(window, 'sine')
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'sine-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('sine')
     pump(30)
     report_shot(window, 'sine-report')
@@ -443,26 +731,49 @@ def sysid():
     # declared first, so the import names the two streams itself; a
     # person importing into an untyped project is asked instead — the
     # dialog the page describes
+    # where the stream goes in: dropped on the project tree, shot
+    # before the type is declared, as a person dropping it sees it
+    shoot(window, 'sysid-drop', marks=[window.tree])
     window.set_project_type('System ID')
     window.import_paths([str(stream)])
     pump(30)
-    select(window, 'Excitation Time History')
+    excitation = 'Excitation Time History'
+    select(window, excitation)
     shoot(window, 'sysid-import')
 
-    frfs = window.project.compute_frfs('Excitation Time History', 'H1')
+    pane = window.data_pane
+    panel = pane.averaging_panel
+
+    def averaging_on():
+        if not pane.averaging_action.isChecked():
+            pane.averaging_action.trigger()
+            pump(20)
+
+    averaging_on()
+    shoot(window, 'sysid-frfs-click',
+          marks=[excitation, pane.averaging_action, panel.frfs_button])
+    # Compute FRFs... asks for the estimator in a dialog; the project
+    # verb takes the answer, H1, directly
+    frfs = window.project.compute_frfs(excitation, 'H1')
     window.show_object(frfs)
     pump(30)
     shoot(window, 'sysid-frfs')
 
-    coherence = window.project.compute_multiple_coherence(
-        'Excitation Time History')
+    select(window, excitation)
+    averaging_on()
+    shoot(window, 'sysid-coherence-click',
+          marks=[excitation, panel.coherence_button])
+    coherence = window.project.compute_multiple_coherence(excitation)
     window.show_object(coherence)
     pump(20)
     shoot(window, 'sysid-coherence')
 
-    driven = window.project.compute_psds('Excitation Time History')
+    select(window, excitation)
+    averaging_on()
+    shoot(window, 'sysid-psds-click', marks=[excitation, panel.psds_button])
+    driven = window.project.compute_psds(excitation)
     window.project['Noise Time History'].averaging = \
-        window.project['Excitation Time History'].averaging
+        window.project[excitation].averaging
     quiet = window.project.compute_psds('Noise Time History')
     # the project verbs put the results in the project; the window
     # catches up by being shown them, and only then can they be picked
@@ -471,14 +782,155 @@ def sysid():
     pump(10)
     select(window, driven, quiet)
     pump(20)
-    window.data_pane.spectra_actions['ratio'].trigger()
+    ratio = pane.spectra_actions['ratio']
+    shoot(window, 'sysid-snr-click', marks=[driven, quiet, ratio])
+    ratio.trigger()
     pump(20)
     shoot(window, 'sysid-snr')
 
-    add_geometry_and_photos(window, 'sysid')
+    # add_geometry_and_photos, opened up so the group can be shot
+    # selected before Link is pressed
+    window.import_paths([str(PLATE / 'geometry.npz')])
+    pump(20)
+    geometry = by_type(window, 'Geometry')
+    window.objects[geometry].define_units('m')
+    demo = ROOT / 'stressdata' / 'plate_projects' / 'sysid.vdyn'
+    if demo.exists():
+        import visualdynamics
+
+        window.add_object('Photos', visualdynamics.load(str(demo))['Photos'])
+    names = list(window.objects)
+    select(window, *names)
+    rows = sorted(names, key=lambda name: window.tree.visualItemRect(
+        window._item_for_object(name)).top())
+    shoot(window, 'sysid-link-click',
+          marks=[rows[0], rows[-1], window.link_action])
+    window.link_selected()
+    pump()
+    window.set_link_role(geometry, 'Basis')
+    pump()
+
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'sysid-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
     window.generate_report('sysid')
     pump(30)
     report_shot(window, 'sysid-report')
+    close(window)
+
+
+def mixed():
+    run = STRESS / 'mixed.nc4'
+    if not run.exists():
+        print('mixed: skipped — stressdata/plate/mixed.nc4 absent',
+              flush=True)
+        return
+    print('mixed:', flush=True)
+    window = fresh_window()
+    shoot(window, 'mixed-drop', marks=[window.tree])
+    window.import_paths([str(run)])
+    pump(30)
+    history = by_type(window, 'TimeHistory')
+    select(window, history)
+    shoot(window, 'mixed-import')
+
+    # the random half, as the random walkthrough does it
+    pane = window.data_pane
+    pane.averaging_action.trigger()
+    pump(20)
+    shoot(window, 'mixed-psds-click',
+          marks=[history, pane.averaging_action,
+                 pane.averaging_panel.psds_button])
+    window.compute_psds()
+    pump(20)
+    shoot(window, 'mixed-psds')
+
+    psd = by_type(window, 'Psd')
+    select(window, psd)
+    pane.octave_action.trigger()
+    pump(20)
+    shoot(window, 'mixed-octave-click',
+          marks=[psd, pane.octave_action, pane.octave_panel.apply_button])
+    banded = window.project.compute_octave(psd)
+    window.show_object(banded)
+    pump(20)
+    shoot(window, 'mixed-octave')
+
+    select(window, history)
+    if not pane.averaging_action.isChecked():
+        pane.averaging_action.trigger()
+        pump(20)
+    shoot(window, 'mixed-coherence-click',
+          marks=[history, pane.averaging_panel.coherence_button])
+    window.compute_multiple_coherence()
+    pump(20)
+    shoot(window, 'mixed-coherence')
+
+    # the specification banded too, as the random guide does it, so
+    # the random report's octave section has its banded requirement
+    spec = by_type(window, 'Specification')
+    window.show_object(window.project.compute_octave(spec))
+    pump(20)
+
+    # the specification's row sits above the PSD's, so it is marked
+    # first: the second badge would otherwise cover the first
+    select(window, psd, spec)
+    pump(20)
+    shoot(window, 'mixed-comparison', marks=[spec, psd])
+
+    # the sine half: the act on the time history's bar
+    select(window, history)
+    if pane.averaging_action.isChecked():
+        pane.averaging_action.trigger()
+        pump(20)
+    shoot(window, 'mixed-sine-click',
+          marks=[history, act(window, 'Extract Sine Levels')])
+    window.extract_sine_levels()
+    pump(30)
+    levels = by_type(window, 'SineLevelSet')
+    select(window, levels, by_type(window, 'SineSweepSpecification'))
+    pump(20)
+    shoot(window, 'mixed-sine-levels')
+
+    # the tone read off the random's PSD, the cursor where it starts
+    select(window, psd)
+    pane.tone_action.trigger()
+    pump(20)
+    shoot(window, 'mixed-tones-click', marks=[psd, pane.tone_action])
+    pane.tone_action.trigger()
+    pump(20)
+
+    add_geometry_and_photos(window, 'random')
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, 'mixed-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
+    # what the button does for this type, one template at a time so
+    # each report's name is in hand for its own picture
+    reports = {template: window.generate_report(template)
+               for template in ('random', 'sine')}
+    pump(30)
+
+    import subprocess
+    import tempfile
+
+    if not os.path.exists(CHROME):
+        print('  mixed reports skipped — no Chrome for the report render',
+              flush=True)
+        close(window)
+        return
+    for template, report in reports.items():
+        name = f'mixed-report-{template}'
+        with tempfile.TemporaryDirectory() as scratch:
+            html = os.path.join(scratch, 'report.html')
+            window.project.export_report(report, html)
+            subprocess.run([CHROME, '--headless', '--disable-gpu',
+                            f'--screenshot={OUT / name}.png',
+                            '--window-size=1280,1600',
+                            '--hide-scrollbars', f'file://{html}'],
+                           check=True, capture_output=True, timeout=120)
+        print(f'  {name}.png', flush=True)
     close(window)
 
 
@@ -618,8 +1070,608 @@ def tree():
     close(window)
 
 
+# ---- the finite element pages ---------------------------------------------
+
+
+def show_scene(window):
+    """Put the 3-D view's picture where the offscreen window holds its
+    '3D view disabled' label, so a grab shows the model being built.
+
+    The offscreen window still keeps the scene in an off-screen plotter
+    (the panes' previews, the picked elements, the merge's marks); only
+    the embedded widget is missing. Rendered at the label's size and
+    set on the label, it photographs with the rest of the window."""
+    from PySide6.QtGui import QPixmap
+    from PySide6.QtWidgets import QSizePolicy
+
+    from visualdynamics.gui.panes import image_of
+
+    pump(10)
+    label = window.scene._page
+    # a picture held at its own size would push the panes about
+    label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+    plotter = window.scene.plotter
+    plotter.window_size = [label.width(), label.height()]
+    # fitted to the pane's width now: a table opened beside the view
+    # narrows it, which the embedded widget's own resize would refit
+    plotter.reset_camera()
+    pixels = plotter.screenshot(return_img=True)
+    label.setPixmap(QPixmap.fromImage(image_of(pixels)))
+
+
+def upright(window, name, view):
+    """Give geometry `name` the view it is built to be seen from and
+    turn the camera to it, as Reset View does."""
+    window.objects[name].view = view
+    window.render_current()
+    pump(10)
+    window.scene.reset_view()
+
+
+def table_width(window, width):
+    """Give the table beside the 3-D view `width` pixels of the window,
+    as dragging the divider does."""
+    views = window.views
+    total = sum(views.sizes())
+    sizes = [0] * views.count()
+    sizes[views.indexOf(window.scene)] = total - width
+    sizes[views.indexOf(window.table_pane)] = width
+    views.setSizes(sizes)
+    pump(10)
+
+
+def tree_rows(window, kind, name=None):
+    """The tree rows whose reference is of `kind` ('family', 'group',
+    'solids', 'solid'), of geometry `name` when given, in tree order."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    found = []
+
+    def walk(item):
+        for i in range(item.childCount()):
+            child = item.child(i)
+            reference = child.data(0, ROLE_REFERENCE)
+            if (reference is not None and reference[0] == kind
+                    and name in (None, reference[1])):
+                found.append(child)
+            walk(child)
+
+    walk(window.tree.invisibleRootItem())
+    return found
+
+
+def family_row(window, name, label):
+    """Geometry `name`'s row for a family ('Quads', 'Hexes', 'Points')
+    or its Solids, expanded into view."""
+    item = window._item_for_object(name)
+    item.setExpanded(True)
+    return next(item.child(i) for i in range(item.childCount())
+                if item.child(i).text(0).startswith(label))
+
+
+def group_row(window, name, group):
+    """Geometry `name`'s row for the element group named `group`."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    geometry = window.objects[name]
+    gid = int(geometry.group_id[list(geometry.group_name).index(group)])
+    row = next(r for r in tree_rows(window, 'group', name)
+               if r.data(0, ROLE_REFERENCE)[2] == gid)
+    row.parent().setExpanded(True)
+    return row
+
+
+def top_solids(window, name):
+    """Geometry `name`'s parts' rows, in tree order: the solids directly
+    under its Solids row, not those inside one."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    return [row for row in tree_rows(window, 'solid', name)
+            if row.parent().data(0, ROLE_REFERENCE)[0] == 'solids']
+
+
+def solid_row(window, name, label):
+    """Geometry `name`'s part reading `label`."""
+    return next(row for row in top_solids(window, name)
+                if row.text(0) == label)
+
+
+def pick(window, rows):
+    """Select tree rows the way a click and Cmd-clicks do: the first
+    current, the rest added."""
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(rows[0])
+    for row in rows[1:]:
+        row.setSelected(True)
+    pump(20)
+
+
+def bar_act(window, verb):
+    """Run the bar's act `verb` for the current selection."""
+    act = next(a for a in window.acts_for() if a[0] == verb)
+    act[3]()
+    pump(20)
+
+
+def solve(window, top):
+    """Solve Modes on the selected geometry, the two numbers it asks for
+    answered as the page says (the dialog is modal, so it is answered
+    here rather than shown)."""
+    from PySide6.QtWidgets import QInputDialog
+
+    answers = iter([(top, True), (2.0, True)])
+    real = QInputDialog.getDouble
+    QInputDialog.getDouble = staticmethod(lambda *a, **k: next(answers))
+    try:
+        window.solve_modes_act()
+    finally:
+        QInputDialog.getDouble = real
+    pump(30)
+
+
+def set_group(window, name, group, **fields):
+    """Type into the Element Groups table, opened on `group`'s row by
+    its pencil: each of `fields` a column's header without its unit
+    ('Material', 'Thickness', 'E', ...) and the text typed into it."""
+    from PySide6.QtCore import Qt
+
+    row = group_row(window, name, group)
+    if window.editing is None or window.editing[1] != 'groups':
+        window._tree_item_clicked(row, 1)
+        pump(20)
+    model = window.table.model()
+    headers = {str(model.headerData(c, Qt.Orientation.Horizontal)): c
+               for c in range(model.columnCount())}
+    geometry = window.objects[name]
+    at = list(geometry.group_name).index(group)
+    for header, text in fields.items():
+        column = next(c for h, c in headers.items()
+                      if h.split(' [')[0] == header)
+        model.setData(model.index(at, column), text, Qt.ItemDataRole.EditRole)
+    pump(10)
+    return row
+
+
+#: the BARC's planes as the page's table types them: element group,
+#: center and widths, inches
+BARC_PLANES = [
+    ('box', (0, -2.875, 1.5), (5.75, 0, 3)),
+    ('box', (2.875, 0, 1.5), (0, 5.75, 3)),
+    ('box', (-2.875, 0, 1.5), (0, 5.75, 3)),
+    ('box', (-1.5625, 2.875, 1.5), (2.625, 0, 3)),
+    ('box', (1.5625, 2.875, 1.5), (2.625, 0, 3)),
+    ('right channel', (1.96875, 3.0625, 1.5), (0.9375, 0, 1)),
+    ('right channel', (1.96875, 4.9375, 1.5), (0.9375, 0, 1)),
+    ('right channel', (2.4375, 4, 1.5), (0, 1.875, 1)),
+    ('left channel', (-2, 3.0625, 1.53125), (1, 0, 0.9375)),
+    ('left channel', (-2, 4.9375, 1.53125), (1, 0, 0.9375)),
+    ('left channel', (-2, 4, 1.0625), (1, 1.875, 0)),
+    ('beam', (0, 5.0625, 1.5), (5, 0, 1)),
+]
+
+
+def fem():
+    """The BARC page: a plate model typed plane by plane, tied at its
+    bolts, given its properties and solved; then the same structure
+    from solid blocks, meshed apart and bolted by merging nodes."""
+    import numpy as np
+    from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
+    from PySide6.QtWidgets import QToolBar
+
+    from visualdynamics.demo import barc
+
+    print('fem:', flush=True)
+    window = fresh_window()
+    show_scene(window)
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(window.test_item)
+    window.test_item.setSelected(True)
+    pump(20)
+    shoot(window, 'fem-new-geometry-click',
+          marks=[window.test_item, act(window, 'New Geometry')])
+    window.new_geometry_act()
+    pump(20)
+    name = 'Geometry'
+    # upright, as the BARC's own model opens (y up); a new geometry
+    # opens z up, and a person turns it
+    upright(window, name, barc.VIEW)
+
+    quads = family_row(window, name, 'Quads')
+    pick(window, [quads])
+    window.add_plane_act()
+    pump(20)
+    panel = window.scene.mesh_panel
+    group, center, widths = BARC_PLANES[0]
+    panel.set_values(group=group, center=center, widths=widths, size=0.125)
+    show_scene(window)
+    shoot(window, 'fem-add-plane-click',
+          marks=[quads, act(window, 'Add Plane'), panel.add_button])
+    panel.add_button.click()
+    pump(5)
+    window.close_mesh_pane()
+    # the rest by the verb each Add records: the pane's fields hold four
+    # decimals, and 1.96875 typed there is 1.9688, which leaves the
+    # channels' flanges off their webs
+    for group, center, widths in BARC_PLANES[1:]:
+        across = [np.eye(3)[i] * w for i, w in enumerate(widths) if w]
+        corner = np.subtract(center, np.sum(across, axis=0) / 2)
+        window.project.add_plane(name, tuple(corner), tuple(across[0]),
+                                 tuple(across[1]), 0.125, group, unit='in')
+    window._refresh_item(window._item_for_object(name), window.objects[name])
+    window.render_current()
+    pick(window, [window._item_for_object(name)])
+    show_scene(window)
+    shoot(window, 'fem-planes')
+
+    # one bolt's patch picked in the Quads table, Tie pressed, the part
+    # below chosen from its menu; the other fifteen tied the same way
+    geometry = window.objects[name]
+    quads = family_row(window, name, 'Quads')
+    window._tree_item_clicked(quads, 1)
+    pump(20)
+    bolts = barc.BOLTS
+    patch, below = barc.bolt_patch(geometry, bolts[0])
+    model = window.table.model()
+    window.table.clearSelection()
+    for element in patch:
+        row = int(np.flatnonzero(geometry.elem_id == element)[0])
+        window.table.selectionModel().select(
+            model.index(row, 0),
+            QItemSelectionModel.SelectionFlag.Select
+            | QItemSelectionModel.SelectionFlag.Rows)
+    pump(20)
+    tie_button = next(bar.widgetForAction(window.tie_action)
+                      for bar in window.findChildren(QToolBar)
+                      if window.tie_action in bar.actions())
+    menus = []
+    window._pop_menu = menus.append
+    window.tie_action.trigger()
+    pump(10)
+    menu = menus[0]
+    # the menu as it pops up under the button, a child of the window so
+    # the grab holds it
+    menu.setParent(window, Qt.WindowType.Widget)
+    menu.adjustSize()
+    menu.move(tie_button.mapTo(window, QPoint(tie_button.width() + 24,
+                                              tie_button.height() + 16)))
+    menu.show()
+    menu.setActiveAction(next(a for a in menu.actions() if a.text() == below))
+    pump(10)
+    table_width(window, 420)
+    show_scene(window)
+    shoot(window, 'fem-tie-click', marks=[quads, tie_button, menu])
+    menu.hide()
+    menu.deleteLater()
+    del window._pop_menu
+    for bolt in bolts:
+        patch, below = barc.bolt_patch(geometry, bolt)
+        window._tie(name, patch, below, below)
+    pump(20)
+    window.stop_editing()
+    pump(10)
+
+    # the properties, typed into the Element Groups table
+    for part, thickness in (('box', 0.25), ('right channel', 0.125),
+                            ('left channel', 0.125), ('beam', 0.125)):
+        set_group(window, name, part, Material='6061-T6')
+        set_group(window, name, part, Thickness=f'{thickness}')
+    window.stop_editing()
+    row = group_row(window, name, 'box')
+    window._tree_item_clicked(row, 1)
+    pump(20)
+    # the row unselected, so its cells read as typed rather than as
+    # the selection's highlight
+    window.table.clearSelection()
+    table_width(window, 760)
+    show_scene(window)
+    shoot(window, 'fem-groups', marks=[row])
+    window.stop_editing()
+    pump(10)
+
+    item = window._item_for_object(name)
+    pick(window, [item])
+    show_scene(window)
+    shoot(window, 'fem-solve-click', marks=[item, act(window, 'Solve Modes')])
+    solve(window, 2000.0)
+    shapes = by_type(window, 'ShapeSet')
+    window.project.animate(shapes, mode=6,
+                           screenshot=str(OUT / 'fem-mode.png'))
+    print('  fem-mode.png', flush=True)
+    close(window)
+
+    # ---- the BARC from bricks
+    window = fresh_window()
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(window.test_item)
+    window.test_item.setSelected(True)
+    pump(10)
+    window.new_geometry_act()
+    pump(20)
+    upright(window, name, barc.VIEW)
+    blocks = [*barc.BOX_SOLIDS,
+              *[(c, w, side if k == 0 else '')
+                for side, pair in barc.CHANNEL_SOLIDS.items()
+                for k, (c, w) in enumerate(pair)],
+              (*barc.BEAM_SOLID, 'beam')]
+    for k, (center, widths, label) in enumerate(blocks):
+        pick(window, [family_row(window, name, 'Solids')])
+        window.add_solid_block_act()
+        pump(10)
+        panel = window.scene.mesh_panel
+        panel.set_values(center=center, widths=widths, group=label)
+        pump(10)
+        if k == 0:
+            show_scene(window)
+            shoot(window, 'fem-bricks-block-click',
+                  marks=[family_row(window, name, 'Solids'),
+                         act(window, 'Add Solid Block'), panel.add_button])
+        panel.add_button.click()
+        pump(10)
+    window.close_mesh_pane()
+    pump(10)
+    # the box's three blocks, then each channel's two, subtracted
+    rows = tree_rows(window, 'solid', name)
+    pick(window, rows[:3])
+    show_scene(window)
+    # a click on the first, a Shift-click on the last
+    shoot(window, 'fem-bricks-subtract-click',
+          marks=[rows[0], rows[2], act(window, 'Subtract')])
+    bar_act(window, 'subtract_solids')
+    for side in ('right channel', 'left channel'):
+        first = solid_row(window, name, side)
+        following = tree_rows(window, 'solid', name)
+        after = following[following.index(first) + 1]
+        pick(window, [first, after])
+        bar_act(window, 'subtract_solids')
+    for row in tree_rows(window, 'solid', name):
+        row.setExpanded(False)
+    parts = top_solids(window, name)
+    pick(window, parts)
+    window.mesh_solids_act()
+    pump(20)
+    meshing = window.scene.mesh_solids_panel
+    meshing.size.setValue(0.125)
+    meshing.parts_apart.setChecked(True)
+    pump(20)
+    show_scene(window)
+    shoot(window, 'fem-bricks-mesh-click',
+          marks=[parts[0], parts[-1], act(window, 'Mesh Solids'),
+                 meshing.parts_apart,
+                 meshing.mesh_button])
+    meshing.mesh_button.click()
+    pump(30)
+
+    # the right foot's four bolts: every place the box and the channel
+    # touch marked, the foot's outer ring clicked out, the rest merged
+    geometry = window.objects[name]
+    rows = [group_row(window, name, 'box'),
+            group_row(window, name, 'right channel')]
+    pick(window, rows)
+    bar_act(window, 'merge_coincident_nodes')
+    places = {node for (x, z), kind in barc.SOLID_BOLTS
+              if kind == 'foot' and x > 0
+              for node in barc.bolt_places(geometry, (x, z), 'foot')}
+    spots = list(window._merging['spots'])
+    for index, spot in enumerate(spots):
+        if places.isdisjoint(spot):
+            window.toggle_merge_place(index)
+    pump(20)
+    merging = window.scene.merge_panel
+    show_scene(window)
+    shoot(window, 'fem-bricks-merge-click',
+          marks=[*rows, act(window, 'Merge Coincident Nodes'),
+                 merging.merge_button])
+    merging.merge_button.click()
+    pump(20)
+    show_scene(window)
+    shoot(window, 'fem-bricks-merged')
+    close(window)
+
+
+def solid_by_id(window, name, solid):
+    """Geometry `name`'s row for solid `solid`, its id."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    return next(row for row in tree_rows(window, 'solid', name)
+                if row.data(0, ROLE_REFERENCE)[2] == solid)
+
+
+def add_solid(window, name, verb, **values):
+    """Add one solid through its pane, opened from the Solids row:
+    `verb` 'add_solid_block' or 'add_solid_cylinder', `values` the
+    fields typed. Returns the new solid's id and the open pane."""
+    pick(window, [family_row(window, name, 'Solids')])
+    bar_act(window, verb)
+    panel = window.scene.mesh_panel
+    panel.set_values(**values)
+    pump(10)
+    return panel
+
+
+def pattern(window, name, solid, counts, spacing):
+    """Pattern solid `solid` through the Pattern pane; returns the
+    pattern's id and the open pane, before Pattern is pressed."""
+    pick(window, [solid_by_id(window, name, solid)])
+    bar_act(window, 'pattern_solids')
+    panel = window.scene.pattern_panel
+    panel.set_values(counts=counts, spacing=spacing)
+    pump(10)
+    return panel
+
+
+def fem_solids():
+    """The Frame-Wing page: the frame drawn as solids, patterned, cut,
+    meshed, given its materials and solved; then a wing bolted on by
+    aligning and merging the meshes where they meet."""
+    from visualdynamics.demo import frame_wing
+
+    print('fem_solids:', flush=True)
+    window = fresh_window()
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(window.test_item)
+    window.test_item.setSelected(True)
+    pump(10)
+    window.new_geometry_act()
+    pump(20)
+    name = window.rename_object('Geometry', 'Frame')
+    pump(10)
+    upright(window, name, frame_wing.VIEW)
+    geometry = window.objects[name]
+
+    def added(panel):
+        panel.add_button.click()
+        pump(10)
+        return geometry.solids[-1].id
+
+    plate = added(add_solid(window, name, 'add_solid_block',
+                            center=(0, 0, -0.25), widths=(16, 6, 0.5),
+                            group='frame'))
+    panel = add_solid(window, name, 'add_solid_block',
+                      center=(-5.8125, 0, -0.25), widths=(3.375, 5, 1),
+                      corner=0.138, group='')
+    show_scene(window)
+    shoot(window, 'fem-solids-block-click',
+          marks=[family_row(window, name, 'Solids'),
+                 act(window, 'Add Solid Block'), panel.add_button])
+    opening = added(panel)
+    panel = add_solid(window, name, 'add_solid_cylinder',
+                      center=(-7.75, -2.75, -0.25), radius=0.1451, length=1.0,
+                      group='')
+    show_scene(window)
+    shoot(window, 'fem-solids-cylinder-click',
+          marks=[family_row(window, name, 'Solids'),
+                 act(window, 'Add Cylinder'), panel.add_button])
+    rail = added(panel)
+    upright_hole = added(add_solid(window, name, 'add_solid_cylinder',
+                                   center=(-7.75, -1.375, -0.25),
+                                   radius=0.1451, length=1.0, group=''))
+    window.close_mesh_pane()
+    pump(10)
+
+    patterns = []
+    for solid, counts, spacing in ((opening, (4, 1, 1), (3.875, 0, 0)),
+                                   (rail, (13, 2, 1), (1.291667, 5.5, 0)),
+                                   (upright_hole, (5, 3, 1), (3.875, 1.375, 0))):
+        panel = pattern(window, name, solid, counts, spacing)
+        if solid == rail:
+            show_scene(window)
+            shoot(window, 'fem-solids-pattern-click',
+                  marks=[solid_by_id(window, name, solid),
+                         act(window, 'Pattern'), panel.pattern_button])
+        panel.pattern_button.click()
+        pump(10)
+        patterns.append(geometry.solids[-1].id)
+    for row in tree_rows(window, 'solid', name):
+        row.setExpanded(False)
+    rows = [solid_by_id(window, name, s) for s in (plate, *patterns)]
+    pick(window, rows)
+    show_scene(window)
+    # a click on the plate, a Shift-click on the last pattern
+    shoot(window, 'fem-solids-subtract-click',
+          marks=[rows[0], rows[-1], act(window, 'Subtract')])
+    bar_act(window, 'subtract_solids')
+    frame = geometry.solids[-1].id
+
+    # the inserts: the same two holes again, shorter, patterned and joined
+    # by the verb each Add records: the pane's fields hold four
+    # decimals, and -0.15625 typed there is -0.1563, which puts the
+    # inserts' faces off the frame's grid and adds a layer of bricks
+    inserts = [window.project.add_solid_cylinder(
+        name, (x, y, -0.15625), 0.1451, 0.3125, name='inserts', unit='in')
+        for x, y in ((-7.75, -2.75), (-7.75, -1.375))]
+    window._solids_changed(name)
+    joined = []
+    for solid, counts, spacing in ((inserts[0], (13, 2, 1), (1.291667, 5.5, 0)),
+                                   (inserts[1], (5, 3, 1), (3.875, 1.375, 0))):
+        pattern(window, name, solid, counts, spacing).pattern_button.click()
+        pump(10)
+        joined.append(geometry.solids[-1].id)
+    pick(window, [solid_by_id(window, name, s) for s in joined])
+    bar_act(window, 'union_solids')
+    insert_part = geometry.solids[-1].id
+    for row in tree_rows(window, 'solid', name):
+        row.setExpanded(False)
+    pick(window, [family_row(window, name, 'Solids')])
+    show_scene(window)
+    shoot(window, 'fem-solids-frame')
+
+    rows = [solid_by_id(window, name, s) for s in (frame, insert_part)]
+    pick(window, rows)
+    bar_act(window, 'mesh_solids')
+    meshing = window.scene.mesh_solids_panel
+    meshing.size.setValue(0.083334)
+    pump(20)
+    show_scene(window)
+    shoot(window, 'fem-solids-mesh-click',
+          marks=[*rows, act(window, 'Mesh Solids'), meshing.mesh_button])
+    meshing.mesh_button.click()
+    pump(30)
+    pick(window, [window._item_for_object(name)])
+    family_row(window, name, 'Hexes').setExpanded(True)
+    show_scene(window)
+    shoot(window, 'fem-solids-mesh')
+
+    set_group(window, name, 'frame', Material='6061-T6')
+    window.stop_editing()
+    set_group(window, name, 'inserts', E='1.1216e6')
+    set_group(window, name, 'inserts', ρ='3.6175e-4', ν='0.3')
+    window.stop_editing()
+    row = group_row(window, name, 'inserts')
+    window._tree_item_clicked(row, 1)
+    pump(20)
+    window.table.clearSelection()
+    table_width(window, 760)
+    # the inserts' elements are a long list of ranges; the column
+    # narrowed, as a drag on its edge does, so the properties show
+    window.table.setColumnWidth(2, 90)
+    show_scene(window)
+    shoot(window, 'fem-solids-groups', marks=[row])
+    window.stop_editing()
+    pump(10)
+
+    pick(window, [window._item_for_object(name)])
+    solve(window, 1500.0)
+    shapes = by_type(window, 'ShapeSet')
+    window.project.animate(shapes, mode=6,
+                           screenshot=str(OUT / 'fem-solids-mode.png'))
+    print('  fem-solids-mode.png', flush=True)
+
+    # the thick wing on the frame, built by the demonstration's own
+    # steps up to the bolting, which is done here in the window
+    wing = 'Thick Wing on Frame'
+    window.project.new_geometry(wing, unit='in')
+    frame_wing._frame(window.project, wing, screwed=True, size=frame_wing.SIZE)
+    frame_wing._wing(window.project, wing, 'thick wing', washers=True,
+                     size=frame_wing.WING_SIZE)
+    frame_wing._materials(window.project[wing])
+    window.project[wing].view = frame_wing.VIEW
+    window.show_object(wing)
+    pump(20)
+    window._item_for_object(name).setExpanded(False)
+    rows = [group_row(window, wing, g)
+            for g in ('frame', 'inserts', 'screws', 'washers')]
+    pick(window, rows)
+    bar_act(window, 'align_meshes')
+    places = window.scene.merge_panel
+    show_scene(window)
+    shoot(window, 'fem-solids-align-click',
+          marks=[*rows, act(window, 'Align Meshes'), places.merge_button])
+    places.merge_button.click()
+    pump(20)
+    # the Align rebuilt the tree's rows: the same four, picked again
+    pick(window, [group_row(window, wing, g)
+                  for g in ('frame', 'inserts', 'screws', 'washers')])
+    bar_act(window, 'merge_coincident_nodes')
+    show_scene(window)
+    shoot(window, 'fem-solids-merge-click',
+          marks=[act(window, 'Merge Coincident Nodes'), places.merge_button])
+    places.merge_button.click()
+    pump(20)
+    close(window)
+
+
 def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                'tree')):
+                'mixed', 'tree', 'fem', 'fem_solids')):
     import traceback
 
     from PySide6.QtWidgets import QApplication
@@ -628,7 +1680,8 @@ def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
 
     QApplication.instance() or QApplication(['visualdynamics'])
     OUT.mkdir(parents=True, exist_ok=True)
-    for build in (modal, random, transient, shock, sine, sysid, tree):
+    for build in (modal, random, transient, shock, sine, sysid, mixed, tree,
+                  fem, fem_solids):
         if build.__name__ not in which:
             continue
         try:
@@ -646,4 +1699,4 @@ if __name__ == '__main__':
     # kept their old pictures (2026-09-03)
     picked = tuple(a.lstrip('-') for a in sys.argv[1:])
     main(picked or ('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                    'tree'))
+                    'mixed', 'tree', 'fem', 'fem_solids'))

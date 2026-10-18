@@ -329,6 +329,8 @@ class AuthorPanel(QWidget):
                                   'this much — select a column header for '
                                   'a channel, a row header for a breakpoint')
         self.scale_button: QPushButton = QPushButton('Scale selected')
+        self.scale_button.setToolTip('Raise or lower the selected levels by '
+                                     'the decibels in the box beside')
         self.scale_button.clicked.connect(self._scale_selected)
         buttons.addWidget(self.scale_box)
         buttons.addWidget(self.scale_button)

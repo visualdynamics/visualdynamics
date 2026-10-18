@@ -40,6 +40,9 @@ The tree adds the slots a shock report draws from. There is no
 coherence slot, because a shock is a single event and coherence
 describes a stationary average.
 
+![Where to click: right-click the project row (1), then choose Set
+Project Type and Shock from the menu](../images/shock-type-click.png)
+
 Select the time history and choose **Shocks** on its bar. Press
 **Detect** to find the events; the view does not detect them until
 you ask, and **Compute SRS** detects them for you if you go straight
@@ -55,6 +58,9 @@ Dragging an edge resizes it, and while **Same length for all** is
 ticked, resizing one window resizes the whole series, stopping before
 any window would overlap its neighbor. Clear the box to resize windows
 one at a time.
+
+![Where to click: select the time history (1), choose Shocks on the bar
+(2), and press Detect (3)](../images/shock-detect-click.png)
 
 ![The imported series: four events on one recording, each shaded
 where it was found, the quiet between them
@@ -73,6 +79,12 @@ same signal. **Automatic** on the tree bar works in this order: it
 filters the record, computes the SRS from the filtered record, and
 integrates twice.
 
+![Where to click: select the time history (1), choose Filter on the bar
+(2), and press Apply Filter (3)](../images/shock-filter-click.png)
+
+![Where to click: select the filtered record (1), then Integrate on the
+bar (2)](../images/shock-integrate-click.png)
+
 The Integrate act removes a drift below 2 Hz, which suits a record's
 motion and not a stroke estimate: a compensated pulse's displacement
 is content at a few hertz. To see whether a pulse fits on the shaker,
@@ -80,6 +92,9 @@ choose **Stroke** on the bar instead. It integrates the record raw and
 reads the peak velocity, the travel with the shaker body counted and
 the force against the shaker's shock ratings; [Will a pulse fit on the
 shaker](../stroke.md) says how to read it.
+
+![Where to click: select the time history (1), then Stroke on the bar
+(2)](../images/shock-stroke-click.png)
 
 ### 3. Compute the shock response spectra
 
@@ -100,6 +115,9 @@ over the whole record. The plot shows every event at one channel, so a
 stepped-up series reads as a family of curves rising to level, and the
 drop-down on the bar reaches the other channels.
 
+![Where to click: with the time history selected (1), press Compute SRS
+in the Shocks view (2)](../images/shock-srs-click.png)
+
 ![The computed SRS: all four events at the corner channel, the
 channel drop-down reaching the others](../images/shock-srs.png)
 
@@ -116,6 +134,10 @@ shaded blue past −3 dB where the shock under-tested and red past
 +3 dB where it over-tested. The same 3 dB is used by the random
 workflow's RMS error bars.
 
+![Where to click: select the SRS (1) and the specification (2) together;
+SRS Error on the bar (3) shows the deviation
+bars](../images/shock-error-click.png)
+
 ![The measured spectra against the required one: the tolerance band
 shaded, the four events' deviations tabled, the stepped-up series
 closing on the specification event by
@@ -129,11 +151,18 @@ read well inside 3 dB on the bars and still fail it. That check is
 beside the plot; in a script it is `srs_tolerance` and its picture
 `plot_srs_tolerance`. [Judging an SRS against its
 tolerance](../srs-tolerance.md) describes it.
+
+![Where to click: with the SRS (1) and the specification (2) selected,
+choose Points Rule on the bar (3)](../images/shock-points-click.png)
+
 A classical pulse (a half-sine, sawtooth or trapezoid) is judged in
 time rather than by its spectrum: **Pulse Check** on the time history's
 bar draws the record on the nominal pulse's tolerance envelope and
 reads its velocity change; [Checking a classical
 pulse](../pulse-check.md) says how.
+
+![Where to click: select the time history (1), then Pulse Check on the
+bar (2)](../images/shock-pulse-click.png)
 
 ### 5. Geometry, photos, report
 
@@ -154,6 +183,9 @@ signed deviation bars, and the conclusions. There is no PSD in a shock
 report: the level of a density computed from a transient recording
 depends on how much quiet time was recorded around the events, and the
 scalogram answers the frequency question with the time axis kept.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/shock-report-click.png)
 
 ![The exported report: the measured transients first, the
 specification and its band after](../images/shock-report.png)

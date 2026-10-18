@@ -14,6 +14,8 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QToolButton
 
+from visualdynamics.gui.tooltips import plain
+
 
 @pytest.fixture
 def editing(window, pump, project):
@@ -40,7 +42,7 @@ def test_the_bar_carries_the_reports_acts(editing):
     assert all(isinstance(b, QToolButton) and b.toolButtonStyle()
                == Qt.ToolButtonStyle.ToolButtonIconOnly for b in buttons), \
         'an icon each; the words are in the tooltip (Brandon, 2026-09-12)'
-    assert all(b.toolTip().startswith(b.text() + ' — ') for b in buttons), \
+    assert all(plain(b.toolTip()).startswith(b.text() + ' — ') for b in buttons), \
         'the tooltip leads with the verb the icon stands for'
     # nothing selected: the block acts wait, the report's are live
     assert not editor.up_action.isEnabled() and not editor.delete_action.isEnabled()

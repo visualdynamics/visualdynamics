@@ -34,11 +34,16 @@ every step. The run does not ship with the repository. It is saved as
 
 ### 1. Import the run
 
-Drag the controller's save onto the window. A transient replication
-run carries the measured control channels, the drive forces, the
-channel table, and the target waveform itself, which is imported as
-the *Transient Specification*. The project type is set to *Transient*
-and the tree adds the slots a transient report needs.
+Drag the controller's save onto the project tree.
+
+![Where a run goes in: drop the file on the project
+tree](../images/transient-drop.png)
+
+A transient replication run carries the measured control channels,
+the drive forces, the channel table, and the target waveform itself,
+which is imported as the *Transient Specification*. The project type
+is set to *Transient* and the tree adds the slots a transient report
+needs.
 
 The record is read as playings. The controller played the target over
 and over, and the run's frames are those repeats: each frame is the
@@ -55,14 +60,18 @@ Select the specification on its own. One channel is drawn at a time,
 since all of its waveforms stacked on one axis cannot be read, and the
 drop-down on the bar reaches the rest.
 
-![The target waveform at one control channel, the channel drop-down
-on the bar](../images/transient-spec.png)
+![Select the specification (1) on its own. The target waveform at one
+control channel, the channel drop-down on the
+bar](../images/transient-spec.png)
 
 Before the first pass, the target can be checked against the shaker
 that will play it: choose **Replication Fit** on the bar for the force
 at its largest peak and its travel and velocity at a few high-pass
 cutoffs, against the ratings. [Checking a replication
 reference](../replication-fit.md) says how to read it.
+
+![Where to click: select the specification (1), then Replication Fit
+on the bar (2)](../images/transient-fit-click.png)
 
 ### 3. Compare waveforms
 
@@ -83,7 +92,8 @@ measured 104Z+ against the specification's 101Z+, say) draw nothing,
 with the reason shown in the plot, because overlaying two different
 channels would look like a comparison without being one.
 
-![The overlay: playing one of seventeen against the target at the
+![Select the time history (1) and the specification (2) together. The
+overlay: playing one of seventeen against the target at the
 corner channel, the burst filling the window's first 0.6 s and the
 ringdown decaying inside it, with the waveform-error grid for every
 channel and every playing below](../images/transient-overlay.png)
@@ -96,9 +106,9 @@ minimizing. The bars are shaded past 20 %, a line for the eye rather
 than a requirement, since there is no accepted tolerance for a
 replicated transient; drag it to move it.
 
-![The waveform error by channel: two shakers replicating an
-eight-channel motion land in the 6-26% band, and the bars say which
-channels carry the error](../images/transient-error.png)
+![Choose Waveform Error on the bar (1). The waveform error by
+channel: two shakers replicating an eight-channel motion land in the
+6-26% band, and the bars say which channels carry the error](../images/transient-error.png)
 
 The waveform error is one figure over the whole playing, and a long
 record that holds several kinds of motion hides a short event's miss
@@ -109,6 +119,10 @@ spectrum and peaks. The marks and the tolerances are set in the panel
 beside the plot. [Judging a replication by
 segment](../replication-segments.md) describes it.
 
+![Where to click: with the pair still selected, choose Segments on the
+bar (1), and add a segment in its panel
+(2)](../images/transient-segments-click.png)
+
 ### 4. Then compare levels
 
 Compute PSDs from both sides, in each one's **Averaging** view. The
@@ -118,7 +132,12 @@ frequency, the level with shape and phase divided out. The transient
 workflow does not use an SRS; a shock response spectrum is how a shock
 test is judged, and that reading belongs to the shock workflow.
 
-![The measured PSDs against the target's: the level comparison, with
+![Where to click: select the specification (1), open the Averaging
+view on the bar (2), and press Compute PSDs (3); then do the same with
+the time history selected](../images/transient-psds-click.png)
+
+![Select the target's PSDs (1) and the measured PSDs (2) together. The
+measured PSDs against the target's: the level comparison, with
 the drive-force records filtered out because they have no
 specification to answer to](../images/transient-level.png)
 
@@ -134,6 +153,9 @@ controller produced, and a scalogram of the control response. The
 level comparison follows (the control PSDs against the target's PSD,
 and RMS error bars), then the waveform error bars and the kurtosis by
 channel. The judgment is written in the conclusions.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/transient-report-click.png)
 
 ![The exported report: the target waveform and the measured control
 response, with the playings marked](../images/transient-report.png)

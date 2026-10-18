@@ -91,3 +91,38 @@ def test_a_specification_does_not_look_like_the_psd_it_subclasses(qt_app):
     """It is a PSD underneath; the tree still has to tell them apart."""
     assert type_icon('Specification').pixmap(QSize(64, 64)).toImage() != \
         type_icon('Psd').pixmap(QSize(64, 64)).toImage()
+
+
+def _ink(icon, size):
+    image = icon.pixmap(QSize(size, size)).toImage()
+    return {(x, y) for x in range(size) for y in range(size)
+            if image.pixelColor(x, y).alpha() > 60}
+
+
+def test_a_geometry_is_a_frame_and_not_a_triangle_element(qt_app):
+    """The geometry wore one triangle, the triangle element's shape
+    beside it in the tree (Brandon, 2026-10-17); it is a frame on legs
+    now, and at tree size its ink overlaps the element's less than
+    half."""
+    from visualdynamics.gui.icons import control_icon
+
+    frame = _ink(type_icon('Geometry'), 16)
+    triangle = _ink(control_icon('tri'), 16)
+    assert len(frame & triangle) < 0.5 * len(frame | triangle)
+    # the three feet are inked, at the full size where they are drawn
+    full = _ink(type_icon('Geometry'), 64)
+    assert {(10, 54), (40, 54), (54, 44)} <= full
+
+
+def test_new_geometry_wears_the_geometry_with_a_plus(qt_app, window, pump):
+    """A bare '+' on the project row said nothing about what it adds."""
+    from visualdynamics.gui.icons import control_icon
+
+    window.tree.setCurrentItem(window.test_item)
+    pump()
+    acts = {verb: icon for verb, _label, icon, _call, _tip in window.acts_for()}
+    assert acts['new_geometry'] == 'new_geometry'
+    image = control_icon('new_geometry').pixmap(QSize(64, 64)).toImage()
+    green = image.pixelColor(42, 42)          # on the disc, off the bars
+    assert green.green() > 120 and green.red() < 100, 'the plus is drawn'
+    assert _ink(control_icon('new_geometry'), 64) - _ink(control_icon('add'), 64)

@@ -40,6 +40,14 @@ shows the slots of both halves (the random's PSD, octave bands and
 coherence, then the sine specification and the sine levels), gray
 until each is filled, and the two reports last.
 
+![Where a run goes in: drop the file on the project
+tree](../images/mixed-drop.png)
+
+![The imported run: the control time histories drawn, the random
+specification, the sine sweep specification and the channel table
+beside them in the tree, and the slots of both halves in
+gray](../images/mixed-import.png)
+
 A sweep that controlled a virtual point through a response
 transformation, while the random controlled the raw channels, imports
 the same way. The sine specification is over the transformation's
@@ -54,11 +62,32 @@ band them and the specification onto proportional bands, and compute
 the multiple coherence. From a script, `random_vibration_run` does all
 of it, and `mixed_run` does it and the sine half together.
 
+![Where to click: select the time history (1), open the Averaging view
+on the bar (2), and press Compute PSDs (3)](../images/mixed-psds-click.png)
+
+![The control PSDs of the whole run, averaged over the frames the
+controller used](../images/mixed-psds.png)
+
+![Where to click: select the PSD (1), choose Octave Bands on the bar
+(2), and press Apply Octave Bands (3)](../images/mixed-octave-click.png)
+
+![The sixth-octave view of the same PSDs](../images/mixed-octave.png)
+
+![Where to click: with the time history selected (1), press Multiple
+Coherence in the Averaging view (2)](../images/mixed-coherence-click.png)
+
+![The multiple coherence map: frequency across, channel down,
+coherence as color](../images/mixed-coherence.png)
+
 One point does not come up in a random-only run: the control spectra
 are of the whole recording, sweep included. A tone adds its power
 across the band it swept, so a control channel reading high there may
 be the tone rather than the random. The random report says so where
 that comparison is drawn.
+
+![Select the specification (1) and the control PSDs (2) together. One
+control channel against the random specification, and the compliance
+table for all eight control channels](../images/mixed-comparison.png)
 
 ## The sine half
 
@@ -71,6 +100,13 @@ spectrum shows nothing of it and a tracking filter's reading includes
 the random's power, so the extraction is the only reading of the tone
 level.
 
+![Where to click: select the time history (1), then Extract Sine Levels
+on the bar (2)](../images/mixed-sine-click.png)
+
+![The extracted sweep level at one control channel against its
+requirement, with the warning and abort bands
+shaded](../images/mixed-sine-levels.png)
+
 ## The reports
 
 Generate Report with the project row selected writes two reports for
@@ -78,6 +114,9 @@ the run, a random report and a sine report, the same two a random-only
 run and a sweep-only run would get. Each can go to whoever owns its
 specification, and each reads the stretch of the run it needs.
 Versions through 0.1.0a35 wrote one combined report for this type.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/mixed-report-click.png)
 
 The random report says what a reader of a random-only report would
 not need to know. Its summary says a sweep ran under the random and is
@@ -89,6 +128,12 @@ channel under three is the sweep, not clipping, since a pure tone's
 kurtosis is 1.5. The level beside its verdict is labeled **Random test
 level**. The sine report's summary says the random is judged in its
 own report.
+
+![The exported random report: its summary says a sweep ran under the
+random and is judged in its own report](../images/mixed-report-random.png)
+
+![The exported sine report: its summary says the random is judged in
+its own report](../images/mixed-report-sine.png)
 
 ```python
 import visualdynamics
@@ -130,6 +175,11 @@ rather than working up half of what was asked for;
   **Tones** reading on the bar does
   ([Reading a tone off an ASD](../tone-readout.md)). The sine half's
   tracked levels remain the levels the report judges.
+
+    ![Where to click: select the PSD (1), then Tones on the bar (2). The
+    cursor starts on the tallest line, and the pane reads the tone under
+    it](../images/mixed-tones-click.png)
+
 - Each report has its own verdict. The random report's is read off the
   octave-band comparison, and the level beside it is labeled **Random
   test level**: the random half's comparison is scaled to its

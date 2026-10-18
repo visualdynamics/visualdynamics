@@ -734,8 +734,10 @@ class MainWindow(QMainWindow):
         path."""
         super().__init__()
         from .project_tree import start_trace
+        from .tooltips import install as wrap_long_tooltips
 
         start_trace()               # the drop log begins with the window
+        wrap_long_tooltips()        # a sentence-long tooltip wraps
         #: where keyboard focus waits out the window's inactive spells —
         #: see `event` for the macOS drop bug this dodges. Zero-size on
         #: purpose: the bug poisons the focused widget's rect, and this
@@ -1559,6 +1561,8 @@ class MainWindow(QMainWindow):
         self.unit_combo.addItems(list(SYSTEMS))
         self.unit_combo.setCurrentText(DEFAULT_SYSTEM.name)
         self.unit_combo.currentTextChanged.connect(self._units_changed)
+        self.unit_combo.setToolTip('The units every view and table shows '
+                                   'values in; data is kept in SI')
         # right-justified in the status bar, keeping the chrome minimal
         self.statusBar().addPermanentWidget(QLabel('Display units:'))
         self.statusBar().addPermanentWidget(self.unit_combo)
@@ -3787,7 +3791,7 @@ class MainWindow(QMainWindow):
                         # somewhere to build a model: without it a
                         # geometry could only be imported (Brandon,
                         # 2026-09-26, a "+" on the project)
-                        ('new_geometry', 'New Geometry', 'add',
+                        ('new_geometry', 'New Geometry', 'new_geometry',
                          self.new_geometry_act,
                          ('An empty geometry, in the display units, to '
                           'add planes to'))]

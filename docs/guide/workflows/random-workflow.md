@@ -30,7 +30,12 @@ so every step can be followed exactly.
 
 ### 1. Import the run
 
-Drag the controller's save onto the window. A Rattlesnake random run
+Drag the controller's save onto the project tree.
+
+![Where a run goes in: drop the file on the project
+tree](../images/random-drop.png)
+
+ A Rattlesnake random run
 carries the control time histories, the specification with its warning
 and abort lines, and the channel table in one file. It also records
 which environment drove it, so the project type is set to *Random
@@ -64,6 +69,9 @@ bold. A clipped channel's spectrum sits a fraction of a decibel from a
 clean one, and [its time statistics](../time-statistics.md) are where
 it shows.
 
+![Where to click: select the time history (1), then Statistics on the
+bar (2)](../images/random-statistics-click.png)
+
 ### 2. Compute the control PSDs
 
 Select the time history, open the **Averaging** view and press
@@ -76,6 +84,9 @@ the trace before you press the button. Beside the number of averages,
 the view shows what they are worth: the degrees of freedom, nominal and
 discounted for overlap, and the 90 percent confidence band they give
 (see [What an average is worth](../averaging-confidence.md)).
+
+![Where to click: select the time history (1), open the Averaging view
+on the bar (2), and press Compute PSDs (3)](../images/random-psds-click.png)
 
 ![The control PSDs: eight acceleration channels and the drive forces,
 averaged over the run's own frames](../images/random-psds.png)
@@ -93,6 +104,9 @@ the specification selected: its requirement and its warning and abort
 limits are banded together, and the report's octave section compares
 the banded measurement with that banded requirement rather than with
 the breakpoint curve.
+
+![Where to click: select the PSD (1), choose Octave Bands on the bar
+(2), and press Apply Octave Bands (3)](../images/random-octave-click.png)
 
 The report opens with a pass/fail box under its title, **PASS** in
 green or **FAIL** in red, read off the octave-band comparison. Beside
@@ -125,6 +139,9 @@ an exceedance of the article from an exceedance caused by the
 instrumentation: a channel the drives explain (coherence near one)
 exceeded because the article did.
 
+![Where to click: with the time history selected (1), press Multiple
+Coherence in the Averaging view (2)](../images/random-coherence-click.png)
+
 ![The multiple coherence map: frequency across, channel down,
 coherence as color](../images/random-coherence.png)
 
@@ -148,7 +165,8 @@ had no specification to compare against: the drive force PSDs share
 DOF names with the control channels, and the comparison leaves them
 out rather than judging newtons against an acceleration band.
 
-![One control channel against the specification: zones shaded,
+![Select the control PSDs (1) and the specification (2) together. One
+control channel against the specification: zones shaded,
 exceedances striped, the Scaling field reading 0 dB, and the
 compliance table accounting for all eight
 channels](../images/random-comparison.png)
@@ -165,6 +183,9 @@ charts (RMS error and lines outside abort), then the same comparison
 and charts again on octave bands, and finally the multiple coherence
 and kurtosis figures that say whether an exceedance is the article or
 the measurement.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/random-report-click.png)
 
 The comparison is one figure per control channel, with no drop-down
 anywhere in the report. Each figure opens on the specification's own

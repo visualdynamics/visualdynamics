@@ -114,6 +114,9 @@ class ReplicationFitPanel(QWidget):
             box.setRange(0.0, 1e9)
             self.boxes[key] = box
             rows.append((key, label, box))
+        self.boxes['force'].setToolTip("The shaker's force rating")
+        self.boxes['stroke'].setToolTip("The shaker's stroke, peak to peak")
+        self.boxes['velocity'].setToolTip("The shaker's velocity rating")
         self.boxes['body_mass'].setSpecialValueText('not counted')
         self.boxes['body_mass'].setToolTip(
             'The shaker body’s mass. Given, the body’s motion '

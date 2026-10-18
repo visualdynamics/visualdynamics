@@ -62,6 +62,13 @@ You can also turn the preview about its center with the rings around it
 and slide the center along its axes with the arrows, which land on a
 tenth of an inch; the rows in the table do not need either.
 
+![Where to click: select the project's row (1) and press New Geometry
+on the bar (2)](../images/fem-new-geometry-click.png)
+
+![Where to click: select the geometry's Quads row (1), choose Add Plane
+on the bar (2), type a row of the table below and press Add
+(3)](../images/fem-add-plane-click.png)
+
 | Plane | Element group | Center | Widths |
 |---|---|---|---|
 | box, bottom | box | (0, −2.875, 1.5) | (5.75, 0, 3) |
@@ -80,6 +87,9 @@ tenth of an inch; the rows in the table do not need either.
 The two channels are turned a quarter turn from each other, as they are
 on the hardware. The lengths are the solid model's, in inches (the
 geometry stores them in SI). Up is +y, as in the solid model.
+
+![The twelve planes added: the box, the two channels and the beam,
+5,470 nodes](../images/fem-planes.png)
 
 From a script, the same planes are `mesh.plane` and `mesh.assemble`, or
 `project.add_plane`, which is what each Add records:
@@ -166,6 +176,10 @@ Ties make the 160 links. For a joint where the nearest node of a whole
 part might be the wrong one, *A second selection…* in the same menu
 ties the patch to a second patch that you pick next.
 
+![Where to click: the pencil on Quads (1); then, with a bolt's patch
+picked in the view, Tie on the bar (2) and the part below from its menu
+(3)](../images/fem-tie-click.png)
+
 The same project with every step below already done, modes solved, is
 on the website's [downloads page](https://visualdynamics.org/downloads#examples),
 and is `barc.project(solved=True)`.
@@ -173,9 +187,10 @@ and is `barc.project(solved=True)`.
 ## 3. Materials, thicknesses, solve
 
 Expand the geometry in the tree (yours, or *BARC*), then **Quads**,
-and click the pencil on an element group's row. The Element Groups table
-opens on it, with one row per part and, to the right of Name and
-Elements, the property columns in the display units.
+select the element groups' rows (Shift-click to take them all) and
+click the pencil on one of them. The Element Groups table opens with a
+row for each group selected and, to the right of Name and Elements, the
+property columns in the display units.
 
 | Element group | Material | Thickness |
 |---|---|---|
@@ -185,6 +200,9 @@ Elements, the property columns in the display units.
 
 Picking a material from the drop-down fills in its modulus, Poisson's
 ratio and density; you can type over any of them.
+
+![The Element Groups table, opened by the pencil on the box's row (1),
+with 6061-T6 and 0.25 in typed](../images/fem-groups.png)
 
 Select the geometry and press *Solve Modes*. It asks for the highest
 frequency to solve for (type 2000 Hz) and the damping to give every mode
@@ -196,6 +214,11 @@ six rigid-body modes at 0 Hz, then the elastic modes. Planes typed from
 the table above give the demo's mesh node for node, and the patches
 above are the demo's element for element, so a geometry built by hand
 solves to the same modes.
+
+![Where to click: select the geometry (1) and press Solve Modes on the
+bar (2)](../images/fem-solve-click.png)
+
+![The first elastic mode of the plate model](../images/fem-mode.png)
 
 ## What was checked
 
@@ -266,6 +289,10 @@ y = 3, and the beam's underside is the channels' top faces at y = 5.
 | its inside | (−2, 4, 1.6875) | 1.5 × 1.75 × 1.125 | |
 | beam | (0, 5.0625, 1.5) | 5 × 0.125 × 1 | beam |
 
+![Where to click: select the Solids row (1), choose Add Solid Block on
+the bar (2), type a block and press Add
+(3)](../images/fem-bricks-block-click.png)
+
 Each inside block reaches past its part's open faces so that it cuts all
 the way through. The box's inside cuts through its front and back. The
 right channel's inside cuts through its inboard side, where it has no
@@ -277,6 +304,9 @@ each channel's two blocks and press *Subtract* to make one part each,
 *right channel* and *left channel*. The pencil on any block opens it
 again so you can change it, and its part changes with it.
 
+![Where to click: click the box (1), Shift-click Block 3 (2) and press
+Subtract (3)](../images/fem-bricks-subtract-click.png)
+
 Then mesh them. Pick the four parts, press *Mesh Solids*, type 0.125 for
 the element size, tick **Keep the parts apart from each other**, and
 press **Mesh**. The four parts are meshed on one grid, cut at every
@@ -286,6 +316,10 @@ foot shares none of them with the box's top face), ready for the bolts
 to be merged. Meshing the parts one at a time puts each on its own grid,
 and then the nodes do not line up: at a quarter inch, a channel's foot
 and the box's top have no nodes in the same place.
+
+![Where to click: click the first part (1), Shift-click the last (2),
+press Mesh Solids (3), tick Keep the parts apart from each other (4) and
+press Mesh (5)](../images/fem-bricks-mesh-click.png)
 
 ### 2. The bolts, merged
 
@@ -310,6 +344,14 @@ except the foot's outer ring. Click the 32 marks around the foot's edge
 to leave them out, and press **Merge**. The 49 places merged turn into
 blue squares, and the 32 left out stay marked. Do the same for the box
 and the left channel.
+
+![Where to click: click the box's element group (1), Cmd-click the right
+channel's (2), press Merge Coincident Nodes (3), click out the 32 marks
+around the foot's edge in the view, and press Merge
+(4)](../images/fem-bricks-merge-click.png)
+
+![The right foot merged: the 49 places drawn as squares, the 32 left out
+still marked](../images/fem-bricks-merged.png)
 
 Then select the right channel and the beam. *Merge Coincident Nodes*
 marks the 81 places where the beam lies on the channel's top. Press

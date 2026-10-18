@@ -91,8 +91,11 @@ class MergePanel(QWidget):
         grid.addLayout(picks, 4, 0, 1, 2)
         buttons = QHBoxLayout()
         self.merge_button: QPushButton = QPushButton('Merge')
+        self.merge_button.setToolTip('Make the coincident nodes picked one '
+                                     'node each')
         self.merge_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
+        self.close_button.setToolTip('Put the pane away without merging')
         buttons.addWidget(self.merge_button)
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 5, 0, 1, 2)

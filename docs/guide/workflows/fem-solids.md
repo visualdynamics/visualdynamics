@@ -68,6 +68,14 @@ the plate it leaves the 0.138 in fillets the frame has in each window's
 corners. Without the fillets, the frame's in-plane modes come out 8 %
 low.
 
+![Where to click: select the Solids row (1), choose Add Solid Block on
+the bar (2), type the window's row of the table and press Add
+(3)](../images/fem-solids-block-click.png)
+
+![Where to click: select the Solids row (1), choose Add Cylinder on the
+bar (2), type the rail hole's row and press Add
+(3)](../images/fem-solids-cylinder-click.png)
+
 Then pattern the shapes. Pick a solid in the tree and press *Pattern*.
 The pane asks how many copies along X, Y and Z, counting the original,
 and how far apart, and draws the copies as you type. **Pattern** makes
@@ -84,6 +92,10 @@ along Y.
 | the rail hole | 13, 2, 1 | 1.291667, 5.5, 0 |
 | the upright hole | 5, 3, 1 | 3.875, 1.375, 0 |
 
+![Where to click: select the rail hole (1), press Pattern on the bar
+(2), type its counts and spacing, and press Pattern
+(3)](../images/fem-solids-pattern-click.png)
+
 That gives four windows, 26 holes along the rails and 15 down the
 uprights (41 holes in all), in three patterns. Now pick the plate and
 the three patterns (click the plate, then Shift-click the last pattern)
@@ -92,6 +104,9 @@ in the tree, here the plate, and its tooltip names which one that is.
 The result is named for the plate, *frame*. *Union* makes the picked
 solids one, *Intersect* keeps only what they share, and *Take Apart*
 undoes a boolean or a pattern so its solids stand on their own again.
+
+![Where to click: click the plate (1), Shift-click the last pattern (2)
+and press Subtract (3)](../images/fem-solids-subtract-click.png)
 
 The inserts fill the top 5/16 in of each hole. Add the same two
 cylinders again, centered a little higher and shorter, named *inserts*,
@@ -104,11 +119,17 @@ and pattern them the same way as the holes:
 
 Pick the two patterns and press *Union* to make one part, *inserts*.
 
+![The frame's two parts: the plate with its windows and holes cut, and
+the inserts](../images/fem-solids-frame.png)
+
 ## 2. Mesh
 
 Pick *frame* and *inserts* in the tree and press *Mesh Solids*. Type
-0.083333 for the element size (a twelfth of an inch, which is six bricks
-across a member and three across a hole) and press **Mesh**. The pane
+0.083334 for the element size (a twelfth of an inch, which is six bricks
+across a member and three across a hole) and press **Mesh**. The twelfth
+is rounded up in its last place on purpose: a span that falls exactly
+halfway between two brick counts then takes the count this model was
+checked with, where 0.083333 would give some of them one brick more. The pane
 opens on half the thinnest feature as its size. Each part becomes
 an element group under **Hexes**, and the two share their nodes around
 each hole. Each hole is meshed as rings of bricks about its circle, with
@@ -117,10 +138,18 @@ frame comes out at 33,320 bricks and 45,087 nodes. If you change a solid
 and press *Mesh Solids* again, each part's new bricks replace its
 earlier mesh, and its element group and material are kept.
 
+![Where to click: pick frame (1) and inserts (2), press Mesh Solids (3),
+type the element size and press Mesh
+(4)](../images/fem-solids-mesh-click.png)
+
+![The frame meshed: an element group for each part under
+Hexes](../images/fem-solids-mesh.png)
+
 ## 3. Materials and solve
 
-Click the pencil on an element group's row to open the Element Groups
-table, one row per part. An element group of solids takes a material
+Select the element groups' rows in the tree (Shift-click to take them
+all) and click the pencil on one of them: the Element Groups table opens
+with a row for each group selected. An element group of solids takes a material
 and nothing else.
 
 | Element group | Material |
@@ -128,11 +157,17 @@ and nothing else.
 | frame | 6061-T6 |
 | inserts | typed: modulus 1.1216e6 psi, density 3.6175e-4 lbf·s²/in⁴, Poisson's ratio 0.3 |
 
+![The Element Groups table, opened by the pencil on the inserts' row
+(1), with their modulus, Poisson's ratio and density
+typed](../images/fem-solids-groups.png)
+
 The inserts' numbers are the shared model's: a stiffness tuned to the
 tested frames and a density that gives the frame its measured mass,
 spread from the insert's annulus over its whole hole. Select the
 geometry and press *Solve Modes*. It solves in about half a minute,
 with six rigid-body modes at 0 Hz followed by the elastic modes.
+
+![The frame's first elastic mode](../images/fem-solids-mode.png)
 
 ## 4. The wings
 
@@ -180,7 +215,7 @@ the cylinder's name, *screws*:
 |---|---|---|
 | the screw | 2, 2, 1 | 3.875, 5.5, 0 |
 
-Then mesh *frame*, *inserts* and *screws* together at 0.083333. Where
+Then mesh *frame*, *inserts* and *screws* together at 0.083334. Where
 two parts overlap, the later one in the tree takes the bricks, so the
 four inserts under the screws become steel.
 
@@ -213,6 +248,13 @@ mesh, so the frame's nodes are the ones that move. Press **Align**.
 With the same four groups picked, press *Merge Coincident Nodes* and
 then **Merge**. The washers are joined to the frame at the places just
 aligned, and the wing is bolted on.
+
+![Where to click: pick frame, inserts, screws and washers under Hexes
+(1 to 4), press Align Meshes (5), then Align
+(6)](../images/fem-solids-align-click.png)
+
+![Where to click: with the same four picked, press Merge Coincident
+Nodes (1), then Merge (2)](../images/fem-solids-merge-click.png)
 
 ### The screws' heads
 

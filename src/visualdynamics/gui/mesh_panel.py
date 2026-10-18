@@ -115,7 +115,10 @@ DEFAULT_SIZE = 0.1
 
 def _box(value: float, minimum: float = -1e9) -> DoubleSpinBox:
     box = DoubleSpinBox()
-    box.setDecimals(4)
+    # six places: the guides' dimensions are inch fractions to the 32nd
+    # and 64th (1.96875, -0.15625), and four places turned the BARC's
+    # channel positions into gaps, the model in four pieces (2026-10-17)
+    box.setDecimals(6)
     box.setRange(minimum, 1e9)
     box.setValue(value)
     return box
@@ -202,6 +205,8 @@ class MeshPanel(QWidget):
         self.section: list[DoubleSpinBox] = []
         for row in range(7, 11):
             label, box = QLabel(), _box(0.0, minimum=0.0)
+            # named for its dimension once a shape is picked (_shape_rows)
+            box.setToolTip('A dimension of the section, in the display unit')
             grid.addWidget(label, row, 0)
             grid.addWidget(box, row, 1)
             self.section_labels.append(label)
@@ -218,6 +223,10 @@ class MeshPanel(QWidget):
             self.hole.append(box)
         self.hole[0].setToolTip('Across the hole')
         self.hole[1].setToolTip('From where it enters, down the frame\'s Z')
+        self.hole[2].setToolTip('Across the counterbore at the entry; '
+                                'zero for none')
+        self.hole[3].setToolTip('How deep the counterbore goes from the '
+                                'entry')
         self.through: QCheckBox = QCheckBox('Through')
         self.through.setToolTip('Through the part it is cut from, however '
                                 'thick that part is made')
@@ -268,8 +277,11 @@ class MeshPanel(QWidget):
         grid.addWidget(self.reading_label, 20, 0, 1, 2)
         buttons = QHBoxLayout()
         self.add_button: QPushButton = QPushButton('Add')
+        self.add_button.setToolTip('Add what the pane describes to the '
+                                   'geometry, as the preview shows it')
         self.add_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
+        self.close_button.setToolTip('Put the pane away without adding')
         buttons.addWidget(self.add_button)
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 21, 0, 1, 2)
@@ -374,6 +386,8 @@ class MeshPanel(QWidget):
             box.setVisible(shown)
             if shown:
                 label.setText(f'{named[k][:1].upper()}{named[k][1:]} [{self.unit}]')
+                box.setToolTip(f'The section\'s {named[k]}, in the display '
+                               'unit')
         if self.editing:
             shape = self.shape.currentText()
             self.title.setText(f'Edit {shape[:1].upper()}{shape[1:]}')

@@ -11,6 +11,7 @@ from test_table_machinery import Sheet, sheet_model
 
 import visualdynamics
 from visualdynamics.gui.tables import CopyPasteTableView
+from visualdynamics.gui.tooltips import plain
 
 T = np.arange(1024) / 1024.0
 
@@ -112,7 +113,7 @@ def test_the_tables_copy_button_shows_under_the_pointer(qt_app):
         view.enterEvent(QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)))
         assert button.isVisible()
         assert button.geometry().right() <= view.viewport().geometry().right()
-        assert button.toolTip().startswith('Copy the whole table')
+        assert plain(button.toolTip()).startswith('Copy the whole table')
         view.leaveEvent(QEvent(QEvent.Type.Leave))
         assert not button.isVisible()
     finally:

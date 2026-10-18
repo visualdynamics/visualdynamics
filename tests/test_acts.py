@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QToolButton
 
 import visualdynamics
 from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
+from visualdynamics.gui.tooltips import plain
 from visualdynamics.project import _SELECTION_APPLIES, _VERB_APPLIES
 
 T = np.arange(4096) / 2048.0
@@ -67,7 +68,7 @@ def test_a_lone_object_offers_its_own_acts_on_the_plotsbar_acts(window, pump):
     assert button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly, \
         'an icon, like every bar button; the words are in the tooltip ' \
         '(Brandon, 2026-09-12)'
-    assert button.toolTip().startswith('Integrate — '), \
+    assert plain(button.toolTip()).startswith('Integrate — '), \
         'the verb leads the tooltip, since the icon is all that shows'
     _select(window, pump, 'Modes')
     # no verb applies to a shape set alone, but what is drawn copies —

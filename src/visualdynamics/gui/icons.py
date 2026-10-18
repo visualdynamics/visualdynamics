@@ -135,16 +135,39 @@ def _curve(points):
     return path
 
 
+#: a test article's stick model: a frame top on three legs, seen from
+#: above at an angle, nodes at its corners and feet
+_FRAME_TOP = [(10, 22), (40, 22), (54, 12), (24, 12)]
+_FRAME_FEET = [(10, 54), (40, 54), (54, 44)]
+
+
 def _draw_geometry(painter, color):
-    """Nodes joined by lines."""
-    points = [(12, 50), (52, 48), (32, 14)]
+    """A frame on legs, drawn as nodes joined by lines."""
+    # One triangle until 2026-10-17, which read as the triangle element
+    # it sat beside in the tree; Brandon picked this frame from four
+    # drawn candidates (a wire cube, a plate mesh, the frame, a solid).
     painter.setPen(_pen(color, 5))
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawPolygon([QPointF(*p) for p in points])
+    top, feet = _FRAME_TOP, _FRAME_FEET
+    for k in range(4):
+        painter.drawLine(QPointF(*top[k]), QPointF(*top[(k + 1) % 4]))
+    for corner, foot in zip(top, feet):
+        painter.drawLine(QPointF(*corner), QPointF(*foot))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(QColor(color)))
-    for x, y in points:
-        painter.drawEllipse(QPointF(x, y), 6.5, 6.5)
+    for x, y in (*top, *feet):
+        painter.drawEllipse(QPointF(x, y), 5.5, 5.5)
+
+
+def _draw_new_geometry(painter, color):
+    """The geometry's frame with a plus: an empty geometry to build."""
+    _draw_geometry(painter, color)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor('#2ca02c')))
+    painter.drawEllipse(QPointF(50, 50), 13, 13)
+    painter.setBrush(QBrush(QColor('white')))
+    painter.drawRoundedRect(QRectF(48, 42, 4, 16), 1, 1)
+    painter.drawRoundedRect(QRectF(42, 48, 16, 4), 1, 1)
 
 
 #: A pulse and its ringdown. The shape a time history wears, and the
@@ -2067,7 +2090,7 @@ def control_icon(name: str) -> QIcon:
     {'play': _draw_play, 'pause': _draw_pause,
      'faster': _draw_faster, 'slower': _draw_slower,
      'up': _draw_up, 'down': _draw_down,
-     'add': _draw_add,
+     'add': _draw_add, 'new_geometry': _draw_new_geometry,
      'beam': _draw_beam, 'tri': _draw_tri, 'quad': _draw_quad,
      'edit': _draw_edit, 'edit_on': _draw_edit_on, 'trash': _draw_trash,
      'colormap': _draw_colormap,

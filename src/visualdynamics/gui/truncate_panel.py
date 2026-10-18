@@ -98,6 +98,8 @@ class TruncatePanel(QWidget):
         # whole-record reset beside it (Brandon, 2026-08-28): the
         # boxes and the drag reach every span, this one included.
         self.apply_button: QPushButton = QPushButton('Apply Truncation')
+        self.apply_button.setToolTip('Make a new object of the record cut to '
+                                     'the span shown')
         self.apply_button.clicked.connect(self.apply_asked.emit)
         grid.addWidget(self.apply_button, len(rows) + 2 + len(derived),
                        0, 1, 2)

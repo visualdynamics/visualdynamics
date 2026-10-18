@@ -41,6 +41,9 @@ The table lists the steps first; each is described in full below it.
    object it stands for arrives, so the gray slots that remain are
    the steps still to do.
 
+![Where the survey goes in: drop the files on the project tree, or
+anywhere on the window](../images/modal-drop.png)
+
 ![The window after the import: the tree holding the measured objects
 with the type's remaining slots in gray, and the FRF's 22 records
 drawn, with the plate's four modes standing clear and the survey's one
@@ -64,6 +67,10 @@ The article's CAD can be shown with the survey too: a STEP, IGES, 3MF
 or STL file imports as face elements, one element group per part, and
 can be linked into the same object group for context.
 
+![Where to click: right-click the geometry (1), choose Define Imported
+Units..., and enter meters in its Unit cell
+(2)](../images/modal-units-click.png)
+
 ![The Imported Units pane for the geometry: one row, Coordinates /
 length, the Unit cell waiting for
 meters](../images/modal-units.png)
@@ -79,6 +86,12 @@ Comparisons are made in the Basis group's DOFs, it is the reference
 for frequency error in the matched-modes table, and every `@basis:`
 binding in the report resolves through it.
 
+![Where to click: select the measured objects (1), then Link on the
+bar above the tree (2)](../images/modal-link-click.png)
+
+![Where to click: right-click the bracket (1) and check Basis of
+Comparisons](../images/modal-basis-click.png)
+
 ![The measured group bracketed as one side, with the FRF
 selected](../images/modal-link.png)
 
@@ -93,6 +106,10 @@ The time data is twenty burst captures, one per accepted average.
 2. Press **Compute PSDs**. The densities are averaged over exactly
    those frames, the run's own averaging, and are added beside the
    record, linked into the group.
+
+![Where to click: select the time history (1), turn on Averaging on
+the plot bar (2), and press Compute PSDs
+(3)](../images/modal-psds-click.png)
 
 ![The computed PSDs, one record per channel, averaged over the run's
 twenty captures](../images/modal-psds.png)
@@ -115,6 +132,9 @@ twenty captures](../images/modal-psds.png)
    mode's residues jointly with all the modes present, for close modes
    that affect each other (`fit_modes(..., refine=n)` in a script).
 
+![Where to click: select the FRF (1), then Fit Modal Model on the bar
+(2)](../images/modal-fit-click.png)
+
 ![The fitting screen as it opens: the measured CMIF with the first
 suggestion already on the largest peak](../images/modal-fit-open.png)
 
@@ -132,6 +152,10 @@ on the fit's damping, read straight off the data, and it says when the
 peak has too few lines for the width to be trusted
 ([Reading Q from a peak's half-power width](../half-power.md)).
 
+![Where to click on the fitting screen: Find Mode (1), then Confirm
+Mode (2); Refine All (3) appears once two modes are
+confirmed](../images/modal-fit-buttons-click.png)
+
 ![Mid-fit: two modes confirmed and bookmarked, the cursor's parabola
 on the 647 Hz peak at 1.98% damping, the confirmed modes in the table
 with the auto-MAC beside them](../images/modal-fit.png)
@@ -145,6 +169,9 @@ Each confirm publishes the fit as a shape set, and that shape set is
 the complete fit state. To change the fit later, select the shape set
 together with the FRF and choose **Edit Fit** on the plot bar; the
 session reopens with every mode as it was published.
+
+![Where to click: select the shape set (1) and the FRF (2) together,
+then Edit Fit on the plot bar (3)](../images/modal-edit-fit-click.png)
 
 ### 6. Look at a shape
 
@@ -175,6 +202,10 @@ still](../images/modal-mode.png)
 5. Press **Add Matches** (+) to add the selected pairs to a Matched
    Modes object for the two sets, created the first time.
 
+![Where to click: select the fitted shape set (1) and the model's shape
+set (2), click a square (3), and press Add Matches
+(4)](../images/modal-mac-click.png)
+
 ![The cross-MAC: five fitted modes against the model's twenty-two,
 the five matches along the diagonal of the band, the picked pair
 outlined and described in the status bar](../images/modal-mac.png)
@@ -189,6 +220,9 @@ outlined and described in the status bar](../images/modal-mac.png)
    conclusions.
 3. Choose Export → HTML... on the report's bar. It writes one
    self-contained file that opens in any browser.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/modal-report-click.png)
 
 ![The exported report: the title page, test geometry and
 instrumentation figures, generated from the

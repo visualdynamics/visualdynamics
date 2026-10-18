@@ -326,7 +326,16 @@ def test_the_table_says_what_the_averages_are_worth(window, pump):
     from PySide6.QtWidgets import QLabel
 
     names = {label.text() for label in panel.findChildren(QLabel)}
-    assert {'Statistical DOF (2n)', 'Equivalent statistical DOF'} <= names
+    assert {'Stat. DOF (2n)', 'Equivalent DOF'} <= names
+    # and every name is read whole: the full words were cut off at the
+    # name column's width (2026-10-17, seen in the guide's screenshots)
+    for key in ('averages', 'dof', 'equivalent', 'band', 'resolution'):
+        value = panel.derived[key]
+        grid = value.parentWidget().layout()
+        row = grid.getItemPosition(grid.indexOf(value))[0]
+        name = grid.itemAtPosition(row, 0).widget()
+        assert name.width() >= name.sizeHint().width(), \
+            f'{name.text()!r} is cut off: {name.width()} < {name.sizeHint().width()}'
     assert panel.derived['dof'].text() == '20'
     # Welch's closed form for Hann at half overlap: 36 n² / (19 n - 1)
     assert panel.derived['equivalent'].text() == f'{3600 / 189:.4g}'

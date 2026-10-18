@@ -68,8 +68,11 @@ class MeshSolidsPanel(QWidget):
         grid.addWidget(self.reading_label, 5, 0, 1, 2)
         buttons = QHBoxLayout()
         self.mesh_button: QPushButton = QPushButton('Mesh')
+        self.mesh_button.setToolTip('Mesh the solids into elements at the '
+                                    'size set above')
         self.mesh_button.setDefault(True)
         self.close_button: QPushButton = QPushButton('Close')
+        self.close_button.setToolTip('Put the pane away without meshing')
         buttons.addWidget(self.mesh_button)
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 6, 0, 1, 2)

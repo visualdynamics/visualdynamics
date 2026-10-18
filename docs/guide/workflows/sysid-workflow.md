@@ -46,6 +46,9 @@ ID (the streams are named directly), or when the second stream is not
 at least 10 dB louder than the first, as in a run that stopped and
 restarted at one level.
 
+![Where a stream goes in: drop the file on the project
+tree](../images/sysid-drop.png)
+
 ![The imported run: the two recordings named, the driven record on
 screen](../images/sysid-import.png)
 
@@ -62,6 +65,9 @@ are the channels whose role is `ref` in the history's Role column (the
 channels the file says were driven), and a channel marked `mon` is in
 no FRF ([the tree](../project-tree.md)).
 
+![Where to click: select Excitation Time History (1), open the
+Averaging view on the bar (2), and press Compute FRFs... (3)](../images/sysid-frfs-click.png)
+
 ![The measured plant: the FRF matrix, one curve per response and
 drive pair](../images/sysid-frfs.png)
 
@@ -75,6 +81,9 @@ something the drives did not put there (a rattle, ambient noise, a
 nonlinearity) at those frequencies, and an FRF line under a coherence
 dip is a line the control law will invert without a good estimate
 behind it.
+
+![Where to click: with Excitation Time History selected (1), press
+Multiple Coherence in the Averaging view (2)](../images/sysid-coherence-click.png)
 
 ![Multiple coherence, one curve per response
 channel](../images/sysid-coherence.png)
@@ -91,6 +100,10 @@ channel](../images/sysid-coherence.png)
 3. Choose one of the two readings on the plot bar. The signal-to-noise
    is a reading of the pair and is not stored as a third object.
 
+![Where to click: select a time history (1) and press Compute PSDs in
+its Averaging view (2); do the same for the other
+history](../images/sysid-psds-click.png)
+
 **Signal to noise (dB)** draws one curve per channel, line by line.
 Where the excitation stood 30 dB over the ambient, the FRF there is a
 good measurement. A line with no signal above the ambient is not
@@ -106,6 +119,10 @@ status line says how many were.
 How both are computed, and the definition they follow, is in
 [How the signal-to-noise is computed](#how-the-signal-to-noise-is-computed).
 
+![Where to click: select the excitation PSDs (1) and the noise PSDs
+(2) together, then choose Signal to noise (dB) on the bar
+(3)](../images/sysid-snr-click.png)
+
 ![The pair read as signal to noise, line by line, in
 decibels](../images/sysid-snr.png)
 
@@ -115,6 +132,13 @@ decibels](../images/sysid-snr.png)
 2. Add the setup photographs.
 3. Select the group and press **Link**.
 4. Select the project row and press *Generate Report*.
+
+![Where to click: select the first object (1), shift-click the last
+(2), and press Link on the bar above the tree
+(3)](../images/sysid-link-click.png)
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/sysid-report-click.png)
 
 The system ID report includes both recordings with their frames, the
 excitation and ambient densities overlaid per channel, the FRF

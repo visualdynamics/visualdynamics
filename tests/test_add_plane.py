@@ -159,7 +159,7 @@ def test_the_project_offers_a_new_geometry(window, pump):
     pump()
     acts = {verb: icon for verb, _label, icon, _handler, _tip
             in window.acts_for()}
-    assert acts.get('new_geometry') == 'add'
+    assert acts.get('new_geometry') == 'new_geometry'
     window.new_geometry_act()
     pump()
     geometry = window.objects['Geometry']
@@ -422,3 +422,16 @@ def test_the_pane_turns_the_box_by_typed_angles_and_the_rings_write_them_back(
     panel.square_button.click()
     pump()
     assert panel.values()['angles'] == (0.0, 0.0, 0.0)
+
+
+def test_the_pane_keeps_an_inch_fraction_to_the_64th(window):
+    """The BARC guide places its channels at 1.96875 and 1.53125 in, and
+    four decimals turned them into 1.9688 and 1.5312: gaps where the
+    planes should meet, the model in four pieces (2026-10-17)."""
+    panel = window.scene.mesh_panel
+    for box in (*panel.center, *panel.widths):
+        box.setValue(1.96875)
+        assert box.value() == pytest.approx(1.96875, abs=1e-9)
+    for box in panel.center:            # a width is never below zero
+        box.setValue(-0.15625)
+        assert box.value() == pytest.approx(-0.15625, abs=1e-9)

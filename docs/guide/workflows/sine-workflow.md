@@ -39,6 +39,9 @@ environment carries the tones' schedules, so the project is typed
 It holds each tone's frequency trajectory, the target level along it,
 and the warning and abort bands around that.
 
+![Where a run goes in: drop the file on the project
+tree](../images/sine-drop.png)
+
 Selecting the specification opens it on the 3-D stage (frequency
 across, time receding, amplitude up, one surface per tone). Turn off
 the **3D** toggle for the flat per-channel view shown here. The rows
@@ -47,6 +50,9 @@ row, and picking rows limits either view to those DOFs. The tone is
 chosen in a drop-down on the bar. The stage draws every chosen DOF at
 once, each in its own color; the flat view draws one at a time, chosen
 in the pair box on the bar.
+
+![Where to click: select the specification (1), then turn off 3D on
+the bar (2)](../images/sine-spec-click.png)
 
 ![The imported sweep: the specification's four tones, each with its
 own schedule and its own tolerance
@@ -60,6 +66,9 @@ frequency against time with amplitude as color. In a multi-tone sweep
 the four tones are four ridges, each following its own path and
 crossing where the schedules cross. A PSD would average all of that
 together.
+
+![Where to click: select the time history (1), then Wavelet on the bar
+(2)](../images/sine-wavelet-click.png)
 
 ![The wavelet reading of the sweep: the up-sweep and the down-sweep
 crossing, the near-dwell holding at 400 Hz, the log sweep walking its
@@ -85,6 +94,9 @@ separated by their different frequency histories. A tracking filter
 applied to one tone at a time picks up the other tone's level as part
 of its own.
 
+![Where to click: with the time history selected (1), press Extract
+Sine Levels on the bar (2)](../images/sine-extract-click.png)
+
 The one setting is how many cycles each reading averages over, and it
 is stored on the time history. Choose **Sine Levels** on the time
 history's bar (offered when the project holds a sweep specification)
@@ -105,6 +117,10 @@ clock to the recording and solves again when the recorded sweep
 drifted from the commanded one, so a long run does not read low
 toward its end.
 
+![Where to click: select the time history (1), choose Sine Levels on
+the bar (2), set Smoothing (3), and press Extract Sine Levels in the
+view (4)](../images/sine-smoothing-click.png)
+
 The button in the view is the same Extract Sine Levels. A reading
 where the tone was under the noise is reported at the noise floor and
 drawn as a hollow ring, so the plot shows how much was not seen
@@ -117,6 +133,9 @@ specification together to draw each measured path over its target and
 zones, with the clocks aligned: on the stage by default, or flat with
 the 3D toggle off. The signed deviation bars judge the whole run tone
 by tone.
+
+![Where to click: select the specification (1) and the levels (2)
+together](../images/sine-levels-click.png)
 
 ![The extracted levels against the specification: measured paths in
 tone colors over the targets and their
@@ -135,6 +154,9 @@ figures are never overlaid across tones, because each tone sweeps its
 own frequencies on its own clock: there is one figure per tone and
 control channel, or, when tones times control channels number more
 than four, one grid figure per tone with a cell for each channel.
+
+![Where to click: select the project row (1), then Generate Report on
+the bar (2)](../images/sine-report-click.png)
 
 ![The exported report](../images/sine-report.png)
 
@@ -205,6 +227,10 @@ project.save('sine.vdyn')
   checks every tone against the modes typed into it, and flags a Q read
   off a level swept too fast for it;
   [Checking a sweep rate](../sweep-rate.md) explains the arithmetic.
+
+    ![Where to click: select the specification (1), then Sweep Rate on
+    the bar (2)](../images/sine-sweep-rate-click.png)
+
 - A dwell is one point over frequency. A tone held at one frequency (a
   sweep across a hair of a hertz, as `SineTone.dwell` writes it and a
   controller's file carries it) is read against time instead:

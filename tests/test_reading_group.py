@@ -28,6 +28,8 @@ import pytest
 from conftest import fixture_path
 from PySide6.QtGui import QActionGroup
 
+from visualdynamics.gui.panes import DataPane
+
 MODAL = ('plate', 'modal.nc4')
 
 
@@ -188,7 +190,8 @@ def test_every_reading_panel_lives_inside_the_pane(pane):
     window — which is how the truncate panel first shipped (Brandon,
     2026-08-28). The guard for the next reading added: its panel must
     be a child of the pane, beside the plot, like every other."""
-    for _action, _wanted, panel_name in type(pane)._READINGS:
+    for reading in type(pane)._READINGS:
+        panel_name = reading.panel
         if panel_name is None:
             continue
         panel = getattr(pane, panel_name)
@@ -196,3 +199,42 @@ def test_every_reading_panel_lives_inside_the_pane(pane):
             f'{panel_name} is not in the pane; shown, it would be ' \
             'a separate window'
         assert not panel.isWindow()
+
+
+@pytest.mark.parametrize('flat', [reading.key for reading
+                                  in DataPane._READINGS if reading.flat])
+def test_a_spectrum_after_a_flat_reading_keeps_its_3d_form(window, pump,
+                                                           flat):
+    """A flat reading hides the 2-D/3-D toggle while it is up, and its
+    choice is sticky; a spectrum selected next is not that reading's,
+    and keeps the toggle. Read from whether the reading is up, not
+    whether it is wanted: by the wanted flag the stroke, the statistics
+    and the kurtosis each took the toggle from the next spectrum."""
+    looking_at(window, pump)
+    pane = window.data_pane
+    action = getattr(pane, f'{flat}_action')
+    assert action.isVisible()
+    action.trigger()
+    pump()
+    assert getattr(pane, f'{flat}_wanted')
+    assert not pane.waterfall_action.isVisible()
+    psds = window.project.compute_psds('Time History')
+    window.show_object(psds)
+    item = window._item_for_object(psds)
+    window.tree.clearSelection()
+    item.setSelected(True)
+    window.tree.setCurrentItem(item)
+    pump()
+    assert getattr(pane, f'{flat}_wanted'), 'the choice is still sticky'
+    assert not action.isVisible()
+    assert pane.waterfall_action.isVisible()
+
+
+def test_the_fitting_bar_hides_every_reading(pane):
+    """The fitting screen's bar has no reading of a record on it; the
+    list it hides is the readings' table, so a new one cannot be
+    missed (the written-out list had missed three)."""
+    pane.show_pair_controls(True)
+    shown = [key for key, action in readings(pane).items()
+             if action.isVisible()]
+    assert shown == []

@@ -241,3 +241,17 @@ def test_every_spin_box_in_the_window_corrects_rather_than_refuses(window):
         'it; build them from gui.editors.SpinBox / DoubleSpinBox: '
         + ', '.join(box.objectName() or box.__class__.__name__
                     for box in plain))
+
+
+def test_a_settings_field_keeps_the_value_it_is_built_with(qt_app):
+    """`number_box` sets the range and the places before the value: set
+    first, a value is clamped to the default 99.99 and rounded to the
+    default two places."""
+    from visualdynamics.gui.editors import number_box
+
+    box = number_box(0.0, 1e9, value=4000.0008, decimals=4, step=0.5,
+                     tip='a rating', suffix=' lbf')
+    assert box.value() == pytest.approx(4000.0008, abs=1e-9)
+    assert box.singleStep() == 0.5
+    assert box.suffix() == ' lbf' and box.toolTip() == 'a rating'
+    assert not box.keyboardTracking(), 'a finished edit only'

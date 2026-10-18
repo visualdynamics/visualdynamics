@@ -71,6 +71,35 @@ def fit_label_axis(axis: Any, labels: Iterable[str],
     axis.setWidth(widest + margin)
 
 
+def _reading_plot(layout: Any, row: int, col: int = 0,
+                  colspan: int = 1) -> Any:
+    """A plot at (`row`, `col`) of a reading's layout, gridded, with no
+    SI scaling.
+
+    The units are in the axis labels, so pyqtgraph's own 'x0.001' beside
+    an axis labeled in seconds would say the same thing twice. It is
+    turned off before anything is drawn: turned off after, an axis drawn
+    at the old scale kept its numbers and read 250 s for 0.25 s.
+    """
+    plot = layout.addPlot(row=row, col=col, colspan=colspan)
+    plot.showGrid(x=True, y=True, alpha=0.2)
+    for side in ('left', 'bottom'):
+        plot.getAxis(side).enableAutoSIPrefix(False)
+    return plot
+
+
+def _long_trace(plot: Any, x: Any, y: Any, pen: Any,
+                name: str | None = None) -> Any:
+    """A record-length trace on `plot`, drawn at a picture's width:
+    decimated to its peaks and clipped to the view, as every time
+    history here is. Drawn whole, a million-sample trace cost over a
+    second a repaint, on every hover and resize."""
+    curve = plot.plot(x, y, pen=pen, name=name)
+    curve.setDownsampling(auto=True, method='peak')
+    curve.setClipToView(True)
+    return curve
+
+
 def legend_below(layout: Any, plot: Any, row: int,
                  colors: dict | None = None,
                  text_size: str | None = None) -> Any:

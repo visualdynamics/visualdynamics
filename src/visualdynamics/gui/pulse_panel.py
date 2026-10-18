@@ -29,7 +29,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QLabel, QWidget
 
 from ..core import classical_pulse as pulses
-from .editors import DoubleSpinBox, commit_on_enter
+from .editors import DoubleSpinBox, commit_on_enter, number_box
 from .settings_panel import add_keyed_settings, add_rule, panel_grid
 
 #: the shapes as the box names them, in `SHAPES` order
@@ -50,12 +50,7 @@ def _box(low: float, high: float, decimals: int, step: float, tip: str,
          ) -> DoubleSpinBox:
     """A number field reporting only a finished edit, since each report
     redraws the check."""
-    box = DoubleSpinBox()
-    box.setRange(low, high)
-    box.setDecimals(decimals)
-    box.setSingleStep(step)
-    box.setToolTip(tip)
-    return box
+    return number_box(low, high, decimals=decimals, step=step, tip=tip)
 
 
 class PulsePanel(QWidget):

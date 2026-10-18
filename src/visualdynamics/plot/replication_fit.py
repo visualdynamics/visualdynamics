@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _long_trace, _reading_plot
+
 #: how solid the stroke band behind the travel is: light, since the
 #: travel is what is read and the band only brackets it
 BAND_ALPHA = 40
@@ -90,7 +92,7 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
         return us.from_si(np.asarray(values, dtype=float), dimension)
 
     # the travel through the record, inside the stroke
-    travel_plot = _plot(layout, 0, 0, colspan=3)
+    travel_plot = _reading_plot(layout, 0, 0, colspan=3)
     up = down = float(shown(rating.room, 'length'))
     fill = QColor(colors['averaging_band'])
     fill.setAlpha(BAND_ALPHA)
@@ -106,8 +108,8 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
     for edge in (up, -down):
         travel_plot.addItem(pg.InfiniteLine(pos=edge, angle=0, pen=stop))
     travel = shown(case.travel, 'length')
-    travel_plot.plot(case.time, travel,
-                     pen=pg.mkPen(colors['response_curve'], width=1.2))
+    _long_trace(travel_plot, case.time, travel,
+                pg.mkPen(colors['response_curve'], width=1.2))
     at = int(np.argmax(np.abs(travel)))
     travel_plot.plot([case.time[at]], [travel[at]], pen=None, symbol='o',
                      symbolSize=MARKER_SIZE + 2,
@@ -135,9 +137,9 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
 
     # the sweep: what each cutoff saves and what it costs
     cutoffs = np.array([c.cutoff for c in fit.cases])
-    stroke_plot = _plot(layout, 1, 0)
-    velocity_plot = _plot(layout, 1, 1)
-    price_plot = _plot(layout, 1, 2)
+    stroke_plot = _reading_plot(layout, 1, 0)
+    velocity_plot = _reading_plot(layout, 1, 1)
+    price_plot = _reading_plot(layout, 1, 2)
     hollow = pg.mkBrush(0, 0, 0, 0)
 
     def series(plot, values, symbol, color, fits):
@@ -194,14 +196,3 @@ def build_replication_fit(layout: Any, fit: Any, cutoff: Any = ..., *,
     return case
 
 
-def _plot(layout: Any, row: int, col: int, colspan: int = 1) -> Any:
-    """A plot at (`row`, `col`) of the layout, gridded, with no SI
-    scaling."""
-    plot = layout.addPlot(row=row, col=col, colspan=colspan)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    # the units are in the labels, so pyqtgraph's own 'x0.001' beside an
-    # axis would say the same thing twice; turned off before anything is
-    # drawn, as the shock check does, or an axis keeps the old scale
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot

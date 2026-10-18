@@ -635,7 +635,7 @@ def _titles(model):
 def _sweep_rate(window, pump, modes='22 40, 35 10'):
     pane = window.data_pane
     pane.sweep_rate_action.setChecked(True)
-    pane._choose_sweep_rate(True)
+    pane._choose_toggle('sweep_rate', True)
     pump()
     panel = pane.sweep_rate_panel
     panel.modes_box.setText(modes)
@@ -765,7 +765,7 @@ def test_putting_it_away_brings_the_specification_back(window, pump):
     _show_spec(window, pump)
     pane, panel = _sweep_rate(window, pump)
     pane.sweep_rate_action.setChecked(False)
-    pane._choose_sweep_rate(False)
+    pane._choose_toggle('sweep_rate', False)
     pump()
     assert not panel.isVisible()
     assert 'Search' in window.statusBar().currentMessage()

@@ -93,6 +93,24 @@ def kurtosis(values: ArrayLike) -> float:
     return float(np.mean(centered ** 4) / m2 ** 2)
 
 
+def frame_kurtosis(frames: ArrayLike) -> np.ndarray:
+    """The Pearson kurtosis of each row of `frames`: `kurtosis` row by
+    row, with the rows that are all finite read at once. A record's
+    frames number in the thousands, and one call apiece was half the
+    time the time statistics took."""
+    frames = np.asarray(frames, dtype=float)
+    result = np.full(len(frames), np.nan)
+    clean = np.isfinite(frames).all(axis=1)
+    centered = frames[clean] - frames[clean].mean(axis=1, keepdims=True)
+    m2 = np.mean(centered ** 2, axis=1)
+    m4 = np.mean(centered ** 4, axis=1)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        result[clean] = np.where(m2 > 0.0, m4 / m2 ** 2, np.nan)
+    for row in np.flatnonzero(~clean):
+        result[row] = kurtosis(frames[row])
+    return result
+
+
 def analyzed_span(data: Any) -> tuple[list[tuple[int, int]], str]:
     """The part of a record the kurtosis is computed over, and its name.
 

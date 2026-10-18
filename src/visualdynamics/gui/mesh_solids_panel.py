@@ -19,7 +19,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .editors import DoubleSpinBox, commit_on_enter
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 # The pane: Brandon, 2026-10-11.
@@ -39,7 +39,7 @@ class MeshSolidsPanel(QWidget):
         grid = panel_grid(self, self.title)
         self.size_label: QLabel = QLabel('Element size')
         self.size: DoubleSpinBox = DoubleSpinBox()
-        self.size.setDecimals(6)
+        self.size.setDecimals(LENGTH_DECIMALS)
         self.size.setRange(0.0, 1e9)
         self.size.setToolTip('Each span between flat faces is divided into '
                              'the whole number of bricks nearest this size')

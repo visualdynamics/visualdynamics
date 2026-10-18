@@ -163,8 +163,9 @@ def shoot(window, name, marks=()):
 CHROME = ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
 
 
-def report_shot(window, name):
-    """The exported report, screenshotted by headless Chrome.
+def report_shot(window, name, report=None):
+    """The exported report (`report`, or the project's first),
+    screenshotted by headless Chrome.
 
     The report editor is a QtWebEngine view, and web engine content
     does not paint into an offscreen window grab — the app shot came
@@ -177,7 +178,8 @@ def report_shot(window, name):
         print(f'  {name}.png skipped — no Chrome for the report render',
               flush=True)
         return
-    report = by_type(window, 'Report')
+    if report is None:
+        report = by_type(window, 'Report')
     with tempfile.TemporaryDirectory() as scratch:
         html = os.path.join(scratch, 'report.html')
         window.project.export_report(report, html)
@@ -189,6 +191,18 @@ def report_shot(window, name):
     print(f'  {name}.png', flush=True)
 
 
+def shoot_report(window, kind):
+    """Where to click for the report, and the report it makes from the
+    `kind` template; every walkthrough ends on these two pictures."""
+    window.tree.setCurrentItem(window.test_item)
+    pump(20)
+    shoot(window, f'{kind}-report-click',
+          marks=[window.test_item, act(window, 'Generate Report')])
+    window.generate_report(kind)
+    pump(30)
+    report_shot(window, f'{kind}-report')
+
+
 def add_geometry_and_photos(window, which):
     """The two objects a controller file cannot bring: the article's
     geometry, and the setup photographs — taken here from the demo
@@ -197,8 +211,7 @@ def add_geometry_and_photos(window, which):
 
     window.import_paths([str(PLATE / 'geometry.npz')])
     pump(20)
-    geometry = next(n for n, o in window.objects.items()
-                    if type(o).__name__ == 'Geometry')
+    geometry = by_type(window, 'Geometry')
     window.objects[geometry].define_units('m')
     demo = ROOT / 'stressdata' / 'plate_projects' / f'{which}.vdyn'
     if demo.exists():
@@ -374,13 +387,7 @@ def modal():
         select(window, 'Photos', frf)
         window.link_selected()
         pump()
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'modal-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('modal')
-    pump(30)
-    report_shot(window, 'modal-report')
+    shoot_report(window, 'modal')
     close(window)
 
 
@@ -412,8 +419,7 @@ def random():
     pump(20)
     shoot(window, 'random-psds')
 
-    psd = next(n for n, o in window.objects.items()
-               if type(o).__name__ == 'Psd')
+    psd = by_type(window, 'Psd')
     select(window, psd)
     pane.octave_action.trigger()
     pump(20)
@@ -442,13 +448,7 @@ def random():
     shoot(window, 'random-comparison', marks=[psd, spec])
 
     add_geometry_and_photos(window, 'random')
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'random-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('random')
-    pump(30)
-    report_shot(window, 'random-report')
+    shoot_report(window, 'random')
     close(window)
 
 
@@ -518,8 +518,7 @@ def transient():
     select(window, history)
     window.compute_psds()
     pump(20)
-    measured = next(n for n, o in window.objects.items()
-                    if type(o).__name__ == 'Psd')
+    measured = by_type(window, 'Psd')
     target = next(n for n, o in window.objects.items()
                   if type(o).__name__ == 'Specification'
                   and 'PSD' in n)
@@ -530,13 +529,7 @@ def transient():
     shoot(window, 'transient-level', marks=[target, measured])
 
     add_geometry_and_photos(window, 'transient')
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'transient-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('transient')
-    pump(30)
-    report_shot(window, 'transient-report')
+    shoot_report(window, 'transient')
     close(window)
 
 
@@ -612,13 +605,7 @@ def shock():
     shoot(window, 'shock-pulse-click', marks=[history, pane.pulse_action])
 
     add_geometry_and_photos(window, 'shock')
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'shock-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('shock')
-    pump(30)
-    report_shot(window, 'shock-report')
+    shoot_report(window, 'shock')
     close(window)
 
     # the optional filter, integration and stroke, in a window of their
@@ -710,13 +697,7 @@ def sine():
     shoot(window, 'sine-levels')
 
     add_geometry_and_photos(window, 'sine')
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'sine-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('sine')
-    pump(30)
-    report_shot(window, 'sine-report')
+    shoot_report(window, 'sine')
     close(window)
 
 
@@ -810,13 +791,7 @@ def sysid():
     window.set_link_role(geometry, 'Basis')
     pump()
 
-    window.tree.setCurrentItem(window.test_item)
-    pump(20)
-    shoot(window, 'sysid-report-click',
-          marks=[window.test_item, act(window, 'Generate Report')])
-    window.generate_report('sysid')
-    pump(30)
-    report_shot(window, 'sysid-report')
+    shoot_report(window, 'sysid')
     close(window)
 
 
@@ -911,26 +886,8 @@ def mixed():
     reports = {template: window.generate_report(template)
                for template in ('random', 'sine')}
     pump(30)
-
-    import subprocess
-    import tempfile
-
-    if not os.path.exists(CHROME):
-        print('  mixed reports skipped — no Chrome for the report render',
-              flush=True)
-        close(window)
-        return
     for template, report in reports.items():
-        name = f'mixed-report-{template}'
-        with tempfile.TemporaryDirectory() as scratch:
-            html = os.path.join(scratch, 'report.html')
-            window.project.export_report(report, html)
-            subprocess.run([CHROME, '--headless', '--disable-gpu',
-                            f'--screenshot={OUT / name}.png',
-                            '--window-size=1280,1600',
-                            '--hide-scrollbars', f'file://{html}'],
-                           check=True, capture_output=True, timeout=120)
-        print(f'  {name}.png', flush=True)
+        report_shot(window, f'mixed-report-{template}', report)
     close(window)
 
 

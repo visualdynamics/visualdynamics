@@ -531,3 +531,17 @@ def test_a_chart_of_many_channels_fits_the_pane_it_is_given(qt_app):
     # and the opening view really does hold every bar
     low, high = plot.viewRange()[1]
     assert low <= 0 and high >= len(rows) - 1
+
+
+def test_frame_kurtosis_is_kurtosis_row_by_row():
+    """Read at once, the frames give the numbers `kurtosis` gives one
+    at a time: a frame with a NaN drops it, a dead frame is NaN."""
+    from visualdynamics.core.kurtosis import frame_kurtosis, kurtosis
+
+    rows = np.random.default_rng(1).standard_normal((40, 300)) ** 3
+    rows[5, 7] = np.nan
+    rows[9] = 1.0
+    one_by_one = np.array([kurtosis(row) for row in rows])
+    at_once = frame_kurtosis(rows)
+    assert np.isnan(at_once[9]) and not np.isnan(at_once[5])
+    np.testing.assert_allclose(at_once, one_by_one, rtol=1e-12)

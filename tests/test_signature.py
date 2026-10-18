@@ -621,6 +621,25 @@ def test_the_panels_modes_and_limits_redraw_the_comparison(window, pump):
     assert panel.readout.text().startswith('84 Hz: flag')
 
 
+def test_a_limit_moved_compares_the_modes_already_found(window, pump,
+                                                        monkeypatch):
+    """The modes found do not depend on the limits, so moving one does
+    not find them again; asking for another count does."""
+    from visualdynamics.core import signature as module
+
+    panel = _signatures(window, pump)
+    finds = []
+    real = module.find_modes
+    monkeypatch.setattr(module, 'find_modes',
+                        lambda *a, **k: finds.append(1) or real(*a, **k))
+    panel.amplitude_box.setValue(30.0)
+    pump()
+    assert finds == []
+    panel.find_box.setValue(panel.find_box.value() + 1)
+    pump()
+    assert finds == [1]
+
+
 def test_either_selected_can_be_the_signature_before(window, pump):
     panel = _signatures(window, pump)
     panel.set_settings(before='After', modes='84')

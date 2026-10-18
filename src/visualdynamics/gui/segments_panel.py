@@ -52,7 +52,7 @@ from ..core.replication_segments import (
     VARIANCE_PERCENT,
     Segment,
 )
-from .editors import DoubleSpinBox
+from .editors import DoubleSpinBox, number_box
 from .icons import control_icon
 from .settings_panel import (
     PANEL_WIDTH,
@@ -81,13 +81,7 @@ def _spin(low: float, high: float, value: float, step: float,
           tip: str) -> DoubleSpinBox:
     """A field reporting only a finished edit, since each report
     redraws the judgment."""
-    box = DoubleSpinBox()
-    box.setRange(low, high)
-    box.setDecimals(2)
-    box.setSingleStep(step)
-    box.setValue(value)
-    box.setToolTip(tip)
-    return box
+    return number_box(low, high, value=value, step=step, tip=tip)
 
 
 class SegmentsPanel(QWidget):

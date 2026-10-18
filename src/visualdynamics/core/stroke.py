@@ -88,7 +88,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .shaker import ShakerRating, acceleration_channel, each_way, finite
+from .shaker import (
+    ShakerRating,
+    acceleration_channel,
+    each_way,
+    finite,
+    sentence,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from ..units import UnitSystem
@@ -435,10 +441,10 @@ class StrokeReading:
 
         rating = self.rating
         if rating.room is None:
-            travel = (f'{_sentence(self._travel_name())} '
+            travel = (f'{sentence(self._travel_name())} '
                       f'{_amount(max(self.travel_down, self.travel_up), "length", us)}')
         else:
-            travel = verdict(_sentence(self.to_the_stop(us)), 'stroke')
+            travel = verdict(sentence(self.to_the_stop(us)), 'stroke')
         lines = [travel]
         if self.fits_stroke is False and self.travel <= rating.stroke:
             lines.append(f'Centered, the travel would fit: '
@@ -554,11 +560,6 @@ def _amount(value: float, dimension: str, unit_system: UnitSystem) -> str:
     panel and the plot write it."""
     return (f'{_number(float(unit_system.from_si(value, dimension)))} '
             f'{unit_system.label_text(dimension)}')
-
-
-def _sentence(text: str) -> str:
-    """`text` with its first letter capitalized."""
-    return text[:1].upper() + text[1:]
 
 
 def _rating(value: Any) -> float | None:

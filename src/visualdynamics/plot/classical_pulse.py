@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _reading_plot
+
 #: how solid the envelope and the window are: light, since the record
 #: is what is read and the shading only brackets it
 SHADE_ALPHA = 45
@@ -76,7 +78,7 @@ def build_pulse_check(layout: Any, check: Any, *, unit_system: Any = None,
     time_label = f'time [{us.label_html("time")}]'
 
     # ---- the record on its envelope --------------------------------------
-    record_plot = _plot(layout, 0)
+    record_plot = _reading_plot(layout, 0)
     legend = legend_below(layout, record_plot, 0, colors)
     if check.time.size:
         fine = np.linspace(check.time[0], check.time[-1], ENVELOPE_POINTS)
@@ -151,7 +153,7 @@ def build_pulse_check(layout: Any, check: Any, *, unit_system: Any = None,
                          size='9pt')
 
     # ---- the velocity across the window ----------------------------------
-    velocity_plot = _plot(layout, 2)
+    velocity_plot = _reading_plot(layout, 2)
     velocity_plot.setXLink(record_plot)
     nominal = check.nominal_velocity_change
     reach = check.velocity_tolerance * abs(nominal)
@@ -183,14 +185,6 @@ def build_pulse_check(layout: Any, check: Any, *, unit_system: Any = None,
         size='9pt')
 
 
-def _plot(layout: Any, row: int) -> Any:
-    """A plot in `row` of the layout, gridded, with no SI scaling: the
-    units are in the labels."""
-    plot = layout.addPlot(row=row, col=0)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot
 
 
 def readout(check: Any, unit_system: Any = None) -> dict[str, str]:

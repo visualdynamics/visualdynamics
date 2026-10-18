@@ -121,7 +121,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .kurtosis import HIGH, LOW, NOMINAL, analyzed_span, kurtosis
+from .kurtosis import (
+    HIGH,
+    LOW,
+    NOMINAL,
+    analyzed_span,
+    frame_kurtosis,
+    kurtosis,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
@@ -762,9 +769,12 @@ def time_statistics(values: ArrayLike, sample_rate: float, *,
     # leaves it out
     times, frames = [], []
     for (low, _high), piece in zip(ranges, pieces):
-        for first in range(0, piece.size - length + 1, length):
-            frames.append(kurtosis(piece[first:first + length]))
-            times.append(float(start) + (low + first + length / 2.0) / rate)
+        count = piece.size // length
+        if count:
+            frames.extend(frame_kurtosis(
+                np.reshape(piece[:count * length], (count, length))))
+            firsts = np.arange(count) * length
+            times.extend(float(start) + (low + firsts + length / 2.0) / rate)
 
     deviation = max(abs(float(data.max()) - mean),
                     abs(float(data.min()) - mean))

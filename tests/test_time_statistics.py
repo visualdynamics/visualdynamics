@@ -785,7 +785,7 @@ def test_a_time_history_offers_the_statistics_reading(window, pump, clean):
     pane = _statistics(window, pump,
                        history(np.clip(clean, -25.0, 25.0)))
     assert pane.statistics_action.isVisible()
-    assert pane.showing_statistics
+    assert pane.showing('statistics')
     panel = pane.statistics_panel
     assert not panel.isHidden()
     assert panel.values['kurtosis'].text() == '2.860'

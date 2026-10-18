@@ -64,7 +64,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.solids import HOLE_DIMENSIONS, SECTIONS
-from .editors import DoubleSpinBox, commit_on_enter
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 # The pop-up windows this pane replaced (`plane_dialog`, 2026-09-26 and
@@ -115,10 +115,7 @@ DEFAULT_SIZE = 0.1
 
 def _box(value: float, minimum: float = -1e9) -> DoubleSpinBox:
     box = DoubleSpinBox()
-    # six places: the guides' dimensions are inch fractions to the 32nd
-    # and 64th (1.96875, -0.15625), and four places turned the BARC's
-    # channel positions into gaps, the model in four pieces (2026-10-17)
-    box.setDecimals(6)
+    box.setDecimals(LENGTH_DECIMALS)
     box.setRange(minimum, 1e9)
     box.setValue(value)
     return box

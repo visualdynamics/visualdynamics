@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.compliance import SRS_INNER_DB, SRS_POINTS_PERCENT
-from .editors import DoubleSpinBox
+from .editors import DoubleSpinBox, number_box
 from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_grid
 
 #: the outer band offered when it is first ticked, dB below and above
@@ -46,13 +46,7 @@ RULE_NAMES = (('share', 'Share inside'), ('above_lower', 'All above lower'))
 def _spin(low: float, high: float, value: float, tip: str) -> DoubleSpinBox:
     """A dB (or percent) field in half-decibel steps, reporting only a
     finished edit, since each report redraws the judgement."""
-    box = DoubleSpinBox()
-    box.setRange(low, high)
-    box.setDecimals(2)
-    box.setSingleStep(0.5)
-    box.setValue(value)
-    box.setToolTip(tip)
-    return box
+    return number_box(low, high, value=value, step=0.5, tip=tip)
 
 
 class SrsTolerancePanel(QWidget):

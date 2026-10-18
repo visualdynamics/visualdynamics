@@ -1116,6 +1116,16 @@ class MainWindow(QMainWindow):
         self.table_bar.addAction(self.author_action)
         self.author_action.setVisible(False)
         self._author_wanted: bool = False
+        #: the replication fit last read, as (record, its samples, the
+        #: inputs, the fit): a cutoff column picked only changes the
+        #: case drawn, and reading the fit again was 0.23 s of filters
+        #: and integrations for numbers already held. Let go whenever
+        #: the fit is not up, so a record left behind is not kept alive
+        self._held_fit: tuple | None = None
+        #: and the modes the signature comparison found, the same way:
+        #: a limit moved does not move them, and finding them again was
+        #: a tenth of a second on every tick of a limit's box
+        self._held_modes: tuple | None = None
         #: why the sheet just asked for could not be opened, said once
         #: on the status line of the render that stood it down
         self._author_refusal: str | None = None
@@ -11553,22 +11563,21 @@ class MainWindow(QMainWindow):
                                      fit=history is not None and any(
                                          dim == 'acceleration'
                                          for dim in history.ordinate_dim))
-        if history is not None and self.data_pane.showing_fit:
-            return self._render_replication_fit(history, series[0][0],
-                                                series[0][2])
-        if history is not None and self.data_pane.showing_wavelet:
-            return self._render_wavelet(history, series[0][0],
-                                        series[0][2])
-        if history is not None and self.data_pane.showing_kurtosis:
+        if not (history is not None and self.data_pane.showing('fit')):
+            self._held_fit = None
+        if history is not None and self.data_pane.showing('kurtosis'):
             return self._render_kurtosis(history, series)
-        if history is not None and self.data_pane.showing_statistics:
-            return self._render_statistics(history, series[0][0],
-                                           series[0][2])
-        if history is not None and self.data_pane.showing_pulse:
-            return self._render_pulse(history, series[0][0], series[0][2])
-        if history is not None and self.data_pane.showing_stroke:
-            return self._render_stroke(history, series[0][0],
-                                       series[0][2])
+        if history is not None:
+            # the readings that replace the trace, each drawn for one
+            # channel of the record: at most one is up (they are one
+            # exclusive group)
+            for key, render in (('fit', self._render_replication_fit),
+                                ('wavelet', self._render_wavelet),
+                                ('statistics', self._render_statistics),
+                                ('pulse', self._render_pulse),
+                                ('stroke', self._render_stroke)):
+                if self.data_pane.showing(key):
+                    return render(history, series[0][0], series[0][2])
         if all_frf and self.data_pane.showing_cmif:
             drawn = build_cmif(self.data_pane.graphics, series,
                                unit_system=self.unit_system,
@@ -11609,6 +11618,7 @@ class MainWindow(QMainWindow):
             self.data_pane.offer_waterfall(False)
             return self._render_signature(signature)
         self.data_pane.signature_panel.hide()
+        self._held_modes = None
         # a specification on its own reads two ways: its spectra, or
         # the level each channel asks for as bars over the table
         levels = self._specification_rows(series)
@@ -11825,8 +11835,10 @@ class MainWindow(QMainWindow):
         # flat plot's cursor and has no 3-D reading
         # and the tone readout's cursor, the same way: the tone is read
         # off the flat spectrum's lines, under a line the user drags
-        toning = (self._tone_source(series) is not None
-                  and self.data_pane.showing_tone)
+        # the button first: reading every record's lines for a tone is
+        # 13 ms on 200 autospectra, and is wanted only while it is up
+        toning = (self.data_pane.showing_tone
+                  and self._tone_source(series) is not None)
         offered = (entry is not None and not pairs and not lone_fed
                    and not cursor and not toning
                    and self._waterfall_count(entry) >= 1)
@@ -11907,8 +11919,8 @@ class MainWindow(QMainWindow):
         banded_source = self._octave_source(series)
         if banded_source is not None and self.data_pane.showing_octave:
             self._draw_octave(banded_source, series[0][2])
-        toned = self._tone_source(series)
-        if toned is not None and self.data_pane.showing_tone:
+        toned = self.data_pane.showing_tone and self._tone_source(series)
+        if toned:
             message = self._draw_tone(*toned) or message
         return message + axis_note
 
@@ -15853,12 +15865,7 @@ class MainWindow(QMainWindow):
         settings = panel.settings()
         panel.show()
         channel = records[0] if records else 0
-        if name is not None and len(history.response_dof) > 1 \
-                and records != [channel]:
-            item = self._item_for_object(name)
-            if item is not None:
-                item.setExpanded(True)
-            self._select_records(name, [channel])
+        self._settle_on_record(name, history, records, channel)
         us = self.unit_system
         dimension = history.ordinate_dim[channel]
         # an undefined dimension is raw numbers, (1, 0), and its range
@@ -15938,12 +15945,7 @@ class MainWindow(QMainWindow):
         # disagree. Signals stay blocked through `_select_records`, so
         # this never re-renders.
         channel = records[0] if records else 0
-        if name is not None and len(history.response_dof) > 1 \
-                and records != [channel]:
-            item = self._item_for_object(name)
-            if item is not None:
-                item.setExpanded(True)
-            self._select_records(name, [channel])
+        self._settle_on_record(name, history, records, channel)
         rate = history.sample_rate
         if not 0.0 < settings['low'] < settings['high']:
             return ('no frequencies this record can carry in that range '
@@ -16054,12 +16056,7 @@ class MainWindow(QMainWindow):
         except ValueError as refusal:
             panel.show_check(None, str(refusal))
             return str(refusal)
-        if name is not None and len(history.response_dof) > 1 \
-                and records != [channel]:
-            item = self._item_for_object(name)
-            if item is not None:
-                item.setExpanded(True)
-            self._select_records(name, [channel])
+        self._settle_on_record(name, history, records, channel)
         dof = str(history.response_dof[channel])
         settings = pane.pulse_settings
         if settings is None:
@@ -16133,10 +16130,11 @@ class MainWindow(QMainWindow):
         number is `core.replication_fit.replication_fit`'s, and the
         picture is `plot.replication_fit`'s, the one a script draws.
         The channel is the picked record when it is an acceleration,
-        the record's first acceleration otherwise.
+        the record's first acceleration otherwise, and the tree is
+        settled onto it, as every one-channel reading's is.
         """
         from ..core.replication_fit import replication_fit
-        from ..core.shaker import ShakerRating, acceleration_channel
+        from ..core.shaker import ShakerRating
         from ..plot.replication_fit import build_replication_fit
 
         panel = self.data_pane.replication_fit_panel
@@ -16147,14 +16145,23 @@ class MainWindow(QMainWindow):
         # flat: there is no depth axis for a travel against its stops
         self.data_pane.show_waterfall(False)
         self.data_pane.graphics.clear()
-        picked = [i for i in (records or [])
-                  if history.ordinate_dim[i] == 'acceleration']
         try:
-            channel = acceleration_channel(
-                history, picked[0] if picked else None)
-            fit = replication_fit(history, ShakerRating(**panel.rating()),
-                                  cutoffs=settings['cutoffs'],
-                                  channel=channel)
+            channel = self._acceleration_channel(history, records)
+            # settled like the other one-channel readings (Brandon,
+            # 2026-10-18): the fit alone left a whole-object selection
+            # standing over a picture of one channel
+            self._settle_on_record(name, history, records, channel)
+            inputs = (ShakerRating(**panel.rating()),
+                      tuple(settings['cutoffs']), channel)
+            held = self._held_fit
+            if (held is not None and held[0] is history
+                    and held[1] is history.ordinate and held[2] == inputs):
+                fit = held[3]
+            else:
+                self._held_fit = None
+                fit = replication_fit(history, inputs[0],
+                                      cutoffs=inputs[1], channel=channel)
+                self._held_fit = (history, history.ordinate, inputs, fit)
             cutoff = settings['cutoff']
             if cutoff is not ... and cutoff is not None:
                 fit.case(cutoff)          # a cutoff no longer offered
@@ -16213,16 +16220,8 @@ class MainWindow(QMainWindow):
         self.data_pane.graphics.clear()
         # offered only where a declared acceleration channel is, so
         # there is one to read
-        accelerations = [i for i in range(history.num_records)
-                         if history.ordinate_dim[i] == 'acceleration']
-        channel = (records[0] if records and records[0] in accelerations
-                   else accelerations[0])
-        if name is not None and len(history.response_dof) > 1 \
-                and records != [channel]:
-            item = self._item_for_object(name)
-            if item is not None:
-                item.setExpanded(True)
-            self._select_records(name, [channel])
+        channel = self._acceleration_channel(history, records)
+        self._settle_on_record(name, history, records, channel)
         settings = panel.settings()
         try:
             reading = read_stroke(history, channel, **settings)
@@ -16244,6 +16243,28 @@ class MainWindow(QMainWindow):
                 f'{prefix}, channel={channel}{given}, '
                 "path='stroke.png', show=False)")
         return summary(reading, self.unit_system)
+
+    def _settle_on_record(self, name, history, records, channel):
+        """Settle the tree onto the one record a reading is drawn for,
+        so the selection and the picture cannot disagree. Signals stay
+        blocked through `_select_records`, so this never re-renders."""
+        if name is not None and len(history.response_dof) > 1 \
+                and records != [channel]:
+            item = self._item_for_object(name)
+            if item is not None:
+                item.setExpanded(True)
+            self._select_records(name, [channel])
+
+    @staticmethod
+    def _acceleration_channel(history, records):
+        """The channel the replication fit and the stroke read: the
+        first picked record when it is a declared acceleration, the
+        record's first such channel otherwise (`core.shaker`)."""
+        from ..core.shaker import acceleration_channel
+
+        picked = [i for i in (records or [])
+                  if history.ordinate_dim[i] == 'acceleration']
+        return acceleration_channel(history, picked[0] if picked else None)
 
     def _kurtosis_bounds_moved(self, low, high):
         """Remember a dragged band, so a redraw does not put it back."""
@@ -16701,7 +16722,14 @@ class MainWindow(QMainWindow):
             return f'Signature: {modes}'
         named = modes is not None
         if not named:
-            modes = find_modes(before, record, settings['find'])
+            held, asked = self._held_modes, (record, settings['find'])
+            if (held is not None and held[0] is before
+                    and held[1] is before.ordinate and held[2] == asked):
+                modes = list(held[3])
+            else:
+                modes = find_modes(before, record, settings['find'])
+                self._held_modes = (before, before.ordinate, asked,
+                                    tuple(modes))
             if not modes:
                 panel.show_result(None)
                 return f'Signature: {before_name} has no peak to compare'
@@ -17211,7 +17239,7 @@ class MainWindow(QMainWindow):
         # is the reading: the levels' readings stand down until it is
         # put away
         self.data_pane.offer_sweep_rate(True)
-        if self.data_pane.showing_sweep_rate:
+        if self.data_pane.showing('sweep_rate'):
             self.data_pane.show_srs_views(False)
             tone = pick_tone(tones)
             return self._render_sweep_rate(

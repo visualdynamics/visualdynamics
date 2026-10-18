@@ -29,6 +29,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _reading_plot
+
 #: the bars of the histogram. Odd, so the middle bar is centered on
 #: the record's middle value; enough that the bell's shoulders and a
 #: clipped record's spikes at each edge are separate bars
@@ -98,7 +100,7 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
     hollow = pg.mkBrush(0, 0, 0, 0)
 
     # ---- the trace, over the span read -----------------------------
-    trace = _plot(layout, 0)
+    trace = _reading_plot(layout, 0)
     legend = legend_below(layout, trace, 0, colors)
     pen = pg.mkPen(colors['response_curve'], width=1)
     for k, (low, high) in enumerate(spans):
@@ -144,7 +146,7 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
                    color=alarm if flagged else foreground, size='9pt')
 
     # ---- the histogram against the Gaussian -------------------------
-    bell = _plot(layout, 2)
+    bell = _reading_plot(layout, 2)
     legend = legend_below(layout, bell, 1, colors)
     values = np.concatenate([ordinate[low:high] for low, high in spans])
     edges, density = histogram(np.asarray(shown(values), dtype=float))
@@ -198,7 +200,7 @@ def build_time_statistics(layout: Any, history: Any, stats: Any,
                          else foreground), size='9pt')
 
     # ---- the kurtosis against time ----------------------------------
-    frames = _plot(layout, 4)
+    frames = _reading_plot(layout, 4)
     legend = legend_below(layout, frames, 2, colors)
     low, high = stats.frame_band
     shade = QColor(colors['averaging_band'])
@@ -277,12 +279,3 @@ def percent(share: float) -> str:
                                       trim='-') + ' %'
 
 
-def _plot(layout: Any, row: int) -> Any:
-    """A plot in `row` of the layout, gridded, with no SI scaling."""
-    plot = layout.addPlot(row=row, col=0)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    # the units are in the labels; turned off before anything is drawn,
-    # as the shock check's rows do, or an axis keeps the old scale
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot

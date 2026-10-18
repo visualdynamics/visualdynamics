@@ -435,3 +435,15 @@ def test_the_pane_keeps_an_inch_fraction_to_the_64th(window):
     for box in panel.center:            # a width is never below zero
         box.setValue(-0.15625)
         assert box.value() == pytest.approx(-0.15625, abs=1e-9)
+
+
+def test_every_length_box_keeps_an_inch_fraction_to_the_64th(window):
+    """The same places for every length typed into the scene's panes:
+    the rigid-body reference point kept four and read 1.96875 in as
+    1.9688."""
+    scene = window.scene
+    boxes = (*scene.rigid_panel.point_boxes, *scene.pattern_panel.spacings,
+             scene.mesh_solids_panel.size, scene.merge_panel.tolerance)
+    for box in boxes:
+        box.setValue(1.96875)
+        assert box.value() == pytest.approx(1.96875, abs=1e-9)

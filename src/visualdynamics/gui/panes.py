@@ -11,7 +11,8 @@ of its own opened from a script.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from functools import partial
+from typing import Any, ClassVar, NamedTuple
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -145,6 +146,24 @@ COMPONENTS: tuple[tuple[str, str], ...] = (
     ('Imaginary', 'imag'),
     ('Phase', 'phase'),
 )
+
+
+class Reading(NamedTuple):
+    """One of the data bar's readings of a time history, by the names
+    its parts have on `DataPane`."""
+
+    #: the pane holds `<key>_action` and `<key>_wanted`
+    key: str
+    #: the attribute holding its settings panel, or None for none
+    panel: str | None
+    #: which `show_controls` offer puts it on the bar: 'averaging',
+    #: 'sine', 'shocks', 'fit', or 'record' for either kind of record
+    offered_by: str
+    #: drawn in place of the trace with no 3-D form, so the 2-D/3-D
+    #: toggle is not offered while it is up
+    flat: bool = False
+    #: its panel's settings are kept on the pane as `<key>_settings`
+    sticky: bool = False
 
 
 class DataPane(QWidget):
@@ -356,25 +375,24 @@ class DataPane(QWidget):
         self.sweep_rate_panel.hide()
         self.wavelet_panel: WaveletPanel = WaveletPanel()
         self.wavelet_panel.hide()
-        self.wavelet_panel.changed.connect(self._wavelet_edited)
         # the time statistics' settings and their table, beside the
         # three rows that draw them; read only, nothing to apply
         self.statistics_panel: StatisticsPanel = StatisticsPanel()
         self.statistics_panel.hide()
-        self.statistics_panel.changed.connect(self._statistics_edited)
         # the pulse a record is judged against, beside the judgment
         self.pulse_panel: PulsePanel = PulsePanel()
         self.pulse_panel.hide()
-        self.pulse_panel.changed.connect(self._pulse_edited)
         # the shaker's ratings beside a record checked against them
         self.replication_fit_panel: ReplicationFitPanel = \
             ReplicationFitPanel()
         self.replication_fit_panel.hide()
-        self.replication_fit_panel.changed.connect(self._fit_edited)
         # the shaker's shock ratings beside the pulse read against them
         self.stroke_panel: StrokePanel = StrokePanel()
         self.stroke_panel.hide()
-        self.stroke_panel.changed.connect(self._stroke_edited)
+        for reading in self._READINGS:
+            if reading.sticky:
+                getattr(self, reading.panel).changed.connect(
+                    partial(self._settings_edited, reading.key))
         # the specification being written at a shape set's modal
         # coordinates, beside the plot that previews it; the toggle
         # is on the table bar, where a lone shape set's readings are
@@ -881,15 +899,9 @@ class DataPane(QWidget):
             'shock stroke, velocity and force typed beside it')
         self.stroke_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.stroke_action)
-        for action in (self.averaging_action, self.filter_action,
-                       self.sine_action,
-                       self.truncate_action, self.kurtosis_action,
-                       self.statistics_action,
-                       self.shocks_action, self.wavelet_action,
-                       self.pulse_action,
-                       self.fit_action,
-                       self.stroke_action):
-            self.reading_group.addAction(action)
+        for reading in self._READINGS:
+            self.reading_group.addAction(
+                getattr(self, f'{reading.key}_action'))
         # the banded reading of a spectrum: the octave conversion
         # previewed as steps over the narrowband, its spacing in the
         # pane, the act on the pane's own button (Brandon,
@@ -900,7 +912,11 @@ class DataPane(QWidget):
         self.octave_action.setToolTip(
             'Preview the spectrum integrated onto proportional bands, '
             'over the narrowband it comes from')
-        self.octave_action.triggered.connect(self._choose_octave)
+        # a lambda, not a partial: PySide reads a slot's signature to
+        # decide whether `triggered` passes `checked`, and called a
+        # partial with no `checked` at all
+        self.octave_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('octave', checked))
         toolbar.addAction(self.octave_action)
         # and the tone read off it: a cursor on the spectrum, the tone
         # under it read as an amplitude beside the spike it stands at,
@@ -913,7 +929,8 @@ class DataPane(QWidget):
             'Read the tone under a cursor on the spectrum: its amplitude '
             'summed from the lines it leaks into, beside the height of '
             'its spike, which moves with the line spacing and the window')
-        self.tone_action.triggered.connect(self._choose_tone)
+        self.tone_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('tone', checked))
         toolbar.addAction(self.tone_action)
         # a sine specification read against the modes it sweeps
         # through: the time and cycles in each half-power band, and
@@ -928,7 +945,8 @@ class DataPane(QWidget):
             'time and cycles in each half-power band, and whether the '
             'rate is under 87 fn / Q\u00b2 oct/min on a log sweep, '
             'fn\u00b2 / Q\u00b2 Hz/s on a linear one')
-        self.sweep_rate_action.triggered.connect(self._choose_sweep_rate)
+        self.sweep_rate_action.triggered.connect(
+            lambda checked=False: self._choose_toggle('sweep_rate', checked))
         # offered by the render that draws a sine specification, and by
         # nothing else, so it starts put away
         self.sweep_rate_action.setVisible(False)
@@ -978,7 +996,6 @@ class DataPane(QWidget):
             self.plot_mode_group.actions(),
             [self.waterfall_action],
             [self.octave_action, self.tone_action],
-            [self.octave_action],
             [self.sweep_rate_action],
             self.comparison_group.actions(),
             self.spectra_group.actions(),
@@ -1024,21 +1041,38 @@ class DataPane(QWidget):
                          f'({image.width()} × {image.height()})')
         return True
 
-    #: the readings, as (action attribute, wanted flag, panel attribute).
-    #: One list, so that adding a fifth reading is one entry rather than
-    #: an edit to every other reading's handler.
-    _READINGS = (('averaging_action', 'averaging_wanted', 'averaging_panel'),
-                 ('filter_action', 'filter_wanted', 'filter_panel'),
-                 ('sine_action', 'sine_wanted', 'sine_panel'),
-                 ('truncate_action', 'truncate_wanted', 'truncate_panel'),
-                 ('kurtosis_action', 'kurtosis_wanted', None),
-                 ('statistics_action', 'statistics_wanted',
-                  'statistics_panel'),
-                 ('shocks_action', 'shocks_wanted', 'shock_panel'),
-                 ('wavelet_action', 'wavelet_wanted', 'wavelet_panel'),
-                 ('pulse_action', 'pulse_wanted', 'pulse_panel'),
-                 ('fit_action', 'fit_wanted', 'replication_fit_panel'),
-                 ('stroke_action', 'stroke_wanted', 'stroke_panel'))
+    #: the readings of a time history, one entry each: what the pane
+    #: offers, checks, puts away and keeps is derived from this list,
+    #: so a new reading is a row here rather than an edit to every
+    #: other reading's handler. The order is the bar's.
+    _READINGS: ClassVar[tuple[Reading, ...]] = (
+        Reading('averaging', 'averaging_panel', 'averaging'),
+        Reading('filter', 'filter_panel', 'averaging'),
+        # offered for a record that has a sweep specification to be
+        # read against, and nowhere else (principle 3)
+        Reading('sine', 'sine_panel', 'sine'),
+        # the cut is offered wherever the averaging is: both are
+        # readings of a record's stretch of time
+        Reading('truncate', 'truncate_panel', 'averaging'),
+        # offered wherever a record is, shock or random: a record is
+        # what has channels to be Gaussian
+        Reading('kurtosis', None, 'record', flat=True),
+        # offered where the averaging is, as the scalogram is: its
+        # bands are for a record meant to be Gaussian random, which a
+        # shock record is not (2026-10-16, on review)
+        Reading('statistics', 'statistics_panel', 'averaging',
+                flat=True, sticky=True),
+        Reading('shocks', 'shock_panel', 'shocks'),
+        Reading('wavelet', 'wavelet_panel', 'averaging', sticky=True),
+        # offered wherever the shocks are: a record that may hold a
+        # pulse
+        Reading('pulse', 'pulse_panel', 'shocks', sticky=True),
+        # both integrate acceleration, so they are offered for a record
+        # that holds some in a declared unit and nowhere else
+        Reading('fit', 'replication_fit_panel', 'fit',
+                flat=True, sticky=True),
+        Reading('stroke', 'stroke_panel', 'fit', flat=True, sticky=True),
+    )
 
     def show_acts(self, acts: Sequence[tuple]) -> None:
         """Put the acts the selection can take on this bar
@@ -1059,11 +1093,11 @@ class DataPane(QWidget):
         same rule written four times; the time it disagreed with itself
         left shocks up with the filter still on.
         """
-        for action_name, wanted, panel_name in self._READINGS:
-            action = getattr(self, action_name)
-            setattr(self, wanted, action.isChecked())
-            if not action.isChecked() and panel_name is not None:
-                getattr(self, panel_name).hide()
+        for reading in self._READINGS:
+            action = getattr(self, f'{reading.key}_action')
+            setattr(self, f'{reading.key}_wanted', action.isChecked())
+            if not action.isChecked() and reading.panel is not None:
+                getattr(self, reading.panel).hide()
 
     def _choose_averaging(self, checked: bool) -> None:
         """The averaging button: remember it, then say so.
@@ -1091,41 +1125,35 @@ class DataPane(QWidget):
         self._readings_settled()
         self.truncate_toggled.emit(checked)
 
-    def _choose_octave(self, checked: bool) -> None:
-        """The octave button: remember it, then say so."""
-        self.octave_wanted = bool(checked)
+    def _choose_toggle(self, key: str, checked: bool) -> None:
+        """The octave, tones or sweep-rate button, each a toggle of its
+        own: remember it, put its panel away when it is unchecked, then
+        say so."""
+        setattr(self, f'{key}_wanted', bool(checked))
         if not checked:
-            self.octave_panel.hide()
-        self.octave_toggled.emit(checked)
+            getattr(self, f'{key}_panel').hide()
+        getattr(self, f'{key}_toggled').emit(checked)
 
-    def _choose_tone(self, checked: bool) -> None:
-        """The tones button: remember it, then say so."""
-        self.tone_wanted = bool(checked)
-        if not checked:
-            self.tone_panel.hide()
-        self.tone_toggled.emit(checked)
+    def showing(self, key: str) -> bool:
+        """Whether the reading or toggle `key` (its action is
+        `<key>_action`) is offered and checked."""
+        action = getattr(self, f'{key}_action')
+        return action.isVisible() and action.isChecked()
 
-    def _choose_sweep_rate(self, checked: bool) -> None:
-        """The sweep-rate button: remember it, then say so."""
-        self.sweep_rate_wanted = bool(checked)
-        if not checked:
-            self.sweep_rate_panel.hide()
-        self.sweep_rate_toggled.emit(checked)
-
-    @property
-    def showing_sweep_rate(self) -> bool:
-        """Whether the sweep-rate reading is offered and checked."""
-        return (self.sweep_rate_action.isVisible()
-                and self.sweep_rate_action.isChecked())
+    def _offer(self, key: str, panel: str | None, offered: bool) -> None:
+        """Put `<key>_action` on the bar or take it off, checked as it
+        was last left; its panel is put away unless it is up."""
+        wanted = offered and getattr(self, f'{key}_wanted')
+        getattr(self, f'{key}_action').setVisible(offered)
+        getattr(self, f'{key}_action').setChecked(wanted)
+        if not wanted and panel is not None:
+            getattr(self, panel).hide()
 
     def offer_sweep_rate(self, offered: bool) -> None:
         """Show or hide the Sweep Rate toggle, for a sine specification;
         checked as it was last left. Its panel goes with it when it is
         not offered or not checked."""
-        self.sweep_rate_action.setVisible(offered)
-        self.sweep_rate_action.setChecked(offered and self.sweep_rate_wanted)
-        if not (offered and self.sweep_rate_wanted):
-            self.sweep_rate_panel.hide()
+        self._offer('sweep_rate', 'sweep_rate_panel', offered)
         if offered:
             self.toolbar.setVisible(True)
 
@@ -1138,75 +1166,16 @@ class DataPane(QWidget):
         self._readings_settled()
         self.reread.emit()
 
-    def _wavelet_edited(self, settings) -> None:
-        """A scalogram parameter moved: keep it, then draw again.
+    def _settings_edited(self, key: str, settings) -> None:
+        """A reading's setting moved: keep it, then draw again.
 
-        Kept on the pane rather than in the panel, so a tuned range
-        survives clicking away to another object and back — the same
-        stickiness every other view choice on this bar has.
+        Kept on the pane as `<key>_settings` rather than in the panel,
+        so a tuned range, a pulse or a shaker's ratings survive clicking
+        away to another object and back: the same stickiness every
+        other view choice on this bar has.
         """
-        self.wavelet_settings = dict(settings)
+        setattr(self, f'{key}_settings', dict(settings))
         self.reread.emit()
-
-    def _statistics_edited(self, settings) -> None:
-        """A statistics setting moved: keep it, then draw again. Kept
-        on the pane, as the wavelet's are, so it is sticky."""
-        self.statistics_settings = dict(settings)
-        self.reread.emit()
-
-    @property
-    def showing_statistics(self) -> bool:
-        """Whether the time statistics are offered and checked."""
-        return (self.statistics_action.isVisible()
-                and self.statistics_action.isChecked())
-    def _pulse_edited(self, settings) -> None:
-        """The pulse or a tolerance moved: keep it, then draw again —
-        on the pane, so the pulse survives clicking away and back, as
-        the scalogram's settings do."""
-        self.pulse_settings = dict(settings)
-        self.reread.emit()
-
-    @property
-    def showing_pulse(self) -> bool:
-        """Whether the pulse check is offered and checked."""
-        return (self.pulse_action.isVisible()
-                and self.pulse_action.isChecked())
-
-    def _fit_edited(self, settings) -> None:
-        """A rating, the cutoffs or the cutoff drawn moved: keep them on
-        the pane, as the scalogram's are, then draw again."""
-        self.fit_settings = dict(settings)
-        self.reread.emit()
-
-    @property
-    def showing_fit(self) -> bool:
-        """Whether the replication fit is offered and checked."""
-        return self.fit_action.isVisible() and self.fit_action.isChecked()
-
-    def _stroke_edited(self, settings) -> None:
-        """A shock rating moved: keep it, then draw again. Kept on the
-        pane, as the scalogram's settings are, so the ratings survive
-        clicking away to another record and back."""
-        self.stroke_settings = dict(settings)
-        self.reread.emit()
-
-    @property
-    def showing_stroke(self) -> bool:
-        """Whether the stroke reading is offered and checked."""
-        return (self.stroke_action.isVisible()
-                and self.stroke_action.isChecked())
-
-    @property
-    def showing_wavelet(self) -> bool:
-        """Whether the scalogram is offered and checked."""
-        return (self.wavelet_action.isVisible()
-                and self.wavelet_action.isChecked())
-
-    @property
-    def showing_kurtosis(self) -> bool:
-        """Whether the kurtosis bar chart is offered and checked."""
-        return (self.kurtosis_action.isVisible()
-                and self.kurtosis_action.isChecked())
 
     @property
     def rms_wanted(self) -> bool:
@@ -1551,12 +1520,12 @@ class DataPane(QWidget):
         # half of principle 3, and the half that survives: it is the
         # readings that stay offered whichever one is chosen (Brandon,
         # 2026-08-27).
-        # the fit by whether it is up, not wanted: its choice is sticky
+        # by whether a reading is up, not wanted: the choice is sticky
         # across a selection it is not offered for, such as a spectrum,
         # which keeps its 3-D form
-        flat = (self.kurtosis_wanted or self.statistics_wanted
-                or self.showing_fit or self.stroke_wanted
-                or self.flat_only)
+        flat = self.flat_only or any(
+            reading.flat and self.showing(reading.key)
+            for reading in self._READINGS)
         self.waterfall_action.setVisible(offered and not flat)
         if offered and not flat:
             self.toolbar.setVisible(True)
@@ -1840,31 +1809,12 @@ class DataPane(QWidget):
         # whichever button had been pressed, with no way back except
         # unpicking it first (Brandon, 2026-08-27). A fenced set of
         # five that shows one is worse than the undivided row was.
-        reading = averaging or shocks
-        instead = reading and (self.kurtosis_wanted or self.wavelet_wanted
-                               or self.statistics_wanted
-                               or self.pulse_wanted
-                               or (fit and self.fit_wanted)
-                               or self.stroke_wanted)
-        self.averaging_action.setVisible(averaging)
-        self.filter_action.setVisible(averaging)
-        self.filter_action.setChecked(averaging and self.filter_wanted)
-        if not averaging or instead:
-            self.filter_panel.hide()
-        # the cut is offered wherever the averaging is: both are
-        # readings of a record's stretch of time
-        # the sine reading is offered for a record that has a sweep
-        # specification to be read against, and nowhere else
-        # (principle 3)
-        self.sine_action.setVisible(averaging and sine)
-        self.sine_action.setChecked(averaging and sine and not instead
-                                    and self.sine_wanted)
-        if not (averaging and sine) or instead:
-            self.sine_panel.hide()
-        self.truncate_action.setVisible(averaging)
-        self.truncate_action.setChecked(averaging and self.truncate_wanted)
-        if not averaging or instead:
-            self.truncate_panel.hide()
+        offers = {'averaging': averaging, 'sine': averaging and sine,
+                  'shocks': shocks, 'fit': fit,
+                  'record': averaging or shocks}
+        for reading in self._READINGS:
+            self._offer(reading.key, reading.panel,
+                        offers[reading.offered_by])
         # only show_pairs puts it up, and only when there is a choice
         self.pair_action.setVisible(False)
         # and only offer_waterfall puts this one up, where plain curves
@@ -1882,66 +1832,13 @@ class DataPane(QWidget):
         self.quantity_action.setVisible(False)
         for action in (self.page_action,):
             action.setVisible(False)
-        self.averaging_action.setChecked(
-            averaging and not instead and self.averaging_wanted)
-        if not averaging or instead:
-            # the panel belongs to the button: nothing else may show it,
-            # so a selection with no averaging — or one reading its
-            # kurtosis instead — cannot leave one up
-            self.averaging_panel.hide()
-        # offered wherever the averaging is: both are readings of a
-        # record, and a record is what has channels to be Gaussian
-        self.kurtosis_action.setVisible(reading)
-        self.kurtosis_action.setChecked(reading and self.kurtosis_wanted)
-        # beside it, but offered where the averaging is, as the
-        # scalogram is: its bands are for a record meant to be Gaussian
-        # random, which a shock record is not (2026-10-16, on review)
-        self.statistics_action.setVisible(averaging)
-        self.statistics_action.setChecked(averaging
-                                          and self.statistics_wanted)
-        if not averaging or not self.statistics_wanted:
-            self.statistics_panel.hide()
-        # the scalogram is offered wherever the averaging is, and for
-        # the same reason: both are readings of a record
-        self.wavelet_action.setVisible(averaging)
-        self.wavelet_action.setChecked(averaging and self.wavelet_wanted)
-        self.shocks_action.setVisible(shocks)
-        # the replication fit integrates acceleration, so it is offered
-        # for a record that holds some and nowhere else (principle 3)
-        self.fit_action.setVisible(fit)
-        self.fit_action.setChecked(fit and self.fit_wanted)
-        if not fit or not self.fit_wanted:
-            self.replication_fit_panel.hide()
-        # the octave reading belongs to a plain density; offered there,
-        # absent everywhere else (principle 3)
-        self.octave_action.setVisible(octave)
-        self.octave_action.setChecked(octave and self.octave_wanted)
-        if not octave or not self.octave_wanted:
-            self.octave_panel.hide()
-        # and the tone readout to an autospectrum on even lines, which
-        # has a line spacing to undo
-        self.tone_action.setVisible(tone)
-        self.tone_action.setChecked(tone and self.tone_wanted)
-        if not tone or not self.tone_wanted:
-            self.tone_panel.hide()
+        # the octave reading belongs to a plain density, and the tone
+        # readout to an autospectrum on even lines, which has a line
+        # spacing to undo; offered there, absent everywhere else
+        # (principle 3)
+        self._offer('octave', 'octave_panel', octave)
+        self._offer('tone', 'tone_panel', tone)
         self.residual_action.setVisible(residual)
-        self.shocks_action.setChecked(shocks and self.shocks_wanted)
-        if not shocks or instead:
-            self.shock_panel.hide()
-        if not averaging or not self.wavelet_wanted:
-            self.wavelet_panel.hide()
-        # the pulse check is offered wherever the shocks are: a record
-        # that may hold a pulse
-        self.pulse_action.setVisible(shocks)
-        self.pulse_action.setChecked(shocks and self.pulse_wanted)
-        if not shocks or not self.pulse_wanted:
-            self.pulse_panel.hide()
-        # the stroke integrates acceleration, as the replication fit
-        # does, so it is offered where the fit is and nowhere else
-        self.stroke_action.setVisible(fit)
-        self.stroke_action.setChecked(fit and self.stroke_wanted)
-        if not fit or not self.stroke_wanted:
-            self.stroke_panel.hide()
         # the CMIF is singular values — there is no real part to pick
         self.component_action.setVisible(
             complex_data and not (cmif and self.showing_cmif))
@@ -2005,15 +1902,14 @@ class DataPane(QWidget):
         """Set the bar up for the fitting screen: hide the reading and
         view controls, and show Edit Fit and Resynthesis when
         `offered`."""
-        for action in (self.curves_action, self.map_action,
+        # the readings from their table: the list written out here
+        # missed the scalogram, the statistics and the pulse check
+        readings = [getattr(self, f'{reading.key}_action')
+                    for reading in self._READINGS]
+        for action in (*readings, self.curves_action, self.map_action,
                        self.drive_point_action, self.cmif_action,
-                       self.averaging_action, self.kurtosis_action,
-                       self.shocks_action, self.filter_action,
-                       self.stroke_action,
-                       self.truncate_action, self.octave_action,
-                       self.tone_action,
+                       self.octave_action, self.tone_action,
                        self.sweep_rate_action,
-                       self.fit_action,
                        self.scaling_action, self.waterfall_action,
                        self.log_frequency_action,
                        self.quantity_action, self.page_action):

@@ -745,6 +745,21 @@ def test_a_rating_edited_redraws_the_verdict(window, pump):
     assert title.startswith('3 Hz: fits')
 
 
+def test_a_whole_object_selection_settles_on_the_channel_read(window,
+                                                              pump):
+    """Selected whole, a record is read at its first acceleration, and
+    the tree is settled onto that record, as every one-channel
+    reading's is, so the selection says what the picture is of."""
+    force = np.ones(4096)
+    _looking_at(window, pump,
+                record(np.vstack([force, tone().ordinate[0][:4096]]),
+                       dims=['force', 'acceleration']), name='Two')
+    _reading(window, pump)
+    assert window.record_grids['Two'].selected_records() == [1]
+    assert window._item_for_object('Two').isExpanded()
+    assert window._status_text.startswith('2Z+')
+
+
 def test_a_column_clicked_draws_that_cutoff(window, pump):
     _looking_at(window, pump, logged())
     panel = _reading(window, pump)
@@ -758,6 +773,31 @@ def test_a_column_clicked_draws_that_cutoff(window, pump):
     assert window.data_pane.fit_settings['cutoff'] == 8.0
     assert window.data_pane.graphics.getItem(0, 0).titleLabel.text \
         .startswith('8 Hz: fits')
+
+
+def test_a_column_clicked_draws_the_fit_already_read(window, pump,
+                                                     monkeypatch):
+    """Picking a column changes only the case drawn, so the fit is not
+    read again; a rating moved is a new fit."""
+    from visualdynamics.core import replication_fit as module
+
+    _looking_at(window, pump, logged())
+    panel = _reading(window, pump)
+    reads = []
+    real = module.replication_fit
+    monkeypatch.setattr(module, 'replication_fit',
+                        lambda *a, **k: reads.append(1) or real(*a, **k))
+    panel.table.selectColumn(4)
+    pump()
+    assert window.data_pane.fit_settings['cutoff'] == 8.0
+    assert reads == [], 'the same fit, another case of it'
+    panel.boxes['stroke'].setValue(panel.boxes['stroke'].value() * 2.0)
+    panel.boxes['stroke'].editingFinished.emit()
+    pump()
+    assert reads == [1]
+    window.data_pane.fit_action.trigger()       # put away: let go
+    pump()
+    assert window._held_fit is None
 
 
 def test_the_cutoffs_are_typed_and_a_bad_list_is_put_back(window, pump):
@@ -843,6 +883,24 @@ def test_the_reading_wears_its_own_glyph(qt_app):
 
     ours = control_icon('replication_fit').pixmap(32).toImage()
     assert ours != control_icon('no-such-glyph').pixmap(32).toImage()
+
+
+def test_the_travel_is_drawn_at_the_pictures_width(window, pump):
+    """The travel is a record-length trace, decimated to its peaks and
+    clipped to the view as every time history here is."""
+    import pyqtgraph as pg
+
+    _looking_at(window, pump, tone(), name='Tone')
+    _reading(window, pump)
+    plots = [item for item in window.data_pane.graphics.ci.items
+             if isinstance(item, pg.PlotItem)]
+    traces = [item for plot in plots for item in plot.listDataItems()
+              if item.xData is not None and len(item.xData) > 100
+              and item.opts['pen'] is not None]
+    assert traces, 'the travel'
+    travel = max(traces, key=lambda item: len(item.xData))
+    assert travel.opts['autoDownsample']
+    assert travel.opts['clipToView']
 
 
 def test_a_spectrum_after_the_fit_keeps_its_3d_form(window, pump):

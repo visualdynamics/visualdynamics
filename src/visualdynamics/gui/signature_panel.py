@@ -26,7 +26,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QWidget
 
 from ..core.signature import AMPLITUDE_LIMIT, FREQUENCY_LIMIT, SignatureMode
-from .editors import DoubleSpinBox, SpinBox
+from .editors import DoubleSpinBox, SpinBox, number_box
 from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_grid
 
 #: how many modes are found when none is named
@@ -59,13 +59,8 @@ def modes_text(modes: Sequence[SignatureMode]) -> str:
 
 
 def _percent(value: float, tip: str) -> DoubleSpinBox:
-    box = DoubleSpinBox()
-    box.setRange(0.0, 100.0)
-    box.setDecimals(1)
-    box.setSingleStep(1.0)
-    box.setValue(value)
-    box.setToolTip(tip)
-    return box
+    return number_box(0.0, 100.0, value=value, decimals=1, step=1.0,
+                      tip=tip)
 
 
 class SignaturePanel(QWidget):

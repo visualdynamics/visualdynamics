@@ -30,7 +30,7 @@ from ..core.time_statistics import (
     TimeStatistics,
 )
 from ..plot.time_statistics import percent
-from .editors import DoubleSpinBox
+from .editors import DoubleSpinBox, number_box
 from .settings_panel import add_derived, add_keyed_settings, add_rule, panel_grid
 
 #: the table under the rule, as (key, name), in the order it reads.
@@ -60,14 +60,8 @@ def _spin(low: float, high: float, value: float, decimals: int,
           tip: str, suffix: str = '') -> DoubleSpinBox:
     """A field that reports only a finished edit, since each report
     redraws three plots."""
-    box = DoubleSpinBox()
-    box.setRange(low, high)
-    box.setDecimals(decimals)
-    box.setValue(value)
-    box.setToolTip(tip)
-    if suffix:
-        box.setSuffix(suffix)
-    return box
+    return number_box(low, high, value=value, decimals=decimals, tip=tip,
+                      suffix=suffix)
 
 
 class StatisticsPanel(QWidget):

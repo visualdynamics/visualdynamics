@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import _long_trace, _reading_plot
+
 #: the pen styles, so nothing is carried by hue alone: the table's own
 #: motion solid, the travel with the body dashed, the ratings dotted
 SOLID, DASHED, DOTTED = 1, 2, 3        # Qt.PenStyle values
@@ -61,10 +63,10 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
             plot.addItem(line, ignoreBounds=False)
 
     # the acceleration
-    acceleration_plot = _plot(layout, 0)
-    acceleration_plot.plot(time, us.from_si(reading.acceleration,
-                                            'acceleration'),
-                           pen=pg.mkPen(trace, width=1.5))
+    acceleration_plot = _reading_plot(layout, 0)
+    _long_trace(acceleration_plot, time,
+                us.from_si(reading.acceleration, 'acceleration'),
+                pg.mkPen(trace, width=1.5))
     acceleration_plot.setLabel('left', axis_label('acceleration', us))
     words = f'{reading.dof}: peak {amount(reading.peak_acceleration, "acceleration")}'
     if reading.force is not None:
@@ -76,14 +78,16 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
                                size='9pt')
 
     # the velocity, with the shock velocity either side of zero
-    velocity_plot = _plot(layout, 1)
+    velocity_plot = _reading_plot(layout, 1)
     velocity_plot.setXLink(acceleration_plot)
-    velocity_plot.plot(time, us.from_si(reading.velocity, 'velocity'),
-                       pen=pg.mkPen(trace, width=1.5))
+    _long_trace(velocity_plot, time,
+                us.from_si(reading.velocity, 'velocity'),
+                pg.mkPen(trace, width=1.5))
     if reading.counts_body:
-        velocity_plot.plot(
-            time, us.from_si(rating.relative(reading.velocity), 'velocity'),
-            pen=relative)
+        _long_trace(
+            velocity_plot, time,
+            us.from_si(rating.relative(reading.velocity), 'velocity'),
+            relative)
     if rating.velocity is not None:
         rating_lines(velocity_plot, rating.velocity, 'velocity')
     velocity_plot.setLabel('left', axis_label('velocity', us))
@@ -96,16 +100,17 @@ def build_stroke(layout: Any, reading: Any, *, unit_system: Any = None,
                            size='9pt')
 
     # the displacement, with the stops half the stroke from center
-    displacement_plot = _plot(layout, 2)
+    displacement_plot = _reading_plot(layout, 2)
     displacement_plot.setXLink(acceleration_plot)
     legend = legend_below(layout, displacement_plot, 3, colors)
     table = pg.mkPen(trace, width=1.5)
-    displacement_plot.plot(time, us.from_si(reading.displacement, 'length'),
-                           pen=table, name='table')
+    _long_trace(displacement_plot, time,
+                us.from_si(reading.displacement, 'length'), table, 'table')
     if reading.counts_body:
-        displacement_plot.plot(
-            time, us.from_si(rating.relative(reading.displacement), 'length'),
-            pen=relative, name='relative to the body')
+        _long_trace(
+            displacement_plot, time,
+            us.from_si(rating.relative(reading.displacement), 'length'),
+            relative, 'relative to the body')
     if rating.room is not None:
         rating_lines(displacement_plot, rating.room, 'length')
         legend.addItem(pg.PlotDataItem([], [], pen=rating_pen()),
@@ -138,16 +143,6 @@ def _tone(share: float | None, colors: Any) -> str:
     return colors['plot_foreground']
 
 
-def _plot(layout: Any, row: int) -> Any:
-    """A plot in `row` of the layout, gridded, with no SI scaling."""
-    plot = layout.addPlot(row=row, col=0)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    # the units are in the labels; an automatic 'x0.001' beside an axis
-    # labeled in seconds would say the same thing twice, and turned off
-    # after drawing an axis kept its old numbers
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot
 
 
 def summary(reading: Any, unit_system: Any = None) -> str:

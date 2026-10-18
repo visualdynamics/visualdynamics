@@ -27,7 +27,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .editors import DoubleSpinBox, commit_on_enter
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 # Brandon, 2026-10-11: the merge was a question and an answer, a
@@ -67,7 +67,7 @@ class MergePanel(QWidget):
         grid = panel_grid(self, self.title)
         self.tolerance_label: QLabel = QLabel('Tolerance')
         self.tolerance: DoubleSpinBox = DoubleSpinBox()
-        self.tolerance.setDecimals(6)
+        self.tolerance.setDecimals(LENGTH_DECIMALS)
         self.tolerance.setRange(0.0, 1e9)
         self.tolerance.setToolTip(
             'Nodes closer than this are one place, in the display unit')

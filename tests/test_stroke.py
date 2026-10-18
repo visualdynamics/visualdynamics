@@ -719,6 +719,21 @@ def test_a_record_with_a_sample_that_is_not_a_number_says_so(window, pump):
     assert pane.stroke_panel.derived['peak'].text() == '—'
 
 
+def test_the_traces_are_drawn_at_the_pictures_width(window, pump):
+    """Every record-length trace is decimated to its peaks and clipped
+    to the view: drawn whole, a million-sample record cost 1.4 s a
+    repaint, on every hover and resize."""
+    pane = _stroke_reading(window, pump)
+    traces = [item for plot in _plots(pane.graphics)
+              for item in plot.listDataItems()
+              if item.xData is not None and len(item.xData) > 100]
+    assert len(traces) >= 3, 'acceleration, velocity and displacement'
+    for item in traces:
+        assert item.opts['autoDownsample']
+        assert item.opts['downsampleMethod'] == 'peak'
+        assert item.opts['clipToView']
+
+
 def test_the_stroke_reading_stands_the_trace_marks_down(window, pump):
     """It replaces the trace, as the scalogram does, so the averaging
     and shock panels are put away and the 3-D toggle is not offered."""

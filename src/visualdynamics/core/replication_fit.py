@@ -94,7 +94,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .shaker import ShakerRating, acceleration_channel, each_way, finite
+from .shaker import (
+    ShakerRating,
+    acceleration_channel,
+    each_way,
+    finite,
+    sentence,
+)
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from .data import TimeHistory
@@ -303,11 +309,11 @@ class FitCase:
         """The verdict in words, as shares of the ratings, as the view
         and the panel state it."""
         if self.fits:
-            return (f'{_sentence(self.name())}: fits, using '
+            return (f'{sentence(self.name())}: fits, using '
                     f'{_of(self.stroke_share, "the room")}, '
                     f'{_of(self.velocity_share, "the velocity rating")} '
                     f'and {_of(self.force_share, "the force rating")}.')
-        return (f'{_sentence(self.name())}: does not fit; '
+        return (f'{sentence(self.name())}: does not fit; '
                 + ' and '.join(self.shortfalls()) + '.')
 
 
@@ -440,12 +446,6 @@ def _of(share: float, what: str) -> str:
     amount = _percent(share)
     return f'{amount} {what}' if amount.endswith('times') \
         else f'{amount} of {what}'
-
-
-def _sentence(text: str) -> str:
-    """`text` with its first letter capitalized and nothing else
-    touched, so 'Hz' stays 'Hz'."""
-    return text[:1].upper() + text[1:]
 
 
 def replication_fit(history: TimeHistory, rating: ShakerRating, *,

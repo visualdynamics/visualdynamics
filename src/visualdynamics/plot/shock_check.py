@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _reading_plot
+
 #: the marker each polarity wears, in `NAMES` order
 SYMBOLS = ('o', 't')
 
@@ -66,7 +68,7 @@ def build_shock_check(layout: Any, history: Any, check: Any,
     time_label = f'time [{us.label_html("time")}]'
 
     # the record over the window
-    record_plot = _plot(layout, 0)
+    record_plot = _reading_plot(layout, 0)
     acceleration = np.real(np.asarray(history.ordinate)[
         record, first:first + time.size])
     record_plot.plot(time, us.from_si(acceleration, 'acceleration'),
@@ -76,7 +78,7 @@ def build_shock_check(layout: Any, history: Any, check: Any,
                          size='9pt')
 
     # its velocity, raw, with the band it has to end inside
-    velocity_plot = _plot(layout, 2)
+    velocity_plot = _reading_plot(layout, 2)
     velocity_plot.setXLink(record_plot)
     reach = float(us.from_si(check.tolerance * check.peak_velocity,
                              'velocity'))
@@ -99,7 +101,7 @@ def build_shock_check(layout: Any, history: Any, check: Any,
                                   else foreground), size='9pt')
 
     # the two spectra, on log axes
-    srs_plot = _plot(layout, 4)
+    srs_plot = _reading_plot(layout, 4)
     srs_plot.setLogMode(x=True, y=True)
     legend = legend_below(layout, srs_plot, 2, colors)
     first_curve = next(iter(spectra.values()))
@@ -140,17 +142,6 @@ def build_shock_check(layout: Any, history: Any, check: Any,
                       color=foreground, size='9pt')
 
 
-def _plot(layout: Any, row: int) -> Any:
-    """A plot in `row` of the layout, gridded, with no SI scaling."""
-    plot = layout.addPlot(row=row, col=0)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    # the units are in the labels, and a scale of 'x0.001' beside an
-    # axis already labeled in seconds says the same thing twice. Turned
-    # off before anything is drawn: turned off after, an axis drawn at
-    # the old scale kept its numbers and read 250 s for 0.25 s
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot
 
 
 def _level_ticks(low: float, high: float) -> list[tuple[float, str]]:

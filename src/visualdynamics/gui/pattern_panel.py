@@ -20,7 +20,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .editors import DoubleSpinBox, SpinBox, commit_on_enter
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, SpinBox, commit_on_enter
 from .settings_panel import panel_grid
 
 # Brandon, 2026-10-11. The Frame-Wing has 41 insert holes, 41 inserts
@@ -58,7 +58,7 @@ class PatternPanel(QWidget):
             count.setRange(1, 10_000)
             count.setToolTip(f'How many along {axis}, the original included')
             spacing = DoubleSpinBox()
-            spacing.setDecimals(6)
+            spacing.setDecimals(LENGTH_DECIMALS)
             spacing.setRange(-1e9, 1e9)
             spacing.setToolTip(f'How far apart along {axis}; negative goes '
                                'the other way')

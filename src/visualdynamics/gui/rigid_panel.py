@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.rigid import INERTIA_TERMS, MassProperties, axis_name
-from .editors import DoubleSpinBox, commit_on_enter
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import add_derived, add_rule, panel_grid
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -67,7 +67,7 @@ class RigidBodyPanel(QWidget):
         self.point_boxes: list[DoubleSpinBox] = []
         for row, axis in enumerate(('X', 'Y', 'Z'), start=2):
             box = DoubleSpinBox()
-            box.setDecimals(4)
+            box.setDecimals(LENGTH_DECIMALS)
             box.setRange(-1e9, 1e9)
             box.setToolTip(
                 f'{axis} of the point the rotations pivot on — the CG, '

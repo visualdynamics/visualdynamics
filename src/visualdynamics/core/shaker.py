@@ -207,6 +207,12 @@ def acceleration_channel(history: TimeHistory,
     return index
 
 
+def sentence(text: str) -> str:
+    """`text` with its first letter capitalized and nothing else
+    touched, so 'Hz' stays 'Hz'."""
+    return text[:1].upper() + text[1:]
+
+
 def finite(values: Any, dof: str) -> np.ndarray:
     """`values` as real floats, refused when any is not finite: one NaN
     integrates to a travel of NaN from that sample on, and a NaN is

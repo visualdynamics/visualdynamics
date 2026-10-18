@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 
 from ..core.compliance import SRS_POINTS_PERCENT
+from . import _signed_db
 
 #: the marker each polarity wears, in the order the spectra are given
 SYMBOLS = ('o', 's', 'd', 't1', 'star')
@@ -69,7 +70,7 @@ def _db(value: Any) -> str:
     'the limit'."""
     if np.ndim(value):
         return 'the limit'
-    return f'{value:+g} dB'.replace('-', '\u2212')
+    return _signed_db(value)
 
 
 def band_text(inner: tuple[Any, Any],

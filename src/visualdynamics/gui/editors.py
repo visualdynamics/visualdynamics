@@ -127,6 +127,37 @@ class SpinBox(_Clamping, QSpinBox):
         return round(_Clamping.valueFromText(self, text))
 
 
+#: the places a length box keeps: the guides' dimensions are inch
+#: fractions to the 32nd and 64th (1.96875, -0.15625), and four places
+#: turned the BARC's channel positions into gaps, the model in four
+#: pieces (2026-10-17)
+LENGTH_DECIMALS = 6
+
+
+def number_box(low: float, high: float, *, value: float | None = None,
+               decimals: int = 2, step: float | None = None, tip: str = '',
+               suffix: str = '') -> DoubleSpinBox:
+    """A `DoubleSpinBox` over [`low`, `high`] for a settings panel.
+
+    The range and the places are set before the value, which is the
+    order that keeps it: a value set first is clamped to the default
+    range and rounded to the default two places. Like every
+    `DoubleSpinBox`, it reports only a finished edit, since each report
+    redraws a reading.
+    """
+    box = DoubleSpinBox()
+    box.setRange(low, high)
+    box.setDecimals(decimals)
+    if step is not None:
+        box.setSingleStep(step)
+    if value is not None:
+        box.setValue(value)
+    box.setToolTip(tip)
+    if suffix:
+        box.setSuffix(suffix)
+    return box
+
+
 class DoubleSpinBox(_Clamping, QDoubleSpinBox):
     """A decimal spin box that commits on a finished edit and brings a
     typed value inside its range, as `SpinBox` does for whole numbers.

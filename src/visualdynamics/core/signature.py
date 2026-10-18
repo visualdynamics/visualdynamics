@@ -674,8 +674,9 @@ def find_modes(data: Any, record: int = 0, count: int = 2, *,
     m = np.where(np.isfinite(m), m, 0.0)
     low, high = (f[0], f[-1]) if bounds is None else sorted(bounds)
     inside = np.flatnonzero((f >= low) & (f <= high))
-    peaks = [int(i) for i in inside if 0 < i < len(m) - 1
-             and m[i] > 0.0 and m[i] >= m[i - 1] and m[i] > m[i + 1]]
+    # every local maximum at once: a noisy 16k-line curve has thousands
+    i = inside[(inside > 0) & (inside < len(m) - 1)]
+    peaks = i[(m[i] > 0.0) & (m[i] >= m[i - 1]) & (m[i] > m[i + 1])].tolist()
     if not peaks:
         return []
     rank = prominence(m, peaks, prominence_window(len(inside)))

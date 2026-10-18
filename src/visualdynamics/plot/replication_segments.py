@@ -30,6 +30,8 @@ from typing import Any
 
 import numpy as np
 
+from . import _long_trace, _reading_plot
+
 #: each kind's edge style, as Qt pen styles by name
 KIND_STYLES = {'stationary': 'SolidLine', 'transient': 'DashLine',
                'shock': 'DotLine'}
@@ -171,20 +173,20 @@ def build_replication_segments(layout: Any, measured: Any,
     foreground = colors['plot_foreground']
     time_label = f'time [{us.label_html("time")}]'
 
-    overlay = _plot(layout, 0)
+    overlay = _reading_plot(layout, 0)
     # the legend under the plot takes every named curve added after it
     legend_below(layout, overlay, 0, colors)
-    _curve(overlay, time, reference_shown,
+    _long_trace(overlay, time, reference_shown,
            pg.mkPen(colors['specification_curve'], width=STOOD_BACK_WIDTH),
            'reference')
-    _curve(overlay, time, control_shown,
+    _long_trace(overlay, time, control_shown,
            pg.mkPen(curve_color(0, colors), width=1), 'control')
     overlay.setLabel('left', axis_label(dimension, us))
     overlay.setTitle(describe_record(result), color=foreground, size='9pt')
 
-    difference = _plot(layout, 2)
+    difference = _reading_plot(layout, 2)
     difference.setXLink(overlay)
-    _curve(difference, time, control_shown - reference_shown,
+    _long_trace(difference, time, control_shown - reference_shown,
            pg.mkPen(curve_color(0, colors), width=1),
            'control \u2212 reference')
     difference.setLabel('left', f'difference [{axis_label(dimension, us)}]')
@@ -233,21 +235,5 @@ def build_replication_segments(layout: Any, measured: Any,
     return result
 
 
-def _plot(layout: Any, row: int) -> Any:
-    """A plot in `row` of the layout, gridded, with no SI scaling (the
-    units are in the labels)."""
-    plot = layout.addPlot(row=row, col=0)
-    plot.showGrid(x=True, y=True, alpha=0.2)
-    for side in ('left', 'bottom'):
-        plot.getAxis(side).enableAutoSIPrefix(False)
-    return plot
 
 
-def _curve(plot: Any, x: np.ndarray, y: np.ndarray, pen: Any,
-           name: str) -> Any:
-    """A long trace on `plot`, drawn at a picture's width: decimated to
-    its peaks and clipped to the view, as every time history here is."""
-    curve = plot.plot(x, y, pen=pen, name=name)
-    curve.setDownsampling(auto=True, method='peak')
-    curve.setClipToView(True)
-    return curve

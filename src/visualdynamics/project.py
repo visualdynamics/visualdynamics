@@ -3197,8 +3197,10 @@ class Project(dict):
             What to call the result. Defaults to the geometry's name
             with ' Modes' after it.
         progress : callable, optional
-            Called with ``(done, total)`` as the solve advances. The
-            app's progress bar uses it; a script can print it.
+            Called with ``(done, total)`` as the solve advances, and with
+            a total of `core.progress.BUSY` while a stage runs that
+            cannot count itself. The app's progress bar uses it; a
+            script can print it.
 
         Returns
         -------

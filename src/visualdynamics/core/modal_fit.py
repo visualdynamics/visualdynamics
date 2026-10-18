@@ -49,7 +49,7 @@ pole, was inspired by SMAC; its computations are not the ones here.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -442,9 +442,8 @@ class ModalFitSession:
             inside = np.ones(len(s1), dtype=bool)
         free = inside.copy()
         for mode in self.modes:
-            width = mode['damping'] * mode['frequency']
             free &= np.abs(self.frequencies
-                           - mode['frequency']) > width
+                           - mode['frequency']) > self._claim(mode)
         if not free.any():
             free = inside
         interior = [i for i in range(1, len(s1) - 1)
@@ -491,6 +490,25 @@ class ModalFitSession:
     #: times this floor, as the remainder is four times under it.
     NEIGHBOR_FLOOR = 0.1
 
+    def _claim(self, mode: Mapping[str, Any]) -> float:
+        """How far either side of a confirmed mode's frequency is its own,
+        in Hz: its half-power half-width, damping times frequency, and
+        never less than half the line spacing, so the line it sits on is
+        always its own.
+
+        Without the floor a mode whose damping collapsed to the search's
+        least claimed less than a line. On FRFs 2 Hz apart with one line
+        forty times its neighbors at 530 Hz, the fit confirmed five modes
+        within half a hertz of it at 0.01 %, each a little off the line
+        and so leaving it free to be offered again.
+        """
+        # found on the raw plate stream (2026-09-03), reproduced with a
+        # planted spike and fixed 2026-10-18
+        if self.frequencies.size < 2:
+            return float(mode['damping'] * mode['frequency'])
+        half_line = 0.5 * float(np.median(np.diff(self.frequencies)))
+        return max(float(mode['damping'] * mode['frequency']), half_line)
+
     def _another_mode_at(self, index: int) -> bool:
         """Whether the residual at this line belongs to a mode not yet
         confirmed, judged by shape.
@@ -506,7 +524,7 @@ class ModalFitSession:
         covering = [mode['shape'][:len(self.responses)]
                     for mode in self.modes
                     if abs(self.frequencies[index] - mode['frequency'])
-                    <= mode['damping'] * mode['frequency']]
+                    <= self._claim(mode)]
         basis = np.array([shape for shape in covering
                           if np.vdot(shape, shape).real > 0.0]).T
         if basis.size == 0:
@@ -1322,7 +1340,7 @@ class ModalFitSession:
         # z=0.027 blend the moment damping could roam.
         farthest = 1.5 * df
         for mode in self.modes:
-            width = float(mode['damping'] * mode['frequency'])
+            width = self._claim(mode)
             edge_low = mode['frequency'] - width
             edge_high = mode['frequency'] + width
             if line < edge_low:

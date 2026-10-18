@@ -4,7 +4,8 @@ Start it with `visualdynamics [files...]` (the older `visualdynamics-gui`
 still works) or `python -m visualdynamics`. Files named on the command
 line are imported once the window is open, `--theme dark` or
 `--theme light` sets the theme, and `--no-disclaimer` skips the alpha
-notice.
+notice. On Windows, a machine without the OpenGL the 3-D view needs is
+told so before the window is built (`opengl`).
 """
 
 from __future__ import annotations
@@ -188,6 +189,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         code, message = check(where[0])
         print(message, flush=True)
         return code
+    from . import opengl
+
+    if '--check-gl' in argv:
+        # the packaged build's other self-check: can this machine draw
+        # the 3-D view? (gui.opengl.check — 0 yes, 2 no)
+        code, message = opengl.check()
+        print(message, flush=True)
+        return code
+    # before the window: building its 3-D view is where a machine with no
+    # OpenGL driver dies, with an access violation and no word
+    reason = opengl.missing()
+    if reason is not None:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(None, 'Visual Dynamics', reason)
+        return 2
     from .icons import app_icon
 
     app.setWindowIcon(app_icon())

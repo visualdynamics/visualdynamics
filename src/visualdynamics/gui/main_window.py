@@ -806,6 +806,10 @@ class MainWindow(QMainWindow):
         #: ('group', (id, ...)) — the element groups picked, one or
         #: several (2026-10-10) — None for a category (2026-09-30)
         self.editing_scope: tuple | None = None
+        #: {id of a geometry: (fingerprint, fem.group_masses)}, so a click
+        #: on an unchanged geometry does not build its model again; the
+        #: fingerprint, not the id, decides whether the masses still hold
+        self._mass_cache: dict[str, tuple] = {}
         self._picked_nodes = []       # nodes gathered for an element
         self._shape_source = None     # (geometry, shape set) while a mode plays
         #: (geometry name, the proposed set) while the rigid-body
@@ -7387,9 +7391,16 @@ class MainWindow(QMainWindow):
         through a queued signal while the loop is running, where the
         pump is a harmless extra turn. The caller hides the bar when
         it is done."""
+        from ..core.progress import BUSY
+
         bar = self._import_progress
-        bar.setRange(0, max(int(total), 1))
-        bar.setValue(int(done))
+        if int(total) == BUSY:
+            # a stage that cannot count itself: Qt's moving bar, which
+            # animates on this thread while the work runs on its own
+            bar.setRange(0, 0)
+        else:
+            bar.setRange(0, max(int(total), 1))
+            bar.setValue(int(done))
         if bar.isHidden():
             bar.show()
             # show() only *posts* the layout request, and the loop
@@ -8479,6 +8490,69 @@ class MainWindow(QMainWindow):
         # are shown in the display system, and follow it (2026-09-26)
         if self.editing is not None:
             self._reload_edit_table()
+
+    def _group_masses(self, geometry):
+        """`fem.group_masses` of this geometry, kept until anything it
+        depends on changes: the nodes, the connectivity, the element
+        groups or their properties."""
+        import hashlib
+
+        from ..core.fem import group_masses
+
+        digest = hashlib.blake2b(digest_size=16)
+        digest.update(np.ascontiguousarray(geometry.node_xyz,
+                                           dtype=np.float64).tobytes())
+        digest.update(np.asarray(geometry.node_id, dtype=np.int64).tobytes())
+        digest.update(np.asarray(geometry.elem_group,
+                                 dtype=np.int64).tobytes())
+        if len(geometry.elem_conn):
+            digest.update(np.concatenate(
+                [np.asarray(conn, dtype=np.int64).ravel()
+                 for conn in geometry.elem_conn]).tobytes())
+        digest.update(repr(sorted((int(k), repr(v)) for k, v in
+                                  (geometry.group_properties or {}).items())
+                           ).encode())
+        key = digest.digest()
+        held = self._mass_cache.get(id(geometry))
+        if held is None or held[0] != key:
+            held = (key, group_masses(geometry))
+            self._mass_cache[id(geometry)] = held
+        return held[1]
+
+    def _weight_note(self, geometry, groups=None) -> str:
+        """'weight 12.4 lbf' for these element groups of a geometry (all of
+        them when None), or '' when none of them has a material.
+
+        Weight is what an engineer weighs a structure in: lbf when the
+        display system's force is lbf, kg otherwise, which is how each
+        system states it. The mass is the solve's own
+        (`fem.group_masses`), and a group that is not yet weighed (no
+        material) is said, so a partial weight is not read as the whole.
+        """
+        # Brandon, 2026-10-18: in lbf for an imperial system (its mass
+        # unit is a slinch, which nobody reads as weight) and kg for SI
+        if not getattr(geometry, 'group_properties', None):
+            return ''
+        from ..units import to_si
+
+        masses = self._group_masses(geometry)
+        wanted = list(masses) if groups is None else [
+            int(group) for group in groups if int(group) in masses]
+        weighed = [masses[group] for group in wanted
+                   if masses[group] is not None]
+        if not weighed:
+            return ''
+        kilograms = float(sum(weighed))
+        if self.unit_system.unit('force') == 'lbf':
+            shown = float(self.unit_system.from_si(
+                kilograms * float(to_si(1.0, 'g')), 'force'))
+            text = f'weight {shown:.4g} lbf'
+        else:
+            text = f'weight {kilograms:.4g} kg'
+        if len(weighed) < len(wanted):
+            text += (f' ({len(weighed)} of {len(wanted)} element groups '
+                     'have a material)')
+        return text
 
     def _status_for(self, obj):
         """How big the object is, and anything wrong with it."""
@@ -10618,6 +10692,9 @@ class MainWindow(QMainWindow):
             if entities:
                 message = (self._entity_summary(geometry, entities)
                            + _label_note(geometry, None, entities))
+                if entities.get('groups'):
+                    weight = self._weight_note(geometry, entities['groups'])
+                    message += f' — {weight}' if weight else ''
             elif entry['components']:
                 shown = ', '.join(sorted(c.replace('_', ' ')
                                          for c in entry['components']))
@@ -10627,6 +10704,8 @@ class MainWindow(QMainWindow):
                            + _label_note(geometry, entry['components'], None))
             else:
                 message = self._status_for(geometry)
+                weight = self._weight_note(geometry)
+                message += f' — {weight}' if weight else ''
         else:
             undefined = sum(1 for _, e in geometries
                             if not e['object'].units_defined)

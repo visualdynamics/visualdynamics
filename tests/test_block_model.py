@@ -91,11 +91,10 @@ def test_a_beam_block_rebuilds_a_frame():
     assert np.abs(m_b - m_o).max() <= 1e-12 * np.abs(m_o).max()
 
 
-def test_a_stiffened_panel_mixes_blocks():
-    """A plate element group and a beam element group on shared nodes: one structure,
-    six rigid modes, the stiffener's stiffness in the answer."""
+def _stiffened_panel():
+    """(the bare plate model, a geometry of it with a rib as a second
+    element group, the skin's group id)."""
     plate = square_plate(4)
-    bare = plate.eigensolution(num_modes=8).frequency
     geometry = plate.geometry()
     group = int(geometry.group_id[0])
     # a stiffener along the middle row of nodes, as a second element group
@@ -115,6 +114,14 @@ def test_a_stiffened_panel_mixes_blocks():
             group + 1: GroupProperties(
                 ALUMINUM, section=Section.rectangle('rib', 0.01, 0.03),
                 orientation=(0.0, 0.0, 1.0))})
+    return plate, stiffened, group
+
+
+def test_a_stiffened_panel_mixes_blocks():
+    """A plate element group and a beam element group on shared nodes: one structure,
+    six rigid modes, the stiffener's stiffness in the answer."""
+    plate, stiffened, _group = _stiffened_panel()
+    bare = plate.eigensolution(num_modes=8).frequency
     model = Model.from_geometry(stiffened)
     assert len(model.plates) == 16 and len(model.beams) == 4
     assert len(model.pieces()) == 1
@@ -201,3 +208,33 @@ def test_block_properties_survive_the_native_file(tmp_path):
     props = back.group_properties[int(back.group_id[0])]
     assert props.section == tube and props.orientation == orientation
     assert props.thickness is None
+
+
+def test_each_element_group_weighs_what_the_model_counts():
+    """The status line's weight: per element group, built and weighed as
+    the solve builds and weighs it, so the parts add up to the model."""
+    from visualdynamics.core.fem import group_masses
+
+    _plate, stiffened, skin = _stiffened_panel()
+    masses = group_masses(stiffened)
+    assert set(masses) == {skin, skin + 1}
+    model = Model.from_geometry(stiffened)
+    assert sum(masses.values()) == pytest.approx(model.total_mass)
+    xyz = np.asarray(stiffened.node_xyz)
+    side = float(np.ptp(xyz[:, 0]))
+    assert masses[skin] == pytest.approx(
+        ALUMINUM.density * 0.01 * side * float(np.ptp(xyz[:, 1])))
+    assert masses[skin + 1] == pytest.approx(
+        ALUMINUM.density * 0.01 * 0.03 * side)
+
+
+def test_a_group_that_makes_no_elements_weighs_nothing_said():
+    """A group with no material yet is None, not zero, and the others
+    are still weighed: a sum can say what it leaves out."""
+    from visualdynamics.core.fem import group_masses
+
+    _plate, stiffened, skin = _stiffened_panel()
+    stiffened.group_properties = {skin: GroupProperties(ALUMINUM, 0.01)}
+    masses = group_masses(stiffened)
+    assert masses[skin + 1] is None
+    assert masses[skin] > 0.0

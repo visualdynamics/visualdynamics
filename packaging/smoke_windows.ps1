@@ -40,6 +40,25 @@ $exe = Join-Path $target 'VisualDynamics.exe'
 if (-not (Test-Path $exe)) { throw "installed, but $exe is not there" }
 Write-Host "installed to $target"
 
+# 1a. Before Mesa, the runner is the machine a Remote Desktop user has:
+# no OpenGL driver. The launcher must say so (gui.opengl.check, exit 2)
+# instead of dying in VTK with 0xC0000005. Exit 0 means this runner has
+# OpenGL of its own, so the path went unexercised: a warning, not a
+# failure. Anything else, the access violation above all, fails.
+$glLog = 'dist\smoke\gl-before-mesa.log'
+$glErr = 'dist\smoke\gl-before-mesa-stderr.log'
+$gl = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList '--check-gl' `
+    -RedirectStandardOutput $glLog -RedirectStandardError $glErr
+Get-Content $glLog
+switch ($gl.ExitCode) {
+    2 { Write-Host 'without a driver, the launcher says what is missing' }
+    0 { Write-Warning 'this runner has OpenGL of its own: the no-driver path was not exercised' }
+    default {
+        Get-Content $glErr | Select-Object -Last 40
+        throw "the OpenGL check without a driver failed (exit $($gl.ExitCode))"
+    }
+}
+
 # 1b. The runner has no GPU. Without one, Windows offers OpenGL 1.1
 # and VTK cannot get a pixel format from it, looks for Mesa, and dies
 # with 0xC0000005 before any window (the third run on real Windows,
@@ -59,6 +78,15 @@ if ($LASTEXITCODE -ne 0) { throw 'could not unpack Mesa' }
 Copy-Item (Join-Path $mesaDir 'x64\*.dll') $target -Force
 if (-not (Test-Path (Join-Path $target 'opengl32.dll'))) { throw 'Mesa did not land beside the exe' }
 Write-Host "Mesa $mesaVersion (llvmpipe) placed beside the exe: the runner has no GPU"
+# and with Mesa there, the same check must find OpenGL it can draw with
+$gl = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList '--check-gl' `
+    -RedirectStandardOutput 'dist\smoke\gl-with-mesa.log' `
+    -RedirectStandardError 'dist\smoke\gl-with-mesa-stderr.log'
+Get-Content 'dist\smoke\gl-with-mesa.log'
+if ($gl.ExitCode -ne 0) {
+    Get-Content 'dist\smoke\gl-with-mesa-stderr.log' | Select-Object -Last 40
+    throw "with Mesa beside the exe, the OpenGL check failed (exit $($gl.ExitCode))"
+}
 
 # 1c. Can the installed build save an animation? Its files being there
 # says nothing about whether the encoder inside them answers, so the

@@ -839,7 +839,7 @@ def aligned_traces(measured: TimeHistory, specification: DataArray,
         raise ValueError(f'the reference names no channel {dof}')
     index = dofs.index(dof)
     dim = specification.ordinate_dim[index]
-    (row,) = rep._rows_by_dof(measured, [dof], dim)
+    (row,) = rep._rows_by_dof(measured, [dof], [dim])
     if row is None:
         raise ValueError(f'the run has no {dim} record at {dof}')
     averaging = rep.averaging_for(measured, specification)

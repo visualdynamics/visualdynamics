@@ -207,17 +207,29 @@ def leftover(measured: TimeHistory, specification: DataArray,
 
 
 def _rows_by_dof(data: DataArray, dofs: Sequence[str],
-                 dim: str) -> list[int | None]:
-    """First record at each DOF carrying `dim`, or None where there is
-    none. First, not best: a channel is picked by what it is, never by
-    which one happens to compare well."""
+                 dims: Sequence[str]) -> list[int | None]:
+    """First record at each DOF carrying that DOF's quantity in `dims`,
+    or None where there is none. First, not best: a channel is picked by
+    what it is, never by which one happens to compare well."""
     out = []
-    for dof in dofs:
+    for dof, dim in zip(dofs, dims):
         match = [i for i in range(data.num_records)
                  if data.channel_key(i)[0] == dof
                  and data.channel_key(i)[1] == dim]
         out.append(match[0] if match else None)
     return out
+
+
+def _control_rows(measured: DataArray,
+                  specification: DataArray) -> list[int | None]:
+    """The record answering each control channel of the target, each by
+    its own quantity: a drive point's force target pairs with the force
+    record and an acceleration target beside it with an accelerometer."""
+    # each channel's own quantity (2026-10-18): the first channel's was
+    # read for all of them, so a force target beside acceleration
+    # targets refused or dropped every acceleration channel
+    return _rows_by_dof(measured, list(specification.response_dof),
+                        list(specification.ordinate_dim))
 
 
 def lag_of(measured: TimeHistory, specification: DataArray,
@@ -242,9 +254,7 @@ def lag_of(measured: TimeHistory, specification: DataArray,
     if averaging is None:
         return 0
     n = averaging.frame_length
-    dofs = list(specification.response_dof)
-    dim = specification.ordinate_dim[0]
-    rows = _rows_by_dof(measured, dofs, dim)
+    rows = _control_rows(measured, specification)
     pairs = [(specification.ordinate[c], measured.ordinate[r])
              for c, r in enumerate(rows) if r is not None]
     pairs = [(s, m) for s, m in pairs if np.abs(s).max() > 0.0]
@@ -393,8 +403,7 @@ def compare(measured: TimeHistory, specification: DataArray,
     n = averaging.frame_length
     band = _band_for(n, rate) if 'srs' in metrics else None
     dofs = list(specification.response_dof)
-    dim = specification.ordinate_dim[0]
-    rows = _rows_by_dof(measured, dofs, dim)
+    rows = _control_rows(measured, specification)
 
     scales = [float(np.linalg.norm(specification.ordinate[c]))
               for c in range(len(dofs))]
@@ -417,7 +426,8 @@ def compare(measured: TimeHistory, specification: DataArray,
                           if measured.channel_key(i)[0] == dof), None)
             if other is None:
                 continue
-            refused, _note = units_check(dim, measured.ordinate_dim[other],
+            refused, _note = units_check(specification.ordinate_dim[c],
+                                         measured.ordinate_dim[other],
                                          wanted_name='the target',
                                          held_name='the record')
             for playing in found_playings:
@@ -425,7 +435,8 @@ def compare(measured: TimeHistory, specification: DataArray,
                             'zero_target': False, 'refused': refused,
                             **dict.fromkeys(metrics, float('nan'))})
             continue
-        _refused, note = units_check(dim, measured.ordinate_dim[row])
+        _refused, note = units_check(specification.ordinate_dim[c],
+                                     measured.ordinate_dim[row])
         whole = specification.ordinate[c]
         silent = scales[c] <= floor
         for playing in found_playings:
@@ -480,8 +491,7 @@ def event_slice(measured: TimeHistory, specification: DataArray,
         return None
     a, n = wanted[0]['start'], wanted[0]['samples']
     dofs = list(specification.response_dof)
-    dim = specification.ordinate_dim[0]
-    rows = _rows_by_dof(measured, dofs, dim)
+    rows = _control_rows(measured, specification)
     keep = [(dof, row) for dof, row in zip(dofs, rows) if row is not None]
     if not keep:
         return None

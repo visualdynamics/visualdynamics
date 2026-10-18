@@ -1296,3 +1296,22 @@ def test_a_tie_between_two_components_is_broken_by_order_not_round_off():
     assert fem.signed_modes(mode)[:, 0].tolist() == pytest.approx(
         [-0.1, 1.0, -1.0 - 1e-9, -0.2])
     assert np.array_equal(fem.signed_modes(-mode), fem.signed_modes(mode))
+
+
+def test_the_dense_eigensolution_is_announced_as_busy():
+    """The dense solver's eigensolution is one call that reports
+    nothing while it runs, and the bar stood still at half for all of
+    it. It is announced as BUSY between the factorization's tick and
+    the solve's end; the sparse solver counts its iterations instead."""
+    from visualdynamics.core.progress import BUSY
+
+    model = straight_beam(1.0, fem.Section.rod('rod', 0.01), 8)
+    for solver, expected in (('dense', 1), ('sparse', 0)):
+        told = []
+        model.eigensolution(num_modes=4, fixed=['100'], solver=solver,
+                            progress=lambda d, t, out=told: out.append((d, t)))
+        busy = [i for i, (_d, total) in enumerate(told) if total == BUSY]
+        assert len(busy) == expected, (solver, told)
+        if busy:
+            assert told[-1][0] == told[-1][1] > 0, 'and the bar ends full'
+            assert busy[0] < len(told) - 1, 'a count follows it'

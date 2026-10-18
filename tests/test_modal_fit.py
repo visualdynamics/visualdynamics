@@ -2574,3 +2574,32 @@ def test_the_fit_weights_by_the_coherence_covering_most_linked_first():
         'coverage outranks the link'
     assert project.fit_coherence('FRF', records=[0]) == twin, \
         'judged over the fitted records only'
+
+
+def test_a_mode_claims_at_least_its_own_line():
+    """A confirmed mode whose damping collapsed to the search's least
+    claimed less than a line, so a one-line spike was offered and
+    confirmed again and again. On the plate's FRFs, 2 Hz apart, a line
+    planted forty times its neighbors at 530 Hz took all five of five
+    automatic modes at 0.01 %; with each mode claiming at least half a
+    line either side, the loop moves on to the plate's own modes."""
+    from conftest import fixture_path
+
+    import visualdynamics
+
+    frf = visualdynamics.import_file(fixture_path('plate', 'frfs.npz'))
+    lines = np.asarray(frf.abscissa)
+    spike = int(np.argmin(np.abs(lines - 530.0)))
+    frf.ordinate = np.array(frf.ordinate, copy=True)
+    frf.ordinate[:, spike] *= 40.0
+    project = visualdynamics.Project()
+    project.add('FRF', frf)
+    found = project[project.fit_modes('FRF', bounds=(300.0, 1300.0),
+                                      limit=5)].frequency
+    elsewhere = [f for f in found if abs(f - lines[spike]) > 2.0]
+    assert len(elsewhere) >= 3, found
+    session = ModalFitSession(frf)
+    narrow = {'frequency': 530.3, 'damping': 1e-4}
+    assert session._claim(narrow) == pytest.approx(1.0)
+    wide = {'frequency': 530.3, 'damping': 0.02}
+    assert session._claim(wide) == pytest.approx(0.02 * 530.3)

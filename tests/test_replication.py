@@ -1875,3 +1875,31 @@ def test_a_refused_channel_says_why_in_the_bars_and_the_grid(window, pump,
     model = window.table.model()
     assert model.data(model.index(0, 1), Qt.ItemDataRole.DisplayRole) \
         == reason[len('not scored: '):]
+
+
+def test_a_target_of_mixed_quantities_pairs_each_channel_by_its_own():
+    """A drive point's force target beside an acceleration target: the
+    first channel's quantity was read for every channel, so the
+    acceleration channel was refused as 'force against acceleration'
+    though its record matched it exactly. Each channel pairs by its own
+    quantity, in the comparison, the alignment and the overlay."""
+    t = np.arange(FRAME) / RATE
+    spec = TransientSpecification(
+        t, np.vstack([_pulse() * 100.0, _pulse() * 9.8]),
+        response_dof=['1Z+', '2Z+'], ordinate_dim=['force', 'acceleration'],
+        ordinate_unit=['N', 'm/s**2'])
+    rows = np.tile(spec.ordinate, 2)
+    history = TimeHistory(np.arange(rows.shape[1]) / RATE, rows,
+                          response_dof=['1Z+', '2Z+'],
+                          ordinate_dim=['force', 'acceleration'],
+                          ordinate_unit=['N', 'm/s**2'])
+    history.averaging = averaging_for(history, spec)
+    scored = compare(history, spec, metrics=('waveform',))
+    assert [(row['label'], row['frame']) for row in scored] == [
+        ('1Z+', 0), ('1Z+', 1), ('2Z+', 0), ('2Z+', 1)]
+    assert all(row.get('refused') is None
+               and row['waveform'] == pytest.approx(0.0, abs=1e-9)
+               for row in scored)
+    from visualdynamics.core.replication import event_slice
+
+    assert event_slice(history, spec, 0).response_dof == ['1Z+', '2Z+']

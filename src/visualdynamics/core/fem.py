@@ -1679,10 +1679,13 @@ class Model:
             _, xy = _triangle_frame(*[self._nodes[n] for n in triangle.nodes])
             plates += (triangle.material.density * triangle.thickness
                        * _triangle_area(xy))
-        solids = float(sum(
-            solid.material.density
-            * abs(_solid_volume(np.array([self._nodes[n] for n in solid.nodes])))
-            for solid in self.solids))
+        solids = 0.0
+        for count in {len(solid.nodes) for solid in self.solids}:
+            kind = [solid for solid in self.solids if len(solid.nodes) == count]
+            xyz = np.array([[self._nodes[n] for n in solid.nodes]
+                            for solid in kind])
+            density = np.array([solid.material.density for solid in kind])
+            solids += float(np.sum(density * np.abs(_solid_volumes(xyz))))
         return beams + plates + solids
 
     @property
@@ -2003,8 +2006,11 @@ class Model:
         progress : callable, optional
             Told ``(done, total)`` as the solve advances: the assembly per
             element, the factorization, the eigen iterations (an estimated
-            length, extended while they run), and the polish. The window's
-            progress bar reads it, and anything it raises stops the solve.
+            length, extended while they run), and the polish. The dense
+            solver's eigensolution is one call that cannot count itself,
+            and is announced as ``(done, core.progress.BUSY)``. The
+            window's progress bar reads it, and anything it raises stops
+            the solve.
 
         Returns
         -------
@@ -2087,6 +2093,10 @@ class Model:
         standard = np.linalg.solve(factor, temporary.T).T
         if ticker is not None:
             ticker.tick()
+            # one call that reports nothing while it runs, and the most
+            # of the dense solve's time: a moving bar for it, not one
+            # standing at half (Brandon, 2026-10-18)
+            ticker.busy()
         eigenvalues, vectors = np.linalg.eigh((standard + standard.T) / 2.0)
         if ticker is not None:
             ticker.tick()
@@ -2558,6 +2568,53 @@ class Model:
             length_unit=self.length_unit)
 
 
+def group_masses(geometry: Geometry) -> dict[int, float | None]:
+    """{element group: mass in kg}, what each of a geometry's element
+    groups weighs as the model built from it counts it.
+
+    Each element group's elements are built as `Model.from_geometry`
+    builds them, with that group's properties, and weighed as
+    `Model.total_mass` weighs a model: beams, plates, triangles and
+    solids by their density, point masses by their mass, and rigid
+    links, springs and ground points as nothing. A group whose
+    properties do not yet make elements (no properties, no material, a
+    beam section not finished) is None, so a partial sum can say what
+    it leaves out.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry, with its element groups' properties
+        (`group_properties`).
+
+    Returns
+    -------
+    dict of int to float or None
+        Every element group the geometry's elements belong to, in kg.
+    """
+    # the status line's weight (Brandon, 2026-10-18): the mass the solve
+    # would use, so the two cannot disagree. A model per group, holding
+    # only that group's nodes, so the cost is one pass over the elements
+    properties = dict(getattr(geometry, 'group_properties', {}) or {})
+    groups = np.asarray(getattr(geometry, 'elem_group', []), dtype=np.int64)
+    index = {int(node): row for row, node in enumerate(geometry.node_id)}
+    out: dict[int, float | None] = {}
+    for group in dict.fromkeys(int(g) for g in groups):
+        model = Model('', length_unit=geometry.length_unit or 'm')
+        used = {int(node) for row in np.flatnonzero(groups == group)
+                for node in np.asarray(geometry.elem_conn[row]).ravel()}
+        for node in sorted(used):
+            model.add_node(node, *[float(v) for v in
+                                   geometry.node_xyz[index[node]]])
+        try:
+            _element_by_group(model, geometry, properties, only=group)
+        except ValueError:
+            out[group] = None
+            continue
+        out[group] = model.total_mass
+    return out
+
+
 def _from_groups(model: Model, geometry: Geometry,
                  properties: dict[int, GroupProperties],
                  total_mass: float | None, groups) -> Model:
@@ -2618,9 +2675,11 @@ def _bring_to(model: Model, total_mass: float) -> None:
 
 
 def _element_by_group(model: Model, geometry: Geometry,
-                      properties: dict[int, GroupProperties]) -> int:
-    """Every element as the element it is, with its element group's properties.
-    Returns how many were built."""
+                      properties: dict[int, GroupProperties],
+                      only: int | None = None) -> int:
+    """Every element as the element it is, with its element group's properties,
+    or with `only` the elements of that one element group. Returns how many
+    were built."""
     ids = np.asarray(getattr(geometry, 'group_id', []), dtype=np.int64)
     names = list(getattr(geometry, 'group_name', []))
     group_name = {int(b): (names[i] if i < len(names) else '')
@@ -2635,6 +2694,8 @@ def _element_by_group(model: Model, geometry: Geometry,
     for index, (kind, conn) in enumerate(zip(geometry.elem_type,
                                              geometry.elem_conn)):
         group = int(groups[index]) if index < len(groups) else 0
+        if only is not None and group != only:
+            continue
         props = properties.get(group)
         if props is None:
             raise ValueError(
@@ -3399,6 +3460,19 @@ def _wedge_basis(l2: float, l3: float, zeta: float
     return n, d
 
 
+#: {nodes: (natural derivatives at each point (p, n, 3), weights (p,))},
+#: the volume rules of the hexahedron (2x2x2 Gauss) and the wedge (the
+#: three-point triangle rule by two Gauss points), as their matrices use
+_VOLUME_RULES = {
+    8: (np.array([_hex_basis(xi, eta, zeta)[1] for xi in _GAUSS_2
+                  for eta in _GAUSS_2 for zeta in _GAUSS_2]), np.ones(8)),
+    6: (np.array([_wedge_basis(l2, l3, zeta)[1]
+                  for (l2, l3), _weight in _TRIANGLE_3 for zeta in _GAUSS_2]),
+        np.array([weight for _point, weight in _TRIANGLE_3
+                  for _zeta in _GAUSS_2])),
+}
+
+
 def _wedge_matrices(material: Material, xyz: np.ndarray
                     ) -> tuple[np.ndarray, np.ndarray]:
     """Stiffness and consistent mass of the six-node wedge, 18x18: the
@@ -3457,14 +3531,21 @@ def _solid_volume(xyz: np.ndarray) -> float:
     """The volume of a hexahedron, wedge or tetrahedron by its nodes,
     integrated the way its matrices are, so the two agree; negative for
     an element numbered inside out, zero for a flat one."""
-    if len(xyz) == 4:
-        return float(np.linalg.det(xyz[1:] - xyz[0]) / 6.0)
-    if len(xyz) == 6:
-        return float(sum(np.linalg.det((_wedge_basis(l2, l3, zeta)[1]).T @ xyz)
-                         * weight
-                         for (l2, l3), weight in _TRIANGLE_3
-                         for zeta in _GAUSS_2))
-    return float(sum(np.linalg.det((_hex_basis(xi, eta, zeta)[1]).T @ xyz)
-                     for xi in _GAUSS_2 for eta in _GAUSS_2
-                     for zeta in _GAUSS_2))
+    return float(_solid_volumes(np.asarray(xyz, dtype=np.float64)[None])[0])
+
+
+def _solid_volumes(xyz: np.ndarray) -> np.ndarray:
+    """`_solid_volume` of many elements of one kind at once: `xyz` is
+    (elements, nodes, 3), and the answer one volume per element."""
+    # The rules' natural derivatives are the same for every element, so
+    # they are built once (`_VOLUME_RULES`) and every element's Jacobians
+    # are one product. Built per element and per point, the volumes were
+    # most of the time a 33,000-brick model took to build, and twice
+    # over: once in the check on each element and again in its mass
+    # (2026-10-18, the status line's weight)
+    if xyz.shape[1] == 4:
+        return np.linalg.det(xyz[:, 1:] - xyz[:, :1]) / 6.0
+    derivatives, weights = _VOLUME_RULES[xyz.shape[1]]
+    jacobians = np.einsum('pnk,enj->epkj', derivatives, xyz)
+    return (np.linalg.det(jacobians) * weights).sum(axis=1)
 

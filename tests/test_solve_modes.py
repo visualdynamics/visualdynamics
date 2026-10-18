@@ -548,12 +548,18 @@ def _hears(solver):
 @pytest.mark.parametrize('solver', ['sparse', 'dense'])
 def test_the_solve_tells_its_progress(solver):
     """`progress` hears (done, total) on either path: done never falls,
-    never passes the total, and the last word is done == total."""
+    never passes a counted total, and the last word is done == total.
+    The dense path's eigensolution, one call that cannot count itself,
+    is the one report with the total BUSY instead."""
+    from visualdynamics.core.progress import BUSY
+
     heard, found = _hears(solver)
     assert heard and found.num_shapes == 12
     done = [d for d, _t in heard]
     assert done == sorted(done)
-    assert all(d <= t for d, t in heard)
+    counted = [(d, t) for d, t in heard if t != BUSY]
+    assert all(d <= t for d, t in counted)
+    assert len(heard) - len(counted) == (1 if solver == 'dense' else 0)
     assert heard[-1][0] == heard[-1][1] > 0
 
 

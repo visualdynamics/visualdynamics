@@ -8,6 +8,11 @@ per tone, an assembly per element, a solve's pieces per channel), so
 the total increases stage by stage and the bar is accurate within
 each stage. Anything the callback raises passes out of the
 computation, which is how a cancel works: the callback raises.
+
+A stage that cannot say how far along it is, one long call into a
+library, is announced with a total of `BUSY`: ``(done, BUSY)`` means
+work is going on and no count can be given, and the window shows a
+moving bar until the next ordinary report.
 """
 
 from __future__ import annotations
@@ -16,6 +21,10 @@ import time
 from collections.abc import Callable
 
 # One progress callback shape for every long verb (2026-10-01).
+
+
+#: the total that says a stage is running and cannot count itself
+BUSY = -1
 
 
 class Cancelled(Exception):
@@ -51,6 +60,14 @@ class Ticker:
     def tick(self, count: int = 1) -> None:
         self.done += int(count)
         self._tell()
+
+    def busy(self) -> None:
+        """Say that a stage is starting that cannot report its progress:
+        the callback is told ``(done, BUSY)`` at once. The next `tick`
+        or `add` reports the count again."""
+        if self.callback is not None:
+            self._told = time.monotonic()
+            self.callback(self.done, BUSY)
 
     def extend_to(self, count: int) -> None:
         """Raise the total to `count` past what is done, if it is lower.

@@ -201,6 +201,13 @@ property columns in the display units.
 Picking a material from the drop-down fills in its modulus, Poisson's
 ratio and density; you can type over any of them.
 
+Once an element group has a material, the status bar gives its weight
+when you select it, the total of several when you select several, and
+the whole geometry's weight when you select the geometry. It is the
+mass the solve uses, shown in lbf when the display units are imperial
+and in kg when they are SI. Groups that have no material yet are left
+out, and the status bar says how many of them there are.
+
 ![The Element Groups table, opened by the pencil on the box's row (1),
 with 6061-T6 and 0.25 in typed](../images/fem-groups.png)
 

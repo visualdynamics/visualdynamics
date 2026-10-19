@@ -53,6 +53,15 @@ COLOR_NAMES = ['gray', 'blue', 'orange', 'green', 'red',
 # not already require.
 COLORMAP = 'viridis'
 
+#: the opacity a solid's skin is drawn at. It is see-through so a hole
+#: or a pocket inside a part shows, and so does the part's far side:
+#: drawn two-sided, the skin's far wall blends with its near one in
+#: whatever order the cells came, which Brandon looked at against the
+#: far wall culled and chose (2026-10-19; PLAN.md "The skin
+#: see-through, the nodes that mean something"). Plates draw opaque: a
+#: plate seen from behind is still the plate.
+SKIN_OPACITY = 0.5
+
 
 def color_name(index: int) -> str:
     """The name of a color index ('gray', 'blue', ...), wrapping past 9."""
@@ -98,12 +107,13 @@ def _display_length(values: ArrayLike, geometry: Geometry,
 
 
 def element_cells(geometry: Geometry,
-                  indices: Sequence[int] | None = None
-                  ) -> tuple[dict[int, list[list[int]]],
-                             dict[int, list[list[int]]], dict[int, list[int]]]:
+                  indices: Sequence[int] | None = None,
+                  separate_skins: bool = False) -> tuple:
     """How the elements are drawn: (faces, lines, points), each keyed by
     element color, with every entry given as node rows (positions in
-    `node_id`), not node ids.
+    `node_id`), not node ids; with `separate_skins`, (faces, lines,
+    points, skins), the solids' skins kept apart from the face elements
+    so a scene can draw them see-through.
 
     A face element is drawn as its corner nodes (`face_corners`), since
     a quad8's midside nodes are not corners of the outline. A solid is
@@ -119,12 +129,15 @@ def element_cells(geometry: Geometry,
         The geometry.
     indices : sequence of int, optional
         Which elements, by row; every element when omitted.
+    separate_skins : bool, default False
+        Return the solids' skins as a fourth dict instead of among the
+        faces.
 
     Returns
     -------
     tuple of dict
         Faces and lines as lists of row lists, points as a row list,
-        each by element color.
+        each by element color; and the skins, when asked for.
     """
     # One rule for every scene because the HTML export once drew a brick
     # as one eight-sided polygon in node order, which folds it into a bow
@@ -160,9 +173,40 @@ def element_cells(geometry: Geometry,
             lines.setdefault(color, []).append(rows(conn[:2]))
         elif render == 'point':
             points.setdefault(color, []).extend(rows(conn))
+    if separate_skins:
+        return faces, lines, points, {color: list(skin.values())
+                                      for color, skin in skins.items()}
     for color, skin in skins.items():
         faces.setdefault(color, []).extend(skin.values())
     return faces, lines, points
+
+
+def drawn_nodes(geometry: Geometry) -> np.ndarray:
+    """A mask over the nodes of the ones a scene draws as points when
+    nothing more specific is asked for: the nodes no element uses, which
+    nothing else would show, and the nodes of line and point elements,
+    where a beam's end or a mass's place is read. A plate's or a solid's
+    nodes sit at the corners of the faces drawn and are not drawn again;
+    a brick model's are mostly inside it, and drawn they were more than
+    half of a frame (PLAN.md "The skin see-through, the nodes that mean
+    something"). A pick still draws the nodes picked, and the Nodes row
+    draws them all.
+    """
+    count = geometry.num_nodes
+    if not len(geometry.elem_conn):
+        return np.ones(count, dtype=bool)
+    conn = [np.asarray(c, dtype=np.int64) for c in geometry.elem_conn]
+    ids = np.concatenate(conn)
+    on_lines = np.concatenate([
+        np.full(len(c), ELEMENT_TYPES[int(code)][2] in ('line', 'point'))
+        for c, code in zip(conn, geometry.elem_type)])
+    order = np.argsort(geometry.node_id)
+    rows = order[np.searchsorted(geometry.node_id[order], ids)]
+    used = np.zeros(count, dtype=bool)
+    used[rows] = True
+    shown = np.zeros(count, dtype=bool)
+    shown[rows[on_lines]] = True
+    return shown | ~used
 
 
 def _cells(index_lists: Sequence[Sequence[int]]) -> np.ndarray:
@@ -832,10 +876,19 @@ def add_geometry(plotter: Any, geometry: Geometry,
     def rows(node_ids: Sequence[int]) -> list[int]:
         return [id_to_row[int(i)] for i in node_ids]
 
-    # Nodes, grouped by color
+    # Nodes, grouped by color: the ones picked, every one when the
+    # Nodes row is what is shown, and otherwise the ones that mean
+    # something on their own (`drawn_nodes`)
     wanted_nodes = picked.get('nodes')
-    node_mask = (np.isin(geometry.node_id, list(wanted_nodes))
-                 if wanted_nodes else np.ones(geometry.num_nodes, bool))
+    if wanted_nodes:
+        node_mask = np.isin(geometry.node_id, list(wanted_nodes))
+    elif components and 'nodes' in components:
+        node_mask = np.ones(geometry.num_nodes, bool)
+    else:
+        node_mask = drawn_nodes(geometry)
+        if 'nodes' in wanted_labels and wanted_labels['nodes'] is None:
+            # a caption names a node that is drawn
+            wanted_labels['nodes'] = [int(i) for i in geometry.node_id[node_mask]]
     for color in (np.unique(geometry.node_color[node_mask])
                   if 'nodes' in draw and node_mask.any() else []):
         mask = (geometry.node_color == color) & node_mask
@@ -850,14 +903,24 @@ def add_geometry(plotter: Any, geometry: Geometry,
     # line is an element group of two-node line elements since 2026-09-30, and
     # draws as its line elements do: direct color per group)
     wanted_elements = picked.get('elements')
-    faces, lines, cell_points = (
+    faces, lines, cell_points, skins = (
         element_cells(geometry, None if wanted_elements is None
-                      else list(wanted_elements))
-        if 'elements' in draw else ({}, {}, {}))
+                      else list(wanted_elements), separate_skins=True)
+        if 'elements' in draw else ({}, {}, {}, {}))
     for color, polys in faces.items():
         mesh = new_mesh()
         mesh.faces = _cells(polys)
         plotter.add_mesh(mesh, **painted(color), opacity=opacity,
+                         specular=0.3, specular_power=25,
+                         show_edges=show_edges)
+    # a solid's skin see-through, both sides (`SKIN_OPACITY`); a
+    # caller drawing fainter still, the muted context or a merge, is
+    # taken at its word
+    for color, polys in skins.items():
+        mesh = new_mesh()
+        mesh.faces = _cells(polys)
+        plotter.add_mesh(mesh, **painted(color),
+                         opacity=min(opacity, SKIN_OPACITY),
                          specular=0.3, specular_power=25,
                          show_edges=show_edges)
     for color, polylines in lines.items():

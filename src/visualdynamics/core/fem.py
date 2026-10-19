@@ -1016,31 +1016,63 @@ def _gram_pass(block: np.ndarray, m_block: np.ndarray
                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """One pass of M-orthonormalization of a block through its Gram
     matrix's eigenvectors: W = Q R with Q^T M Q = I, from G = W^T M W =
-    U diag(d) U^T as Q = W U d^-1/2 and R = d^1/2 U^T; returns Q, M Q,
-    R and which directions survived. A direction whose d has collapsed
-    below 1e-14 of the largest is dropped (its column of Q and row of R
-    zero). Cholesky QR fails on these Gram matrices: one solve with the
+    U diag(d) U^T as Q = W U d^-1/2 and R = d^1/2 U^T, which is W
+    exactly; returns Q, M Q, R and which directions survived. A
+    direction whose d sits below 1e-14 of the largest is round-off in
+    a Gram matrix whose entries are only that accurate, and its vector
+    W u is looked at instead: M-orthogonalized against the directions
+    kept so far, what is left is either real content (the free plate's
+    first block holds a direction at 1e-7 of the largest, which
+    dropping it left out of the Lanczos relation), kept and normalized
+    by its own norm with its projections carried into R, or the Gram
+    eigenvector's own error leaking the others' content, round-off
+    once they are taken out, and dropped: a zero column of Q and row
+    of R. Cholesky QR fails on these Gram matrices: one solve with the
     shifted factor leaves a random block almost wholly in the rigid
-    modes, which the shift puts five orders above the elastic ones, and
-    the Gram matrix's condition is that squared."""
+    modes, which the shift puts five orders above the elastic ones,
+    and the Gram matrix's condition is that squared."""
     from scipy.linalg import eigh as scipy_eigh
 
     gram = block.T @ m_block
     d, u = scipy_eigh((gram + gram.T) / 2.0)
-    keep = d > 1e-14 * d.max() if d.max() > 0.0 else np.zeros(len(d), dtype=bool)
-    root = np.sqrt(np.where(keep, d, 1.0))
-    scale = np.where(keep, 1.0 / root, 0.0)
-    return ((block @ u) * scale, (m_block @ u) * scale,
-            np.where(keep, root, 0.0)[:, None] * u.T, keep)
+    largest = float(d.max()) if len(d) else 0.0
+    q, mq = block @ u, m_block @ u
+    sound = d > 1e-14 * largest
+    # W U = Q D: D diagonal where the Gram matrix is sound, and for a
+    # recovered direction the column of its projections and its norm
+    mixing = np.diag(np.sqrt(np.where(sound, d, 1.0)))
+    q[:, ~sound] = 0.0
+    mq[:, ~sound] = 0.0
+    q[:, sound] /= mixing.diagonal()[sound]
+    mq[:, sound] /= mixing.diagonal()[sound]
+    keep = sound.copy()
+    for i in np.flatnonzero(~sound):
+        z, mz = block @ u[:, i], m_block @ u[:, i]
+        for _pass in range(2):
+            c = mq[:, keep].T @ z
+            z -= q[:, keep] @ c
+            mz -= mq[:, keep] @ c
+            mixing[keep, i] += c
+        norm = math.sqrt(abs(float(z @ mz)))
+        if norm > 1e-13 * math.sqrt(largest):
+            q[:, i], mq[:, i] = z / norm, mz / norm
+            mixing[i, i] = norm
+            keep[i] = True
+        else:
+            mixing[:, i] = 0.0
+    return q, mq, mixing @ u.T, keep
 
 
 def _m_orthonormal(block: np.ndarray, m_block: np.ndarray
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """`_gram_pass` twice: one pass on a Gram matrix of condition 1e10
-    leaves the block orthonormal only to 1e-5, and a basis built from
-    such blocks loses its orthogonality and the iteration its
-    convergence (measured: the residual climbed from the eighth block
-    on). Returns Q, M Q, R = R2 R1 and the first pass's survivors."""
+    """W = Q R with Q^T M Q = I: `_gram_pass` twice, since one pass on
+    a Gram matrix of condition 1e10 leaves the block orthonormal only
+    to 1e-5, and a basis built from such blocks loses its orthogonality
+    and the iteration its convergence (measured: the residual climbed
+    from the eighth block on). R = R2 R1 is W to round-off (reading it
+    back as Q^T M W was only as good as Q's orthonormality, 2e-12).
+    Returns Q, M Q, R and the first pass's survivors (a dropped one has
+    a zero column of Q and a zero row of R)."""
     q, mq, r1, keep = _gram_pass(block, m_block)
     q, mq, r2, _keep = _gram_pass(q, mq)
     return q, mq, r2 @ r1, keep
@@ -1057,15 +1089,24 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
     1 / theta. The Krylov basis is grown a block at a time: each new
     block is A applied to the last (one block solve with the factor),
     M-orthogonalized against the whole basis twice, and M-orthonormalized
-    (`_m_orthonormal`); the coefficients fill the projected matrix H =
-    V^T M A V, whose eigenpairs are the Ritz pairs. A Ritz pair's
-    residual |A x - theta x|_M is the last block's share of it, |B s|,
-    which costs nothing to read, and the iteration stops when every
-    wanted mode's residual over its theta is under `LANCZOS_RESIDUAL`,
-    or at the floor, or when the basis spans the whole space. A
-    direction the orthogonalization leaves empty is replaced by a fresh
-    random one. The basis is held as (n, dimension) column-major arrays,
-    V and M V, so the products against it run in place.
+    (`_m_orthonormal`). The coefficients fill the Rayleigh-Ritz matrix
+    H = V^T M A V, each block column mirrored into its row since A is
+    self-adjoint, and the Ritz pairs are H's eigenpairs. The computed
+    relation A V = V R + Q B is kept beside it, R the coefficients
+    above the diagonal and the orthonormalization's triangle below,
+    and a Ritz pair's residual |A x - theta x|_M then has two parts,
+    read for nothing: the last block's share, |B s|, which another
+    block of basis shrinks, and |(R - H) s|, which no basis can shrink,
+    since it is how far the computed operator is from self-adjoint and
+    the basis from orthogonal (LU's solves leave the operator 8e-9 off
+    on the rigid-link model, Cholesky's 1e-15; measured). The iteration
+    stops when every wanted mode's first part over its theta is under
+    `LANCZOS_RESIDUAL`, or at the floor, or when the basis spans the
+    whole space, and reports the whole residual, both parts, as what it
+    claims for each pair. A direction the orthogonalization
+    leaves empty is left out, and the block shrinks by it. The basis is held
+    as (n, dimension) column-major arrays, V and M V, so the products
+    against it run in place.
 
     Why a block method: the single-vector Lanczos of ARPACK applies the
     operator one vector at a time, and a sparse factor solves a block
@@ -1097,15 +1138,17 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
 
     Returns
     -------
-    (numpy.ndarray, numpy.ndarray)
-        The eigenvalues lambda, nearest the shift first, and the Ritz
-        vectors as columns, M-orthonormal.
+    (numpy.ndarray, numpy.ndarray, numpy.ndarray)
+        The eigenvalues lambda, nearest the shift first, the Ritz
+        vectors as columns, M-orthonormal, and each pair's residual
+        |A x - theta x|_M / theta as the relation claims it.
 
     Raises
     ------
     NotConverged
         When the basis reaches its limit (`LANCZOS_BASIS` times `count`,
-        at most the size) with a wanted residual above 1e-5.
+        at most the size), or runs out of directions, with a wanted
+        residual's first part above 1e-5.
     """
     from scipy.linalg import eigh as scipy_eigh
 
@@ -1117,6 +1160,7 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
     basis = np.empty((size, limit), order='F')
     m_basis = np.empty((size, limit), order='F')
     projected = np.zeros((limit, limit))
+    relation = np.zeros((limit, limit))
     dimension = 0
     start = rng.standard_normal((size, width))
     block, m_block, _r, _keep = _m_orthonormal(start, mass @ start)
@@ -1141,34 +1185,51 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
             coefficients += c
         projected[:grown, dimension:grown] = coefficients
         projected[dimension:grown, :dimension] = coefficients[:dimension].T
+        relation[:grown, dimension:grown] = coefficients
         dimension = grown
-        h = projected[:dimension, :dimension]
-        theta, ritz = scipy_eigh((h + h.T) / 2.0)
+        h = (projected[:dimension, :dimension]
+             + projected[:dimension, :dimension].T) / 2.0
+        theta, ritz = scipy_eigh(h)
         order = np.argsort(theta)[::-1][:count]
         theta, ritz = theta[order], ritz[:, order]
         block, m_block, beta, keep = _m_orthonormal(applied, mass @ applied)
-        residuals = (np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
-                     / np.abs(theta))
-        worst = float(residuals.max())
+        # the next block: the surviving directions, as many as the
+        # space the basis has not yet taken has room for; a dependent
+        # direction's column is empty and its row of the triangle zero,
+        # and the block shrinks by it (fewer survivors than the room
+        # means an invariant subspace was found, which a seeded random
+        # start never lands in; a block with none left and the modes
+        # not converged goes to ARPACK below). The choice is by the
+        # survivor mask, not position: the Gram's eigen-order puts the
+        # empty columns first
+        room = min(block.shape[1], size - dimension, limit - dimension)
+        chosen = np.flatnonzero(keep)[:room]
+        # the relation's block below the diagonal is the triangle the
+        # next block came from, not the transpose of the block above
+        # it: the two differ by the computed operator's asymmetry, and
+        # a residual read from the last block alone did not see it
+        # (2026-10-19, found on the public runner's SuperLU: the
+        # estimate said 9e-8 where the pairs were at 4e-4). The Ritz
+        # matrix stays the mirrored one: it is the projection, and
+        # halving its corrections moved a 14 kHz Ritz value by 1e-7
+        relation[dimension:dimension + len(chosen), dimension - width:dimension] = \
+            beta[chosen]
+        krylov = np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
+        block, m_block = block[:, chosen], m_block[:, chosen]
+        drift = np.linalg.norm((relation[:dimension, :dimension] - h) @ ritz, axis=0)
+        residuals = np.sqrt(krylov ** 2 + drift ** 2) / np.abs(theta)
+        worst = float((krylov / np.abs(theta)).max())
         if worst < LANCZOS_RESIDUAL or dimension >= size:
             break
         if worst < 100.0 * LANCZOS_RESIDUAL and worst > 0.5 * worst_before:
             break
         worst_before = worst
-        if dimension + width > limit:
+        if not len(chosen):
             if worst < 1e-5:
                 break
             raise NotConverged(
                 f'{dimension} Lanczos vectors left a residual of {worst:.1e}')
-        if not keep.all():
-            fresh = rng.standard_normal((size, int(np.sum(~keep))))
-            for _pass in range(2):
-                fresh -= vectors @ (m_vectors.T @ fresh)
-            block[:, ~keep] = fresh
-            block, m_block, _r, _keep = _m_orthonormal(block, mass @ block)
-        if dimension + width > size:
-            block, m_block = block[:, :size - dimension], m_block[:, :size - dimension]
-    return sigma + 1.0 / theta, basis[:, :dimension] @ ritz
+    return sigma + 1.0 / theta, basis[:, :dimension] @ ritz, residuals
 
 
 class Model:
@@ -2449,8 +2510,9 @@ class Model:
             if SPARSE_EIGENSOLVER != 'block':
                 return arpack(count)
             try:
-                return block_lanczos_modes(factor, reduced_m, sigma, count,
-                                           ticker=ticker)
+                eigenvalues, vectors, _claimed = block_lanczos_modes(
+                    factor, reduced_m, sigma, count, ticker=ticker)
+                return eigenvalues, vectors
             except NotConverged as why:
                 warnings.warn(f'the block Lanczos did not converge ({why}); '
                               'solving by ARPACK instead', stacklevel=3)

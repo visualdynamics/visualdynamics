@@ -1402,6 +1402,7 @@ def build_plots(layout: Any, series: Sequence[tuple[str | None, Any, Sequence[in
             curve, drawn_x, drawn_y = _draw_shaped(plot, x, magnitude, shape,
                                                    pen, widths=widths,
                                                    log_abscissa=log_abscissa,
+                                                   log_ordinate=log_ordinate,
                                                    **named)
             if stands_back:
                 # beneath the measurements whatever order the series
@@ -1620,7 +1621,7 @@ def _reach(extents, log_ordinate):
 
 
 def _draw_shaped(plot, x, y, shape, pen, widths=None, log_abscissa=False,
-                 **kwargs):
+                 log_ordinate=False, **kwargs):
     """Draw one curve the way its own points mean, and say what it drew.
 
     'steps' for a density per bin — flat across each, which is what is
@@ -1629,9 +1630,19 @@ def _draw_shaped(plot, x, y, shape, pen, widths=None, log_abscissa=False,
     follows the power law between its breakpoints. 'line' otherwise.
 
     `log_abscissa` says the plot draws x in decades, where pyqtgraph's
-    automatic downsampling must stay off (below).
+    automatic downsampling must stay off (below); `log_ordinate` that y
+    is drawn in decades, where a zero is no value (`gapless`).
     """
     if shape == 'steps' and np.asarray(x).size > 1:
+        # cut to the bins that have values, as `gapless` cuts a line
+        # below. This branch returned before that cut, and a
+        # controller's specification is drawn stepped: NaN outside its
+        # band, 299 empty bins of 1,025, so pyqtgraph hand-packed the
+        # stepped path, the Bus error's route (2026-10-19, a worker
+        # crashed in `test_the_bounds_are_shaded_rather_than_drawn`
+        # once in four gates; the probe of test_path_safety found the
+        # eight paths)
+        x, y, widths = _finite_bins(x, y, widths, log_ordinate)
         edges = bin_edges(x, widths)
         # Neither clipping nor downsampling here. Both re-slice x and y
         # to the same length, and a step curve wants one more x than y
@@ -1647,7 +1658,7 @@ def _draw_shaped(plot, x, y, shape, pen, widths=None, log_abscissa=False,
     # never Qt's crash-prone drawLines fast path. `gapless` is the other
     # half of that: keep the gaps down to what pyqtgraph builds a path
     # from with Qt's own API, rather than by hand-packing its bytes.
-    x, y = gapless(x, y)
+    x, y = gapless(x, y, log_ordinate)
     curve = plot.plot(x, y, connect='finite', pen=pen, **kwargs)
     # Peak downsampling is what keeps 500k-sample records interactive.
     # pyqtgraph buckets points in index space with one bucket size taken
@@ -1810,10 +1821,48 @@ def as_power_law(frequencies: ArrayLike, values: ArrayLike,
     return filled, log_interpolate(filled, frequencies, values)
 
 
-def gapless(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _drawable(x, y, log_ordinate):
+    """Which points can be drawn: finite, and positive where the
+    ordinate is in decades, since a zero there is minus infinity once
+    pyqtgraph has taken its logarithm, and counts as a hole in the
+    path. A controller writes its specification to zero outside its
+    band."""
+    good = np.isfinite(x) & np.isfinite(y)
+    if log_ordinate:
+        good &= y > 0.0
+    return good
+
+
+def _finite_bins(x, y, widths, log_ordinate=False):
+    """A stepped curve's bins cut to the run that has values, first
+    drawable to last (`_drawable`), with the widths cut to match:
+    `widths` is one per bin, or the bin edges, one more than the bins
+    (`bin_edges`)."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size != y.size:
+        return x, y, widths
+    good = _drawable(x, y, log_ordinate)
+    if good.all() or good.sum() < 2:
+        return x, y, widths
+    said = np.flatnonzero(good)
+    lo, hi = int(said[0]), int(said[-1]) + 1
+    if widths is not None:
+        widths = np.asarray(widths, dtype=float)
+        if widths.size == x.size + 1:
+            widths = widths[lo:hi + 1]
+        elif widths.size == x.size:
+            widths = widths[lo:hi]
+    return x[lo:hi], y[lo:hi], widths
+
+
+def gapless(x: np.ndarray, y: np.ndarray,
+            log_ordinate: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """One curve's points cut to the span of its finite points.
 
-    The span runs from the first finite point to the last.
+    The span runs from the first finite point to the last; with
+    `log_ordinate`, a point at or below zero is not finite either, as
+    it is not once its logarithm is taken.
 
     pyqtgraph builds the path for a curve with more than 2 % of its
     points non-finite by packing a byte buffer itself against a private
@@ -1838,7 +1887,7 @@ def gapless(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     y = np.asarray(y, dtype=float)
     if x.size != y.size:
         return x, y
-    good = np.isfinite(x) & np.isfinite(y)
+    good = _drawable(x, y, log_ordinate)
     if good.all() or good.sum() < 2:
         return x, y
     said = np.flatnonzero(good)

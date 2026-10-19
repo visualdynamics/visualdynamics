@@ -120,6 +120,42 @@ def test_the_zone_shading_is_drawn_without_holes(qt_app):
     assert max(bad / n for n, bad in built) < HAND_PACKED
 
 
+def test_a_controllers_specification_is_drawn_stepped_without_holes(qt_app):
+    """The plate fixture's specification, as a controller wrote it: NaN
+    outside its band, 299 bins of 1,025, drawn stepped. The stepped
+    branch of `_draw_shaped` returned before the cut `gapless` makes,
+    and every one of its eight records took the hand-packed path (a
+    worker died of the Bus error in a plot test once in four gates,
+    2026-10-19)."""
+    from conftest import fixture_path
+
+    import visualdynamics
+
+    target = visualdynamics.import_file(
+        fixture_path('plate', 'random.nc4'))['Random_specification']
+    assert hand_packed([('S', target, None)]) == []
+
+
+def test_finite_bins_cuts_the_widths_with_the_bins():
+    from visualdynamics.plot import _finite_bins
+
+    x = np.arange(6.0)
+    y = np.array([np.nan, 1.0, 2.0, np.nan, 3.0, np.nan])
+    cut_x, cut_y, edges = _finite_bins(x, y, np.arange(7.0) - 0.5)
+    assert cut_x.tolist() == [1.0, 2.0, 3.0, 4.0]
+    # zeros are holes in decades, as a controller writes a
+    # specification outside its band, and are values on a linear axis
+    zeros = np.array([0.0, 0.0, 2.0, 3.0, 0.0, 0.0])
+    assert _finite_bins(x, zeros, None, log_ordinate=True)[0].tolist() == [2.0, 3.0]
+    assert _finite_bins(x, zeros, None, log_ordinate=False)[0].size == 6
+    assert edges.tolist() == [0.5, 1.5, 2.5, 3.5, 4.5]
+    assert np.isnan(cut_y[2]), 'a hole inside the run is kept, not bridged'
+    _x, _y, per_bin = _finite_bins(x, y, np.ones(6))
+    assert per_bin.tolist() == [1.0] * 4
+    same = _finite_bins(x, np.ones(6), None)
+    assert same[0].size == 6 and same[2] is None
+
+
 def test_a_breakpoint_specification_is_drawn_without_holes(qt_app):
     """The other way a specification arrives: a handful of breakpoints,
     filled in to follow its power law."""

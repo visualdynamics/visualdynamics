@@ -25,6 +25,10 @@ def animator(geometry, deflection, unit_system=None, **kwargs):
 def test_every_mesh_shares_one_point_buffer(model):
     """The whole scene moves with a single write."""
     geometry, shapes = model
+    # a beam across the plate: the plate alone is one mesh now that a
+    # plate's nodes are not drawn as points, and the sharing is the
+    # point of the test
+    geometry.add_element([int(geometry.node_id[0]), int(geometry.node_id[-1])])
     anim = animator(geometry, ShapeDeflection(geometry, shapes.coordinate,
                                               shapes.shape_matrix[8]))
     assert len(anim.meshes) > 1, 'the model draws several meshes'
@@ -120,9 +124,10 @@ def _mode(model, index=3):
 
 def test_colormap_shares_one_scalar_array_across_every_mesh(model):
     geometry, deflection = _mode(model)
+    geometry.add_element([int(geometry.node_id[0]), int(geometry.node_id[-1])])
     moving = animator(geometry, deflection, colormap=True)
     assert moving.magnitude is not None
-    assert len(moving.meshes) > 1
+    assert len(moving.meshes) > 1, 'the plate and the beam across it'
     assert all(mesh.GetPointData().GetScalars() is moving.scalars_source
                for mesh in moving.meshes), 'one write must recolor them all'
 

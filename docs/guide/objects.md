@@ -95,6 +95,23 @@ project.set_view('BARC', View(eye=(1, 1, -1), up=(0, 1, 0)))  # built y-up
 model is viewed changes; its nodes are not rotated. The view is saved
 with the geometry.
 
+### How a geometry is drawn
+
+A solid element group is drawn as its outer skin, the faces no two of
+its elements share, see-through at half strength, so a bore or a
+pocket inside the part shows through the skin, and so does the part's
+far side.
+Plates draw as themselves, opaque from either side, and lines as
+lines. Nodes are drawn as points only where the point is the
+information: a node no element uses, the nodes of lines and point
+elements, and whatever is picked. The corners of plates and solids
+are where their mesh lines meet and are not drawn again, and a brick
+model's nodes, most of which are inside it, are not drawn at all.
+Picking the Nodes row in the tree draws every node, picking one node
+draws that one, and hovering over a node captions it whether it is
+drawn or not. The same rule draws the view, the report's scenes and
+every exported figure.
+
 ### Element group properties
 
 A geometry is also a finite element model once its element groups say

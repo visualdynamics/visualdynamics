@@ -129,6 +129,7 @@ def test_a_block_meshes_into_tets_of_exactly_its_volume():
     volumes = np.einsum('ij,ij->i', b - a, np.cross(c - a, d - a)) / 6.0
     assert (volumes > 0).all(), 'every tetrahedron the right way out'
     assert volumes.sum() == pytest.approx(2.0, abs=1e-9)
+    assert volumes.min() > 1e-6 * (0.25 * INCH) ** 3, 'no tetrahedron of no volume'
     assert set(part.elem_type) == {111} and list(part.group_name) == ['bar']
     assert made['tets'] == len(conn) and made['steps'] < tetmesh.MOST_STEPS
     assert made['quality'] > 0.1 and made['poor'] < 0.03 * made['tets']

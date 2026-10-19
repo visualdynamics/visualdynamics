@@ -636,6 +636,10 @@ def _tetrahedra(fd, points, nfixed, size, extent):
     # worst at zero (2026-10-19)
     hugging = np.abs(fd(p)) < HUGGING * size
     sliver = (quality < SLIVER) & hugging[tets].all(axis=1)
+    # and one of no volume at all, wherever it lies: the solver refuses
+    # it, and the public runner's triangulation left one inside a bar
+    # that this machine's did not (2026-10-19)
+    sliver |= np.abs(volume) <= 1e-9 * size ** 3
     return p, tets[~sliver], quality[~sliver], int(sliver.sum())
 
 

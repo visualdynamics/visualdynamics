@@ -73,11 +73,20 @@ def test_a_block_with_an_angled_hole_is_fitted_round_and_sharp():
     assert volume == pytest.approx(expected, rel=0.01)
 
 
-def test_brandons_angled_block_is_refused_at_a_half_inch():
+def test_a_fit_that_folds_is_refused_with_the_count(monkeypatch):
+    """Whether a given size folds differs by machine (the public runner
+    fit at 0.5 in what this one did not), so the refusal is forced: a
+    fit whose every brick reads inside out is refused with the count."""
     project, name, geometry = _project()
-    cut, _union = _angled(project, name)
-    with pytest.raises(ValueError, match='folded fitting the shape at that size'):
-        hexmesh.overlay_mesh(geometry, [cut], 0.5 * INCH)
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 0.3, 3.0, angles=(30, 0, 0),
+                                        unit='in')
+    cut = project.combine_solids(name, 'subtract', [block, tilted])
+    monkeypatch.setattr(hexmesh, '_scaled_jacobians',
+                        lambda xyz, hexes: np.full((len(hexes), 8), -1.0))
+    with pytest.raises(ValueError, match=r'\d+ bricks folded fitting the shape at that size'):
+        hexmesh.overlay_mesh(geometry, [cut], 0.25 * INCH)
+    assert hexmesh.likely_to_fold(geometry, [cut], 0.5 * INCH)['across'] == pytest.approx(0.6)
 
 
 @pytest.mark.slow
@@ -240,6 +249,17 @@ def test_the_smallest_feature_and_the_size_suggested_from_it():
     plain = project.add_solid_block(name, (20, 0, 0), (2, 1, 1), unit='in')
     assert hexmesh.smallest_feature(geometry, [plain]) == (np.inf, pytest.approx(1.0 * INCH))
     assert hexmesh.suggested_size(geometry, [plain]) == pytest.approx(1.0 / 3.0 * INCH)
+    # a pipe's wall is the gap between coaxial radii: the wye's 0.3 in,
+    # so its tetrahedra are suggested at 0.1 in (three through), its
+    # bricks at the branch bore's radius over five
+    from visualdynamics.demo import shapes
+    wye = shapes.wye()
+    wye_geometry = wye[wye.names[0]]
+    wye_cut = solids.top_level(wye_geometry)[0].id
+    assert hexmesh.smallest_feature(wye_geometry, [wye_cut]) == (
+        pytest.approx(0.45 * INCH), pytest.approx(0.3 * INCH))
+    assert hexmesh.suggested_size(wye_geometry, [wye_cut], 'tetras') == pytest.approx(0.1 * INCH)
+    assert hexmesh.suggested_size(wye_geometry, [wye_cut]) == pytest.approx(0.09 * INCH)
     # the extrusion rule reads the same walls: the tilted hole's caps,
     # projected onto the nearest axis by the grid's cuts, are not walls
     # (the pane opened at 0.95 in on this block for them)
@@ -319,18 +339,27 @@ def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeyp
 
     answers = ['cancel', 'suggested']
     monkeypatch.setattr(window, '_ask_mesh_anyway', answer)
+    # the mesh itself is not run: whether 0.08 in fits differs by
+    # machine, and what is pinned here is the question and the size
+    # handed on
+    meshed = []
+
+    def record(name, ids, size, **kwargs):
+        meshed.append(size)
+        return {'bricks': 0, 'nodes': 0, 'added': 0, 'shared': 0, 'groups': [],
+                'replaced': 0, 'method': 'overlay'}
+
+    monkeypatch.setattr(window.project, 'mesh_solids', record)
     panel.size.setValue(0.2)
     _settled(window, pump)
-    journal = len(project.journal)
     panel.mesh_button.click()
     pump()
-    assert len(project.journal) == journal, 'cancelled: nothing meshed'
+    assert meshed == [], 'cancelled: nothing meshed'
     assert asked[-1][1] == 'Mesh at 0.08 in' and asked[-1][2] == 'Mesh at 0.2 in anyway'
     assert 'is 2.0 bricks across its radius' in asked[-1][0] and '0.08 in is likely to hold' in asked[-1][0]
     panel.mesh_button.click()
     pump()
-    assert len(project.journal) == journal + 1 and ', 0.08, unit=' in project.journal[-1]
-    assert panel.size.value() == pytest.approx(0.08) or True   # the pane closes after Mesh
+    assert meshed == [pytest.approx(0.08)]
     # a size that is likely to hold asks nothing
     _pick(window, pump, _rows(window, 'solid')[:1])
     _acts(window)['mesh_solids'][3]()
@@ -340,4 +369,4 @@ def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeyp
     before = len(asked)
     panel.mesh_button.click()
     pump()
-    assert len(asked) == before and len(project.journal) == journal + 2
+    assert len(asked) == before and meshed == [pytest.approx(0.08)] * 2

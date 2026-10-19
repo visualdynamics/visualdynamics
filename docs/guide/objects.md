@@ -354,10 +354,12 @@ shape*) and reads the worst scaled Jacobian (1 for a cube, 0 for a
 flat brick), which comes out between about 0.15 and 0.3 where a ring
 mesh gives 0.5 or better. The fitting takes seconds to minutes, so the
 preview draws it only for a small grid. A feature only a few bricks
-across leaves no room to fit: on every shape measured so far a fit
-has held with five or more bricks across the smallest round feature's
-radius and folded with four or fewer. *Detect Element Size* writes
-that size into the box (the smallest radius over five, or the
+across leaves no room to fit: a fit has held with five or more bricks
+across the smallest round feature's radius on most shapes measured
+and folded with four or fewer on all of them; where a bore leaves a
+surface at a shallow angle, the feather edge there can fold a few
+bricks at any size. *Detect Element Size* writes the five-across size
+into the box (the smallest radius over five, or the
 thinnest wall over three; for an extrusion, half the thinnest
 feature; for tetrahedra, the radius over three), and *Mesh* on a size
 under four and a half across asks first, with the size likely to hold

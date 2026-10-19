@@ -193,9 +193,9 @@ THROUGH = 3.0
 def suggested_size(geometry: Any, ids, elements: str = 'hexes') -> float:
     """An element size at which a mesh of the parts is likely to hold:
     for bricks fitted to a shape, the smallest radius over `ACROSS`
-    (five bricks across it, where every fit measured has held and four
+    (five bricks across it, where most fits measured have held and four
     has folded) and the thinnest wall over `THROUGH`; for tetrahedra,
-    three across the radius and two through the wall. With no round
+    three across the radius and three through the wall. With no round
     feature and no wall, `solids.mesh_size`.
 
     Parameters
@@ -214,7 +214,7 @@ def suggested_size(geometry: Any, ids, elements: str = 'hexes') -> float:
     from .solids import mesh_size
 
     radius, wall = smallest_feature(geometry, ids)
-    across, through = (ACROSS, THROUGH) if elements == 'hexes' else (3.0, 2.0)
+    across, through = (ACROSS, THROUGH) if elements == 'hexes' else (3.0, 3.0)
     size = min(radius / across, wall / through)
     return float(size) if np.isfinite(size) else mesh_size(geometry, ids)
 

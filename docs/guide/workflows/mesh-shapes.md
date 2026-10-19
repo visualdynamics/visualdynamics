@@ -7,10 +7,13 @@ everything else, so nothing can be swept along an axis. They are here
 to show what the two meshers for such shapes do today, bricks on a
 grid fitted to the shape and ten-node tetrahedra, with the numbers
 beside the pictures. The meshers will improve; the numbers are the
-record of where they stand, and at the sizes below that record is
-that the tetrahedra mesh all three well, the fitted bricks mesh the
-shaft, and on the wye and the V-block they fold a few elements and
-are refused with the reason.
+record of where they stand. Each is meshed at the size *Detect
+Element Size* gives for the element type, the smallest round
+feature's radius over five for bricks and over three for tetrahedra
+(three through the thinnest wall for either): at those sizes the
+tetrahedra mesh all three well, the fitted bricks mesh the shaft, and
+on the wye and the V-block they fold a few elements and are refused
+with the reason.
 
 Each shape is built from the recipe alone, blocks and cylinders and
 their booleans, by `visualdynamics.demo.shapes`:
@@ -46,7 +49,8 @@ are on a laptop, meshing alone.
 
 A 2 in shaft, 6 in long, with a 0.6 in oil hole drilled through its
 middle at 30 degrees to its axis, the way an oil passage crosses a
-crankshaft. Three elements across the hole's radius at 0.1 in.
+crankshaft. Five bricks across the hole's radius at 0.06 in, three
+tetrahedra at 0.1 in.
 
 ![The shaft meshed into bricks fitted to it](../images/shapes-shaft-hexes.png)
 
@@ -55,8 +59,9 @@ crankshaft. Three elements across the hole's radius at 0.1 in.
 ## The wye fitting
 
 A 2 in run, 6 in long, with a 1.5 in branch leaving it at 45 degrees,
-both bored, the walls 0.3 in: three elements through the wall at
-0.1 in. The saddle where the branch's bore breaks into the run's is
+both bored, the walls 0.3 in: five bricks across the branch bore's
+radius at 0.09 in, three tetrahedra through the wall at 0.1 in. The
+saddle where the branch's bore breaks into the run's is
 the junction every pipe fitting has and no sweep can follow.
 
 ![The wye meshed into tetrahedra](../images/shapes-wye-tetras.png)
@@ -66,8 +71,8 @@ the junction every pipe fitting has and no sweep can follow.
 A 6 x 5 x 3 in block with a 1.2 in crank bore along its length and two
 banks of three 1 in bores at 45 degrees from vertical, each bore
 running from the crank bore out through the top face: a V-engine's
-block with everything but the bores left out. Two and a half elements
-across a bore's radius at 0.2 in.
+block with everything but the bores left out. Five bricks across a
+bore's radius at 0.1 in, three tetrahedra at 0.167 in.
 
 ![The V-block meshed into tetrahedra](../images/shapes-v-block-tetras.png)
 
@@ -75,25 +80,25 @@ across a bore's radius at 0.2 in.
 
 | Shape | Size (in) | Elements | Count | Worst | Under 0.3 | Volume (in³) | Recipe (in³) | Error | Seconds |
 |---|---|---|---|---|---|---|---|---|---|
-| Cross-drilled shaft | 0.1 | hexes | 24,132 | 0.15 | 169 | 17.70 | 17.75 | -0.25 % | 83 |
-| Cross-drilled shaft | 0.1 | tetras | 193,625 | 0.10 | 1,193 | 17.73 | 17.75 | -0.11 % | 16 |
-| Wye fitting | 0.1 | hexes | refused: 5 bricks folded | | | | 11.82 | | 190 |
-| Wye fitting | 0.1 | tetras | 112,203 | 0.10 | 589 | 11.80 | 11.82 | -0.15 % | 20 |
-| V-block | 0.2 | hexes | refused: 6 bricks folded | | | | 71.74 | | 167 |
-| V-block | 0.2 | tetras | 88,102 | 0.10 | 267 | 71.72 | 71.74 | -0.03 % | 13 |
+| Cross-drilled shaft | 0.06 | hexes | 97,534 | 0.07 | 351 | 17.73 | 17.75 | -0.12 % | 473 |
+| Cross-drilled shaft | 0.1 | tetras | 193,622 | 0.10 | 1,193 | 17.73 | 17.75 | -0.11 % | 12 |
+| Wye fitting | 0.09 | hexes | refused: 5 bricks folded | | | | 11.82 | | 293 |
+| Wye fitting | 0.1 | tetras | 112,199 | 0.10 | 581 | 11.80 | 11.82 | -0.15 % | 21 |
+| V-block | 0.1 | hexes | refused: 3 bricks folded | | | | 71.74 | | 738 |
+| V-block | 0.167 | tetras | 156,686 | 0.10 | 435 | 71.72 | 71.74 | -0.03 % | 23 |
 
 ## What the numbers say
 
-The fitted bricks mesh the shaft, and are refused on the wye and the
-V-block at these sizes, each for a handful of folded bricks out of ten
-to thirty thousand: pillow bricks at the feather edges where a bore
+The fitted bricks mesh the shaft, slowly and with a worst element of
+0.07, and are refused on the wye and the V-block even at five bricks
+across their smallest radius, for five and three folded bricks out of
+tens of thousands: pillow bricks at the feather edges where a bore
 leaves a surface at a shallow angle, where the material is thinner
-than a brick. Both are under five bricks across their smallest
-radius, the line every fit measured so far has held at (the wye's
-branch bore is four and a half across at 0.1 in, the V-block's bores
-two and a half at 0.2 in), and *Detect Element Size* gives 0.067 in
-and 0.1 in for them. The block with a peanut cut and two side holes
-shown under *Mesh Solids* fits at 0.25 in and under. The tetrahedra mesh all three in seconds with no element under
+than a brick at any size. The five-across line that *Detect Element
+Size* uses held on the shapes it was read from (the block with a
+peanut cut and two side holes shown under *Mesh Solids* fits at
+0.25 in and under) and does not hold on these two; the feather edges
+are the fitted mesher's open problem. The tetrahedra mesh all three in seconds with no element under
 a tenth and under a percent of them under 0.3. A feature under about
 three elements across cannot be fitted by either mesher and is
 refused with the reason. Pictures and numbers are regenerated by

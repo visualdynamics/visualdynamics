@@ -5,7 +5,8 @@
     ./.venv/bin/python tools/make_shape_pictures.py            # all three
     ./.venv/bin/python tools/make_shape_pictures.py v_block    # one
 
-Each shape is meshed with bricks and with tetrahedra at its size, the
+Each shape is meshed with bricks and with tetrahedra, each at the size
+Detect Element Size gives for it, the
 meshes are rendered by the toolset's own scene (`Geometry.plot`, off
 screen) into docs/guide/images/shapes-<shape>-<elements>.png, and the
 table the page carries is printed, one row per mesh: the count, the
@@ -36,7 +37,7 @@ def main(keys: list[str]) -> None:
         for elements in ('hexes', 'tetras'):
             project = shapes.SHAPES[key]()
             got = shapes.mesh(project, elements)
-            rows.append((shapes.TITLES[key], shapes.SIZES[key], elements, got))
+            rows.append((shapes.TITLES[key], got['size'], elements, got))
             if got['method'] == 'refused':
                 print(f'{key} {elements}: {got["refusal"]}', file=sys.stderr)
                 continue
@@ -49,11 +50,11 @@ def main(keys: list[str]) -> None:
     print('|---|---|---|---|---|---|---|---|---|---|')
     for title, size, elements, got in rows:
         if got['method'] == 'refused':
-            print(f'| {title} | {size} | {elements} | refused: '
+            print(f'| {title} | {size:.3g} | {elements} | refused: '
                   f'{got["refusal"].split(" fitting")[0]} | | | | '
                   f'{got["recipe_volume"]:.2f} | | {got["seconds"]:.0f} |')
             continue
-        print(f'| {title} | {size} | {elements} | {got["count"]:,} | {got["quality"]:.2f} | '
+        print(f'| {title} | {size:.3g} | {elements} | {got["count"]:,} | {got["quality"]:.2f} | '
               f'{got["poor"]:,} | {got["volume"]:.2f} | {got["recipe_volume"]:.2f} | '
               f'{got["volume_error"] * 100:+.2f} % | {got["seconds"]:.0f} |')
 

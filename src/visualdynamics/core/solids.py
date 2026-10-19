@@ -1477,6 +1477,23 @@ def smallest_feature(geometry: Any, ids) -> tuple[float, float]:
     spans = [b - a for k in range(3)
              for a, b in pairwise(sorted(x for x in planes[k] if low[k] - 1e-9 <= x <= high[k] + 1e-9))
              if b - a > 1e-9 * (high[k] - low[k])]
+    # a pipe's wall: the gap between the radii of two cylinders on one
+    # axis (a wye's 0.3 in walls read as 6 in, its run's length,
+    # without this)
+    cylinders = [leaf for leaf in leaves if leaf.kind == 'cylinder']
+    for a_index, a in enumerate(cylinders):
+        axis_a = _frame(a)[2]
+        for b in cylinders[a_index + 1:]:
+            axis_b = _frame(b)[2]
+            if abs(abs(float(axis_a @ axis_b)) - 1.0) > 1e-9:
+                continue
+            between = np.asarray(b.center, dtype=float) - np.asarray(a.center, dtype=float)
+            off_axis = between - float(between @ axis_a) * axis_a
+            if np.linalg.norm(off_axis) > 1e-9 * (a.radius + b.radius):
+                continue
+            gap = abs(a.radius - b.radius)
+            if gap > 0.0:
+                spans.append(gap)
     return (float(min(radii)) if radii else np.inf, float(min(spans)) if spans else np.inf)
 
 

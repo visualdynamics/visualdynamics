@@ -13,8 +13,11 @@ cylinders and their booleans, in inches:
     found = shapes.mesh(project, 'hexes')        # or 'tetras'
     print(found['count'], found['quality'], found['volume_error'])
 
-`report` meshes a shape both ways at its size and gives the numbers
-the guide's table shows: the element count, the worst element (the
+A shape is meshed, unless a size is given, at the size Detect Element
+Size gives for the element type (`core.hexmesh.suggested_size`: the
+smallest radius over five for bricks fitted to the shape, over three
+for tetrahedra). `report` meshes a shape both ways and gives the
+numbers the guide's table shows: the size, the element count, the worst element (the
 scaled Jacobian of a brick, the radius ratio of a tetrahedron, 1 for a
 perfect element and 0 for a flat one), how many are under 0.3, the
 mesh's volume against the recipe's, and the seconds taken.
@@ -36,9 +39,6 @@ from ..core import fem, hexmesh, solids, tetmesh
 
 INCH = 0.0254
 
-#: the element size each shape is meshed at for the guide, in inches:
-#: three to five elements across the smallest feature
-SIZES = {'shaft': 0.1, 'wye': 0.1, 'v_block': 0.2}
 #: each shape's project, by its key
 TITLES = {'shaft': 'Cross-drilled shaft', 'wye': 'Wye fitting', 'v_block': 'V-block'}
 
@@ -128,13 +128,13 @@ def mesh_volume(geometry: Any) -> float:
 
 def mesh(project: Project, elements: str, size: float | None = None) -> dict:
     """Mesh the project's one geometry's parts into `elements`, 'hexes'
-    or 'tetras', at `size` in inches (the shape's `SIZES` entry by
-    default), and measure the result.
+    or 'tetras', at `size` in inches (by default the size Detect
+    Element Size gives for the element type), and measure the result.
 
     Returns
     -------
     dict
-        'count', the elements; 'quality', the worst element's scaled
+        'size', in inches; 'count', the elements; 'quality', the worst element's scaled
         Jacobian (bricks) or radius ratio (tets); 'poor', how many are
         under 0.3; 'volume', the mesh's, and 'recipe_volume', the
         recipe's, in cubic inches; 'volume_error', the mesh's less the
@@ -146,14 +146,15 @@ def mesh(project: Project, elements: str, size: float | None = None) -> dict:
     name = project.names[0]
     geometry = project[name]
     ids = [s.id for s in solids.top_level(geometry)]
+    elements = {'bricks': 'hexes', 'tets': 'tetras'}.get(elements, elements)
     if size is None:
-        size = SIZES[next(key for key, title in TITLES.items() if title == project.name)]
+        size = hexmesh.suggested_size(geometry, ids, elements) / INCH
     started = time.perf_counter()
     try:
         found = project.mesh_solids(name, ids, size, unit='in', elements=elements)
     except ValueError as refusal:
         # recorded as it stands: the table says what was refused and why
-        return {'count': 0, 'quality': float('nan'), 'poor': 0, 'volume': float('nan'),
+        return {'size': size, 'count': 0, 'quality': float('nan'), 'poor': 0, 'volume': float('nan'),
                 'recipe_volume': recipe_volume(geometry, ids) / INCH ** 3,
                 'volume_error': float('nan'), 'seconds': time.perf_counter() - started,
                 'method': 'refused', 'refusal': str(refusal)}
@@ -163,7 +164,7 @@ def mesh(project: Project, elements: str, size: float | None = None) -> dict:
     quality = found['quality'] if elements == 'tetras' or found.get('method') == 'overlay' \
         else _brick_quality(geometry)
     poor = found['poor'] if 'poor' in found else int((_brick_qualities(geometry) < 0.3).sum())
-    return {'count': found['tets'] if elements == 'tetras' else found['bricks'],
+    return {'size': size, 'count': found['tets'] if elements == 'tetras' else found['bricks'],
             'quality': float(quality), 'poor': int(poor), 'volume': volume,
             'recipe_volume': recipe, 'volume_error': (volume - recipe) / recipe,
             'seconds': seconds,
@@ -183,21 +184,22 @@ def _brick_quality(geometry: Any) -> float:
 
 def report(name: str, size: float | None = None) -> dict:
     """Both meshes of the shape `name` ('shaft', 'wye' or 'v_block') at
-    `size` in inches (its `SIZES` entry by default): {'hexes': ...,
-    'tetras': ...}, each as `mesh` gives it, each on a fresh build."""
+    `size` in inches (each at its detected size by default): {'hexes':
+    ..., 'tetras': ...}, each as `mesh` gives it, each on a fresh
+    build."""
     found = {}
     for elements in ('hexes', 'tetras'):
         project = SHAPES[name]()
-        found[elements] = mesh(project, elements, size if size is not None else SIZES[name])
+        found[elements] = mesh(project, elements, size)
     return found
 
 
 def _main() -> None:
     for name in SHAPES:
         found = report(name)
-        print(f'{name} at {SIZES[name]} in:')
+        print(f'{name}:')
         for elements, got in found.items():
-            print(f'  {elements:<7} {got["count"]:>8,} elements, worst {got["quality"]:.2f}, '
+            print(f'  {elements:<7} at {got["size"]:.3g} in: {got["count"]:>8,} elements, worst {got["quality"]:.2f}, '
                   f'{got["poor"]:,} under 0.3, volume {got["volume"]:.2f} in^3 '
                   f'({got["volume_error"] * 100:+.2f} %), {got["seconds"]:.1f} s, '
                   f'{got["method"]}')

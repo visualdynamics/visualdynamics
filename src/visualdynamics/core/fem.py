@@ -178,8 +178,8 @@ ZERO_ENERGY = 1e-12
 SPARSE_ABOVE = 3000
 
 #: the element type a solid is written back as, by its node count
-#: (`Model.geometry`): hex8, wedge6, tet4 in `ELEMENT_TYPES`
-SOLID_CODES = {8: 115, 6: 112, 4: 111}
+#: (`Model.geometry`): hex8, wedge6, tet4, tet10 in `ELEMENT_TYPES`
+SOLID_CODES = {8: 115, 6: 112, 4: 111, 10: 118}
 
 #: the sparse solver polishes what Lanczos hands it until every mode
 #: asked for has a relative residual below this (`polish_modes`), or a
@@ -1105,8 +1105,8 @@ class Model:
 
     def add_solid(self, nodes: Sequence[int], material: Material,
                   color: int = 1, group: str = '') -> Solid:
-        """One solid element over eight, six or four existing nodes: a
-        hexahedron, a wedge or a tetrahedron.
+        """One solid element over eight, six, four or ten existing nodes:
+        a hexahedron, a wedge, a tetrahedron or a ten-node tetrahedron.
 
         A solid with no volume is refused, and so is one made of `RIGID`. One
         numbered the other way round (its volume negative) is the same element
@@ -1115,7 +1115,9 @@ class Model:
         Parameters
         ----------
         nodes : sequence of int
-            The corners, bottom face then top, the same way round.
+            The corners, bottom face then top, the same way round; a
+            ten-node tetrahedron's four corners, then the midsides of
+            edges 1-2, 2-3, 1-3, 1-4, 2-4, 3-4.
         material : Material
             What it is made of.
         color, group : optional
@@ -1126,8 +1128,8 @@ class Model:
         Solid
         """
         nodes = tuple(int(n) for n in nodes)
-        if len(nodes) not in (8, 6, 4) or len(set(nodes)) != len(nodes):
-            raise ValueError('a solid spans eight, six or four distinct nodes')
+        if len(nodes) not in SOLID_CODES or len(set(nodes)) != len(nodes):
+            raise ValueError('a solid spans eight, six, four or ten distinct nodes')
         for node in nodes:
             if node not in self._nodes:
                 raise ValueError(
@@ -3526,6 +3528,77 @@ def _tet_matrices(material: Material, xyz: np.ndarray
     return stiffness, mass
 
 
+def _tet_rule(order: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """A quadrature rule on the tetrahedron L2 + L3 + L4 <= 1: the cube
+    rule collapsed onto it (Stroud's conical product), `order` points a
+    side, exact to degree 2 * order - 1. Points as (L2, L3, L4), weights
+    summing to the volume 1/6."""
+    from scipy.special import roots_jacobi, roots_legendre
+
+    x, a = roots_jacobi(order, 2.0, 0.0)
+    y, b = roots_jacobi(order, 1.0, 0.0)
+    z, c = roots_legendre(order)
+    points, weights = [], []
+    for xi, wa in zip(x, a):
+        l2 = (1.0 + xi) / 2.0
+        for eta, wb in zip(y, b):
+            l3 = (1.0 - l2) * (1.0 + eta) / 2.0
+            for zeta, wc in zip(z, c):
+                l4 = (1.0 - l2 - l3) * (1.0 + zeta) / 2.0
+                points.append((l2, l3, l4))
+                weights.append(wa * wb * wc)
+    weights = np.array(weights)
+    return np.array(points), weights * (1.0 / 6.0) / weights.sum()
+
+
+def _tet10_basis(l2: float, l3: float, l4: float) -> tuple[np.ndarray, np.ndarray]:
+    """The ten quadratic functions of the tetrahedron and their
+    derivatives (10, 3) with respect to (L2, L3, L4): the corners
+    L_i (2 L_i - 1), the midsides 4 L_i L_j in the order of
+    `tetmesh.TET10_EDGES` (1-2, 2-3, 1-3, 1-4, 2-4, 3-4)."""
+    l1 = 1.0 - l2 - l3 - l4
+    l = np.array([l1, l2, l3, l4])
+    # dL_i/d(L2, L3, L4)
+    dl = np.array([[-1.0, -1.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    n = list(l * (2.0 * l - 1.0))
+    d = list((4.0 * l - 1.0)[:, None] * dl)
+    for i, j in ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3)):
+        n.append(4.0 * l[i] * l[j])
+        d.append(4.0 * (l[i] * dl[j] + l[j] * dl[i]))
+    return np.array(n), np.array(d)
+
+
+_TET_RULE = _tet_rule()
+#: the ten-node tetrahedron's volume rule, beside the brick's and the wedge's
+_VOLUME_RULES[10] = (np.array([_tet10_basis(*point)[1] for point in _TET_RULE[0]]),
+                     _TET_RULE[1])
+
+
+def _tet10_matrices(material: Material, xyz: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and consistent mass of the ten-node tetrahedron,
+    30x30, integrated by the 27-point conical rule, exact to degree
+    five: the stiffness's integrand is quadratic on a straight-sided
+    element and the mass's quartic. A curved side, a midside node moved
+    onto a wall, is integrated by the same rule, as the brick's is.
+    The Jacobian's sign is taken as read, as for the brick."""
+    d = _isotropic(material)
+    rho = material.density
+    stiffness = np.zeros((30, 30))
+    mass = np.zeros((30, 30))
+    for (l2, l3, l4), weight in zip(*_TET_RULE):
+        n, dn = _tet10_basis(l2, l3, l4)
+        jacobian = dn.T @ xyz
+        det = abs(np.linalg.det(jacobian))
+        b = _strain_rows(dn @ np.linalg.inv(jacobian).T)
+        stiffness += weight * det * (b.T @ d @ b)
+        fields = np.zeros((3, 30))
+        for i in range(10):
+            fields[:, 3 * i:3 * i + 3] = n[i] * np.eye(3)
+        mass += weight * det * rho * (fields.T @ fields)
+    return stiffness, mass
+
+
 def _solid_matrices(material: Material, xyz: np.ndarray
                     ) -> tuple[np.ndarray, np.ndarray]:
     """(stiffness, mass) of a solid by its node count."""
@@ -3533,6 +3606,8 @@ def _solid_matrices(material: Material, xyz: np.ndarray
         return _hex_matrices(material, xyz)
     if len(xyz) == 6:
         return _wedge_matrices(material, xyz)
+    if len(xyz) == 10:
+        return _tet10_matrices(material, xyz)
     return _tet_matrices(material, xyz)
 
 

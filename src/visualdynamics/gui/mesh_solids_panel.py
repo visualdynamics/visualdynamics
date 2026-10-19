@@ -17,7 +17,14 @@ the size makes, draws it, and shows the result here.
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 from .editors import LENGTH_DECIMALS, DoubleSpinBox, commit_on_enter
 from .settings_panel import panel_grid
@@ -28,7 +35,8 @@ from .settings_panel import panel_grid
 class MeshSolidsPanel(QWidget):
     """The element size, what it makes, and the Mesh button."""
 
-    #: the size or Keep apart changed: the window meshes the preview again
+    #: the size, the elements or Keep apart changed: the window meshes
+    #: the preview again
     changed = Signal()
     mesh_asked = Signal()
     close_asked = Signal()
@@ -45,27 +53,41 @@ class MeshSolidsPanel(QWidget):
                              'the whole number of bricks nearest this size')
         grid.addWidget(self.size_label, 1, 0)
         grid.addWidget(self.size, 1, 1)
+        # the element type is the user's choice (Brandon, 2026-10-18):
+        # bricks where the parts are an extrusion, tetrahedra for any
+        # shape; a shape bricks cannot mesh says why in the reading
+        self.elements_label: QLabel = QLabel('Elements')
+        self.elements: QComboBox = QComboBox()
+        self.elements.addItem('Bricks', 'bricks')
+        self.elements.addItem('Tets', 'tets')
+        self.elements.setToolTip(
+            'Bricks: eight-node hexahedra on a grid, for parts that are '
+            'an extrusion along X, Y or Z, holes rounded. Tets: ten-node '
+            'tetrahedra for any shape, from the recipe alone')
+        grid.addWidget(self.elements_label, 2, 0)
+        grid.addWidget(self.elements, 2, 1)
         self.parts_label: QLabel = QLabel()
         self.parts_label.setWordWrap(True)
         self.parts_label.setEnabled(False)
-        grid.addWidget(self.parts_label, 2, 0, 1, 2)
+        grid.addWidget(self.parts_label, 3, 0, 1, 2)
         self.apart: QCheckBox = QCheckBox('Keep apart from other groups')
         self.apart.setToolTip(
             'Join only nodes of its own element group: where it touches '
             'another part it keeps nodes of its own, to be merged at the '
             'places picked with Merge Coincident Nodes')
-        grid.addWidget(self.apart, 3, 0, 1, 2)
+        grid.addWidget(self.apart, 4, 0, 1, 2)
         # parts bolted together, meshed on one grid each with its own
-        # nodes (the BARC, 2026-10-11): shown with two parts or more
+        # nodes (the BARC, 2026-10-11): shown with two parts or more,
+        # meshed into bricks
         self.parts_apart: QCheckBox = QCheckBox('Keep the parts apart from each other')
         self.parts_apart.setToolTip(
             'Mesh the parts on one grid, each keeping its own nodes where it '
             'touches another: they lie on each other\'s, to be merged at the '
             'places picked with Merge Coincident Nodes')
-        grid.addWidget(self.parts_apart, 4, 0, 1, 2)
+        grid.addWidget(self.parts_apart, 5, 0, 1, 2)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
-        grid.addWidget(self.reading_label, 5, 0, 1, 2)
+        grid.addWidget(self.reading_label, 6, 0, 1, 2)
         buttons = QHBoxLayout()
         self.mesh_button: QPushButton = QPushButton('Mesh')
         self.mesh_button.setToolTip('Mesh the solids into elements at the '
@@ -75,10 +97,11 @@ class MeshSolidsPanel(QWidget):
         self.close_button.setToolTip('Put the pane away without meshing')
         buttons.addWidget(self.mesh_button)
         buttons.addWidget(self.close_button)
-        grid.addLayout(buttons, 6, 0, 1, 2)
-        grid.setRowStretch(7, 1)
+        grid.addLayout(buttons, 7, 0, 1, 2)
+        grid.setRowStretch(8, 1)
         commit_on_enter(self.size)
         self.size.valueChanged.connect(lambda _value: self.changed.emit())
+        self.elements.currentIndexChanged.connect(self._elements_changed)
         self.apart.toggled.connect(lambda _on: self.changed.emit())
         self.parts_apart.toggled.connect(lambda _on: self.changed.emit())
         self.mesh_button.clicked.connect(self.mesh_asked.emit)
@@ -88,7 +111,8 @@ class MeshSolidsPanel(QWidget):
         """Set the pane up: the size in the display unit `unit`, `parts`
         naming the parts it meshes, and `count`, how many there are.
         Both Keep apart boxes are cleared, and the second is shown only
-        for two or more parts."""
+        for two or more parts meshed into bricks; the elements are
+        bricks again."""
         self.size_label.setText(f'Element size [{unit}]')
         self.size.blockSignals(True)
         self.size.setSingleStep(max(size / 4.0, 1e-6))
@@ -98,8 +122,23 @@ class MeshSolidsPanel(QWidget):
             box.blockSignals(True)
             box.setChecked(False)
             box.blockSignals(False)
+        self.elements.blockSignals(True)
+        self.elements.setCurrentIndex(0)
+        self.elements.blockSignals(False)
+        self._count = count
         self.parts_apart.setVisible(count > 1)
         self.parts_label.setText(f'Solids: {parts}')
+
+    @property
+    def element_kind(self) -> str:
+        """'bricks' or 'tets', as picked."""
+        return str(self.elements.currentData())
+
+    def _elements_changed(self, _index: int) -> None:
+        # the parts can be kept apart on one grid: a brick option
+        self.parts_apart.setVisible(self.element_kind == 'bricks'
+                                    and self.__dict__.get('_count', 1) > 1)
+        self.changed.emit()
 
     def show_reading(self, text: str, ok: bool) -> None:
         self.reading_label.setText(text)

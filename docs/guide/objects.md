@@ -329,15 +329,33 @@ shapes themselves, their volumes and their surfaces are in
 ### Mesh Solids
 
 *Mesh Solids*, on the bar when parts are picked, meshes them into
-eight-node bricks, each part an element group named for it. It meshes
-extrusions: every block square to the geometry's axes, and every
-cylinder and rounded corner along one axis, the same one for all of
-them. That covers plates, bars and their holes. A solid turned off the
-axes is refused by name. The grid is cut at every flat face of every
-block, so flat faces are meshed exactly, and each span is divided into
-the whole number of bricks nearest the element size. A brick belongs
-to the picked part whose shape holds its center, and where parts
-overlap it goes to the one later in the tree.
+eight-node bricks or ten-node tetrahedra, each part an element group
+named for it. The element type is yours to choose in the pane:
+*Bricks* for the parts that are an extrusion, *Tets* for any shape.
+
+Bricks mesh an extrusion best: every block square to the geometry's
+axes, and every cylinder and rounded corner along one axis. That
+covers plates, bars and their holes. A cylinder along a second axis, a
+hole drilled in from the side, is cut from the grid and its nodes
+pulled round in its own plane, without a ring, so the bricks around it
+are uneven. The grid is cut at every flat face of every block, so flat
+faces are meshed exactly, and each span is divided into the whole
+number of bricks nearest the element size. A brick belongs to the
+picked part whose shape holds its center, and where parts overlap it
+goes to the one later in the tree.
+
+A shape that is not an extrusion, a hole drilled at an angle, is still
+meshed into bricks, on a grid fitted to it: the cubes whose centers
+lie inside are kept, a layer of bricks is laid under their skin, the
+skin's nodes are moved onto the shape's surface with its corners and
+sharp edges captured, and every node is then moved to where the worst
+brick around it is best. The pane says so (*on a grid fitted to the
+shape*) and reads the worst scaled Jacobian (1 for a cube, 0 for a
+flat brick), which comes out between about 0.15 and 0.3 where a ring
+mesh gives 0.5 or better. The fitting takes seconds, so the preview
+draws it only for a small grid. A feature only a brick or two across
+leaves no room to fit, and the pane says how many bricks folded and to
+use a smaller size or *Tets*.
 
 Holes, bosses and inserts are meshed round. About each circle with
 room around it the grid is replaced by a ring mesh, with the circle's
@@ -349,7 +367,24 @@ around whatever is in the way where none does (a hole nearly as wide as
 a table's top, beside its legs). Where there is no room (a hole close
 to another hole or to a face), and at a rounded corner, the grid's
 nodes on the rim are pulled onto the circle instead; a pull that would
-turn a brick inside out is not made.
+turn a brick inside out is made as far as it can be.
+
+Tets mesh any shape the solids describe, a hole at an angle included,
+from the shape alone. Points are spread through the part and relaxed
+until the edges between them are even, points pushed out of the part
+are put back on its surface, and the sharp edges and corners of the
+part are held by points placed along them, so nothing is rounded off.
+The elements are ten-node tetrahedra, their midside nodes on the
+curved walls, which the solver takes alongside bricks; the four-node
+tetrahedron is far too stiff in bending and is not offered. The pane
+reads the count, the worst radius ratio (1 for a regular tetrahedron,
+0 for a flat one) and how many are under 0.3. A tetrahedral mesh
+takes longer than a brick mesh of the same size, seconds for a
+hundred thousand elements, and the preview draws it only up to a few
+thousand; past that it says the count and *Mesh* makes them with the
+progress bar up. Where both kinds can mesh a part, bricks are the
+better element for the same count, and a brick mesh of a plate or a
+bar should be preferred.
 
 Parts meshed together share nodes where they touch (a frame and the
 inserts in its holes). *Keep apart from other groups* lands the bricks

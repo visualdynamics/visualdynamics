@@ -47,11 +47,18 @@ Write-Host "installed to $target"
 function Invoke-Bounded($arguments, $outLog, $errLog, $seconds) {
     $p = Start-Process -FilePath $exe -PassThru -ArgumentList $arguments `
         -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+    # PowerShell 7 reads a process's exit code only when its handle
+    # was taken before it exited and the untimed WaitForExit has run:
+    # the 0.1.0a57 release run saw the launcher refuse correctly and
+    # read its code as empty, and failed on that
+    $null = $p.Handle
     if (-not $p.WaitForExit($seconds * 1000)) {
         $p.Kill()
         Get-Content $errLog | Select-Object -Last 40
         throw "the application did not exit within $seconds s running: $arguments"
     }
+    $p.WaitForExit()
+    if ($null -eq $p.ExitCode) { throw "no exit code read running: $arguments" }
     return $p.ExitCode
 }
 

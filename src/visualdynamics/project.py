@@ -3015,6 +3015,38 @@ class Project(dict):
         _name, geometry = self._solid_geometry(source)
         return solids.combine(geometry, operation, ids, name)
 
+    def copy_solids(self, source: Any, ids: Any, *,
+                    into: Any = None) -> list[int]:
+        """Copy a geometry's solids, recipe and all, into the same
+        geometry or another (Copy and Paste on solid rows). Returns the
+        new top-level ids.
+
+        A boolean or a pattern is copied with every solid it is made of
+        (`core.solids.copy`), so the copy is edited on its own. A named
+        solid's copy is '<name> copy'.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry the solids are in, by name or as the object.
+        ids : sequence of int
+            The solids, by id.
+        into : str or object, optional
+            The geometry the copies go into; the same one when omitted.
+            Both geometries hold their coordinates the same way, with
+            units defined or not, or the copy is refused.
+
+        Returns
+        -------
+        list of int
+            The new solids' ids, in the order of `ids`.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        target = geometry if into is None else self._solid_geometry(into)[1]
+        return solids.copy(geometry, ids, into=target)
+
     def pattern_solids(self, source: Any, ids: Any, counts: Any, spacing: Any,
                        *, unit: str = 'm') -> int:
         """Pattern a geometry's solids in rows, columns and layers
@@ -3053,17 +3085,22 @@ class Project(dict):
 
     def mesh_solids(self, source: Any, ids: Any, size: float | None = None, *,
                     unit: str = 'm', apart: bool = False,
-                    parts_apart: bool = False) -> dict:
-        """Mesh a geometry's solids into bricks (Mesh Solids). Each part
-        becomes an element group named for it.
+                    parts_apart: bool = False, elements: str = 'bricks',
+                    progress: Any = None) -> dict:
+        """Mesh a geometry's solids into bricks or tetrahedra (Mesh
+        Solids). Each part becomes an element group named for it.
 
-        The parts are extrusions along X, Y or Z, meshed on one grid cut
-        at every flat face, with their holes rounded
-        (`core.solids.extrusion_mesh`). Parts meshed together share nodes
-        where they touch. The solids are kept so they can be meshed
-        again, and a part meshed again replaces its earlier mesh: the
-        bricks in the element group of its name are deleted, and the
-        group and its material are kept.
+        With `elements` 'bricks', parts that are an extrusion along X, Y
+        or Z are meshed on one grid cut at every flat face, with their
+        holes rounded (`core.solids.extrusion_mesh`), and any other
+        shape on a grid fitted to it (`core.hexmesh.overlay_mesh`);
+        `core.solids.brick_mesh` picks. With 'tets', the parts are
+        meshed into ten-node tetrahedra from their recipe's signed
+        distance (`core.tetmesh.tet_mesh`). Parts
+        meshed together share nodes where they touch. The solids are
+        kept so they can be meshed again, and a part meshed again
+        replaces its earlier mesh: the elements in the element group of
+        its name are deleted, and the group and its material are kept.
 
         Parameters
         ----------
@@ -3084,23 +3121,39 @@ class Project(dict):
         parts_apart : bool, default False
             Give each part meshed here its own nodes where the parts
             touch each other. They are still on one grid, so their nodes
-            coincide and can be merged later where bolts go.
+            coincide and can be merged later where bolts go. Bricks
+            only.
+        elements : {'bricks', 'tets'}, default 'bricks'
+            The element type.
+        progress : callable, optional
+            Called with ``(done, total)`` as the mesh goes
+            (`core.solids.extrusion_mesh`, `core.tetmesh.tet_mesh`). The
+            app's progress bar uses it; a script can print it.
 
         Returns
         -------
         dict
-            'bricks', 'nodes', 'axis', 'rounded' and 'shortest' as
-            `extrusion_mesh` gives them, 'added', 'shared' and 'groups'
-            as `mesh.join` gives them, and 'replaced', how many bricks of
-            the parts' earlier mesh were replaced.
+            For bricks, what `brick_mesh` gives, 'method' included; for
+            tetrahedra,
+            'tets', 'nodes', 'steps', 'quality', 'poor', 'slivers' and
+            'shortest' as `tet_mesh` gives them; and either way 'added',
+            'shared' and 'groups' as `mesh.join` gives them, and
+            'replaced', how many elements of the parts' earlier mesh
+            were replaced.
         """
-        from .core import mesh, solids
+        from .core import mesh, solids, tetmesh
 
+        if elements not in ('bricks', 'tets'):
+            raise ValueError(f"elements is 'bricks' or 'tets', not {elements!r}")
         _name, geometry = self._solid_geometry(source)
         ids = [int(i) for i in ids]
         held = (solids.mesh_size(geometry, ids) if size is None
                 else float(size) * self._solid_scale(geometry, unit))
-        part, made = solids.extrusion_mesh(geometry, ids, held, parts_apart)
+        if elements == 'tets':
+            part, made = tetmesh.tet_mesh(geometry, ids, held, progress=progress)
+        else:
+            part, made = solids.brick_mesh(geometry, ids, held, parts_apart,
+                                           progress=progress)
         # meshed again, a part replaces its earlier mesh (Brandon,
         # 2026-10-12): the bricks of the element groups this mesh joins
         # by name go first, with the nodes only they used unless data
@@ -3108,7 +3161,7 @@ class Project(dict):
         # Left in, the new bricks that landed on old ones were left out
         # as already there, and a table meshed again without its legs
         # kept the legs' bricks
-        replaced = [int(e) for e in solids.meshed_bricks(geometry, part.group_name)]
+        replaced = [int(e) for e in solids.meshed_elements(geometry, part.group_name)]
         if replaced:
             geometry.delete_elements(replaced, nodes=True, keep=sorted(self._data_nodes()))
         found = mesh.join(geometry, part, apart=apart)
@@ -5034,6 +5087,7 @@ _JOURNALED_VERBS = (
     'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_section',
     'add_solid_hole', 'combine_solids',
     'delete_solids', 'separate_solids', 'mesh_solids', 'pattern_solids',
+    'copy_solids',
     'edit_solid', 'move_solids', 'delete_elements', 'delete_element_groups',
     'tie_elements',
     'merge_groups', 'set_view', 'set_comparison_scale',

@@ -28,6 +28,7 @@ then Y, then Z axes, the rule Add Block's pane turns a block by
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from typing import Any
@@ -627,6 +628,67 @@ def delete(geometry: Any, ids) -> int:
     return len(going)
 
 
+def copy(geometry: Any, ids, into: Any = None) -> list[int]:
+    """Copy solids, recipe and all, into a geometry: `geometry` itself,
+    or `into`. Returns the new top-level ids, in the order of `ids`.
+
+    A boolean or a pattern is copied with every solid it is made of,
+    each under a new id, so the copy is its own: editing a cylinder of
+    the copy leaves the original. A named solid's copy is named
+    '<name> copy'; the solids inside it keep their names. The two
+    geometries have to hold their coordinates the same way, both with
+    their units defined or neither.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The solids to copy, by id.
+    into : Geometry, optional
+        Where the copies go; `geometry` when omitted.
+
+    Returns
+    -------
+    list of int
+
+    Raises
+    ------
+    ValueError
+        With no ids, an id the geometry does not hold, or geometries
+        whose units differ.
+    """
+    # Copy and Paste on solid rows (Brandon, 2026-10-18)
+    ids = [int(i) for i in ids]
+    if not ids:
+        raise ValueError('pick a solid to copy')
+    target = geometry if into is None else into
+    if (geometry.length_unit is None) != (target.length_unit is None):
+        raise ValueError('the geometries hold their coordinates in different '
+                         'units: define both or neither before copying '
+                         'solids between them')
+    for i in ids:
+        solid(geometry, i)      # refused by name when it is not there
+    made = []
+    for i in ids:
+        original = solid(geometry, i)
+        new = _clone(geometry, original, target)
+        if original.name.strip():
+            target.solids[-1] = replace(new, name=f'{original.name.strip()} copy')
+        made.append(new.id)
+    return made
+
+
+def _clone(geometry: Any, item: Solid, target: Any) -> Solid:
+    """`item` and everything it is made of, added to `target` under new
+    ids, inner solids first so a boolean's operands exist before it."""
+    operands = tuple(_clone(geometry, solid(geometry, o), target).id
+                     for o in item.operands)
+    new = replace(item, id=_next_id(target), operands=operands)
+    target.solids.append(new)
+    return new
+
+
 def separate(geometry: Any, ids) -> int:
     """Take booleans and patterns apart: each one is removed, and its
     operands stand as parts again, which undoes a subtraction made by
@@ -988,13 +1050,26 @@ def shape_triangles(item, deflection: float = DEFLECTION) -> np.ndarray:
 
 #: past this many bricks the grid is refused rather than built
 MESH_LIMIT = 2_000_000
+#: the element types Mesh Solids makes: the brick, and the four- and
+#: ten-node tetrahedra (`tetmesh`)
+MESHED_TYPES = (115, 111, 118)
 
 
 def _frame(item: Solid) -> np.ndarray:
     """The solid's own axes as rows, in the geometry's frame."""
+    return _frame_of(tuple(float(a) for a in item.angles))
+
+
+@functools.lru_cache(maxsize=256)
+def _frame_of(angles: tuple[float, float, float]) -> np.ndarray:
+    # built once per set of angles: a fitted mesh asks a solid's
+    # distance hundreds of thousands of times, and the rotation was a
+    # tenth of the time
     from ..rotate import frame_from_angles
 
-    return frame_from_angles(item.angles)[:3]
+    frame = frame_from_angles(angles)[:3]
+    frame.setflags(write=False)
+    return frame
 
 
 def _pieces(geometry: Any, item: Solid) -> list[tuple[bool, Solid]]:
@@ -1084,7 +1159,7 @@ def _leaves(geometry: Any, solid_id: int) -> list[Solid]:
             for offset in _offsets(item) for leaf in leaves]
 
 
-def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
+def contains(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
     """Which of `points` lie inside the solid, worked out from its recipe
     without the kernel: a block's box and a cylinder's radius and length,
     combined as its booleans say. A point on a face counts as inside.
@@ -1097,6 +1172,10 @@ def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
         The solid, by id.
     points : array_like
         (n, 3), as the geometry holds its coordinates.
+    ignore : collection of int, optional
+        Solids read as holding nothing: a cylinder subtracted is not
+        cut, one unioned adds nothing. The mesher reads a part this
+        way without the cylinders that run across its extrusion.
 
     Returns
     -------
@@ -1104,6 +1183,8 @@ def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
     """
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     item = solid(geometry, solid_id)
+    if item.id in ignore:
+        return np.zeros(len(points), dtype=bool)
     if item.kind in BASIC:
         return _basic_contains(item, points)
     if item.kind in SHAPED:
@@ -1119,16 +1200,98 @@ def contains(geometry: Any, solid_id: int, points) -> np.ndarray:
                 pieces = _pieces(geometry, solid(geometry, o))
                 tests.append(lambda at, pieces=pieces: _pieces_contain(pieces, at))
             else:
-                tests.append(lambda at, o=o: contains(geometry, o, at))
+                tests.append(lambda at, o=o: contains(geometry, o, at, ignore))
         return np.any([test(points - offset) for offset in _offsets(item)
                        for test in tests], axis=0)
-    inside = [contains(geometry, o, points) for o in item.operands]
+    inside = [contains(geometry, o, points, ignore) for o in item.operands]
     if item.kind == 'union':
         return np.any(inside, axis=0)
     if item.kind == 'intersect':
         return np.all(inside, axis=0)
     return inside[0] & ~np.any(inside[1:], axis=0)
 
+
+def distance(geometry: Any, solid_id: int, points, ignore=()) -> np.ndarray:
+    """The signed distance from each of `points` to the solid's surface,
+    negative inside, worked out from its recipe: a block's and a
+    cylinder's exact distances, a union the least of its operands', an
+    intersection the greatest, a subtraction the greater of the first's
+    and the negatives of the rest's. Exact for a block and a cylinder;
+    for a boolean, exact outside and at the surface, and a bound
+    inside, which is what a mesher needs: where the surface is and
+    which way is out.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        The geometry whose solids table holds it.
+    solid_id : int
+        The solid, by id.
+    points : array_like
+        (n, 3), as the geometry holds its coordinates.
+    ignore : collection of int, optional
+        Solids read as holding nothing, as `contains` reads them.
+
+    Returns
+    -------
+    numpy.ndarray
+        (n,), in the geometry's length unit.
+    """
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    item = solid(geometry, solid_id)
+    if item.id in ignore:
+        return np.full(len(points), np.inf)
+    if item.kind in BASIC:
+        return _basic_distance(item, points)
+    if item.kind in SHAPED:
+        pieces = _pieces(geometry, item)
+        return _pieces_distance(pieces, points)
+    if item.kind == PATTERN:
+        tests = []
+        for o in item.operands:
+            if solid(geometry, o).kind in SHAPED:
+                pieces = _pieces(geometry, solid(geometry, o))
+                tests.append(lambda at, pieces=pieces: _pieces_distance(pieces, at))
+            else:
+                tests.append(lambda at, o=o: distance(geometry, o, at, ignore))
+        return np.min([test(points - offset) for offset in _offsets(item)
+                       for test in tests], axis=0)
+    found = [distance(geometry, o, points, ignore) for o in item.operands]
+    if item.kind == 'union':
+        return np.min(found, axis=0)
+    if item.kind == 'intersect':
+        return np.max(found, axis=0)
+    return np.maximum(found[0], -np.min(found[1:], axis=0))
+
+
+def _basic_distance(item: Solid, points: np.ndarray) -> np.ndarray:
+    """The signed distance to a block (its corners rounded or not) or
+    a cylinder, exact."""
+    local = (points - np.asarray(item.center)) @ _frame(item).T
+    if item.kind == 'block':
+        half = np.asarray(item.widths) / 2.0
+        if item.corner > 0.0:
+            # the rounded rectangle in the plane, then the slab
+            q = np.abs(local[:, :2]) - (half[:2] - item.corner)
+            flat = (np.linalg.norm(np.maximum(q, 0.0), axis=1)
+                    + np.minimum(q.max(axis=1), 0.0) - item.corner)
+            q = np.stack([flat, np.abs(local[:, 2]) - half[2]], axis=1)
+        else:
+            q = np.abs(local) - half
+        return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(q.max(axis=1), 0.0)
+    q = np.stack([np.hypot(local[:, 0], local[:, 1]) - item.radius,
+                  np.abs(local[:, 2]) - item.length / 2.0], axis=1)
+    return np.linalg.norm(np.maximum(q, 0.0), axis=1) + np.minimum(q.max(axis=1), 0.0)
+
+
+def _pieces_distance(pieces, points: np.ndarray) -> np.ndarray:
+    """The signed distance to a section's or a hole's material: the
+    uncut pieces' union less the cut ones."""
+    found = np.min([_basic_distance(p, points) for cut, p in pieces if not cut], axis=0)
+    for cut, p in pieces:
+        if cut:
+            found = np.maximum(found, -_basic_distance(p, points))
+    return found
 
 def _basic_contains(item: Solid, points: np.ndarray) -> np.ndarray:
     """Which points lie inside a block or a cylinder, a face counted."""
@@ -1194,12 +1357,19 @@ def _box(geometry: Any, solid_id: int) -> tuple[np.ndarray, np.ndarray]:
     return boxes[0]
 
 
+class NotAnExtrusion(ValueError):
+    """The parts cannot be meshed into bricks: a solid is turned off
+    the geometry's axes. Tetrahedra can mesh them (`tetmesh`)."""
+
+
 def extrusion_axis(geometry: Any, ids) -> int:
     """The axis (0, 1 or 2) the parts are extrusions along.
 
-    Every block must be square to the geometry's axes, and every cylinder
-    and every rounded corner must run along the one axis; a part that is
-    not raises ValueError naming the solid. Blocks alone are an
+    Every block must be square to the geometry's axes; a solid turned
+    off them raises `NotAnExtrusion` naming it. The axis is the one most of
+    the cylinders and rounded corners run along, the largest radius
+    deciding a tie; the rest run across the extrusion and are pulled
+    round from the grid rather than ringed. Blocks alone are an
     extrusion along any axis, and the axis along which their extent is
     thinnest is returned.
 
@@ -1218,17 +1388,22 @@ def extrusion_axis(geometry: Any, ids) -> int:
     for leaf in leaves:
         axes = np.abs(_frame(leaf))
         if not np.allclose(np.sort(axes, axis=1), [[0, 0, 1]] * 3, atol=1e-9):
-            raise ValueError(
-                f'solid {leaf.id} is turned off the geometry\'s axes: Mesh '
-                'Solids meshes extrusions along X, Y or Z')
-    along = {int(np.argmax(np.abs(_frame(leaf)[2])))
-             for leaf in leaves if leaf.kind == 'cylinder' or leaf.corner > 0.0}
-    if len(along) > 1:
-        raise ValueError('the cylinders and rounded corners run along '
-                         'different axes: Mesh Solids meshes an extrusion '
-                         'along one')
+            raise NotAnExtrusion(
+                f'solid {leaf.id} is turned off the geometry\'s axes: bricks '
+                'mesh extrusions along X, Y or Z')
+    # the cylinders along a second axis cannot be ringed, since a ring
+    # is laid in the plane and swept (Brandon, 2026-10-18: a block with
+    # a peanut cut along Z and a hole drilled in from the side along Y
+    # was refused outright); the axis with the most round features
+    # keeps its rings, and the rest are pulled round in their own plane
+    along: dict[int, tuple[int, float]] = {}
+    for leaf in leaves:
+        if leaf.kind == 'cylinder' or leaf.corner > 0.0:
+            axis = int(np.argmax(np.abs(_frame(leaf)[2])))
+            count, widest = along.get(axis, (0, 0.0))
+            along[axis] = (count + 1, max(widest, leaf.radius, leaf.corner))
     if along:
-        return along.pop()
+        return max(along, key=lambda axis: (along[axis], -axis))
     # blocks alone are an extrusion along any axis: the thinnest one
     low, high = zip(*(_box(geometry, i) for i in ids))
     return int(np.argmin(np.max(high, axis=0) - np.min(low, axis=0)))
@@ -1293,60 +1468,10 @@ def _cuts(geometry: Any, ids) -> list[np.ndarray]:
     return out
 
 
-def extrusion_mesh(geometry: Any, ids, size: float,
-                   parts_apart: bool = False) -> tuple[Any, dict]:
-    """The parts as eight-node bricks, ready to join to a geometry
-    (`mesh.join`).
-
-    Each part gets one element group, named for it (or for its kind and
-    id when it has no name). Parts that touch share their nodes there,
-    or, with `parts_apart`, each keeps its own on the same grid, so the
-    nodes of one lie on the other's and bolts can be merged there later.
-
-    The grid is cut at every flat face of every block along every axis,
-    and each span is divided into the whole number of bricks nearest
-    `size`, so flat faces fall on grid lines. A brick goes to the part
-    whose recipe holds its center (`contains`), to the later part where
-    parts overlap (a steel screw added over the insert it is threaded
-    into makes those bricks steel), and to no part in a void. A hole, a
-    boss or an insert is meshed round, not stair-stepped. About each
-    circle with room, a ring mesh with its nodes evenly spaced on the
-    circle replaces the grid. About a circle without room, or a rounded
-    corner's arc, the nodes between its inside and the material beside
-    it are moved radially onto it, except where the move would turn a
-    brick inside out.
-
-    A part that is not an extrusion along X, Y or Z is refused with the
-    solid named (`extrusion_axis`), and so are a solid that is part of
-    another, a size that is not positive, and a grid of more than
-    `MESH_LIMIT` (2,000,000) bricks.
-
-    Parameters
-    ----------
-    geometry : Geometry
-        Whose solids.
-    ids : sequence of int
-        The parts, by id; each a solid nothing else uses. Where two
-        overlap, the later takes the bricks.
-    size : float
-        The element size aimed at, as the geometry holds its
-        coordinates.
-    parts_apart : bool, default False
-        Each part keeps its own nodes where it touches another.
-
-    Returns
-    -------
-    (Geometry, dict)
-        The bricks, in the geometry's length unit; and what was made:
-        'bricks' and 'nodes', the counts; 'axis' (0, 1 or 2); 'rounded',
-        the number of nodes moved onto a circle; 'rings', the number of
-        rings laid, one about each circle with room; and 'shortest', the
-        shortest brick edge.
-    """
-    # parts_apart is for the BARC's box, channels and beam (2026-10-11):
-    # meshed one at a time, their grids were a quarter inch from meeting.
-    from .geometry import Geometry
-
+def _grid_lines(geometry: Any, ids, size: float):
+    """(axis, order, lines): the extrusion axis, the (u, v, w) axes and
+    the grid's lines along each, cut at every flat face and divided
+    into the whole number of bricks nearest `size`."""
     ids = [int(i) for i in ids]
     if not ids:
         raise ValueError('pick a solid to mesh')
@@ -1368,13 +1493,120 @@ def extrusion_mesh(geometry: Any, ids, size: float,
             count = max(1, round((b - a) / size))
             edges.extend(np.linspace(a, b, count + 1)[1:])
         lines.append(np.asarray(edges))
+    return axis, order, lines
+
+
+def grid_cells(geometry: Any, ids, size: float) -> int:
+    """How many bricks the grid `extrusion_mesh` would lay for these
+    parts at `size` holds, voids included: the count before any
+    ownership is asked, so a pane can decide whether to preview a mesh
+    before paying for it.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The element size, as the geometry holds its coordinates.
+
+    Returns
+    -------
+    int
+
+    Raises
+    ------
+    ValueError
+        As `extrusion_mesh` does, for parts or a size it would refuse.
+    """
+    _axis, _order, lines = _grid_lines(geometry, ids, size)
+    nu, nv, nw = (len(line) for line in lines)
+    return (nu - 1) * (nv - 1) * (nw - 1)
+
+
+def extrusion_mesh(geometry: Any, ids, size: float,
+                   parts_apart: bool = False,
+                   progress: Any = None) -> tuple[Any, dict]:
+    """The parts as eight-node bricks, ready to join to a geometry
+    (`mesh.join`).
+
+    Each part gets one element group, named for it (or for its kind and
+    id when it has no name). Parts that touch share their nodes there,
+    or, with `parts_apart`, each keeps its own on the same grid, so the
+    nodes of one lie on the other's and bolts can be merged there later.
+
+    The grid is cut at every flat face of every block along every axis,
+    and each span is divided into the whole number of bricks nearest
+    `size`, so flat faces fall on grid lines. A brick goes to the part
+    whose recipe holds its center (`contains`), to the later part where
+    parts overlap (a steel screw added over the insert it is threaded
+    into makes those bricks steel), and to no part in a void. A hole, a
+    boss or an insert is meshed round, not stair-stepped. About each
+    circle with room, a ring mesh with its nodes evenly spaced on the
+    circle replaces the grid. About a circle without room, or a rounded
+    corner's arc, the nodes between its inside and the material beside
+    it are moved radially onto it, except where the move would turn a
+    brick inside out.
+
+    The extrusion runs along the axis most of the cylinders and rounded
+    corners run along (`extrusion_axis`); a cylinder drilled across it
+    is cut from the grid and its nodes pulled round in its own plane,
+    without a ring, and where it meets a hole along the extrusion the
+    bricks between the two walls are skewed. A solid turned off the
+    axes is refused with the solid named, and so are a solid that is
+    part of another, a size that is not positive, and a grid of more
+    than `MESH_LIMIT` (2,000,000) bricks.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id; each a solid nothing else uses. Where two
+        overlap, the later takes the bricks.
+    size : float
+        The element size aimed at, as the geometry holds its
+        coordinates.
+    parts_apart : bool, default False
+        Each part keeps its own nodes where it touches another.
+    progress : callable, optional
+        Told ``(done, total)`` as the mesh goes: the grid's ownership,
+        the plane and its rings, the rounding, the bricks (the window's
+        bar reads it; anything it raises stops the mesh).
+
+    Returns
+    -------
+    (Geometry, dict)
+        The bricks, in the geometry's length unit; and what was made:
+        'bricks' and 'nodes', the counts; 'axis' (0, 1 or 2); 'rounded',
+        the number of nodes moved onto a circle; 'rings', the number of
+        rings laid, one about each circle with room; and 'shortest', the
+        shortest brick edge.
+    """
+    # parts_apart is for the BARC's box, channels and beam (2026-10-11):
+    # meshed one at a time, their grids were a quarter inch from meeting.
+    from .geometry import Geometry
+    from .progress import Ticker
+
+    ids = [int(i) for i in ids]
+    axis, order, lines = _grid_lines(geometry, ids, size)
     nu, nv, nw = (len(line) for line in lines)
     cells = (nu - 1) * (nv - 1) * (nw - 1)
     if cells > MESH_LIMIT:
         raise ValueError(f'{cells:,} bricks at that size: use a larger one')
+    ticker = Ticker(progress)
+    ticker.add(4)
+    # the rings are laid as if the cylinders across the extrusion were
+    # not there, since a ring's rectangle must hold nothing but its own
+    # outline; the bricks are then owned by what truly holds them
+    across = _cross_cylinders(geometry, ids, axis)
     xyz, conn, groups, made = _mesh_grid(
         lines, order, size, lambda points: _owners(geometry, ids, points),
-        _circles(geometry, ids, axis))
+        _circles(geometry, ids, axis), ticker,
+        held_plane=(lambda points: _owners(geometry, ids, points, across))
+        if across else None,
+        cross=_cross_circles(geometry, ids, axis))
     if not len(conn):
         raise ValueError('the parts hold nothing to mesh')
     if parts_apart:
@@ -1396,11 +1628,49 @@ def extrusion_mesh(geometry: Any, ids, size: float,
     return part, {'bricks': len(conn), 'nodes': len(xyz), 'axis': axis, **made}
 
 
-def meshed_bricks(geometry: Any, names) -> np.ndarray:
-    """The ids of the eight-node bricks in the element groups named
-    `names`, which are what meshing those parts again replaces
-    (`Project.mesh_solids`, and the pane's reading before Mesh is
-    pressed).
+def brick_mesh(geometry: Any, ids, size: float, parts_apart: bool = False,
+               progress: Any = None) -> tuple[Any, dict]:
+    """The parts as eight-node bricks: `extrusion_mesh` where they are
+    an extrusion along X, Y or Z, with rings about the holes, and
+    `hexmesh.overlay_mesh`, a grid fitted to the shape, where they are
+    not. What Mesh Solids runs for Bricks.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id; each a solid nothing else uses.
+    size : float
+        The element size aimed at, as the geometry holds its
+        coordinates.
+    parts_apart : bool, default False
+        Each part keeps its own nodes where it touches another; the
+        extrusion mesher's option, not the fitted grid's.
+    progress : callable, optional
+        Told ``(done, total)`` as the mesh goes.
+
+    Returns
+    -------
+    (Geometry, dict)
+        The bricks and what was made, as the mesher that ran says it,
+        with 'method': 'extrusion' or 'overlay'.
+    """
+    try:
+        part, made = extrusion_mesh(geometry, ids, size, parts_apart, progress=progress)
+    except NotAnExtrusion:
+        from .hexmesh import overlay_mesh
+
+        part, made = overlay_mesh(geometry, ids, size, progress=progress)
+        return part, {**made, 'method': 'overlay'}
+    return part, {**made, 'method': 'extrusion'}
+
+
+def meshed_elements(geometry: Any, names) -> np.ndarray:
+    """The ids of the solid elements Mesh Solids makes, bricks and
+    tetrahedra, in the element groups named `names`: what meshing
+    those parts again replaces (`Project.mesh_solids`, and the pane's
+    reading before Mesh is pressed).
 
     Parameters
     ----------
@@ -1417,13 +1687,16 @@ def meshed_bricks(geometry: Any, names) -> np.ndarray:
     wanted = [int(g) for g, name in zip(geometry.group_id, geometry.group_name)
               if name in names]
     mask = (np.isin(np.asarray(geometry.elem_group, dtype=int), wanted)
-            & (np.asarray(geometry.elem_type, dtype=int) == 115))
+            & np.isin(np.asarray(geometry.elem_type, dtype=int), MESHED_TYPES))
     return np.asarray(geometry.elem_id, dtype=int)[mask]
 
 
-def _mesh_grid(lines, order, size, held, circles):
+def _mesh_grid(lines, order, size, held, circles, ticker=None,
+               held_plane=None, cross=None):
     """Bricks on a grid swept along w, rings laid about the circles:
-    the one mesher behind Mesh Solids and Add Block's holes.
+    the one mesher behind Mesh Solids and Add Block's holes. `ticker`,
+    when given, is ticked four times: ownership, the plane, the
+    rounding, the bricks.
 
     `lines` are the grid's lines along u, v and w, `order` the axes
     (x 0, y 1, z 2) u, v and w are, right-handed. `held(points)` says
@@ -1431,7 +1704,11 @@ def _mesh_grid(lines, order, size, held, circles):
     `circles` are (center, radius, low, high, whole), round w, the
     first two of the center read along u and v: a whole circle is
     ringed where there is room (`_plane`), the rest pulled round from
-    the grid (`_round_onto_circles`).
+    the grid (`_round_onto_circles`). `cross`, when given, holds the
+    circles along the other axes, by axis: their nodes are pulled round
+    in their own plane after the bricks are owned, and `held_plane` is
+    what holds each point with the cylinders across the extrusion read
+    as nothing, which is what the plane and its rings are laid from.
 
     Returns
     -------
@@ -1449,15 +1726,21 @@ def _mesh_grid(lines, order, size, held, circles):
     centers = np.zeros((cu.size, 3))
     for slot, k in enumerate(order):
         centers[:, k] = (cu, cv, cw)[slot].ravel()
-    owner = held(centers).reshape(nu - 1, nv - 1, nw - 1)
+    owner = (held_plane or held)(centers).reshape(nu - 1, nv - 1, nw - 1)
+    if ticker is not None:
+        ticker.tick()
     if not owner.any():
+        if ticker is not None:
+            ticker.tick(3)
         return (np.zeros((0, 3)), np.zeros((0, 8), dtype=int), np.zeros(0, dtype=int),
                 {'rounded': 0, 'rings': 0, 'shortest': 0.0})
     # the plane's mesh, rings about the circles swapped in for the grid
     # there, then swept along w: node (p, k) is p * nw + k, so where
     # there is no ring the numbering is the grid's own
     plane, quads, known, on_circle, left, ringed = _plane(lines, order, size, owner,
-                                                          circles, held)
+                                                          circles, held_plane or held)
+    if ticker is not None:
+        ticker.tick()
     xyz = np.zeros((len(plane) * nw, 3))
     xyz[:, order[0]] = np.repeat(plane[:, 0], nw)
     xyz[:, order[1]] = np.repeat(plane[:, 1], nw)
@@ -1470,13 +1753,31 @@ def _mesh_grid(lines, order, size, held, circles):
         raise ValueError(f'{len(corners):,} bricks at that size: use a larger one')
     groups = known.ravel().copy()
     rounded = 0
-    if left:
-        # a brick's center, its long diagonal's midpoint
-        middles = (xyz[corners[:, 0]] + xyz[corners[:, 6]]) / 2.0
+    # a brick's center, its long diagonal's midpoint
+    middles = (xyz[corners[:, 0]] + xyz[corners[:, 6]]) / 2.0
+    if held_plane is not None:
+        # the plane was laid without the cylinders across it: each
+        # brick, a ring's too, goes to what truly holds its center
+        groups = held(middles)
+    if left or cross:
         cell = float(np.linalg.norm([np.diff(line).max() for line in lines]))
         bounds = np.array([[lines[0][0], lines[1][0]], [lines[0][-1], lines[1][-1]]])
-        rounded = _round_onto_circles(left, xyz, corners, groups, middles, order,
-                                      cell, bounds)
+        if left:
+            rounded = _round_onto_circles(left, xyz, corners, groups, middles, order,
+                                          cell, bounds)
+        along = dict(zip(order, lines))
+        before = xyz.copy() if cross else None
+        for axis, found in (cross or {}).items():
+            # the same pull, in that axis's own plane; a node this would
+            # fold is not moved
+            order2 = [(axis + 1) % 3, (axis + 2) % 3, axis]
+            bounds2 = np.array([[along[order2[0]][0], along[order2[1]][0]],
+                                [along[order2[0]][-1], along[order2[1]][-1]]])
+            rounded += _round_onto_circles(found, xyz, corners, groups, middles,
+                                           order2, cell, bounds2)
+            _rejoin(xyz, before, circles, order, axis, corners, groups)
+    if ticker is not None:
+        ticker.tick()
     corners, groups = corners[groups > 0], groups[groups > 0]
     keep = np.unique(corners)
     rounded += int(np.isin(keep // nw, on_circle).sum())
@@ -1488,18 +1789,62 @@ def _mesh_grid(lines, order, size, held, circles):
     shortest = min(float(np.linalg.norm(xyz[corners[:, list(_CORNER_EDGES[8][c])]]
                                         - xyz[corners[:, [c]]], axis=2).min())
                    for c in (0, 2, 5, 7))
+    if ticker is not None:
+        ticker.tick()
     return xyz[keep], renumber[corners], groups, {'rounded': rounded, 'rings': ringed,
                                                   'shortest': shortest}
 
 
-def _owners(geometry: Any, ids, points) -> np.ndarray:
+def _rejoin(xyz, before, circles, order, axis, corners, groups) -> None:
+    """Put the nodes a cross-axis pull took off a wall along the
+    extrusion back on it: where a hole drilled across meets a hole along
+    the extrusion, a node on both walls belongs on the curve where they
+    cross. The pull in the cross plane sets the coordinate the planes
+    share; the one along the cross axis is solved again so the node is
+    on its own circle too, and the move is undone where it would fold a
+    brick. `before` is every node as it stood before the pull."""
+    from .geometry import _CORNER_EDGES
+
+    u, v, w = order
+    shared = ({0, 1, 2} - {w, axis}).pop()
+    moved = np.flatnonzero(np.any(xyz != before, axis=1))
+    if not len(moved):
+        return
+    edges = np.asarray(_CORNER_EDGES[8])
+    material = corners[groups > 0]
+    for center, radius, low, high, _whole in circles:
+        was = before[moved]
+        on_wall = (np.isclose(np.hypot(was[:, u] - center[u], was[:, v] - center[v]),
+                              radius, rtol=0, atol=1e-9 * radius)
+                   & (was[:, w] >= low - 1e-9 * radius)
+                   & (was[:, w] <= high + 1e-9 * radius))
+        for n in moved[on_wall]:
+            here = xyz[n].copy()
+            reach = radius ** 2 - (here[shared] - center[shared]) ** 2
+            if reach < 0.0:
+                continue
+            side = np.sign(before[n, axis] - center[axis]) or 1.0
+            xyz[n, axis] = center[axis] + side * np.sqrt(reach)
+            rows = material[np.any(material == n, axis=1)]
+            if len(rows):
+                legs = xyz[rows][:, edges] - xyz[rows][:, :, None, :]
+                shares = np.einsum('mci,mci->mc', legs[:, :, 0],
+                                   np.cross(legs[:, :, 1], legs[:, :, 2]))
+                legs0 = before[rows][:, edges] - before[rows][:, :, None, :]
+                shares0 = np.einsum('mci,mci->mc', legs0[:, :, 0],
+                                    np.cross(legs0[:, :, 1], legs0[:, :, 2]))
+                if (shares * shares0 <= 0).any():
+                    xyz[n] = here
+
+
+def _owners(geometry: Any, ids, points, ignore=()) -> np.ndarray:
     """Which part holds each point: 0 none, else 1 + its place in
     `ids`. Where parts overlap the later one takes it, as a later layer
     of paint covers an earlier one — a steel screw added over an insert
-    makes those bricks steel."""
+    makes those bricks steel. `ignore` is `contains`'s."""
     owner = np.zeros(len(points), dtype=int)
     for slot, part in enumerate(ids):
-        owner[contains(geometry, part, points)] = slot + 1
+        owner[contains(geometry, part, points, ignore)] = slot + 1
     return owner
 
 
@@ -1559,7 +1904,45 @@ def _plane(lines, order, size, owner, circles, held):
         else:
             centered.append((here, [circle]))
     rings, ring_owners, on_circle = [], [], []
+
+    def lay(made):
+        """A ring's pieces into the plane; whether one was laid."""
+        nonlocal count
+        if not made:
+            return False
+        (i0, i1, j0, j1, mask), positions, quads, held_by, circle_nodes = made
+        alive[i0:i1, j0:j1] &= ~mask
+        plane.append(positions)
+        count += len(positions)
+        rings.append(quads)
+        ring_owners.append(held_by)
+        on_circle.append(circle_nodes)
+        return True
+
+    # circles about one center are one ring; circles that overlap one
+    # another are one lobed outline (a peanut, a slot, a keyhole:
+    # Brandon, 2026-10-18), ringed as one hole by `_lobed_ring`
+    lobed = []
+    singles = []
     for center, members in centered:
+        if len(members) == 1 and members[0][4]:
+            singles.append((center, members[0]))
+        else:
+            lobed.append(None)
+    groups = _overlapping(singles, tol)
+    lobed = [group for group in groups if len(group) > 1]
+    grouped = {id(circle) for group in lobed for _c, circle in group}
+    for group in lobed:
+        circles_here = [circle for _c, circle in group]
+        made = _lobed_ring(lines, order, size, owner, alive, circles_here,
+                           tol, count, held)
+        if made is None:
+            left.extend(circles_here)
+        elif lay(made):
+            pass
+    for center, members in centered:
+        if any(id(m) in grouped for m in members):
+            continue
         radii = []
         for r in sorted(m[1] for m in members):
             if not radii or r - radii[-1] > tol:
@@ -1573,14 +1956,8 @@ def _plane(lines, order, size, owner, circles, held):
                      held)
         if made is None:
             left.extend(members)
-        elif made:
-            (i0, i1, j0, j1, mask), positions, quads, held_by, circle_nodes = made
-            alive[i0:i1, j0:j1] &= ~mask
-            plane.append(positions)
-            count += len(positions)
-            rings.append(quads)
-            ring_owners.append(held_by)
-            on_circle.append(circle_nodes)
+        else:
+            lay(made)
     ci, cj = np.nonzero(alive)
     grid = np.stack([ci * nv + cj, (ci + 1) * nv + cj, (ci + 1) * nv + cj + 1,
                      ci * nv + cj + 1], axis=1)
@@ -1590,6 +1967,298 @@ def _plane(lines, order, size, owner, circles, held):
         known = np.concatenate([known, *ring_owners])
     on_circle = np.concatenate(on_circle) if on_circle else np.zeros(0, dtype=int)
     return np.concatenate(plane), grid, known, on_circle, left, len(rings)
+
+
+def _overlapping(singles, tol):
+    """Groups of circles whose disks overlap one another, each as
+    [(center (u, v), circle)], joined through their overlaps: two
+    circles crossing are one group, a chain of three one group. A
+    circle inside another throughout, or one touching another only,
+    is left on its own."""
+    groups = []
+    for center, circle in singles:
+        radius = circle[1]
+        joined = []
+        for group in groups:
+            for other_center, other in group:
+                apart = float(np.hypot(*(center - other_center)))
+                if (abs(radius - other[1]) + tol < apart < radius + other[1] - tol
+                        and other[3] > circle[2] + tol and other[2] < circle[3] - tol):
+                    joined.append(group)
+                    break
+        merged = [(center, circle)]
+        for group in joined:
+            merged.extend(group)
+            groups.remove(group)
+        groups.append(merged)
+    return groups
+
+
+def _lobed_ring(lines, order, size, owner, alive, circles, tol, start, held):
+    """A ring mesh about the outline of overlapping circles, the hole they
+    cut together: nodes along the outline, layers out to a rectangle of
+    grid cells, the rectangle's edge the grid's own nodes. None where
+    no such ring fits.
+
+    The outline is the union's boundary, found from a point inside
+    every circle: along each ray from it the outline is the farthest
+    exit from any of the circles. A node is placed exactly at each
+    cusp, where two arcs meet, so a peanut keeps its waist. Only a hole
+    is ringed this way, nothing but one material around it and nothing
+    inside it; a lobed boss or an insert is left to the grid. A ring
+    whose bricks would fold at a cusp is not laid.
+    """
+    # Brandon, 2026-10-18: a peanut-shaped cut (two cylinders unioned
+    # and subtracted) got the pulled grid, stair-stepped, since each
+    # circle had the other in its rectangle and no ring was laid.
+    u, v, w = order
+    lu, lv, lw = lines
+    nu, nv, nw = len(lu), len(lv), len(lw)
+    centers = np.array([c[0][[u, v]] for c in circles])
+    radii = np.array([c[1] for c in circles])
+    low_w = max(c[2] for c in circles)
+    high_w = min(c[3] for c in circles)
+    if high_w <= low_w + tol:
+        return None
+    inside_point = centers.mean(axis=0)
+
+    def inside_union(points):
+        return np.any(np.hypot(points[:, None, 0] - centers[None, :, 0],
+                               points[:, None, 1] - centers[None, :, 1])
+                      <= radii[None, :] + tol, axis=1)
+
+    # The outline, arc by arc: each circle's arcs that no other circle
+    # covers, cut at the crossings (the cusps), chained into one loop
+    # and measured by arc length. Parameterized by length, not by
+    # angle about a point: a cusp off that point's axis is where a ray
+    # crosses the boundary twice, and the radial outline jumps there (a
+    # slot of three circles, 2026-10-18).
+    arcs = []                       # (circle, start angle, end angle), ccw
+    cusps = []
+    for a in range(len(circles)):
+        cuts = []
+        for b in range(len(circles)):
+            if b == a:
+                continue
+            shift = centers[b] - centers[a]
+            apart = float(np.hypot(*shift))
+            if not abs(radii[a] - radii[b]) < apart < radii[a] + radii[b]:
+                continue
+            along = (radii[a] ** 2 - radii[b] ** 2 + apart ** 2) / (2.0 * apart)
+            across = np.sqrt(max(radii[a] ** 2 - along ** 2, 0.0))
+            foot = centers[a] + along * shift / apart
+            side = np.array([-shift[1], shift[0]]) / apart
+            for point in (foot + across * side, foot - across * side):
+                others = [k for k in range(len(circles)) if k not in (a, b)]
+                if not others or not np.any(
+                        np.hypot(*(centers[others] - point).T) < radii[others] - tol):
+                    cuts.append(float(np.arctan2(*(point - centers[a])[::-1])))
+                    if a < b:
+                        cusps.append(point)
+        if not cuts:
+            # a circle no other crosses on the outline: wholly inside
+            # the union (no arc) or the whole outline on its own
+            middle = centers[a] + np.array([radii[a], 0.0])
+            others = [k for k in range(len(circles)) if k != a]
+            if others and np.any(np.hypot(*(centers[others] - middle).T) < radii[others] - tol):
+                continue
+            arcs.append((a, 0.0, 2.0 * np.pi))
+            continue
+        cuts = sorted({round(c, 12) for c in cuts})
+        for k in range(len(cuts)):
+            t0 = cuts[k]
+            t1 = cuts[(k + 1) % len(cuts)]
+            if t1 <= t0:
+                t1 += 2.0 * np.pi
+            mid = centers[a] + radii[a] * np.array([np.cos((t0 + t1) / 2.0),
+                                                     np.sin((t0 + t1) / 2.0)])
+            others = [k2 for k2 in range(len(circles)) if k2 != a]
+            if np.any(np.hypot(*(centers[others] - mid).T) < radii[others] - tol):
+                continue
+            arcs.append((a, t0, t1))
+    if not arcs:
+        return None
+
+    def arc_point(arc, t):
+        a, _t0, _t1 = arc
+        return centers[a] + radii[a] * np.array([np.cos(t), np.sin(t)])
+
+    # chain the arcs into one counterclockwise loop
+    loop = [arcs.pop(0)]
+    while arcs:
+        head = arc_point(loop[-1], loop[-1][2])
+        nearest = min(range(len(arcs)), key=lambda k: float(np.hypot(
+            *(arc_point(arcs[k], arcs[k][1]) - head))))
+        if float(np.hypot(*(arc_point(arcs[nearest], arcs[nearest][1]) - head))) > 1e3 * tol:
+            return None             # the outline is not one loop
+        loop.append(arcs.pop(nearest))
+    if len(loop) > 1 and float(np.hypot(*(arc_point(loop[-1], loop[-1][2])
+                                            - arc_point(loop[0], loop[0][1])))) > 1e3 * tol:
+        return None
+    lengths = np.array([radii[a] * (t1 - t0) for a, t0, t1 in loop])
+    total = float(lengths.sum())
+    starts = np.concatenate([[0.0], np.cumsum(lengths)[:-1]])
+
+    def outline(fraction):
+        """The outline's point at `fraction` of its length from the
+        first arc's start, counterclockwise."""
+        s_along = (fraction % 1.0) * total
+        k = min(int(np.searchsorted(starts, s_along, 'right')) - 1, len(loop) - 1)
+        a, t0, _t1 = loop[k]
+        return arc_point(loop[k], t0 + (s_along - starts[k]) / radii[a])
+
+    dense = np.array([outline(f) for f in np.linspace(0.0, 1.0, 720, endpoint=False)])
+    if not inside_union(inside_point[None, :])[0]:
+        return None
+
+    outer = float(radii.max())
+    reach = max(0.25 * outer, 0.5 * size)
+    low = (centers - radii[:, None]).min(axis=0) - reach
+    high = (centers + radii[:, None]).max(axis=0) + reach
+    i0 = int(np.searchsorted(lu, low[0] + tol, 'right')) - 1
+    i1 = int(np.searchsorted(lu, high[0] - tol, 'left'))
+    j0 = int(np.searchsorted(lv, low[1] + tol, 'right')) - 1
+    j1 = int(np.searchsorted(lv, high[1] - tol, 'left'))
+    i0, j0, i1, j1 = max(i0, 0), max(j0, 0), min(i1, nu - 1), min(j1, nv - 1)
+    middles = (lw[:-1] + lw[1:]) / 2.0
+
+    def layered(points):
+        found = np.zeros((len(points) * (nw - 1), 3))
+        found[:, u] = np.repeat(points[:, 0], nw - 1)
+        found[:, v] = np.repeat(points[:, 1], nw - 1)
+        found[:, w] = np.tile(middles, len(points))
+        return held(found).reshape(len(points), nw - 1)
+
+    def fits(i0, i1, j0, j1):
+        """(inside band, outside band) when the rectangle holds nothing
+        but this outline: every cell wholly inside the union holds the
+        inside band in every layer, every cell wholly outside the
+        outside band; a cell the outline crosses may hold either."""
+        corners_u, corners_v = np.meshgrid(lu[i0:i1 + 1], lv[j0:j1 + 1], indexing='ij')
+        at = np.stack([corners_u.ravel(), corners_v.ravel()], axis=1)
+        within = inside_union(at).reshape(i1 - i0 + 1, j1 - j0 + 1)
+        cell_in = within[:-1, :-1] & within[1:, :-1] & within[1:, 1:] & within[:-1, 1:]
+        cell_out = ~(within[:-1, :-1] | within[1:, :-1] | within[1:, 1:] | within[:-1, 1:])
+        corner = np.where(inside_point - np.array([lu[i0], lv[j0]])
+                          > np.array([lu[i1], lv[j1]]) - inside_point,
+                          np.array([lu[i0], lv[j0]]), np.array([lu[i1], lv[j1]]))
+        # the outline point nearest the corner, and the middle of the
+        # way from it to the corner: outside the union, inside the
+        # rectangle, where the outside band is read
+        nearest = dense[int(np.argmin(np.hypot(*(dense - corner).T)))]
+        sample = (nearest + corner) / 2.0
+        if inside_union(sample[None, :])[0]:
+            return None
+        bands = layered(np.array([inside_point, sample]))
+        cells = owner[i0:i1, j0:j1]
+        if ((cell_in[:, :, None] & (cells != bands[0][None, None, :])).any()
+                or (cell_out[:, :, None] & (cells != bands[1][None, None, :])).any()):
+            return None
+        return bands
+
+    bands = None
+    lowest = (centers - radii[:, None]).min(axis=0)
+    highest = (centers + radii[:, None]).max(axis=0)
+    while i1 - i0 >= 2 and j1 - j0 >= 2:
+        # a layer of bricks has to fit between the outline and the edge
+        room = float(min(lowest[0] - lu[i0], lowest[1] - lv[j0],
+                         lu[i1] - highest[0], lv[j1] - highest[1]))
+        if room < 0.1 * size - tol:
+            break
+        if alive[i0:i1, j0:j1].all():
+            bands = fits(i0, i1, j0, j1)
+            if bands is not None:
+                break
+        i0, i1, j0, j1 = i0 + 1, i1 - 1, j0 + 1, j1 - 1
+    if bands is None:
+        return None
+    if bands[0].any():
+        return None           # material inside the outline: no core for a lobed shape
+    if not (bands[1] != bands[0]).any():
+        return False          # nothing bounded
+
+    # the rectangle's edge, counterclockwise from (i0, j0); each edge
+    # node meets the outline at its share of the way round
+    edge = ([(i, j0) for i in range(i0, i1)] + [(i1, j) for j in range(j0, j1)]
+            + [(i, j1) for i in range(i1, i0, -1)]
+            + [(i0, j) for j in range(j1, j0, -1)])
+    q = np.array([(lu[i], lv[j]) for i, j in edge])
+    count = len(q)
+    steps = np.linalg.norm(np.roll(q, -1, axis=0) - q, axis=1)
+    along = np.concatenate([[0.0], np.cumsum(steps)[:-1]])
+    perimeter = float(steps.sum())
+    if len(loop) == 1:
+        # one circle's outline: edge node k, at `share[k]` of the way
+        # round the rectangle, meets the outline at the same share of
+        # its length, the two loops aligned where the outline comes
+        # nearest the edge's first node
+        first = np.argmin(np.hypot(*(dense - q[0]).T)) / len(dense)
+        where = (first + along / perimeter) % 1.0
+    else:
+        # A cusp's spoke runs down the middle of its wedge of material,
+        # away from both circles, to the edge node nearest where that
+        # ray leaves the rectangle; the edge between two cusps' nodes
+        # is shared evenly along the arc between the cusps. One share
+        # for the whole loop put a slot's cusp node 0.57 in to the side
+        # of its cusp, three degrees outside the wedge, and the quad
+        # beside the cusp folded into the hole (2026-10-18).
+        lo = np.array([lu[i0], lv[j0]])
+        hi = np.array([lu[i1], lv[j1]])
+        anchors = []
+        for k, (a, t0, _t1) in enumerate(loop):
+            cusp = arc_point(loop[k], t0)
+            b = loop[k - 1][0]
+            away = (cusp - centers[a]) / radii[a] + (cusp - centers[b]) / radii[b]
+            exits = [(hi[d] - cusp[d]) / away[d] if away[d] > 0 else
+                     (lo[d] - cusp[d]) / away[d] for d in range(2) if away[d] != 0]
+            hit = cusp + min(exits) * away
+            anchors.append(int(np.argmin(np.hypot(*(q - hit).T))))
+        laps = (np.diff(anchors + [anchors[0]]) % count)
+        if (laps == 0).any() or laps.sum() != count:
+            return None         # two cusps on one edge node, or out of order
+        offsets = (along - along[anchors[0]]) % perimeter
+        marks = np.concatenate([offsets[anchors], [perimeter]])
+        k = np.minimum(np.searchsorted(marks, offsets, 'right') - 1, len(loop) - 1)
+        fraction = (offsets - marks[k]) / (marks[k + 1] - marks[k])
+        where = (starts[k] + fraction * lengths[k]) / total
+    rim = np.array([outline(f) for f in where])
+    edge_nodes = np.array([i * nv + j for i, j in edge])
+    positions, rings = [], [edge_nodes]
+    made = start
+
+    def ring_at(points):
+        nonlocal made
+        positions.append(points)
+        made += len(points)
+        return np.arange(made - len(points), made)
+
+    layers = 1 if not bands[1].any() else max(1, round(float(np.median(
+        np.linalg.norm(rim - q, axis=1))) / size))
+    for step in range(1, layers + 1):
+        rings.append(ring_at(q + step / layers * (rim - q)))
+    k = np.arange(count)
+    following = (k + 1) % count
+    quads = np.concatenate([
+        np.stack([outer_ring[k], outer_ring[following], inner_ring[following],
+                  inner_ring[k]], axis=1)
+        for outer_ring, inner_ring in pairwise(rings)])
+    # a quad folded or concave at a cusp: no ring, the grid instead
+    everything = {int(n): xy for ring, pts in zip(rings[1:], positions) for n, xy in zip(ring, pts)}
+    everything.update({int(n): q[m] for m, n in enumerate(edge_nodes)})
+    pts = np.array([[everything[int(n)] for n in quad] for quad in quads])
+    sides = np.roll(pts, -1, axis=1) - pts
+    turns = (sides[:, :, 0] * np.roll(sides, -1, axis=1)[:, :, 1]
+             - sides[:, :, 1] * np.roll(sides, -1, axis=1)[:, :, 0])
+    if not ((turns > 0).all() or (turns < 0).all()):
+        return None
+    area = 0.5 * np.sum(pts[:, :, 0] * np.roll(pts[:, :, 1], -1, axis=1)
+                        - np.roll(pts[:, :, 0], -1, axis=1) * pts[:, :, 1], axis=1)
+    if not (np.sign(area) == np.sign(area[0])).all() or (area == 0).any():
+        return None
+    mask = np.ones((i1 - i0, j1 - j0), dtype=bool)
+    owners = np.repeat(bands[1][None, :], len(quads), axis=0)
+    return ((i0, i1, j0, j1, mask), np.concatenate(positions), quads, owners,
+            rings[-1])
 
 
 def _ring(lines, order, size, owner, alive, center, radii, tol, start, held):
@@ -1918,26 +2587,47 @@ def _outline(inside: np.ndarray) -> list[tuple[int, int]] | None:
 
 def _circles(geometry, ids, w: int) -> list[tuple[np.ndarray, float, float, float, bool]]:
     """(center, radius, low, high, whole) of every circle the parts'
-    outlines draw, `w` their extrusion axis: each cylinder's, whole, and
-    each rounded block's four corner arcs — a circle of the corner's
-    radius about the arc's center, spanning the block along `w`, a
-    quarter of it drawn."""
-    out = []
+    outlines draw along `w`, their extrusion axis: each cylinder's along
+    it, whole, and each rounded block's four corner arcs — a circle of
+    the corner's radius about the arc's center, spanning the block
+    along `w`, a quarter of it drawn. Circles along another axis are
+    `_cross_circles`."""
+    return _circles_along(geometry, ids).get(w, [])
+
+
+def _cross_circles(geometry, ids, w: int) -> dict[int, list]:
+    """The circles that run across the extrusion, by their own axis:
+    `_circles`' tuples, the span read along that axis."""
+    return {axis: found for axis, found in _circles_along(geometry, ids).items()
+            if axis != w}
+
+
+def _cross_cylinders(geometry, ids, w: int) -> set[int]:
+    """The ids of the cylinders that run across the extrusion."""
+    return {leaf.id for i in ids for leaf in _leaves(geometry, i)
+            if leaf.kind == 'cylinder'
+            and int(np.argmax(np.abs(_frame(leaf)[2]))) != w}
+
+
+def _circles_along(geometry, ids) -> dict[int, list]:
+    out: dict[int, list] = {}
     for i in ids:
         for leaf in _leaves(geometry, i):
             center = np.asarray(leaf.center)
             axes = _frame(leaf)
+            w = int(np.argmax(np.abs(axes[2])))
+            found = out.setdefault(w, [])
             if leaf.kind == 'cylinder':
-                out.append((center, leaf.radius, center[w] - leaf.length / 2,
-                            center[w] + leaf.length / 2, True))
+                found.append((center, leaf.radius, center[w] - leaf.length / 2,
+                              center[w] + leaf.length / 2, True))
             elif leaf.corner > 0.0:
                 wx, wy, wz = leaf.widths
                 for sx in (-1, 1):
                     for sy in (-1, 1):
                         arc = center + (sx * (wx / 2 - leaf.corner) * axes[0]
                                         + sy * (wy / 2 - leaf.corner) * axes[1])
-                        out.append((arc, leaf.corner, center[w] - wz / 2,
-                                    center[w] + wz / 2, False))
+                        found.append((arc, leaf.corner, center[w] - wz / 2,
+                                      center[w] + wz / 2, False))
     return out
 
 
@@ -1961,12 +2651,13 @@ def _round_onto_circles(circles, xyz, corners, groups, centers, order,
     rule, 2026-09-30). A node two circles claim goes to the nearer.
 
     The pulls are made one at a time, the node nearest its circle first,
-    and one that turns a brick beside it inside out is undone: where
-    three corners of a brick land on the circle, the arc carries the
-    middle one past the line between the others and folds the brick
-    into a dart (a hole six bricks across, 2026-10-11). No distance rule
-    caught every case, since whether a pull folds a brick depends on
-    its neighbors' pulls; trying each against them does."""
+    and one that turns a brick beside it inside out is made as far as
+    it can be instead, or not at all: where three corners of a brick
+    land on the circle, the arc carries the middle one past the line
+    between the others and folds the brick into a dart (a hole six
+    bricks across, 2026-10-11). No distance rule caught every case,
+    since whether a pull folds a brick depends on its neighbors' pulls;
+    trying each against them does."""
     from .geometry import _CORNER_EDGES
 
     edges = np.asarray(_CORNER_EDGES[8])
@@ -1981,6 +2672,36 @@ def _round_onto_circles(circles, xyz, corners, groups, centers, order,
     u, v, w = order
     best: dict[int, tuple[float, np.ndarray]] = {}
     classes = np.unique(groups)
+
+    def on_the_outline(target, center, radius, low, high, here):
+        """`target`, moved to where this circle's outline ends when it
+        runs inside another of these circles: the nearest point where
+        the two cross. A circle inside another throughout has no outline
+        there, so None."""
+        # Two overlapping cylinders subtracted from a block (Brandon,
+        # 2026-10-18, a peanut-shaped cut): the rim nodes at the waist
+        # were pulled onto the nearer circle's arc, which there lies
+        # inside the other hole, and twelve bricks of material stood
+        # inside the cut. The cut's outline is the union's, and a node
+        # at the cusp belongs where the circles cross.
+        for other_center, other_radius, other_low, other_high, _w in circles:
+            if other_center is center or other_high <= low or other_low >= high:
+                continue
+            shift = other_center[[u, v]] - center[[u, v]]
+            apart = float(np.hypot(*shift))
+            if apart == 0.0 or np.hypot(*(target - other_center[[u, v]])) \
+                    >= other_radius - 1e-9 * other_radius:
+                continue
+            if apart >= radius + other_radius or apart <= abs(radius - other_radius):
+                return None      # one inside the other: no outline of its own here
+            along = (radius ** 2 - other_radius ** 2 + apart ** 2) / (2.0 * apart)
+            across = np.sqrt(max(radius ** 2 - along ** 2, 0.0))
+            foot = center[[u, v]] + along * shift / apart
+            side = np.array([-shift[1], shift[0]]) / apart
+            crossings = [foot + across * side, foot - across * side]
+            target = min(crossings, key=lambda c: float(np.hypot(*(c - here))))
+        return target
+
     for center, radius, low, high, _whole in circles:
         span = (centers[:, w] > low) & (centers[:, w] < high)
         reach = np.hypot(centers[:, u] - center[u], centers[:, v] - center[v])
@@ -2014,7 +2735,10 @@ def _round_onto_circles(circles, xyz, corners, groups, centers, order,
                     continue
                 target[held] = here[held]
                 target[other] = center[[u, v]][other] + (np.sign(offset[other]) or 1.0) * np.sqrt(reach)
-            gap = abs(distance - radius)
+            target = on_the_outline(target, center, radius, low, high, here)
+            if target is None:
+                continue
+            gap = float(np.hypot(*(target - here)))
             if n not in best or gap < best[n][0]:
                 best[n] = (gap, target)
     if not best:
@@ -2030,10 +2754,17 @@ def _round_onto_circles(circles, xyz, corners, groups, centers, order,
     moved = 0
     for n in sorted(best, key=lambda m: best[m][0]):
         held = xyz[n].copy()
-        xyz[n, [u, v]] = best[n][1]
         bricks = material[beside.get(n, [])]
-        if len(bricks) and (volumes(grid[bricks]) * volumes(xyz[bricks]) <= 0).any():
-            xyz[n] = held
+        # a pull that would fold a brick is made as far as it can be
+        # instead: the dart's middle node stops short of the circle, on
+        # the way to it, rather than staying a brick's corner deep in
+        # the hole (a hole four bricks across, every 45-degree node;
+        # Brandon's side-drilled hole, 2026-10-18)
+        for share in (1.0, 0.75, 0.5, 0.25):
+            xyz[n, [u, v]] = held[[u, v]] + share * (best[n][1] - held[[u, v]])
+            if not len(bricks) or not (volumes(grid[bricks]) * volumes(xyz[bricks]) <= 0).any():
+                moved += share == 1.0
+                break
         else:
-            moved += 1
+            xyz[n] = held
     return moved

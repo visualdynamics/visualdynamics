@@ -119,6 +119,24 @@ def test_the_windows_smoke_test_fails_on_a_traceback_and_the_release_runs_it():
     assert 'packaging\\smoke_windows.ps1' in workflow
 
 
+def test_the_bounded_run_reads_the_exit_code_powershell_hides():
+    """`Start-Process -PassThru` under PowerShell 7 gives a null
+    ExitCode unless the handle was taken before the process exited and
+    the untimed WaitForExit has run: the 0.1.0a57 release run saw the
+    launcher refuse a machine without OpenGL exactly as meant, read its
+    code as empty, and failed the smoke test on that."""
+    with open(os.path.join(ROOT, 'packaging', 'smoke_windows.ps1'),
+              encoding='utf-8') as handle:
+        smoke = handle.read()
+    body = smoke[smoke.index('function Invoke-Bounded'):smoke.index('# 1a.')]
+    taken = body.index('$null = $p.Handle')
+    timed = body.index('$p.WaitForExit($seconds * 1000)')
+    untimed = body.index('$p.WaitForExit()')
+    returned = body.index('return $p.ExitCode')
+    assert taken < timed < untimed < returned
+    assert body.index('$null -eq $p.ExitCode') < returned, 'an empty code is a failure, not a pass'
+
+
 def test_both_packaged_builds_check_they_can_save_an_animation():
     """The bundle carrying QtMultimedia proves nothing about the encoder
     answering; each packaged build writes and reads back a movie."""

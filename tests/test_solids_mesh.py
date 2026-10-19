@@ -21,7 +21,7 @@ import pytest
 
 import visualdynamics
 from visualdynamics.core import solids
-from visualdynamics.core.geometry import _CORNER_EDGES
+from visualdynamics.core.geometry import _CORNER_EDGES, Geometry
 
 INCH = 0.0254
 IN3 = INCH ** 3
@@ -153,8 +153,10 @@ def test_what_is_not_an_extrusion_is_refused_by_name():
     a = project.add_solid_cylinder(name, (5, 0, 0), 0.2, 1.0, unit='in')
     b = project.add_solid_cylinder(name, (8, 0, 0), 0.2, 1.0, angles=(0, 90, 0),
                                    unit='in')
-    with pytest.raises(ValueError, match='the cylinders and rounded corners run along different axes'):
-        solids.extrusion_mesh(geometry, [a, b], 0.1 * INCH)
+    # cylinders along two axes are an extrusion along one of them, the
+    # other pulled round from the grid (test_solids_cross.py)
+    _part, made = solids.extrusion_mesh(geometry, [a, b], 0.1 * INCH)
+    assert made['axis'] == 0 and made['rings'] == 1
     both = project.combine_solids(name, 'union', [a, b])
     with pytest.raises(ValueError, match=f'solid {a} is part of solid {both}'):
         solids.extrusion_mesh(geometry, [a], 0.1 * INCH)
@@ -185,6 +187,17 @@ def test_the_project_meshes_journals_and_keeps_apart():
 
 # ---- the pane ---------------------------------------------------------------
 
+def _settled(window, pump):
+    """Let the preview's settle timer fire, as a person's pause does."""
+    for _ in range(200):
+        if not window._mesh_settle.isActive():
+            break
+        pump()
+        import time
+        time.sleep(0.01)
+    pump()
+
+
 def test_the_pane_previews_the_bricks_and_meshes(window, pump):
     pytest.importorskip('OCP')
     from conftest import select_objects
@@ -211,7 +224,7 @@ def test_the_pane_previews_the_bricks_and_meshes(window, pump):
     assert panel.parts_label.text() == 'Solids: plate'
     assert 'plane-preview' in window.scene.plotter.actors
     panel.size.setValue(0.1)
-    pump()
+    _settled(window, pump)
     assert panel.reading_label.text().startswith('3,840 bricks, ')
     # the ring's 32 on the circle (its rectangle eight bricks a side) in
     # each of the six layers of nodes
@@ -230,9 +243,9 @@ def test_the_pane_previews_the_bricks_and_meshes(window, pump):
     _acts(window)['mesh_solids'][3]()
     pump()
     panel.size.setValue(0.1)
-    pump()
+    _settled(window, pump)
     assert panel.reading_label.text().endswith(
-        'It replaces the 3,840 bricks meshed before.')
+        'It replaces the 3,840 elements meshed before.')
     panel.mesh_button.click()
     pump()
     assert 'replacing the 3,840 meshed before' in window.statusBar().currentMessage()
@@ -554,7 +567,7 @@ def test_the_pane_keeps_two_parts_apart_when_asked(window, pump):
     pump()
     assert panel.reading_label.text().startswith('16 bricks, 45 nodes')
     panel.parts_apart.setChecked(True)
-    pump()
+    _settled(window, pump)
     assert panel.reading_label.text().startswith('16 bricks, 54 nodes')
     panel.mesh_button.click()
     pump()
@@ -726,3 +739,229 @@ def test_round_legs_are_round_up_to_flush_with_the_tables_corners(inset):
         else:
             assert circle.min() > 0.5 - 0.025 - 1e-9 and (np.abs(circle - 0.5) < 1e-9).sum() >= 12
 
+
+
+def test_a_peanut_cut_is_meshed_to_the_unions_outline():
+    """Two overlapping cylinders unioned and subtracted from a block
+    (Brandon, 2026-10-18). No ring can be laid about either circle,
+    since each has the other in its rectangle, so the rim is pulled
+    onto the circles; at the two cusps the nearer circle's arc runs
+    inside the other hole, and twelve bricks of material stood inside
+    the cut with a sliver edge of 0.008 in beside them. A rim node is
+    pulled to the union's outline: where its arc crosses the other
+    circle, the crossing itself."""
+    from visualdynamics.core import solids
+
+    IN = 0.0254
+    geometry = Geometry(node_id=[], node_xyz=np.zeros((0, 3)), elem_id=[],
+                        elem_type=[], elem_conn=[], length_unit='in')
+    block = solids.add_block(geometry, (0, 0, 0), (10 * IN, 10 * IN, 3 * IN))
+    left = solids.add_cylinder(geometry, (-1.5 * IN, 0, 0), 3 * IN, 3 * IN)
+    right = solids.add_cylinder(geometry, (1.5 * IN, 0, 0), 3 * IN, 3 * IN)
+    peanut = solids.combine(geometry, 'union', [left, right])
+    cut = solids.combine(geometry, 'subtract', [block, peanut])
+    project = visualdynamics.Project()
+    project.add('Geometry', geometry)
+    made = project.mesh_solids('Geometry', [cut], 0.5, unit='in')
+    xyz = np.asarray(geometry.node_xyz)
+    index = {int(n): i for i, n in enumerate(geometry.node_id)}
+    corners = np.array([[index[int(n)] for n in c] for c in geometry.elem_conn])
+    centers = xyz[corners].mean(axis=1)
+    assert not solids.contains(geometry, peanut, centers).any(), \
+        'no brick of material inside the cut'
+    cusp = np.sqrt(3.0 ** 2 - 1.5 ** 2) * IN
+    at_cusps = (np.isclose(xyz[:, 0], 0.0, atol=1e-9)
+                & np.isclose(np.abs(xyz[:, 1]), cusp, atol=1e-9))
+    assert int(at_cusps.sum()) == 14, 'a node at each cusp in every layer'
+    assert made['shortest'] > 0.15 * IN, 'no sliver bricks at the waist'
+    # one ring about the union's outline, not two stair-stepped pulls:
+    # every node on the rim lies on an arc of the outline, and the
+    # bricks are all the right way out
+    assert made['rings'] == 1
+    rim = _rim_nodes(geometry, [(-1.5 * IN, 0.0), (1.5 * IN, 0.0)], 3 * IN)
+    assert len(rim) >= 14 * 7, 'the rim has a node every brick or so, in every layer'
+    assert (_corner_volumes(geometry) > 0).all()
+
+
+def _rim_nodes(geometry, centers, radius, tol=1e-9):
+    """The nodes on the outline of a union of equal circles: on one
+    circle and not inside another."""
+    xyz = np.asarray(geometry.node_xyz)
+    far = np.stack([np.hypot(xyz[:, 0] - cx, xyz[:, 1] - cy) for cx, cy in centers])
+    on_one = np.any(np.abs(far - radius) <= tol, axis=0)
+    inside_another = np.any(far < radius - tol, axis=0)
+    return np.flatnonzero(on_one & ~inside_another)
+
+
+def test_the_peanut_rings_at_a_finer_size_too():
+    from visualdynamics.core import solids
+
+    IN = 0.0254
+    geometry = Geometry(node_id=[], node_xyz=np.zeros((0, 3)), elem_id=[],
+                        elem_type=[], elem_conn=[], length_unit='in')
+    block = solids.add_block(geometry, (0, 0, 0), (10 * IN, 10 * IN, 3 * IN))
+    left = solids.add_cylinder(geometry, (-1.5 * IN, 0, 0), 3 * IN, 3 * IN)
+    right = solids.add_cylinder(geometry, (1.5 * IN, 0, 0), 3 * IN, 3 * IN)
+    cut = solids.combine(geometry, 'subtract',
+                         [block, solids.combine(geometry, 'union', [left, right])])
+    project = visualdynamics.Project()
+    project.add('Geometry', geometry)
+    made = project.mesh_solids('Geometry', [cut], 0.25, unit='in')
+    assert made['rings'] == 1
+    assert (_corner_volumes(geometry) > 0).all()
+    assert len(_rim_nodes(geometry, [(-1.5 * IN, 0.0), (1.5 * IN, 0.0)], 3 * IN)) > 14 * 13
+
+
+def test_a_slot_of_three_circles_is_one_ring():
+    """Three overlapping circles in a row, cut from a plate: one lobed
+    outline, one ring, with a node at each of its four cusps."""
+    from visualdynamics.core import solids
+
+    IN = 0.0254
+    geometry = Geometry(node_id=[], node_xyz=np.zeros((0, 3)), elem_id=[],
+                        elem_type=[], elem_conn=[], length_unit='in')
+    plate = solids.add_block(geometry, (0, 0, 0), (12 * IN, 6 * IN, 1 * IN))
+    holes = [solids.add_cylinder(geometry, (x * IN, 0, 0), 1 * IN, 1 * IN)
+             for x in (-1.5, 0.0, 1.5)]
+    slot = solids.combine(geometry, 'union', holes)
+    cut = solids.combine(geometry, 'subtract', [plate, slot])
+    project = visualdynamics.Project()
+    project.add('Geometry', geometry)
+    made = project.mesh_solids('Geometry', [cut], 0.25, unit='in')
+    assert made['rings'] == 1
+    xyz = np.asarray(geometry.node_xyz)
+    y = np.sqrt(1.0 ** 2 - 0.75 ** 2) * IN
+    cusps = sum(int((np.isclose(xyz[:, 0], x * IN, atol=1e-9)
+                     & np.isclose(np.abs(xyz[:, 1]), y, atol=1e-9)).sum())
+                for x in (-0.75, 0.75))
+    assert cusps == 4 * 5, 'four cusps in each of the five layers of nodes'
+    assert not solids.contains(geometry, slot, _centers(geometry)).any()
+    assert (_corner_volumes(geometry) > 0).all()
+
+
+def _centers(geometry):
+    xyz = np.asarray(geometry.node_xyz)
+    index = {int(n): i for i, n in enumerate(geometry.node_id)}
+    return np.array([xyz[[index[int(n)] for n in c]].mean(axis=0)
+                     for c in geometry.elem_conn])
+
+
+def test_a_circle_inside_another_is_not_a_lobe():
+    """A small hole wholly inside a large one's disk (the two cut
+    together) is no outline of its own: the large circle is ringed as a
+    single hole and the small one adds nothing."""
+    from visualdynamics.core import solids
+
+    IN = 0.0254
+    geometry = Geometry(node_id=[], node_xyz=np.zeros((0, 3)), elem_id=[],
+                        elem_type=[], elem_conn=[], length_unit='in')
+    plate = solids.add_block(geometry, (0, 0, 0), (8 * IN, 8 * IN, 1 * IN))
+    big = solids.add_cylinder(geometry, (0, 0, 0), 2 * IN, 1 * IN)
+    small = solids.add_cylinder(geometry, (0.5 * IN, 0, 0), 0.5 * IN, 1 * IN)
+    cut = solids.combine(geometry, 'subtract',
+                         [plate, solids.combine(geometry, 'union', [big, small])])
+    project = visualdynamics.Project()
+    project.add('Geometry', geometry)
+    made = project.mesh_solids('Geometry', [cut], 0.25, unit='in')
+    assert made['rings'] == 1
+    assert (_corner_volumes(geometry) > 0).all()
+    far = np.hypot(*np.asarray(geometry.node_xyz)[:, :2].T)
+    assert int(np.isclose(far, 2 * IN, atol=1e-9).sum()) >= 5 * 32
+
+
+def _holed_part(window, pump):
+    from conftest import select_objects
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    project.new_geometry('Part', unit='in')
+    plate = project.add_solid_block('Part', (0, 0, -0.25), (4, 2, 0.5),
+                                    name='plate', unit='in')
+    hole = project.add_solid_cylinder('Part', (0, 0, -0.25), 0.3, 1.0, unit='in')
+    project.combine_solids('Part', 'subtract', [plate, hole], 'plate')
+    window.show_object('Part')
+    select_objects(window, pump, 'Part')
+    window._solids_changed('Part')
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    return window.scene.mesh_solids_panel
+
+
+def test_the_preview_waits_for_the_size_box_to_settle(window, pump, monkeypatch):
+    """Each change of the size meshed and drew at once, so a spin of the
+    box at a fine size was one mesh per step on this thread. Three quick
+    changes are one mesh, once the box rests."""
+    pytest.importorskip('OCP')
+    panel = _holed_part(window, pump)
+    meshed = []
+    real = solids.extrusion_mesh
+
+    def counted(*args, **kwargs):
+        meshed.append(args[2])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(solids, 'extrusion_mesh', counted)
+    for value in (0.2, 0.15, 0.1):
+        panel.size.setValue(value)
+        pump()
+    assert meshed == [], 'nothing meshed while the box is changing'
+    assert window._mesh_settle.isActive()
+    _settled(window, pump)
+    assert len(meshed) == 1 and meshed[0] == pytest.approx(0.1 * 0.0254)
+    assert panel.reading_label.text().startswith('3,840 bricks, ')
+
+
+def test_a_preview_past_the_budget_is_counted_not_drawn(window, pump):
+    """A fine size on a large part: the bricks are counted from the
+    grid and said, the preview is taken down, and Mesh is what makes
+    them."""
+    pytest.importorskip('OCP')
+    from visualdynamics.gui.main_window import MESH_PREVIEW_BRICKS
+
+    panel = _holed_part(window, pump)
+    assert 'plane-preview' in window.scene.plotter.actors
+    panel.size.setValue(0.02)        # 200 x 100 x 25 cells
+    _settled(window, pump)
+    assert panel.reading_label.text() == (
+        f'About 500,000 bricks at this size. The preview stops past '
+        f'{MESH_PREVIEW_BRICKS:,}; press Mesh to make them.')
+    assert 'plane-preview' not in window.scene.plotter.actors
+    assert 500_000 == solids.grid_cells(window.objects['Part'], [3], 0.02 * 0.0254)
+
+
+def test_mesh_runs_with_the_bar_up(window, pump, monkeypatch):
+    """Mesh goes through the window's long-verb path: the bar is fed
+    (done, total) from the mesher's stages and ends full."""
+    pytest.importorskip('OCP')
+    panel = _holed_part(window, pump)
+    ticks = []
+    monkeypatch.setattr(window, '_strip_tick',
+                        lambda done, total: ticks.append((done, total)))
+    panel.size.setValue(0.1)
+    _settled(window, pump)
+    panel.mesh_button.click()
+    pump()
+    assert len(window.objects['Part'].elem_conn) == 3840
+    assert ticks and ticks[-1][0] == ticks[-1][1] > 0
+    assert [d for d, _t in ticks] == sorted(d for d, _t in ticks)
+
+
+def test_the_mesher_tells_its_progress():
+    """`extrusion_mesh` ticks its stages: done never falls, never passes
+    the total, and the last word is done == total."""
+    from visualdynamics.core import solids
+
+    project, name, geometry, cut = _holed_plate()
+    ids = [cut]
+    heard = []
+    solids.extrusion_mesh(geometry, ids, 0.1 * 0.0254,
+                          progress=lambda d, t: heard.append((d, t)))
+    assert heard[-1][0] == heard[-1][1] == 4
+    done = [d for d, _t in heard]
+    assert done == sorted(done) and all(d <= t for d, t in heard)
+    project.mesh_solids(name, ids, 0.1, unit='in',
+                        progress=lambda d, t: heard.append((d, t)))
+    assert heard[-1][0] == heard[-1][1]

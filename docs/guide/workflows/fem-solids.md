@@ -124,9 +124,11 @@ the inserts](../images/fem-solids-frame.png)
 
 ## 2. Mesh
 
-Pick *frame* and *inserts* in the tree and press *Mesh Solids*. Type
-0.083334 for the element size (a twelfth of an inch, which is six bricks
-across a member and three across a hole) and press **Mesh**. The twelfth
+Pick *frame* and *inserts* in the tree and press *Mesh Solids*. Leave
+*Elements* on *Bricks*: the frame is an extrusion along Z, which is
+what bricks mesh best. Type 0.083334 for the element size (a twelfth
+of an inch, which is six bricks across a member and three across a
+hole) and press **Mesh**. The twelfth
 is rounded up in its last place on purpose: a span that falls exactly
 halfway between two brick counts then takes the count this model was
 checked with, where 0.083333 would give some of them one brick more. The pane

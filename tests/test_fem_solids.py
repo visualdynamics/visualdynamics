@@ -196,7 +196,7 @@ def test_a_solid_is_refused_flat_inverted_or_rigid():
         model.add_solid([1, 2, 3, 4, 9, 10, 11, 12], ALUMINUM)
     with pytest.raises(ValueError, match='not rigid'):
         model.add_solid(range(1, 9), fem.RIGID)
-    with pytest.raises(ValueError, match='eight, six or four'):
+    with pytest.raises(ValueError, match='eight, six, four or ten'):
         model.add_solid(range(1, 6), ALUMINUM)
 
 

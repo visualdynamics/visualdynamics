@@ -188,6 +188,20 @@ from .icons import (
 # what the toolbar's element-type buttons build: type code and node count
 # how the user adds to a selection, in the words of their platform
 EXTEND_KEYS = 'Shift or Cmd' if sys.platform == 'darwin' else 'Shift or Ctrl'
+
+#: solids copied from a geometry's rows, as JSON on the clipboard
+SOLIDS_MIME = 'application/x-visualdynamics-solids'
+
+#: how long the Mesh Solids size box rests before its preview is meshed
+MESH_PREVIEW_SETTLE_MS = 250
+#: the most bricks the Mesh Solids pane previews; past it the count is
+#: said and Mesh makes them with the bar up
+MESH_PREVIEW_BRICKS = 50_000
+#: and the most tetrahedra: the relaxation takes seconds past this
+MESH_PREVIEW_TETS = 5_000
+#: and the most cells of a grid fitted to a shape that is not an
+#: extrusion (`hexmesh.overlay_mesh`): the fitting takes seconds past it
+MESH_PREVIEW_FITTED = 1_500
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -976,7 +990,15 @@ class MainWindow(QMainWindow):
         self.scene.mesh_panel.square_asked.connect(self._mesh_square_up)
         self.scene.merge_panel.changed.connect(self._merge_refresh)
         self._meshing: dict | None = None
-        self.scene.mesh_solids_panel.changed.connect(self._mesh_solids_refresh)
+        self.scene.mesh_solids_panel.changed.connect(self._mesh_preview_asked)
+        #: the preview waits for the size box to settle: each change
+        #: meshed at once, and at a fine size a spin of the box was one
+        #: mesh and one drawing per step on this thread (Brandon,
+        #: 2026-10-18: a 10 by 10 by 3 in block at 0.1 in, 163,560
+        #: bricks, two seconds each and the wheel spinning)
+        self._mesh_settle: QTimer = QTimer(self)
+        self._mesh_settle.setSingleShot(True)
+        self._mesh_settle.timeout.connect(self._mesh_solids_refresh)
         self.scene.mesh_solids_panel.mesh_asked.connect(self._mesh_solids_apply)
         self.scene.mesh_solids_panel.close_asked.connect(
             self.close_mesh_solids_pane)
@@ -2942,35 +2964,94 @@ class MainWindow(QMainWindow):
         return (float(self.unit_system.to_si(typed, 'length'))
                 if self._meshing['defined'] else typed)
 
-    def _mesh_solids_refresh(self) -> None:
-        """Mesh the picked parts at the typed size: draw the bricks and say
-        what they are, or the reason there are none."""
-        from ..core import solids
+    def _mesh_preview_asked(self) -> None:
+        """The size, the elements or Keep apart changed: preview once
+        the box settles."""
+        self._mesh_settle.start(MESH_PREVIEW_SETTLE_MS)
 
+    def _mesh_solids_refresh(self) -> None:
+        """Mesh the picked parts at the typed size, into the elements
+        picked: draw them and say what they are, or the reason there
+        are none. Past `MESH_PREVIEW_BRICKS` bricks or
+        `MESH_PREVIEW_TETS` tetrahedra they are counted and not drawn:
+        the count is said, and Mesh makes them with the bar up."""
+        from ..core import hexmesh, solids, tetmesh
+
+        self._mesh_settle.stop()
         meshing = self.__dict__.get('_meshing')
         if meshing is None:
             return
         panel = self.scene.mesh_solids_panel
         geometry = self.objects.get(meshing['name'])
+        tets = panel.element_kind == 'tets'
         try:
-            part, made = solids.extrusion_mesh(geometry, meshing['ids'],
+            if tets:
+                expected = tetmesh.tet_count(geometry, meshing['ids'],
+                                             self._mesh_solids_size())
+                if expected > MESH_PREVIEW_TETS:
+                    self._draw_plane_preview(None)
+                    panel.show_reading(
+                        f'About {expected:,} tetrahedra at this size. The '
+                        f'preview stops past {MESH_PREVIEW_TETS:,}; press '
+                        'Mesh to make them.', True)
+                    return
+                part, made = tetmesh.tet_mesh(geometry, meshing['ids'],
+                                              self._mesh_solids_size())
+            else:
+                try:
+                    cells = solids.grid_cells(geometry, meshing['ids'],
+                                              self._mesh_solids_size())
+                    budget = MESH_PREVIEW_BRICKS
+                except solids.NotAnExtrusion:
+                    # a grid fitted to the shape: seconds of smoothing,
+                    # so the preview stops sooner
+                    cells = hexmesh.grid_cells(geometry, meshing['ids'],
+                                               self._mesh_solids_size())
+                    budget = MESH_PREVIEW_FITTED
+                if cells > budget:
+                    self._draw_plane_preview(None)
+                    panel.show_reading(
+                        f'About {cells:,} bricks at this size. The preview '
+                        f'stops past {budget:,}; press Mesh to make them.', True)
+                    return
+                part, made = solids.brick_mesh(geometry, meshing['ids'],
                                                self._mesh_solids_size(),
                                                panel.parts_apart.isChecked())
         except ValueError as refusal:
             self._draw_plane_preview(None)
             text = str(refusal)
-            panel.show_reading(f'{text[:1].upper()}{text[1:]}.', False)
+            # the user picks the elements (Brandon, 2026-10-18): a shape
+            # bricks cannot fit at this size says why, and that
+            # tetrahedra can
+            offer = (' Pick Tets to mesh it.' if not tets and 'folded' in text else '')
+            panel.show_reading(f'{text[:1].upper()}{text[1:]}.{offer}', False)
             return
         self._draw_plane_preview(part)
         shortest = (float(self.unit_system.from_si(made['shortest'], 'length'))
                     if meshing['defined'] else made['shortest'])
+        # a part meshed before is meshed again in place of the old
+        # elements (`Project.mesh_solids`): said before Mesh is pressed
+        earlier = len(solids.meshed_elements(geometry, part.group_name))
+        replacing = (f' It replaces the {earlier:,} elements meshed before.'
+                     if earlier else '')
+        if tets:
+            poor = (f' {made["poor"]:,} under 0.3.' if made['poor'] else '')
+            panel.show_reading(
+                f'{made["tets"]:,} ten-node tetrahedra, {made["nodes"]:,} '
+                f'nodes, settled in {made["steps"]} steps. The worst '
+                f'radius ratio is {made["quality"]:.2f}.{poor} The shortest '
+                f'edge is {shortest:.4g} {meshing["unit"]}.{replacing}', True)
+            return
+        if made.get('method') == 'overlay':
+            poor = (f' {made["poor"]:,} under 0.3.' if made['poor'] else '')
+            panel.show_reading(
+                f'{made["bricks"]:,} bricks, {made["nodes"]:,} nodes, on a grid '
+                f'fitted to the shape (not an extrusion). The worst scaled '
+                f'Jacobian is {made["quality"]:.2f}.{poor} The shortest edge is '
+                f'{shortest:.4g} {meshing["unit"]}.{replacing}', True)
+            return
         rounded = (f' {made["rounded"]:,} nodes on circles.'
                    if made['rounded'] else '')
-        # a part meshed before is meshed again in place of the old bricks
-        # (`Project.mesh_solids`): said before Mesh is pressed
-        earlier = len(solids.meshed_bricks(geometry, part.group_name))
-        replacing = (f' It replaces the {earlier:,} bricks meshed before.'
-                     if earlier else '')
         panel.show_reading(
             f'{made["bricks"]:,} bricks, {made["nodes"]:,} nodes, extruded '
             f'along {"XYZ"[made["axis"]]}.{rounded} The shortest edge is '
@@ -2986,11 +3067,20 @@ class MainWindow(QMainWindow):
         panel = self.scene.mesh_solids_panel
         name = meshing['name']
         unit = (self.unit_system.unit('length') if meshing['defined'] else 'm')
+        self._mesh_settle.stop()
+        tets = panel.element_kind == 'tets'
         try:
-            found = self.project.mesh_solids(
+            # on the worker with the bar up: a fine mesh of a large part
+            # is seconds of ownership, rounding and joining, and a
+            # tetrahedral one seconds of relaxation
+            found = self._run_long(
+                f'Meshing {name} at {panel.size.value():g} {meshing["unit"]}…',
+                self.project.mesh_solids,
                 name, meshing['ids'], panel.size.value(), unit=unit,
                 **({'apart': True} if panel.apart.isChecked() else {}),
-                **({'parts_apart': True} if panel.parts_apart.isChecked() else {}))
+                **({'parts_apart': True}
+                   if panel.parts_apart.isChecked() and not tets else {}),
+                **({'elements': 'tets'} if tets else {}))
         except ValueError as refusal:
             self._show_status(f'{name}: {refusal}')
             return
@@ -3001,8 +3091,10 @@ class MainWindow(QMainWindow):
         self.render_current()
         replaced = (f', replacing the {found["replaced"]:,} meshed before'
                     if found.get('replaced') else '')
+        what = (f'{found["tets"]:,} tetrahedra' if tets
+                else f'{found["bricks"]:,} bricks')
         self._show_status(
-            f'{name}: meshed into {found["bricks"]:,} bricks{replaced} — '
+            f'{name}: meshed into {what}{replaced} — '
             f'{found["added"]:,} nodes added, {found["shared"]:,} shared with '
             f'the geometry; {obj.num_nodes:,} nodes in all')
 
@@ -8165,7 +8257,25 @@ class MainWindow(QMainWindow):
     def copy_selected(self) -> None:
         """Cmd/Ctrl+C in the tree: copy the selected objects to the
         clipboard, as objects and as files, and say so in the status
-        bar."""
+        bar. Solid rows go on the clipboard as solids, to paste into a
+        geometry."""
+        picked = self._selected_solids()
+        if picked is not None:
+            # Copy and Paste on solid rows (Brandon, 2026-10-18): the
+            # clipboard names the geometry and the ids, and a paste with
+            # a geometry picked copies the recipes into it
+            import json
+
+            from PySide6.QtCore import QMimeData
+
+            name, ids = picked
+            mime = QMimeData()
+            mime.setData(SOLIDS_MIME, json.dumps({'geometry': name,
+                                                  'ids': ids}).encode())
+            QApplication.clipboard().setMimeData(mime)
+            self._show_status(f'Copied {len(ids)} solid{"s" * (len(ids) != 1)} '
+                              '— select a geometry and paste')
+            return
         names = self.tree.copy_selected()
         if names == [PROJECT_ROW]:
             self._show_status('Copied the project — paste into a folder '
@@ -8179,9 +8289,48 @@ class MainWindow(QMainWindow):
 
     def paste_objects(self) -> None:
         """Cmd/Ctrl+V in the tree: paste whatever the clipboard holds
-        that the tree can take (objects copied from a tree, or files)."""
+        that the tree can take (objects copied from a tree, solids
+        copied from a geometry's rows, or files)."""
+        if self._paste_solids():
+            return
         if not self.tree.paste():
             self._show_status('Nothing on the clipboard to paste here')
+
+    def _paste_solids(self) -> bool:
+        """Solids on the clipboard, pasted into the geometry picked:
+        the one selected, or the one whose solid rows are. Whether the
+        clipboard held solids."""
+        import json
+
+        mime = QApplication.clipboard().mimeData()
+        if mime is None or not mime.hasFormat(SOLIDS_MIME):
+            return False
+        held = json.loads(bytes(mime.data(SOLIDS_MIME)).decode())
+        targets = {name for kind, name, obj, _detail in self.selected_references()
+                   if isinstance(obj, Geometry) and kind in ('object', 'solids',
+                                                             'solid')}
+        if len(targets) != 1:
+            self._show_status('Select a geometry to paste the copied solids into')
+            return True
+        target = targets.pop()
+        source = held['geometry']
+        if source not in self.objects:
+            self._show_status(f'The copied solids came from {source}, which '
+                              'is not in this project')
+            return True
+        try:
+            # the journal reads as a person would say it: no `into` for
+            # a paste back into the geometry the solids came from
+            made = self.project.copy_solids(
+                source, held['ids'],
+                **({} if target == source else {'into': target}))
+        except ValueError as refusal:
+            self._show_status(f'{target}: {refusal}')
+            return True
+        self._solids_changed(target, pick=made)
+        self._show_status(f'Pasted {len(made)} solid{"s" * (len(made) != 1)} '
+                          f'into {target}')
+        return True
 
     def _paste_named_objects(self, names):
         """Object names on the clipboard: ours are duplicated through

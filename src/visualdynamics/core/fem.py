@@ -108,6 +108,7 @@ last four.
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -210,6 +211,40 @@ POLISH_STEPS = 12
 #: (`Ticker.extend_to`)
 EIGEN_SOLVES_PER_MODE = 6
 LANCZOS_GUARD = 8
+#: which eigensolver the sparse solve runs on the shift-inverted
+#: operator: 'block', the block Lanczos written here
+#: (`block_lanczos_modes`), or 'arpack', scipy's `eigsh`. The block
+#: solver hands a model it does not converge to ARPACK itself, with a
+#: warning that says so; the setting is for tests, which run both.
+SPARSE_EIGENSOLVER = 'block'
+#: the block Lanczos' block width, in vectors. Its solves are blocks,
+#: and a block solve costs far less a column than a single one does
+#: (Accelerate, Frame-Wing: 37 ms for one column, 8 ms a column for
+#: twelve, 6 ms for forty-eight), while the Krylov dimension it needs
+#: to converge grows only slowly with the width (120 vectors at 8, 144
+#: at 12, 176 at 16, 288 at 32, for 32 modes of the same model); the
+#: product is flat from 8 to 16 and twelve is taken. The width must
+#: cover the multiplicity of a repeated eigenvalue, the six rigid modes
+#: of a free-free model above all, and a model asked for fewer modes
+#: than this still gets a block this wide.
+LANCZOS_BLOCK = 12
+#: the block Lanczos stops when every mode asked for has a residual of
+#: the shift-inverted operator, |A x - theta x|_M / theta, below this,
+#: or when a step no longer halves the worst once it is under a
+#: hundred times this. The polish then measures the modes against K
+#: and M themselves and finishes them, and it is the polish that sets
+#: the accuracy: the factor's solves carry the condition number's
+#: share of round-off, and the Lanczos vectors converge to the
+#: operator those solves make, whose modes mix neighbors a part in a
+#: hundred by the stiffness's own measure however far the iteration
+#: runs (Frame-Wing: 1e-2 at 1e-4 and at 1e-15 alike). The polish took
+#: two steps to the same floor from either, so the iteration stops
+#: where it stops helping.
+LANCZOS_RESIDUAL = 1e-6
+#: the Krylov basis the block Lanczos may grow to, as a multiple of the
+#: modes asked for (never over the model's size); a model not converged
+#: by then goes to ARPACK. The Frame-Wing's 32 modes took 120 vectors.
+LANCZOS_BASIS = 20
 
 
 #: how many elements of one family are rotated and scattered at once:
@@ -972,6 +1007,170 @@ def polish_modes(stiffness: Any, mass: Any, sigma: float, vectors: np.ndarray,
     return eigenvalues, vectors, residuals
 
 
+class NotConverged(Exception):
+    """The block Lanczos ran out of basis before the modes asked for
+    converged; the caller solves by ARPACK instead."""
+
+
+def _gram_pass(block: np.ndarray, m_block: np.ndarray
+               ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """One pass of M-orthonormalization of a block through its Gram
+    matrix's eigenvectors: W = Q R with Q^T M Q = I, from G = W^T M W =
+    U diag(d) U^T as Q = W U d^-1/2 and R = d^1/2 U^T; returns Q, M Q,
+    R and which directions survived. A direction whose d has collapsed
+    below 1e-14 of the largest is dropped (its column of Q and row of R
+    zero). Cholesky QR fails on these Gram matrices: one solve with the
+    shifted factor leaves a random block almost wholly in the rigid
+    modes, which the shift puts five orders above the elastic ones, and
+    the Gram matrix's condition is that squared."""
+    from scipy.linalg import eigh as scipy_eigh
+
+    gram = block.T @ m_block
+    d, u = scipy_eigh((gram + gram.T) / 2.0)
+    keep = d > 1e-14 * d.max() if d.max() > 0.0 else np.zeros(len(d), dtype=bool)
+    root = np.sqrt(np.where(keep, d, 1.0))
+    scale = np.where(keep, 1.0 / root, 0.0)
+    return ((block @ u) * scale, (m_block @ u) * scale,
+            np.where(keep, root, 0.0)[:, None] * u.T, keep)
+
+
+def _m_orthonormal(block: np.ndarray, m_block: np.ndarray
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """`_gram_pass` twice: one pass on a Gram matrix of condition 1e10
+    leaves the block orthonormal only to 1e-5, and a basis built from
+    such blocks loses its orthogonality and the iteration its
+    convergence (measured: the residual climbed from the eighth block
+    on). Returns Q, M Q, R = R2 R1 and the first pass's survivors."""
+    q, mq, r1, keep = _gram_pass(block, m_block)
+    q, mq, r2, _keep = _gram_pass(q, mq)
+    return q, mq, r2 @ r1, keep
+
+
+def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
+                        width: int = LANCZOS_BLOCK, ticker: Any = None,
+                        seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
+    """The `count` eigenpairs nearest the shift, by block Lanczos on the
+    shift-inverted operator A = (K - sigma M)^-1 M.
+
+    A is self-adjoint in the M-inner product, and its largest
+    eigenvalues theta are the modes nearest the shift, lambda = sigma +
+    1 / theta. The Krylov basis is grown a block at a time: each new
+    block is A applied to the last (one block solve with the factor),
+    M-orthogonalized against the whole basis twice, and M-orthonormalized
+    (`_m_orthonormal`); the coefficients fill the projected matrix H =
+    V^T M A V, whose eigenpairs are the Ritz pairs. A Ritz pair's
+    residual |A x - theta x|_M is the last block's share of it, |B s|,
+    which costs nothing to read, and the iteration stops when every
+    wanted mode's residual over its theta is under `LANCZOS_RESIDUAL`,
+    or at the floor, or when the basis spans the whole space. A
+    direction the orthogonalization leaves empty is replaced by a fresh
+    random one. The basis is held as (n, dimension) column-major arrays,
+    V and M V, so the products against it run in place.
+
+    Why a block method: the single-vector Lanczos of ARPACK applies the
+    operator one vector at a time, and a sparse factor solves a block
+    of right-hand sides for little more than one (the supernodal
+    solve runs on every core). The sixty-eight single solves of a
+    270,000-DOF model were 2.5 s; twelve block solves of twelve are
+    about 1 s. LOBPCG with the factor as a preconditioner on K was
+    tried first and failed on the free-free rigid modes; shift-invert
+    Lanczos has no such case, since the shift puts the rigid modes
+    nearest it and a block wider than six finds all six.
+
+    Parameters
+    ----------
+    factor
+        The factorization of (K - sigma M), as `sparse_solve.factor_symmetric`
+        gives it.
+    mass : scipy.sparse matrix
+        M.
+    sigma : float
+        The shift.
+    count : int
+        How many modes, the nearest the shift.
+    width : int
+        The block width; at most `count`'s size allows.
+    ticker : Ticker, optional
+        Told one tick per column solved, the estimate extended ahead.
+    seed : int
+        The random start's seed: a model solved twice gives one answer.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The eigenvalues lambda, nearest the shift first, and the Ritz
+        vectors as columns, M-orthonormal.
+
+    Raises
+    ------
+    NotConverged
+        When the basis reaches its limit (`LANCZOS_BASIS` times `count`,
+        at most the size) with a wanted residual above 1e-5.
+    """
+    from scipy.linalg import eigh as scipy_eigh
+
+    size = mass.shape[0]
+    rng = np.random.default_rng(seed)
+    width = max(1, min(int(width), size))
+    limit = min(size, LANCZOS_BASIS * int(count))
+    # the basis columns are read and written in place: column-major
+    basis = np.empty((size, limit), order='F')
+    m_basis = np.empty((size, limit), order='F')
+    projected = np.zeros((limit, limit))
+    dimension = 0
+    start = rng.standard_normal((size, width))
+    block, m_block, _r, _keep = _m_orthonormal(start, mass @ start)
+    worst_before = math.inf
+    while True:
+        width = block.shape[1]
+        grown = dimension + width
+        basis[:, dimension:grown] = block
+        m_basis[:, dimension:grown] = m_block
+        if ticker is not None:
+            ticker.extend_to(width)
+        applied = factor.solve(m_block)
+        if ticker is not None:
+            ticker.tick(width)
+        vectors, m_vectors = basis[:, :grown], m_basis[:, :grown]
+        # M-orthogonalized against the basis, twice; the coefficients
+        # are the new block column of H = V^T M A V
+        coefficients = np.zeros((grown, width))
+        for _pass in range(2):
+            c = m_vectors.T @ applied
+            applied -= vectors @ c
+            coefficients += c
+        projected[:grown, dimension:grown] = coefficients
+        projected[dimension:grown, :dimension] = coefficients[:dimension].T
+        dimension = grown
+        h = projected[:dimension, :dimension]
+        theta, ritz = scipy_eigh((h + h.T) / 2.0)
+        order = np.argsort(theta)[::-1][:count]
+        theta, ritz = theta[order], ritz[:, order]
+        block, m_block, beta, keep = _m_orthonormal(applied, mass @ applied)
+        residuals = (np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
+                     / np.abs(theta))
+        worst = float(residuals.max())
+        if worst < LANCZOS_RESIDUAL or dimension >= size:
+            break
+        if worst < 100.0 * LANCZOS_RESIDUAL and worst > 0.5 * worst_before:
+            break
+        worst_before = worst
+        if dimension + width > limit:
+            if worst < 1e-5:
+                break
+            raise NotConverged(
+                f'{dimension} Lanczos vectors left a residual of {worst:.1e}')
+        if not keep.all():
+            fresh = rng.standard_normal((size, int(np.sum(~keep))))
+            for _pass in range(2):
+                fresh -= vectors @ (m_vectors.T @ fresh)
+            block[:, ~keep] = fresh
+            block, m_block, _r, _keep = _m_orthonormal(block, mass @ block)
+        if dimension + width > size:
+            block, m_block = block[:, :size - dimension], m_block[:, :size - dimension]
+    return sigma + 1.0 / theta, basis[:, :dimension] @ ritz
+
+
 class Model:
     """A structure's nodes, elements, masses, springs and constraints, and
     the modes they give.
@@ -1720,13 +1919,16 @@ class Model:
         Each distinct element's local matrices are computed once (2026-10-03):
         a plate's depend only on its material, thickness and side lengths,
         a beam's on its material, section and length, a triangle's on its
-        corners in its own plane, a solid's on its corners relative to its
-        first, so a meshed model of twenty thousand identical plates built
-        one 24x24 pair twenty thousand times in Python, half its solve
-        (Brandon: is the solve multi-threaded? It was not, and threads were
-        not the answer). The key is the exact inputs, so a cached matrix is
-        the matrix; the rotations into the global axes are one einsum per
-        chunk, and the chunk bounds the memory a fine mesh takes.
+        corners in its own plane, so a meshed model of twenty thousand
+        identical plates built one 24x24 pair twenty thousand times in
+        Python, half its solve (Brandon: is the solve multi-threaded? It
+        was not, and threads were not the answer). The key is the exact
+        inputs, so a cached matrix is the matrix; the rotations into the
+        global axes are one einsum per chunk, and the chunk bounds the
+        memory a fine mesh takes. A solid's matrices are built for every
+        element of a kind at once (`_solid_matrices_many`): a meshed
+        solid's bricks are mostly distinct, so there the cache saved
+        little and the one-at-a-time build was the cost.
         """
         index = {node: 6 * i for i, node in enumerate(self.node_ids)}
 
@@ -1803,27 +2005,42 @@ class Model:
             rows = dof_rows([triangle.nodes for triangle in triangles], 6)
             yield rows, rotated(rotations, k[which]), rotated(rotations, m[which])
 
-        for lo in range(0, len(self.solids), chunk):
-            solids = self.solids[lo:lo + chunk]
-            # tets, wedges and bricks side by side differ in size, so each
-            # count is its own batch
-            by_count: dict[int, list] = {}
-            for solid in solids:
-                by_count.setdefault(len(solid.nodes), []).append(solid)
-            for members in by_count.values():
-                # a solid's matrices are those of its corners relative to
-                # its first: the same brick anywhere in the mesh is one brick
-                shapes = [np.array([self._nodes[n] for n in solid.nodes])
-                          for solid in members]
-                which, k, m = cached(
-                    lambda key: _solid_matrices(key[0],
-                                                np.array(key[1]).reshape(-1, 3)),
-                    [(solid.material, tuple(float(v) for v in (xyz - xyz[0]).ravel()))
-                     for solid, xyz in zip(members, shapes)])
+        if self.solids:
+            ordinal = {node: i for i, node in enumerate(self.node_ids)}
+            positions = np.array([self._nodes[node] for node in self.node_ids],
+                                 dtype=np.float64)
+            # tets, wedges and bricks side by side differ in size, and
+            # `_solid_matrices_many` takes one material, so each kind
+            # and material is its own run of chunks
+            by_kind: dict[tuple[int, Material], list] = {}
+            for solid in self.solids:
+                by_kind.setdefault((len(solid.nodes), solid.material),
+                                   []).append(solid)
+            jobs = []
+            for (_count, material), members in by_kind.items():
+                which = np.array([[ordinal[n] for n in solid.nodes]
+                                  for solid in members], dtype=np.int64)
+                for lo in range(0, len(which), chunk):
+                    jobs.append((material, which[lo:lo + chunk]))
+
+            def solid_batch(job):
+                material, which = job
+                # every element at once, rather than each distinct one
+                # cached (2026-10-19): the Frame-Wing's 33,000 bricks are
+                # 2,800 distinct ones, 2.4 s built one at a time in
+                # Python and 0.1 s as arrays
+                k, m = _solid_matrices_many(material, positions[which])
                 # three translations per node: the rows of each node's
                 # first three degrees of freedom, and nothing on its rotations
-                rows = dof_rows([solid.nodes for solid in members], 3)
-                yield rows, k[which], m[which]
+                rows = (6 * which[:, :, None] + np.arange(3)).reshape(len(which), -1)
+                return rows, k, m
+
+            # the chunks on threads, a few at a time so the memory stays
+            # bounded: numpy lets go of the interpreter lock inside the
+            # array calls that are all of a batch, and eight chunks of
+            # bricks take 81 ms on eight threads against 436 ms on one
+            # (measured 2026-10-19)
+            yield from _on_threads(solid_batch, jobs)
 
         if self.masses:
             rows = dof_rows([(item.node,) for item in self.masses], 6)
@@ -1897,35 +2114,47 @@ class Model:
         from scipy import sparse
 
         n = self.num_dof
-        rows_k, cols_k, vals_k, rows_m, cols_m, vals_m = [], [], [], [], [], []
+        rows, cols, vals = [], [], []
         if ticker is not None:
             ticker.add(len(self.beams) + len(self.plates)
                        + len(self.triangles) + len(self.solids)
                        + len(self.springs))
-        for rows, k, m in self._batches():
-            count, r = rows.shape
-            i = np.broadcast_to(rows[:, :, None], (count, r, r)).ravel()
-            j = np.broadcast_to(rows[:, None, :], (count, r, r)).ravel()
+        # Only the upper triangle of each element's matrix is scattered,
+        # the diagonal at half, and the matrix is the triangle plus its
+        # transpose: symmetric by construction, and half the entries to
+        # sort and sum. Scattering the whole and averaging it with its
+        # transpose was 0.8 s of the Frame-Wing's assembly (2026-10-19).
+        # Halving and doubling are exact, so the diagonal is unchanged.
+        # The mass and the stiffness share one pattern, so they travel
+        # as one complex value, mass + i stiffness, and are sorted and
+        # summed once (each part is summed on its own, exactly as apart).
+        for batch, k, m in self._batches():
+            count, r = batch.shape
+            upper = np.triu(np.ones((r, r), dtype=bool))
+            weight = np.where(np.eye(r, dtype=bool), 0.5, 1.0)[upper]
+            # 32-bit indices: a quarter less to sort, and scipy's limit
+            # of two billion rows is far above any model this holds
+            rows.append(np.broadcast_to(batch[:, :, None], (count, r, r))
+                        [:, upper].ravel().astype(np.int32))
+            cols.append(np.broadcast_to(batch[:, None, :], (count, r, r))
+                        [:, upper].ravel().astype(np.int32))
+            both = (m[:, upper] * weight).astype(np.complex128)
             if k is not None:
-                rows_k.append(i)
-                cols_k.append(j)
-                vals_k.append(k.ravel())
+                both.imag = k[:, upper] * weight
                 if ticker is not None:
                     ticker.tick(count)
-            rows_m.append(i)
-            cols_m.append(j)
-            vals_m.append(m.ravel())
+            vals.append(both.ravel())
 
-        def gather(rows, cols, vals):
-            if not rows:
-                return sparse.csr_matrix((n, n))
-            matrix = sparse.coo_matrix(
-                (np.concatenate(vals), (np.concatenate(rows),
-                                        np.concatenate(cols))),
-                shape=(n, n)).tocsr()
-            return ((matrix + matrix.T) / 2.0).tocsr()
-
-        return gather(rows_m, cols_m, vals_m), gather(rows_k, cols_k, vals_k)
+        if not rows:
+            return sparse.csr_matrix((n, n)), sparse.csr_matrix((n, n))
+        triangle = sparse.coo_matrix(
+            (np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+            shape=(n, n)).tocsr()
+        whole = (triangle + triangle.T).tocsr()
+        split = [sparse.csr_matrix((part, whole.indices.copy(), whole.indptr.copy()),
+                                   shape=(n, n))
+                 for part in (whole.data.real.copy(), whole.data.imag.copy())]
+        return split[0], split[1]
 
     def rigid_body_vectors(self) -> np.ndarray:
         """The six rigid-body motions, as columns over the model's DOFs:
@@ -1980,10 +2209,12 @@ class Model:
         result transformed back, which gives every mode, mass-normalized to
         machine precision. The sparse solver, for larger models, stores the
         matrices as their nonzeros (`sparse_matrices`) and finds the lowest
-        modes by shift-invert Lanczos (ARPACK, `scipy.sparse.linalg.eigsh`),
-        the method large finite element codes use, refined by
-        `polish_modes`. Its one factorization is Accelerate's supernodal
-        Cholesky on a Mac and SuperLU's symmetric LU elsewhere
+        modes by shift-invert block Lanczos (`block_lanczos_modes`, the
+        method large finite element codes use, its solves taken a block
+        at a time), refined by `polish_modes`; a model the block method
+        does not converge is solved by ARPACK (`scipy.sparse.linalg.eigsh`)
+        instead, with a warning. Its one factorization is Accelerate's
+        supernodal Cholesky on a Mac and SuperLU's symmetric LU elsewhere
         (`sparse_solve.factor_symmetric`). It finds the lowest `num_modes`, or every mode up to
         `maximum_frequency`, and one of the two must be given. Its memory
         grows with the number of nodes instead of its square: a plate model of
@@ -2162,7 +2393,10 @@ class Model:
 
     def _sparse_modes(self, fixed, maximum_frequency, num_modes, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) for the lowest
-        modes, by shift-invert Lanczos on the sparse matrices."""
+        modes, by shift-invert block Lanczos on the sparse matrices,
+        ARPACK's Lanczos behind it."""
+        import warnings
+
         from scipy.sparse.linalg import LinearOperator, eigsh
 
         from .sparse_solve import factor_symmetric
@@ -2203,8 +2437,25 @@ class Model:
                 ticker.tick()
             return factor.solve(np.asarray(vector, dtype=float))
 
-        shifted_inverse = LinearOperator(factor.shape, matvec=solve,
-                                         dtype=float)
+        def arpack(count):
+            shifted_inverse = LinearOperator(factor.shape, matvec=solve,
+                                             dtype=float)
+            return eigsh(reduced_k, k=count, M=reduced_m, sigma=sigma,
+                         which='LM', OPinv=shifted_inverse)
+
+        def nearest(count):
+            # the block method (2026-10-19), ARPACK behind it: a model
+            # the block basis does not converge is not left unsolved
+            if SPARSE_EIGENSOLVER != 'block':
+                return arpack(count)
+            try:
+                return block_lanczos_modes(factor, reduced_m, sigma, count,
+                                           ticker=ticker)
+            except NotConverged as why:
+                warnings.warn(f'the block Lanczos did not converge ({why}); '
+                              'solving by ARPACK instead', stacklevel=3)
+                return arpack(count)
+
         limit = (None if maximum_frequency is None
                  else (2.0 * np.pi * float(maximum_frequency)) ** 2)
         wanted = int(num_modes) if num_modes is not None else 24
@@ -2214,9 +2465,7 @@ class Model:
             try:
                 if ticker is not None:
                     ticker.extend_to(EIGEN_SOLVES_PER_MODE * count)
-                eigenvalues, vectors = eigsh(reduced_k, k=count, M=reduced_m,
-                                             sigma=sigma, which='LM',
-                                             OPinv=shifted_inverse)
+                eigenvalues, vectors = nearest(count)
             except RuntimeError as failure:
                 empty = np.flatnonzero((reduced_m.diagonal() <= 0.0)
                                        & (reduced_k.diagonal() <= 0.0))
@@ -3471,16 +3720,25 @@ def _wedge_basis(l2: float, l3: float, zeta: float
     return n, d
 
 
-#: {nodes: (natural derivatives at each point (p, n, 3), weights (p,))},
-#: the volume rules of the hexahedron (2x2x2 Gauss) and the wedge (the
-#: three-point triangle rule by two Gauss points), as their matrices use
-_VOLUME_RULES = {
-    8: (np.array([_hex_basis(xi, eta, zeta)[1] for xi in _GAUSS_2
-                  for eta in _GAUSS_2 for zeta in _GAUSS_2]), np.ones(8)),
-    6: (np.array([_wedge_basis(l2, l3, zeta)[1]
-                  for (l2, l3), _weight in _TRIANGLE_3 for zeta in _GAUSS_2]),
-        np.array([weight for _point, weight in _TRIANGLE_3
-                  for _zeta in _GAUSS_2])),
+def _rule(basis, points, weights):
+    """(shape functions (p, n), natural derivatives (p, n, 3), weights
+    (p,)) of a volume rule, the basis evaluated at each of its points."""
+    evaluated = [basis(*point) for point in points]
+    return (np.array([n for n, _d in evaluated]),
+            np.array([d for _n, d in evaluated]),
+            np.asarray(weights, dtype=np.float64))
+
+
+#: {nodes: (shape functions (p, n), natural derivatives (p, n, 3),
+#: weights (p,))}, the volume rules of the hexahedron (2x2x2 Gauss) and
+#: the wedge (the three-point triangle rule by two Gauss points), as
+#: their matrices use them; the ten-node tetrahedron's is added below
+_SOLID_RULES = {
+    8: _rule(_hex_basis, [(xi, eta, zeta) for xi in _GAUSS_2
+                          for eta in _GAUSS_2 for zeta in _GAUSS_2], np.ones(8)),
+    6: _rule(_wedge_basis, [(l2, l3, zeta) for (l2, l3), _weight in _TRIANGLE_3
+                            for zeta in _GAUSS_2],
+             [weight for _point, weight in _TRIANGLE_3 for _zeta in _GAUSS_2]),
 }
 
 
@@ -3570,8 +3828,7 @@ def _tet10_basis(l2: float, l3: float, l4: float) -> tuple[np.ndarray, np.ndarra
 
 _TET_RULE = _tet_rule()
 #: the ten-node tetrahedron's volume rule, beside the brick's and the wedge's
-_VOLUME_RULES[10] = (np.array([_tet10_basis(*point)[1] for point in _TET_RULE[0]]),
-                     _TET_RULE[1])
+_SOLID_RULES[10] = _rule(_tet10_basis, _TET_RULE[0], _TET_RULE[1])
 
 
 def _tet10_matrices(material: Material, xyz: np.ndarray
@@ -3611,6 +3868,148 @@ def _solid_matrices(material: Material, xyz: np.ndarray
     return _tet_matrices(material, xyz)
 
 
+def _on_threads(work: Callable, jobs: list, threads: int | None = None):
+    """`work(job)` for every job, in order, computed `threads` at a time
+    on a thread pool; one job alone is done in the calling thread."""
+    if len(jobs) < 2:
+        for job in jobs:
+            yield work(job)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    threads = threads or min(8, os.cpu_count() or 1)
+    with ThreadPoolExecutor(threads) as pool:
+        for lo in range(0, len(jobs), threads):
+            yield from pool.map(work, jobs[lo:lo + threads])
+
+
+def _stiffness_from_gradients(lame: float, mu: float, weights: np.ndarray,
+                              first: np.ndarray, second: np.ndarray
+                              ) -> np.ndarray:
+    """sum over the points of weight B1^T D B2, for isotropic D, from
+    the two sets' shape function gradients: `first` and `second` are
+    (elements, points, nodes, 3), `weights` (elements, points), and
+    the answer (elements, 3 nodes, 3 nodes).
+
+    With D isotropic the product B_I^T D B_J, I a node of the first set
+    and J of the second, is lambda g_I g_J^T + mu g_J g_I^T + mu (g_I . g_J)
+    I_3 in the nodes' gradients g, which the strain matrices spell out
+    entry by entry. Written this way, every element's stiffness is one
+    small matrix product (the gradients weighted against the gradients,
+    summed over the points) and two rearrangements of it, and a batch
+    of thousands of elements is one call: 0.85 ms a brick built point
+    by point in Python, with the bubble modes 1.2 s for the Frame-Wing's
+    2,000 distinct bricks (2026-10-19).
+    """
+    count, points, n1, _ = first.shape
+    n2 = second.shape[2]
+    weighted = first * weights[:, :, None, None]
+    outer = np.matmul(weighted.reshape(count, points, 3 * n1).transpose(0, 2, 1),
+                      second.reshape(count, points, 3 * n2))
+    # outer[e, I, a, J, b] = sum_p w g1[I, a] g2[J, b], and dots[e, I, J]
+    # its trace over a = b
+    outer = outer.reshape(count, n1, 3, n2, 3)
+    dots = outer[:, :, 0, :, 0] + outer[:, :, 1, :, 1] + outer[:, :, 2, :, 2]
+    stiffness = lame * outer + mu * outer.transpose(0, 1, 4, 3, 2)
+    # added down the 3x3 blocks' diagonals in three strided writes: the
+    # same through a broadcast against eye(3) wrote the whole array and
+    # was the longest step of the batch (7 ms of 56 on 4,096 bricks)
+    for axis in range(3):
+        stiffness[:, :, axis, :, axis] += mu * dots
+    return stiffness.reshape(count, 3 * n1, 3 * n2)
+
+
+def _invert_3x3(matrices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(inverses, determinants) of a stack of 3x3 matrices by their
+    cofactors: one pass of array arithmetic, where LAPACK's factorization
+    is a call per matrix and a tenth of a batch's assembly."""
+    a = matrices
+    cofactors = np.empty_like(a)
+    cofactors[..., 0, 0] = a[..., 1, 1] * a[..., 2, 2] - a[..., 1, 2] * a[..., 2, 1]
+    cofactors[..., 0, 1] = a[..., 1, 2] * a[..., 2, 0] - a[..., 1, 0] * a[..., 2, 2]
+    cofactors[..., 0, 2] = a[..., 1, 0] * a[..., 2, 1] - a[..., 1, 1] * a[..., 2, 0]
+    cofactors[..., 1, 0] = a[..., 0, 2] * a[..., 2, 1] - a[..., 0, 1] * a[..., 2, 2]
+    cofactors[..., 1, 1] = a[..., 0, 0] * a[..., 2, 2] - a[..., 0, 2] * a[..., 2, 0]
+    cofactors[..., 1, 2] = a[..., 0, 1] * a[..., 2, 0] - a[..., 0, 0] * a[..., 2, 1]
+    cofactors[..., 2, 0] = a[..., 0, 1] * a[..., 1, 2] - a[..., 0, 2] * a[..., 1, 1]
+    cofactors[..., 2, 1] = a[..., 0, 2] * a[..., 1, 0] - a[..., 0, 0] * a[..., 1, 2]
+    cofactors[..., 2, 2] = a[..., 0, 0] * a[..., 1, 1] - a[..., 0, 1] * a[..., 1, 0]
+    determinants = (a[..., 0, 0] * cofactors[..., 0, 0]
+                    + a[..., 0, 1] * cofactors[..., 0, 1]
+                    + a[..., 0, 2] * cofactors[..., 0, 2])
+    inverses = cofactors.swapaxes(-1, -2) / determinants[..., None, None]
+    return inverses, determinants
+
+
+def _solid_matrices_many(material: Material, xyz: np.ndarray
+                         ) -> tuple[np.ndarray, np.ndarray]:
+    """`_solid_matrices` of every element of one kind and one material
+    at once: `xyz` is (elements, nodes, 3), and the answer (stiffness,
+    mass), each (elements, 3 nodes, 3 nodes).
+
+    The same integration as the one-element functions — the brick's
+    2x2x2 rule with Wilson's bubble modes condensed out through the
+    centroid's Jacobian, the wedge's and the ten-node tetrahedron's
+    rules, the constant-strain tetrahedron in closed form — with the
+    Jacobians, their inverses and the stiffness products taken over
+    every element in one numpy call each, and the isotropic product
+    B^T D B folded into the gradients (`_stiffness_from_gradients`).
+    The one-element functions are the reference it is tested against
+    and agree with it to round-off.
+    """
+    xyz = np.asarray(xyz, dtype=np.float64)
+    count, nodes = xyz.shape[:2]
+    E, nu = material.youngs_modulus, material.poissons_ratio
+    lame = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))
+    mu = material.shear_modulus
+    rho = material.density
+
+    if nodes == 4:
+        edges = xyz[:, 1:] - xyz[:, :1]
+        inverse, determinants = _invert_3x3(edges)
+        volume = np.abs(determinants) / 6.0
+        gradients = np.concatenate([-inverse.sum(axis=2)[:, None, :],
+                                    inverse.transpose(0, 2, 1)], axis=1)
+        stiffness = _stiffness_from_gradients(lame, mu, volume[:, None],
+                                              gradients[:, None], gradients[:, None])
+        products = (1.0 + np.eye(4))[None] * (rho * volume / 20.0)[:, None, None]
+    else:
+        shapes, derivatives, rule = _SOLID_RULES[nodes]
+        # J[e, p] = dN[p]^T xyz[e], and dN/dx = dN/dxi J^-1 at every
+        # point of every element: batched products, not einsums, which
+        # are several times slower on these shapes
+        jacobians = np.matmul(derivatives.transpose(0, 2, 1)[None], xyz[:, None])
+        inverses, determinants = _invert_3x3(jacobians)
+        determinants = np.abs(determinants)
+        weights = determinants * rule
+        gradients = np.matmul(derivatives[None], inverses.transpose(0, 1, 3, 2))
+        stiffness = _stiffness_from_gradients(lame, mu, weights, gradients, gradients)
+        if nodes == 8:
+            # the bubble modes' strains through the centroid's Jacobian,
+            # scaled by its determinant over the point's, as `_hex_matrices`
+            _n0, d0 = _hex_basis(0.0, 0.0, 0.0)
+            inverse_0, det_0 = _invert_3x3(np.matmul(d0.T[None], xyz))
+            det_0 = np.abs(det_0)
+            points = np.array([(xi, eta, zeta) for xi in _GAUSS_2
+                               for eta in _GAUSS_2 for zeta in _GAUSS_2])
+            bubble = -2.0 * points[:, :, None] * np.eye(3)[None]
+            bubbles = (np.matmul(bubble[None], inverse_0.transpose(0, 2, 1)[:, None])
+                       * (det_0[:, None] / determinants)[:, :, None, None])
+            k_ua = _stiffness_from_gradients(lame, mu, weights, gradients, bubbles)
+            k_aa = _stiffness_from_gradients(lame, mu, weights, bubbles, bubbles)
+            stiffness = stiffness - k_ua @ np.linalg.solve(k_aa, k_ua.transpose(0, 2, 1))
+        products = rho * np.tensordot(weights, shapes[:, :, None] * shapes[:, None, :],
+                                      axes=(1, 0))
+    # the mass couples each node pair's translations alike: the products
+    # down the blocks' diagonals, written as the stiffness's dots are
+    mass = np.zeros((count, nodes, 3, nodes, 3))
+    for axis in range(3):
+        mass[:, :, axis, :, axis] = products
+    # symmetric to round-off, and not made exactly so: the assemblies
+    # read one triangle (`sparse_matrices`) or average the whole
+    return stiffness, mass.reshape(count, 3 * nodes, 3 * nodes)
+
+
 def _solid_volume(xyz: np.ndarray) -> float:
     """The volume of a hexahedron, wedge or tetrahedron by its nodes,
     integrated the way its matrices are, so the two agree; negative for
@@ -3629,7 +4028,7 @@ def _solid_volumes(xyz: np.ndarray) -> np.ndarray:
     # (2026-10-18, the status line's weight)
     if xyz.shape[1] == 4:
         return np.linalg.det(xyz[:, 1:] - xyz[:, :1]) / 6.0
-    derivatives, weights = _VOLUME_RULES[xyz.shape[1]]
+    _shapes, derivatives, weights = _SOLID_RULES[xyz.shape[1]]
     jacobians = np.einsum('pnk,enj->epkj', derivatives, xyz)
     return (np.linalg.det(jacobians) * weights).sum(axis=1)
 

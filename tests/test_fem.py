@@ -1236,21 +1236,33 @@ def _every_family():
     w = [model.add_node(nid + q, *p) for q, p in enumerate([(0.3, 0, -0.1), (0.4, 0, -0.1), (0.3, 0.07, -0.1),
                                                              (0.3, 0, -0.2), (0.4, 0, -0.2), (0.3, 0.07, -0.2)])]
     model.add_solid(w, al)
+    nid += 6
+    # a ten-node tetrahedron beside the wedge, its midsides a little
+    # off the straight edges, as a mesher's are on a curved wall
+    corners = np.array([(0.5, 0, -0.1), (0.6, 0, -0.1), (0.5, 0.07, -0.1), (0.5, 0, -0.2)])
+    edges = ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))
+    midsides = [(corners[a] + corners[b]) / 2 + 0.002 * np.array([q % 3 - 1, q % 2, 1])
+                for q, (a, b) in enumerate(edges)]
+    ten = [model.add_node(nid + q, *p) for q, p in enumerate([*corners, *midsides])]
+    nid += 10
+    model.add_solid(ten, al)
     model.add_mass(grid[5, 4], 0.25, (1e-4, 2e-4, 3e-4))
     return model
 
 
 def test_the_batched_assembly_is_the_element_by_element_one():
-    """Every family — beams, plates, triangles, bricks, a wedge, a tet and
-    a lumped mass — rotated and scattered in batches, each distinct
-    element's matrices computed once, gives the matrices the one-at-a-
-    time assembly gave, to the last bit or two; the dense assembly
-    agrees with the sparse."""
+    """Every family — beams, plates, triangles, bricks, a wedge, a tet, a
+    ten-node tet and a lumped mass — rotated and scattered in batches,
+    each distinct plate's matrices computed once and the solids' all at
+    once, gives the matrices the one-at-a-time assembly gave, to
+    round-off; the dense assembly agrees with the sparse."""
     model = _every_family()
+    assert sorted(len(solid.nodes) for solid in model.solids) == [4, 6, 8, 8, 10]
     mass, stiffness = model.sparse_matrices()
     ref_mass, ref_stiffness = _element_by_element(model)
-    assert abs(mass - ref_mass).max() <= 1e-14 * abs(ref_mass).max()
-    assert abs(stiffness - ref_stiffness).max() <= 1e-14 * abs(ref_stiffness).max()
+    assert abs(mass - ref_mass).max() <= 1e-12 * abs(ref_mass).max()
+    assert abs(stiffness - ref_stiffness).max() <= 1e-12 * abs(ref_stiffness).max()
+    assert abs(mass - mass.T).max() == 0.0 and abs(stiffness - stiffness.T).max() == 0.0
     dense_mass, dense_stiffness = model.matrices()
     assert np.allclose(dense_mass, mass.toarray(), rtol=0,
                        atol=1e-14 * abs(dense_mass).max())

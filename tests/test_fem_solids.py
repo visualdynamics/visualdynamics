@@ -83,6 +83,56 @@ def test_the_wedge_and_the_tetrahedron_agree_with_themselves():
     assert _solid_volume(tet) == pytest.approx(1e-6 / 6)
 
 
+#: a straight element of each family, unit size
+_FAMILIES = {
+    8: CUBE / 0.01,
+    6: np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1]], float),
+    4: np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], float),
+}
+_FAMILIES[10] = np.vstack([_FAMILIES[4]] + [
+    (_FAMILIES[4][a] + _FAMILIES[4][b]) / 2
+    for a, b in ((0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (2, 3))])
+
+
+@pytest.mark.parametrize('nodes', sorted(_FAMILIES))
+def test_a_family_built_all_at_once_is_the_one_element_functions(nodes):
+    """`_solid_matrices_many` builds every element of a kind in one set
+    of array calls, the isotropic product B^T D B folded into the
+    gradients and the brick's bubble modes condensed out in a batch; the
+    one-element functions are the reference, and on fifty distorted
+    elements of each family, scaled over a factor of four, both matrices
+    agree to 1e-12 of their largest entry."""
+    rng = np.random.default_rng(nodes)
+    base = _FAMILIES[nodes]
+    xyz = ((base[None] + rng.uniform(-0.1, 0.1, (50,) + base.shape))
+           * rng.uniform(0.005, 0.02, (50, 1, 1)))
+    stiffness, mass = fem._solid_matrices_many(ALUMINUM, xyz)
+    assert stiffness.shape == mass.shape == (50, 3 * nodes, 3 * nodes)
+    for e in range(50):
+        k, m = fem._solid_matrices(ALUMINUM, xyz[e])
+        assert np.abs(stiffness[e] - k).max() <= 1e-12 * np.abs(k).max()
+        assert np.abs(mass[e] - m).max() <= 1e-12 * np.abs(m).max()
+
+
+def test_the_solid_chunks_come_back_in_order_from_the_threads():
+    """`_batches` builds the solids' chunks on a thread pool, a few at
+    a time: the chunks come back in the order they were given, on more
+    than one thread, and one chunk alone stays on the caller's."""
+    import threading
+
+    seen = []
+
+    def work(job):
+        seen.append(threading.get_ident())
+        return job * 2
+
+    assert list(fem._on_threads(work, list(range(20)), threads=4)) == [2 * q for q in range(20)]
+    assert len(set(seen)) > 1
+    seen.clear()
+    assert list(fem._on_threads(work, [7])) == [14]
+    assert seen == [threading.get_ident()]
+
+
 def _bar_of_bricks(length=0.5, depth=0.02, along=25, deep=1):
     """A bar meshed with bricks, `deep` through its depth and its width."""
     model = Model()

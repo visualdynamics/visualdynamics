@@ -227,7 +227,19 @@ then :; else
   echo "warning: no Finder session — the image is unarranged" >&2
 fi
 sync
-hdiutil detach "$MOUNT" -quiet || { sleep 2; hdiutil detach "$MOUNT" -force -quiet; }
+# the detach as well (a61, 2026-10-19: the detach and then the forced
+# one both failed on the Intel runner with nothing said, since both
+# were quiet, and the ERR trap named this line): it says why and
+# tries again while the volume is busy, the force kept for the end
+for attempt in 1 2 3 4 5; do
+  hdiutil detach "$MOUNT" && break
+  if (( attempt == 5 )); then
+    hdiutil detach "$MOUNT" -force || { hdiutil info >&2; exit 1; }
+    break
+  fi
+  echo "detach failed (attempt $attempt): waiting for the volume to be let go" >&2
+  sleep $((attempt * 5))
+done
 # the convert reads the image the detach has just let go of, and on the
 # Intel runner it failed with nothing said (a45 once, a46 twice — the
 # ERR trap named this line), a moment after a detach that reported

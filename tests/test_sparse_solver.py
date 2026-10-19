@@ -11,6 +11,8 @@ the sparse one has: the search up to a frequency, and the refusals.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 from test_rigid_links import _strip
@@ -144,6 +146,138 @@ def test_the_sparse_search_reaches_a_frequency():
     top = float(model.eigensolution(solver='dense', num_modes=60).frequency[-1])
     _dense, sparse = _compare(model, maximum_frequency=top * 0.99)
     assert len(sparse.frequency) > 24, 'more than the first search held'
+
+
+def _solid_bar():
+    """A free-free bar of bricks, a wedge-free solid model."""
+    from test_fem_solids import _bar_of_bricks
+
+    return _bar_of_bricks(along=12, deep=2)
+
+
+def _springs_model():
+    """Two strips joined by springs, from the springs tests."""
+    model = Model()
+    lower = _strip(model, 1, nx=6, ny=3)
+    upper = _strip(model, 101, nx=6, ny=3, z=0.03)
+    for key in ((0, 0), (6, 0), (0, 3), (6, 3)):
+        model.add_spring(f'{lower[key]}Z', f'{upper[key]}Z', 2e5)
+    return model
+
+
+def _demo_plate():
+    from visualdynamics.demo import plate
+
+    return plate.build()
+
+
+@pytest.mark.parametrize('build, kwargs', [
+    (_demo_plate, {'num_modes': 16}),
+    (lambda: _rigid_link_model()[0], {'num_modes': 14}),
+    (lambda: _rigid_link_model()[0], {'num_modes': 10, 'fixed': ['1', '4']}),
+    (_solid_bar, {'num_modes': 12}),
+    (_springs_model, {'num_modes': 20}),
+    (lambda: _rigid_link_model()[0], {'num_modes': 1}),
+], ids=['free plate', 'rigid links', 'grounded', 'bricks', 'springs', 'one mode'])
+def test_the_block_lanczos_and_arpack_give_one_answer(build, kwargs, monkeypatch):
+    """The sparse solve runs on the block Lanczos written here
+    (`block_lanczos_modes`), ARPACK behind it: on every kind of model,
+    free-free ones with their six rigid modes included, the two give
+    every frequency the same to 1e-9, the rigid ones exactly zero on
+    both, and the block solver is the one that ran."""
+    model = build()
+    called = []
+    real = fem.block_lanczos_modes
+    monkeypatch.setattr(fem, 'block_lanczos_modes',
+                        lambda *a, **k: called.append(1) or real(*a, **k))
+    found = {}
+    for solver in ('block', 'arpack'):
+        monkeypatch.setattr(fem, 'SPARSE_EIGENSOLVER', solver)
+        # and the block solver converged on its own: a fallback to
+        # ARPACK would give the right answer for the wrong reason
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            found[solver] = model.eigensolution(solver='sparse', **kwargs).frequency
+    assert len(called) >= 1 and len(found['block']) == len(found['arpack'])
+    rigid = found['arpack'] == 0.0
+    assert np.array_equal(rigid, found['block'] == 0.0)
+    assert np.allclose(found['block'][~rigid], found['arpack'][~rigid],
+                       rtol=1e-9, atol=0.0), found['block'] / found['arpack'] - 1
+
+
+def test_the_block_lanczos_starts_the_same_twice_and_keeps_its_word():
+    """Its random start is seeded, so a model solved twice gives one
+    answer to the bit (ARPACK's start is random and did not); and the
+    pairs it hands back meet what its residual estimate claimed, read
+    off the last block: measured whole, |A x - theta x|_M / theta is
+    under the floor it may stop at, a hundred times the tolerance."""
+    model, _lower = _rigid_link_model()
+    stiffness, mass, _t, _s, sigma, _k = model.scaled_system()
+    from visualdynamics.core.sparse_solve import factor_symmetric
+
+    factor = factor_symmetric((stiffness - sigma * mass).tocsc())
+    first = fem.block_lanczos_modes(factor, mass, sigma, 12)
+    second = fem.block_lanczos_modes(factor, mass, sigma, 12)
+    assert np.array_equal(first[0], second[0]) and np.array_equal(first[1], second[1])
+    eigenvalues, vectors = first
+    theta = 1.0 / (eigenvalues - sigma)
+    assert vectors.T @ (mass @ vectors) == pytest.approx(np.eye(12), abs=1e-10)
+    residual = factor.solve(mass @ vectors) - vectors * theta
+    measured = np.sqrt(np.sum(residual * (mass @ residual), axis=0)) / theta
+    assert measured.max() < 100.0 * fem.LANCZOS_RESIDUAL, measured
+
+
+def test_a_basis_that_runs_out_goes_to_arpack_with_a_warning(monkeypatch):
+    """A model the block basis cannot converge within its limit is not
+    left unsolved: `_sparse_modes` warns and solves it by ARPACK, and
+    the answer is the one ARPACK gives on its own."""
+    model, _lower = _rigid_link_model()
+    monkeypatch.setattr(fem, 'SPARSE_EIGENSOLVER', 'arpack')
+    expected = model.eigensolution(num_modes=14, solver='sparse').frequency
+    monkeypatch.setattr(fem, 'SPARSE_EIGENSOLVER', 'block')
+    # two blocks of basis for 22 modes: the Ritz values cannot have
+    # settled, and the solver must say so rather than hand them over
+    monkeypatch.setattr(fem, 'LANCZOS_BASIS', 2)
+    stiffness, mass, _t, _s, sigma, _k = model.scaled_system()
+    from visualdynamics.core.sparse_solve import factor_symmetric
+
+    factor = factor_symmetric((stiffness - sigma * mass).tocsc())
+    with pytest.raises(fem.NotConverged, match='residual'):
+        fem.block_lanczos_modes(factor, mass, sigma, 22)
+    with pytest.warns(UserWarning, match='did not converge.*ARPACK'):
+        found = model.eigensolution(num_modes=14, solver='sparse').frequency
+    assert np.allclose(found, expected, rtol=1e-9, atol=0.0)
+
+
+def test_the_m_orthonormalization_survives_an_ill_conditioned_block():
+    """A block of columns that share a direction and differ by parts in
+    a million has a Gram matrix of condition 1e12, and one pass through
+    its eigenvectors leaves Q^T M Q off the identity by 4e-6 (measured);
+    two passes leave it at round-off, Q R is still the block, and a
+    dependent column is reported as collapsed and dropped rather than
+    divided by nothing."""
+    from scipy.sparse import diags
+
+    rng = np.random.default_rng(5)
+    n = 200
+    mass = diags(rng.uniform(0.5, 2.0, n)).tocsc()
+    shared = rng.standard_normal(n)
+    block = shared[:, None] + (rng.standard_normal((n, 6))
+                               * np.array([1.0, 1e-3, 1e-6, 1e-2, 1e-4, 1e-5]))
+    q, mq, r, keep = fem._m_orthonormal(block, mass @ block)
+    assert keep.all()
+    assert np.abs(q.T @ (mass @ q) - np.eye(6)).max() < 1e-11
+    assert np.allclose(q @ r, block, rtol=0, atol=1e-12 * np.abs(block).max())
+    assert np.allclose(mq, mass @ q)
+    q1, _mq1, _r1, _keep1 = fem._gram_pass(block, mass @ block)
+    assert np.abs(q1.T @ (mass @ q1) - np.eye(6)).max() > 1e-7, 'one pass does not'
+    dependent = block.copy()
+    dependent[:, 5] = dependent[:, 0] * 2.0
+    q, mq, r, keep = fem._m_orthonormal(dependent, mass @ dependent)
+    assert keep.sum() == 5 and np.isfinite(q).all()
+    survivors = q[:, keep]
+    assert np.abs(survivors.T @ (mass @ survivors) - np.eye(5)).max() < 1e-12
+    assert np.allclose(q @ r, dependent, rtol=0, atol=1e-12 * np.abs(dependent).max())
 
 
 def test_a_large_model_is_solved_sparse_and_must_say_how_many():

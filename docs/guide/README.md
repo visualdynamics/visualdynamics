@@ -72,6 +72,9 @@ that is not an alpha.
 - [The solid workflow: the Frame-Wing](workflows/fem-solids.md):
   solid shapes added, patterned, subtracted and joined, then meshed
   into bricks and solved
+- [Three shapes that are not extrusions](workflows/mesh-shapes.md):
+  a cross-drilled shaft, a wye fitting and a V-block meshed into
+  bricks fitted to the shape and into tetrahedra, with the numbers
 - [The wavelet reading](wavelet.md): a time history as a scalogram
 - [Checking a classical pulse](pulse-check.md): a half-sine, sawtooth
   or trapezoid against its envelope and its velocity change

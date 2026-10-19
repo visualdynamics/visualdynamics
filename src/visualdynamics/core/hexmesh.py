@@ -46,8 +46,12 @@ from .solids import (
 )
 from .tetmesh import _distance, _extent, _onto, _surfaces, sharp_edges
 
-#: how far in a surface node's twin sits, as a share of the size
+#: passes of filling one-cell pits and emptying one-cell spikes
+CLEAN_PASSES = 4
+#: how far in a surface node's twin sits, as a share of the size, and
+#: at most this share of the material's thickness there
 PILLOW_DEPTH = 0.3
+PILLOW_SHARE = 0.3
 #: how far a corner or an edge point may reach for its node, in sizes
 CAPTURE = 1.0
 #: Laplacian passes over the skin before it is projected
@@ -64,6 +68,10 @@ SETTLED = 0.002
 #: a node whose worst scaled Jacobian is under this tries steps along
 #: the axes too
 TANGLED = 0.15
+#: rounds and sweeps of freeing the surface nodes of the last folded
+#: bricks from the surface
+UNTANGLE_ROUNDS = 4
+UNTANGLE_SWEEPS = 8
 
 _EDGES8 = np.asarray(_CORNER_EDGES[8])
 _FACES = ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7))
@@ -103,7 +111,10 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
         Jacobian (1 for a cube, 0 for a flat brick); 'poor', how many
         bricks are under 0.3; 'uncaptured', how many points along the
         sharp edges found no node of their own; 'sweeps', the final
-        smoothing's; and 'shortest', the shortest edge.
+        smoothing's; 'off_surface', how far the farthest surface node
+        was let into the material to unfold a brick at a feather edge,
+        as a share of the size (0 when none was); and 'shortest', the
+        shortest edge.
     """
     ids = [int(i) for i in ids]
     if not ids:
@@ -128,7 +139,7 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     if not len(hexes):
         raise ValueError('the parts hold nothing to mesh')
     ticker.tick()
-    xyz, hexes, groups, faces, face_hex, surface = _pillow(xyz, hexes, groups, size)
+    xyz, hexes, groups, faces, face_hex, surface = _pillow(xyz, hexes, groups, size, fd)
     ticker.tick()
     mesh = _Mesh(xyz, hexes, faces, face_hex, surface, fd, size, tol)
     uncaptured = mesh.capture(geometry, ids)
@@ -143,6 +154,7 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     sweeps = mesh.smooth(FINAL_SWEEPS, slide=True, ticker=ticker)
     ticker.tick(FINAL_SWEEPS - sweeps)
     mesh.finish()
+    off = mesh.untangle()
     xyz = mesh.xyz
     quality = _scaled_jacobians(xyz, hexes).min(axis=1)
     folded = int((quality <= 0.0).sum())
@@ -169,7 +181,7 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     ticker.tick()
     return part, {'bricks': len(hexes), 'nodes': len(keep), 'quality': float(quality.min()),
                   'poor': int((quality < 0.3).sum()), 'uncaptured': uncaptured,
-                  'sweeps': sweeps, 'shortest': shortest}
+                  'sweeps': sweeps, 'off_surface': off, 'shortest': shortest}
 
 
 def grid_cells(geometry: Any, ids, size: float) -> int:
@@ -222,7 +234,7 @@ def _grid(geometry, ids, size):
     node = np.arange(nx * ny * nz).reshape(nx, ny, nz)
     mids = [(line[:-1] + line[1:]) / 2.0 for line in lines]
     centers = np.stack(np.meshgrid(*mids, indexing='ij'), axis=-1).reshape(-1, 3)
-    owner = _owners(geometry, ids, centers).reshape(nx - 1, ny - 1, nz - 1)
+    owner = _clean(_owners(geometry, ids, centers).reshape(nx - 1, ny - 1, nz - 1))
     i, j, k = np.nonzero(owner > 0)
     hexes = np.stack([node[i, j, k], node[i + 1, j, k], node[i + 1, j + 1, k], node[i, j + 1, k],
                       node[i, j, k + 1], node[i + 1, j, k + 1], node[i + 1, j + 1, k + 1],
@@ -230,7 +242,92 @@ def _grid(geometry, ids, size):
     used = np.unique(hexes)
     renumber = -np.ones(len(grid), dtype=int)
     renumber[used] = np.arange(len(used))
-    return grid[used], renumber[hexes], owner[i, j, k]
+    xyz, hexes = _split_pinches(grid[used], renumber[hexes])
+    return xyz, hexes, owner[i, j, k]
+
+
+def _clean(owner):
+    """The cells' ownership with the one-cell pits and spikes gone: a
+    void cell with four or more of its six neighbors held is filled
+    with the part most of them hold, a held cell hanging by one face
+    (five void neighbors, the grid's outside counted) is emptied,
+    until nothing changes. Emptying at four took a thin plate apart
+    from its corners, which have three faces outside. A surface crossing the grid at a shallow angle
+    leaves pits one cell wide that touch another pit at a corner, and
+    the skin there is no surface: a node whose faces look up, down and
+    sideways at once, with no way in for its twin (the V-block's
+    bores, 2026-10-19). Fitting then puts the filled cell's outer nodes
+    back onto the true surface."""
+    owner = owner.copy()
+    for _ in range(CLEAN_PASSES):
+        held = owner > 0
+        padded = np.pad(held, 1)
+        around = sum(np.roll(padded, shift, axis=axis)[1:-1, 1:-1, 1:-1].astype(int)
+                     for axis in range(3) for shift in (-1, 1))
+        fill = ~held & (around >= 4)
+        empty = held & (6 - around >= 5)
+        if not fill.any() and not empty.any():
+            break
+        if fill.any():
+            parts = np.pad(owner, 1)
+            votes = np.stack([np.roll(parts, shift, axis=axis)[1:-1, 1:-1, 1:-1]
+                              for axis in range(3) for shift in (-1, 1)])
+            for i, j, k in zip(*np.nonzero(fill)):
+                counts = np.bincount(votes[:, i, j, k][votes[:, i, j, k] > 0])
+                owner[i, j, k] = int(np.argmax(counts))
+        owner[empty] = 0
+    return owner
+
+
+def _split_pinches(xyz, hexes):
+    """Nodes where the bricks meet only along an edge or at a corner
+    split, one node per group of bricks that share faces there, so the
+    skin is a surface everywhere. A bore's rim leaves cells touching
+    corner to corner; such a node has no inward direction, and its
+    pillow twin sat on it (the V-block, 2026-10-19)."""
+    attached: list[list[int]] = [[] for _ in range(len(xyz))]
+    for c, hx in enumerate(hexes):
+        for n in hx:
+            attached[n].append(c)
+    faces_of = [frozenset(hx[list(f)]) for hx in hexes for f in _FACES]
+    extra_xyz = []
+    hexes = hexes.copy()
+    for n in range(len(xyz)):
+        cells = attached[n]
+        if len(cells) < 2:
+            continue
+        # the faces at this node, each shared by two cells or one
+        by_face: dict[frozenset, list[int]] = {}
+        for c in cells:
+            for k in range(6):
+                face = faces_of[6 * c + k]
+                if n in face:
+                    by_face.setdefault(face, []).append(c)
+        parent = {c: c for c in cells}
+        for sharing in by_face.values():
+            for c in sharing[1:]:
+                parent[_root(parent, c)] = _root(parent, sharing[0])
+        groups: dict[int, list[int]] = {}
+        for c in cells:
+            groups.setdefault(_root(parent, c), []).append(c)
+        if len(groups) < 2:
+            continue
+        for members in list(groups.values())[1:]:
+            new = len(xyz) + len(extra_xyz)
+            extra_xyz.append(xyz[n])
+            for c in members:
+                hexes[c][hexes[c] == n] = new
+    if extra_xyz:
+        xyz = np.vstack([xyz, np.array(extra_xyz)])
+    return xyz, hexes
+
+
+def _root(parent, c):
+    """The group `c` belongs to, the groups kept as a forest."""
+    while parent[c] != c:
+        parent[c] = parent[parent[c]]
+        c = parent[c]
+    return c
 
 
 def _boundary(hexes):
@@ -252,21 +349,39 @@ def _outward(xyz, hexes, faces, face_hex):
     return normal * np.sign(np.einsum('ij,ij->i', normal, away))[:, None]
 
 
-def _pillow(xyz, hexes, groups, size):
+def _pillow(xyz, hexes, groups, size, fd=None):
     """A layer of bricks under the skin: each surface node gets a twin
-    `PILLOW_DEPTH` sizes in along the mean of its faces' inward
-    normals, the bricks that used it use the twin, and a new brick
+    `PILLOW_DEPTH` sizes in, toward the middle of the bricks it is a
+    corner of, the bricks that used it use the twin, and a new brick
     joins each boundary face to its twins. Every brick is then
-    numbered right-handed."""
+    numbered right-handed. With `fd`, the solid's signed distance, a
+    twin stops short where the material is thin: at a feather edge,
+    where two surfaces meet at a shallow angle, twins the full depth
+    from both sides crossed."""
     faces, face_hex = _boundary(hexes)
     surface = np.unique(faces)
-    normal = _outward(xyz, hexes, faces, face_hex)
-    mean = np.zeros_like(xyz)
-    for m in range(4):
-        np.add.at(mean, faces[:, m], normal)
-    mean = mean[surface] / (np.linalg.norm(mean[surface], axis=1)[:, None] + 1e-30)
+    # the way in: toward the mean of the attached bricks' centers. On a
+    # flat face that is straight in, at an edge the bisector, and at a
+    # stair-step node whose faces look both up and down it still points
+    # into the material, where the mean of the faces' normals (used
+    # first) pointed along the step and laid the twin in the face's own
+    # plane: 360 flat pillow bricks on the V-block (2026-10-19)
+    centers = xyz[hexes].mean(axis=1)
+    toward = np.zeros_like(xyz)
+    for m in range(8):
+        np.add.at(toward, hexes[:, m], centers - xyz[hexes[:, m]])
+    inward = toward[surface] / (np.linalg.norm(toward[surface], axis=1)[:, None] + 1e-30)
+    depth = np.full(len(surface), PILLOW_DEPTH * size)
+    if fd is not None:
+        # the material's thickness along the way in, to a size: the
+        # first sample out of the solid again bounds it
+        thickness = np.full(len(surface), np.inf)
+        for share in (1.0, 0.75, 0.5, 0.25):
+            out = fd(xyz[surface] + share * size * inward) > 0.0
+            thickness[out] = share * size
+        depth = np.minimum(depth, PILLOW_SHARE * thickness)
     twin_start = len(xyz)
-    xyz = np.vstack([xyz, xyz[surface] - PILLOW_DEPTH * size * mean])
+    xyz = np.vstack([xyz, xyz[surface] + depth[:, None] * inward])
     remap = np.arange(len(xyz))
     remap[surface] = twin_start + np.arange(len(surface))
     pillow = np.concatenate([faces, remap[faces]], axis=1)
@@ -464,6 +579,35 @@ class _Mesh:
         new[folded] = xyz[folded]
         xyz[:] = new
 
+    def untangle(self) -> float:
+        """The last folded bricks, at feather edges where two surfaces
+        meet at a shallow angle and the material between is thinner
+        than a brick: their surface nodes are freed from the surface
+        for a few sweeps, so the fold opens with the node a little
+        inside the material. How far the farthest went, as a share of
+        the size; 0 when nothing was folded."""
+        xyz, kind = self.xyz, self.kind
+        was = kind.copy()
+        freed = np.zeros(len(xyz), dtype=bool)
+        for _round in range(UNTANGLE_ROUNDS):
+            worst = _scaled_jacobians(xyz, self.hexes).min(axis=1)
+            folded = np.flatnonzero(worst <= 0.0)
+            if not len(folded):
+                break
+            # the folded bricks' nodes and their neighbors' nodes: a
+            # fold held in place by its surroundings needs them to give
+            nodes = np.unique(self.hexes[folded])
+            around = np.unique(np.concatenate([self.hexes_of[n] for n in nodes]))
+            nodes = np.unique(self.hexes[around])
+            nodes = nodes[(was[nodes] == 1) | (was[nodes] == 2)]
+            freed[nodes] = True
+            kind[nodes] = 0
+            self.smooth(UNTANGLE_SWEEPS, slide=True)
+        kind[:] = was
+        if not freed.any():
+            return 0.0
+        return float(np.abs(self.fd(xyz[freed])).max() / self.size)
+
     # -- smoothing ---------------------------------------------------------
     def scores(self, points, nodes, cells):
         """Each of `nodes`' worst scaled Jacobian among its bricks,
@@ -488,7 +632,8 @@ class _Mesh:
         cells = [np.unique(np.concatenate([self.hexes_of[n] for n in group]))
                  if len(group) else np.zeros(0, dtype=int) for group in groups]
         sweep = 0
-        for sweep in range(1, sweeps + 1):
+        while sweep < sweeps:
+            sweep += 1
             want = xyz.copy()
             inside = kind == 0
             means = _means(xyz, self.pairs)
@@ -507,11 +652,14 @@ class _Mesh:
                               for share in (1.0, 0.5, 0.25)]
                 tangled = current < TANGLED
                 if tangled.any():
-                    for axis in range(3):
-                        for sign in (-1.0, 1.0):
-                            step = np.zeros_like(candidates[0])
-                            step[tangled, axis] = sign * 0.1 * self.size
-                            candidates.append(xyz[group] + step)
+                    # steps of three lengths: the last folds at a
+                    # feather edge are a few hundredths of a size deep
+                    for length in (0.3, 0.1, 0.03):
+                        for axis in range(3):
+                            for sign in (-1.0, 1.0):
+                                step = np.zeros_like(candidates[0])
+                                step[tangled, axis] = sign * length * self.size
+                                candidates.append(xyz[group] + step)
                 for moved in candidates:
                     moved = moved.copy()
                     if slide:
@@ -535,6 +683,12 @@ class _Mesh:
                 ticker.tick()
             if changed <= SETTLED * len(movable):
                 break
+            # past the sweeps asked for, go on while a brick is folded
+            # and the sweeps still help, up to twice as many
+            if sweep == sweeps and slide and sweeps < 2 * FINAL_SWEEPS:
+                worst = _scaled_jacobians(xyz, self.hexes).min(axis=1)
+                if (worst <= 0.0).any():
+                    sweeps = min(sweeps + 5, 2 * FINAL_SWEEPS)
         return sweep
 
 

@@ -7,3 +7,4 @@
 - [The system identification workflow](sysid-workflow.md)
 - [The finite element workflow: the BARC](fem-workflow.md)
 - [The solid workflow: the Frame-Wing](fem-solids.md)
+- [Three shapes that are not extrusions](mesh-shapes.md)

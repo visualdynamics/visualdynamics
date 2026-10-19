@@ -620,8 +620,14 @@ def _tetrahedra(fd, points, nfixed, size, extent):
     quality, volume = _quality(p, tets)
     flipped = volume < 0.0
     tets[flipped] = tets[flipped][:, [0, 2, 1, 3]]
-    on_surface = np.abs(fd(p)) < 1e-6 * size
-    sliver = (quality < SLIVER) & on_surface[tets].all(axis=1)
+    # a sliver hugging the surface, every corner within a fifth of a
+    # size of it, lies in the surface's skin: dropped, which leaves a
+    # dimple no deeper than the sliver was. On a convex wall (a shaft's)
+    # the cap over four surface points has its centroid inside, and
+    # such caps were a seventh of the tetrahedra under 0.3 and the
+    # worst at zero (2026-10-19)
+    hugging = np.abs(fd(p)) < 0.2 * size
+    sliver = (quality < SLIVER) & hugging[tets].all(axis=1)
     return p, tets[~sliver], quality[~sliver], int(sliver.sum())
 
 

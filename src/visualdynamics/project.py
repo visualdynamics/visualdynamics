@@ -3085,16 +3085,16 @@ class Project(dict):
 
     def mesh_solids(self, source: Any, ids: Any, size: float | None = None, *,
                     unit: str = 'm', apart: bool = False,
-                    parts_apart: bool = False, elements: str = 'bricks',
+                    parts_apart: bool = False, elements: str = 'hexes',
                     progress: Any = None) -> dict:
         """Mesh a geometry's solids into bricks or tetrahedra (Mesh
         Solids). Each part becomes an element group named for it.
 
-        With `elements` 'bricks', parts that are an extrusion along X, Y
+        With `elements` 'hexes', parts that are an extrusion along X, Y
         or Z are meshed on one grid cut at every flat face, with their
         holes rounded (`core.solids.extrusion_mesh`), and any other
         shape on a grid fitted to it (`core.hexmesh.overlay_mesh`);
-        `core.solids.brick_mesh` picks. With 'tets', the parts are
+        `core.solids.brick_mesh` picks. With 'tetras', the parts are
         meshed into ten-node tetrahedra from their recipe's signed
         distance (`core.tetmesh.tet_mesh`). Parts
         meshed together share nodes where they touch. The solids are
@@ -3123,8 +3123,9 @@ class Project(dict):
             touch each other. They are still on one grid, so their nodes
             coincide and can be merged later where bolts go. Bricks
             only.
-        elements : {'bricks', 'tets'}, default 'bricks'
-            The element type.
+        elements : {'hexes', 'tetras'}, default 'hexes'
+            The element type, as the tree names the families; 'bricks'
+            and 'tets' are taken to mean the same.
         progress : callable, optional
             Called with ``(done, total)`` as the mesh goes
             (`core.solids.extrusion_mesh`, `core.tetmesh.tet_mesh`). The
@@ -3143,13 +3144,14 @@ class Project(dict):
         """
         from .core import mesh, solids, tetmesh
 
-        if elements not in ('bricks', 'tets'):
-            raise ValueError(f"elements is 'bricks' or 'tets', not {elements!r}")
+        elements = {'bricks': 'hexes', 'tets': 'tetras'}.get(elements, elements)
+        if elements not in ('hexes', 'tetras'):
+            raise ValueError(f"elements is 'hexes' or 'tetras', not {elements!r}")
         _name, geometry = self._solid_geometry(source)
         ids = [int(i) for i in ids]
         held = (solids.mesh_size(geometry, ids) if size is None
                 else float(size) * self._solid_scale(geometry, unit))
-        if elements == 'tets':
+        if elements == 'tetras':
             part, made = tetmesh.tet_mesh(geometry, ids, held, progress=progress)
         else:
             part, made = solids.brick_mesh(geometry, ids, held, parts_apart,

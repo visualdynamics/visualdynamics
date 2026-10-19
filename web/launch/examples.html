@@ -176,6 +176,30 @@
     <a href="downloads.html#examples">the projects themselves</a>,
     solved, can be downloaded and opened in the app.
   </p>
+  <h2>Three shapes that are not extrusions</h2>
+  <p>
+    Mesh Solids meshes an extrusion into bricks with rings about its
+    holes, and that is the mesh to prefer where the part allows it.
+    Three shapes that do not allow it, a shaft with an oil hole drilled
+    through at 30 degrees, a wye fitting and a V-block with two banks of
+    angled bores, are built from the recipe alone by
+    <code>visualdynamics.demo.shapes</code> and meshed both ways, into
+    bricks on a grid fitted to the shape and into ten-node tetrahedra,
+    with the element quality and the volume against the recipe's
+    recorded for each.
+  </p>
+  <div class="figure">
+    <img src="documentation/guide/images/shapes-v-block-tets.png"
+         alt="The V-block meshed into tetrahedra: a block with a crank bore and two banks of angled bores, drawn as its outer surface"
+         loading="lazy">
+  </div>
+  <p class="caption">
+    The V-block in 87,798 ten-node tetrahedra at 0.2 in, within 0.02
+    percent of the recipe's volume.
+    <a href="documentation/guide/workflows/mesh-shapes/">The page on the
+    three shapes</a> has the pictures and the table of numbers for both
+    meshers, as they stand today; it is updated as the meshers change.
+  </p>
   <h2>About these figures</h2>
   <p>
     The figures are drawn by the report renderer, not by code written

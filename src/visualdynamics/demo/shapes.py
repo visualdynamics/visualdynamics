@@ -10,7 +10,7 @@ cylinders and their booleans, in inches:
     from visualdynamics.demo import shapes
 
     project = shapes.v_block()
-    found = shapes.mesh(project, 'bricks')       # or 'tets'
+    found = shapes.mesh(project, 'hexes')        # or 'tetras'
     print(found['count'], found['quality'], found['volume_error'])
 
 `report` meshes a shape both ways at its size and gives the numbers
@@ -127,8 +127,8 @@ def mesh_volume(geometry: Any) -> float:
 
 
 def mesh(project: Project, elements: str, size: float | None = None) -> dict:
-    """Mesh the project's one geometry's parts into `elements`, 'bricks'
-    or 'tets', at `size` in inches (the shape's `SIZES` entry by
+    """Mesh the project's one geometry's parts into `elements`, 'hexes'
+    or 'tetras', at `size` in inches (the shape's `SIZES` entry by
     default), and measure the result.
 
     Returns
@@ -160,14 +160,14 @@ def mesh(project: Project, elements: str, size: float | None = None) -> dict:
     seconds = time.perf_counter() - started
     recipe = recipe_volume(geometry, ids) / INCH ** 3
     volume = mesh_volume(geometry) / INCH ** 3
-    quality = found['quality'] if elements == 'tets' or found.get('method') == 'overlay' \
+    quality = found['quality'] if elements == 'tetras' or found.get('method') == 'overlay' \
         else _brick_quality(geometry)
     poor = found['poor'] if 'poor' in found else int((_brick_qualities(geometry) < 0.3).sum())
-    return {'count': found['tets'] if elements == 'tets' else found['bricks'],
+    return {'count': found['tets'] if elements == 'tetras' else found['bricks'],
             'quality': float(quality), 'poor': int(poor), 'volume': volume,
             'recipe_volume': recipe, 'volume_error': (volume - recipe) / recipe,
             'seconds': seconds,
-            'method': 'tets' if elements == 'tets' else found.get('method', 'extrusion')}
+            'method': 'tetras' if elements == 'tetras' else found.get('method', 'extrusion')}
 
 
 def _brick_qualities(geometry: Any) -> np.ndarray:
@@ -183,10 +183,10 @@ def _brick_quality(geometry: Any) -> float:
 
 def report(name: str, size: float | None = None) -> dict:
     """Both meshes of the shape `name` ('shaft', 'wye' or 'v_block') at
-    `size` in inches (its `SIZES` entry by default): {'bricks': ...,
-    'tets': ...}, each as `mesh` gives it, each on a fresh build."""
+    `size` in inches (its `SIZES` entry by default): {'hexes': ...,
+    'tetras': ...}, each as `mesh` gives it, each on a fresh build."""
     found = {}
-    for elements in ('bricks', 'tets'):
+    for elements in ('hexes', 'tetras'):
         project = SHAPES[name]()
         found[elements] = mesh(project, elements, size if size is not None else SIZES[name])
     return found

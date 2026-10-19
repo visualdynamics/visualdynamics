@@ -65,8 +65,10 @@ SETTLED = 0.01
 #: and in any case after this many steps
 MOST_STEPS = 200
 #: a tetrahedron on the surface with a radius ratio below this is a
-#: sliver, and is removed
+#: sliver, and is removed; on the surface means every corner within
+#: this share of the size of it
 SLIVER = 0.1
+HUGGING = 0.2
 #: rounds of moving a sliver's corners and triangulating again
 SLIVER_ROUNDS = 10
 #: tetrahedra per unit of volume over the cube of the size, the
@@ -511,7 +513,13 @@ def _relax(fd, points, nfixed, size, extent, ticker):
             _tets, bars = _bars(fd, p, size)
         vector = p[bars[:, 0]] - p[bars[:, 1]]
         length = np.linalg.norm(vector, axis=1)
-        aimed = SCALE * float(np.mean(length ** 3)) ** (1.0 / 3.0)
+        # the length aimed at: the median edge, scaled up. Persson and
+        # Strang use the cubic mean, which a long solid's Delaunay
+        # inflates: a shaft's triangulation holds edges from one end
+        # cap to the other whose tetrahedra have their centroids
+        # inside, and the cubic mean came to 4.7 sizes, so every edge
+        # pushed and the points never settled (2026-10-19)
+        aimed = SCALE * float(np.median(length))
         push = np.maximum(aimed - length, 0.0) / np.maximum(length, 1e-30)
         force = np.zeros_like(p)
         np.add.at(force, bars[:, 0], push[:, None] * vector)
@@ -626,7 +634,7 @@ def _tetrahedra(fd, points, nfixed, size, extent):
     # the cap over four surface points has its centroid inside, and
     # such caps were a seventh of the tetrahedra under 0.3 and the
     # worst at zero (2026-10-19)
-    hugging = np.abs(fd(p)) < 0.2 * size
+    hugging = np.abs(fd(p)) < HUGGING * size
     sliver = (quality < SLIVER) & hugging[tets].all(axis=1)
     return p, tets[~sliver], quality[~sliver], int(sliver.sum())
 

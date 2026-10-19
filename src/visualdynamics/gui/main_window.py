@@ -173,7 +173,7 @@ from ..viz.geometry import (
     display_points,
     labels_fit,
 )
-from .editors import DoubleSpinBox, SpinBox, commit_on_enter
+from .editors import DoubleSpinBox, SpinBox, commit_on_enter, commit_typed
 from .icons import (
     child_icon,
     control_icon,
@@ -1000,6 +1000,7 @@ class MainWindow(QMainWindow):
         self._mesh_settle.setSingleShot(True)
         self._mesh_settle.timeout.connect(self._mesh_solids_refresh)
         self.scene.mesh_solids_panel.mesh_asked.connect(self._mesh_solids_apply)
+        self.scene.mesh_solids_panel.detect_asked.connect(self._mesh_solids_detect)
         self.scene.mesh_solids_panel.close_asked.connect(
             self.close_mesh_solids_pane)
         self._patterning: dict | None = None
@@ -2946,7 +2947,10 @@ class MainWindow(QMainWindow):
             self.close_merge_pane(redraw=False)
         defined = geometry.units_defined
         unit = self.unit_system.label_text('length') if defined else 'units'
-        size = solids.mesh_size(geometry, ids)
+        # the size a mesh is likely to hold at, the one Detect Element
+        # Size gives (Brandon, 2026-10-19: the pane opened at 0.95 in on
+        # a block with 1 in holes, a wall misread)
+        size = self._mesh_size_likely(geometry, ids, 'hexes')
         shown = (float(self.unit_system.from_si(size, 'length')) if defined
                  else size)
         names = [(s.name.strip() or f'{SOLID_LABELS[s.kind]} {s.id}')
@@ -2983,7 +2987,7 @@ class MainWindow(QMainWindow):
             return
         panel = self.scene.mesh_solids_panel
         geometry = self.objects.get(meshing['name'])
-        tets = panel.element_kind == 'tets'
+        tets = panel.element_kind == 'tetras'
         try:
             if tets:
                 expected = tetmesh.tet_count(geometry, meshing['ids'],
@@ -3057,6 +3061,90 @@ class MainWindow(QMainWindow):
             f'along {"XYZ"[made["axis"]]}.{rounded} The shortest edge is '
             f'{shortest:.4g} {meshing["unit"]}.{replacing}', True)
 
+    def _mesh_solids_detect(self) -> None:
+        """Detect Element Size: the size the mesh is likely to hold at
+        (`hexmesh.suggested_size`, or `solids.mesh_size` for an
+        extrusion into bricks), written into the box."""
+        meshing = self.__dict__.get('_meshing')
+        if meshing is None:
+            return
+        panel = self.scene.mesh_solids_panel
+        geometry = self.objects[meshing['name']]
+        size = self._mesh_size_likely(geometry, meshing['ids'], panel.element_kind)
+        shown = (float(self.unit_system.from_si(size, 'length')) if meshing['defined']
+                 else size)
+        panel.size.setValue(shown)
+        self._mesh_solids_refresh()
+
+    @staticmethod
+    def _mesh_size_likely(geometry, ids, elements: str) -> float:
+        """The size a mesh of the parts is likely to hold at: an
+        extrusion's half-the-thinnest-feature for bricks, and otherwise
+        `hexmesh.suggested_size` for the element type."""
+        from ..core import hexmesh, solids
+
+        if elements == 'hexes':
+            try:
+                solids.extrusion_axis(geometry, ids)
+                return solids.mesh_size(geometry, ids)
+            except solids.NotAnExtrusion:
+                pass
+        return hexmesh.suggested_size(geometry, ids, elements)
+
+    def _mesh_fit_check(self) -> bool:
+        """Before a fit is paid for: whether to go on at the typed size.
+        A fit likely to fold (`hexmesh.likely_to_fold`) is put to the
+        user with the size suggested instead; the suggested size, when
+        taken, goes into the box."""
+        from ..core import hexmesh, solids
+
+        meshing = self._meshing
+        panel = self.scene.mesh_solids_panel
+        geometry = self.objects[meshing['name']]
+        if panel.element_kind != 'hexes':
+            return True
+        try:
+            solids.extrusion_axis(geometry, meshing['ids'])
+            return True
+        except solids.NotAnExtrusion:
+            pass
+        read = hexmesh.likely_to_fold(geometry, meshing['ids'], self._mesh_solids_size())
+        if not read['likely']:
+            return True
+        suggested = (float(self.unit_system.from_si(read['suggested'], 'length'))
+                     if meshing['defined'] else read['suggested'])
+        typed = panel.size.value()
+        why = []
+        if np.isfinite(read['across']):
+            why.append(f'the smallest round feature is {read["across"]:.1f} bricks across '
+                       f'its radius, and fits have held at {hexmesh.ACROSS:g} or more')
+        if read['flat']:
+            why.append(f'{read["flat"]:,} bricks are flat before any fitting')
+        text = (f'At {typed:g} {meshing["unit"]} the fit is likely to fold: '
+                f'{"; ".join(why)}. {suggested:.3g} {meshing["unit"]} is likely to hold.')
+        answer = self._ask_mesh_anyway(text, f'Mesh at {suggested:.3g} {meshing["unit"]}',
+                                       f'Mesh at {typed:g} {meshing["unit"]} anyway')
+        if answer == 'suggested':
+            panel.size.setValue(suggested)
+            return True
+        return answer == 'anyway'
+
+    def _ask_mesh_anyway(self, text: str, suggested: str, anyway: str) -> str:
+        """The question before a fit likely to fold: 'suggested',
+        'anyway' or 'cancel'. A test replaces this."""
+        from PySide6.QtWidgets import QMessageBox
+
+        box = QMessageBox(self)
+        box.setWindowTitle('Mesh Solids')
+        box.setText(text)
+        take = box.addButton(suggested, QMessageBox.ButtonRole.AcceptRole)
+        go = box.addButton(anyway, QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(take)
+        box.exec()
+        clicked = box.clickedButton()
+        return 'suggested' if clicked is take else 'anyway' if clicked is go else 'cancel'
+
     def _mesh_solids_apply(self) -> None:
         """Mesh: the project's `mesh_solids` at the typed size, and the pane
         put away — the new element groups are in the tree under their
@@ -3065,10 +3153,15 @@ class MainWindow(QMainWindow):
         if meshing is None:
             return
         panel = self.scene.mesh_solids_panel
+        # the size as typed, finished or not (Brandon, 2026-10-19: 0.1
+        # typed and Mesh pressed meshed at 0.25)
+        commit_typed(panel)
+        if not self._mesh_fit_check():
+            return
         name = meshing['name']
         unit = (self.unit_system.unit('length') if meshing['defined'] else 'm')
         self._mesh_settle.stop()
-        tets = panel.element_kind == 'tets'
+        tets = panel.element_kind == 'tetras'
         try:
             # on the worker with the bar up: a fine mesh of a large part
             # is seconds of ownership, rounding and joining, and a
@@ -3080,7 +3173,7 @@ class MainWindow(QMainWindow):
                 **({'apart': True} if panel.apart.isChecked() else {}),
                 **({'parts_apart': True}
                    if panel.parts_apart.isChecked() and not tets else {}),
-                **({'elements': 'tets'} if tets else {}))
+                **({'elements': 'tetras'} if tets else {}))
         except ValueError as refusal:
             self._show_status(f'{name}: {refusal}')
             return
@@ -3201,6 +3294,7 @@ class MainWindow(QMainWindow):
                                    'or a spacing to apply.'), changed)
 
     def _pattern_apply(self) -> None:
+        commit_typed(self.scene.pattern_panel)
         """Pattern: the project's `pattern_solids`, the pane put away, and
         the pattern picked, to combine next. Opened on a pattern, its
         `edit_solid` with what changed."""
@@ -13497,6 +13591,7 @@ class MainWindow(QMainWindow):
             self._merge_refresh()
 
     def _merge_apply(self) -> None:
+        commit_typed(self.scene.merge_panel)
         """Merge the marked places: the project's verb, the ones left out
         as its `exclude`. The pane stays open on the same groups (Brandon,
         2026-10-11: closing it, and the tree's selection with it, left

@@ -1410,12 +1410,13 @@ def extrusion_axis(geometry: Any, ids) -> int:
 
 
 def mesh_size(geometry: Any, ids) -> float:
-    """The element size Mesh Solids opens with: half the thinnest
-    feature, so every feature is two bricks across.
+    """The element size an extrusion is meshed at by default: half the
+    thinnest feature, so every feature is two bricks across.
 
     The thinnest feature is the shortest span between two flat faces (a
-    cylinder's end counts as one), or the narrowest cylinder or rounded
-    corner across. With nothing to measure, the size is 1.0.
+    cylinder's end along an axis counts as one), or the narrowest
+    cylinder or rounded corner across (`smallest_feature`). With
+    nothing to measure, the size is 1.0.
 
     Parameters
     ----------
@@ -1428,13 +1429,57 @@ def mesh_size(geometry: Any, ids) -> float:
     -------
     float
     """
-    cuts = _cuts(geometry, ids)
-    spans = [float(b - a) for axis in cuts for a, b in pairwise(axis)]
-    spans += [2 * (leaf.radius if leaf.kind == 'cylinder' else leaf.corner)
-              for i in ids for leaf in _leaves(geometry, i)
-              if leaf.kind == 'cylinder' or leaf.corner > 0.0]
-    spans = [s for s in spans if s > 0]
-    return 0.5 * min(spans) if spans else 1.0
+    radius, wall = smallest_feature(geometry, ids)
+    thinnest = min(2.0 * radius, wall)
+    return 0.5 * thinnest if np.isfinite(thinnest) else 1.0
+
+
+def smallest_feature(geometry: Any, ids) -> tuple[float, float]:
+    """(the smallest radius, the thinnest wall) of the parts, in the
+    geometry's length unit: the narrowest cylinder or rounded corner,
+    and the shortest span between two flat faces. Infinite where there
+    is none.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+
+    Returns
+    -------
+    (float, float)
+    """
+    ids = [int(i) for i in ids]
+    leaves = [leaf for i in ids for leaf in _leaves(geometry, i)]
+    radii = [leaf.radius if leaf.kind == 'cylinder' else leaf.corner
+             for leaf in leaves if leaf.kind == 'cylinder' or leaf.corner > 0.0]
+    # the flat faces: every block's, and the caps of a cylinder along
+    # an axis; a turned cylinder's caps are not walls (the grid's cuts
+    # read them along the nearest axis, a line the grid needs and not a
+    # wall, and Mesh Solids opened at 0.95 in on a block 3 in thick
+    # with 1 in holes for it: Brandon, 2026-10-19)
+    planes: list[set] = [set(), set(), set()]
+    for leaf in leaves:
+        center = np.asarray(leaf.center, dtype=float)
+        frame = _frame(leaf)
+        if leaf.kind == 'block':
+            half = np.abs(frame.T) @ (np.asarray(leaf.widths, dtype=float) / 2.0)
+            for k in range(3):
+                planes[k].update((center[k] - half[k], center[k] + half[k]))
+        elif np.isclose(np.abs(frame[2]).max(), 1.0):
+            k = int(np.argmax(np.abs(frame[2])))
+            planes[k].update((center[k] - leaf.length / 2.0, center[k] + leaf.length / 2.0))
+    boxes = [_box(geometry, i) for i in ids]
+    low = np.min([lo for lo, _hi in boxes], axis=0)
+    high = np.max([hi for _lo, hi in boxes], axis=0)
+    spans = [b - a for k in range(3)
+             for a, b in pairwise(sorted(x for x in planes[k] if low[k] - 1e-9 <= x <= high[k] + 1e-9))
+             if b - a > 1e-9 * (high[k] - low[k])]
+    return (float(min(radii)) if radii else np.inf, float(min(spans)) if spans else np.inf)
+
+
 
 
 def _cuts(geometry: Any, ids) -> list[np.ndarray]:

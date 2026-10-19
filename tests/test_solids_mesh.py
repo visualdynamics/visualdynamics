@@ -965,3 +965,19 @@ def test_the_mesher_tells_its_progress():
     project.mesh_solids(name, ids, 0.1, unit='in',
                         progress=lambda d, t: heard.append((d, t)))
     assert heard[-1][0] == heard[-1][1]
+
+
+def test_mesh_takes_the_size_as_typed_before_the_edit_is_finished(window, pump):
+    """0.1 typed into the size box and Mesh pressed meshed at 0.25
+    (Brandon, 2026-10-19): the box reports only finished edits, and a
+    button takes no focus on macOS, so the click finished nothing.
+    The apply reads the text as typed."""
+    pytest.importorskip('OCP')
+    panel = _holed_part(window, pump)
+    assert panel.size.value() == pytest.approx(0.25)
+    panel.size.lineEdit().setText('0.4')        # typed, not finished
+    assert panel.size.value() == pytest.approx(0.25), 'the box still reports the old size'
+    panel.mesh_button.click()
+    pump()
+    assert window.project.journal[-1].startswith("project.mesh_solids('Part', [")
+    assert ', 0.4, unit=' in window.project.journal[-1]

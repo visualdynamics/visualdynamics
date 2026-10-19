@@ -214,16 +214,18 @@ def test_the_relaxation_tells_its_progress():
 def test_the_project_meshes_tets_on_request_and_journals_it():
     project, name, geometry = _project()
     block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), name='bar', unit='in')
-    found = project.mesh_solids(name, [block], 0.4, unit='in', elements='tets')
+    found = project.mesh_solids(name, [block], 0.4, unit='in', elements='tetras')
     assert found['tets'] == len(geometry.elem_conn) and set(geometry.elem_type) == {118}
     assert project.journal[-1] == (
-        f"project.mesh_solids({name!r}, [{block}], 0.4, unit='in', elements='tets')")
+        f"project.mesh_solids({name!r}, [{block}], 0.4, unit='in', elements='tetras')")
     # meshed again, into bricks: the tets are replaced
     again = project.mesh_solids(name, [block], 0.5, unit='in')
     assert again['replaced'] == found['tets']
     assert set(geometry.elem_type) == {115}
-    with pytest.raises(ValueError, match="'bricks' or 'tets'"):
-        project.mesh_solids(name, [block], 0.5, unit='in', elements='hexes')
+    # the old words are taken to mean the same
+    assert project.mesh_solids(name, [block], 0.5, unit='in', elements='tets')['tets'] > 0
+    with pytest.raises(ValueError, match="'hexes' or 'tetras'"):
+        project.mesh_solids(name, [block], 0.5, unit='in', elements='wedges')
 
 
 def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
@@ -247,7 +249,8 @@ def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
     _acts(window)['mesh_solids'][3]()
     pump()
     panel = window.scene.mesh_solids_panel
-    assert panel.element_kind == 'bricks'
+    assert panel.element_kind == 'hexes'
+    assert [panel.elements.itemText(k) for k in range(2)] == ['Hexes', 'Tetras']
     # not an extrusion: bricks are fitted to the shape (test_hexmesh.py),
     # here past the fitted preview's budget, so the count alone is said
     panel.size.setValue(0.125)
@@ -267,7 +270,7 @@ def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
     assert set(geometry.elem_type) == {118} and list(geometry.group_name) == ['slab']
     assert window.statusBar().currentMessage().startswith(
         f'{name}: meshed into {len(geometry.elem_conn):,} tetrahedra')
-    assert project.journal[-1].endswith("elements='tets')")
+    assert project.journal[-1].endswith("elements='tetras')")
 
 
 def test_the_panes_tet_preview_stops_at_its_budget(window, pump, monkeypatch):
@@ -336,14 +339,14 @@ def test_a_tet10_bar_vibrates_like_the_brick_bar():
     project, name, geometry = _project()
     bar = project.add_solid_block(name, (1, 0, 0), (2, 0.5, 0.5), name='bar', unit='in')
     found = {}
-    for elements in ('bricks', 'tets'):
+    for elements in ('hexes', 'tetras'):
         project.mesh_solids(name, [bar], 0.25, unit='in', elements=elements)
         fixed = [str(n) for n, xyz in zip(geometry.node_id, geometry.node_xyz)
                  if abs(xyz[0]) < 1e-9]
         geometry.group_properties = {int(geometry.group_id[0]): fem.GroupProperties(ALUMINUM)}
         shapes = fem.Model.from_geometry(geometry).eigensolution(num_modes=4, fixed=fixed)
         found[elements] = shapes.frequency
-    assert found['tets'][:2] == pytest.approx(found['bricks'][:2], rel=0.03)
+    assert found['tetras'][:2] == pytest.approx(found['hexes'][:2], rel=0.03)
 
 
 def test_a_midside_that_dips_into_a_hole_is_put_on_the_wall():
@@ -373,3 +376,16 @@ def test_a_midside_that_dips_into_a_hole_is_put_on_the_wall():
     moved = xyz[conn[0, 4]] / INCH
     assert np.hypot(*moved[:2]) == pytest.approx(1.0, abs=1e-6)
     assert np.linalg.norm(moved - middle) < 0.4 / 3.0
+
+
+def test_a_long_solid_settles_because_the_aim_is_the_median_edge():
+    """A 6 in shaft's Delaunay holds edges from one end cap to the other
+    whose tetrahedra sit inside; the cubic mean of the edge lengths
+    came to 4.7 sizes, every edge pushed, and the points never settled
+    (300 steps, worst 0.02, a fourteenth under 0.3). Aimed at the median
+    edge the shaft settles early with no element under a tenth."""
+    project, name, geometry = _project()
+    shaft = project.add_solid_cylinder(name, (0, 0, 0), 1.0, 6.0, angles=(0, 90, 0), unit='in')
+    _part, made = tetmesh.tet_mesh(geometry, [shaft], 0.3 * INCH, quadratic=False)
+    assert made['steps'] < tetmesh.MOST_STEPS // 2, made
+    assert made['quality'] > 0.09 and made['poor'] < 0.02 * made['tets'], made

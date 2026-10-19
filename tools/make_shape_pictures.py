@@ -33,7 +33,7 @@ OUT = ROOT / 'docs' / 'guide' / 'images'
 def main(keys: list[str]) -> None:
     rows = []
     for key in keys:
-        for elements in ('bricks', 'tets'):
+        for elements in ('hexes', 'tetras'):
             project = shapes.SHAPES[key]()
             got = shapes.mesh(project, elements)
             rows.append((shapes.TITLES[key], shapes.SIZES[key], elements, got))

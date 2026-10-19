@@ -8,8 +8,9 @@ to show what the two meshers for such shapes do today, bricks on a
 grid fitted to the shape and ten-node tetrahedra, with the numbers
 beside the pictures. The meshers will improve; the numbers are the
 record of where they stand, and at the sizes below that record is
-that the tetrahedra mesh all three and the fitted bricks fold a few
-elements on each and are refused with the reason.
+that the tetrahedra mesh all three well, the fitted bricks mesh the
+shaft, and on the wye and the V-block they fold a few elements and
+are refused with the reason.
 
 Each shape is built from the recipe alone, blocks and cylinders and
 their booleans, by `visualdynamics.demo.shapes`:
@@ -18,7 +19,7 @@ their booleans, by `visualdynamics.demo.shapes`:
 from visualdynamics.demo import shapes
 
 project = shapes.v_block()
-found = shapes.mesh(project, 'bricks')      # or 'tets'
+found = shapes.mesh(project, 'hexes')       # or 'tetras'
 print(found['count'], found['quality'], found['volume_error'])
 ```
 
@@ -47,7 +48,9 @@ A 2 in shaft, 6 in long, with a 0.6 in oil hole drilled through its
 middle at 30 degrees to its axis, the way an oil passage crosses a
 crankshaft. Three elements across the hole's radius at 0.1 in.
 
-![The shaft meshed into tetrahedra](../images/shapes-shaft-tets.png)
+![The shaft meshed into bricks fitted to it](../images/shapes-shaft-hexes.png)
+
+![The shaft meshed into tetrahedra](../images/shapes-shaft-tetras.png)
 
 ## The wye fitting
 
@@ -56,7 +59,7 @@ both bored, the walls 0.3 in: three elements through the wall at
 0.1 in. The saddle where the branch's bore breaks into the run's is
 the junction every pipe fitting has and no sweep can follow.
 
-![The wye meshed into tetrahedra](../images/shapes-wye-tets.png)
+![The wye meshed into tetrahedra](../images/shapes-wye-tetras.png)
 
 ## The V-block
 
@@ -66,31 +69,33 @@ running from the crank bore out through the top face: a V-engine's
 block with everything but the bores left out. Two and a half elements
 across a bore's radius at 0.2 in.
 
-![The V-block meshed into tetrahedra](../images/shapes-v-block-tets.png)
+![The V-block meshed into tetrahedra](../images/shapes-v-block-tetras.png)
 
 ## The numbers
 
 | Shape | Size (in) | Elements | Count | Worst | Under 0.3 | Volume (in³) | Recipe (in³) | Error | Seconds |
 |---|---|---|---|---|---|---|---|---|---|
-| Cross-drilled shaft | 0.1 | bricks | refused: 3 bricks folded | | | | 17.75 | | 155 |
-| Cross-drilled shaft | 0.1 | tets | 196,498 | 0.02 | 13,938 | 17.73 | 17.75 | -0.09 % | 156 |
-| Wye fitting | 0.1 | bricks | refused: 7 bricks folded | | | | 11.82 | | 246 |
-| Wye fitting | 0.1 | tets | 98,989 | 0.02 | 9,169 | 11.80 | 11.82 | -0.14 % | 113 |
-| V-block | 0.2 | bricks | refused: 8 bricks folded | | | | 71.74 | | 208 |
-| V-block | 0.2 | tets | 87,798 | 0.10 | 265 | 71.73 | 71.74 | -0.02 % | 12 |
+| Cross-drilled shaft | 0.1 | hexes | 24,132 | 0.15 | 169 | 17.70 | 17.75 | -0.25 % | 83 |
+| Cross-drilled shaft | 0.1 | tetras | 193,625 | 0.10 | 1,193 | 17.73 | 17.75 | -0.11 % | 16 |
+| Wye fitting | 0.1 | hexes | refused: 5 bricks folded | | | | 11.82 | | 190 |
+| Wye fitting | 0.1 | tetras | 112,203 | 0.10 | 589 | 11.80 | 11.82 | -0.15 % | 20 |
+| V-block | 0.2 | hexes | refused: 6 bricks folded | | | | 71.74 | | 167 |
+| V-block | 0.2 | tetras | 88,102 | 0.10 | 267 | 71.72 | 71.74 | -0.03 % | 13 |
 
 ## What the numbers say
 
-The fitted bricks are refused on all three at these sizes, each for a
-handful of folded bricks out of ten to thirty thousand: pillow bricks
-on the oil hole's wall and at the feather edges where a bore leaves a
-surface at a shallow angle, where the material is thinner than a
-brick. The fitting handles the block with a peanut cut and two side
-holes shown under *Mesh Solids*, and the same block at 0.2 in; it
-does not yet handle these. The tetrahedra mesh all three; on the two
-round shapes their worst elements are flat ones on the convex walls,
-which the sliver pass removes where it finds them. A feature under
-about three elements across cannot be fitted by either mesher and is
+The fitted bricks mesh the shaft, and are refused on the wye and the
+V-block at these sizes, each for a handful of folded bricks out of ten
+to thirty thousand: pillow bricks at the feather edges where a bore
+leaves a surface at a shallow angle, where the material is thinner
+than a brick. Both are under five bricks across their smallest
+radius, the line every fit measured so far has held at (the wye's
+branch bore is four and a half across at 0.1 in, the V-block's bores
+two and a half at 0.2 in), and *Detect Element Size* gives 0.067 in
+and 0.1 in for them. The block with a peanut cut and two side holes
+shown under *Mesh Solids* fits at 0.25 in and under. The tetrahedra mesh all three in seconds with no element under
+a tenth and under a percent of them under 0.3. A feature under about
+three elements across cannot be fitted by either mesher and is
 refused with the reason. Pictures and numbers are regenerated by
 `tools/make_shape_pictures.py` whenever either mesher changes, and
 this page is updated with them.

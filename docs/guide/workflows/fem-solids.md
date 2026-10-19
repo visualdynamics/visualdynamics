@@ -125,7 +125,7 @@ the inserts](../images/fem-solids-frame.png)
 ## 2. Mesh
 
 Pick *frame* and *inserts* in the tree and press *Mesh Solids*. Leave
-*Elements* on *Bricks*: the frame is an extrusion along Z, which is
+*Elements* on *Hexes*: the frame is an extrusion along Z, which is
 what bricks mesh best. Type 0.083334 for the element size (a twelfth
 of an inch, which is six bricks across a member and three across a
 hole) and press **Mesh**. The twelfth

@@ -331,7 +331,7 @@ shapes themselves, their volumes and their surfaces are in
 *Mesh Solids*, on the bar when parts are picked, meshes them into
 eight-node bricks or ten-node tetrahedra, each part an element group
 named for it. The element type is yours to choose in the pane:
-*Bricks* for the parts that are an extrusion, *Tets* for any shape.
+*Hexes* for the parts that are an extrusion, *Tetras* for any shape.
 
 Bricks mesh an extrusion best: every block square to the geometry's
 axes, and every cylinder and rounded corner along one axis. That
@@ -352,10 +352,18 @@ sharp edges captured, and every node is then moved to where the worst
 brick around it is best. The pane says so (*on a grid fitted to the
 shape*) and reads the worst scaled Jacobian (1 for a cube, 0 for a
 flat brick), which comes out between about 0.15 and 0.3 where a ring
-mesh gives 0.5 or better. The fitting takes seconds, so the preview
-draws it only for a small grid. A feature only a brick or two across
-leaves no room to fit, and the pane says how many bricks folded and to
-use a smaller size or *Tets*.
+mesh gives 0.5 or better. The fitting takes seconds to minutes, so the
+preview draws it only for a small grid. A feature only a few bricks
+across leaves no room to fit: on every shape measured so far a fit
+has held with five or more bricks across the smallest round feature's
+radius and folded with four or fewer. *Detect Element Size* writes
+that size into the box (the smallest radius over five, or the
+thinnest wall over three; for an extrusion, half the thinnest
+feature; for tetrahedra, the radius over three), and *Mesh* on a size
+under four and a half across asks first, with the size likely to hold
+as the default, before the minutes are spent. A fit that folds anyway
+is refused with the count, and the pane says to use a smaller size or
+*Tetras*.
 
 Holes, bosses and inserts are meshed round. About each circle with
 room around it the grid is replaced by a ring mesh, with the circle's

@@ -20,12 +20,9 @@ means.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
-from PySide6.QtWidgets import QDoubleSpinBox, QSpinBox
-
-if TYPE_CHECKING:                                    # pragma: no cover
-    from PySide6.QtWidgets import QAbstractSpinBox
+from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox, QSpinBox
 
 # Brandon, 2026-08-27: the overlap field took the selection away after
 # the first digit and 50 % could not be typed; the same on frame length.
@@ -47,6 +44,21 @@ def commit_on_enter(*boxes: QAbstractSpinBox) -> None:
     """
     for box in boxes:
         box.setKeyboardTracking(False)
+
+
+def commit_typed(widget: Any) -> None:
+    """Make every spin box under `widget` take the number typed into
+    it, as a finished edit would.
+
+    A box that reports only finished edits (`commit_on_enter`) keeps
+    its old value while the typed text stands uncommitted, and a click
+    on a button does not finish the edit on macOS, where a button
+    takes no focus: a size typed into Mesh Solids' box and Mesh
+    pressed meshed at the size before it. An apply handler calls this
+    before it reads the boxes.
+    """
+    for box in widget.findChildren(QAbstractSpinBox):
+        box.interpretText()
 
 
 class _Clamping:

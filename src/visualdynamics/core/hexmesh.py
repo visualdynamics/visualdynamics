@@ -41,6 +41,7 @@ from .solids import (
     MESH_LIMIT,
     _cuts,
     _owners,
+    smallest_feature,
     solid,
     used_by,
 )
@@ -48,10 +49,8 @@ from .tetmesh import _distance, _extent, _onto, _surfaces, sharp_edges
 
 #: passes of filling one-cell pits and emptying one-cell spikes
 CLEAN_PASSES = 4
-#: how far in a surface node's twin sits, as a share of the size, and
-#: at most this share of the material's thickness there
+#: how far in a surface node's twin sits, as a share of the size
 PILLOW_DEPTH = 0.3
-PILLOW_SHARE = 0.3
 #: how far a corner or an edge point may reach for its node, in sizes
 CAPTURE = 1.0
 #: Laplacian passes over the skin before it is projected
@@ -139,7 +138,7 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     if not len(hexes):
         raise ValueError('the parts hold nothing to mesh')
     ticker.tick()
-    xyz, hexes, groups, faces, face_hex, surface = _pillow(xyz, hexes, groups, size, fd)
+    xyz, hexes, groups, faces, face_hex, surface = _pillow(xyz, hexes, groups, size)
     ticker.tick()
     mesh = _Mesh(xyz, hexes, faces, face_hex, surface, fd, size, tol)
     uncaptured = mesh.capture(geometry, ids)
@@ -182,6 +181,79 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     return part, {'bricks': len(hexes), 'nodes': len(keep), 'quality': float(quality.min()),
                   'poor': int((quality < 0.3).sum()), 'uncaptured': uncaptured,
                   'sweeps': sweeps, 'off_surface': off, 'shortest': shortest}
+
+
+#: bricks across the smallest round feature's radius at which a fit
+#: has held, on every shape measured; four has folded
+ACROSS = 5.0
+#: bricks through the thinnest wall for a fit
+THROUGH = 3.0
+
+
+def suggested_size(geometry: Any, ids, elements: str = 'hexes') -> float:
+    """An element size at which a mesh of the parts is likely to hold:
+    for bricks fitted to a shape, the smallest radius over `ACROSS`
+    (five bricks across it, where every fit measured has held and four
+    has folded) and the thinnest wall over `THROUGH`; for tetrahedra,
+    three across the radius and two through the wall. With no round
+    feature and no wall, `solids.mesh_size`.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    elements : {'hexes', 'tetras'}, default 'hexes'
+        The element type.
+
+    Returns
+    -------
+    float
+    """
+    from .solids import mesh_size
+
+    radius, wall = smallest_feature(geometry, ids)
+    across, through = (ACROSS, THROUGH) if elements == 'hexes' else (3.0, 2.0)
+    size = min(radius / across, wall / through)
+    return float(size) if np.isfinite(size) else mesh_size(geometry, ids)
+
+
+def likely_to_fold(geometry: Any, ids, size: float) -> dict:
+    """Whether a fit at `size` is likely to fold, read before the minutes
+    are spent: how many bricks the smallest round feature's radius is
+    across, and how many pillow bricks are flat or inside out as soon
+    as the grid is pillowed, before any fitting.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose solids.
+    ids : sequence of int
+        The parts, by id.
+    size : float
+        The element size, as the geometry holds its coordinates.
+
+    Returns
+    -------
+    dict
+        'across', bricks across the smallest radius (inf with no round
+        feature); 'flat', the pillow bricks flat or inside out before
+        fitting, said for what it is; 'likely', True under four and a
+        half across; 'suggested', the size `suggested_size` gives.
+    """
+    ids = [int(i) for i in ids]
+    radius, _wall = smallest_feature(geometry, ids)
+    across = radius / float(size)
+    xyz, hexes, groups = _grid(geometry, ids, float(size))
+    flat = 0
+    if len(hexes):
+        xyz, hexes, _groups, _faces, _face_hex, _surface = _pillow(xyz, hexes, groups, float(size))
+        flat = int((_scaled_jacobians(xyz, hexes).min(axis=1) <= 0.0).sum())
+    # bricks flat before fitting are said, not judged: a fit opens some
+    return {'across': float(across), 'flat': flat,
+            'likely': bool(across < ACROSS - 0.5),
+            'suggested': suggested_size(geometry, ids)}
 
 
 def grid_cells(geometry: Any, ids, size: float) -> int:
@@ -349,15 +421,12 @@ def _outward(xyz, hexes, faces, face_hex):
     return normal * np.sign(np.einsum('ij,ij->i', normal, away))[:, None]
 
 
-def _pillow(xyz, hexes, groups, size, fd=None):
+def _pillow(xyz, hexes, groups, size):
     """A layer of bricks under the skin: each surface node gets a twin
     `PILLOW_DEPTH` sizes in, toward the middle of the bricks it is a
     corner of, the bricks that used it use the twin, and a new brick
     joins each boundary face to its twins. Every brick is then
-    numbered right-handed. With `fd`, the solid's signed distance, a
-    twin stops short where the material is thin: at a feather edge,
-    where two surfaces meet at a shallow angle, twins the full depth
-    from both sides crossed."""
+    numbered right-handed."""
     faces, face_hex = _boundary(hexes)
     surface = np.unique(faces)
     # the way in: toward the mean of the attached bricks' centers. On a
@@ -371,17 +440,12 @@ def _pillow(xyz, hexes, groups, size, fd=None):
     for m in range(8):
         np.add.at(toward, hexes[:, m], centers - xyz[hexes[:, m]])
     inward = toward[surface] / (np.linalg.norm(toward[surface], axis=1)[:, None] + 1e-30)
-    depth = np.full(len(surface), PILLOW_DEPTH * size)
-    if fd is not None:
-        # the material's thickness along the way in, to a size: the
-        # first sample out of the solid again bounds it
-        thickness = np.full(len(surface), np.inf)
-        for share in (1.0, 0.75, 0.5, 0.25):
-            out = fd(xyz[surface] + share * size * inward) > 0.0
-            thickness[out] = share * size
-        depth = np.minimum(depth, PILLOW_SHARE * thickness)
+    # the full depth everywhere: a twin stopped short where the
+    # material was thin (a feather edge) folded seven bricks on a block
+    # that fits with the full depth, and helped none of the three
+    # example shapes (2026-10-19)
     twin_start = len(xyz)
-    xyz = np.vstack([xyz, xyz[surface] + depth[:, None] * inward])
+    xyz = np.vstack([xyz, xyz[surface] + PILLOW_DEPTH * size * inward])
     remap = np.arange(len(xyz))
     remap[surface] = twin_start + np.arange(len(surface))
     pillow = np.concatenate([faces, remap[faces]], axis=1)
@@ -589,11 +653,18 @@ class _Mesh:
         xyz, kind = self.xyz, self.kind
         was = kind.copy()
         freed = np.zeros(len(xyz), dtype=bool)
+        before = None
         for _round in range(UNTANGLE_ROUNDS):
             worst = _scaled_jacobians(xyz, self.hexes).min(axis=1)
             folded = np.flatnonzero(worst <= 0.0)
             if not len(folded):
                 break
+            # a round that opened nothing is the last: the refusal then
+            # comes in seconds, not minutes (Brandon's block at 0.25 in
+            # ran four minutes to be refused, 2026-10-19)
+            if before is not None and len(folded) >= before:
+                break
+            before = len(folded)
             # the folded bricks' nodes and their neighbors' nodes: a
             # fold held in place by its surroundings needs them to give
             nodes = np.unique(self.hexes[folded])
@@ -684,11 +755,13 @@ class _Mesh:
             if changed <= SETTLED * len(movable):
                 break
             # past the sweeps asked for, go on while a brick is folded
-            # and the sweeps still help, up to twice as many
-            if sweep == sweeps and slide and sweeps < 2 * FINAL_SWEEPS:
-                worst = _scaled_jacobians(xyz, self.hexes).min(axis=1)
-                if (worst <= 0.0).any():
-                    sweeps = min(sweeps + 5, 2 * FINAL_SWEEPS)
+            # and the last five sweeps opened one, up to half as many
+            # again
+            if sweep == sweeps and slide and sweeps < FINAL_SWEEPS + FINAL_SWEEPS // 2:
+                folded = int((_scaled_jacobians(xyz, self.hexes).min(axis=1) <= 0.0).sum())
+                if folded and folded < getattr(self, '_folded_before', folded + 1):
+                    sweeps = min(sweeps + 5, FINAL_SWEEPS + FINAL_SWEEPS // 2)
+                self._folded_before = folded
         return sweep
 
 

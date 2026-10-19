@@ -42,8 +42,8 @@ def test_the_recipe_volume_is_right_where_it_is_known():
 
 def test_mesh_volume_integrates_bricks_and_tets():
     project = shapes.v_block()
-    got = shapes.mesh(project, 'tets', 0.5)
-    assert got['method'] == 'tets' and got['count'] > 1000
+    got = shapes.mesh(project, 'tetras', 0.5)
+    assert got['method'] == 'tetras' and got['count'] > 1000
     assert abs(got['volume_error']) < 0.02
     assert got['volume'] == pytest.approx(shapes.mesh_volume(project[project.names[0]]) / INCH ** 3)
 
@@ -59,7 +59,7 @@ def test_a_refused_mesh_is_recorded_with_its_reason(monkeypatch):
 
     monkeypatch.setattr(Project, 'mesh_solids', refuse)
     project = shapes.wye()
-    got = shapes.mesh(project, 'bricks', 0.3)
+    got = shapes.mesh(project, 'hexes', 0.3)
     assert got['method'] == 'refused' and 'folded fitting the shape' in got['refusal']
     assert got['count'] == 0 and np.isnan(got['quality']) and got['recipe_volume'] > 0
 
@@ -72,7 +72,7 @@ def test_the_guides_tetrahedra_are_as_the_table_says(key):
     inside out. The bricks' rows, refusals at these sizes, are minutes
     of fitting each and are left to the tool that makes the table: the
     public runner's hour was not enough for both."""
-    got = shapes.mesh(shapes.SHAPES[key](), 'tets')
+    got = shapes.mesh(shapes.SHAPES[key](), 'tetras')
     # the worst on the round shapes is a flat one on a convex wall,
     # 0.02 here and 0.0002 on the public runner (the triangulation
     # differs by machine), so no bar above zero

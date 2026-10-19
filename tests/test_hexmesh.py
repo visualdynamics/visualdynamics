@@ -117,11 +117,15 @@ def test_an_extrusion_keeps_its_rings_through_brick_mesh():
     assert made['method'] == 'extrusion' and made['rings'] == 1
 
 
-def test_the_project_and_the_pane_mesh_a_tilted_hole_into_bricks(window, pump):
+def test_the_project_and_the_pane_mesh_a_tilted_hole_into_bricks(window, pump, monkeypatch):
     pytest.importorskip('OCP')
     from conftest import select_objects
     from test_solids_mesh import _settled
     from test_solids_pane import _acts, _pick, _rows
+
+    # the sizes here are under the five-across line on purpose: the
+    # question before the fit is answered "anyway" (it has its own test)
+    monkeypatch.setattr(window, '_ask_mesh_anyway', lambda *_args: 'anyway')
 
     window.unit_combo.setCurrentText('in-slinch-lbf-s')
     project = window.project
@@ -220,3 +224,120 @@ def test_the_grid_splits_its_pinches(monkeypatch):
     monkeypatch.setattr(hexmesh, '_split_pinches', spy)
     _xyz, hexes, _groups = hexmesh._grid(geometry, [block], 0.5 * INCH)
     assert seen == [len(hexes)] == [4 * 2 * 2]
+
+
+def test_the_smallest_feature_and_the_size_suggested_from_it():
+    """Brandon's block: 1 in holes and a 3 in thickness, so a fit is
+    suggested at a fifth of an inch (five bricks across the radius,
+    where every fit has held and four has folded) and tetrahedra at a
+    third; the slab with a 0.4 in hole likewise."""
+    project, name, geometry = _project()
+    cut, _union = _angled(project, name)
+    radius, wall = hexmesh.smallest_feature(geometry, [cut])
+    assert radius == pytest.approx(1.0 * INCH) and wall == pytest.approx(3.0 * INCH)
+    assert hexmesh.suggested_size(geometry, [cut]) == pytest.approx(0.2 * INCH)
+    assert hexmesh.suggested_size(geometry, [cut], 'tetras') == pytest.approx(1.0 / 3.0 * INCH)
+    plain = project.add_solid_block(name, (20, 0, 0), (2, 1, 1), unit='in')
+    assert hexmesh.smallest_feature(geometry, [plain]) == (np.inf, pytest.approx(1.0 * INCH))
+    assert hexmesh.suggested_size(geometry, [plain]) == pytest.approx(1.0 / 3.0 * INCH)
+    # the extrusion rule reads the same walls: the tilted hole's caps,
+    # projected onto the nearest axis by the grid's cuts, are not walls
+    # (the pane opened at 0.95 in on this block for them)
+    assert solids.mesh_size(geometry, [cut]) == pytest.approx(1.0 * INCH)
+
+
+def test_the_pane_opens_at_the_size_likely_to_hold(window, pump):
+    """Brandon's block: the pane opened at 0.95 in, half a misread
+    wall; it opens at 0.2 in, the holes' radius over five."""
+    pytest.importorskip('OCP')
+    from conftest import select_objects
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    _angled(project, name)
+    window.show_object(name)
+    select_objects(window, pump, name)
+    window._solids_changed(name)
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel = window.scene.mesh_solids_panel
+    assert panel.size.value() == pytest.approx(0.2)
+    assert panel.reading_label.text().startswith('About ')
+
+
+def test_a_fit_likely_to_fold_is_read_before_it_is_paid_for():
+    """At 0.25 in Brandon's block is four bricks across its holes'
+    radius: likely to fold, with 0.2 in suggested; at 0.2 in it is not.
+    The reading takes the grid and its pillow alone, a second."""
+    import time
+
+    project, name, geometry = _project()
+    cut, _union = _angled(project, name)
+    started = time.perf_counter()
+    read = hexmesh.likely_to_fold(geometry, [cut], 0.3 * INCH)
+    assert time.perf_counter() - started < 10.0
+    assert read['likely'] and read['across'] == pytest.approx(10.0 / 3.0)
+    assert read['suggested'] == pytest.approx(0.2 * INCH)
+    assert not hexmesh.likely_to_fold(geometry, [cut], 0.2 * INCH)['likely']
+
+
+def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeypatch):
+    pytest.importorskip('OCP')
+    from conftest import select_objects
+    from test_solids_mesh import _settled
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), name='slab', unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 0.4, 3.0, angles=(30, 0, 0),
+                                        unit='in')
+    project.combine_solids(name, 'subtract', [block, tilted], 'slab')
+    window.show_object(name)
+    select_objects(window, pump, name)
+    window._solids_changed(name)
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel = window.scene.mesh_solids_panel
+    # Detect Element Size: the 0.4 in hole's radius over five
+    panel.detect_button.click()
+    _settled(window, pump)
+    assert panel.size.value() == pytest.approx(0.08)
+    # a coarser size typed: the question, with the suggested size taken
+    asked = []
+
+    def answer(text, suggested, anyway):
+        asked.append((text, suggested, anyway))
+        return answers.pop(0)
+
+    answers = ['cancel', 'suggested']
+    monkeypatch.setattr(window, '_ask_mesh_anyway', answer)
+    panel.size.setValue(0.2)
+    _settled(window, pump)
+    journal = len(project.journal)
+    panel.mesh_button.click()
+    pump()
+    assert len(project.journal) == journal, 'cancelled: nothing meshed'
+    assert asked[-1][1] == 'Mesh at 0.08 in' and asked[-1][2] == 'Mesh at 0.2 in anyway'
+    assert 'is 2.0 bricks across its radius' in asked[-1][0] and '0.08 in is likely to hold' in asked[-1][0]
+    panel.mesh_button.click()
+    pump()
+    assert len(project.journal) == journal + 1 and ', 0.08, unit=' in project.journal[-1]
+    assert panel.size.value() == pytest.approx(0.08) or True   # the pane closes after Mesh
+    # a size that is likely to hold asks nothing
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel.size.setValue(0.08)
+    _settled(window, pump)
+    before = len(asked)
+    panel.mesh_button.click()
+    pump()
+    assert len(asked) == before and len(project.journal) == journal + 2

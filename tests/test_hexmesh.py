@@ -539,6 +539,14 @@ def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeyp
                 'replaced': 0, 'method': 'overlay'}
 
     monkeypatch.setattr(window.project, 'mesh_solids', record)
+    # nor the preview's fit: whether 0.2 in fits differs by machine too,
+    # and a fit refused there leaves Mesh disabled before the question
+    # (the public runner, 0.1.0a63's sync)
+    box_project, box_name, box_geometry = _project()
+    box = box_project.add_solid_block(box_name, (0, 0, 0), (1, 1, 1), unit='in')
+    stand_in_part, stand_in_made = solids.extrusion_mesh(box_geometry, [box], 0.5 * INCH)
+    monkeypatch.setattr(solids, 'brick_mesh', lambda *args, **kwargs: (
+        stand_in_part, {**stand_in_made, 'method': 'overlay', 'quality': 0.5, 'poor': 0}))
     panel.size.setValue(0.2)
     _settled(window, pump)
     panel.mesh_button.click()

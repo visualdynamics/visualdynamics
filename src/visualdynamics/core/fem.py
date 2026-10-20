@@ -1244,7 +1244,17 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         relation[dimension:dimension + len(chosen), dimension - width:dimension] = \
             beta[chosen]
         krylov = np.linalg.norm(beta @ ritz[dimension - width:], axis=0)
-        block, m_block = block[:, chosen], m_block[:, chosen]
+        block = block[:, chosen]
+        # M Q taken afresh, not the combinations of M W the
+        # orthonormalization carried: the first solve's block is almost
+        # all rigid content, its Gram condition 1e10, and the carried
+        # product came out 6e-10 of the largest off M Q. The next solve
+        # is of that product, and the shift-inverse magnifies its rigid
+        # error by theta_rigid / theta, 4e6 for the free plate's
+        # twelfth mode: the pairs measured up to 6.8 times their claim,
+        # by an amount that moved with Accelerate's thread count
+        # (2026-10-20, a full gate failing a third of the time)
+        m_block = mass @ block
         drift = np.linalg.norm((relation[:dimension, :dimension] - h) @ ritz, axis=0)
         residuals = np.sqrt(krylov ** 2 + drift ** 2) / np.abs(theta)
         worst = float((krylov / np.abs(theta)).max())

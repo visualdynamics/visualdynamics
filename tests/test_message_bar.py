@@ -23,7 +23,9 @@ def test_the_status_line_can_be_selected_and_copied(window, pump):
     flags = bar.label.textInteractionFlags()
     assert flags & Qt.TextInteractionFlag.TextSelectableByMouse
     assert flags & Qt.TextInteractionFlag.TextSelectableByKeyboard
-    assert bar.label.isVisible() and bar.label.toolTip() == said
+    # the tooltip carries the whole message; Linux wraps a long one in a
+    # table for its width (the public runner, 0.1.0a63's sync)
+    assert bar.label.isVisible() and said in bar.label.toolTip()
     bar.label.setSelection(0, len(said))
     assert bar.label.selectedText() == said
     # the window's own Copy belongs to the tree alone, so the label keeps

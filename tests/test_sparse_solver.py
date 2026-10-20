@@ -214,6 +214,45 @@ def _tiny_beam():
     return straight_beam(1.0, fem.Section.rod('rod', 0.01), 2)
 
 
+@pytest.mark.parametrize('build, backend', [
+    (_demo_plate, ''), (_demo_plate, 'superlu'), (lambda: _rigid_link_model()[0], ''),
+], ids=['free plate', 'free plate, SuperLU', 'rigid links'])
+def test_the_block_lanczos_claims_each_pair_what_a_solve_measures(
+        build, backend, monkeypatch):
+    """Each pair's claimed residual is the one a solve with the same
+    factor measures, to 2 %, down to round-off: eps per entry of a
+    vector scaled to the operator's largest eigenvalue, summed over the
+    entries, sqrt(n) eps theta_max / theta. The solves are given M
+    times the basis, taken afresh; the image the orthonormalization
+    carried as combinations was 6e-10 off it in the first applied
+    block, the shift-inverse magnified that rigid error by
+    theta_rigid / theta, and the free plate's pairs measured 0.3 to 6.8
+    times their claims, a spread that moved with Accelerate's thread
+    count and failed a full gate a third of the time (SuperLU, the same
+    every run, 1.49). LU's solves on the rigid-link model measure 0.6
+    to 1.9 times the claim pair by pair with or without that, so the
+    default backend's cases need Accelerate's Cholesky and are skipped
+    where it is not (the public runner's Linux)."""
+    from visualdynamics.core.sparse_solve import BACKEND_VARIABLE, factor_symmetric
+
+    monkeypatch.setenv(BACKEND_VARIABLE, backend)
+    stiffness, mass, _t, _s, sigma, _k = build().scaled_system()
+    factor = factor_symmetric((stiffness - sigma * mass).tocsc())
+    if not backend and getattr(factor, 'kind', '') != 'Cholesky':
+        pytest.skip('needs Accelerate\'s Cholesky; the SuperLU case is its own')
+    eigenvalues, vectors, claimed = fem.block_lanczos_modes(factor, mass, sigma, 12)
+    theta = 1.0 / (eigenvalues - sigma)
+    residual = factor.solve(mass @ vectors) - vectors * theta
+    measured = np.sqrt(np.sum(residual * (mass @ residual), axis=0)) / theta
+    # four times the round-off: the solver branch's pairs reach half
+    # of it once converged to 2e-8, where claim and measurement still
+    # agree to 1e-3 (measured 2026-10-20); the defect was 1,300 to
+    # 4,300 times it
+    floor = 4.0 * np.sqrt(mass.shape[0]) * np.finfo(float).eps * theta.max() / theta
+    assert np.all(np.abs(measured - claimed) <= 0.02 * claimed + floor), \
+        (measured / claimed, claimed)
+
+
 @pytest.mark.parametrize('backend', ['', 'superlu'])
 @pytest.mark.parametrize('build', [lambda: _rigid_link_model()[0], _demo_plate, _tiny_beam],
                          ids=['rigid links', 'free plate', 'tiny beam'])
@@ -223,14 +262,15 @@ def test_the_block_lanczos_starts_the_same_twice_and_keeps_its_word(
     answer to the bit (ARPACK's start is random and did not); and the
     pairs it hands back meet the residual it claims for them: measured
     whole with one more solve, |A x - theta x|_M / theta, the worst is
-    within a factor of the worst claimed, either way, that the
-    measurement's own solve error allows (3.3 seen under Accelerate,
-    2.4 under SuperLU, where the claim is mostly the computed
-    operator's asymmetry, 3e-4 on the rigid-link model, and the last
+    within a factor of four of the worst claimed, either way (1.1 the
+    most seen; under SuperLU the claim is mostly the computed
+    operator's asymmetry, 7e-4 on the rigid-link model, and the last
     block's share alone said 9e-8: the public runner's failure of
     2026-10-19). The free plate's first block has a direction the Gram
     matrix cannot see, and a claim that dropped it overstated five
-    times. Run through both factorizations where a Mac has both."""
+    times. Run through both factorizations where a Mac has both.
+    `test_the_block_lanczos_claims_each_pair_what_a_solve_measures`
+    holds the claim to the measurement pair by pair."""
     from visualdynamics.core.sparse_solve import BACKEND_VARIABLE, factor_symmetric
 
     monkeypatch.setenv(BACKEND_VARIABLE, backend)
@@ -246,8 +286,10 @@ def test_the_block_lanczos_starts_the_same_twice_and_keeps_its_word(
     assert vectors.T @ (mass @ vectors) == pytest.approx(np.eye(12), abs=1e-8)
     residual = factor.solve(mass @ vectors) - vectors * theta
     measured = np.sqrt(np.sum(residual * (mass @ residual), axis=0)) / theta
-    assert measured.max() <= 4.0 * claimed.max(), (measured, claimed)
-    assert claimed.max() <= 4.0 * measured.max(), (measured, claimed)
+    # within a factor of four either way, above the measurement's own
+    # floor (1e-9 on the tiny beam, where both are that small)
+    assert measured.max() <= 4.0 * claimed.max() + 1e-8, (measured, claimed)
+    assert claimed.max() <= 4.0 * measured.max() + 1e-8, (measured, claimed)
     assert claimed.max() < 1e-3, 'and the claim is a converged one'
 
 

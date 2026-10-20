@@ -143,12 +143,12 @@ def test_the_blocks_table_takes_a_mass_in_the_display_units(qt_app):
         mass=pytest.approx(2 * slinch))
     assert lines[-1] == (f'.group_properties[{group}] = '
                          f'GroupProperties(mass={2 * slinch!r})')
-    assert float(model.data(model.index(row, _column(model, 'Mass [slinch]')))) \
+    assert float(model.data(model.cell(row, _column(model, 'Mass [slinch]')))) \
         == pytest.approx(2.0)
-    assert model.data(model.index(row, _column(model, 'Material'))) == ''
+    assert model.data(model.cell(row, _column(model, 'Material'))) == ''
     said = []
     model.edit_rejected.connect(said.append)
-    assert not model.setData(model.index(row, _column(model, 'Material')),
+    assert not model.setData(model.cell(row, _column(model, 'Material')),
                              '6061-T6', EDIT)
     assert said and 'takes a mass alone' in said[0]
     _set(model, 'Mass [slinch]', '', row=row)

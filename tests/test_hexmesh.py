@@ -120,7 +120,7 @@ def test_the_fitting_tells_its_progress_and_refuses_what_the_others_refuse():
     assert seen[-1][0] == seen[-1][1] and [d for d, _t in seen] == sorted(d for d, _t in seen)
     with pytest.raises(ValueError, match='above zero'):
         hexmesh.overlay_mesh(geometry, [block], 0.0)
-    with pytest.raises(ValueError, match='use a larger one'):
+    with pytest.raises(ValueError, match='it can hold: use a larger size'):
         hexmesh.overlay_mesh(geometry, [block], 0.001 * INCH)
     assert hexmesh.grid_cells(geometry, [block], 0.5 * INCH) == 4 * 2 * 2
 
@@ -317,7 +317,31 @@ def test_the_pane_opens_at_the_size_likely_to_hold(window, pump):
     assert panel.reading_label.text().startswith('About ')
 
 
-def test_a_fit_likely_to_fold_is_read_before_it_is_paid_for():
+def test_a_fit_projects_by_the_recipes_own_gradient(monkeypatch):
+    """The fit's projections take the gradient from `distance_gradient`
+    rather than by finite differences: four distance evaluations a
+    point were most of a fit's projection cost (2026-10-19). A finite
+    difference of the recipe's distance anywhere in the fit is a
+    failure; the sharp-edge curves still take theirs on the closed-form
+    surfaces they lie on, which cost nothing."""
+    from visualdynamics.core import tetmesh
+
+    real = tetmesh._gradient
+
+    def no_differences_of_the_recipe(g, q, step):
+        if getattr(g, '__name__', '') == 'fd':
+            raise AssertionError('the fit differenced the recipe\'s distance')
+        return real(g, q, step)
+
+    monkeypatch.setattr(tetmesh, '_gradient', no_differences_of_the_recipe)
+    # a plain block, fitted outright: it fits on any machine, and the
+    # projections are the same calls a shape's take
+    project, name, geometry = _project()
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), unit='in')
+    _part, made = hexmesh.overlay_mesh(geometry, [block], 0.2 * INCH)
+    assert made['bricks'] > 100
+
+
     """At 0.25 in Brandon's block is four bricks across its holes'
     radius: likely to fold, with 0.2 in suggested; at 0.2 in it is not.
     The reading takes the grid and its pillow alone, a second."""
@@ -331,6 +355,143 @@ def test_a_fit_likely_to_fold_is_read_before_it_is_paid_for():
     assert read['likely'] and read['across'] == pytest.approx(10.0 / 3.0)
     assert read['suggested'] == pytest.approx(0.2 * INCH)
     assert not hexmesh.likely_to_fold(geometry, [cut], 0.2 * INCH)['likely']
+
+
+def _flanged(project, name):
+    """A 4 x 3 x 1 in block with a 0.2 in flange on top and a 1 in
+    radius hole tilted through it: not an extrusion, so a fit; five
+    bricks across the hole at 0.2 in and one through the flange."""
+    block = project.add_solid_block(name, (0, 0, 0), (4, 3, 1), unit='in')
+    flange = project.add_solid_block(name, (0, 0, 0.6), (5, 3.5, 0.2), unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 1.0, 4.0, angles=(30, 0, 0),
+                                        unit='in')
+    joined = project.combine_solids(name, 'union', [block, flange])
+    return project.combine_solids(name, 'subtract', [joined, tilted])
+
+
+def test_a_thin_wall_is_read_before_a_fit_too():
+    """A 0.2 in flange on a block: one brick through at 0.2 in and two
+    at 0.1 in, both likely to fold, with the wall over three suggested;
+    three and a third through at 0.06 in is not. The wall was read and
+    ignored until a pattern of I-beams passed the check at one brick
+    through their flanges (2026-10-19)."""
+    project, name, geometry = _project()
+    joined = _flanged(project, name)
+    read = hexmesh.likely_to_fold(geometry, [joined], 0.2 * INCH)
+    # five across the 1 in hole's radius, which would pass on its own
+    assert read['likely'] and read['through'] == pytest.approx(1.0)
+    assert read['across'] == pytest.approx(5.0)
+    assert read['suggested'] == pytest.approx(0.2 * INCH / hexmesh.THROUGH)
+    assert hexmesh.likely_to_fold(geometry, [joined], 0.1 * INCH)['likely']
+    assert not hexmesh.likely_to_fold(geometry, [joined], 0.06 * INCH)['likely']
+
+
+def test_a_grid_past_the_limit_is_read_without_being_laid(monkeypatch):
+    """The reading at a size whose grid would pass the brick limit
+    says so instead of raising: it raised out of the pane at 2.3
+    million cells (2026-10-20)."""
+    project, name, geometry = _project()
+    joined = _flanged(project, name)
+    monkeypatch.setattr(hexmesh, 'MESH_LIMIT', 1000)
+    read = hexmesh.likely_to_fold(geometry, [joined], 0.1 * INCH)
+    assert read['cells'] > 1000 and read['flat'] == 0
+    assert read['likely'] and read['through'] == pytest.approx(2.0)
+
+
+def test_a_suggested_size_over_the_limit_offers_tetras(window, pump, monkeypatch):
+    """The wall wants 0.067 in, which on a part this size is a grid past
+    the limit: the question says so and offers tetrahedra in place of
+    the size, and taking them switches the pane without meshing. A size
+    typed past the limit is refused in the bar, not a traceback."""
+    pytest.importorskip('OCP')
+    from conftest import select_objects
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    _flanged(project, name)
+    window.show_object(name)
+    select_objects(window, pump, name)
+    window._solids_changed(name)
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel = window.scene.mesh_solids_panel
+    # the flange piece at 0.0667 in is about 11,000 bricks by its volume
+    monkeypatch.setattr(hexmesh, 'MESH_LIMIT', 5_000)
+    monkeypatch.setattr(solids, 'MESH_LIMIT', 5_000)
+    asked = []
+    monkeypatch.setattr(window, '_ask_mesh_anyway',
+                        lambda text, suggested, anyway: asked.append((text, suggested)) or 'suggested')
+    for piece in panel.piece_ids:
+        panel.set_piece_size(piece, 0.2)
+    panel.mesh_button.click()
+    pump()
+    assert len(asked) == 1 and 'bricks, over the limit of 5,000' in asked[0][0], asked
+    assert asked[0][1] == 'Use tetras instead'
+    assert panel.element_kind == 'tetras'
+    assert not solids.meshed_elements(project[name], ['Part']).size
+    # typed past the limit, with hexes back: the bar, no traceback
+    panel.elements.setCurrentIndex(panel.elements.findData('hexes'))
+    pump()
+    for piece in panel.piece_ids:
+        panel.set_piece_size(piece, 0.05)
+    panel.mesh_button.click()
+    pump()
+    assert 'bricks at that size, over the limit' in window.statusBar().currentMessage()
+
+
+def test_the_question_names_the_thin_wall(window, pump, monkeypatch):
+    pytest.importorskip('OCP')
+    from conftest import select_objects
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    _flanged(project, name)
+    window.show_object(name)
+    select_objects(window, pump, name)
+    window._solids_changed(name)
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    panel = window.scene.mesh_solids_panel
+    asked = []
+    monkeypatch.setattr(window, '_ask_mesh_anyway',
+                        lambda text, suggested, anyway: asked.append(text) or 'cancel')
+    # (block + flange) - hole is two pieces, each less the hole
+    # (2026-10-20): the flange's is the thin wall, and the question
+    # names it
+    assert len(panel.piece_ids) == 2
+    # each row opens at the size its piece is likely to hold at, the
+    # piece read as meshed: the block less the hole, not the block
+    geometry = project[name]
+    block_id = panel.piece_ids[0]
+    (hole,) = solids.piece_plan(geometry, [solids.top_level(geometry)[0].id], 0.2 * INCH)[0]['cuts']
+    with solids.meshed_as(geometry, block_id, (hole,)) as read_as:
+        holed = window._mesh_size_likely(geometry, [read_as], 'hexes') / INCH
+    alone = window._mesh_size_likely(geometry, [block_id], 'hexes') / INCH
+    assert panel.piece_sizes()[block_id] == pytest.approx(holed) and holed != pytest.approx(alone)
+    for piece in panel.piece_ids:
+        panel.set_piece_size(piece, 0.2)
+    panel.mesh_button.click()
+    pump()
+    assert len(asked) == 1 and 'thinnest wall is 1.0 bricks through' in asked[0], asked
+    assert asked[0].startswith('Block 2: ') and '0.0667 in is likely to hold' in asked[0]
+    # the block's piece is read with its hole: at 0.5 in the hole is two
+    # bricks across its radius, which only a reading of the piece as
+    # meshed, less the hole, sees
+    block, flange = panel.piece_ids
+    panel.set_piece_size(block, 0.5)
+    panel.set_piece_size(flange, 0.0667)
+    panel.mesh_button.click()
+    pump()
+    assert len(asked) == 2 and asked[1].startswith('Block 1: '), asked
+    assert 'smallest round feature is 2.0 bricks across' in asked[1]
 
 
 def test_detect_element_size_and_the_question_before_a_fit(window, pump, monkeypatch):

@@ -81,13 +81,13 @@ def test_solve_modes_refuses_a_bare_geometry_and_a_non_geometry():
 
 
 def _column(model, title):
-    titles = [model.headerData(c, Qt.Orientation.Horizontal)
-              for c in range(model.columnCount())]
+    titles = [model.headerData(c, Qt.Orientation.Vertical)
+              for c in range(model.rowCount())]
     return titles.index(title)
 
 
 def _set(model, title, text, row=0):
-    index = model.index(row, _column(model, title))
+    index = model.cell(row, _column(model, title))
     assert model.setData(index, text, EDIT), (title, text)
     return model.data(index, Qt.ItemDataRole.DisplayRole)
 
@@ -95,14 +95,14 @@ def _set(model, title, text, row=0):
 def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
     geometry = _plate_geometry(properties=False)
     model = element_group_table_model(geometry)
-    titles = [model.headerData(c, Qt.Orientation.Horizontal)
-              for c in range(model.columnCount())]
+    titles = [model.headerData(c, Qt.Orientation.Vertical)
+              for c in range(model.rowCount())]
     assert titles == ['Element group', 'Name', 'Elements', 'Material', 'E [Pa]', 'ν',
                       'ρ [kg/m³]', 'Thickness [m]', 'Section', 'Shape',
                       'Dimensions [m]', 'A [m²]', 'Iy [m⁴]', 'Iz [m⁴]',
                       'J [m⁴]', 'Orientation', 'Mass [kg]',
                       'Stiffness [N/m, N·m/rad]', 'Ground']
-    assert model.data(model.index(0, _column(model, 'E [Pa]'))) == '', \
+    assert model.data(model.cell(0, _column(model, 'E [Pa]'))) == '', \
         'blank until set'
     _set(model, 'Material', '6061-T6')
     _set(model, 'E [Pa]', '68.9e9')
@@ -133,10 +133,10 @@ def test_a_section_fills_the_same_way_and_an_orientation_is_three_numbers(
     assert props.section == Section('rib', 3e-4, 2.25e-9, 2.5e-10, 7e-10)
     assert props.orientation == (0.0, 0.0, 1.0)
     assert props.kind == 'beam'
-    assert model.data(model.index(0, _column(model, 'Orientation'))) == '0, 0, 1'
+    assert model.data(model.cell(0, _column(model, 'Orientation'))) == '0, 0, 1'
     said = []
     model.edit_rejected.connect(said.append)
-    assert not model.setData(model.index(0, _column(model, 'Orientation')),
+    assert not model.setData(model.cell(0, _column(model, 'Orientation')),
                              '0, 1', EDIT)
     assert said and 'three numbers' in said[0]
     assert props.orientation == (0.0, 0.0, 1.0), 'a refusal changes nothing'
@@ -280,10 +280,10 @@ def test_picking_a_library_material_fills_the_row(qt_app):
     _set(model, 'Material', 'Ti-6Al-4V')
     props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material is material('Ti-6Al-4V')
-    shown = float(model.data(model.index(0, _column(model, 'E [Pa]'))))
+    shown = float(model.data(model.cell(0, _column(model, 'E [Pa]'))))
     assert shown == pytest.approx(16.5e6 * 6894.757293168361, rel=1e-5), (
         'the row shows the library number')
-    assert float(model.data(model.index(0, _column(model, 'ν')))) == 0.342
+    assert float(model.data(model.cell(0, _column(model, 'ν')))) == 0.342
     # the thickness the row had stays; a second pick swaps the material
     _set(model, 'Thickness [m]', '0.005')
     _set(model, 'Material', '304 stainless')
@@ -312,16 +312,16 @@ def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
     psi, inches = 6894.757293168361, 0.0254
     geometry = _plate_geometry(properties=False)
     model = element_group_table_model(geometry, inch)
-    titles = [model.headerData(c, Qt.Orientation.Horizontal)
-              for c in range(model.columnCount())]
+    titles = [model.headerData(c, Qt.Orientation.Vertical)
+              for c in range(model.rowCount())]
     for title in ('E [psi]', 'ρ [slinch/in³]', 'Thickness [in]', 'A [in²]',
                   'Iy [in⁴]', 'Iz [in⁴]', 'J [in⁴]', 'ν', 'Material'):
         assert title in titles, (title, titles)
     # a library pick reads in psi and slinch/in³
     _set(model, 'Material', '6061-T6')
-    assert float(model.data(model.index(0, _column(model, 'E [psi]')))) == \
+    assert float(model.data(model.cell(0, _column(model, 'E [psi]')))) == \
         pytest.approx(10.0e6)
-    assert float(model.data(model.index(0, _column(model, 'ρ [slinch/in³]')))) \
+    assert float(model.data(model.cell(0, _column(model, 'ρ [slinch/in³]')))) \
         == pytest.approx(0.098 / 386.08858, rel=1e-6)
     # typed in inches, stored in meters
     _set(model, 'Thickness [in]', '0.5')
@@ -361,12 +361,12 @@ def test_switching_the_unit_system_restates_the_blocks_table(window, pump):
     pump()
     edit_element_group(window, pump, int(window.objects['Geometry'].group_id[0]))
     model = window.table.model()
-    assert float(model.data(model.index(0, _column(model, 'Thickness [in]')))) \
+    assert float(model.data(model.cell(0, _column(model, 'Thickness [in]')))) \
         == pytest.approx(0.01 / 0.0254)
     window.unit_combo.setCurrentText('mm-kg-N-s')
     pump()
     model = window.table.model()
-    assert float(model.data(model.index(0, _column(model, 'Thickness [mm]')))) \
+    assert float(model.data(model.cell(0, _column(model, 'Thickness [mm]')))) \
         == pytest.approx(10.0)
 
 
@@ -410,15 +410,15 @@ def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
                                     'rectangular tube', 'I-beam', 'channel',
                                     'angle', 'custom']
     _set(model, 'Section', 'strut')
-    assert model.data(model.index(0, _column(model, 'Shape'))) == 'custom'
+    assert model.data(model.cell(0, _column(model, 'Shape'))) == 'custom'
     _set(model, 'Shape', 'round tube')
-    dims = model.index(0, _column(model, 'Dimensions [in]'))
+    dims = model.cell(0, _column(model, 'Dimensions [in]'))
     assert model.data(dims) == 'D=?, t=?', 'the shape says what it wants'
     _set(model, 'Dimensions [in]', '1, 0.065')
     section = _section_of(geometry)
     assert section == Section.round_tube('strut', 1 * inch, 0.065 * inch)
     assert model.data(dims) == 'D=1, t=0.065'
-    j = float(model.data(model.index(0, _column(model, 'J [in⁴]'))))
+    j = float(model.data(model.cell(0, _column(model, 'J [in⁴]'))))
     assert j == pytest.approx(math.pi * (1 - 0.87 ** 4) / 32)
     # the labels are accepted as shown, in any order they were written
     _set(model, 'Dimensions [in]', 'D=1.25, t=0.049')
@@ -433,7 +433,7 @@ def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
     _set(model, 'Dimensions [m]', 'b=0.01, h=0.03')
     said = []
     model.edit_rejected.connect(said.append)
-    assert not model.setData(model.index(0, _column(model, 'Iy [m⁴]')),
+    assert not model.setData(model.cell(0, _column(model, 'Iy [m⁴]')),
                              '1e-6', EDIT)
     assert said and 'choose Custom in Shape' in said[0]
     # Custom keeps the numbers and lets them be typed
@@ -449,7 +449,7 @@ def test_wrong_dimensions_are_refused_by_name(qt_app):
     model = element_group_table_model(geometry)
     said = []
     model.edit_rejected.connect(said.append)
-    index = model.index(0, _column(model, 'Dimensions [m]'))
+    index = model.cell(0, _column(model, 'Dimensions [m]'))
     assert not model.setData(index, '0.1, 0.2', EDIT)
     assert 'choose a shape first' in said[-1]
     _set(model, 'Shape', 'I-beam')
@@ -486,6 +486,94 @@ def test_an_unfinished_section_is_refused_when_the_model_is_built():
         Model.from_geometry(frame)
 
 
+def test_a_group_of_bricks_takes_no_section_and_one_cleared_is_gone(qt_app):
+    """A group of bricks carrying a beam's empty round tube: the solve
+    says what is wrong (it asked for the tube's dimensions), the table
+    refuses a section, a thickness or an orientation typed on bricks,
+    and clearing the Shape takes the section off, so the bricks solve
+    (Brandon, 2026-10-20: his block carried one, and clearing its cells
+    left an empty section behind)."""
+    project = Project('p')
+    name = project.new_geometry('Part', unit='in')
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), name='block', unit='in')
+    project.mesh_solids(name, [block], 0.5, unit='in')
+    geometry = project[name]
+    group = int(geometry.group_id[0])
+    geometry.group_properties[group] = GroupProperties(
+        ALUMINUM, section=Section('', 0, 0, 0, 0, 'round tube', ()))
+    with pytest.raises(ValueError, match=r'element group 1 \(block\) holds solid elements, '
+                                          r'which take a material alone, and it has a beam '
+                                          r'section: clear its Shape and Section'):
+        Model.from_geometry(geometry)
+    model = element_group_table_model(geometry)
+    said = []
+    model.edit_rejected.connect(said.append)
+    for title, text in (('Shape', 'rod'), ('Thickness [m]', '0.01'),
+                        ('Orientation', '0, 1, 0')):
+        assert not model.setData(model.cell(0, _column(model, title)), text, EDIT), title
+        assert 'takes a material alone' in said[-1], title
+    assert model.setData(model.cell(0, _column(model, 'Shape')), '', EDIT)
+    assert geometry.group_properties[group].section is None
+    assert geometry.group_properties[group].kind == 'solid'
+    assert len(Model.from_geometry(geometry).solids) == 4 * 2 * 2
+
+
+def test_meshing_solids_again_takes_a_stray_section_off_and_says_so(window, pump):
+    """A part meshed again keeps its group and the group's properties,
+    so a beam's section given to it by mistake came back with every new
+    mesh and the solve refused the bricks (Brandon, 2026-10-20). Meshed
+    into a group, solids take its section, thickness and orientation
+    off, keep its material, and the status line says what went."""
+    from conftest import select_objects
+    from test_solids_mesh import _settled
+    from test_solids_pane import _acts, _pick, _rows
+
+    window.unit_combo.setCurrentText('in-slinch-lbf-s')
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), name='block', unit='in')
+    project.mesh_solids(name, [block], 0.5, unit='in')
+    geometry = project[name]
+    group = int(geometry.group_id[0])
+    geometry.group_properties[group] = GroupProperties(
+        ALUMINUM, section=Section('', 0, 0, 0, 0, 'round tube', ()),
+        orientation=(0.0, 1.0, 0.0))
+    window.show_object(name)
+    select_objects(window, pump, name)
+    window._solids_changed(name)
+    pump()
+    _pick(window, pump, _rows(window, 'solid')[:1])
+    _acts(window)['mesh_solids'][3]()
+    pump()
+    _settled(window, pump)
+    window.scene.mesh_solids_panel.mesh_button.click()
+    pump()
+    held = geometry.group_properties[group]
+    assert held.section is None and held.orientation is None and held.material == ALUMINUM
+    assert held.kind == 'solid'
+    message = window.statusBar().currentMessage()
+    assert ('a beam section and an orientation taken off block, solids taking a '
+            'material alone') in message, message
+    assert len(Model.from_geometry(geometry).solids) == 4 * 2 * 2
+    # nothing to take off: nothing said
+    made = project.mesh_solids(name, [block], 0.5, unit='in')
+    assert made['cleared'] == {}
+
+
+def test_a_beam_sections_cells_cleared_take_the_section_off(qt_app):
+    """A section's cells cleared one by one: the section stays while any
+    of it is left, and goes with the last."""
+    geometry = _plate_geometry(properties=False)
+    model = element_group_table_model(geometry)
+    _set(model, 'Material', '6061-T6')
+    _set(model, 'Section', 'tube')
+    _set(model, 'Shape', 'round tube')
+    _set(model, 'Shape', '')
+    assert _section_of(geometry) is not None and _section_of(geometry).name == 'tube'
+    _set(model, 'Section', '')
+    assert _section_of(geometry) is None
+
+
 def test_a_shaped_section_journals_and_saves_by_its_dimensions(qt_app,
                                                               tmp_path):
     geometry = _plate_geometry(properties=False)
@@ -518,11 +606,11 @@ def test_a_rigid_link_is_picked_like_a_material_and_journals_by_name(qt_app):
     _set(model, 'Material', 'rigid (massless)')
     props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material is RIGID and props.kind == 'rigid'
-    assert model.data(model.index(0, _column(model, 'E [Pa]'))) == ''
+    assert model.data(model.cell(0, _column(model, 'E [Pa]'))) == ''
     assert lines[-1].endswith('GroupProperties(RIGID)'), lines[-1]
     said = []
     model.edit_rejected.connect(said.append)
-    assert not model.setData(model.index(0, _column(model, 'E [Pa]')), '1e9',
+    assert not model.setData(model.cell(0, _column(model, 'E [Pa]')), '1e9',
                              EDIT)
     assert 'has no modulus, density or ratio' in said[-1]
     namespace = {}
@@ -656,11 +744,12 @@ def test_the_material_column_and_its_list_are_wide_enough_to_read(window, pump):
     column = _column(model, 'Material')
     metrics = window.table.fontMetrics()
     widest = max(metrics.horizontalAdvance(name) for name in MATERIALS)
-    assert window.table.columnWidth(column) >= widest, (
-        window.table.columnWidth(column), widest)
+    # the groups run across, so Material is a row and every group's
+    # column holds a material: each column opens wide enough to read one
+    assert window.table.columnWidth(0) >= widest, (window.table.columnWidth(0), widest)
     header = window.table.horizontalHeader()
-    assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
-    index = model.index(0, column)
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive
+    index = model.cell(0, column)
     editor = window.table.itemDelegate().createEditor(
         window.table, QStyleOptionViewItem(), index)
     try:

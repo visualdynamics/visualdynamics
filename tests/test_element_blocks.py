@@ -313,21 +313,21 @@ def test_editing_blocks_opens_a_table_of_them(two_blocks, window, pump):
     pump()
     assert window.editing == ('Geometry', 'groups')
     model = window.table.model()
-    headers = [model.headerData(c, Qt.Orientation.Horizontal)
-               for c in range(model.columnCount())]
+    headers = [model.headerData(c, Qt.Orientation.Vertical)
+               for c in range(model.rowCount())]
     assert headers[:3] == ['Element group', 'Name', 'Elements']
     assert headers[3] == 'Material', (
         'then what the element group is made of — tests/test_solve_modes.py')
-    assert model.rowCount() == 2
-    assert model.data(model.index(0, 1)) == 'wing'
+    assert model.item_count() == 2
+    assert model.data(model.cell(0, 1)) == 'wing'
     # the elements it holds, by id and as runs — not a count, which is
     # not a thing anyone can edit. 'wing' holds element 10.
-    assert model.data(model.index(0, 2)) == '10'
-    assert model.data(model.index(1, 2)) == '11', 'and tail holds 11'
-    assert model.flags(model.index(0, 2)) & Qt.ItemFlag.ItemIsEditable, (
+    assert model.data(model.cell(0, 2)) == '10'
+    assert model.data(model.cell(1, 2)) == '11', 'and tail holds 11'
+    assert model.flags(model.cell(0, 2)) & Qt.ItemFlag.ItemIsEditable, (
         'and the list is editable: naming an element claims it for '
         'this element group, the way a node is typed into a traceline')
-    model.setData(model.index(0, 1), 'port wing')
+    model.setData(model.cell(0, 1), 'port wing')
     assert two_blocks.group_name[0] == 'port wing'
 
 
@@ -344,7 +344,7 @@ def test_the_plus_adds_an_empty_block_outright(two_blocks, window, pump):
     assert not window.add_action.isChecked(), 'no add mode to be in'
     assert not window.add_mode
     assert list(two_blocks.group_id) == [7, 9, 10]
-    assert window.table.model().rowCount() == 3
+    assert window.table.model().item_count() == 3
     assert 'Added element group 10' in window.statusBar().currentMessage()
 
 
@@ -355,7 +355,7 @@ def test_deleting_a_block_row_deletes_the_part(two_blocks, window, pump):
     window.tree.setCurrentItem(group_row(window, 7))
     window.edit_entities()
     pump()
-    window.table.selectRow(0)
+    window.table.select_items([0])
     window.delete_entity_rows()
     pump()
     assert list(two_blocks.group_id) == [9]
@@ -415,9 +415,9 @@ def _blocks_model(geometry):
 def _cell(model, row, header):
     from PySide6.QtCore import Qt
 
-    columns = [model.headerData(c, Qt.Orientation.Horizontal)
-               for c in range(model.columnCount())]
-    index = model.index(row, columns.index(header))
+    columns = [model.headerData(c, Qt.Orientation.Vertical)
+               for c in range(model.rowCount())]
+    index = model.cell(row, columns.index(header))
     return model.data(index, Qt.ItemDataRole.DisplayRole), index
 
 
@@ -517,10 +517,11 @@ def test_two_blocks_of_one_kind_offer_merge_from_the_tree(two_blocks, window,
     _pick_blocks(window, pump, item, [0, 1])
     acts = window.acts_for()
     # and Merge Coincident Nodes beside it, which element groups carry
-    # rather than the geometry (2026-10-11)
+    # rather than the geometry (2026-10-11), and Mate Surfaces, two
+    # groups of plates being surfaces to mate (2026-10-20)
     assert [(verb, icon) for verb, _label, icon, _h, _t in acts] == [
         ('merge_groups', 'merge_groups'), ('merge_coincident_nodes', 'merge_nodes'),
-        ('align_meshes', 'align_meshes')]
+        ('align_meshes', 'align_meshes'), ('mate_surfaces', 'mate_surfaces')]
     acts[0][3]()
     pump()
     assert list(two_blocks.group_id) == [7]
@@ -539,15 +540,14 @@ def test_blocks_that_differ_offer_no_merge(two_blocks, window, pump):
     item = _show_geometry(window, pump, two_blocks)
     _pick_blocks(window, pump, item, [0, 1])
     assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes',
-                                                    'align_meshes']
+                                                    'align_meshes', 'mate_surfaces']
     _pick_blocks(window, pump, item, [0])
     assert [act[0] for act in window.acts_for()] == ['merge_coincident_nodes',
                                                     'align_meshes'], (
-        'one element group has nothing to merge with')
+        'one element group has nothing to merge or mate with')
 
 
 def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
-    from PySide6.QtCore import QItemSelectionModel
 
     _show_geometry(window, pump, two_blocks)
     # the table holds the element groups picked (2026-10-10), so the two
@@ -556,13 +556,10 @@ def test_the_blocks_table_offers_the_same_merge(two_blocks, window, pump):
     group_row(window, 9).setSelected(True)
     window.edit_entities()
     pump()
-    window.table.selectRow(0)
+    window.table.select_items([0])
     pump()
     assert not window.merge_groups_action.isVisible(), 'one row'
-    window.table.selectionModel().select(
-        window.table.model().index(1, 0),
-        QItemSelectionModel.SelectionFlag.Select
-        | QItemSelectionModel.SelectionFlag.Rows)
+    window.table.select_items([1], clear=False)
     pump()
     assert window.merge_groups_action.isVisible()
     window.merge_groups_action.trigger()
@@ -609,20 +606,20 @@ def test_the_pencil_on_element_groups_tables_those_and_no_others(
     window.edit_entities()
     pump()
     table = window.table
-    shown = [r for r in range(table.model().rowCount()) if not table.isRowHidden(r)]
+    shown = [r for r in range(table.model().item_count()) if not table.isColumnHidden(r)]
     assert shown == [1], 'tail alone'
     assert window._editing_words() == 'element group 9'
     table.selectAll()
     pump()
-    assert {i.row() for i in table.selectionModel().selectedIndexes()} == {1}, (
-        'Select All reaches only what is shown')
-    assert table.copy(whole_table=True).splitlines()[0].split('\t')[1] == 'tail'
-    assert len(table.copy(whole_table=True).splitlines()) == 1
+    assert table.selected_items() == [1], 'Select All reaches only what is shown'
+    # the groups run across: one column copied, a line per property
+    lines = table.copy(whole_table=True).splitlines()
+    assert lines[1] == 'tail' and all(len(line.split('\t')) == 1 for line in lines)
     # an element group added rebuilds the table: wing stays out of it
     window.add_action.trigger()
     pump()
-    assert table.isRowHidden(0) and not table.isRowHidden(1)
-    assert not table.isRowHidden(table.model().rowCount() - 1), 'the new one in'
+    assert table.isColumnHidden(0) and not table.isColumnHidden(1)
+    assert not table.isColumnHidden(table.model().item_count() - 1), 'the new one in'
     window.stop_editing()
     pump()
     # both picked together, then Edit from the context menu (a right-click
@@ -633,14 +630,14 @@ def test_the_pencil_on_element_groups_tables_those_and_no_others(
     pump()
     assert window.editing == ('Geometry', 'groups')
     assert window.editing_scope == ('group', (7, 9))
-    assert [table.isRowHidden(r) for r in range(table.model().rowCount())] == [
+    assert [table.isColumnHidden(r) for r in range(table.model().item_count())] == [
         False, False, True], 'wing and tail; the one added before is not picked'
     # an element group added there joins the table, and stays after the rebuild
     window.add_action.trigger()
     pump()
     added = int(two_blocks.group_id[-1])
     assert window.editing_scope[1][:2] == (7, 9) and added in window.editing_scope[1]
-    assert not table.isRowHidden(table.model().rowCount() - 1)
+    assert not table.isColumnHidden(table.model().item_count() - 1)
 
 
 def test_the_pencil_on_a_family_tables_its_elements_and_no_others(window, pump):
@@ -679,3 +676,84 @@ def test_the_pencil_on_a_family_tables_its_elements_and_no_others(window, pump):
     window.edit_entities()
     pump()
     assert shown() == [0, 1]
+
+
+def test_the_open_groups_table_follows_the_groups_picked_in_the_tree(
+        two_blocks, window, pump):
+    """With the Element Groups table open on one group, Cmd-clicking
+    another group's row in the tree adds its column, and Cmd-clicking a
+    picked one off takes its column away; the table stays open
+    throughout (Brandon, 2026-10-20: multi-selecting groups showed only
+    the one the table was opened on)."""
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
+
+    _show_geometry(window, pump, two_blocks)
+    window.tree.setCurrentItem(group_row(window, 7))
+    window.edit_entities()
+    pump()
+    table = window.table
+
+    def shown():
+        return [c for c in range(table.model().item_count()) if not table.isColumnHidden(c)]
+
+    assert shown() == [0]
+    group_row(window, 9).setSelected(True)
+    pump()
+    assert window.editing == ('Geometry', 'groups')
+    assert window.editing_scope == ('group', (7, 9))
+    assert shown() == [0, 1], 'tail joins wing'
+    assert table.selected_items() == [0, 1]
+    assert window._editing_words() == 'element groups 7, 9'
+    assert window._pencil_on(group_row(window, 9).data(0, ROLE_REFERENCE))
+    group_row(window, 7).setSelected(False)
+    pump()
+    assert window.editing_scope == ('group', (9,))
+    assert shown() == [1], 'wing leaves'
+
+
+def test_the_groups_table_runs_across_and_edits_several_groups_at_once(two_blocks, window, pump):
+    """The Element Groups table is the other way up (Brandon,
+    2026-10-20): a group's properties read down a column, the groups
+    are the columns, and a value is set on several groups at once by
+    selecting across them and batch editing, or by dragging the fill
+    handle across."""
+    from PySide6.QtCore import QItemSelectionModel, Qt
+
+    _show_geometry(window, pump, two_blocks)
+    # both groups picked together, then edited: both are columns
+    first, second = group_row(window, 7), group_row(window, 9)
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(first)
+    first.setSelected(True)
+    second.setSelected(True)
+    window.edit_entities()
+    pump()
+    table = window.table
+    model = table.model()
+    assert model.transposed and model.item_count() == 2
+    assert not table.isColumnHidden(0) and not table.isColumnHidden(1)
+    assert [model.headerData(c, Qt.Orientation.Horizontal) for c in range(2)] == ['wing', 'tail']
+    assert model.headerData(0, Qt.Orientation.Vertical) == 'Element group'
+    material = [c.title for c in model.columns].index('Material')
+    assert model.headerData(material, Qt.Orientation.Vertical) == 'Material'
+    # both groups' Material cells selected across, one batch edit
+    selection = table.selectionModel()
+    selection.clearSelection()
+    for group in (0, 1):
+        selection.select(model.cell(group, material), QItemSelectionModel.SelectionFlag.Select)
+    applied, rejected = table.batch_edit('6061-T6')
+    assert (applied, rejected) == (2, 0)
+    assert all(two_blocks.group_properties[int(g)].material.name == '6061-T6'
+               for g in two_blocks.group_id)
+    # the fill handle carries a thickness across from the first group
+    thickness = next(i for i, c in enumerate(model.columns) if c.title.startswith('Thickness'))
+    assert model.setData(model.cell(0, thickness), '0.004', Qt.ItemDataRole.EditRole)
+    selection.clearSelection()
+    selection.select(model.cell(0, thickness), QItemSelectionModel.SelectionFlag.Select)
+    assert table.fill_from_selection(1) == (1, 0)
+    held = [two_blocks.group_properties[int(g)].thickness for g in two_blocks.group_id]
+    assert held[0] > 0 and held[1] == held[0]
+    # the selection in the table is the groups in the view: whole columns
+    table.select_items([1])
+    pump()
+    assert table.selected_items() == [1] and table.whole_rows() == [1]

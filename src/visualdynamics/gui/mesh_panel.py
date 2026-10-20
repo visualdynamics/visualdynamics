@@ -87,6 +87,8 @@ DEFAULTS = {
     'solid_part': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
     'solid_section': {'center': (0.0, 0.0, 0.0), 'widths': (0.5, 1.0, 4.0)},
     'solid_hole': {'center': (0.0, 0.0, 0.0), 'widths': (0.25, 0.25, 0.5)},
+    'solid_cone': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
+    'solid_sphere': {'center': (0.0, 0.0, 0.0), 'widths': (1.0, 1.0, 1.0)},
 }
 #: a section's dimensions as it opens, in the display unit, in the order
 #: `SECTIONS` names them: a foot deep in inches, a beam's proportions
@@ -100,16 +102,20 @@ HOLE_DEFAULTS = (0.25, 0.5, 0.5, 0.125)
 #: each kind's title
 TITLES = {'block': 'Add Block', 'plane': 'Add Plane',
           'solid_block': 'Add Solid Block', 'solid_cylinder': 'Add Cylinder',
-          'solid_section': 'Add Section', 'solid_hole': 'Add Hole'}
+          'solid_section': 'Add Section', 'solid_hole': 'Add Hole',
+          'solid_cone': 'Add Cone', 'solid_sphere': 'Add Sphere'}
 #: and the title when a solid already made is opened to change it (its
 #: row's pencil, 2026-10-11): a boolean has no size of its own, so its
 #: pane moves and turns it whole
 EDIT_TITLES = {'solid_block': 'Edit Solid Block', 'solid_cylinder': 'Edit Cylinder',
                'solid_part': 'Move Part', 'solid_section': 'Edit Section',
-               'solid_hole': 'Edit Hole'}
+               'solid_hole': 'Edit Hole', 'solid_cone': 'Edit Cone',
+               'solid_sphere': 'Edit Sphere'}
 #: the kinds that are solids, typed without a mesh
 SOLID_KINDS = ('solid_block', 'solid_cylinder', 'solid_part', 'solid_section',
-               'solid_hole')
+               'solid_hole', 'solid_cone', 'solid_sphere')
+#: a cone as it opens: a radius of half at its base, a quarter at its top
+CONE_TOP = 0.25
 DEFAULT_SIZE = 0.1
 
 
@@ -190,6 +196,13 @@ class MeshPanel(QWidget):
         # so it is a cylinder's second number and a section's last
         grid.addWidget(self.length_label, 12, 0)
         grid.addWidget(self.length, 12, 1)
+        # a cone's radius at its top, in a row only a section's or a
+        # hole's other numbers take, never shown with them (2026-10-20)
+        self.top_label: QLabel = QLabel('Top radius')
+        self.top: DoubleSpinBox = _box(CONE_TOP, minimum=0.0)
+        self.top.setToolTip("At the frame's +Z end; zero for a point")
+        grid.addWidget(self.top_label, 8, 0)
+        grid.addWidget(self.top, 8, 1)
         # a section: its shape in the width label's row, its dimensions
         # in the widths' rows and below
         self.shape_label: QLabel = QLabel('Shape')
@@ -235,6 +248,7 @@ class MeshPanel(QWidget):
         self.angle_label.setEnabled(False)
         grid.addWidget(self.angle_label, 13, 0, 1, 2)
         self.angles: list[DoubleSpinBox] = []
+        self.angle_axes: list[QLabel] = []
         for row, axis in enumerate('XYZ', start=14):
             box = _box(0.0, minimum=-360.0)
             box.setMaximum(360.0)
@@ -242,7 +256,9 @@ class MeshPanel(QWidget):
             box.setToolTip(f'Degrees about the geometry\'s {axis} axis, '
                            'applied X, then Y, then Z; the rings in the view '
                            'turn it too, a degree at a time')
-            grid.addWidget(QLabel(axis), row, 0)
+            axis_label = QLabel(axis)
+            self.angle_axes.append(axis_label)
+            grid.addWidget(axis_label, row, 0)
             grid.addWidget(box, row, 1)
             self.angles.append(box)
         self.size_label: QLabel = QLabel('Element size')
@@ -284,10 +300,10 @@ class MeshPanel(QWidget):
         grid.addLayout(buttons, 21, 0, 1, 2)
         grid.setRowStretch(22, 1)
         commit_on_enter(*self.center, *self.widths, *self.angles, self.size,
-                        self.radius, self.length, self.corner, *self.section,
+                        self.radius, self.length, self.corner, self.top, *self.section,
                         *self.hole)
         for box in (*self.center, *self.widths, *self.angles, self.size,
-                    self.radius, self.length, self.corner, *self.section,
+                    self.radius, self.length, self.corner, self.top, *self.section,
                     *self.hole):
             box.valueChanged.connect(lambda _value: self.changed.emit())
         self.shape.currentTextChanged.connect(self._shape_picked)
@@ -304,7 +320,8 @@ class MeshPanel(QWidget):
         """Set the pane up for `kind`, with every field on its default.
 
         `kind` is 'block' or 'plane' for elements, or a solid:
-        'solid_block', 'solid_cylinder', 'solid_section' or 'solid_hole',
+        'solid_block', 'solid_cylinder', 'solid_cone', 'solid_sphere',
+        'solid_section' or 'solid_hole',
         or 'solid_part' for a boolean, which is only edited. `unit` is the
         display unit the fields are in. `groups` are the geometry's
         element groups to choose from, and the field opens on `default`,
@@ -321,20 +338,27 @@ class MeshPanel(QWidget):
         cylinder = kind == 'solid_cylinder'
         part = kind == 'solid_part'
         section, hole = kind == 'solid_section', kind == 'solid_hole'
+        cone, sphere = kind == 'solid_cone', kind == 'solid_sphere'
         self.title.setText((EDIT_TITLES if editing else TITLES)[kind])
         self.add_button.setText('Apply' if editing else 'Add')
         self.center_label.setText(f'Center [{unit}]')
         self.width_label.setText(f'Width [{unit}]')
-        self.radius_label.setText(f'Radius [{unit}]')
-        self.length_label.setText(f'Length [{unit}]')
+        self.radius_label.setText(f'{"Base radius" if cone else "Radius"} [{unit}]')
+        self.length_label.setText(f'{"Height" if cone else "Length"} [{unit}]')
+        self.top_label.setText(f'Top radius [{unit}]')
         self.size_label.setText(f'Element size [{unit}]')
         self.group_label.setText('Name' if solid else 'Element group')
         for widget in (self.width_label, *self.widths, *self.width_axes):
-            widget.setVisible(not (cylinder or part or section or hole))
+            widget.setVisible(not (cylinder or part or section or hole or cone or sphere))
         for widget in (self.radius_label, self.radius):
-            widget.setVisible(cylinder)
+            widget.setVisible(cylinder or cone or sphere)
         for widget in (self.length_label, self.length):
-            widget.setVisible(cylinder or section)
+            widget.setVisible(cylinder or section or cone)
+        for widget in (self.top_label, self.top):
+            widget.setVisible(cone)
+        # a sphere turned is the same sphere (principle 3)
+        for widget in (self.angle_label, *self.angle_axes, *self.angles):
+            widget.setVisible(not sphere)
         # a section's shape is what it is: picked when it is added
         for widget in (self.shape_label, self.shape):
             widget.setVisible(section and not editing)
@@ -361,8 +385,9 @@ class MeshPanel(QWidget):
         defaults = DEFAULTS[kind]
         self.set_values(center=defaults['center'], widths=defaults['widths'],
                         angles=(0.0, 0.0, 0.0), size=DEFAULT_SIZE,
-                        radius=0.25, length=SECTION_LENGTH if section else 1.0,
-                        corner=0.0, apart=False, quiet=True)
+                        radius=0.5 if (cone or sphere) else 0.25,
+                        length=SECTION_LENGTH if section else 1.0,
+                        corner=0.0, top=CONE_TOP, apart=False, quiet=True)
         if section:
             self.set_values(shape='I-beam', quiet=True)
         if hole:
@@ -416,10 +441,11 @@ class MeshPanel(QWidget):
     def values(self) -> dict:
         """The fields as typed, in the display unit, as a dict: 'center',
         'widths', 'shape', 'dimensions', 'radius', 'length', 'corner',
-        'angles' in degrees, 'size', 'group' and 'apart'.
+        'top', 'angles' in degrees, 'size', 'group' and 'apart'.
 
-        A section's 'dimensions' are its shape's, in the order `SECTIONS`
-        gives them. A hole's are its diameter, its depth (zero when it
+        A cone's 'radius' is at its base, 'top' at its top and 'length'
+        its height. A section's 'dimensions' are its shape's, in the order
+        `SECTIONS` gives them. A hole's are its diameter, its depth (zero when it
         goes through) and its counterbore's diameter and depth (zeros
         when it has none), as `edit_solid` takes them. For a cylinder, a
         section and a hole, 'widths' is the size of the box around the
@@ -436,6 +462,11 @@ class MeshPanel(QWidget):
         if self.kind == 'solid_cylinder':
             widths = (2 * self.radius.value(), 2 * self.radius.value(),
                       self.length.value())
+        elif self.kind == 'solid_cone':
+            wide = 2 * max(self.radius.value(), self.top.value())
+            widths = (wide, wide, self.length.value())
+        elif self.kind == 'solid_sphere':
+            widths = (2 * self.radius.value(),) * 3
         elif self.kind == 'solid_section':
             across = {'round tube': (section[0], section[0]),
                       'angle': section[:2], 'rectangular tube': section[:2]}.get(
@@ -450,7 +481,7 @@ class MeshPanel(QWidget):
                 'widths': widths, 'shape': shape,
                 'dimensions': hole if self.kind == 'solid_hole' else section,
                 'radius': self.radius.value(), 'length': self.length.value(),
-                'corner': self.corner.value(),
+                'corner': self.corner.value(), 'top': self.top.value(),
                 'angles': tuple(box.value() for box in self.angles),
                 'size': self.size.value(),
                 'group': self.group.currentText().strip(),
@@ -469,7 +500,7 @@ class MeshPanel(QWidget):
         emitting `changed`.
         """
         boxes = [*self.center, *self.widths, *self.angles, self.size,
-                 self.radius, self.length, self.corner, *self.section, *self.hole]
+                 self.radius, self.length, self.corner, self.top, *self.section, *self.hole]
         if quiet:
             for box in boxes:
                 box.blockSignals(True)
@@ -506,7 +537,7 @@ class MeshPanel(QWidget):
                     self.group.setCurrentText(value)
                 elif key == 'apart':
                     self.apart.setChecked(bool(value))
-                elif key in ('size', 'radius', 'length', 'corner'):
+                elif key in ('size', 'radius', 'length', 'corner', 'top'):
                     getattr(self, key).setValue(value)
                 else:
                     for box, number in zip(getattr(self, key), value):

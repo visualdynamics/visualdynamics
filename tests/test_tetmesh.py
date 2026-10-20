@@ -52,6 +52,48 @@ def test_the_distance_is_exact_for_a_block_and_a_cylinder():
         [math.sqrt(2.0) - 1.0, -1.0])
 
 
+def test_the_distances_gradient_is_the_unit_outward_direction():
+    """`distance_gradient` against finite differences of `distance`
+    on every kind of recipe: a turned block, a rounded block, a
+    tilted cylinder, a union, a subtraction, an intersection, an
+    I-beam and a pattern of them. Away from edges and corners the two
+    agree to 1e-5 and the gradient is a unit vector; on an edge the
+    analytic one is a side's value, so a few points may differ."""
+    from visualdynamics.core.solids import distance, distance_gradient
+
+    project, name, geometry = _project()
+    block = project.add_solid_block(name, (0, 0, 0), (2, 1, 1), angles=(10, 20, 30), unit='in')
+    rounded = project.add_solid_block(name, (1, 1, 0), (2, 1.5, 1), corner=0.3, unit='in')
+    tilted = project.add_solid_cylinder(name, (0, 0, 0), 0.4, 3.0, angles=(30, 0, 0), unit='in')
+    beam = project.add_solid_section(name, 'I-beam', (0, -2, 0), (1.0, 0.6, 0.2, 0.2), 4.0,
+                                     unit='in')
+    # a solid belongs to one boolean, so each boolean gets its own
+    def pair():
+        return (project.add_solid_block(name, (0, 0, 0), (2, 1, 1), angles=(10, 20, 30),
+                                        unit='in'),
+                project.add_solid_block(name, (1, 1, 0), (2, 1.5, 1), corner=0.3, unit='in'))
+
+    union = project.combine_solids(name, 'union', list(pair()))
+    cut = project.combine_solids(name, 'subtract', [pair()[1], project.add_solid_cylinder(
+        name, (0, 0, 0), 0.4, 3.0, angles=(30, 0, 0), unit='in')])
+    both = project.combine_solids(name, 'intersect', list(pair()))
+    pattern = project.pattern_solids(
+        name, [project.add_solid_section(name, 'I-beam', (0, -2, 0), (1.0, 0.6, 0.2, 0.2),
+                                         4.0, unit='in')], (2, 1, 1), (3.0, 0, 0), unit='in')
+    rng = np.random.default_rng(3)
+    points = rng.uniform(-3, 3, (4000, 3)) * INCH
+    for item in (block, rounded, tilted, union, cut, both, beam, pattern):
+        d, g = distance_gradient(geometry, item, points)
+        assert d == pytest.approx(distance(geometry, item, points))
+        assert np.linalg.norm(g, axis=1) == pytest.approx(np.ones(len(points)), abs=1e-9)
+        h = 1e-7 * INCH
+        numeric = np.stack([(distance(geometry, item, points + np.eye(3)[k] * h)
+                             - distance(geometry, item, points - np.eye(3)[k] * h)) / (2 * h)
+                            for k in range(3)], axis=1)
+        agree = np.linalg.norm(numeric - g, axis=1) < 1e-5
+        assert agree.mean() > 0.97, (item, agree.mean())
+
+
 def test_the_distances_sign_is_contains_everywhere():
     """A boolean's distance is a bound inside and exact at the surface:
     its sign agrees with `contains` on 20,000 points, the angled block
@@ -253,10 +295,16 @@ def test_the_pane_offers_tets_where_bricks_refuse_and_meshes_them(window, pump):
     assert panel.element_kind == 'hexes'
     assert [panel.elements.itemText(k) for k in range(2)] == ['Hexes', 'Tetras']
     # not an extrusion: bricks are fitted to the shape (test_hexmesh.py),
-    # here past the fitted preview's budget, so the count alone is said
+    # here past the fitted preview's budget, so the count alone is said,
+    # from the volume: the grid's 4,096 cells less the hole
     panel.size.setValue(0.125)
     _settled(window, pump)
-    assert panel.reading_label.text().startswith('About 4,096 bricks at this size')
+    from visualdynamics.core import solids
+
+    bricks = solids.brick_count(project[name], [solids.top_level(project[name])[0].id],
+                                0.125 * 0.0254)
+    assert bricks < 4096
+    assert panel.reading_label.text().startswith(f'About {bricks:,} bricks at this size')
     assert panel.mesh_button.isEnabled()
     panel.elements.setCurrentIndex(1)
     panel.size.setValue(0.4)

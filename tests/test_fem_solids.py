@@ -275,7 +275,8 @@ def test_a_solid_block_round_trips_through_a_geometry():
     # and the wrong properties are refused by what the elements are
     geometry.group_properties = {int(geometry.group_id[0]):
                                  GroupProperties(ALUMINUM, thickness=0.01)}
-    with pytest.raises(ValueError, match='hex8 elements, which take a material alone'):
+    with pytest.raises(ValueError, match='holds solid elements, which take a material '
+                                         'alone, and it has a thickness'):
         Model.from_geometry(geometry)
 
 

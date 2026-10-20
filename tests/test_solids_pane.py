@@ -71,8 +71,10 @@ def test_the_solids_row_adds_blocks_and_cylinders_in_the_pane(window, pump):
     (holder,) = _rows(window, 'solids')
     assert holder.text(0) == 'Solids (0)', 'there before the first solid'
     _pick(window, pump, [holder])
+    # no Add Hole: a hole is a cylinder subtracted (Brandon, 2026-10-20)
     assert list(_acts(window)) == ['add_solid_block', 'add_solid_cylinder',
-                                   'add_solid_section', 'add_solid_hole']
+                                   'add_solid_cone', 'add_solid_sphere',
+                                   'add_solid_section']
     panel = _add(window, pump, 'add_solid_block', center=(0, 0, -0.25),
                  widths=(4, 4, 0.5), group='plate')
     assert panel.title.text() == 'Add Solid Block'
@@ -392,7 +394,8 @@ def test_deleting_the_hexes_row_takes_the_parts_nodes_with_it(window, pump):
 
 
 @pytest.mark.parametrize('verb', ['add_solid_block', 'add_solid_cylinder',
-                                  'add_solid_section', 'add_solid_hole'])
+                                  'add_solid_cone', 'add_solid_sphere',
+                                  'add_solid_section'])
 def test_a_solid_opens_centered_on_the_origin(window, pump, verb):
     """Brandon (2026-10-12): a solid always starts at (0, 0, 0) — its own
     middle on the origin, wherever the last one was typed."""
@@ -449,37 +452,30 @@ def test_a_section_is_picked_sized_and_added_in_the_pane(window, pump):
     assert row.text(0) == 'Channel 1'
 
 
-def test_a_hole_goes_through_or_its_depth_with_a_counterbore_asked_for(window, pump):
-    """Add Hole: Through at first, so no depth; unticked, the depth; a
-    counterbore's two numbers only once one is asked for."""
-    geometry = _part(window, pump)
-    panel = _add(window, pump, 'add_solid_hole')
-    assert panel.title.text() == 'Add Hole'
+def test_an_older_holes_pencil_shows_a_counterbore_only_when_asked_for(window, pump):
+    """A hole from a project made before Add Hole came off the bar
+    (2026-10-20) opens on its pencil as before: Through, so no depth; a
+    counterbore's two numbers only once one is asked for, and one
+    narrower than the hole refused."""
+    _part(window, pump)
+    window.project.add_solid_hole('Part', (0, 0, 0.5), 0.25, unit='in')
+    window._solids_changed('Part')
+    pump()
+    _pencil(window, pump, _rows(window, 'solid')[0])
+    panel = window.scene.mesh_panel
+    assert panel.title.text() == 'Edit Hole'
     assert panel.through.isChecked() and not panel.counterbore.isChecked()
     assert [_shown(box) for box in panel.hole] == [True, False, False, False]
     assert not _shown(panel.length) and not _shown(panel.shape)
-    assert panel.reading_label.text() == (
-        'A hole 0.25 in across, through the part it is cut from — subtract it '
-        'from a part.')
-    panel.add_button.click()
-    pump()
-    assert window.project.journal[-1] == (
-        "project.add_solid_hole('Part', (0.0, 0.0, 0.0), 0.25, None, (0.0, 0.0, 0.0), "
-        "'', unit='in')")
     panel.through.setChecked(False)
     panel.counterbore.setChecked(True)
     pump()
     assert [_shown(box) for box in panel.hole] == [True, True, True, True]
+    panel.set_values(dimensions=(0.25, 0.5, 0.5, 0.125))
+    pump()
     assert panel.reading_label.text().startswith(
         'A hole 0.25 in across, 0.5 in deep, counterbored 0.5 in across and '
         '0.125 in deep')
-    panel.add_button.click()
-    pump()
-    assert window.project.journal[-1] == (
-        "project.add_solid_hole('Part', (0.0, 0.0, 0.0), 0.25, 0.5, (0.0, 0.0, 0.0), "
-        "'', unit='in', counterbore=(0.5, 0.125))")
-    assert geometry.solids[1].dimensions == pytest.approx(
-        tuple(np.array([0.25, 0.5, 0.5, 0.125]) * INCH))
     panel.set_values(dimensions=(0.25, 0.5, 0.2, 0.125))
     pump()
     assert panel.reading_label.text().startswith('A counterbore wider than the hole')

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QSizePolicy,
     QSplitter,
     QToolBar,
     QVBoxLayout,
@@ -41,6 +42,7 @@ from .averaging_panel import AveragingPanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
+from .mate_panel import MatePanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
@@ -50,6 +52,7 @@ from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
 from .rigid_panel import RigidBodyPanel
 from .segments_panel import SegmentsPanel
+from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
 from .signature_panel import SignaturePanel
 from .sine_panel import SinePanel
@@ -1949,6 +1952,10 @@ class DataPane(QWidget):
         self.sine_panel.apply_theme(colors)
 
 
+#: the panel column's starting width beside the 3-D view, in pixels
+SIDE_WIDTH = 340
+
+
 class ScenePane(QWidget):
     """The 3-D view: the scene, its camera, and the annotations drawn
     around it.
@@ -2019,19 +2026,62 @@ class ScenePane(QWidget):
         self.merge_panel.hide()
         self.mesh_solids_panel: MeshSolidsPanel = MeshSolidsPanel()
         self.mesh_solids_panel.hide()
+        self.mate_panel: MatePanel = MatePanel()
+        self.mate_panel.hide()
         self.pattern_panel: PatternPanel = PatternPanel()
         self.pattern_panel.hide()
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
-        row.addWidget(self._page, 1)
-        row.addWidget(self.rigid_panel)
-        row.addWidget(self.mesh_panel)
-        row.addWidget(self.merge_panel)
-        row.addWidget(self.mesh_solids_panel)
-        row.addWidget(self.pattern_panel)
-        layout.addLayout(row)
-        self._view_row = row
+        # the panels in a column beside the view, the two in a splitter
+        # the user can drag (Brandon, 2026-10-20: the pane's width was
+        # the panels' own and could not be changed); the column shows
+        # while any panel does and keeps the width it was dragged to
+        self.side_panels: tuple = (self.rigid_panel, self.mesh_panel, self.merge_panel,
+                                   self.mesh_solids_panel, self.mate_panel,
+                                   self.pattern_panel)
+        self.side: QWidget = QWidget()
+        column = QVBoxLayout(self.side)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        for panel in self.side_panels:
+            # `panel_grid` fixes a panel's width for the data pane's
+            # settings column; beside the view the panel fills the
+            # column the user drags, so its contents grow with it
+            # (Brandon, 2026-10-20: the column widened and the panel
+            # did not)
+            panel.setMinimumWidth(PANEL_WIDTH)
+            panel.setMaximumWidth(16777215)      # Qt's QWIDGETSIZE_MAX
+            panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            column.addWidget(panel)
+            panel.installEventFilter(self)
+        column.addStretch(1)
+        self.side.hide()
+        self.view_split: QSplitter = QSplitter(Qt.Orientation.Horizontal)
+        self.view_split.setChildrenCollapsible(False)
+        self.view_split.addWidget(self._page)
+        self.view_split.addWidget(self.side)
+        self.view_split.setStretchFactor(0, 1)
+        self.view_split.setStretchFactor(1, 0)
+        self._side_width: int = SIDE_WIDTH
+        layout.addWidget(self.view_split, 1)
+
+    def eventFilter(self, watched, event) -> bool:
+        """The panel column follows its panels: shown while any is,
+        at the width it was last dragged to, and hidden with the last."""
+        from PySide6.QtCore import QEvent
+
+        if watched in self.side_panels and event.type() in (QEvent.Type.Show, QEvent.Type.Hide,
+                                                             QEvent.Type.ShowToParent,
+                                                             QEvent.Type.HideToParent):
+            wanted = any(panel.isVisibleTo(self.side) for panel in self.side_panels)
+            if wanted and not self.side.isVisibleTo(self):
+                self.side.show()
+                total = sum(self.view_split.sizes()) or self.width()
+                self.view_split.setSizes([max(total - self._side_width, 1), self._side_width])
+            elif not wanted and self.side.isVisibleTo(self):
+                shown = self.view_split.sizes()[1]
+                if shown > 0:
+                    self._side_width = shown
+                self.side.hide()
+        return super().eventFilter(watched, event)
 
     def _build_toolbar(self) -> QToolBar:
         toolbar = QToolBar('3D view')
@@ -2171,8 +2221,8 @@ class ScenePane(QWidget):
         self.plotter.enable_anti_aliasing('fxaa')
         self._page = self.plotter
         self.apply_background()
-        self._view_row.replaceWidget(placeholder, self.plotter)
-        self._view_row.setStretchFactor(self.plotter, 1)
+        self.view_split.replaceWidget(0, self.plotter)
+        self.view_split.setStretchFactor(0, 1)
         placeholder.deleteLater()
         return self.plotter
 

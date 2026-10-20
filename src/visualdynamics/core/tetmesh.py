@@ -317,6 +317,13 @@ def _distance(geometry, ids, points):
     return np.min([distance(geometry, i, points) for i in ids], axis=0)
 
 
+def _distance_gradient(geometry, ids, points):
+    """`_distance` with its gradient, the nearest part's."""
+    from .solids import _least, distance_gradient
+
+    return _least([distance_gradient(geometry, i, points) for i in ids])
+
+
 def _surfaces(geometry, ids, size):
     """(g, seed, low, high, within) for every surface the parts'
     recipes draw: `g(points)` its signed distance, unbounded; `seed(low,
@@ -331,6 +338,9 @@ def _surfaces(geometry, ids, size):
     within either's extent."""
     planes = []
     walls = []
+    #: surfaces made outright, (g, seed, low, high, within): a cone's
+    #: wall, a sphere (not `others`, which a block's faces use for axes)
+    shaped = []
     slack = 1e-6 * size
     for i in ids:
         for leaf in _leaves(geometry, i):
@@ -355,12 +365,24 @@ def _surfaces(geometry, ids, size):
                                 return np.abs((q - center) @ frame[2]) <= hz + slack
                             walls.append((center + sx * wx * frame[0] + sy * wy * frame[1],
                                           frame[2], leaf.corner, lo, hi, within))
+            elif leaf.kind == 'sphere':
+                shaped.append((*_sphere(center, leaf.radius), lo, hi, lambda q: np.ones(len(q), bool)))
             else:
+                # a cylinder, or a cone: a wall whose radius runs from the
+                # base's to the top's, and a cap at each end with a radius
+                top = leaf.radius if leaf.kind == 'cylinder' else float(leaf.dimensions[0])
+
                 def within(q, center=center, frame=frame, hl=leaf.length / 2.0):
                     return np.abs((q - center) @ frame[2]) <= hl + slack
-                walls.append((center, frame[2], leaf.radius, lo, hi, within))
-                for sign in (-1.0, 1.0):
-                    def within(q, center=center, frame=frame, r=leaf.radius):
+                if leaf.kind == 'cylinder':
+                    walls.append((center, frame[2], leaf.radius, lo, hi, within))
+                else:
+                    shaped.append((*_cone(center, frame[2], leaf.radius, top, leaf.length),
+                                   lo, hi, within))
+                for sign, r in ((-1.0, leaf.radius), (1.0, top)):
+                    if r <= 0.0:
+                        continue            # a cone's point has no cap
+                    def within(q, center=center, frame=frame, r=r):
                         local = (q - center) @ frame.T
                         return np.hypot(local[:, 0], local[:, 1]) <= r + slack
                     planes.append((center + sign * frame[2] * leaf.length / 2.0,
@@ -381,7 +403,7 @@ def _surfaces(geometry, ids, size):
         surfaces.append((*_plane(point, normal), lo, hi, within))
     for center, axis, radius, lo, hi, within in walls:
         surfaces.append((*_wall(center, axis, radius), lo, hi, within))
-    return surfaces
+    return surfaces + shaped
 
 
 def _across(axis):
@@ -435,14 +457,77 @@ def _wall(center, axis, radius):
     return g, seed
 
 
+def _cone(center, axis, base, top, length):
+    """A cone's wall, its radius `base` at -length/2 along `axis` and
+    `top` at +length/2: (g, seed) as `_wall`'s, g the distance across
+    the slanted wall, near it."""
+    center = np.asarray(center, dtype=float)
+    axis = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
+    e1, e2 = _across(axis)
+    slope = (top - base) / length
+    lean = np.sqrt(1.0 + slope ** 2)
+
+    def radius(along):
+        return base + slope * (along + length / 2.0)
+
+    def g(q):
+        rel = q - center
+        along = rel @ axis
+        rho = np.linalg.norm(rel - along[:, None] * axis, axis=1)
+        return (rho - radius(along)) / lean
+
+    def seed(lo, hi, spacing):
+        corners = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1])
+                            for z in (lo[2], hi[2])]) - center
+        along = corners @ axis
+        rings = []
+        for s in np.arange(max(along.min(), -length / 2.0),
+                           min(along.max(), length / 2.0) + spacing, spacing):
+            r = radius(s)
+            if r <= 0.0:
+                continue
+            t = np.arange(0.0, 2.0 * np.pi, spacing / r)
+            rings.append(center + r * (np.cos(t)[:, None] * e1 + np.sin(t)[:, None] * e2)
+                         + s * axis)
+        q = np.vstack(rings) if rings else np.empty((0, 3))
+        return q[np.all((q >= lo) & (q <= hi), axis=1)]
+    return g, seed
+
+
+def _sphere(center, radius):
+    """A sphere's surface: (g, seed) as `_wall`'s."""
+    center = np.asarray(center, dtype=float)
+
+    def g(q):
+        return np.linalg.norm(q - center, axis=1) - radius
+
+    def seed(lo, hi, spacing):
+        # rings of latitude, each spaced round by `spacing`
+        rings = []
+        for polar in np.arange(0.0, np.pi + 1e-12, spacing / radius):
+            r = radius * np.sin(polar)
+            z = radius * np.cos(polar)
+            t = np.arange(0.0, 2.0 * np.pi, spacing / r) if r > spacing * 1e-3 else np.zeros(1)
+            rings.append(center + np.stack([r * np.cos(t), r * np.sin(t), np.full(len(t), z)],
+                                           axis=1))
+        q = np.vstack(rings)
+        return q[np.all((q >= lo) & (q <= hi), axis=1)]
+    return g, seed
+
+
 def _gradient(g, q, step):
     return np.stack([(g(q + np.eye(3)[k] * step) - g(q)) / step for k in range(3)], axis=1)
 
 
-def _onto(g, q, tol):
-    """`q` moved onto the surface `g` = 0 along its gradient, once."""
-    value = g(q)
-    grad = _gradient(g, q, max(tol, 1e-12))
+def _onto(g, q, tol, gradient=None):
+    """`q` moved onto the surface `g` = 0 along its gradient, once;
+    `gradient(q)` gives (value, gradient) outright where there is one,
+    else the gradient is taken by finite differences."""
+    if gradient is not None:
+        value, grad = gradient(q)
+    else:
+        value = g(q)
+        grad = _gradient(g, q, max(tol, 1e-12))
     return q - (value / np.maximum((grad ** 2).sum(axis=1), 1e-30))[:, None] * grad
 
 

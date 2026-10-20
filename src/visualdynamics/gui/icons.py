@@ -1349,6 +1349,20 @@ def _draw_merge_nodes(painter, color):
     painter.drawEllipse(QPointF(32, 48), 11, 11)
 
 
+def _draw_mate_surfaces(painter, color):
+    """Two blocks face to face with springs between them: mating
+    surfaces made to interact (Mate Surfaces, 2026-10-20)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRect(6, 8, 52, 14)
+    painter.drawRect(6, 42, 52, 14)
+    for x in (16, 32, 48):
+        painter.drawLine(QPointF(x, 22), QPointF(x - 5, 27))
+        painter.drawLine(QPointF(x - 5, 27), QPointF(x + 5, 32))
+        painter.drawLine(QPointF(x + 5, 32), QPointF(x - 5, 37))
+        painter.drawLine(QPointF(x - 5, 37), QPointF(x, 42))
+
+
 def _draw_align_meshes(painter, color):
     """A coarse row of nodes over a fine one, an arrow carrying a coarse
     node onto the fine node nearest it: meshes made to meet where parts
@@ -1470,6 +1484,33 @@ def _draw_solid_cylinder(painter, color):
     painter.drawArc(QRectF(14, 42, 36, 16), 180 * 16, 180 * 16)
     painter.setBrush(_faded(color, 40))
     painter.drawEllipse(QRectF(14, 6, 36, 16))
+
+
+def _draw_solid_cone(painter, color):
+    """A cone standing on its base, its sides running in to a narrow top
+    (Add Cone, 2026-10-20)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(_faded(color, 90))
+    painter.drawPolygon([QPointF(10, 50), QPointF(24, 12), QPointF(40, 12), QPointF(54, 50)])
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(QRectF(10, 42, 44, 16))
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawArc(QRectF(10, 42, 44, 16), 180 * 16, 180 * 16)
+    painter.setBrush(_faded(color, 40))
+    painter.drawEllipse(QRectF(24, 8, 16, 8))
+
+
+def _draw_solid_sphere(painter, color):
+    """A sphere: a disk with its equator drawn as an ellipse (Add
+    Sphere, 2026-10-20)."""
+    painter.setPen(_pen(color, 5))
+    painter.setBrush(_faded(color, 90))
+    painter.drawEllipse(QRectF(8, 8, 48, 48))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawArc(QRectF(8, 24, 48, 16), 180 * 16, 180 * 16)
+    painter.setPen(_pen(color, 2))
+    painter.drawArc(QRectF(8, 24, 48, 16), 0, 180 * 16)
 
 
 def _draw_solid_section(painter, color):
@@ -2123,8 +2164,9 @@ def control_icon(name: str) -> QIcon:
      'integrate': _draw_integrate, 'differentiate': _draw_differentiate,
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
-     'align_meshes': _draw_align_meshes,
+     'align_meshes': _draw_align_meshes, 'mate_surfaces': _draw_mate_surfaces,
      'solid_block': _draw_solid_block, 'solid_cylinder': _draw_solid_cylinder,
+     'solid_cone': _draw_solid_cone, 'solid_sphere': _draw_solid_sphere,
      'solid_section': _draw_solid_section, 'solid_hole': _draw_solid_hole,
      'solid_union': _draw_solid_union, 'solid_subtract': _draw_solid_subtract,
      'solid_intersect': _draw_solid_intersect,

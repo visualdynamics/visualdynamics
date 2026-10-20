@@ -181,6 +181,7 @@ from .icons import (
     placeholder_icon,
     type_icon,
 )
+from .message_bar import MessageBar
 
 #: how much imaginary part, against the real, counts as a complex
 #: measurement rather than the residue of computing one
@@ -293,11 +294,13 @@ DRAWN_AS = {'groups': 'elements'}
 
 #: a solid's row: what it is called when it has no name, and its icon
 #: (`core.solids`, 2026-10-11)
-SOLID_LABELS = {'block': 'Block', 'cylinder': 'Cylinder', 'union': 'Union',
+SOLID_LABELS = {'block': 'Block', 'cylinder': 'Cylinder', 'cone': 'Cone',
+                'sphere': 'Sphere', 'union': 'Union',
                 'subtract': 'Subtraction', 'intersect': 'Intersection',
                 'pattern': 'Pattern', 'hole': 'Hole',
                 **{shape: f'{shape[:1].upper()}{shape[1:]}' for shape in SECTIONS}}
 SOLID_ICONS = {'block': 'solid_block', 'cylinder': 'solid_cylinder',
+               'cone': 'solid_cone', 'sphere': 'solid_sphere',
                'union': 'solid_union', 'subtract': 'solid_subtract',
                'intersect': 'solid_intersect', 'pattern': 'solid_pattern',
                'hole': 'solid_hole', **dict.fromkeys(SECTIONS, 'solid_section')}
@@ -747,6 +750,8 @@ class MainWindow(QMainWindow):
         platform, so the headless tests use this to run the full render
         path."""
         super().__init__()
+        # the status line as selectable text, before anything adds to the bar
+        self.setStatusBar(MessageBar(self))
         from .project_tree import start_trace
         from .tooltips import install as wrap_long_tooltips
 
@@ -991,6 +996,20 @@ class MainWindow(QMainWindow):
         self.scene.merge_panel.changed.connect(self._merge_refresh)
         self._meshing: dict | None = None
         self.scene.mesh_solids_panel.changed.connect(self._mesh_preview_asked)
+        #: Mate Surfaces while its pane is open: the geometry, the groups,
+        #: the patches with their nodes as picked, and the kept set being
+        #: edited, if any (Brandon, 2026-10-20)
+        self._mating: dict | None = None
+        self._mate_observer = None
+        self._mate_hover_observer = None
+        self._mate_holding = False
+        #: the sets of mated surfaces picked in the tree, marked in the view
+        self._mates_shown: list = []
+        self.scene.mate_panel.tolerance_changed.connect(self._mate_find)
+        self.scene.mate_panel.search_changed.connect(self._mate_search_changed)
+        self.scene.mate_panel.changed.connect(self._mate_refresh)
+        self.scene.mate_panel.keep_asked.connect(self._mate_keep)
+        self.scene.mate_panel.close_asked.connect(self.close_mate_pane)
         #: the preview waits for the size box to settle: each change
         #: meshed at once, and at a fine size a spin of the box was one
         #: mesh and one drawing per step on this thread (Brandon,
@@ -2662,6 +2681,7 @@ class MainWindow(QMainWindow):
                 item.addChild(child)
             self._build_families(item, obj, name)
             self._build_solids(item, obj, name)
+            self._build_mates(item, obj, name)
             # rebuilt while its table is open: the pencil stays on
             self._mark_pencils([item])
         elif isinstance(obj, (DataArray, ShapeSet, ChannelTable, Photos,
@@ -2764,6 +2784,55 @@ class MainWindow(QMainWindow):
             row(holder, solid)
         item.addChild(holder)
 
+    def _build_mates(self, item, geometry, name):
+        """The Mated Surfaces row under a geometry, when it has any, and
+        a row per set under it, its pencil opening the pane on the set
+        (Brandon, 2026-10-20)."""
+        if not geometry.mates:
+            return
+        holder = QTreeWidgetItem([f'Mated Surfaces ({len(geometry.mates)})'])
+        holder.setIcon(0, control_icon('mate_surfaces'))
+        holder.setData(0, ROLE_REFERENCE, ('mates', name, None))
+        holder.setData(0, ROLE_POPULATED, True)
+        holder.setFlags(holder.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        holder.setToolTip(0, 'Where element groups\' surfaces are tied, along the '
+                             'normal and in the plane, when a model is built')
+        for mated in geometry.mates:
+            child = QTreeWidgetItem([f'{mated.name} ({mated.describe()})'])
+            child.setIcon(0, control_icon('mate_surfaces'))
+            child.setData(0, ROLE_REFERENCE, ('mate', name, mated.id))
+            child.setData(0, ROLE_POPULATED, True)
+            child.setFlags(child.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            child.setIcon(1, control_icon('edit'))
+            child.setToolTip(1, 'Change its nodes, how it is held or its name')
+            holder.addChild(child)
+        item.addChild(holder)
+
+    def _mate_selection_holds(self, mating) -> bool:
+        """Whether the tree's selection is still what the Mate Surfaces
+        pane was opened on: its groups, or the set it edits."""
+        if mating['editing'] is not None:
+            return self._selected_mates() == (mating['name'], [mating['editing']])
+        picked = self._selected_entities()
+        return (picked is not None and picked[0] == mating['name'] and picked[1] == 'groups'
+                and sorted(int(g) for g in picked[2]) == mating['groups'])
+
+    def _selected_mates(self) -> tuple[str, list[int]] | None:
+        """(geometry name, set ids) when the tree selection is rows of
+        one geometry's mated surfaces, else None. The Mated Surfaces row
+        itself stands for every set under it (Brandon, 2026-10-20: it
+        could not be deleted, its sets could)."""
+        picked = self.selected_references()
+        if not picked or any(kind not in ('mate', 'mates') for kind, *_rest in picked):
+            return None
+        names = {name for _kind, name, _obj, _detail in picked}
+        if len(names) != 1:
+            return None
+        name = names.pop()
+        if any(kind == 'mates' for kind, *_rest in picked):
+            return name, [m.id for m in self.objects[name].mates]
+        return name, [int(detail) for _kind, _name, _obj, detail in picked]
+
     def _selected_solids(self) -> tuple[str, list[int]] | None:
         """(geometry name, solid ids) when the tree selection is solid rows
         of one geometry, in the table's order, else None."""
@@ -2850,12 +2919,18 @@ class MainWindow(QMainWindow):
         Add runs the project's `add_solid_section`."""
         self._open_mesh_pane('solid_section')
 
-    def add_solid_hole_act(self) -> None:
-        """Open the add pane for a hole in the selected geometry, to
-        subtract from a part: where it enters, a diameter, a depth or
-        Through, and a counterbore when one is wanted. Each Add runs the
-        project's `add_solid_hole`."""
-        self._open_mesh_pane('solid_hole')
+    def add_solid_cone_act(self) -> None:
+        """Open the add pane for a cone in the selected geometry: a
+        center, a base radius, a top radius, a height along its own Z,
+        three angles and a name. Each Add runs the project's
+        `add_solid_cone`."""
+        self._open_mesh_pane('solid_cone')
+
+    def add_solid_sphere_act(self) -> None:
+        """Open the add pane for a sphere in the selected geometry: a
+        center, a radius and a name. Each Add runs the project's
+        `add_solid_sphere`."""
+        self._open_mesh_pane('solid_sphere')
 
     def _solids_changed(self, name: str, pick=()) -> None:
         """The tree and the view after the solids changed, `pick`'s rows
@@ -2945,6 +3020,8 @@ class MainWindow(QMainWindow):
             self.close_mesh_pane()
         if self._merging is not None:
             self.close_merge_pane(redraw=False)
+        if self._mating is not None:
+            self.close_mate_pane(redraw=False)
         defined = geometry.units_defined
         unit = self.unit_system.label_text('length') if defined else 'units'
         # the size a mesh is likely to hold at, the one Detect Element
@@ -2959,6 +3036,7 @@ class MainWindow(QMainWindow):
                          'unit': unit}
         panel = self.scene.mesh_solids_panel
         panel.open_for(unit, shown, ', '.join(names), len(ids))
+        self._mesh_pieces_layout()
         panel.show()
         self._mesh_solids_refresh()
 
@@ -2967,6 +3045,46 @@ class MainWindow(QMainWindow):
         typed = self.scene.mesh_solids_panel.size.value()
         return (float(self.unit_system.to_si(typed, 'length'))
                 if self._meshing['defined'] else typed)
+
+    def _mesh_solids_sizes(self) -> dict[int, float] | None:
+        """The size typed for each piece of a union meshed in pieces,
+        as the geometry holds its coordinates; None with the one box."""
+        panel = self.scene.mesh_solids_panel
+        if not panel.piece_ids:
+            return None
+        typed = panel.piece_sizes()
+        if not self._meshing['defined']:
+            return typed
+        return {i: float(self.unit_system.to_si(v, 'length')) for i, v in typed.items()}
+
+    def _mesh_pieces_layout(self) -> None:
+        """A union that is no extrusion, meshed into bricks, takes a
+        size per piece (`solids.piece_plan`): the pane shows a row for
+        each with the size it is likely to hold at, in place of the one
+        box, and the box comes back for anything else."""
+        from ..core import solids
+
+        meshing = self.__dict__.get('_meshing')
+        if meshing is None:
+            return
+        panel = self.scene.mesh_solids_panel
+        geometry = self.objects[meshing['name']]
+        rows = []
+        if panel.element_kind == 'hexes':
+            try:
+                plan = solids.piece_plan(geometry, meshing['ids'], self._mesh_solids_size())
+            except ValueError:
+                plan = []
+            if len(plan) > 1:
+                for entry in plan:
+                    # read as meshed: a piece less what is cut from it
+                    with solids.meshed_as(geometry, entry['id'], entry['cuts']) as read_as:
+                        size = self._mesh_size_likely(geometry, [read_as], 'hexes')
+                    shown = (float(self.unit_system.from_si(size, 'length'))
+                             if meshing['defined'] else size)
+                    rows.append((entry['id'], entry['name'], shown))
+        if [i for i, _n, _s in rows] != panel.piece_ids:
+            panel.set_pieces(meshing['unit'], rows)
 
     def _mesh_preview_asked(self) -> None:
         """The size, the elements or Keep apart changed: preview once
@@ -2979,7 +3097,7 @@ class MainWindow(QMainWindow):
         are none. Past `MESH_PREVIEW_BRICKS` bricks or
         `MESH_PREVIEW_TETS` tetrahedra they are counted and not drawn:
         the count is said, and Mesh makes them with the bar up."""
-        from ..core import hexmesh, solids, tetmesh
+        from ..core import solids, tetmesh
 
         self._mesh_settle.stop()
         meshing = self.__dict__.get('_meshing')
@@ -2988,6 +3106,8 @@ class MainWindow(QMainWindow):
         panel = self.scene.mesh_solids_panel
         geometry = self.objects.get(meshing['name'])
         tets = panel.element_kind == 'tetras'
+        # the size per piece, or the one box, as the elements say
+        self._mesh_pieces_layout()
         try:
             if tets:
                 expected = tetmesh.tet_count(geometry, meshing['ids'],
@@ -3002,25 +3122,26 @@ class MainWindow(QMainWindow):
                 part, made = tetmesh.tet_mesh(geometry, meshing['ids'],
                                               self._mesh_solids_size())
             else:
-                try:
-                    cells = solids.grid_cells(geometry, meshing['ids'],
-                                              self._mesh_solids_size())
-                    budget = MESH_PREVIEW_BRICKS
-                except solids.NotAnExtrusion:
-                    # a grid fitted to the shape: seconds of smoothing,
-                    # so the preview stops sooner
-                    cells = hexmesh.grid_cells(geometry, meshing['ids'],
-                                               self._mesh_solids_size())
-                    budget = MESH_PREVIEW_FITTED
-                if cells > budget:
+                sizes = self._mesh_solids_sizes()
+                plan = solids.piece_plan(geometry, meshing['ids'],
+                                         self._mesh_solids_size(), sizes)
+                # a grid fitted to the shape is seconds of smoothing, so
+                # the preview stops sooner for one; the bricks the mesh
+                # holds, read from the volume, not the grid's cells
+                bricks = sum(entry['bricks'] for entry in plan)
+                budget = (MESH_PREVIEW_FITTED
+                          if any(entry['method'] == 'overlay' for entry in plan)
+                          else MESH_PREVIEW_BRICKS)
+                if bricks > budget:
                     self._draw_plane_preview(None)
                     panel.show_reading(
-                        f'About {cells:,} bricks at this size. The preview '
+                        f'About {bricks:,} bricks at this size. The preview '
                         f'stops past {budget:,}; press Mesh to make them.', True)
                     return
                 part, made = solids.brick_mesh(geometry, meshing['ids'],
                                                self._mesh_solids_size(),
-                                               panel.parts_apart.isChecked())
+                                               panel.parts_apart.isChecked(),
+                                               sizes=sizes)
         except ValueError as refusal:
             self._draw_plane_preview(None)
             text = str(refusal)
@@ -3046,6 +3167,9 @@ class MainWindow(QMainWindow):
                 f'radius ratio is {made["quality"]:.2f}.{poor} The shortest '
                 f'edge is {shortest:.4g} {meshing["unit"]}.{replacing}', True)
             return
+        if made.get('method') == 'pieces':
+            panel.show_reading(self._pieces_reading(made, meshing) + replacing, True)
+            return
         if made.get('method') == 'overlay':
             poor = (f' {made["poor"]:,} under 0.3.' if made['poor'] else '')
             panel.show_reading(
@@ -3070,11 +3194,49 @@ class MainWindow(QMainWindow):
             return
         panel = self.scene.mesh_solids_panel
         geometry = self.objects[meshing['name']]
+        if panel.piece_ids:
+            for piece in panel.piece_ids:
+                size = self._mesh_size_likely(geometry, [piece], 'hexes')
+                shown = (float(self.unit_system.from_si(size, 'length'))
+                         if meshing['defined'] else size)
+                panel.set_piece_size(piece, shown)
+            self._mesh_solids_refresh()
+            return
         size = self._mesh_size_likely(geometry, meshing['ids'], panel.element_kind)
         shown = (float(self.unit_system.from_si(size, 'length')) if meshing['defined']
                  else size)
         panel.size.setValue(shown)
         self._mesh_solids_refresh()
+
+    def _pieces_reading(self, made: dict, meshing: dict) -> str:
+        """What a union meshed in pieces made: each piece's route and
+        size, and the seams."""
+        def shown(size):
+            return (float(self.unit_system.from_si(size, 'length'))
+                    if meshing['defined'] else size)
+
+        said = []
+        for piece in made['pieces']:
+            if piece['method'] == 'overlay':
+                said.append(f'{piece["name"]} fitted at {shown(piece["size"]):.4g} '
+                            f'{meshing["unit"]} ({piece["bricks"]:,} bricks, worst '
+                            f'{piece["quality"]:.2f})')
+            elif piece.get('turned'):
+                # swept along its own axis, its end on what it meets:
+                # the worst brick, the end's, said (2026-10-20)
+                said.append(f'{piece["name"]} swept along its own axis at '
+                            f'{shown(piece["size"]):.4g} {meshing["unit"]} '
+                            f'({piece["bricks"]:,} bricks, worst {piece["quality"]:.2f})')
+            else:
+                said.append(f'{piece["name"]} swept along {"XYZ"[piece["axis"]]} at '
+                            f'{shown(piece["size"]):.4g} {meshing["unit"]} '
+                            f'({piece["bricks"]:,} bricks)')
+        seams = (f'{made["seam_shared"]:,} nodes shared at the seams'
+                 + (f', {made["ties"]:,} joined rigidly as mated surfaces'
+                    if made['ties'] else '')
+                 + '.')
+        return (f'{made["bricks"]:,} bricks in {len(made["pieces"])} pieces: '
+                + '; '.join(said) + f'. {seams}')
 
     @staticmethod
     def _mesh_size_likely(geometry, ids, elements: str) -> float:
@@ -3108,24 +3270,71 @@ class MainWindow(QMainWindow):
             return True
         except solids.NotAnExtrusion:
             pass
-        read = hexmesh.likely_to_fold(geometry, meshing['ids'], self._mesh_solids_size())
-        if not read['likely']:
-            return True
+        try:
+            plan = solids.piece_plan(geometry, meshing['ids'], self._mesh_solids_size(),
+                                     self._mesh_solids_sizes())
+            fitted = [entry for entry in plan if entry['method'] == 'overlay']
+            for entry in fitted:
+                ids = meshing['ids'] if entry['id'] is None else [entry['id']]
+                with solids.meshed_as(geometry, ids[0], entry['cuts']) as read_as:
+                    shown = [read_as, *ids[1:]]
+                    read = hexmesh.likely_to_fold(geometry, shown, entry['size'])
+                    if read['likely']:
+                        # the size it is likely to hold at, counted as the
+                        # limit counts: bricks by volume, and the grid
+                        suggested_bricks = solids.brick_count(geometry, shown,
+                                                              read['suggested'])
+                        suggested_cells = hexmesh.grid_cells(geometry, shown,
+                                                             read['suggested'], piece=True)
+                        break
+            else:
+                return True
+        except ValueError as refusal:
+            # the reading failed where the mesh would: said in the bar
+            self._show_status(f'{meshing["name"]}: {refusal}')
+            return False
         suggested = (float(self.unit_system.from_si(read['suggested'], 'length'))
                      if meshing['defined'] else read['suggested'])
-        typed = panel.size.value()
+        typed = (float(self.unit_system.from_si(entry['size'], 'length'))
+                 if meshing['defined'] else entry['size'])
+        in_pieces = entry['id'] in panel.piece_ids
+        piece = f'{entry["name"]}: ' if in_pieces else ''
+        # the suggested size is offered only where its mesh fits the
+        # limit; past it the part wants two sizes, which one fit cannot
+        # give (the I-beam volume: 0.067 in is 2.3 million cells)
         why = []
-        if np.isfinite(read['across']):
+        if np.isfinite(read['across']) and read['across'] < hexmesh.ACROSS - 0.5:
             why.append(f'the smallest round feature is {read["across"]:.1f} bricks across '
                        f'its radius, and fits have held at {hexmesh.ACROSS:g} or more')
+        if np.isfinite(read['through']) and read['through'] < hexmesh.THROUGH - 0.5:
+            why.append(f'the thinnest wall is {read["through"]:.1f} bricks through, '
+                       f'and a fit needs {hexmesh.THROUGH:g}')
         if read['flat']:
             why.append(f'{read["flat"]:,} bricks are flat before any fitting')
-        text = (f'At {typed:g} {meshing["unit"]} the fit is likely to fold: '
+        if suggested_bricks > solids.MESH_LIMIT or suggested_cells > solids.GRID_LIMIT:
+            over = (f'about {suggested_bricks:,} bricks, over the limit of '
+                    f'{solids.MESH_LIMIT:,}' if suggested_bricks > solids.MESH_LIMIT else
+                    f'a grid of {suggested_cells:,} cells, over the {solids.GRID_LIMIT:,} '
+                    'it can hold')
+            text = (f'{piece}At {typed:g} {meshing["unit"]} the fit is likely to fold: '
+                    f'{"; ".join(why)}. {suggested:.3g} {meshing["unit"]} is likely to '
+                    f'hold, but that is {over}: the part wants a finer size on its thin '
+                    f'piece than on the rest, which one fit cannot give.')
+            answer = self._ask_mesh_anyway(text, 'Use tetras instead',
+                                           f'Mesh at {typed:g} {meshing["unit"]} anyway')
+            if answer == 'suggested':
+                panel.elements.setCurrentIndex(panel.elements.findData('tetras'))
+                return False
+            return answer == 'anyway'
+        text = (f'{piece}At {typed:g} {meshing["unit"]} the fit is likely to fold: '
                 f'{"; ".join(why)}. {suggested:.3g} {meshing["unit"]} is likely to hold.')
         answer = self._ask_mesh_anyway(text, f'Mesh at {suggested:.3g} {meshing["unit"]}',
                                        f'Mesh at {typed:g} {meshing["unit"]} anyway')
         if answer == 'suggested':
-            panel.size.setValue(suggested)
+            if in_pieces:
+                panel.set_piece_size(entry['id'], suggested)
+            else:
+                panel.size.setValue(suggested)
             return True
         return answer == 'anyway'
 
@@ -3170,6 +3379,7 @@ class MainWindow(QMainWindow):
                 f'Meshing {name} at {panel.size.value():g} {meshing["unit"]}…',
                 self.project.mesh_solids,
                 name, meshing['ids'], panel.size.value(), unit=unit,
+                **({'sizes': panel.piece_sizes()} if panel.piece_ids and not tets else {}),
                 **({'apart': True} if panel.apart.isChecked() else {}),
                 **({'parts_apart': True}
                    if panel.parts_apart.isChecked() and not tets else {}),
@@ -3186,10 +3396,14 @@ class MainWindow(QMainWindow):
                     if found.get('replaced') else '')
         what = (f'{found["tets"]:,} tetrahedra' if tets
                 else f'{found["bricks"]:,} bricks')
+        # a section, thickness or orientation the solids' group carried
+        # was taken off, and said (Brandon, 2026-10-20)
+        cleared = ''.join(f'; {held} taken off {group}, solids taking a material alone'
+                          for group, held in (found.get('cleared') or {}).items())
         self._show_status(
             f'{name}: meshed into {what}{replaced} — '
             f'{found["added"]:,} nodes added, {found["shared"]:,} shared with '
-            f'the geometry; {obj.num_nodes:,} nodes in all')
+            f'the geometry; {obj.num_nodes:,} nodes in all{cleared}')
 
     def close_mesh_solids_pane(self, redraw: bool = True) -> None:
         """Close the Mesh Solids pane and remove its preview. With
@@ -3630,7 +3844,8 @@ class MainWindow(QMainWindow):
         While a geometry's table is being edited, its selected rows are
         deleted. Otherwise, picked solids, entities (nodes, elements and
         the like) or components are deleted from their geometry, and
-        picked records, modes, channels or photos from their object. Only
+        picked records, modes, channels or photos from their object, and
+        picked sets of mated surfaces from their geometry. Only
         when no sub-item is picked are whole objects deleted, so an object
         selected beside a sub-item is not deleted with it."""
         if self.editing is not None:
@@ -3638,6 +3853,9 @@ class MainWindow(QMainWindow):
         chosen = self._selected_solids()
         if chosen is not None:
             return self._delete_solids(*chosen)
+        chosen = self._selected_mates()
+        if chosen is not None:
+            return self._delete_mates(*chosen)
         entities = self._selected_entities()
         if entities:
             return self._delete_entities(*entities)
@@ -3930,15 +4148,17 @@ class MainWindow(QMainWindow):
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
         ('align_meshes', 'Align Meshes', 'align_meshes', 'align_meshes_act'),
+        ('mate_surfaces', 'Mate Surfaces', 'mate_surfaces', 'mate_surfaces_act'),
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
         ('add_block', 'Add Block', 'block', 'add_block_act'),
         ('add_solid_block', 'Add Solid Block', 'solid_block',
          'add_solid_block_act'),
         ('add_solid_cylinder', 'Add Cylinder', 'solid_cylinder',
          'add_solid_cylinder_act'),
+        ('add_solid_cone', 'Add Cone', 'solid_cone', 'add_solid_cone_act'),
+        ('add_solid_sphere', 'Add Sphere', 'solid_sphere', 'add_solid_sphere_act'),
         ('add_solid_section', 'Add Section', 'solid_section',
          'add_solid_section_act'),
-        ('add_solid_hole', 'Add Hole', 'solid_hole', 'add_solid_hole_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
         ('read_as_specification', 'Read as Specification',
          'as_specification', 'read_as_specification_act'),
@@ -3952,15 +4172,18 @@ class MainWindow(QMainWindow):
 
     #: the acts offered on a geometry's Solids row: the shapes a part is
     #: built from before it is meshed (Brandon, 2026-10-11)
+    # Add Hole came off (Brandon, 2026-10-20): a hole was a cylinder, or
+    # two for a counterbore, to subtract; a cone and a sphere went on
     SOLID_ACTS: ClassVar[tuple] = ('add_solid_block', 'add_solid_cylinder',
-                                   'add_solid_section', 'add_solid_hole')
+                                   'add_solid_cone', 'add_solid_sphere',
+                                   'add_solid_section')
 
     #: the acts offered on element groups picked in the tree rather than
     #: the geometry's row: merging every coincident node of a whole model
     #: ties parts that were meant to stay apart, so the merge is asked
     #: of the groups it should tie (Brandon, 2026-10-11)
     GROUP_ACTS: ClassVar[frozenset] = frozenset({'merge_coincident_nodes',
-                                                 'align_meshes'})
+                                                 'align_meshes', 'mate_surfaces'})
 
     def acts_for(self, names=None):
         """The acts the selection can take, as a list of `(verb, label,
@@ -4006,6 +4229,17 @@ class MainWindow(QMainWindow):
                          ("Move the coarser mesh's nodes onto the finer's "
                           'where the selected element groups\' parts meet '
                           'or overlap, so they can be merged')))
+                # two groups or more with surfaces, plates or solids, to
+                # mate (Brandon, 2026-10-20)
+                from ..core.mates import _solid_or_plate_groups
+
+                if (geometry is not None and len(picked[2]) > 1
+                        and len(_solid_or_plate_groups(geometry, picked[2])) > 1):
+                    acts.append(
+                        ('mate_surfaces', 'Mate Surfaces', 'mate_surfaces',
+                         lambda: self.mate_surfaces_act(picked[0], picked[2]),
+                         ('Find where the selected element groups\' surfaces '
+                          'mate, and join them there rigidly or by springs')))
                 if acts:
                     return acts
             if self.test_item.isSelected():
@@ -4306,6 +4540,10 @@ class MainWindow(QMainWindow):
         and a click on it a close. A category's when its whole table is
         open; a family's when its elements are; an element group's when
         it is among the groups being edited."""
+        if reference is not None and reference[0] == 'mate':
+            mating = self.__dict__.get('_mating')
+            return (mating is not None and mating['name'] == reference[1]
+                    and mating['editing'] == reference[2])
         if reference is not None and reference[0] == 'solid':
             patterning = self.__dict__.get('_patterning')
             return ((self._mesh is not None
@@ -4343,6 +4581,8 @@ class MainWindow(QMainWindow):
                     reference = each.data(0, ROLE_REFERENCE)
                     if reference is not None and reference[0] == 'solids':
                         rows = list(self._solid_rows(each))
+                    elif reference is not None and reference[0] == 'mates':
+                        rows = [each.child(k) for k in range(each.childCount())]
                     elif (reference is None or reference[0] not in
                             ('component', 'family', 'group')):
                         continue
@@ -4369,6 +4609,16 @@ class MainWindow(QMainWindow):
         if column != 1:
             return
         reference = item.data(0, ROLE_REFERENCE)
+        if reference is not None and reference[0] == 'mate':
+            # a toggle, as every pencil is
+            if self._pencil_on(reference):
+                self.close_mate_pane()
+                return
+            self.tree.setCurrentItem(item)
+            self.tree.clearSelection()
+            item.setSelected(True)
+            self.edit_mated_surfaces_act(reference[1], reference[2])
+            return
         if reference is not None and reference[0] == 'solid':
             # a toggle as the tables' pencils are: on, it puts the pane away
             if self._pencil_on(reference):
@@ -5191,8 +5441,7 @@ class MainWindow(QMainWindow):
             return
         name, component = self.editing
         geometry = self.objects.get(name)
-        rows = sorted({index.row() for index
-                       in self.table.selectionModel().selectedIndexes()})
+        rows = self.table.selected_items()
         if not rows or geometry is None:
             return
         keys = [_entity_key(geometry, component, row) for row in rows]
@@ -5461,14 +5710,22 @@ class MainWindow(QMainWindow):
         so a column is still the person's to drag wider or narrower."""
         table.resizeColumnsToContents()
         metrics = table.fontMetrics()
+        widest_choice = 0
         for i, column in enumerate(getattr(model, 'columns', ())):
             if not getattr(column, 'editable', False):
                 continue
             widest = max((metrics.horizontalAdvance(str(choice))
                           for choice in column.choices or []), default=0)
-            if widest:
+            widest_choice = max(widest_choice, widest)
+            if widest and not getattr(model, 'transposed', False):
                 table.setColumnWidth(
                     i, max(table.columnWidth(i), widest + COMBO_CELL_PADDING))
+        if widest_choice and getattr(model, 'transposed', False):
+            # the properties run down, so every item's column holds a
+            # choice somewhere: each opens wide enough to read one
+            for i in range(model.columnCount()):
+                table.setColumnWidth(
+                    i, max(table.columnWidth(i), widest_choice + COMBO_CELL_PADDING))
 
     def close_units_panel(self) -> None:
         self.units_target = None
@@ -5879,14 +6136,10 @@ class MainWindow(QMainWindow):
             return
         selection = self.table.selectionModel()
         blocked = selection.blockSignals(True)
-        selection.clearSelection()
-        for row in rows:
-            selection.select(model.index(row, 0),
-                             QItemSelectionModel.SelectionFlag.Select
-                             | QItemSelectionModel.SelectionFlag.Rows)
+        self.table.select_items(rows)
         selection.blockSignals(blocked)
         if rows:
-            self.table.scrollTo(model.index(rows[0], 0))
+            self.table.scrollTo(model.cell(rows[0], 0))
 
     def _show_scope_rows(self, geometry) -> list[int]:
         """A table opened from a narrower row holds what that row is and
@@ -6025,8 +6278,7 @@ class MainWindow(QMainWindow):
             return None
         name = self.editing[0]
         geometry = self.objects.get(name)
-        rows = sorted({index.row() for index
-                       in self.table.selectionModel().selectedRows()})
+        rows = self.table.whole_rows()
         if geometry is None or len(rows) < 2:
             return None
         groups = [_entity_key(geometry, 'groups', row) for row in rows]
@@ -7052,16 +7304,17 @@ class MainWindow(QMainWindow):
             return None
         if not extend:
             mode = QItemSelectionModel.SelectionFlag.ClearAndSelect
-        elif row in {index.row() for index
-                     in self.table.selectionModel().selectedIndexes()}:
+        elif row in self.table.selected_items():
             mode = QItemSelectionModel.SelectionFlag.Deselect
         else:
             mode = QItemSelectionModel.SelectionFlag.Select
         model = self.table.model()
-        self.table.selectionModel().select(
-            model.index(row, 0),
-            mode | QItemSelectionModel.SelectionFlag.Rows)
-        self.table.scrollTo(model.index(row, 0))
+        # the item is a row, or a column of a transposed table (the
+        # element groups, 2026-10-20)
+        whole = (QItemSelectionModel.SelectionFlag.Columns if model.transposed
+                 else QItemSelectionModel.SelectionFlag.Rows)
+        self.table.selectionModel().select(model.cell(row, 0), mode | whole)
+        self.table.scrollTo(model.cell(row, 0))
         return row
 
     def stop_editing(self) -> None:
@@ -7104,8 +7357,7 @@ class MainWindow(QMainWindow):
         geometry = self.objects.get(name)
         if geometry is None:
             return
-        rows = sorted({index.row()
-                       for index in self.table.selectionModel().selectedIndexes()})
+        rows = self.table.selected_items()
         entities = {}
         if rows:
             entities[component] = self._entity_keys(geometry, component, rows)
@@ -8653,6 +8905,12 @@ class MainWindow(QMainWindow):
         # picking anything else puts it away
         if self._merging is not None and not self._merge_holding:
             self.close_merge_pane(redraw=False)
+        # the patches belong to the groups picked when the pane opened, or
+        # to the set it edits: picking anything else puts it away
+        mating = self.__dict__.get('_mating')
+        if (mating is not None and not self._mate_holding
+                and not self._mate_selection_holds(mating)):
+            self.close_mate_pane(redraw=False)
         # the bricks previewed belong to the solids picked when the pane
         # opened, likewise
         if self.__dict__.get('_meshing') is not None:
@@ -8692,6 +8950,7 @@ class MainWindow(QMainWindow):
                 grid.select_records([])
         if self.editing is not None:
             if self._selection_is_being_edited():
+                self._follow_picked_groups()
                 return      # the table drives the view while editing
             self.stop_editing()   # anything else in the tree leaves editing
             return
@@ -8704,6 +8963,29 @@ class MainWindow(QMainWindow):
             # state (Brandon watched the storm, 2026-08-23).
             return
         self.render_current()
+
+    def _follow_picked_groups(self) -> None:
+        """A table opened from element group rows holds the groups picked
+        in the tree, and keeps holding them as the picks change: Cmd-click
+        another group's row and its column joins the table, Cmd-click one
+        off and it leaves."""
+        # Brandon, 2026-10-20: multi-selecting element groups with the
+        # table open left it on the one it was opened from. The scope was
+        # read once, at opening, and a pick that kept editing never
+        # re-read it.
+        scope = self.editing_scope
+        if scope is None or scope[0] != 'group':
+            return
+        name = self.editing[0]
+        picked = self._picked_groups(name)
+        if not picked or picked == tuple(scope[1]):
+            return
+        self.editing_scope = ('group', picked)
+        self._select_scope_rows(self.objects[name])
+        self._draw_edit_selection()
+        self._mark_pencils([self._item_for_object(name)])
+        self._update_toolbar_actions()
+        self._show_status(f'Editing {self._editing_words()} of {name}')
 
     def _selection_is_being_edited(self):
         """Is the tree selection still the category (or its entities) that
@@ -8985,6 +9267,10 @@ class MainWindow(QMainWindow):
                     entry.setdefault('solids', []).append(detail)
                 elif kind == 'solids':
                     entry['show_solids'] = True
+                elif kind == 'mate':
+                    entry.setdefault('mates', []).append(int(detail))
+                elif kind == 'mates':
+                    entry.setdefault('mates', []).extend(m.id for m in obj.mates)
             elif isinstance(obj, DataArray):
                 # one entry per object, not per record: ten cells picked in
                 # a grid are one time history restricted to ten records,
@@ -10811,6 +11097,8 @@ class MainWindow(QMainWindow):
             if (not geometry.elem_conn or entry.get('solids')
                     or entry.get('show_solids')):
                 self._draw_solids(geometry, entry.get('solids') or (), colors)
+        self._mates_shown = [(name, entry['mates']) for name, entry in geometries
+                             if entry.get('mates')]
         arrows_note = self._add_dof_arrows(
             entry['object'] for _name, entry in geometries)
         self.scene.axis_unit = axis_unit
@@ -10827,8 +11115,9 @@ class MainWindow(QMainWindow):
         else:
             # explicit: clearing a scene lets the next mesh reset the camera
             self.scene.plotter.camera_position = camera
-        # cleared with the rest: the merge's marks go back on
+        # cleared with the rest: the merge's and the mating marks go back on
         self._draw_merge_marks(render=False)
+        self._draw_mate_marks(render=False)
         self.scene.plotter.render()
         status = self._geometry_status(geometries, ignored)
         return f'{status}  |  {arrows_note}' if arrows_note else status
@@ -10891,11 +11180,13 @@ class MainWindow(QMainWindow):
                 opacity=SOLID_PICKED_OPACITY if chosen else SOLID_OPACITY,
                 name=f'solid-{solid_id}', pickable=False, reset_camera=False,
                 render=False)
-            self.scene.plotter.add_mesh(
-                surface.extract_feature_edges(30.0, boundary_edges=False,
-                                              non_manifold_edges=False),
-                color=color, line_width=1.5, name=f'solid-edges-{solid_id}',
-                pickable=False, reset_camera=False, render=False)
+            edges = surface.extract_feature_edges(30.0, boundary_edges=False,
+                                                  non_manifold_edges=False)
+            # a sphere has no sharp edge: its surface alone (2026-10-20)
+            if edges.n_points:
+                self.scene.plotter.add_mesh(
+                    edges, color=color, line_width=1.5, name=f'solid-edges-{solid_id}',
+                    pickable=False, reset_camera=False, render=False)
 
     def _add_with_context(self, geometry, components, entities, colors):
         """Draw the whole geometry muted, with the selection standing out.
@@ -10924,7 +11215,8 @@ class MainWindow(QMainWindow):
                 entities=entities, labels=wanted,
                 color_override=colors['scene_highlight'],
                 node_size=16.0, line_width=5.0,
-                opacity=MERGE_OPACITY if self._merging is not None else 1.0,
+                opacity=(MERGE_OPACITY if self._merging is not None
+                         or self.__dict__.get('_mating') is not None else 1.0),
                 text_color=colors['scene_text'])
         return axis_unit
 
@@ -13260,6 +13552,603 @@ class MainWindow(QMainWindow):
             f'{added}: 6 modes {self._describe_rigid(obj, properties)}, '
             f'linked to {name}')
 
+    def mate_surfaces_act(self, name: str, groups) -> None:
+        """Open Mate Surfaces on element groups `groups` of geometry
+        `name`, or put it away when it is open on them already.
+
+        Every patch where their surfaces mate is marked in the view and
+        listed in the pane. A click on a node adds it to the picked
+        patch's side or takes it away, and Keep adds the patch to the
+        geometry's Mated Surfaces, tied along the surface's normal and in
+        its plane, each rigidly, by a stiffness or not at all
+        (`Project.add_mated_surfaces`)."""
+        # Brandon, 2026-10-20: on element groups picked, a patch at a
+        # time, kept as a sub-object of the geometry.
+        groups = sorted({int(g) for g in groups})
+        mating = self._mating
+        if (mating is not None and mating['editing'] is None and mating['name'] == name
+                and mating['groups'] == groups):
+            self.close_mate_pane()
+            return
+        self._open_mating(name, groups, None)
+
+    def edit_mated_surfaces_act(self, name: str, mate_id: int) -> None:
+        """Open Mate Surfaces on a kept set, to change its nodes, how it
+        is joined or its name, and Save."""
+        self._open_mating(name, None, int(mate_id))
+
+    def _open_mating(self, name: str, groups, editing: int | None) -> None:
+        from ..core import mates
+
+        geometry = self.objects.get(name)
+        if not isinstance(geometry, Geometry):
+            return
+        if self.editing is not None:
+            self.stop_editing()
+        if self._mesh is not None:
+            self.close_mesh_pane()
+        if self._merging is not None:
+            self.close_merge_pane(redraw=False)
+        if self.__dict__.get('_meshing') is not None:
+            self.close_mesh_solids_pane(redraw=False)
+        if self._mating is not None:
+            self.close_mate_pane(redraw=False)
+        defined, unit = self._merge_unit(geometry)
+        stiffness_unit = (self.unit_system.label_text('force/length') if defined
+                          else 'force/length')
+
+        def shown_stiffness(value):
+            return float(self.unit_system.from_si(value, 'force/length')) if defined else value
+
+        names = dict(zip((int(g) for g in geometry.group_id), geometry.group_name))
+        if editing is not None:
+            groups = list(mates.find(geometry, editing).groups)
+        # the band a node can be picked in: a quarter of the finer mesh's
+        # spacing, as the tolerance opens on
+        reach = self._merge_default(geometry, groups)
+        search = float(self.unit_system.from_si(reach, 'length')) if defined else reach
+        if editing is None:
+            tolerance = reach
+            shown = (float(self.unit_system.from_si(tolerance, 'length')) if defined
+                     else tolerance)
+            normal, shear = shown_stiffness(1e6), shown_stiffness(1e5)
+            modes = ('rigid', 'rigid')
+            label = ', '.join(str(names[g]).strip() or f'element group {g}' for g in groups)
+        else:
+            mated = mates.find(geometry, editing)
+            groups = list(mated.groups)
+            shown = None
+            normal = shown_stiffness(mated.normal_stiffness or 1e6)
+            shear = shown_stiffness(mated.shear_stiffness or 1e5)
+            modes = (mated.normal_mode, mated.shear_mode)
+            label = mated.name
+        self._mating = {'name': name, 'groups': groups, 'defined': defined, 'unit': unit,
+                        'editing': editing, 'patches': [], 'skins': {}, 'named': '',
+                        'said': '', 'candidates': {}, 'hovered': None}
+        panel = self.scene.mate_panel
+        panel.open_for(label, unit, shown, stiffness_unit, normal, shear, *modes,
+                       search=search)
+        panel.name.setText('')
+        panel.show()
+        if editing is None:
+            self._mate_find()
+        else:
+            self._mating['patches'] = [{'groups': mated.groups,
+                                        'nodes_a': list(mated.nodes_a),
+                                        'nodes_b': list(mated.nodes_b)}]
+            panel.name.setText(mated.name)
+            self._mating['named'] = mated.name
+            panel.set_patches([self._patch_text(0)], 0)
+            self._mate_refresh()
+        self._begin_mate_clicks()
+        self._mark_pencils([self._item_for_object(name)])
+        self.render_current()
+
+    def _patch_text(self, row: int) -> str:
+        """'post on base: 45 nodes on 15', a patch's line in the list."""
+        mating = self._mating
+        geometry = self.objects[mating['name']]
+        patch = mating['patches'][row]
+        first, second = self._mate_names(geometry, patch['groups'])
+        return (f'{first} on {second}: {len(patch["nodes_a"]):,} node'
+                f'{"s" * (len(patch["nodes_a"]) != 1)} on {len(patch["nodes_b"]):,}')
+
+    @staticmethod
+    def _mate_names(geometry, groups) -> tuple[str, str]:
+        names = dict(zip((int(g) for g in geometry.group_id), geometry.group_name))
+        first, second = (str(names.get(int(g), '')).strip() or f'element group {g}'
+                         for g in groups)
+        return first, second
+
+    def _mate_tolerance(self) -> float:
+        """The typed tolerance, as the geometry holds its coordinates."""
+        typed = self.scene.mate_panel.value()
+        return (float(self.unit_system.to_si(typed, 'length'))
+                if self._mating['defined'] else typed)
+
+    def _mate_find(self) -> None:
+        """Find the patches at the typed tolerance (`core.mates.detect`),
+        list them with the first picked, and mark them."""
+        from ..core import mates
+
+        mating = self._mating
+        if mating is None or mating['editing'] is not None:
+            return
+        geometry = self.objects.get(mating['name'])
+        if geometry is None:
+            self.close_mate_pane()
+            return
+        found = mates.detect(geometry, mating['groups'], self._mate_tolerance())
+        mating['patches'] = [{**patch, 'nodes_a': list(patch['nodes_a']),
+                              'nodes_b': list(patch['nodes_b'])} for patch in found]
+        self.scene.mate_panel.set_patches(
+            [self._patch_text(k) for k in range(len(found))], 0 if found else None)
+        self._mate_refresh()
+
+    def _mate_refresh(self) -> None:
+        """The picked patch's sides named, a name offered, what Keep
+        would do said, and the patches marked."""
+        mating = self.__dict__.get('_mating')
+        if mating is None:
+            return
+        geometry = self.objects.get(mating['name'])
+        if geometry is None:
+            self.close_mate_pane()
+            return
+        panel = self.scene.mate_panel
+        said = mating['said']
+        picked = panel.picked_patches()
+        current = panel.current_patch()
+        one = len(picked) == 1
+        # a name applies to one patch kept; several take a name each
+        # (principle 3)
+        panel.name_label.setVisible(one)
+        panel.name.setVisible(one)
+        for widget in (panel.side_label, panel.side_a, panel.side_b):
+            widget.setVisible(current is not None)
+        if not mating['patches']:
+            panel.show_reading(f'{said}No surface of these element groups lies on '
+                               f'another within {panel.value():g} {mating["unit"]}.', False)
+            self._draw_mate_marks()
+            return
+        if current is None:
+            panel.show_reading(f'{said}Pick a patch in the list.', False)
+            self._draw_mate_marks()
+            return
+        patch = mating['patches'][current]
+        first, second = self._mate_names(geometry, patch['groups'])
+        panel.set_sides(first, second)
+        if one and mating['editing'] is None:
+            from ..core import mates
+
+            offered = mates.default_name(geometry, patch['groups'])
+            if panel.name.text() in ('', mating['named']):
+                panel.name.setText(offered)
+            mating['named'] = offered
+        held = {'rigid': 'rigidly', 'stiffness': 'by the stiffness set', 'free': 'not at all'}
+        text = (f'{len(patch["nodes_a"]):,} nodes of {first} on {len(patch["nodes_b"]):,} '
+                f'of {second}: each of {first}\'s is tied to the nearest of {second}\'s '
+                f'when the model is built, along the normal of the surface it lies on '
+                f'{held[panel.normal_held]} and in its plane {held[panel.shear_held]}. ')
+        one = self._mate_shared(geometry, patch['groups'],
+                                (*patch['nodes_a'], *patch['nodes_b']))
+        if one:
+            text += (f'{len(one):,} node{"s" * (len(one) != 1)} here '
+                     f'{"are" if len(one) != 1 else "is"} {first}\'s and {second}\'s '
+                     'both, one node already, marked as squares. ')
+        if len(picked) > 1:
+            text = f'{len(picked)} patches picked, each kept as a set. ' + text
+        ok = True
+        if panel.normal_held == panel.shear_held == 'free':
+            text += 'Free in both, the set would hold nothing. '
+            ok = False
+        for what, mode, box in (('normal', panel.normal_held, panel.normal),
+                                ('shear', panel.shear_held, panel.shear)):
+            if mode == 'stiffness' and not box.value() > 0:
+                text += f'Give the {what} stiffness a value. '
+                ok = False
+        empty = [k for k in picked if not mating['patches'][k]['nodes_a']
+                 or not mating['patches'][k]['nodes_b']]
+        if empty:
+            text += 'Each side needs a node. '
+            ok = False
+        side = first if panel.side == 'a' else second
+        text += f'Click a node of {side} in the view to add it or take it away.'
+        panel.show_reading(said + text, ok)
+        self._draw_mate_marks()
+
+    def _mate_points(self, nodes) -> np.ndarray:
+        from ..viz.geometry import display_points
+
+        geometry = self.objects[self._mating['name']]
+        points, _ = display_points(geometry, self.unit_system)
+        return np.asarray(points, dtype=float)[geometry.node_index(list(nodes))]
+
+    def _draw_mate_marks(self, render: bool = True) -> None:
+        """The marks. With the pane open, only the side being picked:
+        its nodes in the picked patch large, in the other patches small,
+        and the rest of that group's nodes that can be picked
+        (`_mate_candidates`) small in the muted color; the other side's are not
+        drawn, so two sides' coincident nodes are never confused (Brandon,
+        2026-10-20). The first side is in the picked color, the second in
+        the merged color. The nodes the two groups share, one node
+        already, are squares in the merged color, either side. With the
+        pane closed, the sets picked in the tree, both sides."""
+        from ..viz.geometry import display_points
+
+        plotter = self.scene.plotter
+        if plotter is None:
+            return
+        for actor in ('mate-a', 'mate-b', 'mate-other-a', 'mate-other-b', 'mate-candidates',
+                      'mate-shared'):
+            plotter.remove_actor(actor, render=False)
+        colors = resolve_theme(self.theme_name)
+        mating = self.__dict__.get('_mating')
+        pools: dict = {}
+        merged: list = []
+        if mating is not None and mating['patches']:
+            geometry = self.objects.get(mating['name'])
+            panel = self.scene.mate_panel
+            current, side = panel.current_patch(), panel.side
+            points = np.asarray(display_points(geometry, self.unit_system)[0], dtype=float)
+            alive = set(geometry.node_id.tolist())
+            if current is not None:
+                patch = mating['patches'][current]
+                one = self._mate_shared(geometry, patch['groups'],
+                                        (*patch['nodes_a'], *patch['nodes_b']))
+                if one:
+                    merged.append(points[geometry.node_index(one)])
+                alive -= set(one)
+            for k, patch in enumerate(mating['patches']):
+                held = [n for n in patch['nodes_' + side] if n in alive]
+                if held:
+                    pools.setdefault((side, k == current), []).append(
+                        points[geometry.node_index(held)])
+            if current is not None:
+                patch = mating['patches'][current]
+                members = set(patch['nodes_' + side])
+                near = [n for n in self._mate_candidates(current, side)
+                        if n not in members]
+                if near:
+                    plotter.add_points(
+                        points[geometry.node_index(near)], color=colors['scene_muted'],
+                        point_size=7.0, render_points_as_spheres=True,
+                        name='mate-candidates', pickable=False, reset_camera=False,
+                        render=False)
+        elif mating is None:
+            for name, ids in self.__dict__.get('_mates_shown', []):
+                geometry = self.objects.get(name)
+                if geometry is None:
+                    continue
+                points = np.asarray(display_points(geometry, self.unit_system)[0], dtype=float)
+                alive = set(geometry.node_id.tolist())
+                for mated in geometry.mates:
+                    if mated.id not in ids:
+                        continue
+                    one = self._mate_shared(geometry, mated.groups,
+                                            (*mated.nodes_a, *mated.nodes_b))
+                    if one:
+                        merged.append(points[geometry.node_index(one)])
+                    for side, nodes in (('a', mated.nodes_a), ('b', mated.nodes_b)):
+                        held = [n for n in nodes if n in alive and n not in set(one)]
+                        if held:
+                            pools.setdefault((side, True), []).append(
+                                points[geometry.node_index(held)])
+        for (side, big), chunks in pools.items():
+            plotter.add_points(
+                np.vstack(chunks),
+                color=colors['scene_picked'] if side == 'a' else colors['scene_merged'],
+                point_size=16.0 if big else 9.0, render_points_as_spheres=True,
+                name=f'mate-{"" if big else "other-"}{side}', pickable=False,
+                reset_camera=False, render=False)
+        if merged:
+            # one node already, the two groups': squares, as Merge
+            # Coincident Nodes marks what it has made one
+            plotter.add_points(
+                np.vstack(merged), color=colors['scene_merged'], point_size=14.0,
+                render_points_as_spheres=False, name='mate-shared', pickable=False,
+                reset_camera=False, render=False)
+        if render:
+            plotter.render()
+
+    def _mate_shared(self, geometry, groups, nodes) -> list[int]:
+        """The nodes the two groups share near these nodes: one node
+        already, marked as merged and never picked (Brandon,
+        2026-10-20: they looked left out of the set)."""
+        from ..core import mates
+
+        mating = self.__dict__.get('_mating')
+        cache = mating.setdefault('shared', {}) if mating is not None else {}
+        key = tuple(int(g) for g in groups)
+        if key not in cache:
+            cache[key] = np.array(sorted(mates.shared(geometry, key)), dtype=np.int64)
+        both = cache[key]
+        alive = set(geometry.node_id.tolist())
+        held = [n for n in nodes if n in alive]
+        if not len(both) or not held:
+            return []
+        box = geometry.node_xyz[geometry.node_index(held)]
+        margin = 1e-6 + (self._mate_search() if mating is not None else 0.0)
+        xyz = geometry.node_xyz[geometry.node_index(both)]
+        inside = np.all((xyz >= box.min(axis=0) - margin) & (xyz <= box.max(axis=0) + margin),
+                        axis=1)
+        return [int(n) for n in both[inside]]
+
+    def _mate_search(self) -> float:
+        """The typed pick distance, as the geometry holds its coordinates."""
+        typed = self.scene.mate_panel.search.value()
+        return (float(self.unit_system.to_si(typed, 'length'))
+                if self._mating['defined'] else typed)
+
+    def _mate_search_changed(self) -> None:
+        mating = self.__dict__.get('_mating')
+        if mating is None:
+            return
+        mating['candidates'] = {}
+        self._mate_hover(None)
+        self._draw_mate_marks()
+
+    def _mate_candidates(self, row: int, side: str) -> list[int]:
+        """The nodes a click may add to or take from `side` of patch
+        `row`: that side's group's outer nodes within the pick distance
+        of the other side's surface and of the patch, and the side's own
+        nodes wherever they are, so any of them can be taken away; never
+        a node the two groups share (`_mate_shared`)."""
+        from ..core import mates
+        from ..core.mesh import group_skin
+
+        mating = self._mating
+        geometry = self.objects[mating['name']]
+        patch = mating['patches'][row]
+        search = self._mate_search()
+        key = (row, side, search, len(patch['nodes_a']), len(patch['nodes_b']))
+        if key in mating['candidates']:
+            return mating['candidates'][key]
+        members = list(patch['nodes_' + side])
+        nodes = self._mate_side_nodes(patch, side)
+        alive = set(geometry.node_id.tolist())
+        both = [n for n in (*patch['nodes_a'], *patch['nodes_b']) if n in alive]
+        found = []
+        if nodes and both:
+            box = geometry.node_xyz[geometry.node_index(both)]
+            low, high = box.min(axis=0) - search, box.max(axis=0) + search
+            xyz = geometry.node_xyz[geometry.node_index(nodes)]
+            inside = np.all((xyz >= low) & (xyz <= high), axis=1)
+            near = np.asarray(nodes, dtype=np.int64)[inside]
+            other = patch['groups'][1 if side == 'a' else 0]
+            close = mates.near_surface(geometry, near, group_skin(geometry, other), search)
+            found = [int(n) for n in near[close]]
+        merged = set(self._mate_shared(geometry, patch['groups'],
+                                       (*patch['nodes_a'], *patch['nodes_b'])))
+        found = [n for n in found if n not in merged]
+        held = set(found)
+        found += [n for n in members if n not in held and n in alive and n not in merged]
+        mating['candidates'] = {key: found}
+        return found
+
+    def _mate_side_nodes(self, patch: dict, side: str) -> list[int]:
+        """The nodes a click may add to `side` of `patch`: the outer
+        faces' nodes of that side's element group."""
+        from ..core.mates import _skin_nodes
+
+        mating = self._mating
+        group = patch['groups'][0 if side == 'a' else 1]
+        if group not in mating['skins']:
+            mating['skins'][group] = _skin_nodes(self.objects[mating['name']], group)
+        return mating['skins'][group]
+
+    def mate_node_at(self, x: float, y: float) -> int | None:
+        """The node of the picked patch's side being picked whose place is
+        under the pixel `(x, y)`, or None."""
+        from ..viz.pick import ScreenProjector, _nearest_candidate
+
+        mating = self._mating
+        panel = self.scene.mate_panel
+        current = panel.current_patch() if mating is not None else None
+        if current is None:
+            return None
+        candidates = self._mate_candidates(current, panel.side)
+        if not candidates:
+            return None
+        projector = ScreenProjector(self.scene.plotter.renderer,
+                                    self._mate_points(candidates))
+        screen, depth = projector.screen()
+        ratio = self.devicePixelRatioF()
+        distances = np.linalg.norm(screen - np.array([x, y]), axis=1)
+        index = _nearest_candidate(distances, depth, 12.0 * ratio, 2.0 * ratio)
+        return None if index is None else int(candidates[index])
+
+    def toggle_mate_node(self, node: int) -> None:
+        """Add `node` to the picked patch's side being picked, or take it
+        away, as a click on it does."""
+        mating = self._mating
+        panel = self.scene.mate_panel
+        current = panel.current_patch() if mating is not None else None
+        if current is None:
+            return
+        held = mating['patches'][current]['nodes_' + panel.side]
+        if node in held:
+            held.remove(node)
+        else:
+            held.append(node)
+        mating['said'] = ''
+        mating['hovered'] = None
+        panel.set_patch_text(current, self._patch_text(current))
+        self._mate_refresh()
+
+    def _begin_mate_clicks(self) -> None:
+        """Watch clicks ahead of the camera: one on a node of the side
+        being picked adds or removes it, anywhere else turns the view."""
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        if interactor is None or self.__dict__.get('_mate_observer') is not None:
+            return
+        self._mate_observer = interactor.interactor.AddObserver(
+            'LeftButtonPressEvent', self._on_mate_press, 10.0)
+        self._mate_hover_observer = interactor.interactor.AddObserver(
+            'MouseMoveEvent', self._on_mate_move, 10.0)
+
+    def _on_mate_move(self, _caller, _event) -> None:
+        position = self._cursor_position()
+        if position is None or self.__dict__.get('_mating') is None:
+            return
+        self._mate_hover(self.mate_node_at(*position))
+
+    def _mate_hover(self, node: int | None) -> None:
+        """Light up the node under the cursor, one that can be picked,
+        or put the light out with None (Brandon, 2026-10-20)."""
+        mating = self.__dict__.get('_mating')
+        plotter = self.scene.plotter
+        if mating is None or plotter is None or node == mating['hovered']:
+            return
+        mating['hovered'] = node
+        plotter.remove_actor('mate-hover', render=False)
+        if node is not None:
+            plotter.add_points(
+                self._mate_points([node]), color=resolve_theme(self.theme_name)['scene_highlight'],
+                point_size=22.0, render_points_as_spheres=True, name='mate-hover',
+                pickable=False, reset_camera=False, render=False)
+        plotter.render()
+
+    def _on_mate_press(self, caller, _event) -> None:
+        position = self._cursor_position()
+        if position is None:
+            return
+        node = self.mate_node_at(*position)
+        if node is None:
+            return                      # not on a node: the camera's
+        self.toggle_mate_node(node)
+        self._abort(caller, self._mate_observer)
+
+    def _mate_stiffness(self) -> tuple[float, float]:
+        """The typed normal and shear stiffness, in N/m."""
+        panel = self.scene.mate_panel
+        normal, shear = panel.normal.value(), panel.shear.value()
+        if self._mating['defined']:
+            normal = float(self.unit_system.to_si(normal, 'force/length'))
+            shear = float(self.unit_system.to_si(shear, 'force/length'))
+        return normal, shear
+
+    def _mate_keep(self) -> None:
+        """Keep: each picked patch added to the geometry's Mated Surfaces
+        as set, or, editing a kept set, the set saved. The pane stays
+        open on the patches left."""
+        mating = self.__dict__.get('_mating')
+        if mating is None:
+            return
+        panel = self.scene.mate_panel
+        commit_typed(panel)
+        picked = panel.picked_patches()
+        if not picked:
+            return
+        name = mating['name']
+        normal, shear = self._mate_stiffness()
+        held = {'normal_mode': panel.normal_held, 'shear_mode': panel.shear_held,
+                'normal_stiffness': normal if panel.normal_held == 'stiffness' else 0.0,
+                'shear_stiffness': shear if panel.shear_held == 'stiffness' else 0.0}
+        kept = []
+        try:
+            if mating['editing'] is not None:
+                patch = mating['patches'][0]
+                self.project.edit_mated_surfaces(
+                    name, mating['editing'], name=panel.name.text().strip() or mating['named'],
+                    nodes_a=patch['nodes_a'], nodes_b=patch['nodes_b'], **held)
+                kept.append(mating['editing'])
+            else:
+                for k in picked:
+                    patch = mating['patches'][k]
+                    kept.append(self.project.add_mated_surfaces(
+                        name, patch['groups'], patch['nodes_a'], patch['nodes_b'],
+                        name=(panel.name.text().strip() or None) if len(picked) == 1 else None,
+                        **held))
+        except ValueError as refusal:
+            text = str(refusal)
+            mating['said'] = f'Not kept: {text[:1].lower()}{text[1:]}. '
+            self._mate_refresh()
+            self._show_status(f'{name}: {refusal}')
+            return
+        geometry = self.objects[name]
+        names = [m.name for m in geometry.mates if m.id in kept]
+        from ..core import mates
+
+        joined = mates.find(geometry, kept[-1]).describe()
+        if mating['editing'] is None:
+            mating['patches'] = [p for k, p in enumerate(mating['patches']) if k not in picked]
+            panel.set_patches([self._patch_text(k) for k in range(len(mating['patches']))],
+                              0 if mating['patches'] else None)
+            mating['named'] = ''
+            panel.name.setText('')
+            mating['said'] = f'Kept {", ".join(names)} ({joined}). '
+        else:
+            mating['said'] = f'Saved {names[0]} ({joined}). '
+        # the rows are rebuilt, which drops the selection the pane stands
+        # on: picked again with the pane held open, as Merge does
+        self._mate_holding = True
+        try:
+            self._refresh_item(self._item_for_object(name), geometry)
+            if mating['editing'] is None:
+                self._select_group_rows(name, mating['groups'])
+            else:
+                self._select_mate_rows(name, [mating['editing']])
+        finally:
+            self._mate_holding = False
+        self._mate_refresh()
+        self.render_current()
+        self._show_status(f'{name}: {mating["said"].strip()}')
+
+    def close_mate_pane(self, redraw: bool = True) -> None:
+        """Close the Mate Surfaces pane, its marks and its clicks."""
+        self.scene.mate_panel.hide()
+        if self.__dict__.get('_mating') is None:
+            return
+        name = self._mating['name']
+        self._mating = None
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        for attribute in ('_mate_observer', '_mate_hover_observer'):
+            observer = self.__dict__.get(attribute)
+            if interactor is not None and observer is not None:
+                with contextlib.suppress(Exception):
+                    interactor.interactor.RemoveObserver(observer)
+            setattr(self, attribute, None)
+        if self.scene.plotter is not None:
+            self.scene.plotter.remove_actor('mate-hover', render=False)
+        item = self._item_for_object(name)
+        if item is not None:
+            self._mark_pencils([item])
+        if redraw:
+            self.render_current()
+        else:
+            self._draw_mate_marks()
+
+    def _select_mate_rows(self, name: str, ids) -> None:
+        """Pick these sets' rows under the geometry's Mated Surfaces."""
+        item = self._item_for_object(name)
+        if item is None:
+            return
+        wanted = {int(i) for i in ids}
+        self.tree.clearSelection()
+        first = None
+        for i in range(item.childCount()):
+            holder = item.child(i)
+            if (holder.data(0, ROLE_REFERENCE) or (None,))[0] != 'mates':
+                continue
+            holder.setExpanded(True)
+            for j in range(holder.childCount()):
+                row = holder.child(j)
+                if row.data(0, ROLE_REFERENCE)[2] in wanted:
+                    row.setSelected(True)
+                    first = first or row
+        if first is not None:
+            self.tree.setCurrentItem(first, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
+
+    def _delete_mates(self, name: str, ids) -> None:
+        """Delete the picked sets of mated surfaces."""
+        if self._mating is not None:
+            self.close_mate_pane(redraw=False)
+        gone = self.project.delete_mated_surfaces(name, ids)
+        geometry = self.objects[name]
+        self._refresh_item(self._item_for_object(name), geometry)
+        self.render_current()
+        self._show_status(f'{name}: {gone} set{"s" * (gone != 1)} of mated surfaces deleted')
     def merge_nodes_act(self, name: str, groups) -> None:
         """Open the Merge Coincident Nodes pane on element groups
         `groups` of geometry `name`.
@@ -13298,6 +14187,8 @@ class MainWindow(QMainWindow):
             self.close_mesh_pane()
         if self._merging is not None:
             self.close_merge_pane(redraw=False)
+        if self._mating is not None:
+            self.close_mate_pane(redraw=False)
         groups = sorted({int(g) for g in groups})
         start = (self._merge_default(obj, groups) if kind == 'merge'
                  else self._align_default(obj, groups))
@@ -13818,6 +14709,7 @@ class MainWindow(QMainWindow):
             self._open_pattern_pane(name, list(item.operands), editing=solid_id)
             return
         kind = ({'block': 'solid_block', 'cylinder': 'solid_cylinder',
+                 'cone': 'solid_cone', 'sphere': 'solid_sphere',
                  solids.HOLE: 'solid_hole'}.get(item.kind)
                 or ('solid_section' if item.kind in solids.SECTIONS else 'solid_part'))
         self._open_mesh_pane(kind, editing=(name, solid_id))
@@ -13847,7 +14739,9 @@ class MainWindow(QMainWindow):
                 'widths': (tuple(np.asarray(item.widths) / scale)
                            if item.kind == 'block' else (1.0, 1.0, 1.0)),
                 'radius': item.radius / scale, 'length': item.length / scale,
-                'corner': item.corner / scale, 'group': item.name, **shaped}
+                'corner': item.corner / scale, 'group': item.name,
+                **({'top': solids._top(item) / scale} if item.kind == 'cone' else {}),
+                **shaped}
 
     def _mesh_default_group(self, geometry, kind: str) -> str:
         """The element group the pane opens on: the last of the geometry's
@@ -13977,6 +14871,15 @@ class MainWindow(QMainWindow):
                                  "block's narrower width across")
             return 'add_solid_block', {**call, 'widths': tidy(values['widths']),
                                        'corner': float(values['corner'])}
+        if kind == 'solid_sphere':
+            return 'add_solid_sphere', {'center': call['center'],
+                                        'radius': float(values['radius']),
+                                        'name': call['name']}
+        if kind == 'solid_cone':
+            # a cone's own rules are the core's, said by the preview
+            return 'add_solid_cone', {**call, 'radius': float(values['radius']),
+                                      'top': float(values['top']),
+                                      'length': float(values['length'])}
         if values['radius'] <= 0.0 or values['length'] <= 0.0:
             raise ValueError('a cylinder needs a radius and a length')
         return 'add_solid_cylinder', {**call, 'radius': float(values['radius']),
@@ -14017,6 +14920,11 @@ class MainWindow(QMainWindow):
                 made = solids.add_hole(scratch, call['center'], call['diameter'],
                                        call['depth'], call['angles'],
                                        counterbore=call['counterbore'])
+            elif verb == 'add_solid_cone':
+                made = solids.add_cone(scratch, call['center'], call['radius'], call['top'],
+                                       call['length'], call['angles'])
+            elif verb == 'add_solid_sphere':
+                made = solids.add_sphere(scratch, call['center'], call['radius'])
             else:
                 made = solids.add_cylinder(scratch, call['center'], call['radius'],
                                            call['length'], call['angles'])
@@ -14051,6 +14959,12 @@ class MainWindow(QMainWindow):
                        if call['corner'] else '')
             what = (f'A solid block {w[0]:.4g} by {w[1]:.4g} by {w[2]:.4g} '
                     f'{label}{rounded}')
+        elif verb == 'add_solid_cone':
+            what = (f'A cone {call["length"]:.4g} {label} high, '
+                    f'{2 * call["radius"]:.4g} {label} across at its base and '
+                    f'{2 * call["top"]:.4g} {label} at its top')
+        elif verb == 'add_solid_sphere':
+            what = f'A sphere {2 * call["radius"]:.4g} {label} across'
         else:
             what = (f'A cylinder {2 * call["radius"]:.4g} {label} across and '
                     f'{call["length"]:.4g} {label} long')
@@ -14082,7 +14996,13 @@ class MainWindow(QMainWindow):
         # in the verb's own order, so the journal reads as its signature
         kind = self._mesh['kind']
         block = kind == 'solid_block'
-        if kind in ('solid_section', 'solid_hole'):
+        if kind == 'solid_sphere':
+            now = {'center': call['center'], 'radius': call['radius'], 'name': call['name']}
+        elif kind == 'solid_cone':
+            now = {'center': call['center'], 'angles': call['angles'],
+                   'radius': call['radius'], 'top_radius': call['top'],
+                   'length': call['length'], 'name': call['name']}
+        elif kind in ('solid_section', 'solid_hole'):
             now = {'center': call['center'], 'angles': call['angles'],
                    'dimensions': call['dimensions'],
                    **({'length': call['length']} if kind == 'solid_section' else {}),
@@ -14100,7 +15020,8 @@ class MainWindow(QMainWindow):
             if key == 'name':
                 if value != before['group']:
                     changes[key] = value
-            elif not np.allclose(value, before[key], rtol=1e-9, atol=1e-12):
+            elif not np.allclose(value, before['top' if key == 'top_radius' else key],
+                                 rtol=1e-9, atol=1e-12):
                 changes[key] = value
         return changes
 
@@ -14224,7 +15145,7 @@ class MainWindow(QMainWindow):
             self._apply_solid_edit(verb, call)
             return
         if verb in ('add_solid_block', 'add_solid_cylinder', 'add_solid_section',
-                    'add_solid_hole'):
+                    'add_solid_hole', 'add_solid_cone', 'add_solid_sphere'):
             extra = {k: v for k, v in call.items() if k not in ('center', 'name')}
             if verb == 'add_solid_section':
                 new = self.project.add_solid_section(
@@ -14243,6 +15164,14 @@ class MainWindow(QMainWindow):
                 new = self.project.add_solid_block(
                     name, call['center'], extra['widths'], call['angles'],
                     call['name'], unit=self._mesh['unit'], **corner)
+            elif verb == 'add_solid_cone':
+                new = self.project.add_solid_cone(
+                    name, call['center'], extra['radius'], extra['top'], extra['length'],
+                    call['angles'], call['name'], unit=self._mesh['unit'])
+            elif verb == 'add_solid_sphere':
+                new = self.project.add_solid_sphere(
+                    name, call['center'], extra['radius'], call['name'],
+                    unit=self._mesh['unit'])
             else:
                 new = self.project.add_solid_cylinder(
                     name, call['center'], extra['radius'], extra['length'],
@@ -14343,12 +15272,16 @@ class MainWindow(QMainWindow):
             faces = np.column_stack([np.full(count, 3),
                                      np.arange(3 * count).reshape(count, 3)])
             surface = pv.PolyData(part.reshape(-1, 3), faces.ravel()).clean()
+            edges = surface.extract_feature_edges(30.0, boundary_edges=False,
+                                                  non_manifold_edges=False)
+            # a sphere has no sharp edge to draw: its surface, see-through
+            # (2026-10-20)
+            shown, look = ((edges, {'line_width': 2.0}) if edges.n_points
+                           else (surface, {'opacity': 0.3}))
             plotter.add_mesh(
-                surface.extract_feature_edges(30.0, boundary_edges=False,
-                                              non_manifold_edges=False),
-                name='plane-preview', line_width=2.0,
+                shown, name='plane-preview',
                 color=resolve_theme(self.theme_name)['scene_highlight'],
-                pickable=False, reset_camera=False, render=False)
+                pickable=False, reset_camera=False, render=False, **look)
             current = self.current_object()
             if (isinstance(current, Geometry) and not current.num_nodes
                     and not current.solids):

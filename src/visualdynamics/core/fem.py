@@ -879,6 +879,35 @@ class Spring:
     name: str = ''
 
 
+#: how a tie holds each direction of its frame
+TIE_MODES = ('rigid', 'stiffness', 'free')
+
+
+@dataclass
+class Tie:
+    """A node held to a point of a surface, in a frame of its own: along
+    the surface's normal there, and in its plane. The point moves as the
+    surface's nodes around it do, weighted (a point inside a triangle is
+    its three corners, a point on a node that node alone). Each of the
+    frame's three directions is held rigidly, by a spring, or not at all
+    (`Model.add_tie`). Only translations are tied, which is how a node of
+    one mesh is tied to a surface of another (Mate Surfaces,
+    `core.mates`): a tie to the point it lies on carries a rigid motion
+    exactly, where a tie to a nearby node resists a rotation.
+    """
+    # Brandon, 2026-10-20: a normal and a shear setting, each rigid, a
+    # stiffness or free, and on curved surfaces too, so the frame is
+    # each node's own
+
+    node_a: int                         #: the node that follows
+    nodes_b: tuple[int, ...]            #: the nodes the point moves with
+    weights: tuple[float, ...]          #: each one's share, summing to one
+    frame: tuple                        #: three unit rows: normal, then in-plane
+    modes: tuple[str, str, str]         #: per row: 'rigid', 'stiffness' or 'free'
+    stiffness: tuple[float, float, float]   #: per row, N/m where 'stiffness'
+    group: str = ''
+
+
 @dataclass
 class LumpedMass:
     """A rigid item carried at a node: a motor, a battery, a camera.
@@ -1280,6 +1309,7 @@ class Model:
         self.solids: list[Solid] = []
         self.rigid_links: list[RigidLink] = []
         self.springs: list[Spring] = []
+        self.ties: list[Tie] = []
         #: {node: the axes held, 0-5}
         self.grounds: dict[int, tuple[int, ...]] = {}
         self.masses: list[LumpedMass] = []
@@ -1502,6 +1532,101 @@ class Model:
         self.springs.append(spring)
         return spring
 
+    def move_node(self, node: int, x: float, y: float, z: float) -> None:
+        """Move a node already in the model to (x, y, z): how a node tied
+        to a surface is put on it (`add_tie`), the way a tie constraint's
+        position adjustment does in other solvers. Elements are built from
+        the positions when the matrices are assembled, so a move before
+        then is a move of every element on the node."""
+        if int(node) not in self._nodes:
+            raise ValueError(f'no node {node} in the model')
+        self._nodes[int(node)] = np.array([float(x), float(y), float(z)])
+
+    def add_tie(self, node_a: int, node_b: Any, normal: Sequence[float],
+                normal_mode: str = 'rigid', shear_mode: str = 'rigid',
+                normal_stiffness: float = 0.0, shear_stiffness: float = 0.0,
+                group: str = '', weights: Sequence[float] | None = None) -> Tie:
+        """Tie node `node_a`'s translation to a point that moves with
+        `node_b` (one node, or several weighted by `weights`), along
+        `normal` and in the plane across it.
+
+        Each of the two is held rigidly ('rigid'), by a spring of the
+        given stiffness ('stiffness'), or not at all ('free'); the plane's
+        two directions are held alike. A rigid direction makes `node_a`
+        follow `node_b` there exactly: the eigensolution writes that part
+        of `node_a`'s motion through `node_b`'s, as it does a rigid link's
+        followers, with no stiffness to cost accuracy. Rotations are not
+        tied, so a tie between two solids' nodes adds no rotation that
+        nothing resists. A tie spans no gap: a node a hair off the
+        surface is tied as if on it, so it should be moved there first
+        (`move_node`); `from_geometry` does for mated surfaces. A node
+        follows one tie at most.
+
+        Parameters
+        ----------
+        node_a : int
+            The node that follows.
+        node_b : int or sequence of int
+            The node it follows, or the nodes the point it follows moves
+            with: a surface's corners around it. All already in the
+            model, none of them `node_a`.
+        normal : sequence of float
+            The direction across the surface; any length but zero.
+        normal_mode, shear_mode : {'rigid', 'stiffness', 'free'}
+            How the normal and the plane are held.
+        normal_stiffness, shear_stiffness : float
+            In N/m, positive where the mode is 'stiffness'.
+        group : str, optional
+            What the tie belongs to (its set of mated surfaces).
+        weights : sequence of float, optional
+            Each of `node_b`'s share of the point's motion, summing to
+            one; equal shares when omitted.
+
+        Returns
+        -------
+        Tie
+        """
+        nodes_b = (tuple(int(n) for n in node_b) if isinstance(node_b, (list, tuple, np.ndarray))
+                   else (int(node_b),))
+        shares = (np.full(len(nodes_b), 1.0 / len(nodes_b)) if weights is None
+                  else np.asarray(weights, dtype=float))
+        if not nodes_b or len(shares) != len(nodes_b):
+            raise ValueError('a tie follows one node or more, a weight each')
+        if abs(float(shares.sum()) - 1.0) > 1e-9:
+            raise ValueError(f"a tie's weights sum to one, not {float(shares.sum())!r}")
+        for node in (node_a, *nodes_b):
+            if int(node) not in self._nodes:
+                raise ValueError(f'tie names node {node}, which is not in the model')
+        if int(node_a) in nodes_b:
+            raise ValueError(f'a tie joins a node to others; it names node {node_a} on '
+                             'both ends')
+        for mode, value in ((normal_mode, normal_stiffness), (shear_mode, shear_stiffness)):
+            if mode not in TIE_MODES:
+                raise ValueError(f"a tie's direction is held 'rigid', 'stiffness' or "
+                                 f"'free', not {mode!r}")
+            if mode == 'stiffness' and not float(value) > 0.0:
+                raise ValueError(f"a tie's stiffness is positive; it was given {value!r}")
+        if normal_mode == shear_mode == 'free':
+            raise ValueError('a tie free in every direction holds nothing')
+        n = np.asarray(normal, dtype=float)
+        length = float(np.linalg.norm(n))
+        if not length > 0.0:
+            raise ValueError('a tie needs a normal direction')
+        n = n / length
+        # any two directions across the normal: the plane is held alike
+        # both ways, so which two does not matter
+        helper = np.eye(3)[int(np.argmin(np.abs(n)))]
+        t1 = np.cross(n, helper)
+        t1 /= np.linalg.norm(t1)
+        t2 = np.cross(n, t1)
+        tie = Tie(int(node_a), nodes_b, tuple(float(w) for w in shares),
+                  (tuple(n), tuple(t1), tuple(t2)),
+                  (normal_mode, shear_mode, shear_mode),
+                  (float(normal_stiffness), float(shear_stiffness), float(shear_stiffness)),
+                  group)
+        self.ties.append(tie)
+        return tie
+
     def add_ground(self, node: int, directions: Any = True) -> int:
         """Hold a node in some or all of the six directions.
 
@@ -1606,7 +1731,9 @@ class Model:
         quad a plate, a triangle a triangle, a two-node line a beam, a rigid
         link or springs, a hexahedron, wedge or tetrahedron a solid, and a
         point element a lumped mass, a spring to ground or a ground point,
-        each with its element group's properties. That is the model an Exodus
+        each with its element group's properties, and each set of mated
+        surfaces (`geometry.mates`) ties between its two sides
+        (`add_tie`). That is the model an Exodus
         file describes, one property set per element group of one element
         type. An element group with no properties, or an element type the
         solver has no element for, is refused by name, and `material`,
@@ -1787,6 +1914,10 @@ class Model:
             if spring.node_b is not None:
                 neighbors[spring.node_a].add(spring.node_b)
                 neighbors[spring.node_b].add(spring.node_a)
+        for tie in self.ties:
+            for node in tie.nodes_b:
+                neighbors[tie.node_a].add(node)
+                neighbors[node].add(tie.node_a)
         return connected_pieces(neighbors)
 
     def wire_faces(self, material: Material, section: Section,
@@ -2128,6 +2259,27 @@ class Model:
                  * signs[:, :, None] * signs[:, None, :])
             yield rows, k, np.zeros_like(k)
 
+        # a tie's springs act on d = u_a - sum w_i u_i, the node's motion
+        # less the point's: B^T (R^T diag(k) R) B over the translations,
+        # B = [I, -w_1 I, ...], k zero where held rigidly or free; batched
+        # by how many nodes the point moves with
+        sprung: dict[int, list[Tie]] = {}
+        for tie in self.ties:
+            if 'stiffness' in tie.modes:
+                sprung.setdefault(len(tie.nodes_b), []).append(tie)
+        for ties in sprung.values():
+            rows = np.array([[index[node] + i for node in (tie.node_a, *tie.nodes_b)
+                              for i in range(3)] for tie in ties], dtype=np.int64)
+            frames = np.array([tie.frame for tie in ties], dtype=np.float64)
+            held = np.array([[k if mode == 'stiffness' else 0.0
+                              for mode, k in zip(tie.modes, tie.stiffness)]
+                             for tie in ties], dtype=np.float64)
+            block = np.einsum('eki,ek,ekj->eij', frames, held, frames)
+            shares = np.array([(1.0, *(-w for w in tie.weights)) for tie in ties])
+            k = np.einsum('ei,ej,ekl->eikjl', shares, shares, block).reshape(
+                len(ties), rows.shape[1], rows.shape[1])
+            yield rows, k, np.zeros_like(k)
+
     def matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Assemble the global mass and stiffness matrices, dense.
 
@@ -2179,7 +2331,8 @@ class Model:
         if ticker is not None:
             ticker.add(len(self.beams) + len(self.plates)
                        + len(self.triangles) + len(self.solids)
-                       + len(self.springs))
+                       + len(self.springs)
+                       + sum('stiffness' in tie.modes for tie in self.ties))
         # Only the upper triangle of each element's matrix is scattered,
         # the diagonal at half, and the matrix is the triangle plus its
         # transpose: symmetric by construction, and half the entries to
@@ -2597,7 +2750,14 @@ class Model:
             raise ValueError(
                 'node ' + ', '.join(str(n) for n in clash) + ' follows a '
                 'rigid link; ground the node it follows instead')
-        kept = [int(i) for i in free if int(i) not in followers]
+        ties = self._tie_followers(follows)
+        tied = {index[node] + k for node in ties for k in range(3)}
+        clash = sorted({self.node_ids[i // 6] for i in held if i in tied})
+        if clash:
+            raise ValueError(
+                'node ' + ', '.join(str(n) for n in clash) + ' follows a '
+                'tie; ground the node it follows instead')
+        kept = [int(i) for i in free if int(i) not in followers and int(i) not in tied]
         column = {dof: k for k, dof in enumerate(kept)}
         entries = [(dof, k, 1.0) for dof, k in column.items()]
         for node, lead in follows.items():
@@ -2617,7 +2777,10 @@ class Model:
                     entries.extend((rows + axis, column[source],
                                     float(arm[axis, k - 3]))
                                    for axis in range(3) if arm[axis, k - 3])
-        shape = (self.num_dof, len(kept))
+        width = len(kept)
+        if ties:
+            entries, width = self._tie_rows(ties, index, entries, width)
+        shape = (self.num_dof, width)
         if sparse:
             from scipy import sparse as sp
 
@@ -2629,6 +2792,82 @@ class Model:
         for i, j, v in entries:
             transform[i, j] = v
         return transform
+
+    def _tie_followers(self, follows) -> dict[int, Tie]:
+        """{node: its tie} for every node a tie makes follow, refusing a
+        node that follows two ties or is in a rigid body."""
+        ties: dict[int, Tie] = {}
+        bodies = {n for body in self.rigid_bodies() for n in body}
+        for tie in self.ties:
+            if tie.node_a in ties:
+                other = ties[tie.node_a]
+                raise ValueError(
+                    f'node {tie.node_a} follows two ties ({other.group or "unnamed"} '
+                    f'and {tie.group or "unnamed"}): take it out of one')
+            if tie.node_a in bodies:
+                raise ValueError(
+                    f'node {tie.node_a} follows a tie ({tie.group or "unnamed"}) and is '
+                    'in a rigid body: take it out of one')
+            ties[tie.node_a] = tie
+        return ties
+
+    def _tie_rows(self, ties, index, entries, width):
+        """The transform's rows for the translations of the nodes ties
+        make follow: along a rigid direction e, e e^T times the followed
+        point's rows, its nodes' weighted; along a direction held by a
+        spring or free, e times a column of its own. A followed node that
+        follows a tie itself is written out first; a loop of ties is
+        refused."""
+        rows: dict[int, dict[int, float]] = {}
+        for dof, col, value in entries:
+            rows.setdefault(dof, {})
+            rows[dof][col] = rows[dof].get(col, 0.0) + value
+        done: set[int] = set()
+        visiting: set[int] = set()
+        added = []
+
+        def resolve(node: int) -> None:
+            nonlocal width
+            if node in done:
+                return
+            if node in visiting:
+                raise ValueError(f'the ties through node {node} follow one another '
+                                 'round a loop')
+            visiting.add(node)
+            tie = ties[node]
+            for other in tie.nodes_b:
+                if other in ties:
+                    resolve(other)
+            base_a = index[node]
+            out = [{} for _ in range(3)]
+            for e, mode in zip(tie.frame, tie.modes):
+                e = np.asarray(e, dtype=float)
+                if mode == 'rigid':
+                    # u_a . e = (sum w_i u_i) . e
+                    for other, share in zip(tie.nodes_b, tie.weights):
+                        base_b = index[other]
+                        for j in range(3):
+                            for col, value in rows.get(base_b + j, {}).items():
+                                for i in range(3):
+                                    weight = e[i] * e[j] * share * value
+                                    if weight:
+                                        out[i][col] = out[i].get(col, 0.0) + weight
+                else:
+                    col = width
+                    width += 1
+                    for i in range(3):
+                        if e[i]:
+                            out[i][col] = out[i].get(col, 0.0) + float(e[i])
+            for i in range(3):
+                rows[base_a + i] = out[i]
+                added.extend((base_a + i, col, value) for col, value in out[i].items()
+                             if value)
+            visiting.discard(node)
+            done.add(node)
+
+        for node in ties:
+            resolve(node)
+        return entries + added, width
 
     def dangling_rotations(self) -> list[int]:
         """The nodes whose rotations nothing acts on.
@@ -2657,6 +2896,8 @@ class Model:
                     for node, code in ((spring.node_a, spring.direction_a),
                                        (spring.node_b, spring.direction_b))
                     if node is not None and abs(code) <= 3}
+        # a tie holds translations alone
+        touched |= {n for tie in self.ties for n in (tie.node_a, *tie.nodes_b)}
         # a held node's rotations are held already
         held = set(self.loose_nodes()) | {
             node for node, axes in self.grounds.items()
@@ -2733,6 +2974,7 @@ class Model:
         touched = self._rotating_nodes()
         touched |= {n for solid in self.solids for n in solid.nodes}
         touched |= {m.node for m in self.masses}
+        touched |= {n for tie in self.ties for n in (tie.node_a, *tie.nodes_b)}
         return [n for n in self.node_ids if n not in touched]
 
     def _rotating_nodes(self) -> set[int]:
@@ -2948,6 +3190,7 @@ def _from_groups(model: Model, geometry: Geometry,
                        group=labels.get(int(node), ''))
     if not _element_by_group(model, geometry, properties):
         raise ValueError('the geometry has no elements to build from')
+    _mated_links(model, geometry)
     joined = {n for beam in model.beams for n in (beam.node_a, beam.node_b)}
     joined |= {n for plate in model.plates for n in plate.nodes}
     joined |= {n for triangle in model.triangles for n in triangle.nodes}
@@ -2959,6 +3202,7 @@ def _from_groups(model: Model, geometry: Geometry,
                      for n in (link.node_a, link.node_b)}
     held |= {n for spring in model.springs
              for n in (spring.node_a, spring.node_b) if n is not None}
+    held |= {n for tie in model.ties for n in (tie.node_a, *tie.nodes_b)}
     held |= set(model.grounds)
     stray = [m.node for m in model.masses if m.node not in held]
     if stray:
@@ -2978,6 +3222,26 @@ def _from_groups(model: Model, geometry: Geometry,
     if total_mass is not None:
         _bring_to(model, total_mass)
     return model
+
+
+def _mated_links(model: Model, geometry: Geometry) -> None:
+    """The ties of the geometry's mated surfaces (`core.mates`): each
+    node of a set's first side tied to the point of the second side's
+    surface it lies on, along the normal there and across it, as the set
+    holds each (`Model.add_tie`)."""
+    from .mates import links
+
+    for mated in getattr(geometry, 'mates', None) or []:
+        for nodes, weights, node, normal, point in links(geometry, mated):
+            # the node moved onto the point it is tied to, in the model
+            # alone: a tie across even a hair's gap resists a rigid turn
+            # (a shaft tied rigidly in its bore, its nodes a chord's sag
+            # off the bore's facets, kept three of its six free modes,
+            # 2026-10-20)
+            model.move_node(node, *point)
+            model.add_tie(node, nodes, normal, mated.normal_mode, mated.shear_mode,
+                          mated.normal_stiffness, mated.shear_stiffness, group=mated.name,
+                          weights=weights)
 
 
 def _bring_to(model: Model, total_mass: float) -> None:
@@ -3035,6 +3299,20 @@ def _element_by_group(model: Model, geometry: Geometry,
             raise ValueError(f'{named(group)} has {props.kind}: an element group of '
                              'plates takes a thickness, an element group of beams a '
                              'section, never both')
+        shape = ELEMENT_TYPES.get(int(kind), ('', 0, 'unknown'))[2]
+        if shape == 'volume' and props.kind in ('beam', 'plate', 'both a thickness and a section'):
+            # a group of solids given a beam's section or a plate's
+            # thickness: said as that, not as an unfinished section
+            # (Brandon, 2026-10-20: his bricks carried an empty round
+            # tube, and the solve asked for its dimensions)
+            held = ('a beam section' if props.kind == 'beam' else
+                    'a thickness' if props.kind == 'plate' else 'a thickness and a section')
+            clear = ('its Shape and Section' if props.kind == 'beam' else
+                     'its Thickness' if props.kind == 'plate'
+                     else 'its Thickness, Shape and Section')
+            raise ValueError(f'{named(group)} holds solid elements, which take a material '
+                             f'alone, and it has {held}: clear {clear} in the Element '
+                             'Groups table')
         if props.kind == 'beam' and not min(
                 props.section.area, props.section.iy, props.section.iz,
                 props.section.j) > 0.0:

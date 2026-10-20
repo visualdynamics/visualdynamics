@@ -105,6 +105,13 @@ def save_geometry(geom: Geometry, group: h5py.Group) -> None:
         import json
 
         group.attrs['solids'] = json.dumps([s.as_record() for s in solids])
+    # the mated surfaces, as definitions (`core.mates`); absent when there
+    # are none, so a file from before them reads back the same
+    mates = getattr(geom, 'mates', None) or []
+    if mates:
+        import json
+
+        group.attrs['mates'] = json.dumps([m.as_record() for m in mates])
     # what each element group is made of, one subgroup per element group that has it:
     # the material's numbers, and a thickness or a section — the model
     # a geometry can build of itself (2026-09-25) — or, for an element group of
@@ -256,6 +263,13 @@ def load_geometry(group: h5py.Group) -> Geometry:
 
         geometry.solids = [Solid.from_record(r)
                            for r in json.loads(group.attrs['solids'])]
+    if 'mates' in group.attrs:
+        import json
+
+        from ..core.mates import MatedSet
+
+        geometry.mates = [MatedSet.from_record(r)
+                          for r in json.loads(group.attrs['mates'])]
     return geometry
 
 

@@ -7,6 +7,12 @@ inside one, or several objects together. Much of the application is
 in the readings these combinations give, and this page describes each
 of them.
 
+The status line along the bottom of the window says what the last
+action did, or why it was refused. Its text can be selected with the
+mouse and copied with Cmd+C (Ctrl+C on Windows and Linux) or its
+right-click menu, so a message can go into a note or a report as
+written.
+
 ## What the tree shows
 
 The top row is the project. Under it there is one row per object, in

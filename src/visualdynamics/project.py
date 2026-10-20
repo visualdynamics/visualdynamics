@@ -2741,6 +2741,77 @@ class Project(dict):
                                    float(radius) * scale, float(length) * scale,
                                    angles, name)
 
+    def add_solid_cone(self, source: Any, center: Any, base_radius: float,
+                       top_radius: float, height: float, angles: Any = (0.0, 0.0, 0.0),
+                       name: str = '', *, unit: str = 'm') -> int:
+        """Add a cone to a geometry's solids (`core.solids.add_cone`): a
+        frustum `height` along its own axis, `base_radius` at its base
+        and `top_radius` at its top, either zero for a point, centered at
+        `center`.
+
+        With no `angles` its axis is the geometry's Z, its base below.
+        Bricks are fitted to it, since no sweep makes a cone.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Three numbers, in `unit`.
+        base_radius, top_radius, height : float
+            In `unit`.
+        angles : array_like, default (0, 0, 0)
+            Degrees about the geometry's X, then Y, then Z axes.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_cone(geometry, np.asarray(center, dtype=float) * scale,
+                               float(base_radius) * scale, float(top_radius) * scale,
+                               float(height) * scale, angles, name)
+
+    def add_solid_sphere(self, source: Any, center: Any, radius: float, name: str = '', *,
+                         unit: str = 'm') -> int:
+        """Add a sphere to a geometry's solids (`core.solids.add_sphere`),
+        `radius` about `center`. Bricks are fitted to it.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        center : array_like
+            Three numbers, in `unit`.
+        radius : float
+            In `unit`.
+        name : str, optional
+            What to call it.
+        unit : str, default 'm'
+            The unit the lengths are in. A geometry whose units are not
+            defined takes them as given.
+
+        Returns
+        -------
+        int
+            The solid's id.
+        """
+        from .core import solids
+
+        _name, geometry = self._solid_geometry(source)
+        scale = self._solid_scale(geometry, unit)
+        return solids.add_sphere(geometry, np.asarray(center, dtype=float) * scale,
+                                 float(radius) * scale, name)
+
     def add_solid_section(self, source: Any, shape: str, center: Any,
                           dimensions: Any, length: float,
                           angles: Any = (0.0, 0.0, 0.0), name: str = '', *,
@@ -2900,13 +2971,15 @@ class Project(dict):
                    widths: Any = None, angles: Any = None, radius: Any = None,
                    length: Any = None, corner: Any = None, counts: Any = None,
                    spacing: Any = None, dimensions: Any = None, name: Any = None,
-                   unit: str = 'm') -> None:
+                   top_radius: Any = None, unit: str = 'm') -> None:
         """Change a solid after it is made (`core.solids.edit`). Anything
         not given is kept.
 
         The values that can be changed are a block's center, widths,
         angles and corner; a cylinder's center, radius, length and
-        angles; a section's center, dimensions, length and angles; a
+        angles; a cone's center, radius (at its base), top radius,
+        length (its height) and angles; a sphere's center and radius; a
+        section's center, dimensions, length and angles; a
         hole's center, dimensions and angles; a pattern's counts and
         spacing; and any solid's name. A boolean the solid is part of
         changes with it. A mesh made from it does not, until Mesh Solids
@@ -2923,6 +2996,8 @@ class Project(dict):
             lengths in `unit`.
         counts, spacing : optional
             As `pattern_solids` takes them.
+        top_radius : float, optional
+            A cone's, in `unit`.
         dimensions : sequence of float, optional
             A section's, as `add_solid_section` takes them, or a hole's:
             its diameter, its depth (zero for a through hole) and its
@@ -2943,11 +3018,11 @@ class Project(dict):
             ('center', center), ('widths', widths), ('angles', angles),
             ('radius', radius), ('length', length), ('corner', corner),
             ('counts', counts), ('spacing', spacing), ('dimensions', dimensions),
-            ('name', name)) if value is not None}
+            ('top_radius', top_radius), ('name', name)) if value is not None}
         for key in ('center', 'widths', 'spacing', 'dimensions'):
             if key in changes:
                 changes[key] = np.asarray(changes[key], dtype=float) * scale
-        for key in ('radius', 'length', 'corner'):
+        for key in ('radius', 'length', 'corner', 'top_radius'):
             if key in changes:
                 changes[key] = float(changes[key]) * scale
         solids.edit(geometry, int(solid_id), **changes)
@@ -3086,14 +3161,17 @@ class Project(dict):
     def mesh_solids(self, source: Any, ids: Any, size: float | None = None, *,
                     unit: str = 'm', apart: bool = False,
                     parts_apart: bool = False, elements: str = 'hexes',
-                    progress: Any = None) -> dict:
+                    progress: Any = None, sizes: Any = None) -> dict:
         """Mesh a geometry's solids into bricks or tetrahedra (Mesh
         Solids). Each part becomes an element group named for it.
 
         With `elements` 'hexes', parts that are an extrusion along X, Y
         or Z are meshed on one grid cut at every flat face, with their
-        holes rounded (`core.solids.extrusion_mesh`), and any other
-        shape on a grid fitted to it (`core.hexmesh.overlay_mesh`);
+        holes rounded (`core.solids.extrusion_mesh`); a union that is
+        no extrusion in pieces, each operand swept where it is one and
+        fitted where it is not, at its own size, joined where the
+        grids meet and tied at the seams where they do not; and any
+        other shape on a grid fitted to it (`core.hexmesh.overlay_mesh`);
         `core.solids.brick_mesh` picks. With 'tetras', the parts are
         meshed into ten-node tetrahedra from their recipe's signed
         distance (`core.tetmesh.tet_mesh`). Parts
@@ -3130,17 +3208,26 @@ class Project(dict):
             Called with ``(done, total)`` as the mesh goes
             (`core.solids.extrusion_mesh`, `core.tetmesh.tet_mesh`). The
             app's progress bar uses it; a script can print it.
+        sizes : mapping of int to float, optional
+            A size per piece of a union meshed in pieces, by solid id,
+            in `unit`; a piece without one takes `size`. Bricks only.
 
         Returns
         -------
         dict
-            For bricks, what `brick_mesh` gives, 'method' included; for
-            tetrahedra,
-            'tets', 'nodes', 'steps', 'quality', 'poor', 'slivers' and
-            'shortest' as `tet_mesh` gives them; and either way 'added',
-            'shared' and 'groups' as `mesh.join` gives them, and
-            'replaced', how many elements of the parts' earlier mesh
-            were replaced.
+            For bricks, what `brick_mesh` gives, 'method' included (in
+            pieces, 'pieces' lists each piece's readings, 'seam_shared'
+            the nodes shared at the seams, 'ties' the nodes joined there
+            by rigid links and 'seams' the mated surfaces that join
+            them); for tetrahedra, 'tets', 'nodes', 'steps', 'quality',
+            'poor', 'slivers' and 'shortest' as `tet_mesh` gives them;
+            and either way 'added', 'shared' and 'groups' as `mesh.join`
+            gives them, 'replaced', how many elements of the parts'
+            earlier mesh were replaced, 'mates_dropped', how many
+            mated surfaces on that mesh went with it, and 'cleared',
+            {group name: what was taken off it} for each group the
+            solids went into that carried a section, a thickness or an
+            orientation (solids take a material alone, which is kept).
         """
         from .core import mesh, solids, tetmesh
 
@@ -3151,24 +3238,204 @@ class Project(dict):
         ids = [int(i) for i in ids]
         held = (solids.mesh_size(geometry, ids) if size is None
                 else float(size) * self._solid_scale(geometry, unit))
+        scale = self._solid_scale(geometry, unit)
         if elements == 'tetras':
             part, made = tetmesh.tet_mesh(geometry, ids, held, progress=progress)
         else:
-            part, made = solids.brick_mesh(geometry, ids, held, parts_apart,
-                                           progress=progress)
+            part, made = solids.brick_mesh(
+                geometry, ids, held, parts_apart, progress=progress,
+                sizes={int(k): float(v) * scale for k, v in (sizes or {}).items()})
         # meshed again, a part replaces its earlier mesh (Brandon,
         # 2026-10-12): the bricks of the element groups this mesh joins
         # by name go first, with the nodes only they used unless data
         # uses them. The groups stay, and their materials with them.
         # Left in, the new bricks that landed on old ones were left out
         # as already there, and a table meshed again without its legs
-        # kept the legs' bricks
+        # kept the legs' bricks. The rigid links on those bricks' nodes,
+        # the seams' ties above all, go with them: left in, they would
+        # hold the old nodes and point the new mesh at them
         replaced = [int(e) for e in solids.meshed_elements(geometry, part.group_name)]
+        # and the mated surfaces on them: their nodes are the old mesh's
+        # (a union meshed in pieces brings its seams again, in `part`)
+        from .core import mates
+
+        names = list(geometry.group_name)
+        remeshed = [int(geometry.group_id[names.index(n)]) for n in part.group_name
+                    if n and n in names]
+        dropped = mates.delete(geometry, mates.naming_groups(geometry, remeshed))
         if replaced:
+            replaced += [int(e) for e in mesh.links_on(geometry, replaced)]
             geometry.delete_elements(replaced, nodes=True, keep=sorted(self._data_nodes()))
         found = mesh.join(geometry, part, apart=apart)
+        cleared = _solids_take_a_material_alone(geometry, found['groups'])
         return {**made, 'added': found['added'], 'shared': found['shared'],
-                'groups': found['groups'], 'replaced': len(replaced)}
+                'groups': found['groups'], 'replaced': len(replaced),
+                'mates_dropped': dropped, 'cleared': cleared}
+
+    def detect_mated_surfaces(self, source: Any, groups: Any = None,
+                              tolerance: float | None = None, *,
+                              unit: str = 'm') -> list[dict]:
+        """The patches where element groups' surfaces mate
+        (`core.mates.detect`): the nodes on one group's outer faces that
+        lie on another's, within `tolerance`, one patch per connected
+        piece. The finer side is the first, and follows.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        groups : sequence of int or str, optional
+            The element groups, by id or name; every group of plates or
+            solids when omitted.
+        tolerance : float, optional
+            How far a node may be from the other's faces, in `unit`; a
+            millionth of the geometry's size when omitted.
+        unit : str, default 'm'
+            The unit the tolerance is in.
+
+        Returns
+        -------
+        list of dict
+            Each patch's 'groups' (first side's and second side's ids),
+            'nodes_a' and 'nodes_b'.
+        """
+        from .core import mates
+
+        _name, geometry = self._solid_geometry(source)
+        held = (None if tolerance is None
+                else float(tolerance) * self._solid_scale(geometry, unit))
+        ids = None if groups is None else [self._group_of(geometry, g) for g in groups]
+        return mates.detect(geometry, ids, held)
+
+    @staticmethod
+    def _group_of(geometry: Geometry, group: Any) -> int:
+        """An element group's id, from its id or its name."""
+        if isinstance(group, str):
+            names = list(geometry.group_name)
+            if group not in names:
+                raise ValueError(f'no element group {group!r}')
+            return int(geometry.group_id[names.index(group)])
+        return int(group)
+
+    def add_mated_surfaces(self, source: Any, groups: Any, nodes_a: Any, nodes_b: Any, *,
+                           normal_mode: str = 'rigid', shear_mode: str = 'rigid',
+                           normal_stiffness: float = 0.0, shear_stiffness: float = 0.0,
+                           name: str | None = None) -> int:
+        """Join two element groups where their surfaces mate (Mate
+        Surfaces): when a model is built, each of `nodes_a` is tied to the
+        nearest of `nodes_b`, along the normal of the surface it lies on
+        and in that surface's plane, each held rigidly, by a stiffness or
+        not at all (`fem.Model.add_tie`). The set is kept on the geometry
+        (`geometry.mates`), to be edited or deleted later.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        groups : (int or str, int or str)
+            The first side's element group and the second's, by id or
+            name.
+        nodes_a, nodes_b : sequence of int
+            The first side's nodes, which follow, and the second's.
+        normal_mode, shear_mode : {'rigid', 'stiffness', 'free'}
+            How the normal and the plane are held.
+        normal_stiffness, shear_stiffness : float
+            Each node's stiffness along the normal and in the plane, in
+            N/m, where its mode is 'stiffness'.
+        name : str, optional
+            What to call the set; "first on second" when omitted.
+
+        Returns
+        -------
+        int
+            The set's id.
+        """
+        from .core import mates
+
+        _name, geometry = self._solid_geometry(source)
+        pair = tuple(self._group_of(geometry, g) for g in groups)
+        return mates.add(geometry, pair, nodes_a, nodes_b, normal_mode, shear_mode,
+                         normal_stiffness, shear_stiffness, name).id
+
+    def mate_surfaces(self, source: Any, groups: Any = None, tolerance: float | None = None,
+                      *, unit: str = 'm', normal_mode: str = 'rigid',
+                      shear_mode: str = 'rigid', normal_stiffness: float = 0.0,
+                      shear_stiffness: float = 0.0) -> list[int]:
+        """Join every patch where the element groups' surfaces mate, as
+        found (`detect_mated_surfaces`), one set each
+        (`add_mated_surfaces`).
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        groups : sequence of int or str, optional
+            The element groups; every group of plates or solids when
+            omitted.
+        tolerance : float, optional
+            As `detect_mated_surfaces` takes it, in `unit`.
+        unit : str, default 'm'
+            The unit the tolerance is in.
+        normal_mode, shear_mode, normal_stiffness, shear_stiffness
+            As `add_mated_surfaces` takes them.
+
+        Returns
+        -------
+        list of int
+            The sets' ids. None found raises ValueError.
+        """
+        found = self.detect_mated_surfaces(source, groups, tolerance, unit=unit)
+        if not found:
+            raise ValueError('no surface of these element groups lies on another')
+        return [self.add_mated_surfaces(source, patch['groups'], patch['nodes_a'],
+                                        patch['nodes_b'], normal_mode=normal_mode,
+                                        shear_mode=shear_mode,
+                                        normal_stiffness=normal_stiffness,
+                                        shear_stiffness=shear_stiffness)
+                for patch in found]
+
+    def edit_mated_surfaces(self, source: Any, mate_id: int, **fields: Any) -> None:
+        """Change a set of mated surfaces: its `name`, `nodes_a`,
+        `nodes_b`, `normal_mode`, `shear_mode`, `normal_stiffness` or
+        `shear_stiffness`
+        (`core.mates.change`), refused as `add_mated_surfaces` refuses.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        mate_id : int
+            The set.
+        **fields
+            The fields to change, stiffnesses in N/m.
+
+        Returns
+        -------
+        None
+        """
+        from .core import mates
+
+        _name, geometry = self._solid_geometry(source)
+        mates.change(geometry, mate_id, **fields)
+
+    def delete_mated_surfaces(self, source: Any, ids: Any) -> int:
+        """Delete sets of mated surfaces, by id; returns how many went.
+
+        Parameters
+        ----------
+        source : str or object
+            The geometry, by name or as the object itself.
+        ids : sequence of int
+            The sets.
+
+        Returns
+        -------
+        int
+        """
+        from .core import mates
+
+        _name, geometry = self._solid_geometry(source)
+        return mates.delete(geometry, ids)
 
     def delete_solids(self, source: Any, ids: Any) -> int:
         """Delete a geometry's solids, each with every solid it is made
@@ -4975,14 +5242,19 @@ _VERB_APPLIES: tuple = (
     # where parts meshed apart meet, the step before the merge
     ('align_meshes', lambda p, o: (isinstance(o, Geometry)
                                    and len(o.elem_conn) > 0)),
+    # surfaces to mate: two element groups or more; the app offers it on
+    # the groups picked, as it does the merge (2026-10-20)
+    ('mate_surfaces', lambda p, o: (isinstance(o, Geometry)
+                                    and len(o.group_id) > 1 and len(o.elem_conn) > 0)),
     # a plane or a block goes into any geometry, an empty one above all
     ('add_plane', lambda p, o: isinstance(o, Geometry)),
     ('add_block', lambda p, o: isinstance(o, Geometry)),
     # solids go into any geometry too (2026-10-11)
     ('add_solid_block', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_cylinder', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_cone', lambda p, o: isinstance(o, Geometry)),
+    ('add_solid_sphere', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_section', lambda p, o: isinstance(o, Geometry)),
-    ('add_solid_hole', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
     ('author_specification', lambda p, o: isinstance(
         o, (ShapeSet, Specification, ChannelTable))),
@@ -5077,6 +5349,41 @@ _SELECTION_APPLIES: tuple = (
 PARTNER_VERBS = frozenset(verb for verb, _applies in _SELECTION_APPLIES)
 
 
+def _solids_take_a_material_alone(geometry: Geometry, groups: Sequence[int]) -> dict:
+    """Take a section, a thickness or an orientation off each of these
+    element groups that holds solids alone, keeping its material, and
+    say what went: {group name: 'a beam section and an orientation'}.
+
+    A group keeps its properties when its part is meshed again, so one
+    given a beam's section by mistake gave it to the new bricks too, and
+    the solve refused them (Brandon, 2026-10-20: he deleted the mesh and
+    meshed again twice, and the round tube came back each time)."""
+    from dataclasses import replace
+
+    from .core.geometry import SOLID_FAMILIES
+    from .core.mesh import group_families
+
+    cleared = {}
+    names = dict(zip((int(g) for g in geometry.group_id), geometry.group_name))
+    for group in groups:
+        props = geometry.group_properties.get(int(group))
+        families = group_families(geometry, int(group))
+        if props is None or not families or not families <= SOLID_FAMILIES:
+            continue
+        went = [what for what, there in (('a beam section', props.section is not None),
+                                         ('a thickness', props.thickness is not None),
+                                         ('an orientation', props.orientation is not None))
+                if there]
+        if not went:
+            continue
+        geometry.group_properties[int(group)] = replace(props, section=None, thickness=None,
+                                                        orientation=None)
+        label = str(names.get(int(group), '')).strip() or f'element group {group}'
+        cleared[label] = ' and '.join([', '.join(went[:-1]), went[-1]] if len(went) > 1
+                                      else went)
+    return cleared
+
+
 _JOURNALED_VERBS = (
     'add', 'import_file', 'remove', 'rename', 'rename_dof', 'link', 'unlink',
     'relink', 'name_object_group',
@@ -5086,12 +5393,14 @@ _JOURNALED_VERBS = (
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry', 'add_plane',
-    'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_section',
+    'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
+    'add_solid_sphere', 'add_solid_section',
     'add_solid_hole', 'combine_solids',
     'delete_solids', 'separate_solids', 'mesh_solids', 'pattern_solids',
     'copy_solids',
     'edit_solid', 'move_solids', 'delete_elements', 'delete_element_groups',
-    'tie_elements',
+    'tie_elements', 'mate_surfaces', 'add_mated_surfaces',
+    'edit_mated_surfaces', 'delete_mated_surfaces',
     'merge_groups', 'set_view', 'set_comparison_scale',
     'read_as_specification', 'read_as_psd',
     'author_specification',

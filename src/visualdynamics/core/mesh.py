@@ -21,6 +21,7 @@ same way, so planes that meet should be given the same element size.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -469,6 +470,14 @@ def join(geometry: Geometry, part: Geometry,
         groups.append(group_map[int(group)])
     duplicates = len(part.elem_conn) - len(conn)
     geometry.add_elements(conn, types, groups)
+    # the part's mated sets come with it, on the ids its nodes and
+    # groups took (the seams of a union meshed in pieces)
+    from .mates import next_id
+
+    for mated in getattr(part, 'mates', None) or []:
+        moved = mated.followed(renumber, group_map)
+        if moved is not None:
+            geometry.mates.append(replace(moved, id=next_id(geometry)))
     if geometry.length_unit is None:
         geometry.length_unit = part.length_unit
     return {'added': len(new_ids), 'shared': int(on.sum()),
@@ -526,6 +535,124 @@ def assemble(*parts: Geometry, tolerance: float | None = None,
     return whole
 
 
+def links_on(geometry: Geometry, elements: Any) -> list[int]:
+    """The rigid links (`tie`, `tie_nodes`) with a node among these
+    elements' nodes, by id: what goes when the elements are meshed
+    again, since a link left in holds the old node and points the new
+    mesh at it.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose elements.
+    elements : sequence of int
+        Element ids.
+
+    Returns
+    -------
+    list of int
+    """
+    rows = _element_rows(geometry, elements)
+    if not len(rows):
+        return []
+    nodes = set(np.unique(np.concatenate([geometry.elem_conn[r] for r in rows])).tolist())
+    rigid = {int(b) for b in geometry.group_id
+             if getattr(geometry.group_properties.get(int(b)), 'material', None) is not None
+             and geometry.group_properties[int(b)].material.is_rigid}
+    found = []
+    for k, (code, group) in enumerate(zip(geometry.elem_type, geometry.elem_group)):
+        if (int(code) == 21 and int(group) in rigid
+                and any(int(n) in nodes for n in geometry.elem_conn[k])):
+            found.append(int(geometry.elem_id[k]))
+    return found
+
+
+# ---- the outer faces of an element group, and a point's distance to a
+# triangle: what Mate Surfaces (`core.mates`) reads where meshes meet
+
+def group_skin(geometry: Geometry, group: int | str) -> list[tuple[int, ...]]:
+    """The faces on the outside of an element group, as node ids: every
+    face of its plates, and of its solids the faces no second solid in
+    the group shares. Lines and points have none.
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Whose elements.
+    group : int or str
+        The element group, by id or name.
+
+    Returns
+    -------
+    list of tuple of int
+    """
+    from .geometry import ELEMENT_TYPES, face_corners, solid_faces
+
+    rows = _element_rows(geometry, geometry.elements_in(group))
+    faces: dict[tuple[int, ...], tuple[int, ...]] = {}
+    plates: list[tuple[int, ...]] = []
+    for r in rows:
+        code = int(geometry.elem_type[r])
+        conn = [int(n) for n in geometry.elem_conn[r]]
+        render = ELEMENT_TYPES[code][2]
+        if render == 'face':
+            plates.append(tuple(conn[:face_corners(code)]))
+        elif render == 'volume':
+            for face in solid_faces(len(conn)):
+                corners = tuple(conn[k] for k in face)
+                key = tuple(sorted(corners))
+                if key in faces:
+                    del faces[key]
+                else:
+                    faces[key] = corners
+    return plates + list(faces.values())
+
+
+def _point_triangle_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray,
+                             c: np.ndarray) -> np.ndarray:
+    """The distance from each point to its triangle (Ericson's closest
+    point, in regions), all at once."""
+    ab, ac, ap = b - a, c - a, p - a
+    d1 = np.einsum('ij,ij->i', ab, ap)
+    d2 = np.einsum('ij,ij->i', ac, ap)
+    bp = p - b
+    d3 = np.einsum('ij,ij->i', ab, bp)
+    d4 = np.einsum('ij,ij->i', ac, bp)
+    cp = p - c
+    d5 = np.einsum('ij,ij->i', ab, cp)
+    d6 = np.einsum('ij,ij->i', ac, cp)
+    closest = np.empty_like(p)
+    done = np.zeros(len(p), dtype=bool)
+
+    def settle(mask, points):
+        hit = mask & ~done
+        closest[hit] = points[hit]
+        done[hit] = True
+
+    settle((d1 <= 0) & (d2 <= 0), a)
+    settle((d3 >= 0) & (d4 <= d3), b)
+    settle((d6 >= 0) & (d5 <= d6), c)
+    vc = d1 * d4 - d3 * d2
+    with np.errstate(divide='ignore', invalid='ignore'):
+        v = np.where(d1 - d3 != 0, d1 / (d1 - d3), 0.0)
+    settle((vc <= 0) & (d1 >= 0) & (d3 <= 0), a + v[:, None] * ab)
+    vb = d5 * d2 - d1 * d6
+    with np.errstate(divide='ignore', invalid='ignore'):
+        w = np.where(d2 - d6 != 0, d2 / (d2 - d6), 0.0)
+    settle((vb <= 0) & (d2 >= 0) & (d6 <= 0), a + w[:, None] * ac)
+    va = d3 * d6 - d5 * d4
+    with np.errstate(divide='ignore', invalid='ignore'):
+        w2 = np.where((d4 - d3) + (d5 - d6) != 0,
+                      (d4 - d3) / ((d4 - d3) + (d5 - d6)), 0.0)
+    settle((va <= 0) & (d4 - d3 >= 0) & (d5 - d6 >= 0), b + w2[:, None] * (c - b))
+    total = va + vb + vc
+    with np.errstate(divide='ignore', invalid='ignore'):
+        denom = np.where(total != 0, 1.0 / total, 0.0)
+    v3, w3 = vb * denom, vc * denom
+    settle(np.ones(len(p), dtype=bool), a + v3[:, None] * ab + w3[:, None] * ac)
+    return np.linalg.norm(p - closest, axis=1)
+
+
 #: the element group ties go into when none is named and the geometry has no
 #: rigid element group yet
 TIE_GROUP = 'ties'
@@ -579,10 +706,6 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     """
     # A bolted joint is the use (Brandon, 2026-09-26): before Tie, two
     # clicks per link were the only way.
-    from scipy.spatial import cKDTree
-
-    from .fem import RIGID, GroupProperties
-
     patch_rows = _element_rows(geometry, elements)
     if not len(patch_rows):
         raise ValueError('select the elements to tie')
@@ -602,6 +725,42 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     if not len(followers):
         raise ValueError('the patch lies on what it would be tied to — '
                          'every node is shared already')
+    found = tie_nodes(geometry, followers, target, group)
+    return {'links': found['links'], 'shared': len(patch) - len(followers),
+            'group': found['group']}
+
+
+def tie_nodes(geometry: Geometry, followers: Any, target: Any,
+              group: str | None = None) -> dict:
+    """Tie each of the `followers` nodes by a rigid, massless link to the
+    nearest of the `target` nodes, the links going into a rigid element
+    group as `tie` puts them: `tie` for a patch of elements, and the
+    seam between two pieces meshed at different sizes (`solids.brick_mesh`).
+
+    Parameters
+    ----------
+    geometry : Geometry
+        Changed in place.
+    followers : sequence of int
+        The nodes tied, by id.
+    target : sequence of int
+        The nodes they may be tied to, by id.
+    group : str, optional
+        As `tie` takes it.
+
+    Returns
+    -------
+    dict
+        'links', how many were added; 'group', the element group's id.
+    """
+    from scipy.spatial import cKDTree
+
+    from .fem import RIGID, GroupProperties
+
+    followers = np.asarray([int(n) for n in followers], dtype=np.int64)
+    target = np.asarray([int(n) for n in target], dtype=np.int64)
+    if not len(followers):
+        return {'links': 0, 'group': None}
     xyz = geometry.node_xyz
     _distance, nearest = cKDTree(xyz[geometry.node_index(target)]).query(
         xyz[geometry.node_index(followers)])
@@ -628,5 +787,4 @@ def tie(geometry: Geometry, elements: Any, to: Any,
     geometry.add_elements([[int(target[k]), int(node)]
                            for k, node in zip(nearest, followers)],
                           [21] * len(followers), [group_id] * len(followers))
-    return {'links': len(followers), 'shared': len(patch) - len(followers),
-            'group': group_id}
+    return {'links': len(followers), 'group': group_id}

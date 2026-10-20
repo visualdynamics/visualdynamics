@@ -26,7 +26,7 @@ from ..core.unit_choices import (
 from ..units import UNKNOWN, dimension_of, parse_dimension, si_transform
 from ..viz.geometry import COLOR_NAMES, color_name, color_rgb
 from .icons import color_swatch
-from .tables import Column, TableModel
+from .tables import Column, TableModel, TransposedTableModel
 
 if TYPE_CHECKING:                                    # pragma: no cover
     from PySide6.QtCore import QObject
@@ -1178,9 +1178,21 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             raise ValueError('a ground group holds its points fixed and takes '
                              'nothing else — pick a material to make it '
                              'something else')
+        # a group of solids takes a material alone: a section, a thickness
+        # or an orientation typed on it is refused here, and clearing one
+        # left from before is not (Brandon, 2026-10-20: his bricks carried
+        # an empty round tube, and the solve asked for its dimensions)
+        if text and (holder == 'section' or field in ('thickness', 'orientation')):
+            from ..core.geometry import SOLID_FAMILIES
+            from ..core.mesh import group_families
+
+            families = group_families(geometry, group)
+            if families and families <= SOLID_FAMILIES:
+                raise ValueError('a group of solid elements takes a material alone: '
+                                 'no section, thickness or orientation')
         if holder == 'section' and field in ('shape', 'dimensions'):
-            geometry.group_properties[group] = _set_section_shape(
-                props, field, text, unit_system)
+            geometry.group_properties[group] = _without_empty_section(
+                _set_section_shape(props, field, text, unit_system))
             return
         if (holder == 'section' and props is not None
                 and props.section is not None and props.section.shape
@@ -1222,12 +1234,29 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             section = props.section or Section('', 0.0, 0.0, 0.0, 0.0)
             if field == 'name' and not text and props.section is None:
                 return
-            props = replace(props, section=replace(section, **{field: value}))
+            props = _without_empty_section(replace(props, section=replace(section,
+                                                                          **{field: value})))
         else:
             props = replace(props, **{field: value})
         geometry.group_properties[group] = props
 
     return set_value
+
+
+def _without_empty_section(props):
+    """The properties with a section that says nothing taken off: no
+    name, no shape and no numbers. Clearing a section's cells clears the
+    section, so a group given one by mistake becomes what it was
+    (Brandon, 2026-10-20: clearing them left an empty one behind, and the
+    group of bricks stayed a group of beams)."""
+    from dataclasses import replace
+
+    section = props.section if props is not None else None
+    if (section is not None and not section.name and not section.shape
+            and not section.dimensions
+            and not any((section.area, section.iy, section.iz, section.j))):
+        return replace(props, section=None)
+    return props
 
 
 def _set_section_shape(props, field, text, unit_system):
@@ -1497,7 +1526,11 @@ def element_group_table_model(geometry: Geometry,
         # edited last.
         *_property_columns(unit_system),
     ]
-    return TableModel(geometry, columns, lambda g: len(g.group_id), parent)
+    # the other way up (Brandon, 2026-10-20): a group's properties read
+    # as a column of entries, and several groups side by side are
+    # edited at once by selecting across them
+    return TransposedTableModel(geometry, columns, lambda g: len(g.group_id), parent,
+                                item_label=group_label)
 
 
 ENTITY_TABLES = {

@@ -279,3 +279,38 @@ def test_rendering_to_a_file_never_builds_a_pane(tmp_path, qt_app):
     out = tmp_path / 'frf.png'
     result = frf.plot(path=out)
     assert str(result) == str(out) and out.exists()
+
+
+def test_the_panel_column_beside_the_view_is_dragged_and_remembered(qt_app):
+    """The settings panels sit in a splitter beside the 3-D view: the
+    column shows while any panel does, at the width it was last
+    dragged to, and hides with the last panel (Brandon, 2026-10-20:
+    the pane's width could not be changed)."""
+    from visualdynamics.gui.panes import SIDE_WIDTH
+
+    scene = ScenePane('light', offscreen=True)
+    scene.resize(1200, 600)
+    scene.show()
+    qt_app.processEvents()
+    assert not scene.side.isVisibleTo(scene)
+    scene.mesh_solids_panel.show()
+    qt_app.processEvents()
+    assert scene.side.isVisibleTo(scene)
+    assert scene.view_split.sizes()[1] == SIDE_WIDTH
+    # dragged wider, then the panel put away and another opened: the
+    # column comes back at the dragged width
+    total = sum(scene.view_split.sizes())
+    scene.view_split.setSizes([total - 500, 500])
+    qt_app.processEvents()
+    assert scene.view_split.sizes()[1] == 500
+    # the panel fills the column it sits in, so its contents grow with it
+    assert scene.mesh_solids_panel.width() == 500
+    scene.mesh_solids_panel.hide()
+    qt_app.processEvents()
+    assert not scene.side.isVisibleTo(scene)
+    scene.mate_panel.show()
+    qt_app.processEvents()
+    assert scene.side.isVisibleTo(scene) and scene.view_split.sizes()[1] == 500
+    scene.close()
+    scene.deleteLater()
+    qt_app.processEvents()

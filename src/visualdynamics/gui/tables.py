@@ -149,6 +149,11 @@ class TableModel(QAbstractTableModel):
     #: a successful edit's replay-line suffix — the window prepends
     #: `project[name]` and appends it to the session journal
     edit_journaled = Signal(str)
+    #: whether the items run across (`TransposedTableModel`) rather than
+    #: down: the view and the delegate ask the model which column and
+    #: which item a cell belongs to rather than reading its row and
+    #: column, so one table serves either way up
+    transposed: bool = False
 
     def __init__(self, obj: Any, columns: Sequence[Column],
                  row_count: Callable[[Any], int],
@@ -174,37 +179,67 @@ class TableModel(QAbstractTableModel):
             return self.columns[section].title
         return section + 1
 
+    # ---- which way up -------------------------------------------------------
+    # An item is one of the object's things (a node, an element group);
+    # a column is one of its properties. Down the table, items are rows;
+    # across it (`TransposedTableModel`), items are columns. Everything
+    # that reads or writes a cell goes through these four, so the view
+    # and the delegate never assume which way the table runs.
+
+    def item_count(self) -> int:
+        return self._row_count(self.obj)
+
+    def column_of(self, index: QModelIndex | QPersistentModelIndex) -> Column:
+        """The property a cell belongs to."""
+        return self.columns[index.column()]
+
+    def column_number(self, index: QModelIndex | QPersistentModelIndex) -> int:
+        """The position of a cell's property in `columns`."""
+        return index.column()
+
+    def item_of(self, index: QModelIndex | QPersistentModelIndex) -> int:
+        """The item a cell belongs to, as the object counts them."""
+        return index.row()
+
+    def cell(self, item: int, column_number: int) -> QModelIndex:
+        """The index of an item's cell in a property."""
+        return self.index(item, column_number)
+
+    def item_range(self, item: int) -> tuple[QModelIndex, QModelIndex]:
+        """The first and last cells of one item."""
+        return self.index(item, 0), self.index(item, self.columnCount() - 1)
+
     def data(self, index: QModelIndex | QPersistentModelIndex,
              role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
             return None
-        column = self.columns[index.column()]
+        column, item = self.column_of(index), self.item_of(index)
         if column.checkbox:
             # the box is the display; the text side stays on EditRole so
             # copy and paste still speak 'True'/'False'
             if role == Qt.ItemDataRole.CheckStateRole:
                 return (Qt.CheckState.Checked
-                        if column.get(self.obj, index.row())
+                        if column.get(self.obj, item)
                         else Qt.CheckState.Unchecked)
             if role == Qt.ItemDataRole.DisplayRole:
                 return None
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
-            return column.text(self.obj, index.row())
+            return column.text(self.obj, item)
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return column.alignment
         if (role == Qt.ItemDataRole.DecorationRole
                 and column.decoration is not None):
-            return column.decoration(self.obj, index.row())
+            return column.decoration(self.obj, item)
         if (role == Qt.ItemDataRole.BackgroundRole
                 and column.background is not None):
-            return column.background(self.obj, index.row())
+            return column.background(self.obj, item)
         return None
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         flags = (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        if index.isValid() and self.columns[index.column()].editable:
+        if index.isValid() and self.column_of(index).editable:
             flags |= Qt.ItemFlag.ItemIsEditable
-            if self.columns[index.column()].checkbox:
+            if self.column_of(index).checkbox:
                 flags |= Qt.ItemFlag.ItemIsUserCheckable
         return flags
 
@@ -212,43 +247,40 @@ class TableModel(QAbstractTableModel):
                 role: int = Qt.ItemDataRole.EditRole) -> bool:
         if not index.isValid():
             return False
-        if (role == Qt.ItemDataRole.CheckStateRole
-                and self.columns[index.column()].checkbox):
+        column, item = self.column_of(index), self.item_of(index)
+        if role == Qt.ItemDataRole.CheckStateRole and column.checkbox:
             # a click on the box is the same statement as typing the word
             value = ('True' if Qt.CheckState(value) == Qt.CheckState.Checked
                      else 'False')
             role = Qt.ItemDataRole.EditRole
         if role != Qt.ItemDataRole.EditRole:
             return False
-        column = self.columns[index.column()]
         if not column.editable:
             return False
         try:
-            column.set(self.obj, index.row(), str(value))
+            column.set(self.obj, item, str(value))
         except (ValueError, KeyError, IndexError) as e:
             # the cell reverts; say why, or the refusal looks like a bug
             self.edit_rejected.emit(str(e))
             return False
         if column.affects_row:
             # changing a channel's quantity can clear the unit beside it
-            self.dataChanged.emit(self.index(index.row(), 0),
-                                  self.index(index.row(), self.columnCount() - 1))
+            self.dataChanged.emit(*self.item_range(item))
         else:
             self.dataChanged.emit(index, index)
-        self._journal_edit(column, index.row(), str(value))
+        self._journal_edit(column, item, str(value))
         return True
 
     # ---- helpers ------------------------------------------------------------
 
     def refresh_row(self, row: int) -> None:
-        """Redraw one row, leaving the selection alone.
+        """Redraw one item, leaving the selection alone.
 
         A full reset clears the selection, which matters when the
         selection is what the edit applies to: turning a coordinate system
         would lose the system being turned.
         """
-        self.dataChanged.emit(self.index(row, 0),
-                              self.index(row, self.columnCount() - 1))
+        self.dataChanged.emit(*self.item_range(row))
 
     def _journal_edit(self, column, row, text):
         if column.journal is None:
@@ -262,8 +294,8 @@ class TableModel(QAbstractTableModel):
         """Write a different value into each of many cells, as one change,
         and return (applied, rejected, reason).
 
-        `cells` holds (row, column, text) for each cell. `set_many` is
-        this with one value for every cell. One `dataChanged` covers all
+        `cells` holds (item, column number, text) for each cell. `set_many`
+        is this with one value for every cell. One `dataChanged` covers all
         of them: setData cell by cell would emit once per cell, and each
         emission redraws the 3-D view, so setting a column of a few
         thousand nodes costs one redraw and not a few thousand.
@@ -275,23 +307,24 @@ class TableModel(QAbstractTableModel):
         """
         applied = rejected = 0
         reason = ''
-        rows, columns = [], []
-        for row, column_index, text in cells:
+        touched = []
+        for item, column_index, text in cells:
             column = self.columns[column_index]
             if not column.editable:
                 rejected += 1
                 continue
             try:
-                column.set(self.obj, row, text)
+                column.set(self.obj, item, text)
             except (ValueError, KeyError, IndexError) as e:
                 rejected += 1
                 reason = reason or str(e)
                 continue
-            self._journal_edit(column, row, text)
+            self._journal_edit(column, item, text)
             applied += 1
-            rows.append(row)
-            columns.append(column_index)
+            touched.append(self.cell(item, column_index))
         if applied:
+            rows = [c.row() for c in touched]
+            columns = [c.column() for c in touched]
             self.dataChanged.emit(self.index(min(rows), min(columns)),
                                   self.index(max(rows), max(columns)))
         return applied, rejected, reason
@@ -301,8 +334,56 @@ class TableModel(QAbstractTableModel):
         """Write one value into many cells as one change, and return
         (applied, rejected, reason): `set_cells` with the same text for
         every cell."""
-        return self.set_cells((index.row(), index.column(), text)
+        return self.set_cells((self.item_of(index), self.column_number(index), text)
                               for index in indexes)
+
+
+class TransposedTableModel(TableModel):
+    """A `TableModel` the other way up: each property a row and each
+    item a column, with `item_label` naming the columns. The Element
+    Groups table is one (Brandon, 2026-10-20): a group's properties
+    read as a column of entries, and several groups side by side are
+    edited at once by selecting across them."""
+
+    transposed = True
+
+    def __init__(self, obj: Any, columns: Sequence[Column],
+                 row_count: Callable[[Any], int],
+                 parent: QObject | None = None,
+                 item_label: Callable[[Any, int], str] | None = None) -> None:
+        super().__init__(obj, columns, row_count, parent)
+        self._item_label = item_label
+
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex = NO_PARENT) -> int:
+        return 0 if parent.isValid() else len(self.columns)
+
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex = NO_PARENT) -> int:
+        return 0 if parent.isValid() else self._row_count(self.obj)
+
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == Qt.Orientation.Vertical:
+            return self.columns[section].title
+        if self._item_label is not None:
+            return self._item_label(self.obj, section)
+        return section + 1
+
+    def column_of(self, index: QModelIndex | QPersistentModelIndex) -> Column:
+        return self.columns[index.row()]
+
+    def column_number(self, index: QModelIndex | QPersistentModelIndex) -> int:
+        return index.row()
+
+    def item_of(self, index: QModelIndex | QPersistentModelIndex) -> int:
+        return index.column()
+
+    def cell(self, item: int, column_number: int) -> QModelIndex:
+        return self.index(column_number, item)
+
+    def item_range(self, item: int) -> tuple[QModelIndex, QModelIndex]:
+        return self.index(0, item), self.index(self.rowCount() - 1, item)
 
 
 class ChoiceDialog(QDialog):
@@ -441,8 +522,16 @@ class ChoiceDelegate(QStyledItemDelegate):
         return editor
 
     def _column(self, index: QModelIndex | QPersistentModelIndex) -> Column | None:
-        columns = getattr(index.model(), 'columns', None)
+        model = index.model()
+        if hasattr(model, 'column_of'):
+            return model.column_of(index)
+        columns = getattr(model, 'columns', None)
         return columns[index.column()] if columns else None
+
+    @staticmethod
+    def _item(index: QModelIndex | QPersistentModelIndex) -> int:
+        model = index.model()
+        return model.item_of(index) if hasattr(model, 'item_of') else index.row()
 
     def _choices(self, index: QModelIndex | QPersistentModelIndex
                  ) -> tuple[Column | None, list | None]:
@@ -450,7 +539,7 @@ class ChoiceDelegate(QStyledItemDelegate):
         if column is None:
             return None, None
         return column, column.choices_for(getattr(index.model(), 'obj', None),
-                                          index.row())
+                                          self._item(index))
 
     def createEditor(self, parent: QWidget, option: Any,
                      index: QModelIndex | QPersistentModelIndex) -> QWidget:
@@ -541,7 +630,7 @@ class ChoiceDelegate(QStyledItemDelegate):
         super().paint(painter, option, index)
         column = self._column(index)
         if column is None or not column.choices_for(
-                getattr(index.model(), 'obj', None), index.row()):
+                getattr(index.model(), 'obj', None), self._item(index)):
             return
         if not option.state & QStyle.StateFlag.State_Selected:
             return
@@ -630,15 +719,46 @@ class CopyPasteTableView(QTableView):
         reads the selection still reads the model's own rows.
         """
         # 2026-10-10: the pencil on an element group opened every element
-        # group.
+        # group. The rows are items: columns in a transposed table.
         self._shown_rows = None if rows is None else {int(r) for r in rows}
         model = self.model()
-        count = model.rowCount() if model is not None else 0
-        for row in range(count):
-            self.setRowHidden(row, not self.row_shown(row))
+        count = model.item_count() if model is not None else 0
+        for item in range(count):
+            if self._transposed():
+                self.setColumnHidden(item, not self.row_shown(item))
+            else:
+                self.setRowHidden(item, not self.row_shown(item))
         selection = self.selectionModel()
         if selection is not None and self._shown_rows is not None:
             self._drop_hidden(selection.selection())
+
+    def _transposed(self) -> bool:
+        return bool(getattr(self.model(), 'transposed', False))
+
+    def _item(self, index: QModelIndex | QPersistentModelIndex) -> int:
+        model = self.model()
+        return model.item_of(index) if hasattr(model, 'item_of') else index.row()
+
+    def selected_items(self) -> list[int]:
+        """The items any selected cell belongs to, sorted: rows down a
+        table, columns across a transposed one."""
+        selection = self.selectionModel()
+        if selection is None:
+            return []
+        return sorted({self._item(index) for index in selection.selectedIndexes()})
+
+    def select_items(self, items: Iterable[int], clear: bool = True) -> None:
+        """Select whole items, as a click on their headers would."""
+        model, selection = self.model(), self.selectionModel()
+        if model is None or selection is None:
+            return
+        if clear:
+            selection.clearSelection()
+        whole = (QItemSelectionModel.SelectionFlag.Columns if self._transposed()
+                 else QItemSelectionModel.SelectionFlag.Rows)
+        for item in items:
+            selection.select(model.cell(int(item), 0),
+                             QItemSelectionModel.SelectionFlag.Select | whole)
 
     def row_shown(self, row: int) -> bool:
         """Whether `row` is shown (see `show_rows`)."""
@@ -653,6 +773,8 @@ class CopyPasteTableView(QTableView):
         if model is not None:
             for row in range(model.rowCount()):
                 self.setRowHidden(row, False)
+            for column in range(model.columnCount()):
+                self.setColumnHidden(column, False)
 
     def selectionChanged(self, selected: Any, deselected: Any) -> None:
         super().selectionChanged(selected, deselected)
@@ -660,18 +782,30 @@ class CopyPasteTableView(QTableView):
             self._drop_hidden(selected)
 
     def _drop_hidden(self, selection: Any) -> None:
-        hidden = sorted({index.row() for index in selection.indexes()
-                         if not self.row_shown(index.row())})
+        hidden = sorted({self._item(index) for index in selection.indexes()
+                         if not self.row_shown(self._item(index))})
         if not hidden:
             return
         model, chosen = self.model(), self.selectionModel()
-        for row in hidden:
-            chosen.select(model.index(row, 0),
-                          QItemSelectionModel.SelectionFlag.Deselect
-                          | QItemSelectionModel.SelectionFlag.Rows)
+        whole = (QItemSelectionModel.SelectionFlag.Columns if self._transposed()
+                 else QItemSelectionModel.SelectionFlag.Rows)
+        for item in hidden:
+            chosen.select(model.cell(item, 0),
+                          QItemSelectionModel.SelectionFlag.Deselect | whole)
 
     def _shown(self, rows: Iterable[int]) -> list[int]:
+        """The items among `rows` that are shown."""
         return [row for row in rows if self.row_shown(row)]
+
+    def _rows_shown(self, rows: Iterable[int]) -> list[int]:
+        """The view rows among `rows` that are shown: every row when the
+        items run across."""
+        return list(rows) if self._transposed() else self._shown(rows)
+
+    def _columns_shown(self, columns: Iterable[int]) -> list[int]:
+        """The view columns among `columns` that are shown: every column
+        when the items run down."""
+        return self._shown(columns) if self._transposed() else list(columns)
 
     # ---- clipboard ----------------------------------------------------------
 
@@ -691,8 +825,8 @@ class CopyPasteTableView(QTableView):
         if model is None:
             return ''
         if whole_table:
-            rows = self._shown(range(model.rowCount()))
-            columns = range(model.columnCount())
+            rows = self._rows_shown(range(model.rowCount()))
+            columns = self._columns_shown(range(model.columnCount()))
         else:
             rows, columns = self.selected_block()
             if not rows:
@@ -802,18 +936,19 @@ class CopyPasteTableView(QTableView):
         rows, columns = self.selected_block()
         top = rows[0] if rows else 0
         left = columns[0] if columns else 0
-        # line by line onto the rows that are shown, from the top one down
-        landing = self._shown(range(top, model.rowCount()))
+        # line by line onto the rows that are shown, from the top one
+        # down, and cell by cell onto the columns that are shown
+        landing = self._rows_shown(range(top, model.rowCount()))
+        across = self._columns_shown(range(left, model.columnCount()))
 
         applied = rejected = 0
         for row_offset, line in enumerate(text.split('\n')):
             if not line.strip() and row_offset == len(text.split('\n')) - 1:
                 continue          # trailing newline from the spreadsheet
             for column_offset, cell in enumerate(line.split('\t')):
-                column = left + column_offset
-                if row_offset >= len(landing) or column >= model.columnCount():
+                if row_offset >= len(landing) or column_offset >= len(across):
                     continue      # pasting past the edge stops, not wraps
-                row = landing[row_offset]
+                row, column = landing[row_offset], across[column_offset]
                 index = model.index(row, column)
                 if not (model.flags(index) & Qt.ItemFlag.ItemIsEditable):
                     rejected += 1
@@ -844,8 +979,8 @@ class CopyPasteTableView(QTableView):
         value.
         """
         model = self.model()
-        columns = [model.columns[column] for column
-                   in {index.column() for index in indexes}]
+        columns = list({id(model.column_of(index)): model.column_of(index)
+                        for index in indexes}.values())
         first = columns[0]
         if first.choices and all(column.choices == first.choices
                                  for column in columns):
@@ -887,6 +1022,8 @@ class CopyPasteTableView(QTableView):
         selection = self.selectionModel()
         if selection is None:
             return []
+        if self._transposed():
+            return sorted({index.column() for index in selection.selectedColumns()})
         return sorted({index.row() for index in selection.selectedRows()})
 
     def clear_cells(self) -> tuple[int, int]:
@@ -943,29 +1080,33 @@ class CopyPasteTableView(QTableView):
         model = self.model()
         if not rows or model is None:
             return 0, 0
+        # the fill runs along the items: down the rows, or across the
+        # columns of a transposed table; the properties are the other way
+        along, properties = (columns, rows) if self._transposed() else (rows, columns)
         # a column can declare companions that fill along with it —
         # sorted, so a carried Type lands before the Unit that carried it
         specs = getattr(model, 'columns', None)
         if specs is not None:
-            wanted = set(columns)
-            for c in columns:
+            wanted = set(properties)
+            for c in properties:
                 wanted.update(j for j, spec in enumerate(specs)
                               if spec.title in specs[c].carries)
-            columns = sorted(wanted)
-        if through > rows[-1]:
-            targets = range(rows[-1] + 1, min(through, model.rowCount() - 1) + 1)
-        elif through < rows[0]:
-            targets = range(max(through, 0), rows[0])
+            properties = sorted(wanted)
+        last = model.item_count() - 1
+        if through > along[-1]:
+            targets = range(along[-1] + 1, min(through, last) + 1)
+        elif through < along[0]:
+            targets = range(max(through, 0), along[0])
         else:
             return 0, 0
         targets = self._shown(targets)
         cells = []
         for target in targets:
             # step through the block in order, wrapping, measured from its top
-            source = rows[(target - rows[0]) % len(rows)]
-            for column in columns:
-                cells.append((target, column, model.data(
-                    model.index(source, column), Qt.ItemDataRole.EditRole)))
+            source = along[(target - along[0]) % len(along)]
+            for prop in properties:
+                cells.append((target, prop, model.data(
+                    model.cell(source, prop), Qt.ItemDataRole.EditRole)))
         applied, rejected, reason = model.set_cells(cells)
         self.edits_applied.emit(applied, rejected, reason)
         return applied, rejected
@@ -973,9 +1114,10 @@ class CopyPasteTableView(QTableView):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._on_handle(event.position().toPoint())):
-            rows, _columns = self.selected_block()
-            self._filling = rows
-            self._fill_to = rows[-1]
+            rows, columns = self.selected_block()
+            along = columns if self._transposed() else rows
+            self._filling = along
+            self._fill_to = along[-1]
             event.accept()
             return
         super().mousePressEvent(event)
@@ -985,7 +1127,7 @@ class CopyPasteTableView(QTableView):
         if self._filling is not None:
             index = self.indexAt(position)
             if index.isValid():
-                self._fill_to = index.row()
+                self._fill_to = index.column() if self._transposed() else index.row()
                 self.viewport().update()
             event.accept()
             return
@@ -1004,7 +1146,7 @@ class CopyPasteTableView(QTableView):
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._on_handle(event.position().toPoint())):
             self._filling = self._fill_to = None
-            self.fill_from_selection(self.model().rowCount() - 1)
+            self.fill_from_selection(self.model().item_count() - 1)
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
@@ -1028,10 +1170,16 @@ class CopyPasteTableView(QTableView):
         rows, columns = self.selected_block()
         if self._filling is not None and rows:
             # outline what the drag would cover, before it is committed
-            top = min(self._fill_to, rows[0])
-            bottom = max(self._fill_to, rows[-1])
-            area = (self.visualRect(model.index(top, columns[0]))
-                    .united(self.visualRect(model.index(bottom, columns[-1]))))
+            if self._transposed():
+                left = min(self._fill_to, columns[0])
+                right = max(self._fill_to, columns[-1])
+                area = (self.visualRect(model.index(rows[0], left))
+                        .united(self.visualRect(model.index(rows[-1], right))))
+            else:
+                top = min(self._fill_to, rows[0])
+                bottom = max(self._fill_to, rows[-1])
+                area = (self.visualRect(model.index(top, columns[0]))
+                        .united(self.visualRect(model.index(bottom, columns[-1]))))
             painter.setPen(QPen(self.palette().highlight().color(), 1,
                                 Qt.PenStyle.DashLine))
             painter.drawRect(area.adjusted(0, 0, -1, -1))

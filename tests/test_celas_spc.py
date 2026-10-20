@@ -193,11 +193,11 @@ def test_the_table_takes_ground_directions(qt_app):
     model.edit_journaled.connect(lines.append)
     _set(model, 'Ground', 'x, y, z', row=row)
     assert geometry.group_properties[group].ground == ('X', 'Y', 'Z')
-    assert model.data(model.index(row, _column(model, 'Ground'))) == 'X, Y, Z'
+    assert model.data(model.cell(row, _column(model, 'Ground'))) == 'X, Y, Z'
     assert lines[-1] == (f'.group_properties[{group}] = '
                          "GroupProperties(ground=('X', 'Y', 'Z'))")
     _set(model, 'Ground', 'all', row=row)
-    assert model.data(model.index(row, _column(model, 'Ground'))) == 'all'
+    assert model.data(model.cell(row, _column(model, 'Ground'))) == 'all'
     assert lines[-1].endswith('GroupProperties(ground=True)')
     _set(model, 'Ground', '', row=row)
     assert group not in geometry.group_properties

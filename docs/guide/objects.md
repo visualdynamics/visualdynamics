@@ -116,11 +116,23 @@ every exported figure.
 
 A geometry is also a finite element model once its element groups say
 what they are made of. The pencil on an element group's row in the tree
-opens the Element Groups table on that group. Its property columns
-take, per element group, a material (name, E, ν, ρ) and either a
-thickness, for a group of quads or triangles, or a section and an
-orientation vector, for a group of beams. A group of solid elements
-takes the material alone.
+opens the Element Groups table on that group. With the table open,
+Cmd-click (Ctrl-click elsewhere) more groups' rows in the tree to add
+their columns, or click a picked one off to take its column away;
+picking several and choosing Edit from the right-click menu opens the
+table on all of them. The table runs
+across: each group is a column, named for it, and its properties read
+down the column, a material (name, E, ν, ρ) and either a thickness,
+for a group of quads or triangles, or a section and an orientation
+vector, for a group of beams. A group of solid elements takes the
+material alone. The table refuses a section, a thickness or an orientation typed on
+one, and clearing a section's cells (its Shape, or its name) takes the
+section off once nothing of it is left. Meshing solids into a group
+that carries a section, a thickness or an orientation takes them off
+and keeps its material, and the status line says what went. To set one value on several groups at once, select
+the property's cells across their columns and batch edit, or drag the
+fill handle across from the group that has it; every table convention
+holds this way up.
 
 A section is built from its shape: round tube, rod, rectangle,
 rectangular tube, I-beam, channel or angle, picked in the Shape column.
@@ -288,25 +300,77 @@ Coincident Nodes*. From a script, `project.align_meshes(name, reach,
 groups=[...], exclude=[...])` (`Geometry.align_moves` lists the moves,
 each a node and the node it moves onto).
 
+*Mate Surfaces* is for parts whose meshes meet face to face, matched
+or not. Pick two element groups or more in the tree, plates or solids,
+and it is on the bar. Its pane finds every patch where one group's
+outside lies on another's and faces it, within the tolerance, and
+lists them, one entry per connected patch, so four legs standing on a
+table top are four entries. The first side of a patch is the finer
+mesh; its nodes are tied to the second side's surface.
+
+To change a patch, pick it and pick the side with the two buttons.
+Only that side's nodes are drawn, so coincident nodes of the two sides
+are never confused: the patch's nodes large, the side's nodes in the
+other patches small, and its other nodes that can be picked small in
+a muted color. A node the two groups share, where the mesher or a
+merge made the meshes one node, is a square on either side: it is
+joined already, tighter than any tie, and is never tied or picked. A
+node can be picked only within the *Pick within*
+distance of the other side's surface, and the node under the cursor
+lights up. A click adds the node to the side or takes it away.
+
+How the sides are held is set twice, once along the surface's normal
+and once in its plane (the shear): *Rigid*, *Stiffness* (per node, in
+the display units) or *Free*. Rigid in both ties the surfaces together;
+rigid along the normal and free in the plane lets them slide; a
+stiffness in both is a joint to tune until the model's modes match the
+measured ones. Each node of the first side is tied to the point of the
+second side's surface it lies on, moving with the corners around that
+point, and along the surface's normal there. On a curved surface, a
+shaft in its bore, each node has its own normal, so a shaft held
+rigidly along the normal and free in the plane turns and slides in its
+bore and nothing else. When the model is built, each tied node is put
+on the point it is tied to, which it is already within the tolerance.
+*Keep* adds the picked patches to the geometry's **Mated Surfaces**
+row, one set each, named *post on base* or as typed, and the pane stays
+open on the patches left.
+
+A set of mated surfaces holds no elements. Its ties are made when a
+model is built, so the set can be changed at any time. Its row's pencil
+opens the pane on it, to change its nodes, how it is held or its name,
+and *Save*. *Delete* removes a set, or every set when the **Mated
+Surfaces** row itself is picked. A set follows its nodes when they are
+renumbered or merged, and goes with its element group. To make the
+meshes one where their nodes coincide, use *Merge Coincident Nodes*
+instead. From a script, `project.mate_surfaces(name, ['post', 'base'])`
+keeps every patch found, rigid in both unless `normal_mode` and
+`shear_mode` say otherwise; `project.detect_mated_surfaces` lists the
+patches, and `project.add_mated_surfaces`, `edit_mated_surfaces` and
+`delete_mated_surfaces` work on one set, stiffness in N/m.
+
 ### Solids
 
 Solids are the shapes a part is built from before it is meshed. They
 are listed on a geometry's **Solids** row, which is there before the
-first solid is added. *Add Solid Block* and *Add Cylinder* on that row
-open the add pane on a solid centered on the origin. A block is a
-center, three widths, three angles and an optional corner radius, which
-rounds its four edges along its own Z so that a window cut with it has
-fillets. A cylinder is a center, a radius, a length along its own Z and
-three angles. Either one takes a name. The pane draws the shape as you
-type, and the rings and arrows turn and slide it. *Add Section* adds an
-I-beam, a channel, a tee, an angle, a rectangular tube or a round tube,
-run a length along its own Z and sized by the same dimensions the beam
-element's sections take (a tee takes an I-beam's). *Add Hole* adds a
-hole to subtract from a part: it starts at its center, on the face it
-is drilled from, and runs a depth down its own Z, or with *Through*
-ticked it runs through the part it is cut from, however thick that part
-is made. *Counterbore* makes it wider at the entry, for a screw's head.
+first solid is added. *Add Solid Block*, *Add Cylinder*, *Add Cone*
+and *Add Sphere* on that row open the add pane on a solid centered on
+the origin. A block is a center, three widths, three angles and an
+optional corner radius, which rounds its four edges along its own Z so
+that a window cut with it has fillets. A cylinder is a center, a
+radius, a length along its own Z and three angles. A cone is a frustum:
+a center, a base radius at its own -Z end, a top radius at its +Z end,
+a height and three angles, with either radius zero for a point. A
+sphere is a center and a radius. Each takes a name. The pane draws the
+shape as you type, and the rings and arrows turn and slide it. *Add
+Section* adds an I-beam, a channel, a tee, an angle, a rectangular tube
+or a round tube, run a length along its own Z and sized by the same
+dimensions the beam element's sections take (a tee takes an I-beam's).
 Each of these is one solid, and its pencil changes its dimensions.
+
+A hole is a cylinder subtracted from a part, or two cylinders for a
+counterbore. Projects made with the hole solid that was once on this
+row still open with their holes, which draw, mesh and edit as before:
+a hole's pencil sets its depth, or *Through*, and its *Counterbore*.
 
 Pick two parts or more in the tree and the bar offers *Union*,
 *Subtract* and *Intersect*. *Subtract* takes the others from the one
@@ -361,7 +425,42 @@ number of bricks nearest the element size. A brick belongs to the
 picked part whose shape holds its center, and where parts overlap it
 goes to the one later in the tree.
 
-A shape that is not an extrusion, a hole drilled at an angle, is still
+A union that is not an extrusion is meshed in pieces, one per
+operand, as deep as unions go: a union with another union among its
+operands gives up that union's operands too, so a table unioned again
+with a sphere is still its block, legs and rod, and the sphere. A
+subtraction whose first operand is a union is split the same way, each
+member less what the subtraction takes: a block and a flange unioned
+and drilled through are the block less the hole and the flange less the
+hole. Any other subtraction, an intersection or a pattern is one piece,
+its operands being no material on their own. Each piece that is an
+extrusion is swept as above, with rings about its holes, and each that
+is not is fitted as below, every piece at its own size. A piece that is one block, cylinder or section turned
+off the axes is swept along its own axis: a tilted rod gets rings along
+its length. Where it runs into a piece before it, each line of nodes
+along the sweep stops at that piece's surface and its nodes are spread
+evenly back to the free end, so the last layer lies on the face it
+meets and the bricks near there are sheared; the pane gives the worst
+brick. A turned piece that runs through another, or meets pieces at
+both ends, is fitted instead. One turned block, cylinder or section
+meshed on its own is swept the same way. The pane then shows a size per piece in place of the
+one box, each starting at the size the piece is likely to hold at,
+and *Detect Element Sizes* fills every row. Where two pieces meet and
+their grids match, the seam's nodes are shared, and where they do
+not, the finer piece's nodes on the seam are tied rigidly to the
+coarser piece as mated surfaces, one set per seam under the geometry's
+**Mated Surfaces**, which can be given a stiffness afterward; the pane
+reads both counts. Where two pieces overlap, the material is the
+earlier operand's: a later piece's grid is cut at the earlier pieces'
+faces and its bricks inside them are left out, so legs that run up
+into a table top end at its underside. Each piece keeps its own
+element group, named for its operand. This is how a part with one thin piece on a thick one
+meshes: a block with 0.2 in flanges wants 0.2 in bricks on the block
+and 0.067 in on the flanges, which no one grid can give. In a script,
+`mesh_solids(name, [part], 0.2, unit='in', sizes={flange: 0.067})`
+names the sizes by solid id.
+
+A shape that is not an extrusion, a hole drilled at an angle, a cone or a sphere, is still
 meshed into bricks, on a grid fitted to it: the cubes whose centers
 lie inside are kept, a layer of bricks is laid under their skin, the
 skin's nodes are moved onto the shape's surface with its corners and
@@ -379,8 +478,12 @@ bricks at any size. *Detect Element Size* writes the five-across size
 into the box (the smallest radius over five, or the
 thinnest wall over three; for an extrusion, half the thinnest
 feature; for tetrahedra, the radius over three), and *Mesh* on a size
-under four and a half across asks first, with the size likely to hold
-as the default, before the minutes are spent. A fit that folds anyway
+under four and a half across, or under two and a half through the
+thinnest wall, asks first, with the size likely to hold as the
+default, before the minutes are spent. Where the size likely to hold
+would itself be a grid past the brick limit, the part wants a finer
+size on its thin piece than on the rest, which one fit cannot give,
+and the question offers tetrahedra instead. A fit that folds anyway
 is refused with the count, and the pane says to use a smaller size or
 *Tetras*.
 
@@ -423,7 +526,10 @@ Coincident Nodes* (the BARC's box, channels and beam are meshed this
 way). The pane opens on an element size of half the thinnest feature,
 draws the bricks as the size is typed, and reports how many there are
 and the shortest edge; a size that would make more than 2,000,000
-bricks is refused. *Mesh* adds them and closes the pane. The solids
+bricks is refused. The count is the parts' volume over a brick's, so a
+part filling a small share of its box is held to the bricks it will
+have, not to its box. The grid a mesher lays over the box is held to
+10,000,000 cells, which is about 3 GB of memory while it is laid. *Mesh* adds them and closes the pane. The solids
 stay, to be meshed again or deleted. When a part is meshed again it
 replaces its earlier mesh: the bricks of the element group named for it
 are removed, with the nodes only they used (unless data is measured or

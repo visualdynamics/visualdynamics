@@ -38,14 +38,17 @@ from scipy.spatial import cKDTree
 from .geometry import _CORNER_EDGES, Geometry
 from .progress import Ticker
 from .solids import (
+    GRID_LIMIT,
     MESH_LIMIT,
     _cuts,
     _owners,
+    _within_limits,
+    brick_count,
+    refuse_parts_of_another,
     smallest_feature,
     solid,
-    used_by,
 )
-from .tetmesh import _distance, _extent, _onto, _surfaces, sharp_edges
+from .tetmesh import _distance, _distance_gradient, _extent, _onto, _surfaces, sharp_edges
 
 #: passes of filling one-cell pits and emptying one-cell spikes
 CLEAN_PASSES = 4
@@ -78,7 +81,8 @@ _HEX_EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
               (0, 4), (1, 5), (2, 6), (3, 7))
 
 
-def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple[Any, dict]:
+def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None,
+                 piece: bool = False, cuts_from=(), discard: Any = None) -> tuple[Any, dict]:
     """The parts as eight-node bricks fitted to their shape, ready to
     join to a geometry (`mesh.join`).
 
@@ -88,7 +92,8 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     share their nodes there.
 
     Refused: a solid that is part of another, a size that is not
-    positive, and a grid of more than `MESH_LIMIT` cells.
+    positive, a mesh of more than `MESH_LIMIT` bricks by its volume, and
+    a grid of more than `GRID_LIMIT` cells.
 
     Parameters
     ----------
@@ -101,6 +106,17 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
         grid's spacing, the block faces falling on grid planes.
     progress : callable, optional
         Told ``(done, total)`` as the mesh goes.
+    piece : bool, default False
+        The part is a union's operand meshed on its own (`solids.brick_mesh`).
+    cuts_from : sequence of int, optional
+        Solids whose flat faces the grid is cut at too, the earlier
+        pieces of a union.
+    discard : callable, optional
+        Given the bricks' centers, (n, 3), which bricks the caller does
+        not want: a union's later piece inside the pieces before it.
+        They are left out of the mesh handed back, and a fold among
+        them is no refusal: the rod of Brandon's volume folded four
+        bricks at its end inside the block it entered (2026-10-20).
 
     Returns
     -------
@@ -112,17 +128,14 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
         sharp edges found no node of their own; 'sweeps', the final
         smoothing's; 'off_surface', how far the farthest surface node
         was let into the material to unfold a brick at a feather edge,
-        as a share of the size (0 when none was); and 'shortest', the
-        shortest edge.
+        as a share of the size (0 when none was); 'shortest', the
+        shortest edge; and 'discarded', the bricks `discard` named.
     """
     ids = [int(i) for i in ids]
     if not ids:
         raise ValueError('pick a solid to mesh')
-    used = used_by(geometry)
-    inside_another = [i for i in ids if i in used]
-    if inside_another:
-        raise ValueError(f'solid {inside_another[0]} is part of solid '
-                         f'{used[inside_another[0]]}; mesh that one')
+    if not piece:
+        refuse_parts_of_another(geometry, ids)
     size = float(size)
     if not size > 0.0:
         raise ValueError('an element size above zero')
@@ -132,15 +145,18 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     def fd(points):
         return _distance(geometry, ids, points)
 
+    def fdg(points):
+        return _distance_gradient(geometry, ids, points)
+
     low, high = _extent(geometry, ids)
     tol = 1e-9 * float(np.linalg.norm(high - low))
-    xyz, hexes, groups = _grid(geometry, ids, size)
+    xyz, hexes, groups = _grid(geometry, ids, size, cuts_from)
     if not len(hexes):
         raise ValueError('the parts hold nothing to mesh')
     ticker.tick()
     xyz, hexes, groups, faces, face_hex, surface = _pillow(xyz, hexes, groups, size)
     ticker.tick()
-    mesh = _Mesh(xyz, hexes, faces, face_hex, surface, fd, size, tol)
+    mesh = _Mesh(xyz, hexes, faces, face_hex, surface, fd, size, tol, fdg)
     uncaptured = mesh.capture(geometry, ids)
     mesh.smooth_skin()
     mesh.aim()
@@ -156,12 +172,17 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     off = mesh.untangle()
     xyz = mesh.xyz
     quality = _scaled_jacobians(xyz, hexes).min(axis=1)
-    folded = int((quality <= 0.0).sum())
+    wanted = np.ones(len(hexes), dtype=bool)
+    if discard is not None:
+        wanted = ~np.asarray(discard(xyz[hexes].mean(axis=1)), dtype=bool)
+    folded = int(((quality <= 0.0) & wanted).sum())
     if folded:
         # a feature two bricks across or less leaves no room to fit
         # (the 1 in side hole at 0.5 in): refused, not handed over
         raise ValueError(f'{folded:,} bricks folded fitting the shape at that size: '
                          'use a smaller one, or tetrahedra')
+    discarded = int((~wanted).sum())
+    hexes, groups, quality = hexes[wanted], groups[wanted], quality[wanted]
     keep = np.unique(hexes)
     renumber = np.zeros(len(xyz), dtype=int)
     renumber[keep] = np.arange(1, len(keep) + 1)
@@ -180,7 +201,8 @@ def overlay_mesh(geometry: Any, ids, size: float, progress: Any = None) -> tuple
     ticker.tick()
     return part, {'bricks': len(hexes), 'nodes': len(keep), 'quality': float(quality.min()),
                   'poor': int((quality < 0.3).sum()), 'uncaptured': uncaptured,
-                  'sweeps': sweeps, 'off_surface': off, 'shortest': shortest}
+                  'sweeps': sweeps, 'off_surface': off, 'shortest': shortest,
+                  'discarded': discarded}
 
 
 #: bricks across the smallest round feature's radius at which a fit
@@ -238,25 +260,42 @@ def likely_to_fold(geometry: Any, ids, size: float) -> dict:
     -------
     dict
         'across', bricks across the smallest radius (inf with no round
-        feature); 'flat', the pillow bricks flat or inside out before
-        fitting, said for what it is; 'likely', True under four and a
-        half across; 'suggested', the size `suggested_size` gives.
+        feature); 'through', bricks through the thinnest wall (inf with
+        no wall); 'flat', the pillow bricks flat or inside out before
+        fitting, said for what it is (0, uncounted, when the grid is
+        past `GRID_LIMIT` or its bricks past `MESH_LIMIT`); 'cells', the
+        grid's cells; 'bricks', about how many the mesh holds
+        (`brick_count`); 'likely', True
+        under four and a half across or under two and a half through;
+        'suggested', the size `suggested_size` gives.
     """
     ids = [int(i) for i in ids]
-    radius, _wall = smallest_feature(geometry, ids)
+    radius, wall = smallest_feature(geometry, ids)
     across = radius / float(size)
-    xyz, hexes, groups = _grid(geometry, ids, float(size))
+    # the wall was read and then ignored until 2026-10-19: a 2 x 2
+    # pattern of I-beams with 0.2 in flanges under the peanut block
+    # passed the check at 0.2 in, one brick through the flanges, and
+    # the fit ran seven minutes to a worst brick of 0.08
+    through = wall / float(size)
+    # a grid past the limit is not laid to count its flat bricks: the
+    # fit will refuse it in a moment with the count (2026-10-20: the
+    # check raised out of the pane at 2.3 million cells)
+    cells = grid_cells(geometry, ids, float(size))
+    bricks = brick_count(geometry, ids, float(size))
     flat = 0
-    if len(hexes):
-        xyz, hexes, _groups, _faces, _face_hex, _surface = _pillow(xyz, hexes, groups, float(size))
-        flat = int((_scaled_jacobians(xyz, hexes).min(axis=1) <= 0.0).sum())
+    if cells <= GRID_LIMIT and bricks <= MESH_LIMIT:
+        xyz, hexes, groups = _grid(geometry, ids, float(size))
+        if len(hexes):
+            xyz, hexes, _groups, _faces, _face_hex, _surface = _pillow(xyz, hexes, groups, float(size))
+            flat = int((_scaled_jacobians(xyz, hexes).min(axis=1) <= 0.0).sum())
     # bricks flat before fitting are said, not judged: a fit opens some
-    return {'across': float(across), 'flat': flat,
-            'likely': bool(across < ACROSS - 0.5),
+    return {'across': float(across), 'through': float(through), 'flat': flat,
+            'cells': int(cells), 'bricks': int(bricks),
+            'likely': bool(across < ACROSS - 0.5 or through < THROUGH - 0.5),
             'suggested': suggested_size(geometry, ids)}
 
 
-def grid_cells(geometry: Any, ids, size: float) -> int:
+def grid_cells(geometry: Any, ids, size: float, piece: bool = False) -> int:
     """How many cells the grid `overlay_mesh` lays over these parts at
     `size` holds, voids included: the count before anything is asked
     of the shape, so a pane can decide whether to preview.
@@ -280,10 +319,11 @@ def grid_cells(geometry: Any, ids, size: float) -> int:
 # ---------------------------------------------------------------------------
 # the grid and the pillow
 
-def _lines(geometry, ids, size):
+def _lines(geometry, ids, size, cuts_from=()):
     """The grid's lines along each axis: every block face on one, each
-    span divided into the whole number of cells nearest `size`."""
-    cuts = _cuts(geometry, ids)
+    span divided into the whole number of cells nearest `size`; the
+    faces of the solids in `cuts_from` on one too."""
+    cuts = _cuts(geometry, ids, cuts_from)
     lines = []
     for k in range(3):
         edges = [cuts[k][0]]
@@ -294,20 +334,24 @@ def _lines(geometry, ids, size):
     return lines
 
 
-def _grid(geometry, ids, size):
+def _grid(geometry, ids, size, cuts_from=()):
     """The cubes over the parts whose centers a part holds: (nodes,
     bricks, each brick's part). The grid's lines fall on every block
     face, as the extrusion mesher's do."""
-    lines = _lines(geometry, ids, size)
+    lines = _lines(geometry, ids, size, cuts_from)
     nx, ny, nz = (len(line) for line in lines)
-    if (nx - 1) * (ny - 1) * (nz - 1) > MESH_LIMIT:
-        raise ValueError(f'{(nx - 1) * (ny - 1) * (nz - 1):,} bricks at that size: use a larger one')
+    _within_limits(geometry, ids, size, (nx - 1) * (ny - 1) * (nz - 1))
     grid = np.stack(np.meshgrid(*lines, indexing='ij'), axis=-1).reshape(-1, 3)
     node = np.arange(nx * ny * nz).reshape(nx, ny, nz)
     mids = [(line[:-1] + line[1:]) / 2.0 for line in lines]
     centers = np.stack(np.meshgrid(*mids, indexing='ij'), axis=-1).reshape(-1, 3)
     owner = _clean(_owners(geometry, ids, centers).reshape(nx - 1, ny - 1, nz - 1))
     i, j, k = np.nonzero(owner > 0)
+    # counted again, kept: a part thinner than `brick_count`'s samples
+    # can have been undercounted there
+    if len(i) > MESH_LIMIT:
+        raise ValueError(f'{len(i):,} bricks at that size, over the limit of '
+                         f'{MESH_LIMIT:,}: use a larger one')
     hexes = np.stack([node[i, j, k], node[i + 1, j, k], node[i + 1, j + 1, k], node[i, j + 1, k],
                       node[i, j, k + 1], node[i + 1, j, k + 1], node[i + 1, j + 1, k + 1],
                       node[i, j + 1, k + 1]], axis=1)
@@ -484,8 +528,11 @@ class _Mesh:
     surface, 2 on a sharp edge, 3 at a corner), the targets the surface
     nodes are moved to, and the smoothing."""
 
-    def __init__(self, xyz, hexes, faces, face_hex, surface, fd, size, tol):
+    def __init__(self, xyz, hexes, faces, face_hex, surface, fd, size, tol, fdg=None):
         self.xyz: np.ndarray = xyz
+        #: (distance, gradient) outright, where the recipe gives it;
+        #: None takes the gradient by finite differences
+        self.fdg: Any = fdg
         self.hexes: np.ndarray = hexes
         self.faces: np.ndarray = faces
         self.face_hex: np.ndarray = face_hex
@@ -529,7 +576,7 @@ class _Mesh:
         a size: a Newton step from a kink of the distance jumps far."""
         q = points.copy()
         for _ in range(steps):
-            moved = _onto(self.fd, q, self.tol)
+            moved = _onto(self.fd, q, self.tol, gradient=self.fdg)
             step = moved - q
             length = np.linalg.norm(step, axis=1)
             far = length > 0.5 * self.size
@@ -694,62 +741,108 @@ class _Mesh:
         middle of its neighbors the whole way, half or a quarter, and
         for a tangled node small steps along the axes. With `slide`,
         surface nodes move too, along the surface; without, they hold
-        where the stage put them. Sweeps until no node moves, or few."""
-        xyz, kind, color = self.xyz, self.kind, self.color
+        where the stage put them. Sweeps until no node moves, or few.
+
+        Only the active nodes are scored in a sweep: every movable node
+        in the first, and after that the nodes that moved in the last
+        sweep and their neighbors, since no brick of any other node
+        changed. The axis steps are tried for the tangled nodes alone
+        and scored on their bricks alone. Before (2026-10-19), every
+        candidate was scored on every brick of a color class, the
+        eighteen axis steps included, and a 33,000-brick fit spent
+        209 s of 406 in the scoring and most of its projections on
+        candidates for nodes that were not tangled.
+        """
+        xyz, kind, color, hexes = self.xyz, self.kind, self.color, self.hexes
         movable = np.flatnonzero(kind <= (2 if slide else 0))
-        plain = np.flatnonzero(kind == 1)
-        curve = np.flatnonzero(kind == 2)
         groups = [movable[color[movable] == c] for c in range(color.max() + 1)]
-        cells = [np.unique(np.concatenate([self.hexes_of[n] for n in group]))
-                 if len(group) else np.zeros(0, dtype=int) for group in groups]
+        may_move = np.zeros(len(xyz), dtype=bool)
+        may_move[movable] = True
+        active = may_move.copy()
+        member = np.zeros(len(xyz), dtype=bool)
+        a, b = self.pairs[:, 0], self.pairs[:, 1]
+
+        def touching(nodes):
+            """Every brick any of `nodes` is a corner of."""
+            member[nodes] = True
+            cells = np.flatnonzero(member[hexes].any(axis=1))
+            member[nodes] = False
+            return cells
+
+        def onto(nodes, moved):
+            """A candidate for a surface node put back on the surface:
+            it is near already, so two steps do."""
+            if not slide:
+                return moved
+            on_plain = kind[nodes] == 1
+            if on_plain.any():
+                moved[on_plain] = self.project(moved[on_plain], steps=2)
+            on_curve = np.flatnonzero(kind[nodes] == 2)
+            if len(on_curve):
+                moved[on_curve] = self.onto_curves(nodes[on_curve], moved[on_curve], rounds=2)
+            return moved
+
         sweep = 0
         while sweep < sweeps:
             sweep += 1
             want = xyz.copy()
-            inside = kind == 0
+            inside = (kind == 0) & active
             means = _means(xyz, self.pairs)
             want[inside] = means[inside]
             if slide:
+                plain = np.flatnonzero((kind == 1) & active)
+                curve = np.flatnonzero((kind == 2) & active)
                 along = _means(xyz, self.skin_pairs)
                 want[plain] = self.project(along[plain])
                 want[curve] = self.onto_curves(curve, along[curve])
-            changed = 0
-            for group, attached in zip(groups, cells):
-                if not len(group):
+            moved_now = np.zeros(len(xyz), dtype=bool)
+            for group in groups:
+                sub = group[active[group]]
+                if not len(sub):
                     continue
-                current = self.scores(xyz, group, attached)
-                best, best_score = xyz[group].copy(), current.copy()
-                candidates = [xyz[group] + share * (want[group] - xyz[group])
-                              for share in (1.0, 0.5, 0.25)]
-                tangled = current < TANGLED
-                if tangled.any():
+                cells = touching(sub)
+                current = self.scores(xyz, sub, cells)
+                best, best_score = xyz[sub].copy(), current.copy()
+                trial = xyz.copy()
+                # the share of zero is the node where it is, put back on
+                # the surface: a surface node drifts off it between
+                # projections, and this candidate was implicit before,
+                # in every axis step's projection of the whole class
+                for share in (1.0, 0.5, 0.25, 0.0):
+                    moved = onto(sub, xyz[sub] + share * (want[sub] - xyz[sub]))
+                    trial[sub] = moved
+                    score = self.scores(trial, sub, cells)
+                    better = score > best_score + 1e-12
+                    best[better], best_score[better] = moved[better], score[better]
+                trial[sub] = xyz[sub]
+                tangled = np.flatnonzero(current < TANGLED)
+                if len(tangled):
                     # steps of three lengths: the last folds at a
                     # feather edge are a few hundredths of a size deep
+                    tang = sub[tangled]
+                    cells_t = touching(tang)
+                    best_t, score_t = best[tangled].copy(), best_score[tangled].copy()
                     for length in (0.3, 0.1, 0.03):
                         for axis in range(3):
                             for sign in (-1.0, 1.0):
-                                step = np.zeros_like(candidates[0])
-                                step[tangled, axis] = sign * length * self.size
-                                candidates.append(xyz[group] + step)
-                for moved in candidates:
-                    moved = moved.copy()
-                    if slide:
-                        # a candidate is near the surface already: two
-                        # steps put it back on
-                        on_plain = kind[group] == 1
-                        if on_plain.any():
-                            moved[on_plain] = self.project(moved[on_plain], steps=2)
-                        on_curve = np.flatnonzero(kind[group] == 2)
-                        if len(on_curve):
-                            moved[on_curve] = self.onto_curves(group[on_curve], moved[on_curve], rounds=2)
-                    trial = xyz.copy()
-                    trial[group] = moved
-                    score = self.scores(trial, group, attached)
-                    better = score > best_score + 1e-12
-                    best[better], best_score[better] = moved[better], score[better]
+                                moved = xyz[tang].copy()
+                                moved[:, axis] += sign * length * self.size
+                                moved = onto(tang, moved)
+                                trial[tang] = moved
+                                score = self.scores(trial, tang, cells_t)
+                                better = score > score_t + 1e-12
+                                best_t[better], score_t[better] = moved[better], score[better]
+                    trial[tang] = xyz[tang]
+                    best[tangled], best_score[tangled] = best_t, score_t
                 gained = best_score > current + 1e-12
-                xyz[group[gained]] = best[gained]
-                changed += int(gained.sum())
+                xyz[sub[gained]] = best[gained]
+                moved_now[sub[gained]] = True
+            changed = int(moved_now.sum())
+            # the next sweep scores what moved and its neighbors
+            active[:] = moved_now
+            active[a[moved_now[b]]] = True
+            active[b[moved_now[a]]] = True
+            active &= may_move
             if ticker is not None:
                 ticker.tick()
             if changed <= SETTLED * len(movable):

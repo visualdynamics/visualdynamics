@@ -8,7 +8,10 @@ to nodes of their own element groups, as Add Block's option does, so a
 part meshed beside another keeps its own nodes where they touch, to be
 merged later at the places picked. With two or more parts, Keep the
 parts apart from each other meshes them on one grid with each part
-keeping its own nodes where the parts touch.
+keeping its own nodes where the parts touch. A union that is no
+extrusion is meshed in pieces, and then the size is one per piece, in
+a table in place of the box: each piece's row takes its own, and
+Detect Element Size fills every row.
 
 The pane holds no rules of its own: the window asks `core.solids` what
 the size makes, draws it, and shows the result here.
@@ -16,13 +19,16 @@ the size makes, draws it, and shows the result here.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
 
@@ -54,6 +60,24 @@ class MeshSolidsPanel(QWidget):
                              'the whole number of bricks nearest this size')
         grid.addWidget(self.size_label, 1, 0)
         grid.addWidget(self.size, 1, 1)
+        # a union meshed in pieces takes a size per piece (Brandon,
+        # 2026-10-20: a 3 in block and 0.2 in flanges want two sizes,
+        # which one fit cannot give)
+        self.pieces_label: QLabel = QLabel('Element size per piece')
+        self.pieces: QTableWidget = QTableWidget(0, 2)
+        self.pieces.setHorizontalHeaderLabels(['Piece', 'Size'])
+        self.pieces.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.pieces.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.pieces.verticalHeader().setVisible(False)
+        self.pieces.setToolTip('Each piece of the union is meshed at its own size, swept '
+                               'where it is an extrusion and fitted where it is not, and '
+                               'the pieces are joined where their grids meet and tied '
+                               'where they do not')
+        grid.addWidget(self.pieces_label, 10, 0, 1, 2)
+        grid.addWidget(self.pieces, 11, 0, 1, 2)
+        self.pieces_label.hide()
+        self.pieces.hide()
+        self._piece_ids: list[int] = []
         # Brandon, 2026-10-19: a size the mesh is likely to hold at, from
         # the smallest feature, written into the box
         self.detect_button: QPushButton = QPushButton('Detect Element Size')
@@ -109,7 +133,7 @@ class MeshSolidsPanel(QWidget):
         buttons.addWidget(self.mesh_button)
         buttons.addWidget(self.close_button)
         grid.addLayout(buttons, 8, 0, 1, 2)
-        grid.setRowStretch(9, 1)
+        grid.setRowStretch(12, 1)
         commit_on_enter(self.size)
         self.size.valueChanged.connect(lambda _value: self.changed.emit())
         self.elements.currentIndexChanged.connect(self._elements_changed)
@@ -145,6 +169,51 @@ class MeshSolidsPanel(QWidget):
     def element_kind(self) -> str:
         """'hexes' or 'tetras', as picked."""
         return str(self.elements.currentData())
+
+    def set_pieces(self, unit: str, rows) -> None:
+        """Show a size per piece, `rows` being (solid id, name, size)
+        in the display unit, in place of the one box; None puts the box
+        back."""
+        rows = list(rows or [])
+        self._piece_ids = [int(i) for i, _n, _s in rows]
+        self.pieces.setRowCount(len(rows))
+        for r, (_i, name, size) in enumerate(rows):
+            item = QTableWidgetItem(str(name))
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.pieces.setItem(r, 0, item)
+            box = DoubleSpinBox()
+            box.setDecimals(LENGTH_DECIMALS)
+            box.setRange(0.0, 1e9)
+            box.setSingleStep(max(size / 4.0, 1e-6))
+            box.setValue(size)
+            commit_on_enter(box)
+            box.valueChanged.connect(lambda _value: self.changed.emit())
+            self.pieces.setCellWidget(r, 1, box)
+        self.pieces_label.setText(f'Element size per piece [{unit}]')
+        showing = bool(rows)
+        self.pieces_label.setVisible(showing)
+        self.pieces.setVisible(showing)
+        self.size_label.setVisible(not showing)
+        self.size.setVisible(not showing)
+        self.detect_button.setText('Detect Element Sizes' if showing else 'Detect Element Size')
+        self.pieces.setFixedHeight(
+            self.pieces.horizontalHeader().height() + 30 * len(rows) + 4)
+
+    @property
+    def piece_ids(self) -> list[int]:
+        """The pieces shown, by solid id; empty with the one box."""
+        return list(self._piece_ids)
+
+    def piece_sizes(self) -> dict[int, float]:
+        """Each piece's size as typed, by solid id."""
+        return {int(i): float(self.pieces.cellWidget(r, 1).value())
+                for r, i in enumerate(self._piece_ids)}
+
+    def set_piece_size(self, solid_id: int, size: float) -> None:
+        box = self.pieces.cellWidget(self._piece_ids.index(int(solid_id)), 1)
+        box.blockSignals(True)
+        box.setValue(size)
+        box.blockSignals(False)
 
     def _elements_changed(self, _index: int) -> None:
         # the parts can be kept apart on one grid: a brick option

@@ -188,16 +188,16 @@ def test_the_element_groups_table_takes_a_stiffness_and_ground(qt_app):
     assert props.stiffness[2] == pytest.approx(along)
     assert props.stiffness[4] == pytest.approx(about)
     assert props.stiffness[0] is None, 'a direction not named is free'
-    assert model.data(model.index(row, _column(model, title))) == \
+    assert model.data(model.cell(row, _column(model, title))) == \
         'Kz=100, Kry=50'
     assert lines[-1] == (f'.group_properties[{group}] = '
                          f'GroupProperties(stiffness={props.stiffness!r})')
     said = []
     model.edit_rejected.connect(said.append)
-    assert not model.setData(model.index(row, _column(model, title)),
+    assert not model.setData(model.cell(row, _column(model, title)),
                              'Kq=5', EDIT)
     assert 'given by direction' in said[-1]
-    assert not model.setData(model.index(row, _column(model, 'Material')),
+    assert not model.setData(model.cell(row, _column(model, 'Material')),
                              'my alloy', EDIT)
     assert 'takes a stiffness alone' in said[-1]
     # ground, from the Material list
@@ -208,7 +208,7 @@ def test_the_element_groups_table_takes_a_stiffness_and_ground(qt_app):
     _set(model, 'Material', GROUND, row=row)
     assert geometry.group_properties[group] == GroupProperties(ground=True)
     assert lines[-1] == f'.group_properties[{group}] = GroupProperties(ground=True)'
-    assert model.data(model.index(row, material)) == GROUND
+    assert model.data(model.cell(row, material)) == GROUND
     _set(model, 'Material', '6061-T6', row=row)
     assert geometry.group_properties[group].kind == 'solid'
     assert geometry.group_properties[group].material is MATERIALS['6061-T6']

@@ -578,6 +578,8 @@ class Geometry:
             for `DEFAULT_VIEW`.
         solids: The solid shapes of the parts before they are meshed
             (`core.solids`).
+        mates: Where element groups' surfaces are joined, by rigid links
+            or springs made when a model is built (`core.mates`).
     """
 
     # No tracelines (2026-09-30): one storage for one drawn idea, PLAN.md
@@ -685,6 +687,10 @@ class Geometry:
         #: cylinders and booleans of them (`core.solids`, 2026-10-11); not
         #: elements, and read by nothing that solves or draws a mesh
         self.solids: list = []
+        #: where element groups' surfaces are joined (`core.mates.MatedSet`):
+        #: definitions the model builder makes links of, kept in step as
+        #: nodes and element groups are renumbered, merged or deleted
+        self.mates: list = []
         # one element group, one family (2026-09-30): a source that mixes them —
         # UNV 2412 and the sdynpy layout carry no element groups at all, so every
         # element arrives in one — is split on arrival rather than
@@ -1612,6 +1618,7 @@ class Geometry:
         self.node_id[row] = node_id
         for conn in self.elem_conn:
             conn[conn == old] = node_id
+        self._mates_follow(nodes={old: node_id})
 
     def renumber_group(self, row: int, group_id: int) -> None:
         """Give an element group a new id, and update its elements.
@@ -1639,6 +1646,7 @@ class Geometry:
         old = int(self.group_id[row])
         self.group_id[row] = group_id
         self.elem_group[self.elem_group == old] = group_id
+        self._mates_follow(groups={old: group_id})
 
     def renumber_coordinate_system(self, row: int, cs_id: int) -> None:
         """Give a coordinate system a new id, and update the nodes that use it.
@@ -1666,6 +1674,14 @@ class Geometry:
         for name in ('node_def_cs', 'node_disp_cs'):
             references = getattr(self, name)
             references[references == old] = cs_id
+
+    def _mates_follow(self, nodes=None, groups=None) -> None:
+        """Keep the mated sets in step with renumbered, merged or
+        deleted nodes and element groups (`MatedSet.followed`): a set
+        whose side empties, or whose group goes, goes with it."""
+        if self.mates:
+            self.mates = [kept for kept in (m.followed(nodes, groups) for m in self.mates)
+                          if kept is not None]
 
     def delete_nodes(self, node_ids: Ids) -> dict[str, int]:
         """Remove nodes, and the elements that use them.
@@ -1697,6 +1713,7 @@ class Geometry:
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
         self.node_xyz = self.node_xyz[keep]
+        self._mates_follow(nodes={node: None for node in wanted})
         self.validate()
         return {'nodes': removed_nodes, 'elements': len(orphan_elements)}
 
@@ -2059,6 +2076,7 @@ class Geometry:
         for name in ('node_id', 'node_def_cs', 'node_disp_cs', 'node_color'):
             setattr(self, name, getattr(self, name)[keep])
         self.node_xyz = self.node_xyz[keep]
+        self._mates_follow(nodes=mapping)
         duplicates = self.merge_duplicate_elements(groups)
         self.validate()
         return {'merged': len(mapping), 'into': len(set(mapping.values())),
@@ -2459,6 +2477,7 @@ class Geometry:
         for group in wanted:                 # a deleted element group's properties go with it
             self.group_properties.pop(group, None)
         self.group_id = self.group_id[staying]
+        self._mates_follow(groups={group: None for group in wanted})
         return {'groups': removed, 'elements': len(doomed),
                 'nodes': gone['nodes']}
 
@@ -2528,6 +2547,7 @@ class Geometry:
         for group in others:
             self.group_properties.pop(group, None)
         self.group_id = self.group_id[keep]
+        self._mates_follow(groups={group: into for group in others})
         return {'into': into, 'groups': len(others),
                 'elements': int(moved.sum())}
 

@@ -80,21 +80,21 @@ bore's radius at 0.1 in, three tetrahedra at 0.167 in.
 
 | Shape | Size (in) | Elements | Count | Worst | Under 0.3 | Volume (in³) | Recipe (in³) | Error | Seconds |
 |---|---|---|---|---|---|---|---|---|---|
-| Cross-drilled shaft | 0.06 | hexes | 97,534 | 0.07 | 351 | 17.73 | 17.75 | -0.12 % | 473 |
-| Cross-drilled shaft | 0.1 | tetras | 193,622 | 0.10 | 1,193 | 17.73 | 17.75 | -0.11 % | 12 |
-| Wye fitting | 0.09 | hexes | refused: 5 bricks folded | | | | 11.82 | | 293 |
+| Cross-drilled shaft | 0.06 | hexes | 97,534 | 0.10 | 336 | 17.73 | 17.75 | -0.12 % | 33 |
+| Cross-drilled shaft | 0.1 | tetras | 193,621 | 0.10 | 1,193 | 17.73 | 17.75 | -0.11 % | 12 |
+| Wye fitting | 0.09 | hexes | refused: 9 bricks folded | | | | 11.82 | | 18 |
 | Wye fitting | 0.1 | tetras | 112,199 | 0.10 | 581 | 11.80 | 11.82 | -0.15 % | 21 |
-| V-block | 0.1 | hexes | refused: 3 bricks folded | | | | 71.74 | | 738 |
+| V-block | 0.1 | hexes | refused: 13 bricks folded | | | | 71.74 | | 50 |
 | V-block | 0.167 | tetras | 156,686 | 0.10 | 435 | 71.72 | 71.74 | -0.03 % | 23 |
 
 ## What the numbers say
 
-The fitted bricks mesh the shaft, slowly and with a worst element of
-0.07, and are refused on the wye and the V-block even at five bricks
-across their smallest radius, for five and three folded bricks out of
-tens of thousands: pillow bricks at the feather edges where a bore
-leaves a surface at a shallow angle, where the material is thinner
-than a brick at any size. The five-across line that *Detect Element
+The fitted bricks mesh the shaft in half a minute with a worst
+element of 0.10, and are refused on the wye and the V-block even at
+five bricks across their smallest radius, for nine and thirteen folded
+bricks out of tens of thousands: pillow bricks at the feather edges
+where a bore leaves a surface at a shallow angle, where the material
+is thinner than a brick at any size. The five-across line that *Detect Element
 Size* uses held on the shapes it was read from (the block with a
 peanut cut and two side holes shown under *Mesh Solids* fits at
 0.25 in and under) and does not hold on these two; the feather edges

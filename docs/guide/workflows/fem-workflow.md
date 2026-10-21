@@ -3,8 +3,9 @@
 This page builds a finite element model of plates in the app: the
 planes a structure is made of, tied together where it is bolted, then
 solved. Further down, the same structure is [built again from solid
-bricks](#the-barc-from-bricks-bolted-by-merging-nodes), with its parts
-meshed separately and each bolt made by merging the nodes it clamps.
+bricks](#the-barc-from-bricks-bolted-with-mate-surfaces), with its parts
+meshed apart and each joint made with Mate Surfaces over the nodes its
+bolts clamp.
 For a part too thick for plates, [the solid workflow](fem-solids.md)
 builds the Frame-Wing from solid shapes and meshes them into bricks.
 
@@ -189,8 +190,8 @@ and is `barc.project(solved=True)`.
 Expand the geometry in the tree (yours, or *BARC*), then **Quads**,
 select the element groups' rows (Shift-click to take them all) and
 click the pencil on one of them. The Element Groups table opens with a
-row for each group selected and, to the right of Name and Elements, the
-property columns in the display units.
+column for each group selected and, below Name and Elements, a row for
+each property in the display units.
 
 | Element group | Material | Thickness |
 |---|---|---|
@@ -250,7 +251,7 @@ shapes = model.eigensolution(maximum_frequency=2000)
 print(shapes.frequency[6:16])                 # the first ten elastic modes
 ```
 
-## The BARC from bricks, bolted by merging nodes
+## The BARC from bricks, bolted with Mate Surfaces
 
 The same structure is also built from solid bricks, the same way the
 [Frame-Wing](fem-solids.md) is: each part made from solid shapes,
@@ -265,13 +266,15 @@ barc.solid_project(solved=True).save('barc-bricks.vdyn')  # both, solved
 ```
 
 Bricks touch where the parts touch: a channel's foot sits flat on the
-box's top wall, and the beam sits flat on the channels' tops. So the
-bolts are built without links. Each part is meshed with its own nodes,
-which lie on the next part's nodes where the two touch but are joined to
-none of them. Each bolt is then made by merging the nodes it clamps into
-one, a place at a time, with *Merge Coincident Nodes*. Everywhere else
-the parts touch, the nodes stay in pairs, free to separate, as the parts
-are between their bolts.
+box's top wall, and the beam sits flat on the channels' tops. Each part
+is meshed with its own nodes, which lie on the next part's nodes where
+the two touch but are joined to none of them. Each joint is then made
+with *Mate Surfaces*: it finds where the two parts touch, you keep the
+nodes the bolts clamp, and the joint holds them to the part below,
+rigidly or with a stiffness. Everywhere else the parts touch, the nodes
+stay free to separate, as the parts are between their bolts. A joint is
+kept under the geometry's **Mated Surfaces** row, where it can be opened
+again to change its nodes or its stiffness.
 
 ### 1. The parts, as solids
 
@@ -319,8 +322,8 @@ the element size, tick **Keep the parts apart from each other**, and
 press **Mesh**. The four parts are meshed on one grid, cut at every
 part's faces, so where two parts touch their nodes lie on each other's
 at any element size. Each part keeps its own nodes there (a channel's
-foot shares none of them with the box's top face), ready for the bolts
-to be merged. Meshing the parts one at a time puts each on its own grid,
+foot shares none of them with the box's top face), ready for the
+joints. Meshing the parts one at a time puts each on its own grid,
 and then the nodes do not line up: at a quarter inch, a channel's foot
 and the box's top have no nodes in the same place.
 
@@ -328,44 +331,58 @@ and the box's top have no nodes in the same place.
 press Mesh Solids (3), tick Keep the parts apart from each other (4) and
 press Mesh (5)](../images/fem-bricks-mesh-click.png)
 
-### 2. The bolts, merged
+### 2. The joints
 
 The bolts are the same sixteen as in the plate model, at the same
 (x, z): four through each foot into the box and four through the beam
-into each channel's top. Each bolt merges the places it clamps, by the
-same rule the plate model's patches follow. Under a foot that is the
-washer's area: the corners of the brick the bolt passes through and of
-the eight around it, 4 × 4 places on the face where the parts touch.
-Through the beam it is only the four corners of the brick the bolt
-passes through. Merging only four places at a foot reads up to 10 %
-soft against the models on the wiki and loses the ninth mode's shape.
+into each channel's top. Each foot is one joint and each end of the
+beam another, four joints in all. A joint holds the nodes its bolts
+clamp, by the same rule the plate model's patches follow. Under a foot
+that is each washer's area: the corners of the brick the bolt passes
+through and of the eight around it, 4 × 4 nodes. Through the beam it is
+only the four corners of the brick the bolt passes through. Holding
+only four nodes at a foot reads up to 10 % soft against the models on
+the wiki and loses the ninth mode's shape.
 
 In the tree, select the box's and the right channel's element groups
 under **Hexes** (click one, then Cmd-click the other; Ctrl-click on
-Windows and Linux) and press *Merge Coincident Nodes* on the bar. A pane
-opens beside the view, both parts are drawn see-through, and every place
-where their nodes coincide is marked: the 81 places of the foot's
-underside, 9 × 9. A foot's four bolts, 4 × 4 places each, share their
-middle rows and together make one 7 × 7 square, which is every place
-except the foot's outer ring. Click the 32 marks around the foot's edge
-to leave them out, and press **Merge**. The 49 places merged turn into
-blue squares, and the 32 left out stay marked. Do the same for the box
-and the left channel.
+Windows and Linux) and press *Mate Surfaces* on the bar. A pane opens
+beside the view, both parts are drawn see-through, and the patch where
+the foot rests on the box is listed and marked: 81 nodes, 9 × 9, on
+each side. **Pick nodes of** is on *box*, the patch's first side, so
+only the box's nodes are drawn. A foot's four bolts, 4 × 4 nodes each,
+share their middle rows and together make one 7 × 7 square, which is
+every node except the foot's outer ring. Click the 32 marks around the
+foot's edge to take them off; each lights up as the cursor reaches it.
+Leave **Normal** and **Shear** on *Rigid*, type *right foot bolts* as
+the name, and press **Keep**. Do the same for the box and the left
+channel, named *left foot bolts*.
 
 ![Where to click: click the box's element group (1), Cmd-click the right
-channel's (2), press Merge Coincident Nodes (3), click out the 32 marks
-around the foot's edge in the view, and press Merge
-(4)](../images/fem-bricks-merge-click.png)
+channel's (2), press Mate Surfaces (3), click out the 32 marks around
+the foot's edge in the view, name the joint (4) and press Keep
+(5)](../images/fem-bricks-mate-click.png)
 
-![The right foot merged: the 49 places drawn as squares, the 32 left out
-still marked](../images/fem-bricks-merged.png)
+![The right foot's joint kept: the 49 nodes under the washers marked,
+the joint listed under the geometry's Mated Surfaces
+row](../images/fem-bricks-mated.png)
 
-Then select the right channel and the beam. *Merge Coincident Nodes*
-marks the 81 places where the beam lies on the channel's top. Press
-**None** to leave them all out, click the four corners of the brick
-each of the four bolts passes through (16 marks), and press **Merge**.
-Repeat for the left channel and the beam. The four merges join the four
-parts into one structure at 130 places.
+Then select the right channel and the beam and press *Mate Surfaces*.
+The patch is the 81 nodes where the beam lies on the channel's top.
+Press **None** to take every node off, click the four corners of the
+brick each of the four bolts passes through (16 marks) to put them
+back, name it *right top bolts*, and press **Keep**. Repeat for the left
+channel and the beam. The four joints tie the four parts into one
+structure at 130 nodes.
+
+A joint's stiffness is set the same way. Open a joint with the pencil
+on its row, set **Normal** or **Shear** to *Stiffness*, type a value per
+node in the display units, and press **Save**. This is how a bolted
+joint is tuned until the model's modes match the measured ones.
+
+![Where to click: the pencil on the right foot's joint (1), Normal set
+to Stiffness (2), a stiffness typed (3), and Save
+(4)](../images/fem-bricks-joint-click.png)
 
 ### 3. The bolts' mass, the material, solve
 
@@ -384,8 +401,8 @@ modes by 1 to 7 %.
 
 Give the box, the channels and the beam 6061-T6 in the Element Groups
 table (bricks take only a material) and press *Solve Modes*. At an
-eighth of an inch the assembly has 15,299 nodes and 9,440 bricks and
-solves in about ten seconds. Its first ten elastic modes are within
+eighth of an inch the assembly has 15,429 nodes and 9,440 bricks and
+solves in a few seconds. Its first ten elastic modes are within
 3.4 % of a brick model that joined each foot over its whole footprint;
 that model was checked against the wiki's model and test, and its
 frequencies were 1 to 4 % above the measured modes. The mode shapes

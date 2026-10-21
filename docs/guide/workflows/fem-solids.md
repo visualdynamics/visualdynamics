@@ -37,11 +37,11 @@ per click.
 | Step | Where | How |
 |---|---|---|
 | Start a geometry | the project row's bar | **+** *New Geometry* |
-| Add the shapes | the geometry's **Solids** row | *Add Solid Block*, *Add Cylinder*, *Add Section*, *Add Hole* |
+| Add the shapes | the geometry's **Solids** row | *Add Solid Block*, *Add Cylinder*, *Add Cone*, *Add Sphere*, *Add Section* |
 | Pattern them in rows | solids picked in the tree | *Pattern* |
 | Cut and join them | solids picked in the tree | *Subtract*, *Union* |
 | Mesh | parts picked in the tree | *Mesh Solids* |
-| Bolt a wing on | element groups picked in the tree | *Align Meshes*, then *Merge Coincident Nodes* |
+| Bolt a wing on | element groups picked in the tree | *Mate Surfaces* |
 | Give each part its material | the pencil on an element group's row | the Element Groups table |
 | Solve | the geometry's bar | *Solve Modes* |
 
@@ -151,7 +151,7 @@ Hexes](../images/fem-solids-mesh.png)
 
 Select the element groups' rows in the tree (Shift-click to take them
 all) and click the pencil on one of them: the Element Groups table opens
-with a row for each group selected. An element group of solids takes a material
+with a column for each group selected. An element group of solids takes a material
 and nothing else.
 
 | Element group | Material |
@@ -241,22 +241,28 @@ top without sharing any node with it.
 
 ### Bolting
 
-The washers and the frame were meshed separately, so the washers' nodes
-do not land on the frame's. Under **Hexes**, pick the element groups
-*frame*, *inserts*, *screws* and *washers* and press *Align Meshes*.
-Each node of the frame's top under a washer is marked, with a line to
-the washer node it would move onto; the washers' rings are the finer
-mesh, so the frame's nodes are the ones that move. Press **Align**.
-With the same four groups picked, press *Merge Coincident Nodes* and
-then **Merge**. The washers are joined to the frame at the places just
-aligned, and the wing is bolted on.
+The washers and the frame were meshed separately, so their nodes do not
+line up, and they do not need to. Under **Hexes**, pick the element
+groups *frame*, *inserts*, *screws* and *washers* and press *Mate
+Surfaces*. Each washer's underside rests partly on its screw and partly
+on the frame around it, so the pane lists eight patches, two at each
+washer, and marks them all. Click the first in the list and Shift-click
+the last to pick all eight, leave **Normal** and **Shear** on *Rigid*,
+and press **Keep**. Each patch becomes a joint under the geometry's
+**Mated Surfaces** row, and the wing is bolted on: each node on one side
+is held to the point of the other side's surface beneath it, so the two
+meshes need not match.
 
 ![Where to click: pick frame, inserts, screws and washers under Hexes
-(1 to 4), press Align Meshes (5), then Align
-(6)](../images/fem-solids-align-click.png)
+(1 to 4), press Mate Surfaces (5), pick all eight patches (6, 7) and
+press Keep (8)](../images/fem-solids-mate-click.png)
 
-![Where to click: with the same four picked, press Merge Coincident
-Nodes (1), then Merge (2)](../images/fem-solids-merge-click.png)
+![The wing bolted on: the eight joints listed under Mated Surfaces, the
+nodes of the one picked marked](../images/fem-solids-mated.png)
+
+A joint can be made softer than rigid. Its pencil opens it again, where
+**Normal** and **Shear** each take *Stiffness* and a value per node, which
+is how a bolted joint is tuned to match measured modes.
 
 ### The screws' heads
 
@@ -268,7 +274,7 @@ it a mass of 1.9986e-5 lbf·s²/in (3.5 g) in the Element Groups table.
 Give *screws* and *washers* 1018 steel.
 
 Select the geometry and press *Solve Modes*. The thick wing on the frame
-has 65,325 nodes and solves in under a minute.
+has 65,585 nodes and solves in under a minute.
 
 ## Sections, tubes and holes
 
@@ -294,14 +300,12 @@ the pane on its dimensions, so making a beam deeper is one number
 changed. A section meshes the way the blocks it is made of would: its
 flat faces on grid lines, and a round tube as a ring.
 
-*Add Hole* adds a hole to subtract from a part. Its center is where it
-enters, on the face it is drilled from, and it runs down its own Z. With
-**Through** ticked it goes out the far side of the part it is cut from,
-and stays through if that part is made thicker; unticked, it goes the
-depth typed. **Counterbore** adds a wider, shallower bore at the entry.
-Pick the part and the hole and press *Subtract*. A hole that is
-patterned and then subtracted goes through in the same way. From a
-script:
+A hole is a cylinder subtracted from the part, as the frame's are, and a
+counterbore is a second, wider and shorter cylinder at its entry. A
+script can add a hole in one call: `add_solid_hole` takes the center
+where it enters and runs down its own Z, through the part it is cut
+from when no depth is given, and stays through if that part is made
+thicker. Pick the part and the hole and subtract as before:
 
 ```python
 import visualdynamics
@@ -359,18 +363,18 @@ make them slightly stiffer.
 
 | Mode | Thick wing on frame, shared | Built here | Thin wing on frame, shared | Built here |
 |---|---|---|---|---|
-| 1 | 126.0 | 125.2 | 63.8 | 62.4 |
-| 2 | 233.4 | 240.1 | 113.5 | 111.8 |
-| 3 | 242.7 | 243.3 | 224.4 | 222.8 |
-| 4 | 312.4 | 309.1 | 224.8 | 225.8 |
-| 5 | 439.3 | 440.0 | 268.6 | 271.3 |
-| 6 | 454.3 | 453.2 | 306.2 | 303.2 |
-| 7 | 460.8 | 467.2 | 373.0 | 367.0 |
-| 8 | 645.1 | 654.5 | 417.2 | 412.0 |
-| 9 | 676.5 | 681.7 | 497.2 | 493.7 |
+| 1 | 126.0 | 124.5 | 63.8 | 62.3 |
+| 2 | 233.4 | 239.3 | 113.5 | 111.6 |
+| 3 | 242.7 | 241.1 | 224.4 | 222.6 |
+| 4 | 312.4 | 308.7 | 224.8 | 225.2 |
+| 5 | 439.3 | 438.0 | 268.6 | 270.4 |
+| 6 | 454.3 | 451.2 | 306.2 | 302.7 |
+| 7 | 460.8 | 464.9 | 373.0 | 366.0 |
+| 8 | 645.1 | 651.5 | 417.2 | 410.8 |
+| 9 | 676.5 | 678.1 | 497.2 | 491.5 |
 
 The steel screw threaded into the insert, as on the hardware, matters:
-with only a washer merged onto the insert's spread-out material, the
+with only a washer mated onto the insert's spread-out material, the
 thick wing's first mode reads 7 % low. No property was adjusted to bring
 these numbers closer. None of the wiki's files are in this package or
 its examples; the numbers above are the values read from them.

@@ -757,3 +757,60 @@ def test_the_groups_table_runs_across_and_edits_several_groups_at_once(two_block
     table.select_items([1])
     pump()
     assert table.selected_items() == [1] and table.whole_rows() == [1]
+
+
+def test_a_long_elements_list_does_not_push_the_values_out_of_sight(window, pump):
+    """A group whose elements are a long list of ids (here every other
+    element of a strip) opened its column in the Element Groups table to
+    that list's width, and the right-aligned values below it were out of
+    sight and read as blank (2026-10-21). No column opens wider than a
+    reading; the list is cut short and shows whole on hover."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QToolTip
+
+    count = 60
+    strip = Geometry(
+        node_id=list(range(1, 2 * (count + 1) + 1)),
+        node_xyz=[[x, y, 0] for y in (0, 1) for x in range(count + 1)],
+        elem_id=list(range(10, 10 + count)),
+        elem_conn=[[k + 1, k + 2, count + k + 3, count + k + 2] for k in range(count)],
+        elem_type=[44] * count,
+        elem_group=[7, 9] * (count // 2),
+        group_id=[7, 9],
+        group_name=['wing', 'tail'],
+        length_unit='m')
+    _show_geometry(window, pump, strip)
+    row = group_row(window, 7)
+    window.tree.clearSelection()
+    window.tree.setCurrentItem(row)
+    row.setSelected(True)
+    window.edit_entities()
+    pump()
+    table, model = window.table, window.table.model()
+    assert model.transposed and window.editing == ('Geometry', 'groups')
+    titles = [c.title for c in model.columns]
+    elements = model.cell(0, titles.index('Elements'))
+    listed = model.data(elements, Qt.ItemDataRole.DisplayRole)
+    assert len(listed) > 2 * table.WIDEST_COLUMN_CHARACTERS, 'every other element: a long list'
+    limit = table.fontMetrics().averageCharWidth() * table.WIDEST_COLUMN_CHARACTERS
+    assert table.columnWidth(0) <= limit
+    assert table.fontMetrics().horizontalAdvance(listed) > table.columnWidth(0)
+    # a number fits its cell; the list is cut short and shows whole on hover
+    name = model.cell(0, titles.index('Name'))
+    assert table.cut_short(elements) and not table.cut_short(name)
+    table.resize(600, 600)
+    pump()
+    table.scrollTo(elements)
+    where = table.visualRect(elements).center()
+    event = _tooltip_request(table, where)
+    table.viewportEvent(event)
+    assert QToolTip.text() == listed
+    QToolTip.hideText()
+
+
+def _tooltip_request(table, where):
+    """A tooltip request at `where` in the table's viewport."""
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QHelpEvent
+
+    return QHelpEvent(QEvent.Type.ToolTip, where, table.viewport().mapToGlobal(where))

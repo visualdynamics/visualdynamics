@@ -115,9 +115,10 @@
     block less its inside and its slot, each channel a block less the
     inside of its C, the beam a block) and meshed into bricks with Mesh
     Solids, each part on its own nodes where it touches the next. Each
-    bolt is made by merging the nodes it clamps with Merge Coincident
-    Nodes: under the washer at each foot, and at the four corners of
-    the brick it passes through at the beam. Each bolt's mass is a
+    bolt is a joint made with Mate Surfaces, which ties the nodes the
+    bolt clamps to the face of the part beneath them: under the washer
+    at each foot, and at the four corners of the brick it passes through
+    at the beam. Each bolt's mass is a
     point mass at its head. The removable component, the two channels
     and the beam, is also a model of its own.
   </p>
@@ -152,10 +153,10 @@
     subtracted, the threaded inserts are cylinders in the tops of the
     holes, and each wing is a plate less its eighteen holes. Pattern
     copies the holes in rows, and Mesh Solids meshes the parts into
-    bricks. A wing is bolted on by merging nodes: the wing and the
-    washers under it are meshed apart from the frame, Align Meshes puts
-    the washers' undersides on the frame's nodes, and Merge Coincident
-    Nodes joins them. Then Solve Modes.
+    bricks. A wing is bolted on with Mate Surfaces: the wing and the
+    washers under it are meshed apart from the frame, and the washers'
+    undersides are tied to the frame and the screws beneath them, though
+    the two meshes do not match. Then Solve Modes.
   </p>
   <div class="figure">
     <iframe src="examples/frame-wing.html" loading="lazy" scrolling="no"

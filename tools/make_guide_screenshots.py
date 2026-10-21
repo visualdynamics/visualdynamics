@@ -1030,14 +1030,19 @@ def tree():
 # ---- the finite element pages ---------------------------------------------
 
 
-def show_scene(window):
+def show_scene(window, look=None):
     """Put the 3-D view's picture where the offscreen window holds its
     '3D view disabled' label, so a grab shows the model being built.
 
     The offscreen window still keeps the scene in an off-screen plotter
     (the panes' previews, the picked elements, the merge's marks); only
     the embedded widget is missing. Rendered at the label's size and
-    set on the label, it photographs with the rest of the window."""
+    set on the label, it photographs with the rest of the window.
+    `look`, an actor's name and a zoom, centers the view on that actor
+    (the scene draws a model scaled to its own box, so a point is
+    found by what is drawn there) and zooms in from the framing, as a
+    pan and a scroll do."""
+    import numpy as np
     from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import QSizePolicy
 
@@ -1052,6 +1057,17 @@ def show_scene(window):
     # fitted to the pane's width now: a table opened beside the view
     # narrows it, which the embedded widget's own resize would refit
     plotter.reset_camera()
+    if look is not None:
+        actor, zoom = look
+        bounds = np.reshape(plotter.renderer.actors[actor].GetBounds(), (3, 2))
+        camera = plotter.camera
+        shift = bounds.mean(axis=1) - np.asarray(camera.focal_point)
+        camera.focal_point = tuple(np.asarray(camera.focal_point) + shift)
+        camera.position = tuple(np.asarray(camera.position) + shift)
+        camera.zoom(zoom)
+        # a camera moved by hand is not drawn until asked: the
+        # screenshot alone returns the framing's picture again
+        plotter.render()
     pixels = plotter.screenshot(return_img=True)
     label.setPixmap(QPixmap.fromImage(image_of(pixels)))
 
@@ -1167,24 +1183,31 @@ def solve(window, top):
 
 
 def set_group(window, name, group, **fields):
-    """Type into the Element Groups table, opened on `group`'s row by
-    its pencil: each of `fields` a column's header without its unit
-    ('Material', 'Thickness', 'E', ...) and the text typed into it."""
+    """Type into the Element Groups table, opened on `group` by the
+    pencil on its row: each of `fields` a property's title without its
+    unit ('Material', 'Thickness', 'E', ...) and the text typed into it.
+    The table is one column per group picked, a property per row."""
     from PySide6.QtCore import Qt
 
     row = group_row(window, name, group)
-    if window.editing is None or window.editing[1] != 'groups':
+
+    def shown():
+        if window.editing is None or window.editing[1] != 'groups':
+            return []
+        model = window.table.model()
+        return [str(model.headerData(c, Qt.Orientation.Horizontal))
+                for c in range(model.item_count())]
+
+    if group not in shown():
+        pick(window, [row])
         window._tree_item_clicked(row, 1)
         pump(20)
     model = window.table.model()
-    headers = {str(model.headerData(c, Qt.Orientation.Horizontal)): c
-               for c in range(model.columnCount())}
-    geometry = window.objects[name]
-    at = list(geometry.group_name).index(group)
+    at = shown().index(group)
     for header, text in fields.items():
-        column = next(c for h, c in headers.items()
-                      if h.split(' [')[0] == header)
-        model.setData(model.index(at, column), text, Qt.ItemDataRole.EditRole)
+        prop = next(k for k, c in enumerate(model.columns)
+                    if c.title.split(' [')[0] == header)
+        model.setData(model.cell(at, prop), text, Qt.ItemDataRole.EditRole)
     pump(10)
     return row
 
@@ -1210,12 +1233,13 @@ BARC_PLANES = [
 def fem():
     """The BARC page: a plate model typed plane by plane, tied at its
     bolts, given its properties and solved; then the same structure
-    from solid blocks, meshed apart and bolted by merging nodes."""
+    from solid blocks, meshed apart and bolted with Mate Surfaces."""
     import numpy as np
     from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
     from PySide6.QtWidgets import QToolBar
 
     from visualdynamics.demo import barc
+    from visualdynamics.gui.main_window import ROLE_REFERENCE
 
     print('fem:', flush=True)
     window = fresh_window()
@@ -1294,7 +1318,7 @@ def fem():
     menu.show()
     menu.setActiveAction(next(a for a in menu.actions() if a.text() == below))
     pump(10)
-    table_width(window, 420)
+    table_width(window, 460)
     show_scene(window)
     shoot(window, 'fem-tie-click', marks=[quads, tie_button, menu])
     menu.hide()
@@ -1319,7 +1343,7 @@ def fem():
     # the row unselected, so its cells read as typed rather than as
     # the selection's highlight
     window.table.clearSelection()
-    table_width(window, 760)
+    table_width(window, 460)
     show_scene(window)
     shoot(window, 'fem-groups', marks=[row])
     window.stop_editing()
@@ -1398,30 +1422,55 @@ def fem():
     meshing.mesh_button.click()
     pump(30)
 
-    # the right foot's four bolts: every place the box and the channel
-    # touch marked, the foot's outer ring clicked out, the rest merged
+    # the right foot's joint: the patch where the foot rests on the box
+    # found, the foot's outer ring clicked out of the box's side, the 49
+    # nodes under the washers kept rigid (the demonstration's own set)
     geometry = window.objects[name]
     rows = [group_row(window, name, 'box'),
             group_row(window, name, 'right channel')]
     pick(window, rows)
-    bar_act(window, 'merge_coincident_nodes')
-    places = {node for (x, z), kind in barc.SOLID_BOLTS
-              if kind == 'foot' and x > 0
-              for node in barc.bolt_places(geometry, (x, z), 'foot')}
-    spots = list(window._merging['spots'])
-    for index, spot in enumerate(spots):
-        if places.isdisjoint(spot):
-            window.toggle_merge_place(index)
+    bar_act(window, 'mate_surfaces')
+    mating = window.scene.mate_panel
+    places = sorted({node for (x, z), kind in barc.SOLID_BOLTS
+                     if kind == 'foot' and x > 0
+                     for node in barc.bolt_places(geometry, (x, z), 'foot')})
+    box = int(geometry.group_id[list(geometry.group_name).index('box')])
+    clamped = set(barc._beneath(geometry, box, places))
+    assert mating.side == 'a', 'the box is not the side picked first'
+    for node in list(window._mating['patches'][0]['nodes_a']):
+        if node not in clamped:
+            window.toggle_mate_node(node)
+    assert len(window._mating['patches'][0]['nodes_a']) == 49
+    mating.name.setText('right foot bolts')
     pump(20)
-    merging = window.scene.merge_panel
-    show_scene(window)
-    shoot(window, 'fem-bricks-merge-click',
-          marks=[*rows, act(window, 'Merge Coincident Nodes'),
-                 merging.merge_button])
-    merging.merge_button.click()
+    show_scene(window, look=('mate-a', 2.5))
+    shoot(window, 'fem-bricks-mate-click',
+          marks=[*rows, act(window, 'Mate Surfaces'), mating.name,
+                 mating.keep_button])
+    mating.keep_button.click()
     pump(20)
-    show_scene(window)
-    shoot(window, 'fem-bricks-merged')
+    window.close_mate_pane()
+    pump(10)
+    kept = next(m.id for m in geometry.mates if m.name == 'right foot bolts')
+    joint = next(r for r in tree_rows(window, 'mate', name)
+                 if r.data(0, ROLE_REFERENCE)[2] == kept)
+    joint.parent().setExpanded(True)
+    pick(window, [joint])
+    show_scene(window, look=('mate-a', 2.5))
+    shoot(window, 'fem-bricks-mated')
+
+    # the joint opened again by its pencil, made a stiffness along the
+    # normal; shot before Save, which the page leaves to the reader
+    window.edit_mated_surfaces_act(name, kept)
+    pump(20)
+    mating.normal_mode.setCurrentIndex(mating.normal_mode.findData('stiffness'))
+    mating.normal.setValue(50000.0)
+    pump(20)
+    show_scene(window, look=('mate-a', 2.5))
+    shoot(window, 'fem-bricks-joint-click',
+          marks=[joint, mating.normal_mode, mating.normal, mating.keep_button])
+    window.close_mate_pane()
+    pump(10)
     close(window)
 
 
@@ -1459,7 +1508,7 @@ def pattern(window, name, solid, counts, spacing):
 def fem_solids():
     """The Frame-Wing page: the frame drawn as solids, patterned, cut,
     meshed, given its materials and solved; then a wing bolted on by
-    aligning and merging the meshes where they meet."""
+    mating the meshes where they meet."""
     from visualdynamics.demo import frame_wing
 
     print('fem_solids:', flush=True)
@@ -1577,10 +1626,7 @@ def fem_solids():
     window._tree_item_clicked(row, 1)
     pump(20)
     window.table.clearSelection()
-    table_width(window, 760)
-    # the inserts' elements are a long list of ranges; the column
-    # narrowed, as a drag on its edge does, so the properties show
-    window.table.setColumnWidth(2, 90)
+    table_width(window, 460)
     show_scene(window)
     shoot(window, 'fem-solids-groups', marks=[row])
     window.stop_editing()
@@ -1608,22 +1654,30 @@ def fem_solids():
     rows = [group_row(window, wing, g)
             for g in ('frame', 'inserts', 'screws', 'washers')]
     pick(window, rows)
-    bar_act(window, 'align_meshes')
-    places = window.scene.merge_panel
-    show_scene(window)
-    shoot(window, 'fem-solids-align-click',
-          marks=[*rows, act(window, 'Align Meshes'), places.merge_button])
-    places.merge_button.click()
+    bar_act(window, 'mate_surfaces')
+    mating = window.scene.mate_panel
+    listed = mating.patches
+    assert listed.count() == 8, f'{listed.count()} patches, not eight'
+    listed.selectAll()
     pump(20)
-    # the Align rebuilt the tree's rows: the same four, picked again
-    pick(window, [group_row(window, wing, g)
-                  for g in ('frame', 'inserts', 'screws', 'washers')])
-    bar_act(window, 'merge_coincident_nodes')
     show_scene(window)
-    shoot(window, 'fem-solids-merge-click',
-          marks=[act(window, 'Merge Coincident Nodes'), places.merge_button])
-    places.merge_button.click()
+    first, last = listed.item(0), listed.item(listed.count() - 1)
+    shoot(window, 'fem-solids-mate-click',
+          marks=[*rows, act(window, 'Mate Surfaces'),
+                 (listed.viewport(), listed.visualItemRect(first)),
+                 (listed.viewport(), listed.visualItemRect(last)),
+                 mating.keep_button])
+    mating.keep_button.click()
     pump(20)
+    window.close_mate_pane()
+    pump(10)
+    geometry = window.objects[wing]
+    assert len(geometry.mates) == 8
+    joint = tree_rows(window, 'mate', wing)[0]
+    joint.parent().setExpanded(True)
+    pick(window, [joint])
+    show_scene(window, look=('mate-a', 16.0))
+    shoot(window, 'fem-solids-mated')
     close(window)
 
 

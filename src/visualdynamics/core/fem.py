@@ -3347,8 +3347,20 @@ def _mated_links(model: Model, geometry: Geometry) -> None:
     holds each (`Model.add_tie`)."""
     from .mates import links
 
+    # a node on the edge between two groups that both rest on one
+    # surface is in a set for each (a frame node at a screw's hole, under
+    # a washer: "frame on washers" and "screws on washers"), tied twice to
+    # one point the same way: the second is the first again and is left
+    # out. Two that differ, another surface or another hold, still reach
+    # `constraint_transform`, which refuses them by name (2026-10-20)
+    held: dict[int, tuple] = {}
     for mated in getattr(geometry, 'mates', None) or []:
+        how = (int(mated.groups[1]), mated.normal_mode, mated.shear_mode,
+               float(mated.normal_stiffness), float(mated.shear_stiffness))
         for nodes, weights, node, normal, point in links(geometry, mated):
+            if held.get(node) == how:
+                continue
+            held.setdefault(node, how)
             # the node moved onto the point it is tied to, in the model
             # alone: a tie across even a hair's gap resists a rigid turn
             # (a shaft tied rigidly in its bore, its nodes a chord's sag

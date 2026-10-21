@@ -22,6 +22,7 @@ from typing import Any
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QEvent,
     QItemSelectionModel,
     QMimeData,
     QModelIndex,
@@ -55,6 +56,7 @@ from PySide6.QtWidgets import (
     QStyleOptionComboBox,
     QTableView,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -946,6 +948,50 @@ class CopyPasteTableView(QTableView):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._place_copy_button()
+
+    # ---- columns no wider than a reading ------------------------------------
+
+    #: no column opens wider than this many average characters. An element
+    #: group's Elements cell, a list of id ranges, once opened its column so
+    #: wide that the right-aligned values below it in the Element Groups
+    #: table were out of sight and read as blank (2026-10-21)
+    WIDEST_COLUMN_CHARACTERS = 32
+
+    def cap_columns(self) -> None:
+        """Narrow any column wider than `WIDEST_COLUMN_CHARACTERS` to it.
+
+        A cell cut short this way ends in an ellipsis and shows its whole
+        text on hover; the column is still the person's to drag wider."""
+        model = self.model()
+        if model is None:
+            return
+        limit = self.fontMetrics().averageCharWidth() * self.WIDEST_COLUMN_CHARACTERS
+        for column in range(model.columnCount()):
+            if self.columnWidth(column) > limit:
+                self.setColumnWidth(column, limit)
+
+    def cut_short(self, index: QModelIndex) -> bool:
+        """Whether cell `index` is too narrow for its text."""
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        if text is None or text == '':
+            return False
+        # the text's room: the cell less the margin the style draws it in
+        margin = 2 * (self.style().pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin) + 1)
+        return (self.fontMetrics().horizontalAdvance(str(text))
+                > self.visualRect(index).width() - margin)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        # a cell cut short shows its whole text on hover, unless the model
+        # has its own tooltip to give (why a cell does not apply)
+        if event.type() == QEvent.Type.ToolTip:
+            index = self.indexAt(event.pos())
+            if (index.isValid() and not index.data(Qt.ItemDataRole.ToolTipRole)
+                    and self.cut_short(index)):
+                QToolTip.showText(event.globalPos(),
+                                  str(index.data(Qt.ItemDataRole.DisplayRole)),
+                                  self.viewport(), self.visualRect(index))
+                return True
+        return super().viewportEvent(event)
 
     def enterEvent(self, event) -> None:
         super().enterEvent(event)

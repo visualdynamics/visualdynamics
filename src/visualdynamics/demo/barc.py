@@ -45,10 +45,12 @@ Solids, following the documentation's steps. Bricks touch where the
 parts do, so their bolts are made differently. The parts are meshed on
 one grid, each with its own nodes (`parts_apart`), coincident with the
 next part's nodes where the two touch and joined to none of them. Each
-bolt is then made by merging the places it clamps (`bolt_places`, Merge
-Coincident Nodes with the rest left out): at a foot, the corners of the
-brick under the bolt and the eight around it, the washer's area, and at
-the beam, the four corners of the brick the bolt passes through. The
+bolt is then a mated set, made by Mate Surfaces with the found patch
+trimmed to the places the bolt clamps (`bolt_places`): at a foot, the
+corners of the brick under the bolt and the eight around it, the
+washer's area, and at the beam, the four corners of the brick the bolt
+passes through. Each node there is tied rigidly to the face beneath it,
+and the rest of the contact is left free. The
 bolts' masses are point masses, an element group of point elements
 given a mass (`fem.GroupProperties(mass=...)`).
 
@@ -70,8 +72,10 @@ from visualdynamics import View, fem, mesh
 # does it (2026-09-26). The beam had one bolt at each end until Brandon,
 # 2026-10-11, made it four per channel. The brick model was added on
 # 2026-10-07; since 2026-10-11 its parts are solids, meshed by Mesh
-# Solids, node for node the boxes they replaced, and its bolts are made
-# by merging nodes (Brandon, 2026-10-11).
+# Solids, node for node the boxes they replaced. Its bolts were made by
+# merging nodes from 2026-10-11 until Brandon, 2026-10-20, asked for the
+# examples to be rebuilt with Mate Surfaces; the frequencies did not
+# move, since a rigid tie on coincident nodes is the merge.
 
 #: element size aimed at, inches: 0.125 converges the first ten modes to
 #: about a percent (0.0625 moves them no more) and solves in a few
@@ -371,7 +375,7 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
         raise ValueError(f'{part!r} is not one of {PARTS}')
     # the parts meshed together on one grid, cut at every part's faces,
     # each keeping its own nodes: where two touch their nodes lie on
-    # each other's, joined to none, for the bolts to merge. Meshed one
+    # each other's, joined to none, for the bolts to tie. Meshed one
     # at a time, each on its own grid, a channel's foot met the box's
     # top with no nodes in common at a quarter inch (2026-10-11)
     project = Project('BARC')
@@ -387,16 +391,21 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     for kind in kinds:
         for side in ('right channel', 'left channel'):
             below, above = ('box', side) if kind == 'foot' else (side, 'beam')
+            places = sorted({node for (bx, bz), k in SOLID_BOLTS if k == kind
+                             and (bx > 0) == (side == 'right channel')
+                             for node in bolt_places(whole, (bx, bz), kind)})
+            # Mate Surfaces on the two parts, as the pane does it: the
+            # patch where they touch, its first side kept at the places
+            # the bolts clamp and clicked off everywhere else (a foot's
+            # outer ring of 32; at the beam None, then the 16 under the
+            # bolts), rigid, named for the joint
             groups = [ids[below], ids[above]]
-            places = {node for (bx, bz), k in SOLID_BOLTS if k == kind
-                      and (bx > 0) == (side == 'right channel')
-                      for node in bolt_places(whole, (bx, bz), kind)}
-            # the pane's own tolerance, a quarter of the finest spacing;
-            # every coincidence not under a bolt left out, as unpicking it
-            tolerance = 0.25 * whole.node_spacing(groups)
-            left_out = [node for spot in whole.coincident_spots(
-                tolerance, groups) if places.isdisjoint(spot) for node in spot]
-            whole.merge_coincident_nodes(tolerance, groups, left_out)
+            patch, = project.detect_mated_surfaces(
+                name, groups, 0.25 * whole.node_spacing(groups))
+            clamped = set(places) | set(_beneath(whole, ids[below], places))
+            project.add_mated_surfaces(
+                name, patch['groups'], [n for n in patch['nodes_a'] if n in clamped],
+                patch['nodes_b'], name=f'{side.split()[0]} {kind} bolts')
     # each bolt's mass at the node of its head face nearest its axis
     xyz = whole.node_xyz / INCH
     for kind in kinds:
@@ -420,15 +429,29 @@ def solid_geometry(part: str = 'BARC', size: float = SIZE) -> Any:
     return whole
 
 
+def _beneath(geometry: Any, group: int, places) -> list[int]:
+    """The nodes of element group `group` at the places `places`: on
+    one grid, each place's partner across the joint is the node of the
+    part below at the same point."""
+    from scipy.spatial import cKDTree
+
+    rows = np.flatnonzero(geometry.elem_group == group)
+    own = np.unique(np.concatenate([geometry.elem_conn[r] for r in rows]))
+    tree = cKDTree(geometry.node_xyz[geometry.node_index(own)])
+    gap, nearest = tree.query(geometry.node_xyz[geometry.node_index(places)])
+    assert gap.max() < 1e-9, 'a place with no node beneath it'
+    return sorted({int(own[k]) for k in nearest})
+
+
 def bolt_places(geometry: Any, axis: tuple, kind: str) -> set[int]:
     """The places a bolt clamps, as the ids of the nodes of the part on
-    top that a merge joins there.
+    top that a bolt's mated set ties there.
 
     They are the corners, on the face where the parts touch, of the
     bricks the bolt clamps, picked by the same `CLAMPED` rule as the
     plate model's bolts: the washer's 4 x 4 places at a foot, and the
     four corners of the brick the bolt passes through at the beam. These
-    are the places the app's merge pane marks and a person clicks.
+    are the places a person keeps marked in the Mate Surfaces pane.
 
     Parameters
     ----------

@@ -61,6 +61,9 @@ class MatePanel(QWidget):
     changed = Signal()
     keep_asked = Signal()
     close_asked = Signal()
+    #: every node of the side being picked back, or none
+    all_asked = Signal()
+    none_asked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -110,6 +113,17 @@ class MatePanel(QWidget):
                                'takes it away')
         grid.addWidget(self.side_label, 5, 0)
         grid.addLayout(sides, 5, 1)
+        # every node of the side back, or none, to pick a few by clicking:
+        # a beam's end on a channel is 81 nodes and its bolts clamp 16
+        # (the BARC, 2026-10-20), as the merge pane's All and None
+        picks = QHBoxLayout()
+        self.all_button: QPushButton = QPushButton('All')
+        self.all_button.setToolTip('Every node the side had when the patch was found')
+        self.none_button: QPushButton = QPushButton('None')
+        self.none_button.setToolTip('Take every node off the side, to click a few back')
+        picks.addWidget(self.all_button)
+        picks.addWidget(self.none_button)
+        grid.addLayout(picks, 6, 1)
         # the normal and the shear, each held its own way (Brandon,
         # 2026-10-20): rigid, a stiffness in the display units, or free
         self.normal_mode_label: QLabel = QLabel('Normal')
@@ -127,17 +141,17 @@ class MatePanel(QWidget):
         for row, (label, widget) in enumerate(
                 ((self.normal_mode_label, self.normal_mode), (self.normal_label, self.normal),
                  (self.shear_mode_label, self.shear_mode), (self.shear_label, self.shear)),
-                start=6):
+                start=7):
             grid.addWidget(label, row, 0)
             grid.addWidget(widget, row, 1)
         self.name_label: QLabel = QLabel('Name')
         self.name: QLineEdit = QLineEdit()
         self.name.setToolTip('What the tree calls the set kept')
-        grid.addWidget(self.name_label, 10, 0)
-        grid.addWidget(self.name, 10, 1)
+        grid.addWidget(self.name_label, 11, 0)
+        grid.addWidget(self.name, 11, 1)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
-        grid.addWidget(self.reading_label, 11, 0, 1, 2)
+        grid.addWidget(self.reading_label, 12, 0, 1, 2)
         buttons = QHBoxLayout()
         self.keep_button: QPushButton = QPushButton('Keep')
         self.keep_button.setToolTip('Add the picked patches to the geometry\'s Mated '
@@ -147,8 +161,8 @@ class MatePanel(QWidget):
         self.close_button.setToolTip('Put the pane away; what was kept stays')
         buttons.addWidget(self.keep_button)
         buttons.addWidget(self.close_button)
-        grid.addLayout(buttons, 12, 0, 1, 2)
-        grid.setRowStretch(13, 1)
+        grid.addLayout(buttons, 13, 0, 1, 2)
+        grid.setRowStretch(14, 1)
         for box in (self.tolerance, self.search, self.normal, self.shear):
             commit_on_enter(box)
         self.search.valueChanged.connect(lambda _value: self.search_changed.emit())
@@ -160,6 +174,8 @@ class MatePanel(QWidget):
         self.normal.valueChanged.connect(lambda _value: self.changed.emit())
         self.shear.valueChanged.connect(lambda _value: self.changed.emit())
         self.keep_button.clicked.connect(self.keep_asked.emit)
+        self.all_button.clicked.connect(self.all_asked.emit)
+        self.none_button.clicked.connect(self.none_asked.emit)
         self.close_button.clicked.connect(self.close_asked.emit)
         self._show_stiffness()
 

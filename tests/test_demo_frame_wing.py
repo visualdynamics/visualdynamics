@@ -77,30 +77,35 @@ def test_a_wing_alone_is_a_plate_with_eighteen_holes():
 
 
 def test_the_assembly_bolts_the_wing_on_through_four_washers():
-    """The wing and its washers meshed apart from the frame, the washers'
-    undersides aligned onto the frame and merged (2026-10-11): one
-    structure, joined at each washer and nowhere else, no rigid link,
-    a screw head's grams on the wing's top at each screw."""
+    """The wing and its washers meshed apart from the frame and joined
+    to it by Mate Surfaces (Brandon, 2026-10-20: the examples remade with
+    the new joints): two rigid sets at each washer, one where its
+    underside rests on the frame and one where it rests on the screw,
+    eight in all; no node shared between the wing and the frame, no
+    rigid link, one structure, a screw head's grams on the wing's top at
+    each screw. The meshes need not line up: Align Meshes is gone."""
     from visualdynamics.core.fem import Model
 
-    # at the real sizes: a frame coarser than the washers would move
-    # its own nodes onto them, Align moving the coarser piece
     both = frame_wing.geometry('thick wing')
     names = set(both.group_name)
     assert {'frame', 'inserts', 'thick wing', 'washers', 'screw heads'} <= names
     ids = dict(zip(both.group_name, both.group_id.tolist()))
     frame = set(both.nodes_in([ids[n] for n in ('frame', 'inserts', 'screws')
                                if n in ids]))
-    wing = set(both.nodes_in([ids['thick wing']]))
-    assert not frame & wing, 'the wing touches the frame only through its washers'
+    assert not frame & set(both.nodes_in([ids['washers']])), 'joined by ties alone'
+    assert not frame & set(both.nodes_in([ids['thick wing']]))
+    sets = both.mates
+    assert len(sets) == 8 and all(m.describe() == 'rigid' for m in sets)
+    assert sorted({tuple(both.group_name[list(both.group_id).index(g)] for g in m.groups)
+                   for m in sets}) == [('frame', 'washers'), ('screws', 'washers')]
     inch = both.node_xyz / INCH
     for x, y in frame_wing.SCREWS:
-        joined = [n for n in frame & set(both.nodes_in([ids['washers']]))
-                  if np.hypot(*(inch[both.node_index([n])[0], :2] - (x, y)))
-                  < frame_wing.WASHER_RADIUS + 0.01]
-        assert len(joined) >= 4, (x, y)
+        # each washer has a set on the frame and one on the screw, near it
+        near = [m for m in sets if np.hypot(*(inch[both.node_index(list(m.nodes_a))]
+                                               .mean(axis=0)[:2] - (x, y))) < 0.05]
+        assert len(near) == 2, (x, y)
     model = Model.from_geometry(both)
-    assert len(model.pieces()) == 1 and not model.rigid_links
+    assert len(model.pieces()) == 1 and not model.rigid_links and model.ties
     assert len(model.masses) == 4
     assert sum(m.mass for m in model.masses) == pytest.approx(4 * frame_wing.SCREW_MASS)
 

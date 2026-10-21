@@ -1009,6 +1009,8 @@ class MainWindow(QMainWindow):
         self.scene.mate_panel.search_changed.connect(self._mate_search_changed)
         self.scene.mate_panel.changed.connect(self._mate_refresh)
         self.scene.mate_panel.keep_asked.connect(self._mate_keep)
+        self.scene.mate_panel.all_asked.connect(lambda: self._mate_side_all(True))
+        self.scene.mate_panel.none_asked.connect(lambda: self._mate_side_all(False))
         self.scene.mate_panel.close_asked.connect(self.close_mate_pane)
         #: the preview waits for the size box to settle: each change
         #: meshed at once, and at a fine size a spin of the box was one
@@ -5707,8 +5709,12 @@ class MainWindow(QMainWindow):
         column starts empty and sized to nothing, and a material name
         could not be read in it (Brandon, 2026-10-02); the units columns
         had the same rule since September. The header stays interactive,
-        so a column is still the person's to drag wider or narrower."""
+        so a column is still the person's to drag wider or narrower. No
+        column opens wider than a reading (`CopyPasteTableView.cap_columns`):
+        a long cell is cut short and shows its whole text on hover."""
         table.resizeColumnsToContents()
+        if hasattr(table, 'cap_columns'):
+            table.cap_columns()
         metrics = table.fontMetrics()
         widest_choice = 0
         for i, column in enumerate(getattr(model, 'columns', ())):
@@ -13680,7 +13686,9 @@ class MainWindow(QMainWindow):
             return
         found = mates.detect(geometry, mating['groups'], self._mate_tolerance())
         mating['patches'] = [{**patch, 'nodes_a': list(patch['nodes_a']),
-                              'nodes_b': list(patch['nodes_b'])} for patch in found]
+                              'nodes_b': list(patch['nodes_b']),
+                              'found_a': list(patch['nodes_a']),
+                              'found_b': list(patch['nodes_b'])} for patch in found]
         self.scene.mate_panel.set_patches(
             [self._patch_text(k) for k in range(len(found))], 0 if found else None)
         self._mate_refresh()
@@ -13957,6 +13965,23 @@ class MainWindow(QMainWindow):
         distances = np.linalg.norm(screen - np.array([x, y]), axis=1)
         index = _nearest_candidate(distances, depth, 12.0 * ratio, 2.0 * ratio)
         return None if index is None else int(candidates[index])
+
+    def _mate_side_all(self, every: bool) -> None:
+        """The picked patch's side being picked: every node it had when
+        the patch was found (or the set opened), or none."""
+        mating = self.__dict__.get('_mating')
+        panel = self.scene.mate_panel
+        current = panel.current_patch() if mating is not None else None
+        if current is None:
+            return
+        patch = mating['patches'][current]
+        key = 'nodes_' + panel.side
+        found = patch.setdefault('found_' + panel.side, list(patch[key]))
+        patch[key] = list(found) if every else []
+        mating['said'] = ''
+        mating['hovered'] = None
+        panel.set_patch_text(current, self._patch_text(current))
+        self._mate_refresh()
 
     def toggle_mate_node(self, node: int) -> None:
         """Add `node` to the picked patch's side being picked, or take it

@@ -460,6 +460,58 @@ def test_the_pane_on_two_groups_picks_nodes_keeps_edits_and_deletes(window, pump
     assert not geometry.mates and _row(window, name, ('mates', name, None)) is None
 
 
+def test_a_node_two_sets_tie_alike_is_tied_once_and_unalike_refused():
+    """A node in two sets that hold it to the same surface the same way
+    is tied once: the Frame-Wing's frame nodes round a screw's hole are
+    in "frame on washers" and "screws on washers" both (2026-10-20). A
+    second set that holds it another way is still refused by name."""
+    *_, geometry = _two_blocks()
+    patch, = mates.detect(geometry, list(geometry.group_id))
+    mates.add(geometry, patch['groups'], patch['nodes_a'], patch['nodes_b'], name='first')
+    mates.add(geometry, patch['groups'], patch['nodes_a'], patch['nodes_b'], name='again')
+    single = len(Model.from_geometry(_steel(copy.deepcopy(geometry))).ties)
+    assert single == len(patch['nodes_a'])
+    mates.add(geometry, patch['groups'], patch['nodes_a'], patch['nodes_b'], 'rigid', 'free',
+              name='loose')
+    with pytest.raises(ValueError, match=r'follows two ties \(first and loose\)'):
+        Model.from_geometry(_steel(geometry)).constraint_transform()
+
+
+def test_all_and_none_put_back_or_take_off_a_sides_nodes(window, pump):
+    """None takes every node off the side being picked, to click a few
+    back (a beam's end on a channel is 81 nodes and its bolts clamp 16);
+    All puts back every node the side had when the patch was found, and
+    each acts on its own side alone."""
+    project = window.project
+    name = project.new_geometry('Part', unit='in')
+    base = project.add_solid_block(name, (0, 0, 0), (4, 2, 1), name='base', unit='in')
+    post = project.add_solid_block(name, (1.5, 0, 1), (1, 2, 1), name='post', unit='in')
+    project.mesh_solids(name, [base], 0.5, unit='in')
+    project.mesh_solids(name, [post], 0.25, unit='in', apart=True)
+    geometry = project[name]
+    window.show_object(name)
+    pump()
+    window.mate_surfaces_act(name, [_group(geometry, 'post'), _group(geometry, 'base')])
+    pump()
+    panel = window.scene.mate_panel
+    assert panel.patches.item(0).text() == 'post on base: 45 nodes on 15'
+    panel.none_button.click()
+    pump()
+    assert panel.patches.item(0).text() == 'post on base: 0 nodes on 15'
+    window.toggle_mate_node(window._mating['patches'][0]['found_a'][0])
+    assert panel.patches.item(0).text() == 'post on base: 1 node on 15'
+    panel.all_button.click()
+    pump()
+    assert panel.patches.item(0).text() == 'post on base: 45 nodes on 15'
+    panel.side_b.click()
+    panel.none_button.click()
+    pump()
+    assert panel.patches.item(0).text() == 'post on base: 45 nodes on 0'
+    panel.all_button.click()
+    pump()
+    assert panel.patches.item(0).text() == 'post on base: 45 nodes on 15'
+
+
 def _post_sharing_its_seam():
     """The post meshed onto the base, not apart: every other node of its
     5 x 9 seam lands on the base's 3 x 5 and is that node."""

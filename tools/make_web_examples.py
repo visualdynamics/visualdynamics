@@ -251,8 +251,8 @@ def build_barc(size: float = BARC_WEB_SIZE, write: bool = True) -> int:
 #: the BARC of bricks drawn at the planes figure's quarter inch: 3,000
 #: nodes and a 1.7 MB page, where the example's eighth of an inch makes
 #: 15,000 nodes and 7.9 MB. A foot bolt clamps three bricks across, so
-#: at a quarter inch the feet are merged over their whole footprint and
-#: the modes read 1 to 5 % above the example's
+#: at a quarter inch the feet are tied over their whole footprint and
+#: the modes read 1 to 6 % above the example's (mated, 2026-10-20)
 BARC_BRICKS_WEB_SIZE = 0.25
 
 

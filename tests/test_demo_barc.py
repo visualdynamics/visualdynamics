@@ -289,42 +289,54 @@ def _shared(geometry, a, b):
     return nodes[0] & nodes[1]
 
 
-def test_each_bolt_merges_the_places_it_clamps_and_no_other():
+def test_each_joint_ties_the_places_its_bolts_clamp_and_no_other():
     """Meshed apart, each channel's foot is 9 x 9 places coincident with
-    the box and each channel's top 9 x 9 with the beam. A foot's four
-    bolts merge the washer's 4 x 4 places each, which share their middle
-    rows into one 7 x 7 square; a beam bolt merges the four corners of
-    the brick it passes through. The rest stay coincident and unjoined,
-    left out as a person unpicks them in the pane."""
+    the box and each channel's top 9 x 9 with the beam, none shared. Each
+    joint is a set of mated surfaces, rigid (Brandon, 2026-10-20: the
+    examples remade with the new joints): a foot's four bolts tie the
+    washer's 4 x 4 places each, which share their middle rows into one
+    7 x 7 square; a beam end's four bolts tie the four corners of the
+    brick each passes through. The patch is as Mate Surfaces finds it,
+    the part below the first side (both sides hold 81, and the first
+    group picked follows), kept at the bolts' places and clicked off
+    everywhere else; the second side stays the patch's whole 81."""
     geometry = barc.solid_geometry()
     ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
-    for side in ('right channel', 'left channel'):
-        for below, above, merged in (('box', side, 49), (side, 'beam', 16)):
-            shared = _shared(geometry, below, above)
-            assert len(shared) == merged, (below, above)
-            groups = [ids[below], ids[above]]
-            left = geometry.coincident_spots(
-                0.25 * geometry.node_spacing(groups), groups)
-            assert len(left) == 81 - merged
+    sets = {m.name: m for m in geometry.mates}
+    assert sorted(sets) == ['left foot bolts', 'left top bolts', 'right foot bolts',
+                            'right top bolts']
+    assert all(m.describe() == 'rigid' for m in sets.values())
+    for side in ('right', 'left'):
+        channel = f'{side} channel'
+        for kind, below, above, places in (('foot', 'box', channel, 49),
+                                           ('top', channel, 'beam', 16)):
+            mated = sets[f'{side} {kind} bolts']
+            assert mated.groups == (ids[below], ids[above])
+            assert (len(mated.nodes_a), len(mated.nodes_b)) == (places, 81), (side, kind)
+            assert not _shared(geometry, below, above), 'joined by ties, not merged'
     inch = geometry.node_xyz / 0.0254
     for (bx, bz), kind in barc.SOLID_BOLTS[8:]:
-        side = 'right channel' if bx > 0 else 'left channel'
+        side = 'right' if bx > 0 else 'left'
         places = barc.bolt_places(geometry, (bx, bz), kind)
-        assert places <= _shared(geometry, side, 'beam')
         at = inch[geometry.node_index(sorted(places))]
         assert np.allclose(at.mean(axis=0)[[0, 2]], (bx, bz))
         assert np.allclose(np.ptp(at, axis=0), [0.125, 0.0, 0.125])
-    assert not _shared(geometry, 'box', 'beam')
+        # the joint's first side, the channel, is tied at the places'
+        # partners: the four corners of the brick the bolt passes through
+        tied = inch[geometry.node_index(list(sets[f'{side} top bolts'].nodes_a))]
+        near = tied[np.hypot(tied[:, 0] - bx, tied[:, 2] - bz) < 0.1]
+        assert len(near) == 4
 
 
-def test_the_docs_solids_meshed_apart_and_merged_are_the_demos_bricks():
+def test_the_docs_solids_meshed_apart_and_mated_are_the_demos_bricks():
     """The page's bricks steps, as the project verbs the app records:
     the blocks table typed into Add Solid Block, each part's blocks
     subtracted from its first, the four parts meshed with Keep the parts
-    apart, then the four merges the page clicks — at each foot every
-    place but the outer ring of 32, at each end of the beam none but the
-    16 under its bolts — must give the demo's bricks, node for node and
-    brick for brick, joined at the same 130 places (2026-10-11)."""
+    apart, then the four joints the page makes in Mate Surfaces — at each
+    foot the patch with its outer ring of 32 clicked out, at each end of
+    the beam None and the 16 under its bolts clicked back — must give
+    the demo's bricks, node for node and brick for brick, tied at the
+    same places (2026-10-20; merged nodes before)."""
     import pathlib
 
     import visualdynamics
@@ -359,35 +371,36 @@ def test_the_docs_solids_meshed_apart_and_merged_are_the_demos_bricks():
     for side in ('right channel', 'left channel'):
         for below, above in (('box', side), (side, 'beam')):
             groups = [ids[below], ids[above]]
-            tolerance = 0.25 * typed.node_spacing(groups)
-            spots = typed.coincident_spots(tolerance, groups)
-            assert len(spots) == 81
-            at = typed.node_xyz[typed.node_index([s[0] for s in spots])] / inch
+            patch, = project.detect_mated_surfaces(
+                name, groups, 0.25 * typed.node_spacing(groups))
+            assert len(patch['nodes_a']) == len(patch['nodes_b']) == 81
+            at = typed.node_xyz[typed.node_index(list(patch['nodes_a']))] / inch
             if below == 'box':
-                # the page: leave out the 32 around the foot's edge
+                # the page: click out the 32 around the foot's edge
                 x, z = at[:, 0], at[:, 2]
-                edge = ((np.isclose(x, x.min()) | np.isclose(x, x.max()))
-                        | (np.isclose(z, z.min()) | np.isclose(z, z.max())))
+                out = ((np.isclose(x, x.min()) | np.isclose(x, x.max()))
+                       | (np.isclose(z, z.min()) | np.isclose(z, z.max())))
             else:
                 # None, then the four corners of the brick under each bolt
                 axes = [a for a, k in barc.SOLID_BOLTS if k == 'top'
                         and (a[0] > 0) == (side == 'right channel')]
-                edge = ~np.array([any(abs(p[0] - a[0]) < 0.07
-                                      and abs(p[2] - a[1]) < 0.07
-                                      for a in axes) for p in at])
-            left_out = [n for spot, out in zip(spots, edge) if out
-                        for n in spot]
-            assert len(spots) - int(edge.sum()) == (49 if below == 'box' else 16)
-            project.merge_coincident_nodes(name, tolerance, groups, left_out)
+                out = ~np.array([any(abs(p[0] - a[0]) < 0.07 and abs(p[2] - a[1]) < 0.07
+                                     for a in axes) for p in at])
+            kept = [n for n, o in zip(patch['nodes_a'], out) if not o]
+            assert len(kept) == (49 if below == 'box' else 16)
+            joint = 'foot' if below == 'box' else 'top'
+            project.add_mated_surfaces(name, patch['groups'], kept, patch['nodes_b'],
+                                       name=f'{side.split()[0]} {joint} bolts')
     demo = barc.solid_geometry()
     assert typed.num_nodes == demo.num_nodes
     assert np.allclose(np.sort(typed.node_xyz, axis=0),
                        np.sort(demo.node_xyz, axis=0))
     for group in ('box', 'right channel', 'left channel', 'beam'):
         assert len(typed.elements_in(group)) == len(demo.elements_in(group))
-    for side in ('right channel', 'left channel'):
-        for below, above, merged in (('box', side, 49), (side, 'beam', 16)):
-            assert len(_shared(typed, below, above)) == merged
+    sets = {m.name: m for m in demo.mates}
+    for mated in typed.mates:
+        assert set(mated.nodes_a) == set(sets[mated.name].nodes_a), mated.name
+        assert set(mated.nodes_b) == set(sets[mated.name].nodes_b), mated.name
 
 
 def test_the_removable_component_stays_where_it_was_checked():

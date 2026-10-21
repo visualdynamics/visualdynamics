@@ -83,8 +83,8 @@ Geometry*, which adds an empty geometry in the display length unit to
 build a model in. In a geometry, the **Quads** row offers *Add Plane*
 and the **Hexes** row *Add Block*, since each adds elements of that
 family ([the finite element workflow](workflows/fem-workflow.md)). The
-**Solids** row offers *Add Solid Block*, *Add Cylinder*, *Add Section*
-and *Add Hole*: shapes to combine, pattern and then mesh
+**Solids** row offers *Add Solid Block*, *Add Cylinder*, *Add Cone*,
+*Add Sphere* and *Add Section*: shapes to combine, pattern and then mesh
 ([the solid workflow](workflows/fem-solids.md)).
 
 ![The project row selected: the panes clear, and Generate Report and New Geometry are on the bar](images/tree-project.png)

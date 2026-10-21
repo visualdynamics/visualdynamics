@@ -16,10 +16,10 @@ plate less its four windows (with rounded corners, which leave the
 fillets) and its 41 holes, the inserts a union of cylinders in the tops
 of the holes, and each wing a plate less its eighteen holes. The holes
 are copied in rows with Pattern, and the solids are meshed into bricks
-with Mesh Solids. A wing is bolted on the way the BARC's bricks are, by
-merging nodes: the wing and the washers under it are meshed apart from
-the frame, Align Meshes puts the washers' undersides on the frame's
-nodes, and Merge Coincident Nodes joins them. The screws are steel,
+with Mesh Solids. A wing is bolted on the way the BARC's bricks are,
+with Mate Surfaces: the wing and the washers under it are meshed apart
+from the frame, and each washer's underside is tied to the frame and
+the screw beneath it, though the meshes do not match. The screws are steel,
 threaded into the four inserts they pass through (a steel cylinder over
 each, made last so it takes those bricks), with the rest of each screw's
 mass as a point mass on the wing's top. Every dimension below is read
@@ -235,16 +235,19 @@ def _materials(geometry: Any) -> None:
 
 def _bolt(project: Any, name: str, wing: str) -> None:
     """The wing bolted on: the frame, its inserts, its screws and the
-    washers picked, Align Meshes and Merge Coincident Nodes on them, and
+    washers picked, Mate Surfaces on them, every patch where a washer's
+    underside rests on the frame or a screw kept as a rigid joint, and
     each screw's grams on the node of the wing's top nearest it."""
+    # the joints mated since 2026-10-20 (Brandon: remake the examples
+    # with the new joints); before, Align Meshes moved the frame's nodes
+    # under each washer onto the washer's and Merge Coincident Nodes
+    # made them one, which the ties' point on the surface does without
     geometry = project[name]
     ids = dict(zip(geometry.group_name, geometry.group_id.tolist()))
     # a coarse mesh can leave a screw or an insert with no brick, and its
     # group with nothing in it: the ones there are picked
     picked = [ids[n] for n in ('frame', 'inserts', 'screws', 'washers') if n in ids]
-    project.align_meshes(name, groups=picked)
-    project.merge_coincident_nodes(name, 0.25 * geometry.node_spacing(picked),
-                                   groups=picked)
+    project.mate_surfaces(name, picked, 0.25 * geometry.node_spacing(picked))
     xyz = geometry.node_xyz / INCH
     top = np.flatnonzero(np.abs(xyz[:, 2] - (WING_GAP + WING_THICKNESS[wing])) < 1e-6)
     heads = [[int(geometry.node_id[top[np.argmin(

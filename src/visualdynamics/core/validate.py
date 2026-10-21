@@ -15,6 +15,7 @@ nothing in the file to say why.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 import numpy as np
@@ -206,8 +207,57 @@ def dofs(values: Sequence[str], label: str = 'DOF',
     direction is still refused either way: `101Q+` is a typo, not an
     omission, and Q is not an axis.
     """
+    items = [values] if isinstance(values, str) else list(values)
+    normalized = _dofs_normalized(items)
+    if normalized is not None:
+        return normalized
+    return _dofs_each(items, label, allow_unknown)
+
+
+#: one DOF string already in the normalized spelling `dofs` produces:
+#: a node id with no leading zero (zero itself allowed), then a signed
+#: upper-case direction — or a modal coordinate with a positive index.
+#: ASCII digits only: `\d` would also match the other scripts' digits,
+#: which `str.isdigit` accepts and `int` converts, so the slow path
+#: rewrites them and this one must not pass them through.
+_NORMALIZED = re.compile(
+    r'(?:(?:0|[1-9][0-9]*)(?:' + '|'.join(re.escape(d) for d in DIRECTIONS)
+    + r')|' + MODAL_PREFIX + r'[1-9][0-9]*)\n')
+_ALL_NORMALIZED = re.compile(r'(?:' + _NORMALIZED.pattern + r')*')
+
+
+def _dofs_normalized(items: list) -> list[str] | None:
+    """`items` as a list of str when every one is already normalized,
+    else None.
+
+    The fast path: a solved model's coordinates are hundreds of
+    thousands of strings its own `dof_strings` wrote in exactly this
+    spelling, and `_dofs_each` over them, one Python call per string,
+    was the largest cost left in a `ShapeSet`. One regex over the
+    strings joined with newlines reads them in C; anything it does not
+    recognize — a sign left off, a lower-case axis, a leading zero, a
+    blank, a non-string — goes to `_dofs_each`, which is the rule. The
+    join refuses a non-string by raising, and the separator count
+    catches a string with a newline inside it, which would otherwise
+    read as two good ones.
+    """
+    try:
+        joined = '\n'.join(items)
+    except TypeError:
+        return None
+    if joined.count('\n') != len(items) - 1:
+        return None
+    if not _ALL_NORMALIZED.fullmatch(joined + '\n'):
+        return None
+    return [str(item) for item in items]
+
+
+def _dofs_each(values: Sequence[str], label: str,
+               allow_unknown: bool) -> list[str]:
+    """`dofs`, one string at a time: the reference the fast path must
+    agree with (`tests/test_validate_rules.py` holds it to that)."""
     out = []
-    for value in ([values] if isinstance(values, str) else values):
+    for value in values:
         text = '' if value is None else str(value).strip()
         if not text:
             if allow_unknown:

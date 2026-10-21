@@ -9,6 +9,9 @@ by someone fixing a file, so which entries it names is the point.
 
 from __future__ import annotations
 
+import re
+
+import numpy as np
 import pytest
 
 from visualdynamics.core import validate
@@ -60,3 +63,57 @@ def test_direction_codes_count_the_axes_from_one_negated_for_minus():
     ('MX', None), ('1', None), ('', None)])
 def test_a_modal_coordinate_is_the_letter_and_a_positive_index(text, index):
     assert validate.modal_coordinate(text) == index
+
+
+#: strings `dofs` rewrites or refuses, which its fast path must hand
+#: to the per-string rule rather than pass through: each is one step
+#: off the normalized spelling the fast path recognizes
+IRREGULAR = ['101z', '0rx-', '007Y+', 'm03', ' 12Z- ', '١X+', '1١X+', 'M3X+',
+             '101Q', '1X+\n2Y+', '', None, 1, 'Z+', '7', 'M0']
+
+
+def test_the_fast_path_agrees_with_the_per_string_rule_on_a_mixed_list():
+    mixed = ['101X+', '101z', '0rx-', '007Y+', 'M3', 'm03', ' 12Z- ',
+             '١X+', None, 'Z+', '7']
+    expected = ['101X+', '101Z+', '0RX-', '7Y+', 'M3', 'M3', '12Z-',
+                '1X+', '', 'Z+', '7']
+    assert validate.dofs(mixed, allow_unknown=True) == expected
+    assert validate._dofs_each(mixed, 'DOF', True) == expected
+    with pytest.raises(ValueError, match=r'^DOF is empty$'):
+        validate.dofs(mixed)
+    with pytest.raises(ValueError, match=r"^DOF 'Z\+' does not start with a node id$"):
+        validate.dofs([v for v in mixed if v is not None])
+
+
+def test_a_normalized_list_takes_the_fast_path_and_anything_else_does_not(
+        monkeypatch):
+    normalized = ['1X+', '0RZ-', '45087RX+', 'M12', '7Y-']
+
+    def refuse(*args):
+        raise AssertionError('the per-string rule was called')
+    monkeypatch.setattr(validate, '_dofs_each', refuse)
+    out = validate.dofs(normalized)
+    assert out == normalized and out is not normalized
+    assert all(type(s) is str for s in validate.dofs(np.array(normalized)))
+    for item in IRREGULAR:
+        with pytest.raises(AssertionError, match='per-string rule'):
+            validate.dofs(['1X+', item, 'M2'], allow_unknown=True)
+
+
+@pytest.mark.parametrize('item', IRREGULAR)
+def test_an_irregular_string_among_normalized_ones_gets_the_rule(item):
+    values = ['1X+', item, 'M2']
+    try:
+        expected = validate._dofs_each(values, 'DOF', False)
+    except ValueError as refusal:
+        with pytest.raises(ValueError, match='^' + re.escape(str(refusal)) + '$'):
+            validate.dofs(values)
+    else:
+        assert validate.dofs(values) == expected
+    try:
+        expected = validate._dofs_each(values, 'DOF', True)
+    except ValueError as refusal:
+        with pytest.raises(ValueError, match='^' + re.escape(str(refusal)) + '$'):
+            validate.dofs(values, allow_unknown=True)
+    else:
+        assert validate.dofs(values, allow_unknown=True) == expected

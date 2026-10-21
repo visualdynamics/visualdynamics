@@ -38,6 +38,16 @@ def _plate_geometry(mesh=4, properties=True):
     return geometry
 
 
+def _beam_geometry():
+    """A group of eight beams with nothing set: a section is a beam's, and
+    the table takes one only for a group of beams."""
+    from test_springs import _whole_beam
+
+    geometry = _whole_beam().geometry()
+    geometry.group_properties = {}
+    return geometry
+
+
 def _verbs(project, name):
     return [verb for verb, _reading in project.verbs(name)]
 
@@ -121,7 +131,7 @@ def test_the_blocks_table_builds_a_property_set_cell_by_cell(qt_app):
 
 def test_a_section_fills_the_same_way_and_an_orientation_is_three_numbers(
         qt_app):
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     _set(model, 'Section', 'rib')
     _set(model, 'A [m²]', '3e-4')
@@ -334,9 +344,11 @@ def test_the_blocks_table_shows_and_takes_the_display_units(qt_app):
     props = geometry.group_properties[int(geometry.group_id[0])]
     assert props.material.youngs_modulus == pytest.approx(1e7 * psi)
     assert props.material.poissons_ratio == 0.33
-    # a section's second moments in in⁴
+    # a section's second moments in in⁴, on a group of beams
+    beams = _beam_geometry()
+    model = element_group_table_model(beams, inch)
     _set(model, 'Iy [in⁴]', '2')
-    props = geometry.group_properties[int(geometry.group_id[0])]
+    props = beams.group_properties[int(beams.group_id[0])]
     assert props.section.iy == pytest.approx(2 * inches ** 4)
 
 
@@ -403,7 +415,7 @@ def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
     from visualdynamics.units import SYSTEMS
 
     inch = 0.0254
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry, SYSTEMS['in-slinch-lbf-s'])
     shape_column = model.columns[_column(model, 'Shape')]
     assert shape_column.choices == ['round tube', 'rod', 'rectangle',
@@ -427,7 +439,7 @@ def test_a_shape_asks_for_its_dimensions_and_computes_the_rest(qt_app):
 
 
 def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     _set(model, 'Shape', 'rectangle')
     _set(model, 'Dimensions [m]', 'b=0.01, h=0.03')
@@ -445,7 +457,7 @@ def test_a_shaped_sections_numbers_are_computed_not_typed(qt_app):
 
 
 def test_wrong_dimensions_are_refused_by_name(qt_app):
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     said = []
     model.edit_rejected.connect(said.append)
@@ -461,7 +473,7 @@ def test_wrong_dimensions_are_refused_by_name(qt_app):
 
 
 def test_an_angle_says_where_to_point_it(qt_app):
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     _set(model, 'Shape', 'angle')
     shown = _set(model, 'Dimensions [m]', '0.1, 0.1, 0.01')
@@ -563,7 +575,7 @@ def test_meshing_solids_again_takes_a_stray_section_off_and_says_so(window, pump
 def test_a_beam_sections_cells_cleared_take_the_section_off(qt_app):
     """A section's cells cleared one by one: the section stays while any
     of it is left, and goes with the last."""
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     _set(model, 'Material', '6061-T6')
     _set(model, 'Section', 'tube')
@@ -576,7 +588,7 @@ def test_a_beam_sections_cells_cleared_take_the_section_off(qt_app):
 
 def test_a_shaped_section_journals_and_saves_by_its_dimensions(qt_app,
                                                               tmp_path):
-    geometry = _plate_geometry(properties=False)
+    geometry = _beam_geometry()
     model = element_group_table_model(geometry)
     lines = []
     model.edit_journaled.connect(lines.append)

@@ -125,9 +125,17 @@ across: each group is a column, named for it, and its properties read
 down the column, a material (name, E, ν, ρ) and either a thickness,
 for a group of quads or triangles, or a section and an orientation
 vector, for a group of beams. A group of solid elements takes the
-material alone. The table refuses a section, a thickness or an orientation typed on
-one, and clearing a section's cells (its Shape, or its name) takes the
-section off once nothing of it is left. Meshing solids into a group
+material alone, a group of points takes a mass, ground or a stiffness,
+and a group of lines can take a stiffness in place of a section. A
+property that a group's elements do not use is blank in that group's
+column and takes no value: the Thickness row is live under a group of
+quads and blank under a group of beams, and hovering over a blank cell
+says why. A paste, a fill or a batch edit across several groups sets
+the cells that apply, skips the rest and says on the status line how
+many it skipped and why. A value left from before in a cell that does
+not apply still shows, so it can be cleared, and clearing a section's
+cells (its Shape, or its name) takes the section off once nothing of it
+is left. Meshing solids into a group
 that carries a section, a thickness or an orientation takes them off
 and keeps its material, and the status line says what went. To set one value on several groups at once, select
 the property's cells across their columns and batch edit, or drag the

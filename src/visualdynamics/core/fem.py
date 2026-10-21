@@ -1041,70 +1041,84 @@ class NotConverged(Exception):
     converged; the caller solves by ARPACK instead."""
 
 
-def _gram_pass(block: np.ndarray, m_block: np.ndarray
-               ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """One pass of M-orthonormalization of a block through its Gram
-    matrix's eigenvectors: W = Q R with Q^T M Q = I, from G = W^T M W =
-    U diag(d) U^T as Q = W U d^-1/2 and R = d^1/2 U^T, which is W
-    exactly; returns Q, M Q, R and which directions survived. A
-    direction whose d sits below 1e-14 of the largest is round-off in
-    a Gram matrix whose entries are only that accurate, and its vector
-    W u is looked at instead: M-orthogonalized against the directions
-    kept so far, what is left is either real content (the free plate's
-    first block holds a direction at 1e-7 of the largest, which
-    dropping it left out of the Lanczos relation), kept and normalized
-    by its own norm with its projections carried into R, or the Gram
-    eigenvector's own error leaking the others' content, round-off
-    once they are taken out, and dropped: a zero column of Q and row
-    of R. Cholesky QR fails on these Gram matrices: one solve with the
-    shifted factor leaves a random block almost wholly in the rigid
-    modes, which the shift puts five orders above the elastic ones,
-    and the Gram matrix's condition is that squared."""
-    from scipy.linalg import eigh as scipy_eigh
+def _m_orthonormal(block: np.ndarray, mass: Any, m_block: np.ndarray | None = None,
+                   passes: int = 2, final_product: bool = True
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """W = Q R with Q^T M Q = I, by Gram-Schmidt column by column, each
+    column orthogonalized against those before it twice (the second
+    pass is what keeps the result orthonormal when a column's share
+    outside the earlier ones is small) and normalized by its M-norm;
+    returns Q, M Q, R, which columns survived, and each column's share:
+    what was left of it outside the earlier columns, over its own norm.
+    A column whose share is below 1e-12 is dependent on them, and is
+    dropped: a zero column of Q and a zero row of R, its coefficients
+    kept.
 
-    gram = block.T @ m_block
-    d, u = scipy_eigh((gram + gram.T) / 2.0)
-    largest = float(d.max()) if len(d) else 0.0
-    q, mq = block @ u, m_block @ u
-    sound = d > 1e-14 * largest
-    # W U = Q D: D diagonal where the Gram matrix is sound, and for a
-    # recovered direction the column of its projections and its norm
-    mixing = np.diag(np.sqrt(np.where(sound, d, 1.0)))
-    q[:, ~sound] = 0.0
-    mq[:, ~sound] = 0.0
-    q[:, sound] /= mixing.diagonal()[sound]
-    mq[:, sound] /= mixing.diagonal()[sound]
-    keep = sound.copy()
-    for i in np.flatnonzero(~sound):
-        z, mz = block @ u[:, i], m_block @ u[:, i]
-        for _pass in range(2):
-            c = mq[:, keep].T @ z
-            z -= q[:, keep] @ c
-            mz -= mq[:, keep] @ c
-            mixing[keep, i] += c
-        norm = math.sqrt(abs(float(z @ mz)))
-        if norm > 1e-13 * math.sqrt(largest):
-            q[:, i], mq[:, i] = z / norm, mz / norm
-            mixing[i, i] = norm
-            keep[i] = True
-        else:
-            mixing[:, i] = 0.0
-    return q, mq, mixing @ u.T, keep
-
-
-def _m_orthonormal(block: np.ndarray, m_block: np.ndarray
-                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """W = Q R with Q^T M Q = I: `_gram_pass` twice, since one pass on
-    a Gram matrix of condition 1e10 leaves the block orthonormal only
-    to 1e-5, and a basis built from such blocks loses its orthogonality
-    and the iteration its convergence (measured: the residual climbed
-    from the eighth block on). R = R2 R1 is W to round-off (reading it
-    back as Q^T M W was only as good as Q's orthonormality, 2e-12).
-    Returns Q, M Q, R and the first pass's survivors (a dropped one has
-    a zero column of Q and a zero row of R)."""
-    q, mq, r1, keep = _gram_pass(block, m_block)
-    q, mq, r2, _keep = _gram_pass(q, mq)
-    return q, mq, r2 @ r1, keep
+    Column by column rather than through the Gram matrix: a block that
+    one solve with the shifted factor has left almost wholly in the
+    rigid modes carries the elastic ones at the ratio of their
+    shift-inverted eigenvalues, 1e-9 on a small model of bricks tied
+    across a seam (elastic modes at 20 kHz), and the Gram matrix holds
+    that squared, below round-off, so an orthonormalization through
+    its eigenvectors lost the elastic directions or kept them as noise
+    (2026-10-19, the block method lost such a model while ARPACK, with
+    this orthogonalization, did not). Subtracting the earlier columns
+    leaves a remainder whose relative accuracy is round-off over the
+    share, and that is what the elastic modes need. The product M Q is
+    taken afresh after each pass rather than carried along as the same
+    combinations of M W: carried, it keeps the cancellation's round-off,
+    1e-7 of a remainder at 1e-9, and the block came out orthonormal to
+    5e-3 (measured; 9e-16 taken afresh). Cholesky QR, the first attempt,
+    fails outright on these Gram matrices, whose condition is the spread
+    of the spectrum squared. `m_block`, when given, is M W as the caller
+    has it, for the first pass; the block is held column-major so the
+    products against its earlier columns run in place, and the caller's
+    arrays are worked on in place where they are column-major already.
+    `passes` is one for a block that is orthonormal already but for a
+    small perturbation, which one pass takes out. `final_product` false
+    leaves the image as carried through the last pass, for a caller
+    that takes a fresh one later.
+    """
+    # the block and its image are the caller's to give up: worked on in
+    # place where they are column-major already
+    q = np.asfortranarray(block, dtype=np.float64)
+    count = q.shape[1]
+    mq = np.asfortranarray(mass @ q if m_block is None else m_block, dtype=np.float64)
+    original = np.sqrt(np.abs(np.sum(q * mq, axis=0)))
+    # W = Q R throughout: a subtraction q_j -= c q_i adds c times row j
+    # of R to row i, a normalization q_j /= s scales row j by s
+    r = np.eye(count)
+    keep = np.ones(count, dtype=bool)
+    for _pass in range(passes):
+        for j in range(count):
+            if not keep[j]:
+                continue
+            if j:
+                # a dropped column is zero, so its share is nothing
+                c = mq[:, :j].T @ q[:, j]
+                q[:, j] -= q[:, :j] @ c
+                mq[:, j] -= mq[:, :j] @ c
+                r[:j, :] += c[:, None] * r[j, :]
+            norm = math.sqrt(abs(float(q[:, j] @ mq[:, j])))
+            # the share outside the earlier columns over both passes is
+            # the diagonal of R, the product of the norms taken out: the
+            # first pass leaves a column's own non-orthogonality (1e-10
+            # of it, classical Gram-Schmidt's), which the second takes
+            # out, and a column that is a multiple of another is seen
+            # only across the two
+            if norm * r[j, j] > 1e-12 * original[j]:
+                q[:, j] /= norm
+                mq[:, j] /= norm
+                r[j, :] *= norm
+            else:
+                keep[j] = False
+                q[:, j] = 0.0
+                mq[:, j] = 0.0
+                r[j, :] = 0.0
+        if _pass + 1 < passes or final_product:
+            mq = np.asfortranarray(mass @ q)
+    share = np.where(keep, np.abs(np.diag(r)) / np.where(original > 0.0, original, 1.0), 0.0)
+    return q, mq, r, keep, share
 
 
 def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
@@ -1192,7 +1206,7 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
     relation = np.zeros((limit, limit))
     dimension = 0
     start = rng.standard_normal((size, width))
-    block, m_block, _r, _keep = _m_orthonormal(start, mass @ start)
+    block, m_block, _r, _keep, _share = _m_orthonormal(start, mass)
     worst_before = math.inf
     while True:
         width = block.shape[1]
@@ -1205,13 +1219,30 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         if ticker is not None:
             ticker.tick(width)
         vectors, m_vectors = basis[:, :grown], m_basis[:, :grown]
-        # M-orthogonalized against the basis, twice; the coefficients
-        # are the new block column of H = V^T M A V
-        coefficients = np.zeros((grown, width))
-        for _pass in range(2):
-            c = m_vectors.T @ applied
-            applied -= vectors @ c
-            coefficients += c
+        # M-orthogonalized against the basis, then orthonormalized within
+        # the block, then both again: the coefficients are the new block
+        # column of H = V^T M A V, and what the second round takes out
+        # is carried through the first round's triangle. The second
+        # round comes after the block is normalized because a column's
+        # share outside the basis can be 1e-10 of it (the tied bricks
+        # of 2026-10-19), and what two passes leave at round-off of the
+        # whole is 1e-6 of that share once it is scaled to one; the
+        # basis then lost its orthogonality block by block (3e-7, 2e-4,
+        # 2e-2, 0.8, measured) and the iteration everything
+        coefficients = m_vectors.T @ applied
+        applied -= vectors @ coefficients
+        block, m_block, beta, keep, _share = _m_orthonormal(applied, mass,
+                                                            final_product=False)
+        # always, not only where a share looks small: the share that
+        # matters is the block's outside the basis, which the in-block
+        # share does not read, and skipping the round on it lost the
+        # rigid-link model its orthonormality (measured)
+        again = m_vectors.T @ block
+        block -= vectors @ again
+        m_block -= m_vectors @ again
+        coefficients += again @ beta
+        block, m_block, more, keep, _share = _m_orthonormal(block, mass, m_block, passes=1)
+        beta = more @ beta
         projected[:grown, dimension:grown] = coefficients
         projected[dimension:grown, :dimension] = coefficients[:dimension].T
         relation[:grown, dimension:grown] = coefficients
@@ -1221,7 +1252,6 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         theta, ritz = scipy_eigh(h)
         order = np.argsort(theta)[::-1][:count]
         theta, ritz = theta[order], ritz[:, order]
-        block, m_block, beta, keep = _m_orthonormal(applied, mass @ applied)
         # the next block: the surviving directions, as many as the
         # space the basis has not yet taken has room for; a dependent
         # direction's column is empty and its row of the triangle zero,
@@ -1253,7 +1283,11 @@ def block_lanczos_modes(factor: Any, mass: Any, sigma: float, count: int,
         # error by theta_rigid / theta, 4e6 for the free plate's
         # twelfth mode: the pairs measured up to 6.8 times their claim,
         # by an amount that moved with Accelerate's thread count
-        # (2026-10-20, a full gate failing a third of the time)
+        # (2026-10-20, a full gate failing a third of the time). Since the
+        # second orthonormalization round above (merged after this line)
+        # takes its own fresh M Q, this one is a product too many, the
+        # same numbers again; kept so the guarantee does not rest on
+        # that call's default
         m_block = mass @ block
         drift = np.linalg.norm((relation[:dimension, :dimension] - h) @ ritz, axis=0)
         residuals = np.sqrt(krylov ** 2 + drift ** 2) / np.abs(theta)
@@ -2791,16 +2825,52 @@ class Model:
         if ties:
             entries, width = self._tie_rows(ties, index, entries, width)
         shape = (self.num_dof, width)
+        # a lead whose followers lie on a slanted line (`oblique_lead_lines`)
+        # keeps two rotations, in a basis turned to the line, and not the
+        # one about it: its three rotation columns are combined into two
+        # by a second transform, T R, R the identity elsewhere (the ties'
+        # own columns past len(kept) included: a tie row reads a lead's
+        # rotation only through a rigid follower, which the dropped
+        # rotation about the line does not move)
+        turned = []
+        for lead, line in self.oblique_lead_lines():
+            axes = [column[index[lead] + 3 + k] for k in range(3)
+                    if index[lead] + 3 + k in column]
+            if len(axes) == 3:
+                turned.append((axes, _plane_basis(line)))
+        if turned:
+            dropped = {axis for axes, _basis in turned for axis in axes}
+            fresh = {}
+            for k in range(width):
+                if k not in dropped:
+                    fresh[k] = len(fresh)
+            mixing = [(k, fresh[k], 1.0) for k in fresh]
+            for axes, basis in turned:
+                first = len(fresh) + 2 * len([1 for a, _b in turned if a < axes])
+                for k in range(2):
+                    mixing.extend((axes[row], first + k, float(basis[row, k]))
+                                  for row in range(3) if basis[row, k])
+            columns = len(fresh) + 2 * len(turned)
         if sparse:
             from scipy import sparse as sp
 
             if not entries:
                 return sp.csr_matrix(shape)
             i, j, v = zip(*entries, strict=True)
-            return sp.coo_matrix((v, (i, j)), shape=shape).tocsr()
+            transform = sp.coo_matrix((v, (i, j)), shape=shape).tocsr()
+            if turned:
+                i, j, v = zip(*mixing, strict=True)
+                transform = (transform @ sp.coo_matrix(
+                    (v, (i, j)), shape=(width, columns)).tocsr()).tocsr()
+            return transform
         transform = np.zeros(shape, dtype=np.float64)
         for i, j, v in entries:
             transform[i, j] = v
+        if turned:
+            reduce = np.zeros((width, columns))
+            for i, j, v in mixing:
+                reduce[i, j] = v
+            transform = transform @ reduce
         return transform
 
     def _tie_followers(self, follows) -> dict[int, Tie]:
@@ -2928,9 +2998,12 @@ class Model:
         above it. These rotations are grounded like those of a node only
         solids touch (`dangling_rotations`): the rotation about the line where
         the line runs along a global axis, and all three where the body's
-        nodes coincide. A line at a slant is left to the factorization's own
-        refusal, which names it; grounding an oblique axis would need a
-        rotated basis, and no model here has needed one.
+        nodes coincide. A line at a slant is held through a rotated basis
+        in `constraint_transform` (`oblique_lead_lines`): a fine mesh tied
+        to a coarse one node to nearest node has most of its ties on
+        slanted arms, and left to the factorization, which refused the
+        matrix on a Mac and handed back garbage elsewhere, no solver
+        could find the modes.
 
         Returns
         -------
@@ -2940,13 +3013,48 @@ class Model:
         # Found tying a beam of bricks to the channels under it (the BARC in
         # hexes, 2026-10-07): the two meshes' columns line up, so each tied
         # channel node leads only the beam nodes straight above it.
+        idle = []
+        for lead, line in self._lead_lines():
+            if line is None:
+                idle.extend((lead, axis) for axis in range(3))
+                continue
+            axis = int(np.argmax(np.abs(line)))
+            if abs(line[axis]) > 1.0 - 1e-9:
+                idle.append((lead, axis))
+        return idle
+
+    def oblique_lead_lines(self) -> list[tuple[int, np.ndarray]]:
+        """(lead node, unit direction) for each rigid body that only
+        solids touch whose nodes lie on one line at a slant to the axes.
+
+        Such a body's rotation about its line is a degree of freedom
+        with neither mass nor stiffness, as `idle_lead_rotations` says,
+        and no single rotation of the lead can be held for it; the
+        constraint transform writes the lead's rotation in a basis
+        turned to the line and leaves that component out. A fine brick
+        mesh tied to a coarse one node to nearest node makes these by
+        the dozen, each fine node's arm to its lead running diagonally.
+
+        Returns
+        -------
+        list of (int, numpy.ndarray)
+            The lead and the line's direction, a unit vector, in the
+            model's order.
+        """
+        return [(lead, line) for lead, line in self._lead_lines()
+                if line is not None and np.abs(line).max() <= 1.0 - 1e-9]
+
+    def _lead_lines(self) -> list[tuple[int, np.ndarray | None]]:
+        """(lead, unit direction of the line its followers lie on, or
+        None where they coincide with it) for each rigid body only
+        solids touch whose nodes are on one line."""
         if not self.solids:
             return []
         carried = {n for beam in self.beams for n in (beam.node_a, beam.node_b)}
         carried |= {n for plate in self.plates for n in plate.nodes}
         carried |= {n for triangle in self.triangles for n in triangle.nodes}
         carried |= {m.node for m in self.masses if any(m.inertia)}
-        idle = []
+        lines: list[tuple[int, np.ndarray | None]] = []
         for body in self.rigid_bodies():
             if any(node in carried for node in body):
                 continue
@@ -2955,15 +3063,13 @@ class Model:
                              for node in body[1:]], dtype=float)
             size = float(np.abs(arms).max()) if arms.size else 0.0
             if size == 0.0:
-                idle.extend((lead, axis) for axis in range(3))
+                lines.append((lead, None))
                 continue
             _u, spread, direction = np.linalg.svd(arms / size)
             if spread.size > 1 and spread[1] > 1e-9 * spread[0]:
                 continue                      # not on one line: all stiff
-            axis = int(np.argmax(np.abs(direction[0])))
-            if abs(direction[0][axis]) > 1.0 - 1e-9:
-                idle.append((lead, axis))
-        return idle
+            lines.append((lead, direction[0] / np.linalg.norm(direction[0])))
+        return lines
 
     def loose_nodes(self) -> list[int]:
         """The nodes nothing touches: no element, no rigid link and no lumped
@@ -3443,6 +3549,19 @@ def _labels_from_groups(geometry) -> dict[int, str]:
             counted[label] = counted.get(label, 0) + 1
     return {node: max(counted, key=lambda n: (counted[n], -order.get(n, 0)))
             for node, counted in votes.items()}
+
+
+def _plane_basis(line: np.ndarray) -> np.ndarray:
+    """(3, 2), two orthonormal directions perpendicular to the unit
+    vector `line`: a rotation written in them has no component about
+    the line."""
+    line = np.asarray(line, dtype=np.float64)
+    other = np.zeros(3)
+    other[int(np.argmin(np.abs(line)))] = 1.0
+    first = np.cross(line, other)
+    first /= np.linalg.norm(first)
+    second = np.cross(line, first)
+    return np.column_stack([first, second])
 
 
 def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:

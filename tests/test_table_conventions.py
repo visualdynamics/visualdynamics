@@ -446,3 +446,176 @@ def test_every_editable_cell_actually_journals(models):
                 continue        # refused its own value: spoken, not silent
             assert heard and heard[0], (
                 f'{name} / {spec.title} edited without a journal line')
+
+
+# ---- a property shows only where it applies (principle 3) -------------------
+
+#: the Element Groups table's rows whose meaning depends on the group's
+#: elements, and the groups below each one applies to
+APPLIES = {
+    'Thickness [m]': {'plate'},
+    'Section': {'beam'}, 'Shape': {'beam'}, 'Dimensions [m]': {'beam'},
+    'A [m²]': {'beam'}, 'Iy [m⁴]': {'beam'}, 'Iz [m⁴]': {'beam'},
+    'J [m⁴]': {'beam'}, 'Orientation': {'beam'},
+    'Mass [kg]': {'point'}, 'Ground': {'point'},
+    'Stiffness [N/m, N·m/rad]': {'point', 'beam'},
+}
+#: the groups' columns in the table, in the order `_four_groups` makes them
+GROUPS = ('beam', 'plate', 'solid', 'point')
+
+
+def _four_groups():
+    """A group of beams, one of quads, one of bricks and one of points,
+    in that order, with nothing set."""
+    from test_springs import _whole_beam
+
+    geometry = _whole_beam().geometry()
+    geometry.group_properties = {}
+    for name, nodes, code in (('plate', [1, 2, 3, 4], 44),
+                              ('solid', list(range(1, 9)), 115),
+                              ('point', [5], 161)):
+        group = geometry.add_group(name)
+        geometry.add_elements([nodes], [code], [group])
+    return geometry, element_group_table_model(geometry)
+
+
+def _row(model, title):
+    titles = [model.headerData(r, Qt.Orientation.Vertical)
+              for r in range(model.rowCount())]
+    return titles.index(title)
+
+
+def _editable(model, index):
+    return bool(model.flags(index) & Qt.ItemFlag.ItemIsEditable)
+
+
+def test_a_group_property_shows_only_for_the_groups_it_applies_to(qt_app):
+    """Each row is live for the groups whose elements use it and blank,
+    read-only and explained on hover for the rest: no thickness on
+    beams, no section on plates, no mass on bricks."""
+    geometry, model = _four_groups()
+    assert model.columnCount() == len(GROUPS)
+    for title, takers in APPLIES.items():
+        for column, group in enumerate(GROUPS):
+            index = model.index(_row(model, title), column)
+            if group in takers:
+                assert _editable(model, index), (title, group)
+                assert not model.data(index, Qt.ItemDataRole.ToolTipRole), (title, group)
+            else:
+                assert not _editable(model, index), (title, group)
+                assert model.data(index) == '', (title, group)
+                assert model.data(index, Qt.ItemDataRole.ToolTipRole), (title, group)
+    # the material is every group's
+    for column in range(len(GROUPS)):
+        assert _editable(model, model.index(_row(model, 'Material'), column))
+    # and a cell that does not apply refuses a value typed in, saying why
+    said = []
+    model.edit_rejected.connect(said.append)
+    thickness = model.index(_row(model, 'Thickness [m]'), GROUPS.index('beam'))
+    assert not model.setData(thickness, '0.003', EDIT)
+    assert said[-1] == 'a group of beams takes no thickness; triangles and quads do'
+    section = model.index(_row(model, 'Shape'), GROUPS.index('solid'))
+    assert not model.setData(section, 'rod', EDIT)
+    assert 'takes a material alone' in said[-1]
+    assert geometry.group_properties == {}
+
+
+def test_moving_elements_into_a_group_changes_what_applies(qt_app):
+    """The rule follows the elements: an empty group takes anything, and
+    once the quad is moved into it, a section no longer applies."""
+    geometry, model = _four_groups()
+    model.beginResetModel()
+    spare = geometry.add_group('spare')
+    model.endResetModel()
+    column = len(GROUPS)
+    section = model.index(_row(model, 'Section'), column)
+    assert _editable(model, section), 'an empty group takes anything'
+    quad = int(geometry.elem_id[geometry.elem_group == int(geometry.group_id[1])][0])
+    assert model.setData(model.index(_row(model, 'Elements'), column), str(quad), EDIT)
+    assert int(geometry.elem_group[geometry.elem_id == quad][0]) == spare
+    assert not _editable(model, section)
+    assert _editable(model, model.index(_row(model, 'Thickness [m]'), column))
+
+
+def test_elements_added_to_a_group_change_what_applies(qt_app):
+    """Elements added by script replace the element arrays; the table's
+    record of each group's families follows them."""
+    geometry, model = _four_groups()
+    model.beginResetModel()
+    spare = geometry.add_group('spare')
+    model.endResetModel()
+    thickness = model.index(_row(model, 'Thickness [m]'), len(GROUPS))
+    assert _editable(model, thickness), 'an empty group takes anything'
+    geometry.add_elements([[1, 2]], [21], [spare])
+    assert not _editable(model, thickness), 'a group of beams takes no thickness'
+
+
+def _view(model):
+    view = CopyPasteTableView()
+    view.setModel(model)
+    heard = []
+    view.edits_applied.connect(lambda *said: heard.append(said))
+    return view, heard
+
+
+def _select(view, rows, columns):
+    selection = view.selectionModel()
+    model = view.model()
+    selection.clearSelection()
+    for row in rows:
+        for column in columns:
+            selection.select(model.index(row, column),
+                             QItemSelectionModel.SelectionFlag.Select)
+
+
+def test_a_paste_across_groups_lands_only_where_it_applies(qt_app):
+    from PySide6.QtWidgets import QApplication
+
+    geometry, model = _four_groups()
+    view, heard = _view(model)
+    row = _row(model, 'Thickness [m]')
+    _select(view, [row], [0])
+    QApplication.clipboard().setText('0.004\t0.004\t0.004\t0.004')
+    assert view.paste() == (1, 3)
+    assert heard[-1] == (1, 3, ('a group of beams takes no thickness; '
+                                'triangles and quads do'))
+    held = {name: geometry.group_properties.get(int(geometry.group_id[k]))
+            for k, name in enumerate(GROUPS)}
+    assert held['plate'].thickness == 0.004
+    assert held['beam'] is None and held['solid'] is None and held['point'] is None
+
+
+def test_a_batch_edit_across_groups_skips_and_says_so(qt_app):
+    geometry, model = _four_groups()
+    view, heard = _view(model)
+    _select(view, [_row(model, 'Thickness [m]')], range(len(GROUPS)))
+    assert view.batch_edit('0.002') == (1, 3)
+    applied, rejected, reason = heard[-1]
+    assert (applied, rejected) == (1, 3) and 'takes no thickness' in reason
+    plate = int(geometry.group_id[GROUPS.index('plate')])
+    assert set(geometry.group_properties) == {plate}
+    assert geometry.group_properties[plate].thickness == 0.002
+
+
+def test_a_fill_across_groups_carries_only_what_applies(qt_app):
+    """Filled from the beam across: the beam's section goes nowhere else,
+    and its blank thickness, blank because a beam has none, does not
+    clear the plate's."""
+    from test_fem import ALUMINUM
+
+    from visualdynamics.core.fem import GroupProperties
+
+    geometry, model = _four_groups()
+    beam, plate = (int(geometry.group_id[GROUPS.index(name)]) for name in ('beam', 'plate'))
+    geometry.group_properties[plate] = GroupProperties(ALUMINUM, thickness=0.003)
+    model.setData(model.index(_row(model, 'Shape'), 0), 'rod', EDIT)
+    model.setData(model.index(_row(model, 'Dimensions [m]'), 0), '0.01', EDIT)
+    beam_props = geometry.group_properties[beam]
+    view, heard = _view(model)
+    _select(view, range(_row(model, 'Thickness [m]'), _row(model, 'Orientation') + 1), [0])
+    applied, rejected = view.fill_from_selection(len(GROUPS) - 1)
+    assert applied == 0 and rejected > 0
+    assert heard[-1][2] == 'a group of quads takes no section; beams do'
+    assert geometry.group_properties[plate] == GroupProperties(ALUMINUM, thickness=0.003)
+    assert geometry.group_properties[beam] == beam_props
+    assert set(geometry.group_properties) == {beam, plate}

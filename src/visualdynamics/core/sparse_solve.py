@@ -14,6 +14,7 @@ matrix is symmetric so it orders and pivots for that.
 from __future__ import annotations
 
 import ctypes as C
+import math
 import os
 import sys
 from typing import Any
@@ -24,6 +25,28 @@ import scipy.sparse as sp
 #: set to 'superlu' to keep Accelerate out, which is how the tests run
 #: both paths on one machine
 BACKEND_VARIABLE = 'VISUALDYNAMICS_SPARSE_SOLVER'
+
+
+#: the backward error a probe solve may have before the factor is
+#: refused as that of a matrix singular to working precision. A
+#: factorization reports success on such a matrix and hands back a
+#: factor whose solves are garbage: a tied model with a rotation
+#: nothing held had solves with a backward error of 11 under SuperLU
+#: and finite garbage under Accelerate's LDLT (2026-10-19), and two
+#: eigensolvers ran on them. A sound factor of an ill-conditioned
+#: matrix measures 1e-8 to 2e-6 on the models here (the springs' the
+#: worst), a garbage one 0.25, 11 and 6e8.
+PROBE_LIMIT = 1e-3
+
+
+def probe_backward_error(matrix: Any, solve: Any) -> float:
+    """|A x - b| / |b| for one solve with a fixed right-hand side, the
+    cosines of the row numbers; infinite when the answer is not."""
+    probe = np.cos(np.arange(matrix.shape[0], dtype=np.float64))
+    answer = solve(probe)
+    if not np.isfinite(answer).all():
+        return math.inf
+    return float(np.linalg.norm(matrix @ answer - probe) / np.linalg.norm(probe))
 
 
 class SuperLUFactor:
@@ -41,6 +64,10 @@ class SuperLUFactor:
         self._factor = splu(sp.csc_matrix(matrix), permc_spec='MMD_AT_PLUS_A',
                             options={'SymmetricMode': True})
         self.shape: tuple[int, int] = self._factor.shape
+        residual = probe_backward_error(matrix, self.solve)
+        if not residual < PROBE_LIMIT:
+            raise RuntimeError('the matrix is singular to working precision: '
+                               f'a probe solve has a backward error of {residual:.1e}')
 
     def solve(self, rhs: Any) -> np.ndarray:
         """X with A X = `rhs`, for one right-hand side or a block of
@@ -202,13 +229,15 @@ class AccelerateFactor:
                 self.kind: str = 'Cholesky' if kind == _CHOLESKY else 'LDLT'
                 # LDLT reports success on an exactly singular matrix and
                 # its solves come back NaN (measured 2026-10-18: an empty
-                # matrix, a zero row, a rank-one block all 'ok'), where
-                # Cholesky succeeding proves the matrix definite. One
-                # probe solve tells, and a refusal here sends the matrix
-                # on to SuperLU, whose 'exactly singular' the modal solve
-                # already turns into its own message
-                if kind == _LDLT and not np.isfinite(
-                        self.solve(np.ones(n))).all():
+                # matrix, a zero row, a rank-one block all 'ok'), or
+                # finite garbage on one singular to working precision
+                # (2026-10-19, a backward error of 0.25), where Cholesky
+                # succeeding proves the matrix definite. One probe solve
+                # tells, and a refusal here sends the matrix on to
+                # SuperLU, whose own probe the modal solve turns into
+                # its message
+                if kind == _LDLT and not probe_backward_error(
+                        matrix, self.solve) < PROBE_LIMIT:
                     lib['destroy'](C.byref(factored))
                     self._factor = None
                     raise ValueError('Accelerate found the matrix singular')

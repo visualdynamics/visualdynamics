@@ -322,12 +322,15 @@ def test_a_basis_that_runs_out_goes_to_arpack_with_a_warning(monkeypatch):
     assert np.allclose(found, expected, rtol=1e-9, atol=0.0)
 
 
-def test_the_m_orthonormalization_survives_an_ill_conditioned_block():
-    """A block of columns that share a direction and differ by parts in
-    a million has a Gram matrix of condition 1e12, and one pass through
-    its eigenvectors leaves Q^T M Q off the identity by 4e-6 (measured);
-    two passes leave it at round-off, Q R is still the block, and a
-    dependent column is never divided by nothing."""
+def test_the_m_orthonormalization_keeps_a_share_of_1e_minus_10():
+    """`_m_orthonormal` is Gram-Schmidt column by column, twice, with
+    the product M Q taken afresh after each pass: on a block of columns
+    that share a direction and differ by parts in 1e-10 (what one solve
+    with the shifted factor leaves of the elastic modes of bricks tied
+    across a seam), Q^T M Q is the identity to round-off and Q R is
+    still the block; a column that is a multiple of another is dropped,
+    a zero column of Q and row of R; and a single pass, or the product
+    carried along as combinations, is not enough (measured: 5e-3)."""
     from scipy.sparse import diags
 
     rng = np.random.default_rng(5)
@@ -335,29 +338,186 @@ def test_the_m_orthonormalization_survives_an_ill_conditioned_block():
     mass = diags(rng.uniform(0.5, 2.0, n)).tocsc()
     shared = rng.standard_normal(n)
     block = shared[:, None] + (rng.standard_normal((n, 6))
-                               * np.array([1.0, 1e-3, 1e-6, 1e-2, 1e-4, 1e-5]))
-    q, mq, r, keep = fem._m_orthonormal(block, mass @ block)
+                               * np.array([1.0, 1e-3, 1e-10, 1e-2, 1e-6, 1e-10]))
+    q, mq, r, keep, share = fem._m_orthonormal(block, mass)
     assert keep.all()
-    assert np.abs(q.T @ (mass @ q) - np.eye(6)).max() < 1e-11
-    assert np.allclose(q @ r, block, rtol=0, atol=1e-12 * np.abs(block).max())
-    assert np.allclose(mq, mass @ q)
-    q1, _mq1, _r1, _keep1 = fem._gram_pass(block, mass @ block)
-    assert np.abs(q1.T @ (mass @ q1) - np.eye(6)).max() > 1e-7, 'one pass does not'
-    # an empty column is dropped, a zero column of Q and row of R; a
-    # duplicate column's null direction may come back as real content
-    # (the Gram eigenvector's own error lets the 1e-6 columns through),
-    # which is in the block's span and harmless: finite, orthonormal
-    # with the rest, and Q R is still the block
-    for name, column in (('empty', np.zeros(n)), ('duplicate', block[:, 0] * 2.0)):
-        dependent = block.copy()
-        dependent[:, 5] = column
-        q, mq, r, keep = fem._m_orthonormal(dependent, mass @ dependent)
-        assert np.isfinite(q).all(), name
-        if name == 'empty':
-            assert keep.sum() == 5 and not q[:, ~keep].any() and not r[~keep].any()
-        survivors = q[:, keep]
-        assert np.abs(survivors.T @ (mass @ survivors) - np.eye(keep.sum())).max() < 1e-11, name
-        assert np.allclose(q @ r, dependent, rtol=0, atol=1e-12 * np.abs(dependent).max()), name
+    assert np.abs(q.T @ (mass @ q) - np.eye(6)).max() < 1e-13
+    assert np.allclose(mq, mass @ q, rtol=0, atol=1e-15 * np.abs(mq).max())
+    assert np.allclose(q @ r, block, rtol=0, atol=1e-13 * np.abs(block).max())
+    assert np.allclose(r, np.triu(r)), 'R is a triangle'
+    assert share.min() < 1e-9 and share.max() <= 1.0 + 1e-12, 'the shares read the 1e-10 columns'
+    dependent = block.copy()
+    dependent[:, 5] = dependent[:, 0] * 2.0
+    q, mq, r, keep, _share = fem._m_orthonormal(dependent, mass)
+    assert keep.sum() == 5 and not keep[5] and not q[:, 5].any() and not r[5].any()
+    survivors = q[:, keep]
+    assert np.abs(survivors.T @ (mass @ survivors) - np.eye(5)).max() < 1e-13
+    assert np.allclose(q @ r, dependent, rtol=0, atol=1e-13 * np.abs(dependent).max())
+
+
+def _brick_bar(model, first, nx, ny, nz, dx, z0):
+    """A bar of bricks, `nx` by `ny` by `nz` of side `dx`, its bottom
+    at `z0`; the node ids by (i, j, k)."""
+    from test_fem import ALUMINUM
+
+    ids = {}
+    nid = first
+    for k in range(nz + 1):
+        for j in range(ny + 1):
+            for i in range(nx + 1):
+                ids[i, j, k] = model.add_node(nid, i * dx, j * dx, z0 + k * dx)
+                nid += 1
+    for k in range(nz):
+        for j in range(ny):
+            for i in range(nx):
+                model.add_solid([ids[i, j, k], ids[i + 1, j, k], ids[i + 1, j + 1, k],
+                                 ids[i, j + 1, k], ids[i, j, k + 1], ids[i + 1, j, k + 1],
+                                 ids[i + 1, j + 1, k + 1], ids[i, j + 1, k + 1]], ALUMINUM)
+    return ids
+
+
+def _tied_bars(ratio=2, slanted=False):
+    """Two bars of bricks stacked, the upper `ratio` times finer, each
+    upper bottom node tied to the nearest lower top node; `slanted`
+    ties only the fine nodes a half step off the coarse ones, one to a
+    lead, so every tie is one follower on a diagonal arm."""
+    model = Model()
+    nx, ny, nz, dx = 6, 2, 2, 0.01
+    lower = _brick_bar(model, 1, nx, ny, nz, dx, 0.0)
+    upper = _brick_bar(model, 10001, nx * ratio, ny * ratio, nz, dx / ratio, nz * dx)
+    tops = {(i, j): lower[i, j, nz] for i in range(nx + 1) for j in range(ny + 1)}
+    if slanted:
+        # the twelve fine nodes diagonally off a coarse one, (2a+1, 2b+1)
+        # one layer up, each tied to one of its four coarse corners, no
+        # corner twice, so every body is one follower on a diagonal arm.
+        # A rigid link whose lead only solids touch holds the follower
+        # only along the arm (the lead's rotation moves it freely
+        # across), so the corners cycle through all four diagonals, or
+        # the upper bar would slide as a mechanism
+        corner = {0: [(0, 0), (1, 1), (1, 0), (0, 1)],
+                  1: [(1, 1), (0, 0), (0, 1), (1, 0)]}
+        for b in range(ny):
+            for a in range(nx):
+                da, db = corner[b][a % 4]
+                model.add_rigid_link(tops[a + da, b + db],
+                                     upper[2 * a + 1, 2 * b + 1, 1])
+        return model
+    for i in range(nx * ratio + 1):
+        for j in range(ny * ratio + 1):
+            lead = tops[round(i / ratio), round(j / ratio)]
+            model.add_rigid_link(lead, upper[i, j, 0])
+    return model
+
+
+@pytest.mark.parametrize('ratio', [1, 2], ids=['coincident', 'nearest node'])
+def test_bricks_tied_across_a_seam_solve_by_the_block_method(ratio, monkeypatch):
+    """Two brick bars tied node to node across a seam, their elastic
+    modes at 20 kHz: the shift-inverted spectrum spreads over 4e8, so
+    one solve leaves an elastic direction at 1e-9 of a block, which the
+    Gram-matrix orthonormalization lost (2026-10-19: the block method
+    handed the polish dependent vectors on the coincident ties and ran
+    out of basis on the nearest-node ones, while ARPACK solved both).
+    Now both solve by the block method, with no fallback, to the dense
+    answer and to ARPACK's."""
+    model = _tied_bars(ratio)
+    dense = model.eigensolution(num_modes=8, solver='dense').frequency
+    found = {}
+    for solver in ('block', 'arpack'):
+        monkeypatch.setattr(fem, 'SPARSE_EIGENSOLVER', solver)
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
+            found[solver] = model.eigensolution(num_modes=8, solver='sparse').frequency
+    assert int(np.sum(dense == 0.0)) == 6
+    for solver, frequency in found.items():
+        assert np.array_equal(frequency == 0.0, dense == 0.0), solver
+        assert np.allclose(frequency[6:], dense[6:], rtol=1e-9, atol=0.0), solver
+
+
+def test_a_tie_on_a_slanted_arm_holds_the_rotation_about_it(monkeypatch):
+    """A fine mesh tied to a coarse one node to nearest node puts most
+    ties on slanted arms, one follower to a lead: the lead's rotation
+    about the arm moves nothing and nothing resists it, and the rule
+    that holds such a rotation knew only axis-aligned lines (a desktop
+    model of 2026-10-19 had 82 of them; Accelerate refused the matrix
+    and SuperLU factored it into garbage). The lead's rotation is now
+    written in a basis turned to the line, without the component about
+    it: the model solves, dense and sparse alike, and without that the
+    sparse solve is refused as unfactorable."""
+    model = _tied_bars(ratio=2, slanted=True)
+    oblique = model.oblique_lead_lines()
+    assert len(oblique) == len(model.rigid_bodies()) == 12
+    assert all(np.abs(line).max() < 1 - 1e-9 for _lead, line in oblique)
+    # a line has no sign: (1, 1, 1) and (-1, -1, -1) are one direction
+    lines = {tuple(np.round(line * np.sign(line[2]), 6)) for _lead, line in oblique}
+    assert len(lines) == 4, 'all four diagonals'
+    assert all(abs(np.linalg.norm(line) - 1.0) < 1e-12 for _lead, line in oblique)
+    # one rotation fewer per slanted line
+    transform = model.constraint_transform(sparse=True)
+    followers = sum(len(body) - 1 for body in model.rigid_bodies())
+    assert transform.shape[1] == len(model._free_dofs(())) - 6 * followers - len(oblique)
+    dense = model.eigensolution(num_modes=8, solver='dense').frequency
+    sparse = model.eigensolution(num_modes=8, solver='sparse').frequency
+    assert int(np.sum(dense == 0.0)) == 6 and np.array_equal(sparse == 0.0, dense == 0.0)
+    assert np.allclose(sparse[6:], dense[6:], rtol=1e-9, atol=0.0)
+    monkeypatch.setattr(Model, 'oblique_lead_lines', lambda self: [])
+    with pytest.raises(ValueError, match='could not be factored'):
+        model.eigensolution(num_modes=8, solver='sparse')
+
+
+def test_slanted_arms_and_a_springy_tie_share_one_transform():
+    """A tie held by a spring across its normal gives the transform
+    columns of its own past the kept ones, and a lead on a slanted arm
+    turns its rotation columns by a second transform; the second must
+    carry the tie's columns through. Both in one model (the branch that
+    turned the rotations was cut before ties had columns of their own,
+    2026-10-20): one column fewer per slanted line, one per tie (three
+    translations, two of them back as their own columns), and the
+    sparse solve the dense one's."""
+    model = _tied_bars(ratio=2, slanted=True)
+    nx, ny, nz = 6, 2, 2
+    lower = {(i, j): 1 + nz * (nx + 1) * (ny + 1) + j * (nx + 1) + i
+             for i in range(nx + 1) for j in range(ny + 1)}
+    upper = {(i, j): 10001 + j * (2 * nx + 1) + i
+             for i in range(2 * nx + 1) for j in range(2 * ny + 1)}
+    for a, b in ((0, 0), (2, 0), (4, 2), (6, 2)):
+        assert np.allclose(model._nodes[upper[2 * a, 2 * b]], model._nodes[lower[a, b]])
+        model.add_tie(upper[2 * a, 2 * b], lower[a, b], (0, 0, 1),
+                      shear_mode='stiffness', shear_stiffness=1e6)
+    oblique = model.oblique_lead_lines()
+    assert len(oblique) == 12
+    followers = sum(len(body) - 1 for body in model.rigid_bodies())
+    transform = model.constraint_transform(sparse=True)
+    assert transform.shape[1] == (len(model._free_dofs(())) - 6 * followers
+                                  - len(oblique) - 4)
+    assert np.allclose(transform.toarray(), model.constraint_transform())
+    dense = model.eigensolution(num_modes=8, solver='dense').frequency
+    sparse = model.eigensolution(num_modes=8, solver='sparse').frequency
+    assert int(np.sum(dense == 0.0)) == 6 and np.array_equal(sparse == 0.0, dense == 0.0)
+    assert np.allclose(sparse[6:], dense[6:], rtol=1e-9, atol=0.0)
+
+
+def test_superlu_refuses_a_factor_whose_solves_are_garbage(monkeypatch):
+    """SuperLU reports success on a matrix singular to working precision
+    and its solves come back garbage (a backward error of 11 on the
+    tied desktop model, which two eigensolvers then ran on): a probe
+    solve after the factorization refuses it. The matrix is the one
+    that model makes, in small: bricks tied on slanted arms with the
+    rotation about each arm left unheld."""
+    from visualdynamics.core import sparse_solve
+    from visualdynamics.core.sparse_solve import BACKEND_VARIABLE, SuperLUFactor
+
+    model = _tied_bars(ratio=2, slanted=True)
+    stiffness, mass, _t, _s, sigma, _k = model.scaled_system()
+    sound = (stiffness - sigma * mass).tocsc()
+    assert SuperLUFactor(sound).backend == 'superlu', 'the held matrix is taken'
+    monkeypatch.setattr(Model, 'oblique_lead_lines', lambda self: [])
+    stiffness, mass, _t, _s, sigma, _k = model.scaled_system()
+    singular = (stiffness - sigma * mass).tocsc()
+    with pytest.raises(RuntimeError, match='singular to working precision'):
+        SuperLUFactor(singular)
+    monkeypatch.setenv(BACKEND_VARIABLE, 'superlu')
+    with pytest.raises(RuntimeError):
+        sparse_solve.factor_symmetric(singular)
 
 
 def test_a_large_model_is_solved_sparse_and_must_say_how_many():

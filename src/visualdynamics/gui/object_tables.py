@@ -1178,18 +1178,6 @@ def _set_property(holder, field, dimension=None, unit_system=None):
             raise ValueError('a ground group holds its points fixed and takes '
                              'nothing else — pick a material to make it '
                              'something else')
-        # a group of solids takes a material alone: a section, a thickness
-        # or an orientation typed on it is refused here, and clearing one
-        # left from before is not (Brandon, 2026-10-20: his bricks carried
-        # an empty round tube, and the solve asked for its dimensions)
-        if text and (holder == 'section' or field in ('thickness', 'orientation')):
-            from ..core.geometry import SOLID_FAMILIES
-            from ..core.mesh import group_families
-
-            families = group_families(geometry, group)
-            if families and families <= SOLID_FAMILIES:
-                raise ValueError('a group of solid elements takes a material alone: '
-                                 'no section, thickness or orientation')
         if holder == 'section' and field in ('shape', 'dimensions'):
             geometry.group_properties[group] = _without_empty_section(
                 _set_section_shape(props, field, text, unit_system))
@@ -1352,12 +1340,89 @@ def _property_journal(geometry, row, _text):
             + ', '.join(parts) + ')')
 
 
-def _property_columns(unit_system=None):
+class _GroupFamilies:
+    """Each element group's element families, by its row in the table,
+    worked out once per arrangement of the elements.
+
+    The table asks for every cell it paints, and scanning a mesh of half
+    a million elements for one group takes a millisecond, so the answer
+    is kept until the element arrays are replaced, a group is renumbered
+    or `forget` is called (the Elements column moves elements in
+    place).
+    """
+
+    def __init__(self, geometry: Geometry) -> None:
+        self.geometry: Geometry = geometry
+        self._key = None
+        self._families = {}
+
+    def forget(self):
+        self._key = None
+
+    def __call__(self, row):
+        from ..core.geometry import ELEMENT_TYPES, element_family
+
+        g = self.geometry
+        key = (g.elem_group, g.elem_type, tuple(int(i) for i in g.group_id))
+        if (self._key is None or self._key[0] is not key[0]
+                or self._key[1] is not key[1] or self._key[2] != key[2]):
+            found = {}
+            if len(g.elem_group):
+                pairs = np.unique(np.column_stack([np.asarray(g.elem_group),
+                                                   np.asarray(g.elem_type)]),
+                                  axis=0)
+                for group, code in pairs:
+                    if int(code) in ELEMENT_TYPES:
+                        found.setdefault(int(group), set()).add(
+                            element_family(int(code)))
+            self._families, self._key = found, key
+        return self._families.get(int(g.group_id[row]), set())
+
+
+def _property_families(holder, field):
+    """The element families a property means something for, or None for
+    one that applies to every family (the material)."""
+    if holder == 'section' or field == 'orientation':
+        return ('beams',)
+    return {'thickness': ('triangles', 'quads'), 'mass': ('points',),
+            'ground': ('points',), 'stiffness': ('points', 'beams')}.get(field)
+
+
+def _does_not_apply(families_of, holder, field):
+    """A column's `does_not_apply`: '' for a group whose elements take the
+    property (or a group with no elements yet), otherwise why not."""
+    from ..core.geometry import FAMILY_LABELS, SOLID_FAMILIES
+
+    wanted = _property_families(holder, field)
+    if wanted is None:
+        return None
+    word = 'section' if holder == 'section' else field
+
+    def why_not(_geometry, row):
+        families = families_of(row)
+        if not families or families & set(wanted):
+            return ''
+        # a group of solids takes a material alone (Brandon, 2026-10-20: his
+        # bricks carried a beam's empty round tube, and the solve asked
+        # for its dimensions)
+        if families <= SOLID_FAMILIES:
+            return f'a group of solid elements takes a material alone: no {word}'
+        held = ' and '.join(FAMILY_LABELS[f].lower() for f in sorted(families))
+        takers = ' and '.join(FAMILY_LABELS[f].lower() for f in wanted)
+        return f'a group of {held} takes no {word}; {takers} do'
+    return why_not
+
+
+def _property_columns(unit_system=None, families_of=None):
     """The property columns, in the display system (Brandon,
     2026-09-26: the table should show and expect the current display
     units). Held in SI on the geometry, as the model is inside, and
     journaled in SI, as every table edit is; the header names the unit.
-    Without a system, SI."""
+    Without a system, SI. With `families_of` (a `_GroupFamilies`), a
+    property is blank and takes no value for a group whose elements do
+    not use it: a thickness for plates, a section and an orientation for
+    beams, a mass and ground for points, a stiffness for points and
+    lines."""
     from ..core.fem import MATERIALS
 
     columns = []
@@ -1388,6 +1453,8 @@ def _property_columns(unit_system=None):
                  unit_system.label_text('force*length'))
                 if unit_system is not None else ('N/m', 'N·m'))
             title = f'{title} [{along}, {about}/rad]'
+        if families_of is not None:
+            kwargs['does_not_apply'] = _does_not_apply(families_of, holder, field)
         columns.append(Column(
             title, (lambda g, r, h=holder, f=field, d=dimension:
                     _property_value(g, r, h, f, d, unit_system)),
@@ -1487,7 +1554,9 @@ def element_group_table_model(geometry: Geometry,
     Every column is editable: the group's number, its name, its
     elements, and the properties a model built from the geometry needs
     (a material, and a thickness, section or mass by element type, shown
-    in the display units and blank until set). The elements are listed as runs
+    in the display units and blank until set). A property the group's
+    elements do not use, a thickness on beams or a section on bricks, is
+    blank there and takes no value, and says why on hover. The elements are listed as runs
     (`1-36 156-245`), and naming an element here moves it into this
     group. A node can be in no element at all, but an element is always
     in exactly one element group, so an edit can add and move elements,
@@ -1498,6 +1567,15 @@ def element_group_table_model(geometry: Geometry,
     """
     def set_name(geometry: Any, row: int, text: str) -> None:
         geometry.group_name[row] = text
+
+    families_of = _GroupFamilies(geometry)
+
+    def set_elements(geometry: Any, row: int, text: str) -> None:
+        # the elements move in place, which the families' key cannot see
+        try:
+            _set_group_elements(geometry, row, text)
+        finally:
+            families_of.forget()
 
     columns = [
         Column('Element group', lambda g, r: int(g.group_id[r]),
@@ -1511,7 +1589,7 @@ def element_group_table_model(geometry: Geometry,
         # would have been meaningless — a number is not a thing you
         # can change — and the count is still readable at a glance
         # from the runs.
-        Column('Elements', _group_elements_text, set=_set_group_elements,
+        Column('Elements', _group_elements_text, set=set_elements,
                # membership moves elements between element groups; the honest
                # replay is the post-state of the whole assignment array
                journal=lambda g, _r, _t: '.elem_group = np.array('
@@ -1524,7 +1602,10 @@ def element_group_table_model(geometry: Geometry,
         # set. Every cell's journal line restates the whole property
         # set, so a replay lands on the same object whichever cell was
         # edited last.
-        *_property_columns(unit_system),
+        # A property that the group's elements do not use is blank and
+        # takes no value there (principle 3), while the same row stays
+        # live for the groups it applies to.
+        *_property_columns(unit_system, families_of),
     ]
     # the other way up (Brandon, 2026-10-20): a group's properties read
     # as a column of entries, and several groups side by side are

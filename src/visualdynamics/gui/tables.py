@@ -102,6 +102,13 @@ class Column:
     #: units pane) declares a closure returning None. The meta-test in
     #: test_table_conventions holds every editable column to this.
     journal: Callable | None = None
+    #: (obj, row) -> '' where the property means something for that item,
+    #: or why it does not. Such a cell is blank, takes no value and says
+    #: why on hover, while the same property stays live for the items it
+    #: applies to: a group of bricks has no thickness, a group of plates
+    #: does (principle 3: show only what applies). A value already held
+    #: there from before shows, and can be cleared but not changed.
+    does_not_apply: Callable | None = None
     alignment: int = int(Qt.AlignmentFlag.AlignRight
                          | Qt.AlignmentFlag.AlignVCenter)
 
@@ -122,6 +129,11 @@ class Column:
         if self.row_choices is not None:
             return self.row_choices(obj, row)
         return self.choices
+
+    def why_not(self, obj: Any, row: int) -> str:
+        """Why the property does not apply to one item, or '' where it
+        does."""
+        return self.does_not_apply(obj, row) if self.does_not_apply else ''
 
     def text(self, obj: Any, row: int) -> str:
         """The cell's text: `format` applied to the value when the column
@@ -225,6 +237,8 @@ class TableModel(QAbstractTableModel):
                 return None
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             return column.text(self.obj, item)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return column.why_not(self.obj, item) or None
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return column.alignment
         if (role == Qt.ItemDataRole.DecorationRole
@@ -237,11 +251,23 @@ class TableModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         flags = (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        if index.isValid() and self.column_of(index).editable:
+        if not index.isValid():
+            return flags
+        column, item = self.column_of(index), self.item_of(index)
+        # a cell that does not apply stays selectable, so a block selected
+        # across items is still a block, and is editable only to clear a
+        # value left there from before
+        if column.editable and (not column.why_not(self.obj, item)
+                                or column.text(self.obj, item)):
             flags |= Qt.ItemFlag.ItemIsEditable
-            if self.column_of(index).checkbox:
+            if column.checkbox:
                 flags |= Qt.ItemFlag.ItemIsUserCheckable
         return flags
+
+    def inapplicable(self, item: int, column_number: int) -> str:
+        """Why a property does not apply to an item, or '' where it
+        does (`Column.does_not_apply`)."""
+        return self.columns[column_number].why_not(self.obj, item)
 
     def setData(self, index: QModelIndex | QPersistentModelIndex, value: Any,
                 role: int = Qt.ItemDataRole.EditRole) -> bool:
@@ -256,6 +282,10 @@ class TableModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.EditRole:
             return False
         if not column.editable:
+            return False
+        reason = column.why_not(self.obj, item)
+        if reason and str(value).strip():
+            self.edit_rejected.emit(reason)
             return False
         try:
             column.set(self.obj, item, str(value))
@@ -303,7 +333,10 @@ class TableModel(QAbstractTableModel):
         Cells that refuse their value are left as they are and counted,
         so a batch that only partly lands is not mistaken for a clean
         one, and the reason for the first refusal is returned with the
-        counts.
+        counts. A value written where the property does not apply is
+        refused the same way; a blank written there is no edit at all,
+        so a fill carried from one item to another of a different kind
+        writes only what applies.
         """
         applied = rejected = 0
         reason = ''
@@ -313,6 +346,13 @@ class TableModel(QAbstractTableModel):
             if not column.editable:
                 rejected += 1
                 continue
+            why_not = column.why_not(self.obj, item)
+            if why_not and str(text).strip():
+                rejected += 1
+                reason = reason or why_not
+                continue
+            if why_not and not column.text(self.obj, item):
+                continue      # blank onto a blank that does not apply
             try:
                 column.set(self.obj, item, text)
             except (ValueError, KeyError, IndexError) as e:
@@ -656,7 +696,7 @@ class CopyPasteTableView(QTableView):
     button for the whole table.
 
     `edits_applied` reports (cells written, cells refused, the first
-    refusal's reason) after a batch edit, a clear or a fill.
+    refusal's reason) after a paste, a batch edit, a clear or a fill.
     `rows_deleted` carries the whole rows a person asked to remove, and
     is emitted only when the owner sets `rows_deletable`, because only
     the owner knows whether a row is an item (a channel, a mode) or just
@@ -924,9 +964,10 @@ class CopyPasteTableView(QTableView):
         top-left corner, onto the shown rows, and return (applied,
         rejected).
 
-        Cells that will not accept a value are left as they are and
+        Cells that will not accept a value, a cell whose property does
+        not apply to its item among them, are left as they are and
         counted, so a paste that partly lands is not silently half
-        applied. A paste past the table's edge stops there and does not
+        applied; `edits_applied` says how it landed. A paste past the table's edge stops there and does not
         wrap.
         """
         model = self.model()
@@ -942,6 +983,15 @@ class CopyPasteTableView(QTableView):
         across = self._columns_shown(range(left, model.columnCount()))
 
         applied = rejected = 0
+        reasons = []
+
+        def heard(reason):
+            reasons.append(reason)
+
+        # the cells' own refusals, so the summary can say why
+        refusals = getattr(model, 'edit_rejected', None)
+        if refusals is not None:
+            refusals.connect(heard)
         for row_offset, line in enumerate(text.split('\n')):
             if not line.strip() and row_offset == len(text.split('\n')) - 1:
                 continue          # trailing newline from the spreadsheet
@@ -952,11 +1002,17 @@ class CopyPasteTableView(QTableView):
                 index = model.index(row, column)
                 if not (model.flags(index) & Qt.ItemFlag.ItemIsEditable):
                     rejected += 1
+                    why_not = self._why_not(index)
+                    if why_not:
+                        reasons.append(why_not)
                     continue
                 if model.setData(index, cell, Qt.ItemDataRole.EditRole):
                     applied += 1
                 else:
                     rejected += 1
+        if refusals is not None:
+            refusals.disconnect(heard)
+        self.edits_applied.emit(applied, rejected, reasons[0] if reasons else '')
         return applied, rejected
 
     # ---- batch edit ---------------------------------------------------------
@@ -968,6 +1024,26 @@ class CopyPasteTableView(QTableView):
             return []
         return [index for index in self.selectedIndexes()
                 if model.flags(index) & Qt.ItemFlag.ItemIsEditable]
+
+    def _why_not(self, index: QModelIndex) -> str:
+        """Why a cell's property does not apply to its item, or ''."""
+        model = self.model()
+        inapplicable = getattr(model, 'inapplicable', None)
+        if inapplicable is None:
+            return ''
+        return inapplicable(model.item_of(index), model.column_number(index))
+
+    def inapplicable_selection(self) -> list[str]:
+        """Why each selected cell that does not apply is skipped, one
+        reason per cell. A batch edit counts them as refused, so a value
+        set across a group of beams and a group of bricks says what it
+        left out."""
+        model = self.model()
+        if model is None:
+            return []
+        return [why for index in self.selectedIndexes()
+                if not model.flags(index) & Qt.ItemFlag.ItemIsEditable
+                and (why := self._why_not(index))]
 
     def shared_choices(self,
                        indexes: Sequence[QModelIndex]) -> Column | None:
@@ -993,11 +1069,15 @@ class CopyPasteTableView(QTableView):
 
         The prompt offers the columns' choices when the selection shares
         a list, and otherwise asks for text. Pass `text` to skip the
-        prompt.
+        prompt. Selected cells whose property does not apply to their
+        item are left blank and counted as refused, with the reason.
         """
         indexes = self.editable_selection()
+        skipped = self.inapplicable_selection()
         if not indexes:
-            return 0, 0
+            if skipped:
+                self.edits_applied.emit(0, len(skipped), skipped[0])
+            return 0, len(skipped)
         if text is None:
             prompt = f'Set {len(indexes)} selected cells to:'
             column = self.shared_choices(indexes)
@@ -1012,6 +1092,9 @@ class CopyPasteTableView(QTableView):
                 if not confirmed:
                     return 0, 0
         applied, rejected, reason = self.model().set_many(indexes, text)
+        if skipped:
+            rejected += len(skipped)
+            reason = reason or skipped[0]
         self.edits_applied.emit(applied, rejected, reason)
         return applied, rejected
 
@@ -1074,7 +1157,10 @@ class CopyPasteTableView(QTableView):
         The whole block repeats, not only its last row, so filling from
         two alternating rows carries the alternation, as a spreadsheet
         does. Columns named in a filled column's `carries` are filled
-        along with it, and hidden rows are skipped.
+        along with it, and hidden rows are skipped. A cell of the block
+        whose property does not apply to its item carries nothing, and a
+        target where the property does not apply refuses the value
+        (`TableModel.set_cells`).
         """
         rows, columns = self.selected_block()
         model = self.model()
@@ -1100,11 +1186,18 @@ class CopyPasteTableView(QTableView):
         else:
             return 0, 0
         targets = self._shown(targets)
+        inapplicable = getattr(model, 'inapplicable', None)
         cells = []
         for target in targets:
             # step through the block in order, wrapping, measured from its top
             source = along[(target - along[0]) % len(along)]
             for prop in properties:
+                if inapplicable is not None and inapplicable(source, prop):
+                    # blank because it does not apply, not because it is
+                    # unset: there is nothing to carry, and carrying the
+                    # blank would clear a plate's thickness filled from a
+                    # beam
+                    continue
                 cells.append((target, prop, model.data(
                     model.cell(source, prop), Qt.ItemDataRole.EditRole)))
         applied, rejected, reason = model.set_cells(cells)

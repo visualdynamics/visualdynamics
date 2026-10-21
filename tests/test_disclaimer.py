@@ -74,6 +74,7 @@ def test_the_launcher_exits_when_the_notice_is_refused(qt_app, monkeypatch):
             pass
 
     monkeypatch.setattr(main_window, 'MainWindow', Window)
+    _forget(disclaimer)
     shown = []
     monkeypatch.setattr(disclaimer, 'acknowledged',
                         lambda parent=None: (shown.append(parent), False)[1])
@@ -83,8 +84,50 @@ def test_the_launcher_exits_when_the_notice_is_refused(qt_app, monkeypatch):
     monkeypatch.setattr(disclaimer, 'acknowledged',
                         lambda parent=None: (shown.append(parent), True)[1])
     assert gui.main([]) == 99, 'acknowledged: the event loop runs'
+    _forget(disclaimer)
     assert gui.main(['--no-disclaimer']) == 99
     assert len(shown) == 2, 'the flag skips the notice'
+
+
+def _forget(disclaimer):
+    """No version acknowledged yet, in the tests' own preference store."""
+    store = disclaimer.settings()
+    store.remove(disclaimer.KEY)
+    store.sync()
+
+
+def test_the_notice_comes_once_for_each_version(qt_app, monkeypatch):
+    """Shown on the first launch of a version and not again until the
+    version changes (Brandon, 2026-10-21: every launch was tiresome). A
+    refusal records nothing, so the next launch asks again."""
+    from PySide6.QtWidgets import QWidget
+
+    from visualdynamics import gui
+    from visualdynamics.gui import disclaimer, main_window
+
+    class Window(QWidget):
+        def import_path(self, _path):
+            pass
+
+    monkeypatch.setattr(main_window, 'MainWindow', Window)
+    monkeypatch.setattr(qt_app, 'exec', lambda: 99)
+    _forget(disclaimer)
+    answers = []
+
+    def answer(said):
+        monkeypatch.setattr(disclaimer, 'acknowledged',
+                            lambda parent=None: (answers.append(said), said)[1])
+
+    answer(False)
+    assert gui.main([]) == 0 and len(answers) == 1
+    assert disclaimer.needed(), 'a refusal is not an acknowledgment'
+    answer(True)
+    assert gui.main([]) == 99 and len(answers) == 2
+    assert gui.main([]) == 99 and len(answers) == 2, 'the same version asks once'
+    monkeypatch.setattr(disclaimer, '__version__', '0.1.0a999')
+    assert disclaimer.needed()
+    assert gui.main([]) == 99 and len(answers) == 3, 'a new version asks again'
+    _forget(disclaimer)
 
 
 def test_a_pre_release_sorts_below_its_release():

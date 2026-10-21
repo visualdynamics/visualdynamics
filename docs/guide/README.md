@@ -6,8 +6,8 @@ way they do.
 **This is an alpha release.** It has been checked against known cases,
 but not yet against a broad set of tests, so verify the numbers it
 produces by independent means before anything depends on them. The
-application says so when it opens, and asks you to acknowledge it
-every time. Please report anything that looks wrong to
+application says so when it opens, and asks you to acknowledge it the
+first time each new version is launched. Please report anything that looks wrong to
 contact@visualdynamics.org. Projects are saved as `.vdyn` files, and
 Engineering Sciences Common Data Format (`.h5`) files are imported and
 exported for exchanging data with other tools. While Visual Dynamics

@@ -15,8 +15,8 @@ Three names, on purpose: Visual Dynamics is what a person reads,
 `visualdynamics` is the package and the import, and `.vdyn` is the
 project file.
 
-**This is an alpha.** Every launch opens with a notice that has to be
-acknowledged: the software has been checked against known cases, not
+**This is an alpha.** The first launch of each version opens with a
+notice that has to be acknowledged: the software has been checked against known cases, not
 yet against a broad set of tests, and its numbers are to be verified
 by independent means before anything depends on them. Projects are
 saved as `.vdyn` files, and Engineering Sciences Common Data Format

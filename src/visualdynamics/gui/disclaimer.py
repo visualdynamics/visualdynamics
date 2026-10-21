@@ -1,7 +1,10 @@
 """The alpha notice, acknowledged before the window takes input.
 
-The launcher shows this dialog on every launch, after the window is
-built and before the event loop handles anything else. Quit is enabled
+The launcher shows this dialog the first time each version is
+launched, after the window is built and before the event loop handles
+anything else. The version acknowledged is kept in the preference store
+(`gui.preferences.settings`), so a later launch of the same version opens
+straight to the window, and the next version asks again. Quit is enabled
 from the start; Continue is enabled only once the checkbox is ticked,
 and nothing in the window can be reached until Continue is pressed.
 
@@ -24,11 +27,16 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from .preferences import settings
 
 # Brandon, 2026-09-11: this is an alpha release, and a user should have
-# to acknowledge, every time the application loads, that its results are
-# to be checked. Every launch, by decision: a few seconds, and the point
-# stays in front of the user for as long as the release is an alpha.
+# to acknowledge that its results are to be checked. It was shown on
+# every launch until Brandon, 2026-10-21, found that tiresome: now the
+# first launch of each version, which still puts it in front of anyone
+# running a release they have not acknowledged.
+
+#: the version whose notice was last acknowledged, in the preference store
+KEY = 'acknowledged_version'
 
 TITLE = 'Visual Dynamics — alpha release'
 
@@ -86,6 +94,19 @@ class Disclaimer(QDialog):
         if not self.acknowledged.isChecked():
             return
         super().accept()
+
+
+def needed() -> bool:
+    """Whether this version's notice is still to be acknowledged: True
+    on the first launch of a version, False once it was."""
+    return str(settings().value(KEY, '')) != __version__
+
+
+def remember() -> None:
+    """Record that this version's notice was acknowledged."""
+    store = settings()
+    store.setValue(KEY, __version__)
+    store.sync()
 
 
 def acknowledged(parent: QWidget | None = None) -> bool:

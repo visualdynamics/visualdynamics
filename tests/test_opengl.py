@@ -9,6 +9,8 @@ launcher stops on it before building a window.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from visualdynamics.gui import opengl
@@ -140,3 +142,30 @@ def test_check_gl_prints_and_returns_the_checks_answer_before_any_qt(
     monkeypatch.setattr(opengl, 'check', lambda: (2, 'missing: OpenGL 1.1'))
     assert gui.main(['--check-gl']) == 2
     assert capsys.readouterr().out.strip() == 'missing: OpenGL 1.1'
+
+
+def test_qt_quick_draws_with_opengl_as_the_3d_views_do(monkeypatch, qt_app):
+    """Qt composes a window with one graphics system. The 3-D views are
+    OpenGL widgets and the report's web view is Qt Quick, Metal by
+    default on a Mac; together, every 3-D view composed blank (Brandon,
+    2026-10-21). The launcher and the window itself both ask Qt Quick for
+    OpenGL before any web view exists, and leave a choice already made
+    in the environment alone. The blank itself shows only on a real
+    screen, so what is pinned here is the asking."""
+    from visualdynamics.gui import before_application
+    from visualdynamics.gui.main_window import MainWindow
+
+    monkeypatch.delenv(opengl.QUICK_BACKEND, raising=False)
+    before_application()
+    assert os.environ[opengl.QUICK_BACKEND] == 'opengl', 'the launcher'
+    monkeypatch.delenv(opengl.QUICK_BACKEND, raising=False)
+    window = MainWindow(offscreen_3d=True)
+    try:
+        assert os.environ[opengl.QUICK_BACKEND] == 'opengl', (
+            'a window a script builds without the launcher')
+    finally:
+        window.close()
+        window.deleteLater()
+    monkeypatch.setenv(opengl.QUICK_BACKEND, 'metal')
+    opengl.one_graphics_system()
+    assert os.environ[opengl.QUICK_BACKEND] == 'metal', 'a choice made stands'

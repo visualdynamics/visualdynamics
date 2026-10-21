@@ -129,8 +129,13 @@ def theme_flag(argv: list[str]) -> tuple[list[str], str | None]:
 
 def before_application() -> None:
     """What has to be set before the QApplication exists: the
-    application's name."""
+    application's name, and one graphics system for Qt Quick and the
+    3-D views (`opengl.one_graphics_system`)."""
     from PySide6.QtWidgets import QApplication
+
+    from .opengl import one_graphics_system
+
+    one_graphics_system()
 
     # what the machine calls this while it is running — and it must be
     # said *before* the QApplication exists. Cocoa's application menu
@@ -217,12 +222,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     window.raise_()
     window.activateWindow()
     if with_disclaimer:
-        # the alpha notice, acknowledged before the window takes input
-        # — every launch, by decision (Brandon, 2026-09-11)
-        from .disclaimer import acknowledged
+        # the alpha notice, acknowledged before the window takes input,
+        # on the first launch of each version (Brandon, 2026-10-21; every
+        # launch from 2026-09-11)
+        from . import disclaimer
 
-        if not acknowledged(window):
-            return 0
+        if disclaimer.needed():
+            if not disclaimer.acknowledged(window):
+                return 0
+            disclaimer.remember()
     if argv:
         # Import once the event loop is running: an import may open a modal
         # units dialog, which cannot be displayed before app.exec() starts.

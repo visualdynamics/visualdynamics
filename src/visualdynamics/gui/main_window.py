@@ -750,6 +750,11 @@ class MainWindow(QMainWindow):
         platform, so the headless tests use this to run the full render
         path."""
         super().__init__()
+        # before any web view: a window built by a script, without the
+        # launcher, needs the same one graphics system
+        from .opengl import one_graphics_system
+
+        one_graphics_system()
         # the status line as selectable text, before anything adds to the bar
         self.setStatusBar(MessageBar(self))
         from .project_tree import start_trace

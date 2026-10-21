@@ -76,8 +76,9 @@ System, and the choice is remembered. `--theme dark` (or `light`) on
 the command line, or `VISUALDYNAMICS_THEME=dark` in the environment,
 sets it for one launch.
 
-Every launch of this alpha opens with a disclaimer to acknowledge: the
-software is provided as is, and checking its numbers is up to you.
+The first launch of each version of this alpha opens with a disclaimer
+to acknowledge: the software is provided as is, and checking its
+numbers is up to you.
 **File → About Visual Dynamics…** shows the version, and works without
 the network.
 

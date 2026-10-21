@@ -176,6 +176,32 @@ def check() -> tuple[int, str]:
     return 0, f'OpenGL {version} ({renderer})'
 
 
+#: the variable Qt Quick reads for the graphics system it draws with
+QUICK_BACKEND = 'QSG_RHI_BACKEND'
+
+
+def one_graphics_system() -> None:
+    """Have Qt Quick draw with OpenGL, as the 3-D views do.
+
+    Qt composes each window with one graphics system. The 3-D views are
+    OpenGL widgets, and the report's web view is drawn by Qt Quick, which
+    on macOS defaults to Metal. With both in one window, the 3-D views
+    composed blank: every 3-D view on a Mac, with the report's web view
+    drawing normally. Set before the first Qt Quick window exists, which
+    is the first web view; a value already in the environment is left
+    as it is.
+    """
+    # pyvistaqt 0.13 made the 3-D view a QOpenGLWidget composed by Qt;
+    # 0.12's was a native window of its own, which never met Qt Quick.
+    # Measured on screen 2026-10-21 (Brandon: no 3-D view drew in the
+    # packaged app): 0.3 % of the view drawn, 21 % with this set, the
+    # report unchanged. Setting the widgets' backend as well
+    # (QT_WIDGETS_RHI_BACKEND=opengl) blanked it again.
+    import os
+
+    os.environ.setdefault(QUICK_BACKEND, 'opengl')
+
+
 def say(reason: str) -> None:
     """Show `reason` to the person starting the application, without
     Qt: on Windows through its own message box, since a QApplication

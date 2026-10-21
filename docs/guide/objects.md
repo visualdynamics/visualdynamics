@@ -35,7 +35,12 @@ uses; writing through a row writes the array.
 `geometry.place_coordinate_system(cs_id, angles=(x, y, z), origin=...)`
 turns or moves a coordinate system, with the angles in degrees about
 the fixed X, then Y, then Z axes. It is the same call the 3-D view's
-rings and arrows make when a turn or a slide ends.
+rings and arrows make when a turn or a slide ends. The coordinate
+systems table shows those angles as Rotation X, Y and Z, beside the
+origin, and an angle typed there turns the system. X and Z read from
+-180° to 180° and Y from -90° to 90°. At a quarter turn about Y, the X
+and Z turns are about the same axis, so the table gives the whole turn
+as Z and shows X as zero.
 
 There are no tracelines. A line drawn through nodes is an element
 group of two-node beam elements with no properties: `add_beams` chains

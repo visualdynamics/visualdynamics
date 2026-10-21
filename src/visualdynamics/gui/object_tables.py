@@ -813,6 +813,7 @@ def coordinate_system_table_model(geometry: Geometry,
                                   parent: QObject | None = None
                                   ) -> TableModel:
     from ..core.geometry import CS_TYPES
+    from ..rotate import angles_of, frame_from_angles
 
     unit = (unit_system.label_text('length') if geometry.units_defined
             else 'units undefined')
@@ -832,6 +833,27 @@ def coordinate_system_table_model(geometry: Geometry,
                 value = unit_system.to_si(value, 'length')
             geometry.cs_matrix[row, 3, axis] = value
         return setter
+
+    # the turn as three angles about the fixed X, then Y, then Z axes,
+    # the convention of the solids' Rotation and of
+    # `Geometry.place_coordinate_system(angles=)` (Brandon, 2026-10-21:
+    # the table showed where a system was but not how it was turned)
+    def rotation_getter(axis: int) -> Callable[[Geometry, int], float]:
+        def getter(geometry: Geometry, row: int) -> Any:
+            return angles_of(geometry.cs_matrix[row])[axis]
+        return getter
+
+    def rotation_setter(axis: int) -> Callable[[Geometry, int, str], None]:
+        def setter(geometry: Any, row: int, text: str) -> None:
+            angles = list(angles_of(geometry.cs_matrix[row]))
+            angles[axis] = float(text)
+            geometry.cs_matrix[row, :3] = frame_from_angles(angles)[:3]
+        return setter
+
+    def rotation_journal(geometry: Any, row: int, _text: str) -> str:
+        angles = tuple(float(a) for a in angles_of(geometry.cs_matrix[row]))
+        return (f'.place_coordinate_system({int(geometry.cs_id[row])}, '
+                f'angles={angles!r})')
 
     def set_name(geometry: Any, row: int, text: str) -> None:
         geometry.cs_name[row] = text
@@ -865,6 +887,12 @@ def coordinate_system_table_model(geometry: Geometry,
                  f'.cs_matrix[{r}, 3, {i}] = '
                  f'{float(g.cs_matrix[r, 3, i])!r}',
                  format=lambda v: f'{v:.6g}')
+          for i, axis in enumerate('XYZ')],
+        # one angle typed can restate the others: near a quarter turn
+        # about Y, X and Z turn about one axis and are read back as Z
+        *[Column(f'Rotation {axis} [\u00b0]', rotation_getter(i),
+                 set=rotation_setter(i), journal=rotation_journal,
+                 format=lambda v: f'{v:.6g}', affects_row=True)
           for i, axis in enumerate('XYZ')],
     ]
     return TableModel(geometry, columns, lambda g: len(g.cs_id), parent)

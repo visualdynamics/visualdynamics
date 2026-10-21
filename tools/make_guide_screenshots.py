@@ -1039,9 +1039,9 @@ def show_scene(window, look=None):
     the embedded widget is missing. Rendered at the label's size and
     set on the label, it photographs with the rest of the window.
     `look`, an actor's name and a zoom, centers the view on that actor
-    (the scene draws a model scaled to its own box, so a point is
-    found by what is drawn there) and zooms in from the framing, as a
-    pan and a scroll do."""
+    (found by what is drawn there, so no coordinate has to be converted
+    to the display unit the scene is drawn in) and zooms in from the
+    framing, as a pan and a scroll do."""
     import numpy as np
     from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import QSizePolicy

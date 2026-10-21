@@ -390,3 +390,38 @@ def test_a_block_picked_in_the_drop_down_is_honored(plate, window, pump):
     window.commit_action.trigger()
     pump()
     assert int(plate.elem_group[-1]) == second, 'where it was told'
+
+
+def test_a_new_geometry_takes_its_first_node_where_the_view_looks(window, pump):
+    """A geometry with no nodes opens its Nodes editor with the + on the
+    bar, and its first node lands on the plane through the view's
+    center. Until 2026-10-21 the editor stopped short of showing the +
+    (an empty highlight mesh was refused), and a first point went to a
+    fixed depth near the camera, an inch from the origin it was
+    clicked on."""
+    name = window.project.new_geometry('Geometry', unit='in')
+    window.show_object(name)
+    pump()
+    edit(window, pump, 'Nodes')
+    assert window.editing == (name, 'nodes')
+    assert window.add_action.isVisible(), 'no way to add the first node'
+    window.set_add_mode(True)
+    renderer = window.scene.plotter.renderer
+    camera = renderer.GetActiveCamera()
+    focal = np.asarray(camera.GetFocalPoint())
+    looking = np.asarray(camera.GetDirectionOfProjection())
+    width, height = renderer.GetSize()
+    geometry = window.objects[name]
+    shown = window.unit_system.from_si
+    # the middle of the view is its focal point
+    window._add_at(width / 2, height / 2)
+    assert geometry.num_nodes == 1
+    first = np.asarray(shown(geometry.node_xyz[0], 'length'), dtype=float)
+    assert np.allclose(first, focal, atol=1e-6 * max(1.0, np.abs(focal).max()))
+    assert window._hover_mesh is not None, 'the highlight is back with a node'
+    # a click off the middle lands on the same plane, square to the view
+    window._add_at(width / 2 + 80, height / 2 - 40)
+    assert geometry.num_nodes == 2
+    second = np.asarray(shown(geometry.node_xyz[1], 'length'), dtype=float)
+    assert np.linalg.norm(second - first) > 0
+    assert abs(float(np.dot(second - focal, looking))) < 1e-6 * np.linalg.norm(second - first)

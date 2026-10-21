@@ -403,3 +403,75 @@ def test_nothing_lights_while_the_camera_is_being_dragged(systems, window,
     assert window._gizmo_hovered is None
     assert not any(c == theme_highlight(window)
                    for c in colors_of(window).values())
+
+
+def test_adding_and_turning_are_never_on_together(systems, window, pump):
+    """A click in the view either adds a coordinate system or grabs a
+    ring, so the + and the rings are one mode at a time (Brandon,
+    2026-10-21): switching either on switches the other off, whichever
+    came first."""
+    window.table.selectRow(0)
+    pump()
+    window.set_add_mode(True)
+    pump()
+    assert window.add_mode and window.add_action.isChecked()
+    window.rotate_action.setChecked(True)
+    pump()
+    assert window.rotate_action.isChecked() and len(rings(window)) == 3
+    assert not window.add_mode and not window.add_action.isChecked(), (
+        'turning on left adding on')
+    window.add_action.setChecked(True)
+    pump()
+    assert window.add_mode
+    assert not window.rotate_action.isChecked() and not rings(window), (
+        'adding on left the rings on')
+
+
+def test_the_table_reads_and_takes_the_turn_as_three_angles(systems, window,
+                                                             pump):
+    """The coordinate system table showed where a system was but not how
+    it was turned (Brandon, 2026-10-21). Rotation X, Y and Z are the
+    fixed-axis angles of `place_coordinate_system(angles=)`: a turn made
+    with the rings reads back in them, a typed angle turns the frame
+    and leaves its origin and the other two angles, and the edit
+    journals as a call that replays."""
+    from PySide6.QtCore import Qt
+
+    from visualdynamics.rotate import frame_from_angles
+
+    model = window.table.model()
+    titles = [c.title for c in model.columns]
+    turn = [titles.index(f'Rotation {axis} [°]') for axis in 'XYZ']
+
+    def angles(row=0):
+        return [float(model.data(model.index(row, c), Qt.ItemDataRole.EditRole))
+                for c in turn]
+
+    assert angles() == [0.0, 0.0, 0.0]
+    # a turn about Z made with the rings, read back in the table
+    window.table.selectRow(0)
+    pump()
+    window.rotate_action.setChecked(True)
+    pump()
+    start = np.array(systems.cs_matrix[0])
+    window._rotating = {'row': 0, 'axis': 2, 'start': start.copy(), 'from': 0.0}
+    window._apply_rotation(np.radians(37.4), snap=True)
+    window._commit_rotation()
+    pump()
+    assert np.allclose(angles(), [0.0, 0.0, 37.0])
+    window.rotate_action.setChecked(False)
+    pump()
+    # an angle typed about Y turns the frame about the fixed Y, after X
+    assert model.setData(model.index(0, turn[1]), '20', Qt.ItemDataRole.EditRole)
+    pump()
+    assert np.allclose(angles(), [0.0, 20.0, 37.0])
+    assert np.allclose(systems.cs_matrix[0][:3], frame_from_angles((0, 20, 37))[:3])
+    assert np.allclose(systems.cs_matrix[0][3], start[3]), 'the origin stays'
+    assert window.project.journal[-1].endswith(
+        'place_coordinate_system(1, angles=(0.0, 20.0, 37.0))')
+    room: dict = {}
+    exec(window.project.session_script(), room)          # noqa: S102
+    assert np.allclose(room['project']['Geometry'].cs_matrix[0], systems.cs_matrix[0],
+                       atol=1e-9)
+    # the other system is untouched
+    assert angles(1) == [0.0, 0.0, 0.0]

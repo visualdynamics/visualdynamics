@@ -90,7 +90,7 @@ class ScreenProjector:
         """
         screen, depth = self.screen()
         if not len(screen):
-            return 0.0                 # empty model: the focal plane
+            return 0.0                 # empty model: `place_point` uses the focal plane
         distances = np.linalg.norm(screen - np.array([x, y]), axis=1)
         return float(depth[int(np.argmin(distances))])
 
@@ -108,7 +108,7 @@ class ScreenProjector:
         """
         screen, _ = self.screen()
         if not len(screen):
-            return self.unproject(x, y, 0.0)
+            return self.on_focal_plane(x, y)
 
         distances = np.linalg.norm(screen - np.array([x, y]), axis=1)
         anchor = self.points[int(np.argmin(distances))]
@@ -124,6 +124,25 @@ class ScreenProjector:
             return self.unproject(x, y)
         t = float(np.dot(anchor - near, normal)) / denominator
         return near + t * direction
+
+    def on_focal_plane(self, x: float, y: float) -> np.ndarray:
+        """Where the ray through pixel (x, y) crosses the plane through
+        the camera's focal point, square to the view: where a first point
+        goes when the model has none to take a depth from.
+
+        A fixed depth in normalized device coordinates is not that plane:
+        in perspective it lies close to the camera, and a first node
+        clicked at the middle of an empty view landed about an inch
+        from where the camera stood (2026-10-21)."""
+        camera = self.renderer.GetActiveCamera()
+        focal = np.asarray(camera.GetFocalPoint(), dtype=float)
+        normal = np.asarray(camera.GetDirectionOfProjection(), dtype=float)
+        near = self.unproject(x, y, -1.0)
+        direction = self.unproject(x, y, 1.0) - near
+        denominator = float(np.dot(direction, normal))
+        if abs(denominator) < 1e-12:
+            return focal
+        return near + float(np.dot(focal - near, normal)) / denominator * direction
 
     def _plane_normal(self, flatness=0.02):
         """The model's plane normal, if it is essentially flat."""

@@ -310,6 +310,29 @@ def _occt_section():
     return notice.split('## OpenCASCADE, and what its wheel carries')[1].split('\n## ')[0]
 
 
+def test_the_notice_names_every_package_the_builds_carry():
+    """Every runtime dependency, every extra the release builds install
+    (`step`, `app`) and the Sparkle framework the macOS build copies in
+    is named in NOTICE.md. truststore, pyobjc-core and Sparkle shipped
+    unnamed until 2026-10-21; a new dependency now fails here until its
+    license is read and written down."""
+    import pathlib
+    import re
+    import tomllib
+
+    root = pathlib.Path(__file__).parent.parent
+    project = tomllib.loads((root / 'pyproject.toml').read_text(encoding='utf-8'))['project']
+    extras = project.get('optional-dependencies', {})
+    wanted = [*project['dependencies'], *extras.get('step', []), *extras.get('app', [])]
+    names = {re.split(r'[\s;<>=!~\[]', spec, maxsplit=1)[0] for spec in wanted}
+    notice = (root / 'NOTICE.md').read_text(encoding='utf-8').lower()
+    missing = sorted(n for n in names if n.lower() not in notice)
+    assert not missing, f'not in NOTICE.md: {missing}'
+    assert 'Sparkle' in (root / 'packaging' / 'build_macos.sh').read_text(encoding='utf-8')
+    assert 'sparkle' in notice
+    assert (root / 'packaging' / 'licenses' / 'third-party' / 'Sparkle-LICENSE.txt').exists()
+
+
 def test_every_license_text_the_notice_names_ships():
     """The OpenCASCADE wheel's table names a license text per library
     (2026-10-11): every one is in `packaging/licenses/`, which every

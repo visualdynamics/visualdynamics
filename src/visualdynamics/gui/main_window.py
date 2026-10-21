@@ -6191,6 +6191,11 @@ class MainWindow(QMainWindow):
             self.add_action.setChecked(False)
             self._add_group()
             return
+        if enabled and self.rotate_action.isChecked():
+            # one mode at a time (Brandon, 2026-10-21): a click in the
+            # view either adds or grabs a ring, never both, so the bar
+            # never shows two modes armed
+            self.rotate_action.setChecked(False)
         if not enabled and self._picked_nodes:
             self._commit_picked_nodes()
         self.add_mode = enabled
@@ -6399,6 +6404,9 @@ class MainWindow(QMainWindow):
         """Turn on or off the rings for turning the coordinate system
         being edited. While a ring is dragged, it has the mouse."""
         enabled = bool(enabled) and self._turnable_row() is not None
+        if enabled and self.add_mode:
+            # turning takes the click, so adding stops (`set_add_mode`)
+            self.set_add_mode(False)
         self._rotating = None
         self._sliding = None
         if enabled:
@@ -7406,6 +7414,14 @@ class MainWindow(QMainWindow):
         from ..viz.geometry import display_points, shared_points
 
         points, _ = display_points(geometry, self.unit_system)
+        if not len(points):
+            # a geometry with no nodes yet has nothing to light up, and
+            # an empty mesh is refused outright: the refusal stopped the
+            # editor short of showing its + on a new geometry, so the
+            # first node could not be added (2026-10-21). Both meshes
+            # come back with the scene redrawn after that node.
+            self._hover_mesh = self._picked_mesh = None
+            return
         source, _view = shared_points(points)
         mesh = pv.PolyData()
         mesh.SetPoints(source)

@@ -1,13 +1,17 @@
 # Third-party notices
 
-Visual Dynamics depends on these packages. It does not include them: a
-normal install fetches each from PyPI under its own license, and nothing
-here changes those terms.
+Visual Dynamics depends on these packages. The `visualdynamics` package
+on PyPI does not include them: a normal install fetches each from PyPI
+under its own license, and nothing here changes those terms. The
+packaged applications carry them, and the macOS app carries Sparkle
+besides.
 
 | Package | License | Obligation if this is redistributed |
 | --- | --- | --- |
 | numpy, scipy, h5py, pandas, pint, VTK | BSD-3-Clause | keep the copyright notice |
-| netCDF4, pyvista, pyvistaqt, pyqtgraph, openpyxl | MIT | keep the copyright notice |
+| netCDF4, pyvista, pyvistaqt, pyqtgraph, openpyxl, truststore (the update check's use of the system's certificate store) | MIT | keep the copyright notice |
+| pyobjc-core (the macOS app only) | MIT | keep the copyright notice |
+| **Sparkle** 2, the macOS app's updater: a framework the build copies into the app from Sparkle's own release, not a PyPI package | MIT, with parts under BSD-2-Clause (bsdiff, the signature verifier), MIT (sais-lite) and zlib (Ed25519) | its text, with those parts' notices, ships as `licenses/third-party/Sparkle-LICENSE.txt`; source at github.com/sparkle-project/Sparkle |
 | certifi (Mozilla's CA bundle, as netCDF4's dependency and the update check's trust store) | MPL-2.0 | keep the notice; its files ship unmodified, and its source is at github.com/certifi/python-certifi |
 | properdocs, mkdocs-materialx, mkdocstrings and friends (docs only) | BSD-2 / MIT / ISC | docs build only; nothing ships |
 | pytest, pytest-cov, pytest-xdist, ruff, sdypy-sep005 (dev only) | MIT | test suite only; nothing ships |

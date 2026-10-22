@@ -71,6 +71,20 @@ CMIF, MAC on complex shapes, the SRS family (maximax at Q of 10 and
 Then, in the files above: FRF synthesis from real modes, octave
 banding, and the beam element with its assembly.
 
+`instrumentation.npz` (`generate_instrumentation_oracle.py`, added
+2026-10-22) holds sdynpy's Effective Independence choices
+(`fem.sdynpy_dof.by_effective_independence`) for three problems: 30
+random tri-axial blocks over 6 modes with 8 kept, a simply supported
+plate's out-of-plane modes on a 9 x 7 grid with 16 kept, and the same
+plate on a 21 x 15 grid with 12 kept. sdynpy removes one candidate at a
+time; Visual Dynamics removes the same way while no more than four
+times the wanted count remain, and must then choose the same sensors
+(`tests/test_instrumentation_oracle.py`; it does, both cases). On the
+large grid it removes a tenth at a time first, so the sets differ, and
+the determinant of the information kept is compared instead: 12.857
+against sdynpy's 12.847 as log det, Visual Dynamics keeping slightly
+more.
+
 Deliberately not covered, with reasons at the implementation sites:
 linear spectra (ours is numpy's rfft unscaled by convention), and
 integrate/differentiate (ours applies a drift high-pass by design).

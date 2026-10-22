@@ -684,9 +684,11 @@ def test_the_tri_axial_pass_chooses_for_the_modes_it_can_resolve():
 
 def test_a_plan_short_of_directions_warns_and_keeps_every_mode():
     project, _name, modes = _bar_project()
+    # at the edges too: a quarter of an inch in from them, the half-inch
+    # bar's 1 in faces keep only their center lines
     with pytest.warns(ins.FewerDirectionsWarning,
                       match='Bar Modes: 7 directions for 8 modes: planned for the lowest 7'):
-        added = project.plan_instrumentation(modes, 2, 1)
+        added = project.plan_instrumentation(modes, 2, 1, edge_distance=0)
     kept = project[added['shapes']]
     assert kept.num_shapes == 8, 'every mode asked for, so the auto-MAC shows the cost'
     assert project[added['channels']].num_channels == 7
@@ -695,6 +697,105 @@ def test_a_plan_short_of_directions_warns_and_keeps_every_mode():
 def test_the_lowest_are_by_frequency_however_the_modes_are_listed():
     geometry, shapes = _bar()
     backward = ins.elastic(shapes)[::-1]
-    made = ins.plan(shapes, geometry, 2, 1, modes=backward)
+    made = ins.plan(shapes, geometry, 2, 1, modes=backward, edge_distance=0.0)
     left_out = sorted(set(range(8)) - set(made.placement.planned.tolist()))
     assert [backward[k] for k in left_out] == [max(backward, key=lambda m: shapes.frequency[m])]
+
+
+def _gap_to_edge(point):
+    """How far a point on the 8 x 2 x 1 in bar's outside is from the
+    edge of the face it is on, in inches, worked out by hand: the face
+    is the one the point is on, and its edge the rectangle around it."""
+    half = np.array([4.0, 1.0, 0.5])
+    on = int(np.argmax(np.isclose(np.abs(point), half)))
+    return min(half[a] - abs(point[a]) for a in range(3) if a != on)
+
+
+def test_places_keep_the_distance_from_their_faces_edges():
+    """At a quarter of an inch every place is at least that far from
+    its face's edge, and every node that far in is still a place: none
+    lost that should stay. Each face's edge is its own, so a node on a
+    block edge is near both faces' edges and is no place on either."""
+    geometry, _shapes = _bar()
+    near = ins.candidates(geometry)
+    away = ins.candidates(geometry, edge_distance=ins.EDGE_DISTANCE)
+    gaps = [_gap_to_edge(p) for p in near.geometry.node_xyz / INCH]
+    wanted = {(int(n), int(s)) for n, s, gap in zip(near.source, near.surface, gaps, strict=True)
+              if gap >= 0.25 - 1e-9}
+    assert {(int(n), int(s)) for n, s in zip(away.source, away.surface, strict=True)} == wanted
+    assert min(_gap_to_edge(p) for p in away.geometry.node_xyz / INCH) >= 0.25 - 1e-9
+    # the 8 x 2 faces keep 15 x 3 nodes, the 8 x 1 faces 15 x 1, the ends 3 x 1
+    assert sorted(Counter(away.surface.tolist()).values()) == [3, 3, 15, 15, 45, 45]
+    farther = ins.candidates(geometry, edge_distance=0.6 * INCH)
+    assert sorted(Counter(farther.surface.tolist()).values()) == [13, 13], (
+        'only the 8 x 2 faces have a node 0.6 in from every edge')
+
+
+def test_a_surface_with_no_edge_keeps_every_place():
+    """With the edge angle past 90 degrees the bar is one surface, a
+    closed one: it has no edge to keep away from."""
+    geometry, _shapes = _bar()
+    whole = ins.candidates(geometry, edge_angle=120.0)
+    away = ins.candidates(geometry, edge_angle=120.0, edge_distance=ins.EDGE_DISTANCE)
+    assert len(whole.source) == len(away.source) > 0
+
+
+def test_the_plan_keeps_a_quarter_inch_from_the_edges_unless_told():
+    """The distance is typed in a unit like the project's other
+    lengths, kept in meters, and a geometry whose units are not defined
+    keeps none by default."""
+    project, _name, modes = _bar_project()
+    added = project.plan_instrumentation(modes, 2, 3, modes=[6, 7, 8, 9])
+    placed = project[added['geometry']].node_xyz / INCH
+    assert min(_gap_to_edge(p) for p in placed) >= 0.25 - 1e-9
+    added = project.plan_instrumentation(modes, 2, 3, modes=[6, 7, 8, 9], name='Far',
+                                         edge_distance=0.6, unit='in')
+    assert project.journal[-1] == ("project.plan_instrumentation('Bar Modes', 2, 3, "
+                                   "modes=[6, 7, 8, 9], name='Far', edge_distance=0.6, unit='in')")
+    placed = project[added['geometry']].node_xyz / INCH
+    assert min(_gap_to_edge(p) for p in placed) >= 0.6 - 1e-9
+    assert np.isclose(project.provenance[added['geometry']]['params']['edge_distance'],
+                      0.6 * INCH), 'kept in meters'
+    geometry, shapes = _bar()
+    geometry.length_unit = None                  # the same numbers, now in meters, read raw
+    on_edges = ins.plan(shapes, geometry, 2, 3, modes=[6, 7, 8, 9]).geometry.node_xyz / INCH
+    assert min(_gap_to_edge(p) for p in on_edges) < 0.25, 'no distance kept without units'
+
+
+def _surface(number, area):
+    return ins.Surface(number, 1, 'solid', [(1, 2, 3)], np.array([[0.0, 0.0, 1.0]]),
+                       np.array([area]))
+
+
+def test_small_surfaces_are_left_out_unless_picked():
+    """A surface under 1 % of the outside's area starts out left out: a
+    sliver, a fillet or a bore, where nobody mounts a sensor. When none
+    is that large, all of them stay."""
+    found = [_surface(1, 50.0), _surface(2, 30.0), _surface(3, 19.0),
+             _surface(4, 0.99), _surface(5, 0.01)]
+    assert ins.default_surfaces(found) == [1, 2, 3]
+    assert ins.SMALL_SURFACE == 0.01
+    even = [_surface(k, 1.0) for k in range(1, 201)]      # each 0.5 %
+    assert ins.default_surfaces(even) == list(range(1, 201)), 'nothing left to plan on'
+
+
+def test_a_small_part_starts_out_left_out():
+    """A half-inch cube sitting on an 8 x 2 x 1 in bar, meshed apart: each
+    of its five open faces is 0.25 of 52.75 sq in, under 1 %, so by
+    default no place is on it; asked for, its places are there."""
+    project = visualdynamics.Project('p')
+    name = project.new_geometry('Part', unit='in')
+    bar = project.add_solid_block(name, (0, 0, 0), (8, 2, 1), name='bar', unit='in')
+    cube = project.add_solid_block(name, (0, 0, 0.75), (0.5, 0.5, 0.5), name='cube', unit='in')
+    project.mesh_solids(name, [bar], 0.5, unit='in')
+    project.mesh_solids(name, [cube], 0.5, unit='in', apart=True)
+    geometry = project[name]
+    found = ins.skin(geometry)
+    group_of = dict(zip(geometry.group_name, (int(g) for g in geometry.group_id), strict=True))
+    small = [s.id for s in found if s.group == group_of['cube']]
+    assert len(small) == 5
+    assert set(ins.default_surfaces(found)) == {s.id for s in found} - set(small)
+    places = ins.candidates(geometry, found=found)
+    assert not set(places.surface.tolist()) & set(small)
+    every = ins.candidates(geometry, surfaces=[s.id for s in found], found=found)
+    assert set(every.surface.tolist()) >= set(small)

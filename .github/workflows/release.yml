@@ -35,8 +35,10 @@ on:
   # A version released by its own sync (Brandon, 2026-10-21: "automate
   # merges that I push to main that pass the CI"). When the tests pass
   # on a push to main and main carries a __version__ with no release
-  # yet, this run releases it: builds, drafts, waits at `approve` for
-  # the maintainer's one tap, publishes, then PyPI and the site. A sync
+  # yet, this run releases it: builds, drafts, publishes, then PyPI and
+  # the site, with no one to wait for (Brandon, 2026-10-22: no trip to
+  # GitHub to approve a release; the sync that bumps the version is the
+  # request, and the tests passing is the check). A sync
   # that leaves the version alone releases nothing. One run carries it
   # all because GitHub starts no workflow from a tag or a release that
   # a workflow's own token made (packaging/release_decision.py).
@@ -316,13 +318,15 @@ jobs:
             packaging/release_updates.sh "$TAG"
           rm -f "$RUNNER_TEMP/ed.key"
 
-  # A sync's release waits here for the maintainer: the `release`
-  # environment has the maintainer as its required reviewer, so this
-  # job does not start until approved (a tap in GitHub's page or app), and
-  # then publishes the draft. That is the look a tagged release gets
-  # by hand. A pushed tag skips this and is published by hand as
+  # A sync's release is published here once the draft carries its
+  # assets and the update feeds. The `release` environment lets only a
+  # protected branch, the public main, through; it had the maintainer
+  # as a required reviewer until 2026-10-22, when Brandon asked for
+  # releases to publish without a trip to GitHub to approve them, and a
+  # reviewer added there again would hold this job until approved, with
+  # no change here. A pushed tag skips this and is published by hand as
   # before; its `release: published` event starts PyPI and the site.
-  approve:
+  publish_draft:
     needs: [which, updates]
     if: needs.which.outputs.auto == 'true'
     runs-on: ubuntu-latest
@@ -352,14 +356,14 @@ jobs:
     # themselves between releases — the example tiles' pictures were
     # the first (2026-09-16). The manifest then names whatever release
     # is latest, so the update check keeps its answer.
-    # ...or after `approve` published a sync's release, whose
+    # ...or after `publish_draft` published a sync's release, whose
     # publishing starts nothing on its own
-    needs: [which, approve]
+    needs: [which, publish_draft]
     if: >-
       !cancelled() && (
       (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.site)
-      || needs.approve.result == 'success')
+      || needs.publish_draft.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -386,7 +390,7 @@ jobs:
             NAME=$(gh release view --repo "$GITHUB_REPOSITORY" --json name -q .name)
             export TAG URL NAME
           elif [ -z "$URL" ]; then
-            # a sync's release, published by `approve`: read by its tag
+            # a sync's release, published by `publish_draft`: read by its tag
             URL=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url -q .url)
             NAME=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json name -q .name)
             export URL NAME
@@ -478,12 +482,12 @@ jobs:
     # 2026-09-14) fired both these jobs, and the site went out with
     # latest.json saying version "examples" until it was redeployed by
     # hand
-    # ...or after `approve` published a sync's release
-    needs: [which, approve]
+    # ...or after `publish_draft` published a sync's release
+    needs: [which, publish_draft]
     if: >-
       !cancelled() && (
       (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
-      || needs.approve.result == 'success')
+      || needs.publish_draft.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: pypi

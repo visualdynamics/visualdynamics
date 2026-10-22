@@ -2,7 +2,7 @@
 
 When the tests pass on a push to the public main and main carries a
 `__version__` with no release yet, the release workflow builds it,
-drafts it, waits for the maintainer's approval and publishes it, then
+drafts it and publishes it, then
 PyPI and the site follow (packaging/release_decision.py). These pin the
 decision for every way the workflow starts, the version bump the sync
 tool's `--release` makes, and the wiring of the workflow itself, which
@@ -57,7 +57,7 @@ def test_anything_else_from_the_tests_releases_nothing(why):
     assert said['tag'] == ''
 
 
-def test_a_pushed_tag_releases_that_tag_and_waits_for_no_approval():
+def test_a_pushed_tag_releases_that_tag_and_is_published_by_hand():
     said = decision.decide('push', ref_name='v0.1.0a67', sha='def456')
     assert said == {'build': 'true', 'release': 'true', 'auto': 'false',
                     'tag': 'v0.1.0a67', 'sha': 'def456'}
@@ -118,23 +118,25 @@ def test_the_release_workflow_runs_on_the_tests_passing_on_main():
     assert "needs.which.outputs.release == 'true'" in notarized, 'a sync release is notarized too'
 
 
-def test_a_sync_release_waits_for_approval_before_anyone_sees_it():
+def test_a_sync_release_is_a_draft_until_its_feeds_are_on_it():
     jobs = _workflow('release.yml')['jobs']
     drafted = next(step for step in jobs['publish']['steps']
                    if step.get('uses', '').startswith('softprops/'))['with']
     assert drafted['draft'] is True
     assert drafted['tag_name'] == '${{ needs.which.outputs.tag }}'
     assert drafted['target_commitish'] == '${{ needs.which.outputs.sha }}'
-    approve = jobs['approve']
-    assert approve['environment'] == 'release', 'the environment that holds the reviewer'
-    assert approve['needs'] == ['which', 'updates'], 'after the update feeds are on the draft'
-    assert approve['if'] == "needs.which.outputs.auto == 'true'"
-    assert '--draft=false' in approve['steps'][-1]['run']
+    publish = jobs['publish_draft']
+    assert publish['environment'] == 'release', (
+        'the environment that lets only the protected main through, and where a '
+        'reviewer added would hold it')
+    assert publish['needs'] == ['which', 'updates'], 'after the update feeds are on the draft'
+    assert publish['if'] == "needs.which.outputs.auto == 'true'"
+    assert '--draft=false' in publish['steps'][-1]['run']
     for after in ('pypi', 'site'):
-        assert 'approve' in jobs[after]['needs']
-        assert "needs.approve.result == 'success'" in jobs[after]['if']
+        assert 'publish_draft' in jobs[after]['needs']
+        assert "needs.publish_draft.result == 'success'" in jobs[after]['if']
         assert jobs[after]['if'].startswith('!cancelled()'), (
-            'a skipped approve (a pushed tag) must not skip the release event path')
+            'a skipped publish_draft (a pushed tag) must not skip the release event path')
 
 
 def test_the_sync_tool_asks_for_the_release():

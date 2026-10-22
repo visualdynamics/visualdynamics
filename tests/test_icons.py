@@ -126,3 +126,22 @@ def test_new_geometry_wears_the_geometry_with_a_plus(qt_app, window, pump):
     green = image.pixelColor(42, 42)          # on the disc, off the bars
     assert green.green() > 120 and green.red() < 100, 'the plus is drawn'
     assert _ink(control_icon('new_geometry'), 64) - _ink(control_icon('add'), 64)
+
+
+@pytest.mark.parametrize('solid, face, edge', [
+    ('tetras', 'triangles', ((54, 50), (34, 36))),
+    ('wedges', 'triangles', ((38, 10), (54, 40))),
+    ('hexes', 'quads', ((54, 10), (54, 42))),
+    ('pyramids', 'quads', ((42, 50), (32, 10))),
+])
+def test_a_solid_icon_is_its_face_and_the_depth_behind_it(qt_app, solid, face, edge):
+    """The depth edges were drawn with the pen the node dots had turned
+    off, so the tet wore the triangle's icon and the brick the quad's
+    (Brandon, 2026-10-22). Each solid's depth edge is inked where it is
+    drawn, and at tree size the solid has ink its face does not."""
+    from visualdynamics.gui.icons import child_icon
+
+    (x0, y0), (x1, y1) = edge
+    assert (round((x0 + x1) / 2), round((y0 + y1) / 2)) in _ink(child_icon(solid), 64)
+    extra = _ink(child_icon(solid), 16) - _ink(child_icon(face), 16)
+    assert len(extra) >= 8, f'{solid} reads as {face} at tree size: {len(extra)} pixels apart'

@@ -333,6 +333,12 @@ def qt_app():
     # same on the way out; a crash report, 2026-09-19)
     app.clipboard().clear()
     app.processEvents()
+    # and no window of Python's left for PySide's exit sweep, which
+    # deletes a window and then its children a second time (gate
+    # workers segfaulted at exit, 2026-10-22)
+    from visualdynamics.gui import release_widgets
+
+    release_widgets(app)
 
 
 @pytest.fixture

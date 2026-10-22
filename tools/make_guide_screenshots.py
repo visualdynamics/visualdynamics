@@ -1681,8 +1681,63 @@ def fem_solids():
     close(window)
 
 
+def plan():
+    """The Plan Instrumentation page: the BARC's solved bricks, the act on
+    the shape set's bar, then the pane with the box's thin edges left
+    out and the planned sensors on the rest."""
+    import tempfile
+
+    from visualdynamics.demo import barc
+
+    print('plan:', flush=True)
+    window = fresh_window()
+    with tempfile.TemporaryDirectory() as scratch:
+        path = os.path.join(scratch, 'BARC.vdyn')
+        barc.solid_project(solved=True).save(path)
+        window.import_paths([path])
+        pump(60)
+    shapes = next(name for name, obj in window.objects.items()
+                  if type(obj).__name__ == 'ShapeSet' and 'Removable' not in name)
+    pick(window, [window._item_for_object(shapes)])
+    # the auto-MAC flat: the offscreen window cannot draw its 3-D bars
+    if window.mac_bars_action.isChecked():
+        window.mac_bars_action.trigger()
+        pump(10)
+    shoot(window, 'plan-click', marks=[shapes, act(window, 'Plan Instrumentation')])
+    bar_act(window, 'plan_instrumentation')
+    panel = window.scene.instrumentation_panel
+    panel.triaxial.setValue(6)
+    panel.uniaxial.setValue(4)
+    # the box's thin edges, too narrow for an accelerometer: the rims of
+    # its open ends and its two thin sides, each a quarter inch wide.
+    # Narrow is read as area over the outline's half-perimeter, since a
+    # rim is a ring whose outline spans the whole box
+    import numpy as np
+
+    from visualdynamics.core.instrumentation import surface_frame
+
+    geometry = window.objects['BARC']
+    names = dict(zip((int(g) for g in geometry.group_id), geometry.group_name))
+    rows = {int(n): k for k, n in enumerate(geometry.node_id)}
+    _angle, found = window._planning_skin()
+    for surface in found:
+        if str(names[surface.group]).strip() != 'box':
+            continue
+        points = geometry.node_xyz[[rows[n] for f in surface.faces for n in f]]
+        across = points @ surface_frame(surface.normals.mean(axis=0))[:2].T
+        narrow = surface.area / np.ptp(across, axis=0).sum() < 0.6 * 0.0254
+        # the smallest of them start out left out already
+        if narrow and surface.id not in window._planning['off']:
+            window.toggle_plan_surface(surface.id)
+    window._plan_now()
+    pump(20)
+    show_scene(window)
+    shoot(window, 'plan-pane', marks=[panel.keep_button])
+    close(window)
+
+
 def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                'mixed', 'tree', 'fem', 'fem_solids')):
+                'mixed', 'tree', 'fem', 'fem_solids', 'plan')):
     import traceback
 
     from PySide6.QtWidgets import QApplication
@@ -1692,7 +1747,7 @@ def main(which=('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
     QApplication.instance() or QApplication(['visualdynamics'])
     OUT.mkdir(parents=True, exist_ok=True)
     for build in (modal, random, transient, shock, sine, sysid, mixed, tree,
-                  fem, fem_solids):
+                  fem, fem_solids, plan):
         if build.__name__ not in which:
             continue
         try:
@@ -1710,4 +1765,4 @@ if __name__ == '__main__':
     # kept their old pictures (2026-09-03)
     picked = tuple(a.lstrip('-') for a in sys.argv[1:])
     main(picked or ('modal', 'random', 'transient', 'shock', 'sine', 'sysid',
-                    'mixed', 'tree', 'fem', 'fem_solids'))
+                    'mixed', 'tree', 'fem', 'fem_solids', 'plan'))

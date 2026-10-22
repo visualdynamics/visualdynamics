@@ -75,6 +75,9 @@ that is not an alpha.
 - [Three shapes that are not extrusions](workflows/mesh-shapes.md):
   a cross-drilled shaft, a wye fitting and a V-block meshed into
   bricks fitted to the shape and into tetrahedra, with the numbers
+- [Planning a test's instrumentation](plan-instrumentation.md): the
+  accelerometers for a modal test chosen from the finite element modes,
+  on the surfaces a person can reach
 - [The wavelet reading](wavelet.md): a time history as a scalogram
 - [Checking a classical pulse](pulse-check.md): a half-sine, sawtooth
   or trapezoid against its envelope and its velocity change

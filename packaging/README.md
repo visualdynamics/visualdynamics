@@ -184,20 +184,20 @@ That sets `__version__` to the next alpha, commits it, pushes, and syncs.
 When the tests pass on the public `main`, the release workflow sees a
 version with no release yet (`packaging/release_decision.py`) and
 releases it in one run: all four builds, the draft with its checksums,
-the macOS update feeds, and then the `approve` job, which waits for the
-maintainer. Approving it on GitHub's page for the run, or in the GitHub
-app, publishes the draft, and PyPI and the site follow in the same run.
-A sync that leaves the version alone releases nothing.
+the macOS update feeds, and then the `publish_draft` job, which
+publishes the draft; PyPI and the site follow in the same run. Nobody
+approves it: the sync that changed the version is the request, and the
+tests passing on `main` is the check. A sync that leaves the version
+alone releases nothing.
 
-The `release` environment on the public repository holds the approval:
-its required reviewer is the maintainer, and `approve` does not start
-until the maintainer approves it. A run waiting there holds the workflow's concurrency
-group, so a site redeploy queues behind it until it is approved or
-rejected. Rejecting it leaves the draft unpublished; delete the draft
-before asking for the same version again.
+`publish_draft` runs in the `release` environment on the public
+repository, which lets only a protected branch through. The environment
+has no required reviewer. Adding one there makes every sync's release
+wait for that person's approval on GitHub before it is published, with
+no change to the workflow; a run waiting there holds the workflow's
+concurrency group, so a site redeploy queues behind it.
 
-A pushed tag still works as before, published by hand, and skips the
-approval.
+A pushed tag still works as before, published by hand.
 
 ## Signing, and what it costs to skip
 

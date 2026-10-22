@@ -23,7 +23,10 @@ surface allows. A node where surfaces meet at an edge or a corner is a
 candidate on each of them, so that a sensor sits flat on one; within a
 surface the faces' normals at the node are averaged. A plate's normal
 points away from the middle of the model. Beams contribute every node,
-measured in the global system.
+measured in the global system. A place nearer than `edge_distance` to
+its surface's edge is not a candidate, since a sensor's base needs flat
+ground around the spot it is glued to; an edge here is wherever the
+surface ends, at a sharp edge, a free edge, a hole or where parts touch.
 
 `local_shapes` turns a shape set's translations into each candidate's
 own directions, and `effective_independence` chooses the sensors:
@@ -52,7 +55,16 @@ import numpy as np
 #: neighboring faces whose outward normals differ by more than this, in
 #: degrees, are on separate surfaces: a block's edge is 90, a
 #: cylinder's facets a few degrees each
-EDGE_ANGLE = 40.0
+# Brandon, 2026-10-22: 20 degrees, from 40
+EDGE_ANGLE = 20.0
+
+#: how far a sensor stays from its surface's edge, in meters: a quarter
+#: of an inch (Brandon, 2026-10-22)
+EDGE_DISTANCE = 0.25 * 0.0254
+
+#: a surface of less than this share of the whole outside's area is
+#: left out unless picked (`default_surfaces`)
+SMALL_SURFACE = 0.01
 
 #: removal in batches stops once this many times the wanted count
 #: remain, and the rest is removed one at a time
@@ -231,8 +243,35 @@ def skin(geometry: Any, *, edge_angle: float = EDGE_ANGLE) -> list[Surface]:
     return found
 
 
+def default_surfaces(found: list[Surface]) -> list[int]:
+    """The surfaces sensors go on unless told otherwise: every one of at
+    least `SMALL_SURFACE` of the whole outside's area. Sensors go on
+    the significant surfaces of a test article; a small one is most
+    often a sliver along an edge, a fillet or a hole's bore. When no
+    surface is that large, all of them.
+
+    Parameters
+    ----------
+    found : list of Surface
+        From `skin`.
+
+    Returns
+    -------
+    list of int
+        Their ids, in order.
+    """
+    # Brandon, 2026-10-22: at 20 degrees the cone split into 193
+    # surfaces, most of them a single element; "any surfaces less than
+    # 1% of the total surface area should be de-selected by default ...
+    # we just mount to significant surfaces usually"
+    total = sum(s.area for s in found)
+    kept = [s.id for s in found if s.area >= SMALL_SURFACE * total]
+    return kept or [s.id for s in found]
+
+
 def candidates(geometry: Any, groups: Any = None, surfaces: Any = None, *,
-               edge_angle: float = EDGE_ANGLE, found: Any = None) -> Candidates:
+               edge_angle: float = EDGE_ANGLE, found: Any = None,
+               edge_distance: float = 0.0) -> Candidates:
     """Every place on `geometry` a sensor can be mounted, as an
     experimental geometry with a coordinate system per place.
 
@@ -244,13 +283,19 @@ def candidates(geometry: Any, groups: Any = None, surfaces: Any = None, *,
         The element groups sensors may go on. All of them when omitted.
         A face shared with a group that is not picked is still inside.
     surfaces : sequence of int, optional
-        The surfaces sensors may go on, by `Surface.id`. All of those in
-        `groups` when omitted.
+        The surfaces sensors may go on, by `Surface.id`. Those of
+        `groups` that `default_surfaces` keeps when omitted: every one
+        of at least `SMALL_SURFACE` of the outside's area.
     edge_angle : float, default EDGE_ANGLE
         Degrees between two neighboring faces' normals beyond which they
         are on separate surfaces.
     found : list of Surface, optional
         `skin(geometry, edge_angle=edge_angle)`, when already found.
+    edge_distance : float, default 0
+        How near a place may be to its surface's edge, in the
+        geometry's coordinates (meters once its units are defined),
+        measured in a straight line. Nothing is left out at 0. A
+        surface with no edge, such as a whole sphere, keeps every place.
 
     Returns
     -------
@@ -260,11 +305,12 @@ def candidates(geometry: Any, groups: Any = None, surfaces: Any = None, *,
 
     picked = ({int(g) for g in geometry.group_id} if groups is None
               else {int(g) for g in groups})
-    wanted = None if surfaces is None else {int(s) for s in surfaces}
     xyz = geometry.node_xyz
     row_of = {int(n): k for k, n in enumerate(geometry.node_id)}
+    by_id = np.argsort(geometry.node_id)
     if found is None:
         found = skin(geometry, edge_angle=edge_angle)
+    wanted = set(default_surfaces(found) if surfaces is None else (int(s) for s in surfaces))
 
     # a place per node per surface, the surface's faces at the node
     # averaged by area; the largest first, so a node's own id goes to it
@@ -278,6 +324,11 @@ def candidates(geometry: Any, groups: Any = None, surfaces: Any = None, *,
         at, where = np.unique(corner_nodes, return_inverse=True)
         summed = np.zeros((len(at), 3))
         np.add.at(summed, where, np.repeat(weight, per_face, axis=0))
+        if edge_distance > 0:
+            rows = by_id[np.searchsorted(geometry.node_id, at, sorter=by_id)]
+            away = _away_from_edge(surface.faces, at, xyz[rows], xyz, by_id,
+                                   geometry.node_id, edge_distance)
+            at, summed = at[away], summed[away]
         nodes.append(at)
         sums.append(summed)
         kinds.extend([surface.kind] * len(at))
@@ -623,7 +674,8 @@ class Plan:
 
 def plan(shapes: Any, geometry: Any, triaxial: int, uniaxial: int = 0, *,
          modes: Any = None, groups: Any = None, surfaces: Any = None,
-         edge_angle: float | None = None, axes: Any = (2,)) -> Plan:
+         edge_angle: float | None = None, axes: Any = (2,),
+         edge_distance: float | None = None) -> Plan:
     """Plan a test's accelerometers from a finite element model.
 
     Parameters
@@ -642,14 +694,20 @@ def plan(shapes: Any, geometry: Any, triaxial: int, uniaxial: int = 0, *,
     groups : sequence of int, optional
         The element groups sensors may go on. All when omitted.
     surfaces : sequence of int, optional
-        The surfaces sensors may go on, by `Surface.id`. All of those in
-        `groups` when omitted.
+        The surfaces sensors may go on, by `Surface.id`. Those of
+        `groups` that `default_surfaces` keeps when omitted.
     edge_angle : float, optional
         Degrees between neighboring faces' normals beyond which they are
         on separate surfaces; `EDGE_ANGLE` when omitted.
     axes : sequence of int, default (2,)
         The directions a uni-axial accelerometer may measure: 0, 1, 2
         for a place's X, Y, Z. Z, the surface normal, by default.
+    edge_distance : float, optional
+        How near a sensor may be to its surface's edge, in the
+        geometry's coordinates. `EDGE_DISTANCE`, a quarter of an inch,
+        when omitted and the geometry's units are defined; 0 when they
+        are not, since a distance means nothing against coordinates
+        with no unit.
 
     Returns
     -------
@@ -665,8 +723,11 @@ def plan(shapes: Any, geometry: Any, triaxial: int, uniaxial: int = 0, *,
     modes = [int(m) for m in modes]
     if not modes:
         raise ValueError('no modes to measure: every mode is a rigid-body mode at 0 Hz')
+    if edge_distance is None:
+        edge_distance = EDGE_DISTANCE if geometry.units_defined else 0.0
     places = candidates(geometry, groups, surfaces,
-                        edge_angle=EDGE_ANGLE if edge_angle is None else float(edge_angle))
+                        edge_angle=EDGE_ANGLE if edge_angle is None else float(edge_angle),
+                        edge_distance=float(edge_distance))
     blocks, measured = local_shapes(shapes, modes, places, geometry)
     placement = effective_independence(blocks, triaxial, uniaxial, axes=axes,
                                        allowed=measured, sources=places.source,
@@ -768,6 +829,39 @@ def assemble(shapes: Any, modes: Any, places: Candidates, blocks: Any,
         mass_unit=shapes.mass_unit,
         description=[description[m] for m in modes] if description is not None else None)
     return Plan(kept_geometry, table, test_shapes, placement)
+
+
+def _away_from_edge(faces: list, at: np.ndarray, points: np.ndarray, xyz: np.ndarray,
+                    by_id: np.ndarray, node_id: np.ndarray, distance: float) -> np.ndarray:
+    """Which of the nodes `at`, at `points`, are at least `distance`
+    from the edge of the surface made of `faces`: the sides only one of
+    its faces has."""
+    from scipy.spatial import cKDTree
+
+    sides = np.array([sorted((f[k], f[(k + 1) % len(f)])) for f in faces
+                      for k in range(len(f))], dtype=np.int64).reshape(-1, 2)
+    unique, count = np.unique(sides, axis=0, return_counts=True)
+    edge = unique[count == 1]
+    if not len(edge):
+        return np.ones(len(at), dtype=bool)
+    ends = xyz[by_id[np.searchsorted(node_id, edge.ravel(), sorter=by_id)]].reshape(-1, 2, 3)
+    start, along = ends[:, 0], ends[:, 1] - ends[:, 0]
+    middle = start + along / 2
+    half = float(np.linalg.norm(along, axis=1).max()) / 2
+    # every side whose middle is near enough that the side could be
+    # nearer than `distance`, then its exact distance
+    near = cKDTree(middle).query_ball_point(points, distance + half, return_sorted=False)
+    which = np.repeat(np.arange(len(at)), [len(n) for n in near])
+    side = np.fromiter((k for n in near for k in n), dtype=np.int64, count=len(which))
+    if not len(side):
+        return np.ones(len(at), dtype=bool)
+    span = np.einsum('ij,ij->i', along[side], along[side])
+    t = np.einsum('ij,ij->i', points[which] - start[side], along[side])
+    t = np.clip(np.divide(t, span, out=np.zeros_like(t), where=span > 0), 0.0, 1.0)
+    gap = np.linalg.norm(points[which] - start[side] - t[:, None] * along[side], axis=1)
+    away = np.ones(len(at), dtype=bool)
+    away[which[gap < distance]] = False
+    return away
 
 
 def _remove(kept: np.ndarray, loss: np.ndarray, target: int) -> np.ndarray:

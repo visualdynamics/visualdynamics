@@ -151,11 +151,11 @@ def test_the_pypi_jobs_publish_by_identity_and_only_when_meant():
         assert len(publish) == 1
         assert not any('password' in s.get('with', {}) for s in job['steps'])
     # a version's release only (2026-09-14): a published `v` release, or
-    # a sync's release once `approve` has published it
+    # a sync's release once `publish_draft` has published it
     gate = ' '.join(jobs['pypi']['if'].split())
     assert gate == ("!cancelled() && ( (github.event_name == 'release' && "
                     "startsWith(github.event.release.tag_name, 'v')) "
-                    "|| needs.approve.result == 'success')"), \
+                    "|| needs.publish_draft.result == 'success')"), \
         'PyPI publishes for a version release only (2026-09-14)'
     assert 'inputs.reserve' in jobs['reserve']['if']
     for name in ('linux', 'windows', 'macos'):

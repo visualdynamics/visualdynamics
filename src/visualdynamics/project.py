@@ -3554,7 +3554,8 @@ class Project(dict):
                              modes: Any = None, groups: Any = None,
                              surfaces: Any = None, edge_angle: float | None = None,
                              axes: Any = (2,), name: str | None = None,
-                             progress: Any = None) -> dict[str, str]:
+                             progress: Any = None, edge_distance: float | None = None,
+                             unit: str = 'm') -> dict[str, str]:
         """Plan a test's accelerometers from finite element modes, by
         Effective Independence.
 
@@ -3584,8 +3585,9 @@ class Project(dict):
             when omitted.
         surfaces : sequence of int, optional
             The surfaces sensors may go on, by their number in
-            `core.instrumentation.skin`. Every surface of `groups` when
-            omitted.
+            `core.instrumentation.skin`. When omitted, every surface of
+            `groups` of at least 1 % of the outside's area
+            (`core.instrumentation.default_surfaces`).
         edge_angle : float, optional
             Degrees between two neighboring faces' normals beyond which
             they are on separate surfaces;
@@ -3601,6 +3603,15 @@ class Project(dict):
             Called with ``(0, core.progress.BUSY)`` as the work starts,
             which cannot count its own stages; the app's progress bar
             uses it.
+        edge_distance : float, optional
+            How near a sensor may be to the edge of its surface, in
+            `unit`: a sharp edge, a free edge, a hole or where parts
+            touch. A quarter of an inch when omitted
+            (`core.instrumentation.EDGE_DISTANCE`), and 0 for a geometry
+            whose units are not defined; 0 allows a sensor on the edge.
+        unit : str, default 'm'
+            The unit `edge_distance` is in. A geometry whose units are
+            not defined takes it as given.
 
         Returns
         -------
@@ -3638,8 +3649,11 @@ class Project(dict):
         geometry_name, geometry = found
         ids = None if groups is None else [self._group_of(geometry, g) for g in groups]
         kept = None if surfaces is None else [int(s) for s in surfaces]
+        if edge_distance is not None:
+            edge_distance = float(edge_distance) * self._solid_scale(geometry, unit)
         made = plan(shapes, geometry, triaxial, uniaxial, modes=modes, groups=ids,
-                    surfaces=kept, edge_angle=edge_angle, axes=axes)
+                    surfaces=kept, edge_angle=edge_angle, axes=axes,
+                    edge_distance=edge_distance)
         short = shortfall(made.placement, made.shapes.num_shapes)
         if short:
             warnings.warn(FewerDirectionsWarning(f'{source}: {short}'), stacklevel=2)
@@ -3648,6 +3662,7 @@ class Project(dict):
                   'modes': None if modes is None else [int(m) for m in modes],
                   'groups': ids, 'surfaces': kept,
                   'edge_angle': None if edge_angle is None else float(edge_angle),
+                  'edge_distance': None if edge_distance is None else float(edge_distance),
                   'axes': [int(a) for a in axes],
                   'geometry': geometry_name}
         added = {

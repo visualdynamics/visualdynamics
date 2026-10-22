@@ -9114,7 +9114,11 @@ class MainWindow(QMainWindow):
         return True
 
     def _units_changed(self, name):
+        planning = self.__dict__.get('_planning')
+        distance = self._planning_distance() if planning is not None else None
         self.unit_system = SYSTEMS[name]
+        if planning is not None:
+            self._show_plan_distance(distance)  # the same distance, in the new unit
         if self._merging is not None:
             self._open_merge_panel()        # its tolerance, in the new unit
         self.render_current()
@@ -14295,6 +14299,7 @@ class MainWindow(QMainWindow):
         triaxial = -(-len(modes) // 3) + 1
         panel = self.scene.instrumentation_panel
         panel.open_for(f'{name}, on {geometry_name}', groups, triaxial, 0, f'{name} Plan')
+        self._show_plan_distance(self._plan_default_distance())
         panel.show()
         self._begin_plan_clicks()
         self._plan_now()
@@ -14319,7 +14324,7 @@ class MainWindow(QMainWindow):
 
     def _planning_skin(self):
         """The model's surfaces at the pane's edge angle, found once."""
-        from ..core.instrumentation import skin
+        from ..core.instrumentation import default_surfaces, skin
 
         planning = self._planning
         angle = float(self.scene.instrumentation_panel.edge_angle.value())
@@ -14330,11 +14335,40 @@ class MainWindow(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
             # a surface's number is its place in this angle's split: the
-            # ones left out at another angle mean nothing here
-            if planning['skins']:
-                planning['off'] = set()
+            # ones left out at another angle mean nothing here, and each
+            # split starts from the default, the small surfaces out
+            planning['off'] = {s.id for s in found} - set(default_surfaces(found))
             planning['skins'] = {angle: found}
         return angle, planning['skins'][angle]
+
+    def _plan_default_distance(self) -> float:
+        """The distance sensors keep from the edges unless told: a
+        quarter of an inch, or none on a geometry whose units are not
+        defined (`core.instrumentation.plan`)."""
+        from ..core.instrumentation import EDGE_DISTANCE
+
+        geometry = self.objects[self._planning['geometry']]
+        return EDGE_DISTANCE if geometry.units_defined else 0.0
+
+    def _planning_distance(self) -> float:
+        """The distance sensors keep from the surfaces' edges, in the
+        geometry's coordinates: the pane's box, typed in the display unit
+        system once the geometry's units are defined."""
+        geometry = self.objects[self._planning['geometry']]
+        typed = float(self.scene.instrumentation_panel.edge_distance.value())
+        return (float(self.unit_system.to_si(typed, 'length')) if geometry.units_defined
+                else typed)
+
+    def _show_plan_distance(self, distance: float) -> None:
+        """Put `distance`, in the geometry's coordinates, in the pane's
+        box in the display unit system."""
+        geometry = self.objects[self._planning['geometry']]
+        panel = self.scene.instrumentation_panel
+        if geometry.units_defined:
+            panel.show_edge_distance(float(self.unit_system.from_si(distance, 'length')),
+                                     self.unit_system.label_text('length'))
+        else:
+            panel.show_edge_distance(distance, '')
 
     def _planning_kept(self, found, groups) -> list[int]:
         """The surfaces sensors may go on: in a checked group and not
@@ -14353,10 +14387,11 @@ class MainWindow(QMainWindow):
         planning = self._planning
         angle, found = self._planning_skin()
         kept = self._planning_kept(found, groups)
-        key = (angle, tuple(groups), tuple(kept))
+        distance = self._planning_distance()
+        key = (angle, tuple(groups), tuple(kept), distance)
         if planning['places'] is None or planning['places'][0] != key:
             places = candidates(self.objects[planning['geometry']], groups, kept,
-                                edge_angle=angle, found=found)
+                                edge_angle=angle, found=found, edge_distance=distance)
             planning['places'] = (key, places)
             planning['blocks'] = None
         places = planning['places'][1]
@@ -14558,16 +14593,29 @@ class MainWindow(QMainWindow):
     def _begin_plan_clicks(self) -> None:
         """Watch the view's clicks: a press and release in one place on a
         surface leaves it out or puts it back. The press goes on to the
-        camera, so a drag turns the view and toggles nothing."""
+        camera, so a drag turns the view and toggles nothing.
+
+        The release is heard from the camera's style, as the end of its
+        interaction, not from the interactor: the style takes the mouse
+        to itself from the press (VTK's GrabFocus), so the interactor's
+        observers hear neither the drag nor the release. Listening there,
+        no click ever toggled a surface, and the press left behind ended
+        the hover's light for good (Brandon, 2026-10-22)."""
         interactor = getattr(self.scene.plotter, 'iren', None)
         if interactor is None or self.__dict__.get('_plan_observers'):
             return
         raw = interactor.interactor
         self._plan_observers = [
-            raw.AddObserver('LeftButtonPressEvent', self._on_plan_press, 10.0),
-            raw.AddObserver('LeftButtonReleaseEvent', self._on_plan_release, 10.0),
-            raw.AddObserver('MouseMoveEvent', self._on_plan_move, 10.0),
+            (raw, raw.AddObserver('LeftButtonPressEvent', self._on_plan_press, 10.0)),
+            (raw, raw.AddObserver('MouseMoveEvent', self._on_plan_move, 10.0)),
         ]
+        style = raw.GetInteractorStyle()
+        if style is not None:
+            self._plan_observers.append(
+                (style, style.AddObserver('EndInteractionEvent', self._on_plan_release, 10.0)))
+        else:
+            self._plan_observers.append(
+                (raw, raw.AddObserver('LeftButtonReleaseEvent', self._on_plan_release, 10.0)))
 
     def _on_plan_press(self, _caller, _event) -> None:
         planning = self.__dict__.get('_planning')
@@ -14601,7 +14649,12 @@ class MainWindow(QMainWindow):
         """Keep: the plan added to the project as the pane says it
         (`Project.plan_instrumentation`), its three objects in the tree,
         and the pane put away."""
-        from ..core.instrumentation import EDGE_ANGLE, FewerDirectionsWarning, elastic
+        from ..core.instrumentation import (
+            EDGE_ANGLE,
+            FewerDirectionsWarning,
+            default_surfaces,
+            elastic,
+        )
 
         planning = self.__dict__.get('_planning')
         if planning is None:
@@ -14621,10 +14674,17 @@ class MainWindow(QMainWindow):
             options['modes'] = modes
         if not panel.all_groups:
             options['groups'] = groups
-        if len(kept) < len([s for s in found if s.group in set(groups)]):
+        # journaled only when the person changed them from the default
+        offered = {s.id for s in found if s.group in set(groups)}
+        if set(kept) != set(default_surfaces(found)) & offered:
             options['surfaces'] = kept
         if angle != EDGE_ANGLE:
             options['edge_angle'] = angle
+        distance = self._planning_distance()
+        if not np.isclose(distance, self._plan_default_distance(), rtol=1e-4, atol=0.0):
+            # in the geometry's own coordinates, which are meters once
+            # its units are defined: the default unit
+            options['edge_distance'] = distance
         if panel.uniaxial_axes != (2,):
             options['axes'] = list(panel.uniaxial_axes)
         typed = panel.name.text().strip()
@@ -14656,11 +14716,9 @@ class MainWindow(QMainWindow):
         """Put Plan Instrumentation away; nothing is added."""
         self.scene.instrumentation_panel.hide()
         self._plan_timer.stop()
-        interactor = getattr(self.scene.plotter, 'iren', None)
-        for observer in self.__dict__.get('_plan_observers') or []:
-            if interactor is not None:
-                with contextlib.suppress(Exception):
-                    interactor.interactor.RemoveObserver(observer)
+        for watched, observer in self.__dict__.get('_plan_observers') or []:
+            with contextlib.suppress(Exception):
+                watched.RemoveObserver(observer)
         self._plan_observers = []
         if self.__dict__.get('_planning') is None:
             return

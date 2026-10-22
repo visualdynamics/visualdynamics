@@ -12,9 +12,9 @@ push to `main`, the run releases `main` if the version it carries has
 no release yet. A sync with a new `__version__` is the request to
 release; a sync that leaves the version alone releases nothing.
 
-That last path ends at the `approve` job, which waits for the
-maintainer's approval before the draft is published, and only then do
-PyPI and the site follow. GitHub does not start a workflow from a tag
+That last path ends at the `publish_draft` job, which publishes the
+draft once its assets and update feeds are on it, and then PyPI and
+the site follow. GitHub does not start a workflow from a tag
 or a release that a workflow's own token made, which is why one run
 carries the release from the tests' result to the website.
 
@@ -70,7 +70,7 @@ def decide(event: str, *, ref_name: str = '', sha: str = '', reserve: bool = Fal
 
 def released(tag: str, repository: str) -> bool:
     """Whether GitHub already has a release, draft included, or a tag
-    named `tag`. A release that was drafted and never approved still
+    named `tag`. A release that was drafted and never published still
     holds its name, so a rerun does not draft it twice."""
     for command in (['gh', 'release', 'view', tag, '--repo', repository],
                     ['gh', 'api', f'repos/{repository}/git/ref/tags/{tag}']):

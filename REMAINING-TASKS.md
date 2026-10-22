@@ -186,8 +186,9 @@ happens on its own once 6 is done.
    back. (Since 2026-10-21 steps 1, 4, 5 and 6 can be one command:
    `tools/sync_public.sh --release "<title>"` bumps the alpha, syncs,
    and the release workflow drafts the release once the tests pass,
-   then waits for Brandon's approval in the `release` environment
-   before publishing; packaging/README.md, "Releasing by a sync".) (The first release also made the repository public and put
+   and publishes it; it waited for Brandon's approval in the `release`
+   environment until 2026-10-22; packaging/README.md, "Releasing by a
+   sync".) (The first release also made the repository public and put
    branch protection on `main` — a pull request with its checks
    green, administrators enforced, linear history — which is what
    `tools/sync_public.sh` leans on. Both are done and stay done. The

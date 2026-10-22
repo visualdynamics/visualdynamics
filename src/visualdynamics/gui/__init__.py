@@ -244,4 +244,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     # while both still stand.
     app.clipboard().clear()
     app.processEvents()
+    release_widgets(app)
     return code
+
+
+def release_widgets(app: Any) -> int:
+    """Delete the windows Python still owns, one by one, while the
+    application stands, and return how many there were.
+
+    Left to the interpreter's exit, PySide deletes every widget it still
+    owns in one sweep over its own table, in no particular order. A
+    window deleted there takes its children with it, and the sweep then
+    reaches a child it still lists and deletes it again: the process
+    segfaults on its way out. Deleting each window here, through its
+    wrapper, leaves the sweep nothing to do.
+    """
+    # a gate worker segfaulted at exit three times on 2026-10-22, in
+    # PySide's moduleShutdown sweep, on a QListWidget, a QComboBox and a
+    # QRadioButton of dialogs the tests had left open; PLAN.md, "Nothing
+    # of Python's left for PySide's sweep"
+    import gc
+
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    # the cycles first: a window held by nothing but its own connections
+    # goes the way Python owns it, not the sweep's
+    gc.collect()
+    released = 0
+    for widget in app.topLevelWidgets():
+        # through shiboken, not deleteLater: a window Qt deletes leaves
+        # its children's wrappers standing, and the sweep still crashed
+        if (shiboken6.isValid(widget) and shiboken6.ownedByPython(widget)
+                and widget.parent() is None):
+            shiboken6.delete(widget)
+            released += 1
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    return released

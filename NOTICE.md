@@ -17,6 +17,7 @@ besides.
 | pytest, pytest-cov, pytest-xdist, ruff, sdypy-sep005 (dev only) | MIT | test suite only; nothing ships |
 | escdf, the Engineering Sciences Common Data Format's reference implementation (dev only; not on PyPI, so CI installs it from its repository in a step of its own and it is not in the package metadata) | BSD-3-Clause | test suite only, as the format's agreement oracle; nothing of it ships. Its **specification files** do ship, vendored as `io/escdf_specifications/*.txt` with their `LICENSE` beside them, so the reader here knows the standard's types |
 | **PySide6 (Qt for Python)** | **LGPL-3.0** | see below |
+| **shiboken6**, PySide6's binding layer, installed with it | **LGPL-3.0** (offered as LGPL-3.0, GPL-2.0 or GPL-3.0; used under the LGPL) | the same as PySide6: see below |
 | **OpenCASCADE** 8.0.1 (via cadquery-ocp/OCP, Apache-2.0 bindings), and the libraries its wheel carries | **LGPL-2.1 with the Open CASCADE exception**; the others as listed below | see below |
 | **libquadmath**, inside the numpy and scipy wheels | **LGPL-2.1-or-later** | see below |
 | **FFmpeg** (libavcodec, libavformat, libavutil, libswscale, libswresample), inside the PySide6 wheels for Qt Multimedia | **LGPL-2.1-or-later** — built without its GPL parts (no libx264), as the libraries report of themselves | the same as Qt's: shared libraries, shipped unmodified and replaceable; source at ffmpeg.org (n7.1.5) |

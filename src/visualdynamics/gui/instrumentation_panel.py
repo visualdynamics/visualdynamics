@@ -7,7 +7,8 @@ the selection does while the pane is open; the pane names them. The
 element groups sensors may go on are checked here, and the surfaces
 of the model are drawn in the view, where a click on one leaves it out
 or puts it back. The numbers of tri-axial and uni-axial accelerometers
-are typed, and the sensors Effective Independence chooses are drawn on
+are typed, and so is how far a sensor stays from a surface's edge, in
+the display unit system; the sensors Effective Independence chooses are drawn on
 the model as they change, each tri-axial one as a triad and each
 uni-axial one as an arrow, with how well they tell the modes apart: the
 worst off-diagonal term of the auto-MAC at the chosen channels and the
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.instrumentation import EDGE_ANGLE
-from .editors import DoubleSpinBox, SpinBox, commit_on_enter, number_box
+from .editors import LENGTH_DECIMALS, DoubleSpinBox, SpinBox, commit_on_enter, number_box
 from .settings_panel import panel_grid
 
 # Brandon, 2026-10-21: plan the accelerometers of a modal or vibration
@@ -52,8 +53,9 @@ class InstrumentationPanel(QWidget):
     #: the counts or the uni-axial directions changed: the window chooses
     #: the sensors again
     changed = Signal()
-    #: the element groups or the edge angle changed: the window finds the
-    #: places and reads the modes again, then chooses
+    #: the element groups, the edge angle or the distance from the edges
+    #: changed: the window finds the places and reads the modes again,
+    #: then chooses
     places_changed = Signal()
     #: every surface put back, or every one left out
     all_asked = Signal()
@@ -97,6 +99,12 @@ class InstrumentationPanel(QWidget):
             tip='Two neighboring faces are on one surface while their normals are within '
                 'this angle: a curved surface is one surface however far it turns. Raise it '
                 'for a coarse curved mesh that splits into strips.')
+        # Brandon, 2026-10-22: stay a quarter of an inch from the edges by
+        # default, shown in the display unit system
+        self.edge_distance: DoubleSpinBox = number_box(
+            0.0, 1e9, value=0.0, decimals=LENGTH_DECIMALS,
+            tip='How near a sensor may be to the edge of its surface: a sharp edge, a free '
+                'edge, a hole or where parts touch. 0 allows a sensor on the edge.')
         self.triaxial: SpinBox = SpinBox()
         self.triaxial.setRange(0, 100000)
         self.triaxial.setToolTip('How many tri-axial accelerometers: placed first')
@@ -110,21 +118,22 @@ class InstrumentationPanel(QWidget):
         self.axes.setToolTip('Which way a uni-axial accelerometer may point, in its '
                              "place's own system: Z is out of the surface")
         for row, (label, widget) in enumerate(
-                (('Surface edge', self.edge_angle), ('Tri-axial', self.triaxial),
-                 ('Uni-axial', self.uniaxial), ('Uni-axial along', self.axes)), start=7):
+                (('Surface edge', self.edge_angle), ('Away from edges', self.edge_distance),
+                 ('Tri-axial', self.triaxial), ('Uni-axial', self.uniaxial),
+                 ('Uni-axial along', self.axes)), start=7):
             grid.addWidget(QLabel(label), row, 0)
             grid.addWidget(widget, row, 1)
         self.name_label: QLabel = QLabel('Name')
         self.name: QLineEdit = QLineEdit()
         self.name.setToolTip("The start of the three names Keep adds: '... Geometry', "
                              "'... Channels' and '... Shapes'")
-        grid.addWidget(self.name_label, 11, 0)
-        grid.addWidget(self.name, 11, 1)
+        grid.addWidget(self.name_label, 12, 0)
+        grid.addWidget(self.name, 12, 1)
         self.reading_label: QLabel = QLabel()
         self.reading_label.setWordWrap(True)
         self.reading_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
-        grid.addWidget(self.reading_label, 12, 0, 1, 2)
+        grid.addWidget(self.reading_label, 13, 0, 1, 2)
         buttons = QHBoxLayout()
         self.keep_button: QPushButton = QPushButton('Keep')
         self.keep_button.setToolTip('Add the experimental geometry, the channel table '
@@ -134,13 +143,14 @@ class InstrumentationPanel(QWidget):
         self.close_button.setToolTip('Put the pane away; nothing is added')
         buttons.addWidget(self.keep_button)
         buttons.addWidget(self.close_button)
-        grid.addLayout(buttons, 13, 0, 1, 2)
-        grid.setRowStretch(14, 1)
-        commit_on_enter(self.triaxial, self.uniaxial, self.edge_angle)
+        grid.addLayout(buttons, 14, 0, 1, 2)
+        grid.setRowStretch(15, 1)
+        commit_on_enter(self.triaxial, self.uniaxial, self.edge_angle, self.edge_distance)
         self.triaxial.valueChanged.connect(lambda _value: self.changed.emit())
         self.uniaxial.valueChanged.connect(lambda _value: self.changed.emit())
         self.axes.currentIndexChanged.connect(lambda _index: self.changed.emit())
         self.edge_angle.valueChanged.connect(lambda _value: self.places_changed.emit())
+        self.edge_distance.valueChanged.connect(lambda _value: self.places_changed.emit())
         self.all_button.clicked.connect(self.all_asked.emit)
         self.none_button.clicked.connect(self.none_asked.emit)
         self.groups.itemChanged.connect(lambda _item: self.places_changed.emit())
@@ -189,6 +199,14 @@ class InstrumentationPanel(QWidget):
         """The directions a uni-axial sensor may measure: 2, the normal,
         or 0, 1 and 2."""
         return tuple(self.axes.currentData())
+
+    def show_edge_distance(self, value: float, unit: str) -> None:
+        """Show the distance from the edges, `value` in `unit` ('' for a
+        geometry whose units are not defined), without reporting it."""
+        self.edge_distance.blockSignals(True)
+        self.edge_distance.setSuffix(f' {unit}' if unit else '')
+        self.edge_distance.setValue(value)
+        self.edge_distance.blockSignals(False)
 
     def show_modes(self, text: str) -> None:
         """Name the modes measured."""

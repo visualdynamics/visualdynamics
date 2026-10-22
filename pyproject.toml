@@ -79,6 +79,10 @@ dependencies = [
     # pyvista's own cap is what decides which VTK is installed.
     "vtk",
     "PySide6",
+    # PySide6's own binding layer (LGPL-3.0, the same terms), installed
+    # with it: imported by name for the exit's window release
+    # (gui.release_widgets), so declared rather than relied on arriving
+    "shiboken6",
     "pyqtgraph",
     "openpyxl",
     # A channel table is a spreadsheet, and a DataFrame is what carries a

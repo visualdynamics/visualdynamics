@@ -10,8 +10,8 @@
 # __version__ to the next alpha (tools/next_alpha.py), commits that and
 # pushes this repository's main, then syncs. Once the tests pass on the
 # public main, the release workflow sees a version with no release yet
-# and releases it, waiting for the maintainer's approval on GitHub
-# before it publishes (packaging/release_decision.py). It refuses
+# and releases it, published with no one to wait for (Brandon,
+# 2026-10-22; packaging/release_decision.py). It refuses
 # uncommitted work: a release is what is committed, and nothing else.
 #
 # Builds the public tree into the clone, commits it on a branch named
@@ -45,7 +45,7 @@ if (( RELEASE )); then
     git commit -q -m "$version" -- src/visualdynamics/__init__.py
     git push -q origin main
     TITLE="$version: $TITLE"
-    echo "releasing $version: once the tests pass, approve it on GitHub"
+    echo "releasing $version: it publishes itself once the tests pass on main"
 fi
 IDENT=(-c user.email=269075368+bzwink@users.noreply.github.com -c user.name="Brandon Zwink")
 

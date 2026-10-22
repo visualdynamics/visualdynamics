@@ -1867,40 +1867,50 @@ def _draw_coordinate_systems(painter, color):
     painter.drawEllipse(origin, 5, 5)
 
 
+def _depth(painter, color, *edges):
+    """The edges a solid's face is extruded along, thinner than the face
+    so they read as going back.
+
+    `_element_shape` leaves the pen off to fill its node dots, so these
+    take a pen of their own.
+    """
+    # drawn with the dots' empty pen they were invisible: the tet wore
+    # the triangle's icon and the brick the quad's (Brandon, 2026-10-22)
+    painter.setPen(_pen(color, 5))
+    for start, end in edges:
+        painter.drawLine(QPointF(*start), QPointF(*end))
+
+
 def _draw_tet(painter, color):
-    """A tetrahedron: a triangle with its apex drawn to the far corner."""
+    """A tetrahedron: a triangle with its far corner inside, joined to
+    the three."""
     _element_shape(painter, color, [(32, 10), (54, 50), (10, 50)])
-    painter.drawLine(QPointF(32, 10), QPointF(34, 36))
-    painter.drawLine(QPointF(54, 50), QPointF(34, 36))
-    painter.drawLine(QPointF(10, 50), QPointF(34, 36))
+    _depth(painter, color, ((32, 10), (34, 36)), ((54, 50), (34, 36)),
+           ((10, 50), (34, 36)))
 
 
 def _draw_wedge(painter, color):
-    """A wedge: a triangle extruded sideways."""
-    _element_shape(painter, color, [(12, 20), (28, 48), (12, 48)])
-    painter.drawLine(QPointF(12, 20), QPointF(40, 14))
-    painter.drawLine(QPointF(28, 48), QPointF(54, 42))
-    painter.drawLine(QPointF(12, 48), QPointF(40, 42))
-    painter.drawLine(QPointF(40, 14), QPointF(54, 42))
-    painter.drawLine(QPointF(40, 14), QPointF(40, 42))
-    painter.drawLine(QPointF(40, 42), QPointF(54, 42))
+    """A wedge: an upright triangle extruded back and to the right, a
+    triangular prism, the hidden edges left out as the brick leaves
+    them."""
+    # Brandon, 2026-10-22: the old sideways ramp did not read as a wedge
+    _element_shape(painter, color, [(24, 24), (40, 54), (8, 54)])
+    _depth(painter, color, ((24, 24), (38, 10)), ((40, 54), (54, 40)),
+           ((38, 10), (54, 40)))
 
 
 def _draw_hex(painter, color):
     """A brick: a square with its back face offset."""
     _element_shape(painter, color, [(10, 22), (42, 22), (42, 54), (10, 54)])
-    painter.drawLine(QPointF(10, 22), QPointF(22, 10))
-    painter.drawLine(QPointF(42, 22), QPointF(54, 10))
-    painter.drawLine(QPointF(42, 54), QPointF(54, 42))
-    painter.drawLine(QPointF(22, 10), QPointF(54, 10))
-    painter.drawLine(QPointF(54, 10), QPointF(54, 42))
+    _depth(painter, color, ((10, 22), (22, 10)), ((42, 22), (54, 10)),
+           ((42, 54), (54, 42)), ((22, 10), (54, 10)), ((54, 10), (54, 42)))
 
 
 def _draw_pyramid(painter, color):
     """A pyramid: a quad base with an apex."""
     _element_shape(painter, color, [(10, 50), (42, 50), (54, 40), (22, 40)])
-    for corner in ((10, 50), (42, 50), (54, 40), (22, 40)):
-        painter.drawLine(QPointF(*corner), QPointF(32, 10))
+    _depth(painter, color, *(((corner), (32, 10))
+                             for corner in ((10, 50), (42, 50), (54, 40), (22, 40))))
 
 
 def _draw_elements(painter, color):

@@ -71,9 +71,11 @@ def test_a_lone_object_offers_its_own_acts_on_the_plotsbar_acts(window, pump):
     assert plain(button.toolTip()).startswith('Integrate — '), \
         'the verb leads the tooltip, since the icon is all that shows'
     _select(window, pump, 'Modes')
-    # no verb applies to a shape set alone, but what is drawn copies —
-    # on whichever bar is up
-    assert bar_acts(window.data_pane) + bar_acts(window.scene) == ['Copy']
+    # a shape set alone is its mode table and auto-MAC, neither the
+    # plot nor the 3-D view: the 3-D view's Copy used to sit on that
+    # view's bar while it was hidden, where nobody could press it
+    assert not window.scene.isVisibleTo(window) and not window.data_pane.isVisibleTo(window)
+    assert bar_acts(window.data_pane) + bar_acts(window.scene) == []
 
 
 def test_a_combination_offers_only_what_it_can_take_together(window, pump):

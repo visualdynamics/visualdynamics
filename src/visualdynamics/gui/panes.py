@@ -42,6 +42,7 @@ from .averaging_panel import AveragingPanel
 from .editors import SpinBox
 from .filter_panel import FilterPanel
 from .icons import child_icon, control_icon
+from .instrumentation_panel import InstrumentationPanel
 from .mate_panel import MatePanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
@@ -2030,13 +2031,16 @@ class ScenePane(QWidget):
         self.mate_panel.hide()
         self.pattern_panel: PatternPanel = PatternPanel()
         self.pattern_panel.hide()
+        #: Plan Instrumentation's modes, counts and reading (2026-10-21)
+        self.instrumentation_panel: InstrumentationPanel = InstrumentationPanel()
+        self.instrumentation_panel.hide()
         # the panels in a column beside the view, the two in a splitter
         # the user can drag (Brandon, 2026-10-20: the pane's width was
         # the panels' own and could not be changed); the column shows
         # while any panel does and keeps the width it was dragged to
         self.side_panels: tuple = (self.rigid_panel, self.mesh_panel, self.merge_panel,
                                    self.mesh_solids_panel, self.mate_panel,
-                                   self.pattern_panel)
+                                   self.pattern_panel, self.instrumentation_panel)
         self.side: QWidget = QWidget()
         column = QVBoxLayout(self.side)
         column.setContentsMargins(0, 0, 0, 0)

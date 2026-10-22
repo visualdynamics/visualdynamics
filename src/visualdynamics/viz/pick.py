@@ -14,6 +14,7 @@ dependency.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
@@ -350,3 +351,46 @@ class EntityPicker:
         distances = np.linalg.norm(screen - cursor, axis=1)
         nearest = _nearest_candidate(distances, depth, tolerance, tie)
         return None if nearest is None else int(self.geometry.cs_id[nearest])
+
+
+class FacePicker:
+    """Which of a set of polygons is under a pixel: the front-most one
+    whose projected interior holds it.
+
+    `polygons` are rows into the projector's points, each listed in
+    order around it, and `owner` names what each one belongs to; a pick
+    returns the owner. Built once, since fanning tens of thousands of
+    faces into triangles is the slow part; a pick projects the points
+    again only when the camera has moved.
+    """
+
+    def __init__(self, projector: ScreenProjector, polygons: Sequence[Sequence[int]],
+                 owner: Sequence[int]) -> None:
+        self.projector: ScreenProjector = projector
+        triangles, owners = [], []
+        for rows, who in zip(polygons, owner, strict=True):
+            for a, b in pairwise(rows[1:]):
+                triangles.append((rows[0], a, b))
+                owners.append(who)
+        self.triangles: np.ndarray = (np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+                                      if triangles else np.empty((0, 3), dtype=np.int64))
+        self.owner: np.ndarray = np.asarray(owners, dtype=np.int64)
+
+    def pick(self, x: float, y: float) -> int | None:
+        """The owner of the front-most polygon under the device pixel
+        `(x, y)`, or None."""
+        if not len(self.triangles):
+            return None
+        screen, depth = self.projector.screen()
+        cursor = np.array([float(x), float(y)])
+        a, b, c = (screen[self.triangles[:, i]] for i in range(3))
+        d1 = _cross2(b - a, cursor - a)
+        d2 = _cross2(c - b, cursor - b)
+        d3 = _cross2(a - c, cursor - c)
+        inside = (((d1 >= 0) & (d2 >= 0) & (d3 >= 0))
+                  | ((d1 <= 0) & (d2 <= 0) & (d3 <= 0)))
+        hits = np.flatnonzero(inside)
+        if not len(hits):
+            return None
+        center_depth = depth[self.triangles[hits]].mean(axis=1)
+        return int(self.owner[hits[np.argmin(center_depth)]])

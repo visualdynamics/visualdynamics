@@ -247,6 +247,28 @@ ROLE_PENCIL_ON = Qt.ItemDataRole.UserRole + 3       # column 1: its table open?
 #: the marks inside them
 MERGE_OPACITY = 0.3
 
+#: how far, in points, the cursor may move between press and release for
+#: Plan Instrumentation to read a click on a surface rather than a drag
+#: that turns the view
+PLAN_CLICK = 4.0
+
+
+def _mode_runs(modes) -> str:
+    """Modes, by index, named by number and run together where they
+    follow on: '7–9, 11'."""
+    runs: list[list[int]] = []
+    for n in sorted(int(m) + 1 for m in modes):
+        if runs and n == runs[-1][-1] + 1:
+            runs[-1].append(n)
+        else:
+            runs.append([n])
+    return ', '.join(f'{r[0]}' if len(r) == 1 else f'{r[0]}–{r[-1]}' for r in runs)
+
+
+def _rgb(color: str) -> np.ndarray:
+    """A '#rrggbb' theme color as three bytes."""
+    return np.array([int(color[k:k + 2], 16) for k in (1, 3, 5)], dtype=np.uint8)
+
 # room a unit cell needs beyond its text: the drop-down arrow and padding
 COMBO_CELL_PADDING = 44
 
@@ -1017,6 +1039,21 @@ class MainWindow(QMainWindow):
         self.scene.mate_panel.all_asked.connect(lambda: self._mate_side_all(True))
         self.scene.mate_panel.none_asked.connect(lambda: self._mate_side_all(False))
         self.scene.mate_panel.close_asked.connect(self.close_mate_pane)
+        # Plan Instrumentation: a count or a direction chooses again, a
+        # mode or a group finds the places again; both a moment after the
+        # last change, so holding an arrow does not compute every step
+        self._plan_timer = QTimer(self)
+        self._plan_timer.setSingleShot(True)
+        self._plan_timer.setInterval(150)
+        self._plan_timer.timeout.connect(self._plan_now)
+        panel = self.scene.instrumentation_panel
+        panel.changed.connect(self._plan_timer.start)
+        panel.places_changed.connect(self._plan_timer.start)
+        panel.keep_asked.connect(self._plan_keep)
+        panel.all_asked.connect(lambda: self._plan_all_surfaces(True))
+        panel.none_asked.connect(lambda: self._plan_all_surfaces(False))
+        panel.close_asked.connect(self.close_instrumentation_pane)
+        self._plan_observers: list = []
         #: the preview waits for the size box to settle: each change
         #: meshed at once, and at a fine size a spin of the box was one
         #: mesh and one drawing per step on this thread (Brandon,
@@ -3729,7 +3766,7 @@ class MainWindow(QMainWindow):
             self.tree.blockSignals(True)
             item.setSelected(False)
             self.tree.blockSignals(False)
-            self.render_current()
+            self._show_picks()
             return
         adding = self._adding_to_selection()
         if not adding:
@@ -3778,6 +3815,18 @@ class MainWindow(QMainWindow):
                 self.tree.setCurrentItem(
                     item, 0, QItemSelectionModel.SelectionFlag.NoUpdate)
             self.tree.blockSignals(False)
+        self._show_picks()
+
+    def _show_picks(self) -> None:
+        """Show what a grid pick selected. With Plan Instrumentation open,
+        modes of its shape set picked are the modes it plans for, and
+        anything else puts it away."""
+        planning = self.__dict__.get('_planning')
+        if planning is not None and not planning['holding']:
+            if self._planning_selection_holds(planning):
+                self._plan_now()
+                return
+            self.close_instrumentation_pane(redraw=False)
         self.render_current()
 
     def current_reference(self) -> tuple[str | None, Any, Any]:
@@ -4156,6 +4205,8 @@ class MainWindow(QMainWindow):
          'merge_nodes_act'),
         ('align_meshes', 'Align Meshes', 'align_meshes', 'align_meshes_act'),
         ('mate_surfaces', 'Mate Surfaces', 'mate_surfaces', 'mate_surfaces_act'),
+        ('plan_instrumentation', 'Plan Instrumentation', 'plan_instrumentation',
+         'plan_instrumentation_act'),
         ('add_plane', 'Add Plane', 'plane', 'add_plane_act'),
         ('add_block', 'Add Block', 'block', 'add_block_act'),
         ('add_solid_block', 'Add Solid Block', 'solid_block',
@@ -4274,10 +4325,20 @@ class MainWindow(QMainWindow):
                          applicable[verb])
                         for verb_, label, icon, handler in self.ACTS
                         if verb_ == verb and verb in applicable]
+            references = self.selected_references()
             names = list(dict.fromkeys(
-                name for kind, name, _obj, _detail
-                in self.selected_references()
+                name for kind, name, _obj, _detail in references
                 if kind in ('object', 'record')))
+            # modes picked in one shape set's grid: the modes a test is
+            # planned for (Brandon, 2026-10-21), and nothing else is
+            # offered on a mode pick
+            modes_of = {name for kind, name, _obj, _detail in references if kind == 'mode'}
+            if not names and len(modes_of) == 1:
+                name = next(iter(modes_of))
+                applicable = dict(self.project.selection_verbs(name))
+                return [(verb, label, icon, getattr(self, handler), applicable[verb])
+                        for verb, label, icon, handler in self.ACTS
+                        if verb == 'plan_instrumentation' and verb in applicable]
         names = [name for name in names if name in self.objects]
         if not names:
             return []
@@ -4297,14 +4358,24 @@ class MainWindow(QMainWindow):
 
     def _offer_acts(self):
         """Put the selection's acts on the bar that is up — the plot's
-        when data is drawn, the 3-D view's otherwise — and take them
-        off the other. Nothing during a fit, which owns the bar."""
+        when data is drawn, the 3-D view's otherwise, the table's when
+        the table is all there is — and take them off the others.
+        Nothing during a fit, which owns the bar."""
+        from .panes import offer_acts
+
         acts = [] if self.fit is not None else self.acts_for()
         plot_up = self.data_pane.isVisibleTo(self)
+        # a shape set selected alone is its mode table and auto-MAC,
+        # neither the plot nor the 3-D view: its acts went on the hidden
+        # 3-D view's bar, and Plan Instrumentation was nowhere to be
+        # seen (Brandon, 2026-10-21, on a cone's modes)
+        table_only = (not plot_up and not self.scene.isVisibleTo(self)
+                      and self.table_pane.isVisibleTo(self))
         # and whatever is drawn can be copied (Brandon, 2026-09-24): the
         # plot or the stage when the plot pane is up, the 3-D view
         # otherwise — last on the bar, after the selection's own acts
         drawn = (self.fit is None and not self.test_item.isSelected()
+                 and not table_only
                  and any(kind in ('object', 'record') for kind, _name, _obj,
                          _detail in self.selected_references()))
         if drawn:
@@ -4312,7 +4383,11 @@ class MainWindow(QMainWindow):
             acts = acts + [copy_act(self.data_pane, 'plot') if plot_up
                            else copy_act(self.scene, '3-D view')]
         self.data_pane.show_acts(acts if plot_up else [])
-        self.scene.show_acts(([] if plot_up else acts) + self._movie_acts())
+        self.scene.show_acts(([] if plot_up or table_only else acts) + self._movie_acts())
+        offer_acts(self.table_bar, self.__dict__.setdefault('_table_acts', {}),
+                   acts if table_only else [])
+        if table_only and acts:
+            self.table_bar.show()
 
     def _movie_acts(self):
         """Save Animation on the 3-D view's bar while something there is
@@ -8944,6 +9019,12 @@ class MainWindow(QMainWindow):
             self.close_mesh_solids_pane(redraw=False)
         if self.__dict__.get('_patterning') is not None:
             self.close_pattern_pane(redraw=False)
+        # the plan belongs to the shape set it was opened on: picking its
+        # modes plans for them, picking anything else puts it away
+        planning = self.__dict__.get('_planning')
+        if (planning is not None and not planning['holding']
+                and not self._planning_selection_holds(planning)):
+            self.close_instrumentation_pane(redraw=False)
         # Making the owner row current means "the whole object", so its
         # grid picks are released — a cell selected minutes ago must not
         # silently turn a later delete-the-object into delete-that-record.
@@ -8989,7 +9070,7 @@ class MainWindow(QMainWindow):
             # user. One render, after the loop, shows the same final
             # state (Brandon watched the storm, 2026-08-23).
             return
-        self.render_current()
+        self._show_picks()
 
     def _follow_picked_groups(self) -> None:
         """A table opened from element group rows holds the groups picked
@@ -14164,6 +14245,428 @@ class MainWindow(QMainWindow):
             self.render_current()
         else:
             self._draw_mate_marks()
+
+    # ---- Plan Instrumentation ------------------------------------------------
+
+    def plan_instrumentation_act(self) -> None:
+        """Open Plan Instrumentation on the selected shape set, on the
+        modes picked in its grid or, with none picked, on every mode
+        above 0 Hz."""
+        from ..project import _plannable
+
+        references = self.selected_references()
+        names = {name for kind, name, _obj, _detail in references if kind in ('object', 'mode')}
+        name = next(iter(names)) if len(names) == 1 else None
+        if name is None or not _plannable(self.project, self.objects.get(name)):
+            self._show_status('Select finite element modes on a model with solids, plates '
+                              'or beams to plan the instrumentation for')
+            return
+        self._open_planning(name)
+
+    def _open_planning(self, name: str) -> None:
+        from ..core.geometry import ELEMENT_TYPES
+
+        geometry_name, geometry = self.project.geometry_for(name)
+        if self.editing is not None:
+            self.stop_editing()
+        if self._mesh is not None:
+            self.close_mesh_pane()
+        if self._merging is not None:
+            self.close_merge_pane(redraw=False)
+        if self.__dict__.get('_mating') is not None:
+            self.close_mate_pane(redraw=False)
+        if self.__dict__.get('_meshing') is not None:
+            self.close_mesh_solids_pane(redraw=False)
+        # the plan is drawn on the model: the 3-D view comes up, with the
+        # pane beside it, whatever the shape set was showing
+        self._show_views(three_d=True)
+        names = dict(zip((int(g) for g in geometry.group_id), geometry.group_name))
+        kinds: dict[int, set] = {}
+        for code, group in zip(geometry.elem_type, geometry.elem_group, strict=True):
+            kinds.setdefault(int(group), set()).add(ELEMENT_TYPES.get(int(code), ('', 0, ''))[2])
+        groups = [(g, str(names.get(g, '')).strip() or f'element group {g}')
+                  for g in sorted(kinds) if kinds[g] & {'volume', 'face', 'line'}]
+        self._planning = {'shapes': name, 'geometry': geometry_name, 'skins': {},
+                          'places': None, 'blocks': None, 'off': set(), 'plan': None,
+                          'holding': False, 'framed': False, 'picker': None,
+                          'hovered': None, 'pressed': None, 'mesh': None}
+        modes = self._planning_modes()
+        # enough tri-axial sensors to measure every mode, and one more
+        triaxial = -(-len(modes) // 3) + 1
+        panel = self.scene.instrumentation_panel
+        panel.open_for(f'{name}, on {geometry_name}', groups, triaxial, 0, f'{name} Plan')
+        panel.show()
+        self._begin_plan_clicks()
+        self._plan_now()
+
+    def _planning_modes(self) -> list[int]:
+        """The modes measured: those picked in the shape set's grid, or
+        every one above 0 Hz."""
+        from ..core.instrumentation import elastic
+
+        name = self._planning['shapes']
+        picked = sorted(int(detail) for kind, owner, _obj, detail in self.selected_references()
+                        if kind == 'mode' and owner == name)
+        return picked or elastic(self.objects[name])
+
+    def _planning_selection_holds(self, planning) -> bool:
+        """Whether the selection is still the shape set the plan is for,
+        whole or by its modes: the pane stays open and plans for them."""
+        references = self.selected_references()
+        return bool(references) and all(
+            kind in ('object', 'mode') and owner == planning['shapes']
+            for kind, owner, _obj, _detail in references)
+
+    def _planning_skin(self):
+        """The model's surfaces at the pane's edge angle, found once."""
+        from ..core.instrumentation import skin
+
+        planning = self._planning
+        angle = float(self.scene.instrumentation_panel.edge_angle.value())
+        if angle not in planning['skins']:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                found = skin(self.objects[planning['geometry']], edge_angle=angle)
+            finally:
+                QApplication.restoreOverrideCursor()
+            # a surface's number is its place in this angle's split: the
+            # ones left out at another angle mean nothing here
+            if planning['skins']:
+                planning['off'] = set()
+            planning['skins'] = {angle: found}
+        return angle, planning['skins'][angle]
+
+    def _planning_kept(self, found, groups) -> list[int]:
+        """The surfaces sensors may go on: in a checked group and not
+        clicked out."""
+        groups = set(groups)
+        off = self._planning['off']
+        return [s.id for s in found if s.group in groups and s.id not in off]
+
+    def _planning_places(self, modes, groups):
+        """The places and the modes read in their directions, for these
+        modes, element groups and surfaces: each found once and kept
+        while it stays the same, so a change of count only chooses
+        again and a change of modes does not find the places again."""
+        from ..core.instrumentation import candidates, local_shapes
+
+        planning = self._planning
+        angle, found = self._planning_skin()
+        kept = self._planning_kept(found, groups)
+        key = (angle, tuple(groups), tuple(kept))
+        if planning['places'] is None or planning['places'][0] != key:
+            places = candidates(self.objects[planning['geometry']], groups, kept,
+                                edge_angle=angle, found=found)
+            planning['places'] = (key, places)
+            planning['blocks'] = None
+        places = planning['places'][1]
+        if planning['blocks'] is None or planning['blocks'][0] != (key, tuple(modes)):
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                blocks, measured = local_shapes(self.objects[planning['shapes']], modes,
+                                                places, self.objects[planning['geometry']])
+            finally:
+                QApplication.restoreOverrideCursor()
+            planning['blocks'] = ((key, tuple(modes)), blocks, measured)
+        return places, planning['blocks'][1], planning['blocks'][2]
+
+    def _plan_modes_text(self, modes) -> str:
+        """The modes measured, named for the pane: their numbers, run
+        together where they follow on, and their frequencies."""
+        from ..core.instrumentation import elastic
+
+        shapes = self.objects[self._planning['shapes']]
+        named = _mode_runs(modes)
+        low, high = (float(shapes.frequency[min(modes, key=lambda m: shapes.frequency[m])]),
+                     float(shapes.frequency[max(modes, key=lambda m: shapes.frequency[m])]))
+        how = ('every mode above 0 Hz; pick modes in the shape set to measure others'
+               if list(modes) == elastic(shapes) else 'the modes picked')
+        return (f'Measuring {len(modes)} mode{"s" * (len(modes) != 1)} ({named}), '
+                f'{low:,.4g} to {high:,.4g} Hz: {how}.')
+
+    def _plan_now(self) -> None:
+        """Choose the sensors for what the pane and the selection say,
+        draw them and read the plan; a plan that cannot be made says why
+        and keeps Keep off."""
+        from ..core.instrumentation import assemble, effective_independence, lowest_first
+
+        planning = self.__dict__.get('_planning')
+        if planning is None:
+            return
+        panel = self.scene.instrumentation_panel
+        modes, groups = self._planning_modes(), panel.picked_groups
+        planning['plan'] = None
+        panel.show_modes(self._plan_modes_text(modes) if modes else
+                         'Every mode is a rigid-body mode at 0 Hz: pick modes to measure.')
+        _angle, found = self._planning_skin()
+        panel.show_surfaces(len(self._planning_kept(found, groups)),
+                            len([s for s in found if s.group in set(groups)]))
+        if not modes or not groups:
+            panel.show_reading('Pick modes to measure and check an element group to place '
+                               'sensors on.', False)
+            self._draw_plan(None)
+            return
+        places, blocks, measured = self._planning_places(modes, groups)
+        try:
+            placement = effective_independence(
+                blocks, panel.triaxial.value(), panel.uniaxial.value(),
+                axes=panel.uniaxial_axes, allowed=measured, sources=places.source,
+                lowest=lowest_first(self.objects[planning['shapes']], modes))
+        except ValueError as why:
+            text = str(why)
+            panel.show_reading(f'No plan: {text[:1].lower()}{text[1:]}.', False)
+            self._draw_plan(None)
+            return
+        plan = assemble(self.objects[planning['shapes']], modes, places, blocks, placement)
+        planning['plan'] = plan
+        mac = plan.shapes.auto_mac()
+        worst = float((mac - np.diag(np.diag(mac))).max()) if len(modes) > 1 else 0.0
+        channels = plan.channels.num_channels
+        # fewer directions than modes: planned for the lowest, said so,
+        # and Keep still offered; the shapes kept hold every mode, so
+        # their auto-MAC shows which cannot be told apart
+        short = ''
+        if len(placement.planned) < len(modes):
+            left = [m for k, m in enumerate(modes) if k not in set(placement.planned.tolist())]
+            short = (f' Warning: {len(placement.planned)} directions for {len(modes)} modes, '
+                     f'planned for the lowest {len(placement.planned)}; modes '
+                     f'{_mode_runs(left)} cannot be told apart by these sensors.')
+        panel.show_reading(
+            f'{len(placement.triaxial)} tri-axial and {len(placement.uniaxial)} uni-axial '
+            f'sensors, {channels} channel{"s" * (channels != 1)} on '
+            f'{plan.geometry.num_nodes} of {len(places.source):,} places. Worst '
+            f'off-diagonal MAC {worst:.2f}; condition number {placement.condition:.3g}.'
+            + short, True)
+        self._draw_plan(plan)
+
+    def _plan_surface_colors(self) -> np.ndarray:
+        """Each face's color: the surfaces sensors may go on in the solid
+        color, the rest muted, the one under the cursor lit."""
+        planning = self._planning
+        colors = resolve_theme(self.theme_name)
+        owner = planning['mesh']['owner']
+        _angle, found = self._planning_skin()
+        groups = set(self.scene.instrumentation_panel.picked_groups)
+        kept = np.isin(owner, self._planning_kept(found, groups))
+        rgb = np.where(kept[:, None], _rgb(colors['scene_solid']), _rgb(colors['scene_muted']))
+        if planning['hovered'] is not None:
+            rgb[owner == planning['hovered']] = _rgb(colors['scene_highlight'])
+        return rgb.astype(np.uint8)
+
+    def _draw_plan(self, plan) -> None:
+        """The model's surfaces, those sensors may go on in the solid
+        color and those left out muted, any beams, and the planned
+        sensors on them: each tri-axial one a triad of its place's axes,
+        each uni-axial one an arrow (`add_dof_arrows`, X red, Y green,
+        Z blue, Z out of the surface)."""
+        import pyvista as pv
+
+        from ..core.geometry import ELEMENT_TYPES
+        from ..viz.geometry import add_dof_arrows, display_points
+        from ..viz.pick import FacePicker, ScreenProjector
+
+        planning = self.__dict__.get('_planning')
+        if planning is None or self.scene.plotter is None:
+            return
+        geometry = self.objects[planning['geometry']]
+        plotter = self.scene.plotter
+        colors = resolve_theme(self.theme_name)
+        camera = plotter.camera_position
+        plotter.clear()
+        plotter.set_background(colors['scene_background'], top=colors['scene_background_top'])
+        points, axis_unit = display_points(geometry, self.unit_system)
+        points = np.asarray(points, dtype=float)
+        self.scene.axis_unit = axis_unit
+        _angle, found = self._planning_skin()
+        rows = {int(n): k for k, n in enumerate(geometry.node_id)}
+        polygons = [[rows[n] for n in face] for s in found for face in s.faces]
+        owner = np.array([s.id for s in found for _face in s.faces], dtype=np.int64)
+        planning['mesh'] = {'owner': owner}
+        if polygons:
+            flat = np.concatenate([[len(p), *p] for p in polygons]).astype(np.int64)
+            mesh = pv.PolyData(points, flat)
+            mesh.cell_data['colors'] = self._plan_surface_colors()
+            # drawn as the geometry draws its faces, edges and all, so the
+            # parts read; the colors say which surfaces sensors may go on
+            plotter.add_mesh(mesh, scalars='colors', rgb=True, name='plan-surfaces',
+                             specular=0.3, specular_power=25, show_edges=True,
+                             pickable=False, reset_camera=False, render=False)
+            planning['mesh']['mesh'] = mesh
+        planning['picker'] = FacePicker(ScreenProjector(plotter.renderer, points),
+                                        polygons, owner)
+        lines = [r for r, code in enumerate(geometry.elem_type)
+                 if ELEMENT_TYPES.get(int(code), ('', 0, ''))[2] == 'line']
+        if lines:
+            add_geometry(plotter, geometry, unit_system=self.unit_system,
+                         text_color=colors['scene_text'], entities={'elements': lines})
+        if plan is not None:
+            add_dof_arrows(plotter, plan.geometry, plan.channels.dof_strings(),
+                           unit_system=self.unit_system, name='plan')
+        annotate_scene(plotter, axis_unit, colors, self.scene.bounds_visible,
+                       self.scene.orientation_visible)
+        if planning['framed']:
+            plotter.camera_position = camera
+        else:
+            self.scene.set_home_view(geometry.opening_view, geometry)
+            self.scene.frame()
+            planning['framed'] = True
+        plotter.render()
+
+    def plan_surface_at(self, x: float, y: float) -> int | None:
+        """The surface under the device pixel `(x, y)` that a click can
+        leave out or put back, or None: one of a checked element group."""
+        planning = self.__dict__.get('_planning')
+        if planning is None or planning['picker'] is None:
+            return None
+        picked = planning['picker'].pick(x, y)
+        if picked is None:
+            return None
+        _angle, found = self._planning_skin()
+        groups = set(self.scene.instrumentation_panel.picked_groups)
+        return picked if any(s.id == picked and s.group in groups for s in found) else None
+
+    def toggle_plan_surface(self, surface: int) -> None:
+        """Leave `surface` out of the places sensors may go, or put it
+        back, as a click on it does, and plan again."""
+        planning = self.__dict__.get('_planning')
+        if planning is None:
+            return
+        planning['off'] ^= {int(surface)}
+        self._plan_now()
+
+    def _plan_all_surfaces(self, every: bool) -> None:
+        """Put every surface back, or leave every one out."""
+        planning = self.__dict__.get('_planning')
+        if planning is None:
+            return
+        _angle, found = self._planning_skin()
+        planning['off'] = set() if every else {s.id for s in found}
+        self._plan_now()
+
+    def _plan_hover(self, surface: int | None) -> None:
+        """Light up the surface under the cursor, or put the light out."""
+        planning = self.__dict__.get('_planning')
+        if planning is None or surface == planning['hovered']:
+            return
+        planning['hovered'] = surface
+        mesh = (planning['mesh'] or {}).get('mesh')
+        if mesh is None:
+            return
+        mesh.cell_data['colors'] = self._plan_surface_colors()
+        self.scene.plotter.render()
+
+    def _begin_plan_clicks(self) -> None:
+        """Watch the view's clicks: a press and release in one place on a
+        surface leaves it out or puts it back. The press goes on to the
+        camera, so a drag turns the view and toggles nothing."""
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        if interactor is None or self.__dict__.get('_plan_observers'):
+            return
+        raw = interactor.interactor
+        self._plan_observers = [
+            raw.AddObserver('LeftButtonPressEvent', self._on_plan_press, 10.0),
+            raw.AddObserver('LeftButtonReleaseEvent', self._on_plan_release, 10.0),
+            raw.AddObserver('MouseMoveEvent', self._on_plan_move, 10.0),
+        ]
+
+    def _on_plan_press(self, _caller, _event) -> None:
+        planning = self.__dict__.get('_planning')
+        if planning is not None:
+            planning['pressed'] = self._cursor_position()
+
+    def _on_plan_release(self, _caller, _event) -> None:
+        planning = self.__dict__.get('_planning')
+        if planning is None or planning['pressed'] is None:
+            return
+        pressed, planning['pressed'] = planning['pressed'], None
+        position = self._cursor_position()
+        if position is None:
+            return
+        ratio = self.devicePixelRatioF()
+        if np.hypot(position[0] - pressed[0], position[1] - pressed[1]) > PLAN_CLICK * ratio:
+            return                      # a drag: the camera's
+        surface = self.plan_surface_at(*position)
+        if surface is not None:
+            self.toggle_plan_surface(surface)
+
+    def _on_plan_move(self, _caller, _event) -> None:
+        planning = self.__dict__.get('_planning')
+        if planning is None or planning['pressed'] is not None:
+            return                      # turning the view: no lights
+        position = self._cursor_position()
+        if position is not None:
+            self._plan_hover(self.plan_surface_at(*position))
+
+    def _plan_keep(self) -> None:
+        """Keep: the plan added to the project as the pane says it
+        (`Project.plan_instrumentation`), its three objects in the tree,
+        and the pane put away."""
+        from ..core.instrumentation import EDGE_ANGLE, FewerDirectionsWarning, elastic
+
+        planning = self.__dict__.get('_planning')
+        if planning is None:
+            return
+        panel = self.scene.instrumentation_panel
+        commit_typed(panel)
+        self._plan_now()
+        if planning['plan'] is None:
+            return
+        name = planning['shapes']
+        modes = self._planning_modes()
+        groups = panel.picked_groups
+        angle, found = self._planning_skin()
+        kept = self._planning_kept(found, groups)
+        options = {}
+        if modes != elastic(self.objects[name]):
+            options['modes'] = modes
+        if not panel.all_groups:
+            options['groups'] = groups
+        if len(kept) < len([s for s in found if s.group in set(groups)]):
+            options['surfaces'] = kept
+        if angle != EDGE_ANGLE:
+            options['edge_angle'] = angle
+        if panel.uniaxial_axes != (2,):
+            options['axes'] = list(panel.uniaxial_axes)
+        typed = panel.name.text().strip()
+        if typed and typed != f'{name} Plan':
+            options['name'] = typed
+        planning['holding'] = True
+        try:
+            # the reading said it already: a plan for fewer modes than
+            # asked is the person's to keep
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', FewerDirectionsWarning)
+                added = self._run_long('Planning the instrumentation…',
+                                       self.project.plan_instrumentation, name,
+                                       panel.triaxial.value(), panel.uniaxial.value(), **options)
+        except ValueError as why:
+            planning['holding'] = False
+            self._show_status(f'{name}: {why}')
+            return
+        self.close_instrumentation_pane(redraw=False)
+        for key in ('channels', 'shapes', 'geometry'):
+            self.show_object(added[key], source=name, select=key == 'geometry')
+        plan = self.objects[added['geometry']]
+        self._show_status(
+            f'{added["geometry"]}: {plan.num_nodes} places, '
+            f'{self.objects[added["channels"]].num_channels} channels — with '
+            f'{added["channels"]} and {added["shapes"]}')
+
+    def close_instrumentation_pane(self, redraw: bool = True) -> None:
+        """Put Plan Instrumentation away; nothing is added."""
+        self.scene.instrumentation_panel.hide()
+        self._plan_timer.stop()
+        interactor = getattr(self.scene.plotter, 'iren', None)
+        for observer in self.__dict__.get('_plan_observers') or []:
+            if interactor is not None:
+                with contextlib.suppress(Exception):
+                    interactor.interactor.RemoveObserver(observer)
+        self._plan_observers = []
+        if self.__dict__.get('_planning') is None:
+            return
+        self._planning = None
+        if redraw:
+            self.render_current()
 
     def _select_mate_rows(self, name: str, ids) -> None:
         """Pick these sets' rows under the geometry's Mated Surfaces."""

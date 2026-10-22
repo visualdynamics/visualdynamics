@@ -1363,6 +1363,24 @@ def _draw_mate_surfaces(painter, color):
         painter.drawLine(QPointF(x - 5, 37), QPointF(x, 42))
 
 
+def _draw_plan_instrumentation(painter, color):
+    """A surface seen at a slant with a small sensor block on it and its
+    three axes, one straight up out of the surface: an accelerometer
+    placed on a part (Plan Instrumentation, 2026-10-21)."""
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolygon([QPointF(4, 50), QPointF(22, 38), QPointF(60, 38), QPointF(42, 50)])
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+    painter.drawRect(26, 33, 10, 9)
+    painter.setPen(_pen(color, 4))
+    tips = (QPointF(31, 8), QPointF(56, 27), QPointF(10, 26))
+    for tip in tips:
+        painter.drawLine(QPointF(31, 35), tip)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawPolygon([QPointF(25, 12), QPointF(31, 2), QPointF(37, 12)])
+
+
 def _draw_align_meshes(painter, color):
     """A coarse row of nodes over a fine one, an arrow carrying a coarse
     node onto the fine node nearest it: meshes made to meet where parts
@@ -2165,6 +2183,7 @@ def control_icon(name: str) -> QIcon:
      'transform': _draw_transform, 'expand': _draw_expand,
      'merge': _draw_merge, 'merge_nodes': _draw_merge_nodes,
      'align_meshes': _draw_align_meshes, 'mate_surfaces': _draw_mate_surfaces,
+     'plan_instrumentation': _draw_plan_instrumentation,
      'solid_block': _draw_solid_block, 'solid_cylinder': _draw_solid_cylinder,
      'solid_cone': _draw_solid_cone, 'solid_sphere': _draw_solid_sphere,
      'solid_section': _draw_solid_section, 'solid_hole': _draw_solid_hole,

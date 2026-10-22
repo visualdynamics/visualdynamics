@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import warnings
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -3549,6 +3550,115 @@ class Project(dict):
         return self._derive(source, shapes, name or f'{source} Modes',
                             recipe=('solve_modes', params))
 
+    def plan_instrumentation(self, source: Any, triaxial: int, uniaxial: int = 0, *,
+                             modes: Any = None, groups: Any = None,
+                             surfaces: Any = None, edge_angle: float | None = None,
+                             axes: Any = (2,), name: str | None = None,
+                             progress: Any = None) -> dict[str, str]:
+        """Plan a test's accelerometers from finite element modes, by
+        Effective Independence.
+
+        The model's outer surface is split into surfaces at its sharp
+        edges (`core.instrumentation.skin`), and every place on the
+        surfaces kept a sensor can sit is a candidate, measured in its own system with +Z out of the surface
+        and +X in the plane of a system axis (`core.instrumentation.plan`).
+        Tri-axial accelerometers are placed first, then uni-axial ones
+        along the surface normal. Three objects are added and linked: the
+        experimental geometry of the chosen places, the channel table, and
+        the modes at exactly those channels.
+
+        Parameters
+        ----------
+        source : str or object
+            The shape set, by name or as the object itself. It is read
+            on the geometry in its object group, or the active one.
+        triaxial : int
+            How many tri-axial accelerometers.
+        uniaxial : int, default 0
+            How many uni-axial accelerometers.
+        modes : sequence of int, optional
+            The modes to measure, by index. Every mode above 0 Hz when
+            omitted.
+        groups : sequence of int or str, optional
+            The element groups sensors may go on, by id or name. All
+            when omitted.
+        surfaces : sequence of int, optional
+            The surfaces sensors may go on, by their number in
+            `core.instrumentation.skin`. Every surface of `groups` when
+            omitted.
+        edge_angle : float, optional
+            Degrees between two neighboring faces' normals beyond which
+            they are on separate surfaces;
+            `core.instrumentation.EDGE_ANGLE` when omitted. A coarse
+            curved mesh may need more.
+        axes : sequence of int, default (2,)
+            The directions a uni-axial accelerometer may measure, 0, 1, 2
+            for X, Y, Z of its place: Z, the surface normal, by default.
+        name : str, optional
+            The start of the three names. The shape set's name with
+            ' Plan' after it when omitted.
+        progress : callable, optional
+            Called with ``(0, core.progress.BUSY)`` as the work starts,
+            which cannot count its own stages; the app's progress bar
+            uses it.
+
+        Returns
+        -------
+        dict
+            The names added, under 'geometry', 'channels' and 'shapes'.
+
+        Raises
+        ------
+        TypeError
+            When `source` is not a shape set.
+        ValueError
+            When it has no geometry to plan on, or the plan cannot be
+            made (no sensors, fewer places than sensors, no mode chosen).
+
+        Warns
+        -----
+        core.instrumentation.FewerDirectionsWarning
+            When the sensors measure fewer directions than there are
+            modes: the plan is made for the lowest modes that many, and
+            the shapes kept still hold every mode asked for, so their
+            auto-MAC shows which the sensors cannot tell apart.
+        """
+        from .core.instrumentation import FewerDirectionsWarning, plan, shortfall
+        from .core.progress import BUSY
+
+        if progress is not None:
+            progress(0, BUSY)
+        source = self.name_of(source)
+        shapes = self[source]
+        if not isinstance(shapes, ShapeSet):
+            raise TypeError(f'{source!r} is not a shape set')
+        found = self.geometry_for(source)
+        if found is None:
+            raise ValueError(f'{source} has no geometry to plan the instrumentation on')
+        geometry_name, geometry = found
+        ids = None if groups is None else [self._group_of(geometry, g) for g in groups]
+        kept = None if surfaces is None else [int(s) for s in surfaces]
+        made = plan(shapes, geometry, triaxial, uniaxial, modes=modes, groups=ids,
+                    surfaces=kept, edge_angle=edge_angle, axes=axes)
+        short = shortfall(made.placement, made.shapes.num_shapes)
+        if short:
+            warnings.warn(FewerDirectionsWarning(f'{source}: {short}'), stacklevel=2)
+        base = name or f'{source} Plan'
+        params = {'triaxial': int(triaxial), 'uniaxial': int(uniaxial),
+                  'modes': None if modes is None else [int(m) for m in modes],
+                  'groups': ids, 'surfaces': kept,
+                  'edge_angle': None if edge_angle is None else float(edge_angle),
+                  'axes': [int(a) for a in axes],
+                  'geometry': geometry_name}
+        added = {
+            'geometry': self._derive(source, made.geometry, f'{base} Geometry',
+                                     recipe=('plan_instrumentation', params), link=False),
+        }
+        added['channels'] = self.add(f'{base} Channels', made.channels)
+        added['shapes'] = self.add(f'{base} Shapes', made.shapes)
+        self.link(added['geometry'], added['channels'], added['shapes'])
+        return added
+
     def read_as_specification(self, name: Any) -> str:
         """Read a PSD as a specification, the requirement measurements are
         judged against, keeping its name, object group and every
@@ -5177,6 +5287,25 @@ def _has_dims(obj, wanted):
         {obj.known_dim(i) for i in range(obj.num_records)} & wanted)
 
 
+def _plannable(project, obj) -> bool:
+    """Whether a shape set can plan a test's instrumentation: it has a
+    mode above 0 Hz and is drawn on a geometry with solids, plates or
+    beams to place sensors on."""
+    from .core.geometry import ELEMENT_TYPES
+
+    if not isinstance(obj, ShapeSet) or not np.any(np.asarray(obj.frequency) > 0):
+        return False
+    try:
+        found = project.geometry_for(project.name_of(obj))
+    except (KeyError, ValueError, TypeError):
+        return False
+    if found is None:
+        return False
+    kinds = {ELEMENT_TYPES.get(int(code), ('', 0, ''))[2]
+             for code in np.unique(found[1].elem_type)}
+    return bool(kinds & {'volume', 'face', 'line'})
+
+
 def _two_shape_sets(project, obj):
     return isinstance(obj, ShapeSet) and sum(
         isinstance(other, ShapeSet) for other in project.values()) >= 2
@@ -5235,6 +5364,9 @@ _VERB_APPLIES: tuple = (
     # a geometry is a model once its element groups say what they are made of
     ('solve_modes', lambda p, o: (isinstance(o, Geometry)
                                   and bool(o.group_properties))),
+    # finite element modes on a model to put sensors on (Brandon,
+    # 2026-10-21, Plan Instrumentation)
+    ('plan_instrumentation', _plannable),
     # coincident nodes matter to connectivity, so a geometry of elements;
     # a sensor layout of bare nodes has none to tie
     ('merge_coincident_nodes', lambda p, o: (isinstance(o, Geometry)
@@ -5392,6 +5524,7 @@ _JOURNALED_VERBS = (
     'compute_frfs', 'compute_multiple_coherence', 'compute_srs',
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
+    'plan_instrumentation',
     'merge_coincident_nodes', 'align_meshes', 'new_geometry', 'add_plane',
     'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
     'add_solid_sphere', 'add_solid_section',

@@ -4,6 +4,15 @@
 # green (Brandon, 2026-09-14: a hard rule, administrators included).
 #
 #     tools/sync_public.sh "<the pull request's title>"
+#     tools/sync_public.sh --release "<what the release brings>"
+#
+# --release asks for a release as well (Brandon, 2026-10-21): it sets
+# __version__ to the next alpha (tools/next_alpha.py), commits that and
+# pushes this repository's main, then syncs. Once the tests pass on the
+# public main, the release workflow sees a version with no release yet
+# and releases it, waiting for the maintainer's approval on GitHub
+# before it publishes (packaging/release_decision.py). It refuses
+# uncommitted work: a release is what is committed, and nothing else.
 #
 # Builds the public tree into the clone, commits it on a branch named
 # for the moment, pushes the branch, opens the pull request and marks
@@ -19,7 +28,25 @@ set -e
 cd "$(dirname "$0")/.."
 CLONE="$HOME/visualdynamics-shared"
 REPO=visualdynamics/visualdynamics
+RELEASE=0
+if [[ ${1:-} == --release ]]; then
+    RELEASE=1
+    shift
+fi
 TITLE=${1:?a title for the pull request}
+if (( RELEASE )); then
+    if [[ $(git rev-parse --abbrev-ref HEAD) != main ]]; then
+        echo 'a release is cut from main'; exit 1
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo 'commit first: a release is built from what is committed'; exit 1
+    fi
+    version=$(./.venv/bin/python tools/next_alpha.py)
+    git commit -q -m "$version" -- src/visualdynamics/__init__.py
+    git push -q origin main
+    TITLE="$version: $TITLE"
+    echo "releasing $version: once the tests pass, approve it on GitHub"
+fi
 IDENT=(-c user.email=269075368+bzwink@users.noreply.github.com -c user.name="Brandon Zwink")
 
 # Settle the branch before building into it. The clone is left on a

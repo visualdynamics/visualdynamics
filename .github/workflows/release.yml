@@ -32,6 +32,18 @@ on:
   # do not exist yet — the release is already public when it is written.
   release:
     types: [published]
+  # A version released by its own sync (Brandon, 2026-10-21: "automate
+  # merges that I push to main that pass the CI"). When the tests pass
+  # on a push to main and main carries a __version__ with no release
+  # yet, this run releases it: builds, drafts, waits at `approve` for
+  # the maintainer's one tap, publishes, then PyPI and the site. A sync
+  # that leaves the version alone releases nothing. One run carries it
+  # all because GitHub starts no workflow from a tag or a release that
+  # a workflow's own token made (packaging/release_decision.py).
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write        # to create the release and attach the builds
@@ -41,12 +53,41 @@ concurrency:
   cancel-in-progress: false      # never abandon a half-published release
 
 jobs:
+  # What this run does, decided once: build or not, release or not, and
+  # which tag and commit (packaging/release_decision.py). Every job
+  # below reads it instead of the event.
+  which:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      release: ${{ steps.decide.outputs.release }}
+      auto: ${{ steps.decide.outputs.auto }}
+      tag: ${{ steps.decide.outputs.tag }}
+      sha: ${{ steps.decide.outputs.sha }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EVENT: ${{ github.event_name }}
+      RESERVE: ${{ inputs.reserve }}
+      SITE: ${{ inputs.site }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with: {ref: '${{ github.event.workflow_run.head_sha || github.sha }}'}
+      - id: decide
+        run: python3 packaging/release_decision.py >> "$GITHUB_OUTPUT"
+
   linux:
-    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
+    needs: which
+    if: needs.which.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # The same list packaging/build_linux.sh reads, so a runner and a
@@ -75,11 +116,13 @@ jobs:
         with: {name: linux, path: dist/*.AppImage, retention-days: 1}
 
   windows:
-    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
+    needs: which
+    if: needs.which.outputs.build == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
@@ -110,7 +153,8 @@ jobs:
   # tag the build refuses to finish unsigned or unnotarized
   # (VD_REQUIRE_NOTARIZED); dispatched, it makes whatever it can.
   macos:
-    if: github.event_name != 'release' && !inputs.reserve && !inputs.site
+    needs: which
+    if: needs.which.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +167,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       # [step]: the CAD kernel ships in every packaged build (the spec
@@ -148,7 +193,7 @@ jobs:
           PYTHON: python
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
-          VD_REQUIRE_NOTARIZED: ${{ startsWith(github.ref, 'refs/tags/v') && '1' || '' }}
+          VD_REQUIRE_NOTARIZED: ${{ needs.which.outputs.release == 'true' && '1' || '' }}
         run: packaging/build_macos.sh
       # the image people download, and the zip Sparkle downloads (made
       # only once the app is notarized and stapled)
@@ -176,10 +221,10 @@ jobs:
     # without its Mac images is the half-release this job exists to
     # prevent. A failed build is rerun; nothing is drafted until it is
     # green.
-    needs: [linux, windows, macos]
+    needs: [which, linux, windows, macos]
     if: >-
       !cancelled()
-      && startsWith(github.ref, 'refs/tags/v')
+      && needs.which.outputs.release == 'true'
       && needs.linux.result == 'success'
       && needs.windows.result == 'success'
       && needs.macos.result == 'success'
@@ -209,6 +254,11 @@ jobs:
           files: builds/*
           draft: true          # look at it before the world does
           generate_release_notes: true
+          # a pushed tag names itself; a sync's release names its tag
+          # here, and GitHub makes the tag at this commit when the draft
+          # is published
+          tag_name: ${{ needs.which.outputs.tag }}
+          target_commitish: ${{ needs.which.outputs.sha }}
 
   # The macOS app's Sparkle updates, onto the draft once it exists —
   # after publish, because Sparkle shows the release's own notes beside
@@ -224,8 +274,8 @@ jobs:
   # (0.1.0a44, 2026-10-10). Both run on Apple silicon — making a delta
   # reads the zips, it does not run them.
   updates:
-    needs: publish
-    if: github.event_name == 'push'
+    needs: [which, publish]
+    if: needs.which.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -235,8 +285,10 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       VD_ARCHES: ${{ matrix.arch }}
+      TAG: ${{ needs.which.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/download-artifact@v8
         with: {path: dist, merge-multiple: true, pattern: 'macos-${{ matrix.arch }}'}
       - name: Sparkle's tools
@@ -245,7 +297,7 @@ jobs:
         run: |
           gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 \
               --json tagName -q '.[].tagName' |
-            grep '^v' | grep -vxF "$GITHUB_REF_NAME" | head -2 |
+            grep '^v' | grep -vxF "$TAG" | head -2 |
             while read -r tag; do
               gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
                 --pattern "VisualDynamics-*-macos-$VD_ARCHES.zip" \
@@ -261,8 +313,27 @@ jobs:
           SPARKLE_ED_KEY_FILE="$RUNNER_TEMP/ed.key" \
           SPARKLE_BIN="$RUNNER_TEMP/sparkle/bin" \
           UPDATE_STORE="$RUNNER_TEMP/updates" \
-            packaging/release_updates.sh "$GITHUB_REF_NAME"
+            packaging/release_updates.sh "$TAG"
           rm -f "$RUNNER_TEMP/ed.key"
+
+  # A sync's release waits here for the maintainer: the `release`
+  # environment has the maintainer as its required reviewer, so this
+  # job does not start until approved (a tap in GitHub's page or app), and
+  # then publishes the draft. That is the look a tagged release gets
+  # by hand. A pushed tag skips this and is published by hand as
+  # before; its `release: published` event starts PyPI and the site.
+  approve:
+    needs: [which, updates]
+    if: needs.which.outputs.auto == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.which.outputs.tag }}
+    steps:
+      - name: Publish the draft
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
 
   # Everything visualdynamics.org serves, from one directory: the launch
   # pages, the documentation properdocs builds into web/launch/documentation/,
@@ -281,13 +352,19 @@ jobs:
     # themselves between releases — the example tiles' pictures were
     # the first (2026-09-16). The manifest then names whatever release
     # is latest, so the update check keeps its answer.
+    # ...or after `approve` published a sync's release, whose
+    # publishing starts nothing on its own
+    needs: [which, approve]
     if: >-
+      !cancelled() && (
       (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
       || (github.event_name == 'workflow_dispatch' && inputs.site)
+      || needs.approve.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.13', cache: pip}
       - run: pip install -e '.[docs]'
@@ -298,7 +375,7 @@ jobs:
       - name: Write the update manifest from the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || needs.which.outputs.tag }}
           URL: ${{ github.event.release.html_url }}
           NAME: ${{ github.event.release.name }}
         run: |
@@ -308,6 +385,11 @@ jobs:
             URL=$(gh release view --repo "$GITHUB_REPOSITORY" --json url -q .url)
             NAME=$(gh release view --repo "$GITHUB_REPOSITORY" --json name -q .name)
             export TAG URL NAME
+          elif [ -z "$URL" ]; then
+            # a sync's release, published by `approve`: read by its tag
+            URL=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url -q .url)
+            NAME=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json name -q .name)
+            export URL NAME
           fi
           python - <<'EOF'
           import json, os
@@ -396,7 +478,12 @@ jobs:
     # 2026-09-14) fired both these jobs, and the site went out with
     # latest.json saying version "examples" until it was redeployed by
     # hand
-    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
+    # ...or after `approve` published a sync's release
+    needs: [which, approve]
+    if: >-
+      !cancelled() && (
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v'))
+      || needs.approve.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: pypi
@@ -404,6 +491,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with: {ref: '${{ needs.which.outputs.sha }}'}
       - uses: actions/setup-python@v7
         with: {python-version: '3.13'}
       - run: pip install -q build

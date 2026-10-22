@@ -97,9 +97,12 @@ def test_the_site_job_deploys_the_directory_the_docs_build_into():
         f'mkdocs builds into {docs["site_dir"]}, the job deploys {deployed}')
     manifest = [step for step in site['steps'] if 'latest.json' in step.get('run', '')]
     assert manifest and f"{deployed}/latest.json" in manifest[0]['run']
+    # the builds run only when the decision says so, and a published
+    # release is not one of those times (packaging/release_decision.py)
     for name in ('linux', 'windows', 'macos'):
-        assert "github.event_name != 'release'" in workflow['jobs'][name]['if'], (
-            f'{name} would rebuild on every publish')
+        assert workflow['jobs'][name]['if'] == "needs.which.outputs.build == 'true'", name
+    assert _decision().decide('release', sha='s')['build'] == 'false', (
+        'the builds would rerun on every publish')
 
 
 def test_the_manifest_is_one_release_the_newest():
@@ -147,13 +150,18 @@ def test_the_pypi_jobs_publish_by_identity_and_only_when_meant():
         publish = [s for s in job['steps'] if 'pypi-publish' in s.get('uses', '')]
         assert len(publish) == 1
         assert not any('password' in s.get('with', {}) for s in job['steps'])
-    assert jobs['pypi']['if'] == ("github.event_name == 'release' && "
-                                  "startsWith(github.event.release.tag_name, 'v')"), \
+    # a version's release only (2026-09-14): a published `v` release, or
+    # a sync's release once `approve` has published it
+    gate = ' '.join(jobs['pypi']['if'].split())
+    assert gate == ("!cancelled() && ( (github.event_name == 'release' && "
+                    "startsWith(github.event.release.tag_name, 'v')) "
+                    "|| needs.approve.result == 'success')"), \
         'PyPI publishes for a version release only (2026-09-14)'
     assert 'inputs.reserve' in jobs['reserve']['if']
     for name in ('linux', 'windows', 'macos'):
-        assert '!inputs.reserve' in jobs[name]['if'], (
-            f'{name} would build on a reserve run')
+        assert jobs[name]['if'] == "needs.which.outputs.build == 'true'", name
+    assert _decision().decide('workflow_dispatch', reserve=True)['build'] == 'false', (
+        'the builds would run on a reserve run')
     assert workflow[True]['workflow_dispatch']['inputs']['reserve']['default'] is False
 
 
@@ -232,7 +240,7 @@ def test_the_publish_job_waits_for_every_build():
     workflow = yaml.safe_load(
         (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
     publish = workflow['jobs']['publish']
-    assert publish['needs'] == ['linux', 'windows', 'macos']
+    assert publish['needs'] == ['which', 'linux', 'windows', 'macos']
     gate = ' '.join(publish['if'].split())
     assert gate.startswith('!cancelled()')
     assert "needs.linux.result == 'success'" in gate
@@ -257,8 +265,7 @@ def test_the_macos_pair_builds_signed_on_a_runner_of_each_architecture():
     workflow = yaml.safe_load(
         (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
     job = workflow['jobs']['macos']
-    assert '!inputs.reserve' in job['if'] and '!inputs.site' in job['if']
-    assert "github.event_name != 'release'" in job['if']
+    assert job['if'] == "needs.which.outputs.build == 'true'"
     assert 'macos' not in workflow[True]['workflow_dispatch']['inputs'], (
         'no longer off by default')
     matrix = job['strategy']['matrix']['include']
@@ -271,7 +278,7 @@ def test_the_macos_pair_builds_signed_on_a_runner_of_each_architecture():
     build = next(s for s in steps if 'build_macos.sh' in s.get('run', ''))
     assert build['env']['PYTHON'] == 'python', 'the runner has no .venv'
     assert {'NOTARY_APPLE_ID', 'NOTARY_PASSWORD'} <= set(build['env'])
-    assert "startsWith(github.ref, 'refs/tags/v')" in build['env']['VD_REQUIRE_NOTARIZED']
+    assert "needs.which.outputs.release == 'true'" in build['env']['VD_REQUIRE_NOTARIZED']
     assert steps.index(signing) < steps.index(build)
     sparkle = next(s for s in steps if 'fetch_sparkle.sh' in s.get('run', ''))
     assert 'SPARKLE=' in sparkle['run'] and steps.index(sparkle) < steps.index(build)
@@ -293,7 +300,8 @@ def test_the_updates_are_signed_on_a_runner_after_the_draft_opens():
     workflow = yaml.safe_load(
         (root / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8'))
     job = workflow['jobs']['updates']
-    assert job['needs'] == 'publish' and job['if'] == "github.event_name == 'push'"
+    assert job['needs'] == ['which', 'publish']
+    assert job['if'] == "needs.which.outputs.release == 'true'"
     assert job['runs-on'].startswith('macos')
     # one job per architecture, side by side (2026-10-10: one job doing
     # both in turn was a quarter of the release), each taking only its
@@ -373,4 +381,18 @@ def test_the_site_can_be_redeployed_on_demand_between_releases():
     # and a site-only dispatch builds nothing: the first one rebuilt
     # Linux and Windows for a page change (2026-09-16)
     for job in ('linux', 'windows', 'macos'):
-        assert '!inputs.site' in workflow['jobs'][job]['if'], job
+        assert workflow['jobs'][job]['if'] == "needs.which.outputs.build == 'true'", job
+    assert _decision().decide('workflow_dispatch', site=True)['build'] == 'false'
+
+
+def _decision():
+    """packaging/release_decision.py, which decides what each run of the
+    release workflow builds."""
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(__file__).resolve().parent.parent / 'packaging' / 'release_decision.py'
+    spec = importlib.util.spec_from_file_location('release_decision', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

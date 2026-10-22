@@ -174,6 +174,31 @@ nothing. Tag when there is something worth handing over:
 The release is created as a **draft**, so it can be looked at before the
 world sees it.
 
+### Releasing by a sync
+
+A release can also be asked for from the private side:
+
+    tools/sync_public.sh --release "what the release brings"
+
+That sets `__version__` to the next alpha, commits it, pushes, and syncs.
+When the tests pass on the public `main`, the release workflow sees a
+version with no release yet (`packaging/release_decision.py`) and
+releases it in one run: all four builds, the draft with its checksums,
+the macOS update feeds, and then the `approve` job, which waits for the
+maintainer. Approving it on GitHub's page for the run, or in the GitHub
+app, publishes the draft, and PyPI and the site follow in the same run.
+A sync that leaves the version alone releases nothing.
+
+The `release` environment on the public repository holds the approval:
+its required reviewer is the maintainer, and `approve` does not start
+until the maintainer approves it. A run waiting there holds the workflow's concurrency
+group, so a site redeploy queues behind it until it is approved or
+rejected. Rejecting it leaves the draft unpublished; delete the draft
+before asking for the same version again.
+
+A pushed tag still works as before, published by hand, and skips the
+approval.
+
 ## Signing, and what it costs to skip
 
 Signed and notarized on macOS; unsigned on Windows and Linux. What

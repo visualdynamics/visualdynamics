@@ -202,7 +202,7 @@ def test_a_click_on_a_surface_leaves_it_out_and_another_puts_it_back(
     assert window.plan_surface_at(*pixel) is None
 
 
-def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump, monkeypatch):
+def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump):
     """Clicks and hovers as VTK delivers them, through a real interactor
     with the trackball camera's style: the style takes the mouse to
     itself from the press, so the interactor's observers never hear the
@@ -210,8 +210,6 @@ def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump, m
     left behind put out the hover's light for good (Brandon, 2026-10-22:
     clicking surfaces did nothing). A click toggles, a drag does not, and
     after either, the surface under the cursor still lights."""
-    from types import SimpleNamespace
-
     import vtk
 
     select_objects(window, pump, bar)
@@ -219,24 +217,19 @@ def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump, m
     found = window._planning_skin()[1]
     pixel = _on_screen(window, found[0].id)
     surface = window.plan_surface_at(*pixel)
-    renderer = vtk.vtkRenderer()
-    frame = vtk.vtkRenderWindow()
-    frame.SetOffScreenRendering(1)
-    frame.AddRenderer(renderer)
-    # the interactor the app's view runs on (pyvistaqt's), not the
-    # platform's: vtkRenderWindowInteractor() is the X11 one on Linux,
-    # and over a window with no X window of its own it crashed a CI
-    # worker in the press (2026-10-23, Python 3.12 on the public main)
-    raw = vtk.vtkGenericRenderWindowInteractor()
-    raw.SetRenderWindow(frame)
-    raw.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
-    raw.Initialize()
-    # the pane's observers moved onto this interactor
-    for watched, observer in window._plan_observers:
-        watched.RemoveObserver(observer)
-    window._plan_observers = []
-    monkeypatch.setattr(window.scene.plotter, 'iren', SimpleNamespace(interactor=raw))
-    window._begin_plan_clicks()
+    # the view's own interactor, on the view's own render window, which
+    # is the one the pane's observers are on. A second window built here
+    # with an interactor of its own crashed CI workers in the press, on
+    # one Python with the platform's interactor and on both with the
+    # generic one (2026-10-23): a second GL context on a runner with no
+    # display. The app never makes one.
+    # Its style is the view's own trackball camera, whose observers the
+    # pane put on when it opened; replacing it with a bare VTK style left
+    # pyvista's observers driving one style and the pane listening to
+    # another.
+    raw = window.scene.plotter.iren.interactor
+    assert isinstance(raw.GetInteractorStyle(), vtk.vtkInteractorStyleTrackballCamera)
+    raw.Enable()
 
     def at(x, y, event):
         raw.SetEventInformation(round(x), round(y), 0, 0, '0', 0)
@@ -247,16 +240,21 @@ def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump, m
     assert window._planning['off'] == {surface}, 'the click toggled it'
     at(*pixel, 'MouseMoveEvent')
     assert window._planning['hovered'] == surface, 'and the light still follows the cursor'
+    # the view's camera really turns now: put it back after each gesture,
+    # so the pixel is still on the surface
+    camera = window.scene.plotter.camera_position
     at(*pixel, 'LeftButtonPressEvent')
     at(pixel[0] + 30, pixel[1], 'MouseMoveEvent')
     at(pixel[0] + 30, pixel[1], 'LeftButtonReleaseEvent')
     assert window._planning['off'] == {surface}, 'a drag turns the view and toggles nothing'
+    window.scene.plotter.camera_position = camera
     at(*pixel, 'MouseMoveEvent')
     assert window._planning['hovered'] == surface
     # a wheel turn ends an interaction too, with no press: nothing toggles
     raw.SetEventInformation(round(pixel[0]), round(pixel[1]), 0, 0, '0', 0)
     raw.MouseWheelForwardEvent()
     assert window._planning['off'] == {surface}
+    window.scene.plotter.camera_position = camera
     at(*pixel, 'LeftButtonPressEvent')
     at(*pixel, 'LeftButtonReleaseEvent')
     assert window._planning['off'] == set(), 'a second click puts it back'

@@ -177,6 +177,10 @@ segments](sine-profile.md)).
 import as read, its missing samples crossed and a dead channel named,
 the preview the import dialog shows ([Importing a time history from
 delimited text](text-import.md)).
+`plot_mixed_mode(history, floor, sweep)` draws a mixed test's data
+sheet beside the spectrum it was read from, the reading the sine view's
+Mixed Mode readout shows ([A mixed-mode test as one
+specification](mixed-mode.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

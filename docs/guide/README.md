@@ -107,6 +107,9 @@ that is not an alpha.
 - [Checking a sine tone's frequency](sine-frequency.md): the tone's own
   frequency on the record against the specification's, along the
   sweep, against a band
+- [A mixed-mode test as one specification](mixed-mode.md): the floor,
+  the tones and the narrowbands, and a data sheet that judges each by
+  its own rule
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

@@ -575,6 +575,47 @@ def time_statistics():
                          path=str(OUT / 'time-statistics-clipped.png'))
 
 
+def overload():
+    """Three channels against the 25 g range a channel table gives them
+    (5 V over 200 mV/g): the flat profile's twelve seconds at minus
+    6 dB, at full level through the range, and at minus 12 dB."""
+    import numpy as np
+
+    from visualdynamics.core.channel_table import ChannelTable
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_overload
+    from visualdynamics.units import SI
+
+    g = 9.80665
+    rate = 5120.0
+    n = int(12.0 * rate)
+    # the time statistics' record: white noise shaped line by line to
+    # the profile, unit variance being an ASD of 2/rate
+    spectrum = np.fft.rfft(np.random.default_rng(1403).standard_normal(n))
+    f = np.fft.rfftfreq(n, 1.0 / rate)
+    gain = np.where((f >= 20.0) & (f <= 2000.0),
+                    np.sqrt(0.04 / (2.0 / rate)), 0.0)
+    clean = np.fft.irfft(spectrum * gain, n)
+    rows = np.vstack([clean / 2.0, np.clip(clean, -25.0, 25.0),
+                      clean / 4.0]) * g
+    history = TimeHistory(np.arange(n) / rate, rows,
+                          response_dof=['1Z+', '2Z+', '3Z+'],
+                          ordinate_dim=['acceleration'] * 3,
+                          ordinate_unit=['g'] * 3)
+    table = ChannelTable({'channel': [1, 2, 3], 'node': [1, 2, 3],
+                          'direction': ['Z+'] * 3, 'unit': ['g'] * 3,
+                          'channel_type': ['acceleration'] * 3,
+                          'sensitivity': [200.0] * 3, 'range': [5] * 3})
+    check = history.overload_check(table)
+    for channel in check.channels:
+        print(channel.describe('g', g))
+    print(check.describe())
+    plot_overload(history, table,
+                  unit_system=SI.with_units(acceleration='g'),
+                  show=False, size=(1000, 760),
+                  path=str(OUT / 'overload-check.png'))
+
+
 def replication_segments():
     """A minute of rough road replicated, judged segment by segment: a
     stationary stretch, a pothole and a braking transient. The run's
@@ -833,6 +874,7 @@ def main():
     averaging_confidence()
     tone_readout()
     time_statistics()
+    overload()
     replication_segments()
     sweep_rate()
     signature()

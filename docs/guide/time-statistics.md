@@ -158,7 +158,9 @@ reading is journaled as its `plot_time_statistics` call.
   is flagged by most of them, correctly and uselessly.
 - The range. The rail is only counted when the range is given, and
   the range belongs to the input that recorded the channel, in the
-  channel's own units.
+  channel's own units. The *Overload* reading takes every channel's
+  range from a linked channel table at once
+  ([checking each channel against its range](overload.md)).
 - A flagged frame. The frame band says where to look, not what
   happened there. The trace at that time says what happened, a dropout
   or a spike or a rattle, and whether the channel is cleared or set

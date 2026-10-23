@@ -94,6 +94,10 @@ drawn at a picture's width whatever the record's length; the
 `plot_time_statistics(history, record)` (one channel's trace, histogram
 against the Gaussian and kurtosis frame by frame; see
 [time statistics](time-statistics.md)),
+`plot_overload(history, table)` (each channel against the range its
+channel table gives it: the worst channel's trace over its range, and
+the headroom bars beside the kurtosis bars; see
+[checking each channel against its range](overload.md)),
 `plot_replication_fit(history, rating)` (whether a shaker can play the
 record; see [checking a replication reference](replication-fit.md)),
 `plot_stroke(history)` (a pulse's acceleration, velocity and

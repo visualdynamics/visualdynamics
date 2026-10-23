@@ -2402,10 +2402,12 @@ def _comparison_block(block, measured, specification, us, caption,
     figure as a claim about the raw data.
     """
     from ..core.compliance import (
+        compare,
         comparison_scale_db,
         judge,
         log_interpolate,
         matched_records,
+        readouts,
     )
     from ..core.data import Specification
 
@@ -2424,6 +2426,9 @@ def _comparison_block(block, measured, specification, us, caption,
                    or _channel_label(specification, i) == str(named))]
     if not shared:
         return None
+    # the pair the bar charts compare, before the lines at 0 Hz go: the
+    # readouts are the bars' own numbers (`compliance.compare`)
+    compared_spec, compared_measured = specification, measured
     measured = _positive_lines(measured)
     specification = _positive_lines(specification)
     x = np.asarray(measured.display_abscissa(us), dtype=float)
@@ -2500,6 +2505,12 @@ def _comparison_block(block, measured, specification, us, caption,
             channel[key] = mapped(verdict['level'] * factor)
         channel['key'] = _channel_key(channel, edges, target,
                                       specification.known_dim(record))
+        # the share outside abort and the RMS error, lower left and
+        # lower right, each in its box (Brandon, 2026-10-23)
+        if record in measured_of:
+            channel['readouts'] = readouts(compare(
+                compared_spec, compared_measured, record,
+                measured_of[record], scale_db=scale_db))
         channels.append(channel)
 
     first = channels[0]

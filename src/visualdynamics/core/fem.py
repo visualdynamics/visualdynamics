@@ -1358,6 +1358,10 @@ class Model:
         self.grounds: dict[int, tuple[int, ...]] = {}
         self.masses: list[LumpedMass] = []
         self.faces: list[Face] = []
+        #: {node: its displacement frame's axes as rows}, for each node a
+        #: geometry measures in a turned frame: the modes are written in
+        #: it (`eigensolution`), as every shape set's DOFs are read
+        self.displacement_frames: dict[int, np.ndarray] = {}
 
     # ---- building ---------------------------------------------------------
 
@@ -1836,6 +1840,7 @@ class Model:
         # last digit (`tests/test_block_model.py`).
         model = cls(name or getattr(geometry, 'name', '') or 'geometry',
                     length_unit=geometry.length_unit or 'm')
+        model.displacement_frames = _displacement_frames(geometry)
         properties = dict(getattr(geometry, 'group_properties', {}) or {})
         if properties:
             return _from_groups(model, geometry, properties, total_mass,
@@ -2511,7 +2516,9 @@ class Model:
         -------
         ShapeSet
             The modes in ascending frequency, at every degree of freedom
-            (`dof_strings`), with mass in kg. Each mode's leading component
+            (`dof_strings`), with mass in kg. A node the geometry measures
+            in a turned displacement frame has its six components written
+            in that frame, as every shape set's DOFs are read. Each mode's leading component
             is positive (`signed_modes`), so a model solved twice gives the
             same shapes.
         """
@@ -2534,7 +2541,10 @@ class Model:
         frequency[_strains_nothing(full, stiffness)] = 0.0
 
         order = np.argsort(frequency, kind='stable')
-        frequency, full = frequency[order], signed_modes(full[:, order])
+        # in each node's displacement frame before the sign is chosen, so
+        # the sign rule reads what is stored
+        frequency = frequency[order]
+        full = signed_modes(self._in_displacement_frames(full[:, order]))
         keep = np.ones(len(frequency), dtype=bool)
         if maximum_frequency is not None:
             keep &= frequency <= float(maximum_frequency)
@@ -2548,6 +2558,31 @@ class Model:
                         shape_matrix=full[:, keep].T,
                         mass_unit='kg',
                         comment=self.name or '')
+
+    def _in_displacement_frames(self, full):
+        """`full` (six rows per node in `dof_strings` order, a column per
+        mode, global) with each node in `displacement_frames` written in
+        its frame: `local = R @ global`, the translations and the
+        rotations alike."""
+        # The solve wrote global components under labels every reader takes
+        # in the node's displacement frame (`deform.dof_directions`), so a
+        # node measured in a turned frame was drawn, arrowed and planned
+        # along the wrong axes; the matrices were identical turned or not
+        # (Brandon, 2026-10-23).
+        if not self.displacement_frames:
+            return full
+        index = {node: k for k, node in enumerate(self._nodes)}
+        held = [(index[node], rotation)
+                for node, rotation in self.displacement_frames.items()
+                if node in index]
+        if not held:
+            return full
+        rows = np.array([k for k, _rotation in held], dtype=np.int64)
+        rotations = np.array([rotation for _k, rotation in held])
+        for first in (0, 3):        # the translations, then the rotations
+            at = 6 * rows[:, None] + first + np.arange(3)
+            full[at] = np.einsum('nij,njm->nim', rotations, full[at])
+        return full
 
     def _dense_modes(self, fixed, ticker=None):
         """(eigenvalues, shapes at every DOF, stiffness) solved whole."""
@@ -3574,6 +3609,20 @@ def _plane_basis(line: np.ndarray) -> np.ndarray:
     first /= np.linalg.norm(first)
     second = np.cross(line, first)
     return np.column_stack([first, second])
+
+
+def _displacement_frames(geometry: Any) -> dict[int, np.ndarray]:
+    """Each node a geometry measures in a turned displacement frame, with
+    that frame's axes as rows: the one reading every shape set's DOFs
+    are taken by (`deform._cs_rotations`)."""
+    from ..deform import _cs_rotations
+
+    rotations = _cs_rotations(geometry)
+    if not rotations:
+        return {}
+    return {int(node): rotations[int(cs)]
+            for node, cs in zip(geometry.node_id, geometry.node_disp_cs)
+            if int(cs) in rotations}
 
 
 def _strains_nothing(shapes: np.ndarray, stiffness: np.ndarray) -> np.ndarray:

@@ -797,3 +797,47 @@ def test_the_material_column_and_its_list_are_wide_enough_to_read(window, pump):
     finally:
         editor.deleteLater()
         pump()
+
+
+# ---- the displacement frames --------------------------------------------------
+
+
+def test_a_solved_mode_is_written_in_each_nodes_displacement_frame():
+    """Every reader takes a DOF's direction in its node's displacement
+    frame (`deform.dof_directions`), and the solve wrote global
+    components under those labels: the matrices came out identical with
+    a node's frame turned or not (Brandon, 2026-10-23). The node's rows
+    are now its frame's, and the motion every reader reconstructs is the
+    same physical motion either way."""
+    import copy
+
+    from visualdynamics.deform import node_displacements
+
+    plain = _plate_geometry()
+    turned = copy.deepcopy(plain)
+    # 90 degrees about Z: the node's X is global +Y, its Y global -X
+    frame = turned.add_coordinate_system(
+        rotation=[[0, 1, 0], [-1, 0, 0], [0, 0, 1]])
+    node = int(turned.node_id[7])
+    turned.node_disp_cs[7] = frame
+    a = Model.from_geometry(plain).eigensolution(num_modes=12)
+    b = Model.from_geometry(turned).eigensolution(num_modes=12)
+    assert np.allclose(a.frequency, b.frequency)
+    column = {dof: k for k, dof in enumerate(a.coordinate)}
+    rows = [column[f'{node}{d}'] for d in ('X+', 'Y+', 'Z+', 'RX+', 'RY+', 'RZ+')]
+    others = np.setdiff1d(np.arange(len(a.coordinate)), rows)
+    moved = 0
+    for m in range(12):
+        # a mode's sign is the sign rule's, read on what is stored
+        sign = np.sign(a.shape_matrix[m, others] @ b.shape_matrix[m, others])
+        x, y, z, rx, ry, rz = a.shape_matrix[m, rows]
+        assert np.allclose(sign * b.shape_matrix[m, rows],
+                           [y, -x, z, ry, -rx, rz], atol=1e-12), m
+        assert np.allclose(sign * b.shape_matrix[m, others],
+                           a.shape_matrix[m, others]), 'the other nodes as they were'
+        globally = node_displacements(plain, a.coordinate, a.shape_matrix[m])
+        read = node_displacements(turned, b.coordinate, sign * b.shape_matrix[m])
+        assert np.allclose(read, globally, atol=1e-12), \
+            f'mode {m + 1} moves the same way as the reader reads it'
+        moved += abs(x) + abs(y) > 1e-6
+    assert moved >= 3, 'modes that move the node in its plane were checked'

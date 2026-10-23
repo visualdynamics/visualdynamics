@@ -87,24 +87,48 @@ def shape_value_text(value: Any) -> str:
     one as its real and imaginary parts, '0.5-0.25j'."""
     import numpy as np
 
+    # + 0.0 turns a negated zero into zero: '2X-' against a column with
+    # no X read '-0'
     if np.iscomplexobj(value):
-        return f'{value.real:.6g}{value.imag:+.6g}j'
-    return f'{float(value):.6g}'
+        return f'{value.real + 0.0:.6g}{value.imag + 0.0:+.6g}j'
+    return f'{float(value) + 0.0:.6g}'
 
 
-def shape_values(shapes: Any) -> tuple[list[str], list[list[str]]]:
-    """``(headers, rows)`` of a shape set's values: a row per DOF, the
-    DOF first, then a column per mode ('M1', 'M2', ...).
+def shape_values(shapes: Any, dofs: Any = None,
+                 form: str = 'shapes') -> tuple[list[str], list[list[str]]]:
+    """``(headers, rows)`` of a shape set's values, or of one of its
+    transformations, at `dofs` (`transform.matrix_at`).
 
-    Rows are DOFs and columns modes, the way a mode shape matrix is
-    usually written, which is the transpose of `ShapeSet.shape_matrix`.
+    The shapes are a row per DOF, the DOF first, then a column per mode
+    ('M1', 'M2', ...), the way a mode shape matrix is usually written:
+    the transpose of `ShapeSet.shape_matrix`. The two transformations
+    are a row per mode, then a column per DOF. A DOF the set does not
+    have is labeled so and its values are blank.
     """
-    # Brandon, 2026-10-22, with the table of them beside the mode list.
-    headers = ['DOF'] + [mode_heading(m) for m in range(shapes.num_shapes)]
-    rows = [[str(dof)] + [shape_value_text(value)
-                          for value in shapes.shape_matrix[:, i]]
-            for i, dof in enumerate(shapes.coordinate)]
+    # Brandon, 2026-10-22, with the table of them beside the mode list;
+    # at a choice of DOFs and in three forms, 2026-10-23.
+    from .transform import matrix_at
+
+    view = matrix_at(shapes, dofs, form)
+    missing = set(view.missing)
+
+    def label(dof):
+        return f'{dof} (not in the set)' if dof in missing else str(dof)
+
+    rows_are_dofs = form == 'shapes'
+    headers = (['DOF' if rows_are_dofs else 'Mode']
+               + [label(c) if not rows_are_dofs else c for c in view.columns])
+    rows = [[label(r) if rows_are_dofs else r]
+            + [cell_value_text(v) for v in view.values[i]]
+            for i, r in enumerate(view.rows)]
     return headers, rows
+
+
+def cell_value_text(value: Any) -> str:
+    """`shape_value_text`, and blank where there is no value."""
+    import numpy as np
+
+    return '' if np.isnan(value) else shape_value_text(value)
 
 
 def table_of(obj: Any, geometry: Any = None,

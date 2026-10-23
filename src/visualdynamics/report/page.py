@@ -107,12 +107,26 @@ canvas { width: 100%; border: 1px solid var(--line); border-radius: 6px;
 .legend span.zone::before { content: ""; display: inline-block;
   width: .8em; height: .8em; margin-right: .35rem; vertical-align: -.08em;
   background: var(--swatch); border: 1px solid var(--line); }
-.controls { display: flex; gap: .6rem; align-items: center;
-            margin-top: .3rem; font-size: .85rem; }
+.controls { display: flex; gap: .3rem .6rem; align-items: center;
+            flex-wrap: wrap; margin-top: .3rem; font-size: .85rem; }
+.controls button { white-space: nowrap; }
 .controls button, .controls select {
   font: inherit; color: var(--ink); background: transparent;
   border: 1px solid var(--line); border-radius: 5px; padding: .15rem .6rem; }
 .hint { color: var(--faint); font-size: .75rem; }
+/* a channel's two readouts in the row under its figure (Brandon,
+   2026-10-23): the number in a box gray inside the tolerance, red over
+   it, blue under it — the exceedance marks' red and blue, solid, and
+   the gray the specification curve is drawn in. The share of the band
+   outside abort follows Reset Axes; the RMS error stands at the row's
+   end (`compliance.readouts`). */
+.readout { white-space: nowrap; }
+.readout.rms { margin-left: auto; }
+.readout .box { display: inline-block; margin-left: .3rem; padding: 0 .4rem;
+  border-radius: 4px; color: #ffffff; font-weight: 700; }
+.readout .box.in { background: rgb(154, 154, 162); }
+.readout .box.over { background: rgb(229, 83, 75); }
+.readout .box.under { background: rgb(76, 146, 217); }
 .modeinfo { position: absolute; top: 8px; left: 12px; font-size: .8rem;
             color: var(--ink); pointer-events: none; line-height: 1.35;
             background: color-mix(in srgb, var(--paper) 65%, transparent);
@@ -682,6 +696,24 @@ function plotBlock(block, into) {
     i => { picked = i; applyChannel(); draw(); });
   const c = captionFor(block);
   if (c) s.appendChild(c);
+  /* the channel on show's two readouts, in the row with Reset Axes:
+     the share outside abort after the button, the RMS error at the
+     row's end */
+  function fillReadouts() {
+    const row = reset.parentNode;
+    row.querySelectorAll('.readout').forEach(e => e.remove());
+    const ch = block.channels ? block.channels[picked] : null;
+    ((ch && ch.readouts) || []).forEach(r => {
+      const item = document.createElement('span');
+      item.className = 'readout ' + r.name;
+      item.dataset.name = r.name;
+      item.textContent = r.label + ':';
+      const box = document.createElement('span');
+      box.className = 'box ' + r.state; box.textContent = r.text;
+      item.appendChild(box);
+      if (r.name === 'lines') reset.after(item); else row.appendChild(item);
+    });
+  }
 
   const finite = v => v !== null && isFinite(v);
   /* the drawn curves become whichever channel is picked; the extents
@@ -701,6 +733,7 @@ function plotBlock(block, into) {
         block.curves.push({label: r.label, x: null, y: r.y}));
     }
     fillLegend();
+    fillReadouts();
   }
   applyChannel();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;

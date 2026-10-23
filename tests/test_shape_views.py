@@ -190,3 +190,178 @@ def test_a_script_reads_the_same_values():
         {'channel': [1], 'node': [1], 'direction': ['X+'], 'unit': ['g']}))
     with pytest.raises(ValueError, match='only a shape set'):
         project.table('Channels', values=True)
+
+
+# ---- at a channel table's DOFs, in three forms ------------------------------------
+#
+# Brandon, 2026-10-23: the kinematic transformation at a channel table's
+# references or responses, beside the shapes, read as the transform reads
+# them. One matrix (`transform.matrix_at`) for the window and a script.
+
+
+def _rigid_project():
+    """Four nodes of a square and their rigid shapes, with a channel
+    table of twelve references (two of them written negative), four Z
+    responses, and a monitor the set lacks; the responses and the
+    monitor have Control checked."""
+    from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
+
+    geometry = visualdynamics.Geometry(
+        [1, 2, 3, 4], [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],
+        length_unit='m')
+    references = ['1X+', '1Y+', '1Z+', '2X-', '2Y+', '2Z+', '3X+', '3Y-',
+                  '3Z+', '4X+', '4Y+', '4Z+']
+    responses = ['1Z+', '2Z+', '3Z+', '4Z+']
+    dofs = references + responses + ['9Z+']
+    table = visualdynamics.ChannelTable({
+        'channel': list(range(1, len(dofs) + 1)),
+        'node': [dof[:-2] for dof in dofs],
+        'direction': [dof[-2:] for dof in dofs],
+        'unit': ['lbf'] * 12 + ['g'] * 5,
+        'role': ['reference'] * 12 + ['response'] * 4 + ['monitor'],
+        # the monitor is a control channel too, so the control choice is
+        # not the responses under another name
+        'control': ['False'] * 12 + ['True'] * 5})
+    project = visualdynamics.Project('p')
+    project.add('Square', geometry)
+    project.add('Channels', table)
+    project.add('Rigid', rigid_body_shapes(geometry, MassProperties((0.5, 0.5, 0))))
+    project.link('Square', 'Channels')
+    project.link('Square', 'Rigid')
+    return project, references, responses
+
+
+def test_the_shapes_at_a_choice_of_dofs_honor_the_sign():
+    from visualdynamics.core.transform import matrix_at
+
+    project, _references, _responses = _rigid_project()
+    shapes = project['Rigid']
+    view = matrix_at(shapes, ['2X+', '2X-', '9Z+'])
+    assert view.rows == ['2X+', '2X-', '9Z+'] and view.columns[0] == 'M1'
+    assert np.allclose(view.values[1], -view.values[0]), '2X- is minus 2X+'
+    assert np.isnan(view.values[2]).all() and view.missing == ['9Z+']
+    whole = matrix_at(shapes)
+    assert np.array_equal(whole.values, np.asarray(shapes.shape_matrix).T)
+
+
+def test_the_transformations_are_what_the_transform_applies():
+    """Φ⁺ times a motion is the modal response `to_modal` makes, and Φᵀ
+    times a force is the modal force, at the same DOFs and signs."""
+    from visualdynamics.core.transform import matrix_at, to_modal
+
+    project, references, _responses = _rigid_project()
+    shapes = project['Rigid']
+    rng = np.random.default_rng(4)
+    t = np.arange(64) / 64.0
+    values = rng.standard_normal((12, 64))
+    for form, quantity in (('response', 'acceleration'), ('force', 'force')):
+        view = matrix_at(shapes, references, form)
+        assert view.rows == [f'M{k}' for k in range(1, 7)]
+        assert view.columns == references
+        history = visualdynamics.TimeHistory(
+            t, values, response_dof=references, ordinate_dim=quantity)
+        modal, _report = to_modal(history, shapes)
+        assert np.allclose(view.values @ values, modal.ordinate), form
+    response = matrix_at(shapes, references, 'response').values
+    phi = matrix_at(shapes, references).values
+    assert np.allclose(response @ phi, np.eye(6)), 'Φ⁺Φ = I'
+
+
+def test_too_few_dofs_refuse_the_response_transformation():
+    from visualdynamics.core.transform import matrix_at
+
+    project, _references, responses = _rigid_project()
+    with pytest.raises(ValueError, match='resolve only 3 of 6 modes'):
+        matrix_at(project['Rigid'], responses, 'response')
+    assert matrix_at(project['Rigid'], responses, 'force').values.shape == (6, 4)
+    with pytest.raises(ValueError, match='not a form'):
+        matrix_at(project['Rigid'], responses, 'inverse')
+    with pytest.raises(ValueError, match='none of these'):
+        matrix_at(project['Rigid'], ['9Z+'], 'force')
+
+
+def test_a_tables_channels_are_chosen_by_one_rule():
+    project, references, responses = _rigid_project()
+    table = project['Channels']
+    assert table.choices() == ['all', 'control', 'reference', 'response',
+                               'monitor']
+    assert [table.dof_strings()[i] for i in table.chosen('reference')] == references
+    assert [table.dof_strings()[i] for i in table.chosen('control')] == \
+        responses + ['9Z+']
+    with pytest.raises(ValueError, match='not a choice'):
+        table.chosen('drives')
+
+
+def test_a_script_reads_a_choice_of_channels_in_a_form():
+    project, references, _responses = _rigid_project()
+    headers, rows = project.table('Rigid', values=True, dofs='reference',
+                                  form='force')
+    assert headers == ['Mode'] + references
+    assert rows[0][0] == 'M1' and rows[0][4] == '-1', "M1 at 2X- is -1"
+    headers, rows = project.table('Rigid', values=True, dofs='monitor')
+    assert rows == [['9Z+ (not in the set)', '', '', '', '', '', '']]
+    project.unlink('Channels')
+    with pytest.raises(ValueError, match='no channel table'):
+        project.table('Rigid', values=True, dofs='reference')
+
+
+def test_the_window_offers_the_choices_and_the_forms(window, pump):
+    project, references, _responses = _rigid_project()
+    for name in project.names:
+        window.add_object(name, project[name])
+    for other in ('Channels', 'Rigid'):
+        window.project.link('Square', other)
+    window.tree.clearSelection()
+    item = window._item_for_object('Rigid')
+    window.tree.setCurrentItem(item)
+    item.setSelected(True)
+    pump()
+    _toggle(window, pump, window.shape_values_action)
+    dofs, form = window.values_dofs_combo, window.values_form_combo
+    assert window.values_dofs_action.isVisible()
+    assert window.values_form_action.isVisible()
+    assert [dofs.itemText(i) for i in range(dofs.count())] == [
+        'All DOFs', 'Control channels', 'References', 'Responses', 'Monitors']
+    dofs.setCurrentIndex(dofs.findData('reference'))
+    pump()
+    model = window.shape_values_table.model()
+    labels = [model.headerData(r, Qt.Orientation.Vertical)
+              for r in range(model.rowCount())]
+    assert labels == references
+    assert model.data(model.index(3, 0)) == '-1', '2X- moves against M1'
+    form.setCurrentIndex(form.findData('force'))
+    pump()
+    model = window.shape_values_table.model()
+    assert (model.rowCount(), model.columnCount()) == (6, 12)
+    assert model.headerData(0, Qt.Orientation.Vertical) == 'M1'
+    dofs.setCurrentIndex(dofs.findData('response'))
+    form.setCurrentIndex(form.findData('response'))
+    pump()
+    assert window.shape_values_table.model() is None
+    assert 'resolve only 3 of 6 modes' in window.statusBar().currentMessage()
+    dofs.setCurrentIndex(dofs.findData('monitor'))
+    form.setCurrentIndex(form.findData('shapes'))
+    pump()
+    assert '1 monitors, 1 not in the set' in window.statusBar().currentMessage()
+    window.shape_values_action.trigger()
+    pump()
+    assert not window.values_form_action.isVisible(), 'away with the values'
+    assert not window.values_dofs_action.isVisible()
+
+
+def test_a_picked_mode_is_a_row_of_a_transformation(window, pump):
+    """A mode is a column of the shapes and a row of a transformation."""
+    project, _references, _responses = _rigid_project()
+    window.add_object('Rigid', project['Rigid'])
+    _show(window, pump, project['Rigid'], name='Again')
+    _toggle(window, pump, window.shape_values_action)
+    form = window.values_form_combo
+    form.setCurrentIndex(form.findData('force'))
+    pump()
+    window._item_for_object('Again').setExpanded(True)
+    pump()
+    window.record_grids['Again'].select_records([2])
+    window.render_current()     # what a click on the cell runs
+    pump()
+    selection = window.shape_values_table.selectionModel()
+    assert selection.isRowSelected(2) and not selection.isColumnSelected(2)

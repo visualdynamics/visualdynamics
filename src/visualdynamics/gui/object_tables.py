@@ -69,39 +69,60 @@ def _set_description(shapes, row, text):
 
 
 class _ShapeValuesModel(TableModel):
-    """A shape set's values with each row headed by its DOF and each
-    mode's column header telling its frequency on hover."""
+    """A shape set's matrix at a choice of DOFs (`transform.MatrixAt`):
+    its rows headed by their labels, a DOF the set lacks marked so, and
+    a mode's header telling its frequency on hover."""
+
+    def __init__(self, shapes: Any, view: Any, columns: Sequence[Column],
+                 names: Sequence[str], parent: QObject | None = None) -> None:
+        super().__init__(view, columns, lambda v: len(v.rows), parent)
+        self.shapes: Any = shapes
+        #: the DOFs asked for that the set has no column for
+        self.missing: set[str] = set(view.missing)
+        self._names = list(names)
+
+    def _label(self, label: str) -> str:
+        return f'{label} (not in the set)' if label in self.missing else label
+
+    def _frequency(self, label: str) -> str | None:
+        if label in self._names:
+            index = self._names.index(label)
+            return f'{float(self.shapes.frequency[index]):.4f} Hz'
+        return None
 
     def headerData(self, section: int, orientation: Qt.Orientation,
                    role: int = Qt.ItemDataRole.DisplayRole) -> Any:
-        if orientation == Qt.Orientation.Vertical:
-            if role == Qt.ItemDataRole.DisplayRole:
-                return str(self.obj.coordinate[section])
-            return None
+        labels = (self.obj.rows if orientation == Qt.Orientation.Vertical
+                  else self.obj.columns)
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self._label(str(labels[section]))
         if role == Qt.ItemDataRole.ToolTipRole:
-            return f'{float(self.obj.frequency[section]):.4f} Hz'
-        return super().headerData(section, orientation, role)
+            return self._frequency(str(labels[section]))
+        return None
 
 
-def shape_values_model(shapes: ShapeSet,
-                       parent: QObject | None = None) -> TableModel:
-    """A mode set's shape values as a table: a row per DOF, headed by
-    the DOF, and a column per mode (M1, M2, ...), read-only. A complex
-    mode's value shows its real and imaginary parts. The headings and
-    the text are `core.tables`', which a script's `Project.table(...,
-    values=True)` reads too."""
+def shape_values_model(shapes: ShapeSet, parent: QObject | None = None,
+                       dofs: Sequence[str] | None = None,
+                       form: str = 'shapes') -> TableModel:
+    """A mode set's values as a table, read-only: at every DOF of the
+    set or at `dofs`, as the shapes (a row per DOF, a column per mode,
+    M1, M2, ...) or one of the transformations through them (a row per
+    mode, a column per DOF). The matrix is `transform.matrix_at`'s and
+    the text `core.tables`', which a script's `Project.table(...,
+    values=True)` reads too; a complex mode's value shows its real and
+    imaginary parts. Raises ValueError where `matrix_at` does."""
     # Brandon, 2026-10-22: the numbers themselves, beside the mode list
-    # and the MAC, rows the DOFs and columns the modes as they are
-    # usually written.
-    from ..core.tables import mode_heading, shape_value_text
+    # and the MAC; at a channel table's DOFs and in three forms,
+    # 2026-10-23.
+    from ..core.tables import cell_value_text
+    from ..core.transform import matrix_at, modal_dofs
 
-    columns = [Column(mode_heading(k),
-                      lambda s, r, k=k: s.shape_matrix[k, r],
-                      format=shape_value_text)
-               for k in range(shapes.num_shapes)]
-    return _ShapeValuesModel(shapes, columns,
-                             lambda s: len(s.coordinate), parent)
-
+    view = matrix_at(shapes, dofs, form)
+    columns = [Column(str(label),
+                      lambda v, r, c=c: v.values[r, c],
+                      format=cell_value_text)
+               for c, label in enumerate(view.columns)]
+    return _ShapeValuesModel(shapes, view, columns, modal_dofs(shapes), parent)
 
 
 def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],

@@ -180,3 +180,35 @@ def test_the_page_puts_the_level_left_of_the_verdict():
     assert "big.textContent = testLevelText(block.test_level_db);" in body
     assert '.testlevel .word { font-size: 2rem; font-weight: 700;' in _CSS
     assert '.verdictrow { display: flex;' in _CSS
+
+
+# ---- a channel's two readouts, by the verdict's own rule ---------------------
+
+
+def test_the_states_turn_where_the_verdict_counts():
+    """Past the tolerance is out; at it exactly is still in, as the
+    verdict counts a channel (Brandon, 2026-10-23)."""
+    assert compliance.lines_state(compliance.LINES_PERCENT) == 'in'
+    assert compliance.lines_state(compliance.LINES_PERCENT + 0.01) == 'over'
+    assert compliance.lines_state(0.0) == 'in', 'a share has no under'
+    assert compliance.rms_state(compliance.ERROR_DB) == 'in'
+    assert compliance.rms_state(compliance.ERROR_DB + 0.01) == 'over'
+    assert compliance.rms_state(-compliance.ERROR_DB) == 'in'
+    assert compliance.rms_state(-compliance.ERROR_DB - 0.01) == 'under'
+    assert compliance.rms_state(float('nan')) == 'in'
+
+
+def test_a_channels_readouts_say_the_number_and_its_state():
+    got = compliance.readouts({'lines': 40, 'abort_percent': 12.34,
+                               'difference_db': -3.5})
+    assert got == [
+        {'name': 'lines', 'label': '% Lines Out', 'text': '12.3',
+         'state': 'over'},
+        {'name': 'rms', 'label': 'RMS Error', 'text': '-3.5 dB',
+         'state': 'under'}]
+    # no abort limits written, no share; an error of nothing reads +0.0
+    got = compliance.readouts({'lines': 40, 'difference_db': -0.0})
+    assert got == [{'name': 'rms', 'label': 'RMS Error', 'text': '+0.0 dB',
+                    'state': 'in'}]
+    assert compliance.readouts({'lines': 0}) == [], 'nothing compared'
+    assert compliance.readouts({'lines': 0, 'refused': 'why'}) == []

@@ -2656,7 +2656,13 @@ def _random_control_blocks(objects: Mapping[str, Any],
             'specification\'s own frequency band; the measurement '
             'beyond it is a zoom away. Shading marks lines outside '
             'an abort limit — red above the upper, blue below the '
-            'lower.'},
+            'lower. Under each figure, **% Lines Out** is the share '
+            'of the channel\'s band outside its abort limits and '
+            '**RMS Error** how far its level sits from the '
+            'specification\'s, each number boxed in gray inside the '
+            'tolerance, red over it and blue under it: the same '
+            'numbers, tolerances and colors as the bar charts below, '
+            'so a failing channel is seen on its own figure.'},
         *_comparisons('@basis:Psd', '@basis:Specification',
                       'Control against specification', objects, object_groups),
         {'kind': 'text', 'text':

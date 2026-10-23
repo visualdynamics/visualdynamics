@@ -954,6 +954,115 @@ def to_physical(data: DataArray, shapes: ShapeSet,
     return result, report
 
 
+#: what the Shape Values table shows of a set at a choice of DOFs: the
+#: shapes, the response transformation or the force transformation
+FORMS = ('shapes', 'response', 'force')
+
+
+@dataclass
+class MatrixAt:
+    """A shape set's matrix at a choice of DOFs, in one of `FORMS`.
+
+    Attributes
+    ----------
+    form : str
+        'shapes', 'response' or 'force'.
+    rows, columns : list of str
+        The labels: DOFs down and modes across for the shapes, modes
+        down and DOFs across for the two transformations.
+    values : numpy.ndarray
+        `(rows, columns)`, NaN where a DOF is not in the set.
+    missing : list of str
+        The DOFs asked for that the set has no column for.
+    """
+
+    form: str
+    rows: list[str]
+    columns: list[str]
+    values: np.ndarray
+    missing: list[str] = field(default_factory=list)
+
+
+def matrix_at(shapes: ShapeSet, dofs: Sequence[str] | None = None,
+              form: str = 'shapes') -> MatrixAt:
+    """A shape set's matrix at `dofs`, as the transform uses it.
+
+    'shapes' is `Φ` at the DOFs, a row per DOF and a column per mode:
+    how each modal coordinate moves each DOF, `u = Φq`, each value as
+    stored, complex where the set is. 'response' is `Φ⁺`, a row per mode
+    and a column per DOF, what `to_modal` applies to motions,
+    `q = Φ⁺u`. 'force' is `Φᵀ`, what it applies to forces, `f_m = Φᵀf`.
+    The two transformations are over the real shapes, as the transform
+    takes them, and the pseudo-inverse is refused when the DOFs resolve
+    fewer modes than the set has.
+
+    A DOF is matched to the set's column as the transform matches a
+    channel, its sign honored: `2X-` is the negative of the set's `2X+`.
+    A DOF the set has no column for is kept, its row or column NaN, and
+    listed in `missing`. With `dofs` left out, every DOF of the set.
+
+    Parameters
+    ----------
+    shapes : ShapeSet
+        The set.
+    dofs : sequence of str, optional
+        The DOFs, in the order they are wanted.
+    form : str, default 'shapes'
+        One of `FORMS`.
+
+    Returns
+    -------
+    MatrixAt
+        The labels, the values and the DOFs not in the set.
+
+    Raises
+    ------
+    ValueError
+        For a form not in `FORMS`, a transformation at DOFs none of
+        which is in the set, or a response transformation the DOFs are
+        too few to resolve.
+    """
+    # Brandon, 2026-10-23: the kinematic transformation at a channel
+    # table's references, responses or control channels, beside the
+    # shapes themselves, read the way the transform reads them.
+    if form not in FORMS:
+        raise ValueError(f'{form!r} is not a form; use one of {FORMS}')
+    names = modal_dofs(shapes)
+    if dofs is None:
+        if form == 'shapes':
+            return MatrixAt(form, list(shapes.coordinate), names,
+                            np.asarray(shapes.shape_matrix).T)
+        dofs = list(shapes.coordinate)
+    dofs = [str(dof) for dof in dofs]
+    report = TransformReport()
+    if form == 'shapes':
+        lookup = shapes._dof_lookup()
+        matrix = np.asarray(shapes.shape_matrix)
+        values = np.full((len(dofs), shapes.num_shapes), np.nan,
+                         dtype=np.result_type(matrix.dtype, np.float64))
+        missing = []
+        for row, dof in enumerate(dofs):
+            base, sign = _split_sign(dof)
+            found = lookup.get(base)
+            if found is None:
+                missing.append(dof)
+                continue
+            column, column_sign = found
+            values[row] = matrix[:, column] * sign * column_sign
+        return MatrixAt(form, dofs, names, values, missing)
+    kept, phi = _columns(shapes, dofs, report)
+    if not kept:
+        raise ValueError('none of these DOFs is in the set')
+    block = (_fit(phi, 'motion', len(kept), shapes, report)
+             if form == 'response' else phi.T)
+    values = np.full((shapes.num_shapes, len(dofs)), np.nan)
+    at = {dof: k for k, dof in enumerate(kept)}
+    for column, dof in enumerate(dofs):
+        if dof in at:
+            values[:, column] = block[:, at[dof]]
+    return MatrixAt(form, names, dofs, values, list(report.dropped))
+
+
 def carried_modes(report: TransformReport, shapes: ShapeSet) -> list[str]:
     """The modal DOFs an expansion carried, in mode order, or an empty
     list when it carried every mode, so a name lists the modes only

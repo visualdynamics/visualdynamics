@@ -223,8 +223,13 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
     drawn = (
         "(() => {"
         " const cs = Array.from(document.querySelectorAll('canvas.bars'));"
+        " const read = Array.from(document.querySelectorAll('.controls'))"
+        "  .filter(r => r.querySelector('.readout'))"
+        "  .map(r => Array.from(r.querySelectorAll('.readout'), e =>"
+        "   `${e.dataset.name} ${e.querySelector('.box').className.split(' ')[1]}"
+        " ${e.querySelector('.box').textContent}`).join('|'));"
         " return JSON.stringify({canvases: cs.length,"
-        "  bars: cs.map(c => +(c.dataset.bars || 0))}); })()")
+        "  bars: cs.map(c => +(c.dataset.bars || 0)), readouts: read}); })()")
     picked = (
         "(() => { const pick = document.querySelector('select.channel');"
         "const was = pick ? pick.options[pick.selectedIndex].text : null;"
@@ -274,6 +279,14 @@ def test_the_page_builds_the_channel_picker_and_the_marks(run, tmp_path):
     assert drew['canvases'] == BAR_CHARTS, 'every bar chart is on the page'
     assert min(drew['bars']) > 1, (
         'and every one of them drew its bars through to the end')
+    # every channel's figure put its two readouts in the row under it,
+    # beside Reset Axes, each in a state (Brandon, 2026-10-23)
+    assert drew['readouts'], 'the comparison figures carry their readouts'
+    for stamp in drew['readouts']:
+        names = [part.split(' ')[0] for part in stamp.split('|')]
+        assert names == ['lines', 'rms'], stamp
+        assert all(part.split(' ')[1] in ('in', 'over', 'under')
+                   for part in stamp.split('|')), stamp
 
 
 def test_a_binding_never_answers_with_what_a_narrower_one_claims():
@@ -1365,3 +1378,51 @@ def test_the_bar_chart_zooms_along_its_channels(run, tmp_path):
     assert opened['shown'] == opened['bars'] > 1
     assert 1 <= zoomed['shown'] < opened['shown']
     assert back['shown'] == opened['bars']
+
+
+# ---- the readouts on each channel's figure --------------------------------------
+
+
+def test_each_figure_carries_the_bars_own_numbers(run):
+    """Brandon, 2026-10-23: '% Lines Out' and 'RMS Error' on every
+    control channel's figure, each in a box colored by its state. They
+    are the numbers the two bar charts draw, channel for channel, on
+    the narrowband pair and again on the octave bands."""
+    import json
+
+    from visualdynamics.core.compliance import compare_all, readouts
+
+    page = render_html(report_of(run), run.project, unit_system=visualdynamics.SI)
+    payload = json.loads(page.split('type="application/json">')[1]
+                         .split('</script>')[0])
+
+    def channels(block):
+        if block.get('kind') == 'grid':
+            for row in block['rows']:
+                for column in row['cells']:
+                    for cell in column:
+                        yield from channels(cell)
+        # a plot's channels are a list; the verdict's is a count
+        if isinstance(block.get('channels'), list):
+            yield from block['channels']
+
+    shown = {}
+    for block in payload['blocks']:
+        for channel in channels(block):
+            if channel.get('readouts'):
+                shown.setdefault(channel['label'], []).append(channel['readouts'])
+    spec = next(obj for obj in run.objects.values()
+                if isinstance(obj, visualdynamics.Specification)
+                and obj.bandwidth is None)
+    psd = next(obj for obj in run.objects.values()
+               if isinstance(obj, visualdynamics.Psd)
+               and not isinstance(obj, visualdynamics.Specification)
+               and obj.bandwidth is None)
+    expected = {label: readouts(result)
+                for label, result in compare_all(spec, psd)}
+    assert set(shown) == set(expected), 'one per control channel'
+    for label, wanted in expected.items():
+        assert shown[label][0] == wanted, label
+        assert len(shown[label]) == 2, 'and again on the octave bands'
+    states = {r['state'] for rows in expected.values() for r in rows}
+    assert 'over' in states and 'in' in states, 'the run has both kinds'

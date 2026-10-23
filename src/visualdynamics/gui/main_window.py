@@ -1219,9 +1219,33 @@ class MainWindow(QMainWindow):
         self.table_bar.addAction(self.mac_bars_action)
         self.table_bar.addAction(self.mode_table_action)
         self.table_bar.addAction(self.shape_values_action)
+        # where the values are read and in which form (Brandon,
+        # 2026-10-23): every DOF of the set or a channel choice of the
+        # table in its group, and the shapes or a transformation
+        self.values_dofs_combo: QComboBox = QComboBox()
+        self.values_dofs_combo.setToolTip(
+            'Where the values are read: every DOF of the set, or a choice '
+            'of the channel table in its group')
+        self.values_dofs_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.values_dofs_action: QAction = self.table_bar.addWidget(
+            self.values_dofs_combo)
+        self.values_form_combo: QComboBox = QComboBox()
+        for label, form in (('Shapes Φ', 'shapes'),
+                            ('Response transformation Φ⁺', 'response'),
+                            ('Force transformation Φᵀ', 'force')):
+            self.values_form_combo.addItem(label, form)
+        self.values_form_combo.setToolTip(
+            'The shapes at the DOFs (u = Φq), or the transformation the '
+            'transform applies there: Φ⁺ to motions (q = Φ⁺u), Φᵀ to '
+            'forces')
+        self.values_form_combo.currentIndexChanged.connect(
+            lambda _index: self.render_current())
+        self.values_form_action: QAction = self.table_bar.addWidget(
+            self.values_form_combo)
         self.table_bar.addAction(self.mac_action)
         self.mac_bars_action.setVisible(False)
-        self.shape_values_action.setVisible(False)
+        self._hide_shape_values()
         self.mac_action.setVisible(False)
         # writing a specification at a channel table's control
         # channels: the reading of a lone table that makes an object.
@@ -2587,12 +2611,7 @@ class MainWindow(QMainWindow):
         channel, the control channels, then each role the table has a
         channel in. A choice no channel answers is not offered, and with
         nothing to pick the box stays away."""
-        from ..viz.geometry import CHANNEL_ROLES
-
-        held = set(table.roles()) | ({'control'} if table.controls().any()
-                                     else set())
-        roles = [role for role in CHANNEL_ROLES
-                 if role == 'all' or role in held]
+        roles = table.choices()
         self._fill_dofs_combo([(self._ROLE_CHOICES[role], role)
                                for role in roles],
                               "Which channels' DOFs the arrows mark: the "
@@ -2603,16 +2622,28 @@ class MainWindow(QMainWindow):
     def _fill_dofs_combo(self, choices, tooltip):
         """Put `(label, value)` choices in the DOF drop-down, keeping the
         current choice when it is still among them."""
-        previous = self.dofs_combo.currentData()
+        self._fill_combo(self.dofs_combo, choices, tooltip)
+
+    @staticmethod
+    def _fill_combo(combo, choices, tooltip):
+        """Put `(label, value)` choices in `combo`, quietly, keeping the
+        current choice when it is still among them."""
+        previous = combo.currentData()
         values = [value for _label, value in choices]
-        self.dofs_combo.blockSignals(True)
-        self.dofs_combo.clear()
+        combo.blockSignals(True)
+        combo.clear()
         for label, value in choices:
-            self.dofs_combo.addItem(label, value)
+            combo.addItem(label, value)
         if previous in values:
-            self.dofs_combo.setCurrentIndex(values.index(previous))
-        self.dofs_combo.setToolTip(tooltip)
-        self.dofs_combo.blockSignals(False)
+            combo.setCurrentIndex(values.index(previous))
+        combo.setToolTip(tooltip)
+        combo.blockSignals(False)
+
+    def _hide_shape_values(self):
+        """The values toggle and its two drop-downs, all away."""
+        self.shape_values_action.setVisible(False)
+        self.values_dofs_action.setVisible(False)
+        self.values_form_action.setVisible(False)
 
     @staticmethod
     def _response_quantities(data, records):
@@ -9687,13 +9718,13 @@ class MainWindow(QMainWindow):
                 self.mode_table_action.setVisible(False)
                 self.mac_bars_action.setVisible(False)
                 self.mac_action.setVisible(False)
-                self.shape_values_action.setVisible(False)
+                self._hide_shape_values()
                 self.table_bar.show()
         elif self.author_action.isVisible() and channels and not shapes:
             self.mode_table_action.setVisible(False)
             self.mac_bars_action.setVisible(False)
             self.mac_action.setVisible(False)
-            self.shape_values_action.setVisible(False)
+            self._hide_shape_values()
             self.table_bar.show()
         self._offer_acts()
         refused = getattr(self, '_refused_comparison', None)
@@ -17354,9 +17385,9 @@ class MainWindow(QMainWindow):
         # mode list is the fit's own table, not the toggle's business
         self.table_bar.show()
         for action in (self.mode_table_action, self.overlay_action,
-                       self.add_matches_action, self.mac_action,
-                       self.shape_values_action):
+                       self.add_matches_action, self.mac_action):
             action.setVisible(False)
+        self._hide_shape_values()
         self.mac_bars_action.setVisible(True)
         if self.mac_bars_action.isChecked():
             # the key carries the grid size: a cursor-stop redraw (same
@@ -19897,7 +19928,7 @@ class MainWindow(QMainWindow):
         # a lone shape set's other views are its renderer's to put back
         self._shape_views_up = False
         self.shape_values_table.hide()
-        self.shape_values_action.setVisible(False)
+        self._hide_shape_values()
         self.mac_action.setVisible(False)
         self.mode_table_action.setEnabled(True)
         if self.report_editor is not None:
@@ -20035,23 +20066,69 @@ class MainWindow(QMainWindow):
                       theme=self.theme_name)
             self.mac_frame.set_ratio(1.0)
             self._mac_surface(bars=False)
+        note = ''
+        self.values_dofs_action.setVisible(False)
+        self.values_form_action.setVisible(shown['values'])
+        form = self.values_form_combo.currentData()
         if shown['values']:
-            table = self.shape_values_table
-            table.setModel(shape_values_model(shapes, self))
-            table.show()
-            self._size_choice_columns(table, table.model())
+            note = self._render_shape_values(shapes, name)
         self.table_bar.show()
         self.table.setVisible(shown['table'])
-        too_many = (not fits and self.shape_values_action.isChecked())
-        note = (f' — {values:,} shape values, too many for a table'
-                if too_many else '')
+        if not fits and self.shape_values_action.isChecked():
+            note = f' — {values:,} shape values, too many for a table'
         if mode is not None:
             self.table.selectRow(mode)
             self.table.scrollTo(model.index(mode, 0))
-            if shown['values']:
-                self.shape_values_table.selectColumn(mode)
+            if shown['values'] and self.shape_values_table.model() is not None:
+                # a mode is a column of the shapes, a row of a transformation
+                if form == 'shapes':
+                    self.shape_values_table.selectColumn(mode)
+                else:
+                    self.shape_values_table.selectRow(mode)
             return shapes.mode_label(mode) + note
         return self._status_for(shapes) + note
+
+    #: the values drop-down's words for a channel table's choices
+    _VALUES_CHOICES: ClassVar[dict] = {'control': 'Control channels',
+                                       'reference': 'References',
+                                       'response': 'Responses',
+                                       'monitor': 'Monitors'}
+
+    def _render_shape_values(self, shapes, name):
+        """The values table at the DOFs and in the form the two
+        drop-downs say (`transform.matrix_at`, through
+        `Project._shape_dofs`). Returns what the status line adds: which
+        channels and how many the set lacks, or why the form is
+        refused."""
+        table = self.shape_values_table
+        channels = (self.project._channel_table_of(name)
+                    if name is not None else None)
+        choices = [('All DOFs', None)]
+        if channels is not None:
+            choices += [(self._VALUES_CHOICES[c], c) for c in channels.choices()
+                        if c in self._VALUES_CHOICES]
+        self._fill_combo(self.values_dofs_combo, choices,
+                         "Where the values are read: every DOF of the set, or "
+                         "a choice of the channel table in its group, signs "
+                         "as the table writes them")
+        self.values_dofs_action.setVisible(len(choices) > 1)
+        choice = self.values_dofs_combo.currentData()
+        form = self.values_form_combo.currentData()
+        try:
+            dofs = self.project._shape_dofs(name, choice) if choice else None
+            model = shape_values_model(shapes, self, dofs, form)
+        except ValueError as refusal:
+            table.setModel(None)
+            table.show()
+            return f' — {refusal}'
+        table.setModel(model)
+        table.show()
+        self._size_choice_columns(table, model)
+        if choice is None:
+            return ''
+        missing = model.missing
+        said = f' — {len(dofs)} {self.values_dofs_combo.currentText().lower()}'
+        return said + (f', {len(missing)} not in the set' if missing else '')
 
     def _shape_views(self, values_fit):
         """Which of a lone shape set's three views are up: the mode

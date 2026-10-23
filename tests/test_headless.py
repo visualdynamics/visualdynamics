@@ -320,6 +320,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_photos': 'plot_photos',
         '_render_table': 'Project.table',
         '_render_shape_table': 'Project.table / Project.table(values=True)',
+        '_render_shape_values': 'Project.table(values=True, dofs=, form=)',
         '_render_matches': 'Project.table (core.tables.matched_rows)',
         '_render_cross_mac': 'plot_mac / Project.animate_pair',
         '_render_report_builder': 'Project.export_report',

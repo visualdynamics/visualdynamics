@@ -1099,6 +1099,52 @@ LINES_CHANNELS_FAIL_PERCENT = 20.0
 RMS_CHANNELS_FAIL_PERCENT = 10.0
 
 
+def lines_state(percent: float) -> str:
+    """'over' when more than `LINES_PERCENT` of a channel's band is
+    outside its abort limits, else 'in'. No amount of staying inside is
+    a fault, so there is no 'under'."""
+    return 'over' if float(percent) > LINES_PERCENT else 'in'
+
+
+def rms_state(difference_db: float) -> str:
+    """'over' when a channel's RMS is more than `ERROR_DB` above the
+    specification's, 'under' when more than that below, else 'in'
+    (and for a NaN, which nothing judges)."""
+    db = float(difference_db)
+    return 'over' if db > ERROR_DB else 'under' if db < -ERROR_DB else 'in'
+
+
+def readouts(result: dict[str, Any]) -> list[dict[str, str]]:
+    """The two numbers a channel's comparison figure carries, from its
+    `compare` result: the share of its band outside abort and its RMS
+    error, each with its state against the tolerance (`lines_state`,
+    `rms_state`), the same reading `verdict` and the bar charts give.
+
+    Each is a dict of 'name' ('lines' or 'rms'), 'label', 'text' (the
+    number as it is shown) and 'state' ('in', 'over' or 'under'). The
+    share is left out when the specification carries no abort limits,
+    and the error when it could not be read; a channel with nothing
+    compared has none.
+    """
+    # Brandon, 2026-10-23: on each channel's figure, "% Lines Out" lower
+    # left and "RMS Error" lower right, the number in a box gray, red or
+    # blue, so a failing channel is seen on its own figure.
+    if not result.get('lines'):
+        return []
+    out = []
+    percent = result.get('abort_percent')
+    if percent is not None:
+        out.append({'name': 'lines', 'label': '% Lines Out',
+                    'text': f'{float(percent):.1f}',
+                    'state': lines_state(percent)})
+    difference = float(result.get('difference_db', float('nan')))
+    if np.isfinite(difference):
+        out.append({'name': 'rms', 'label': 'RMS Error',
+                    'text': f'{difference + 0.0:+.1f} dB',
+                    'state': rms_state(difference)})
+    return out
+
+
 def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     """Whether a run passed, from the rows `compare_all` returned.
 
@@ -1131,10 +1177,11 @@ def verdict(rows: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
     if not judged:
         return {**out, 'passed': None, 'lines_percent': float('nan'),
                 'rms_percent': float('nan')}
+    # by the same two states each channel's figure shows (`readouts`)
     lines_out = sum(1 for r in judged
-                    if float(r.get('abort_percent') or 0.0) > LINES_PERCENT)
+                    if lines_state(r.get('abort_percent') or 0.0) == 'over')
     rms_out = sum(1 for r in judged
-                  if abs(float(r.get('difference_db', 0.0))) > ERROR_DB)
+                  if rms_state(r.get('difference_db', 0.0)) != 'in')
     lines_percent = 100.0 * lines_out / len(judged)
     rms_percent = 100.0 * rms_out / len(judged)
     passed = (lines_percent < LINES_CHANNELS_FAIL_PERCENT

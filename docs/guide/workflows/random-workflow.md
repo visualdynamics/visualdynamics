@@ -198,6 +198,15 @@ channel's cell notes how far off that axis it sits; when it cannot, the
 columns are the DOF's own direction letters. Each cell is the figure
 that channel would have had on its own.
 
+The row under each figure, beside **Reset Axes**, carries two numbers:
+**% Lines Out**, the share of the channel's band outside its abort
+limits, and **RMS Error**, how far its level sits from the
+specification's in decibels. Each number is in a box, gray inside the
+tolerance, red over it and blue under it (only the RMS error can be
+under). They are the numbers the two bar charts draw, against the same
+tolerances (a tenth of the band and ±3 dB) and in the same colors, so a
+failing channel is seen on its own figure.
+
 The channel table keeps every row on one line, however long its
 comments. A section whose objects the project does not hold (the
 specification sections of a run imported without one, for example) is

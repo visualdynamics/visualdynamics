@@ -18,6 +18,7 @@ from numpy.typing import ArrayLike
 
 # the solid face table lives in core, where finding a part's skin
 # needs it too (Align Meshes, 2026-10-11)
+from ..core.channel_table import CHANNEL_CHOICES
 from ..core.geometry import ELEMENT_TYPES, face_corners, solid_faces
 from ..theme import theme as resolve_theme
 from ..units import DEFAULT_SYSTEM
@@ -1057,8 +1058,9 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
 
 
 #: what a channel table's arrows can be limited to, in the order the
-#: app's drop-down lists them; 'all' is every channel
-CHANNEL_ROLES = ('all', 'control', 'reference', 'response', 'monitor')
+#: app's drop-down lists them; 'all' is every channel. The table's own
+#: rule (`ChannelTable.chosen`), named here for the arrows.
+CHANNEL_ROLES = CHANNEL_CHOICES
 
 
 def channel_dofs(table: Any, role: str = 'all') -> tuple[list[str], list[bool]]:
@@ -1077,12 +1079,7 @@ def channel_dofs(table: Any, role: str = 'all') -> tuple[list[str], list[bool]]:
     if role not in CHANNEL_ROLES:
         raise ValueError(f'{role!r} is not a role; use one of {CHANNEL_ROLES}')
     dofs, types = table.dof_strings(), table.types()
-    # the control channels by their flag, which any role can carry
-    # (Brandon, 2026-10-22)
-    controls = table.controls()
-    rows = [i for i, own in enumerate(table.roles())
-            if role == 'all' or own == role
-            or (role == 'control' and controls[i])]
+    rows = table.chosen(role)
     return ([dofs[i] for i in rows],
             [types[i] in EXCITATION_QUANTITIES for i in rows])
 

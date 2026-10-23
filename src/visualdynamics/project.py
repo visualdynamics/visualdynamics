@@ -4561,8 +4561,8 @@ class Project(dict):
             out.write(html)
         return path
 
-    def table(self, name: Any, *,
-              values: bool = False) -> tuple[list[str], list[list[str]]]:
+    def table(self, name: Any, *, values: bool = False, dofs: Any = None,
+              form: str = 'shapes') -> tuple[list[str], list[list[str]]]:
         """(headers, rows) for an object that can be shown as a table.
 
         The rows are a channel table's instrumentation, a shape set's
@@ -4570,8 +4570,10 @@ class Project(dict):
         both sets' parameters. They are the same rows the report prints,
         so a script and a report always agree. With `values`, a shape
         set gives its shape values instead, as the app's Shape Values
-        table shows them: a row per DOF and a column per mode. An object
-        with no table raises ValueError.
+        table shows them: at every DOF of the set, or at `dofs`, and as
+        the shapes or one of the transformations through them
+        (`core.transform.matrix_at`). An object with no table raises
+        ValueError.
 
         Parameters
         ----------
@@ -4579,6 +4581,14 @@ class Project(dict):
             The object to tabulate.
         values : bool, default False
             For a shape set, its values rather than its modes.
+        dofs : str or sequence of str, optional
+            With `values`, where: a list of DOFs, or a channel choice
+            ('all', 'control', 'reference', 'response' or 'monitor') of
+            the channel table in the set's object group. Every DOF of
+            the set when left out.
+        form : str, default 'shapes'
+            With `values`, what: 'shapes' (`Φ`, a row per DOF),
+            'response' (`Φ⁺`, a row per mode) or 'force' (`Φᵀ`).
 
         Returns
         -------
@@ -4593,12 +4603,37 @@ class Project(dict):
             if not isinstance(self[name], ShapeSet):
                 raise ValueError(f'{name} is a {type(self[name]).__name__}; '
                                  'only a shape set has shape values')
-            return shape_values(self[name])
+            return shape_values(self[name], self._shape_dofs(name, dofs), form)
         built = table_of(self[name], objects=self)
         if built is None:
             raise ValueError(f'{name} is a {type(self[name]).__name__}, '
                              'which does not read as a table')
         return built
+
+    def _channel_table_of(self, name: str) -> ChannelTable | None:
+        """The channel table in `name`'s object group, the first when
+        there are several, or None."""
+        for member in self.object_group_of(name) or []:
+            if member != name and isinstance(self[member], ChannelTable):
+                return self[member]
+        return None
+
+    def _shape_dofs(self, name: str, dofs: Any) -> list[str] | None:
+        """`dofs` as DOF strings for the shape values of `name`: a list as
+        given, None for every DOF of the set, or a channel choice read
+        from the channel table in its object group, in table order and
+        with a channel's sign as the table writes it. One reading for
+        the window's drop-down and a script's `table`."""
+        if dofs is None or not isinstance(dofs, str):
+            return None if dofs is None else [str(dof) for dof in dofs]
+        table = self._channel_table_of(name)
+        if table is None:
+            raise ValueError(f'{name} has no channel table in its object '
+                             f'group to take {dofs!r} channels from')
+        strings = table.dof_strings()
+        # a channel with no node or direction yet names no DOF
+        return [strings[i] for i in table.chosen(dofs)
+                if str(table['node'][i]) and str(table['direction'][i])]
 
     def plot(self, name: str, **kwargs: Any) -> Any:
         """Plot an object the way the app plots it: data as curves, a

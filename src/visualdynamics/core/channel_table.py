@@ -218,6 +218,11 @@ def _parse_date(text: str) -> str:
     raise ValueError(f'{text!r} is not a date — try YYYY-MM-DD')
 
 
+#: what a table's channels can be chosen by: every channel, the control
+#: channels (by their flag, whatever their role), or one role
+CHANNEL_CHOICES = ('all', 'control', 'reference', 'response', 'monitor')
+
+
 class ChannelTable:
     """Per-channel metadata, in one fixed set of typed columns.
 
@@ -596,6 +601,46 @@ class ChannelTable:
              for name, spec in self.COLUMNS.items()}))
         self.frame = pd.concat([self.frame, added], ignore_index=True)
         return numbers
+
+    def chosen(self, choice: str = 'all') -> list[int]:
+        """The rows of the channels `choice` picks, in table order.
+
+        Parameters
+        ----------
+        choice : str, default 'all'
+            One of `CHANNEL_CHOICES`: 'control' for the channels with
+            Control checked, whatever their role, or a role.
+
+        Returns
+        -------
+        list of int
+            The rows.
+
+        Raises
+        ------
+        ValueError
+            If `choice` is not one of `CHANNEL_CHOICES`.
+        """
+        # One rule for every place channels are picked this way: the
+        # arrows on a geometry and the shape values at a table's DOFs
+        # (Brandon, 2026-10-22 and 2026-10-23).
+        if choice not in CHANNEL_CHOICES:
+            raise ValueError(f'{choice!r} is not a choice; use one of '
+                             f'{CHANNEL_CHOICES}')
+        if choice == 'all':
+            return list(range(self.num_channels))
+        if choice == 'control':
+            return [int(i) for i in np.flatnonzero(self.controls())]
+        return [i for i, role in enumerate(self.roles()) if role == choice]
+
+    def choices(self) -> list[str]:
+        """The `CHANNEL_CHOICES` that pick a channel, in that order:
+        'all' always, then 'control' when a channel has Control checked,
+        then each role a channel holds."""
+        held = set(self.roles())
+        return [choice for choice in CHANNEL_CHOICES
+                if choice == 'all' or (choice == 'control' and self.controls().any())
+                or choice in held]
 
     def delete_channels(self, indices: Sequence[int]) -> None:
         """Remove the given rows in place. At least one row must remain.

@@ -1,6 +1,6 @@
 """The readings of a record are one choice, and the bar says so.
 
-Averaging, filter, kurtosis, shocks, the wavelet, the pulse check, the replication fit and the stroke
+Averaging, filter, kurtosis, statistics, overload, shocks, the wavelet, the pulse check, the replication fit and the stroke
 are ways of reading one record, and a record is read one way at a
 time. That was always true and
 the bar did not show it: four buttons in a row, indistinguishable from
@@ -56,6 +56,7 @@ def readings(pane):
             'truncate': pane.truncate_action,
             'kurtosis': pane.kurtosis_action,
             'statistics': pane.statistics_action,
+            'overload': pane.overload_action,
             'shocks': pane.shocks_action,
             'wavelet': pane.wavelet_action,
             'pulse': pane.pulse_action,
@@ -95,10 +96,10 @@ def test_nothing_else_sits_inside_the_fence(pane):
 
 
 @pytest.mark.parametrize('standing', ['averaging', 'filter', 'truncate',
-                                      'kurtosis', 'statistics', 'shocks',
+                                      'kurtosis', 'statistics', 'overload', 'shocks',
                                       'wavelet', 'pulse', 'fit', 'stroke'])
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
-                                    'kurtosis', 'statistics', 'shocks',
+                                    'kurtosis', 'statistics', 'overload', 'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke'])
 def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
     """The exclusion itself, from every direction to every other.
@@ -126,7 +127,7 @@ def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
 
 
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
-                                    'kurtosis', 'statistics', 'shocks',
+                                    'kurtosis', 'statistics', 'overload', 'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke'])
 def test_the_flags_follow_the_buttons(pane, pump, chosen):
     """The flags the drawing code reads, which the old version updated
@@ -140,6 +141,7 @@ def test_the_flags_follow_the_buttons(pane, pump, chosen):
              'truncate': pane.truncate_wanted,
              'kurtosis': pane.kurtosis_wanted,
              'statistics': pane.statistics_wanted,
+             'overload': pane.overload_wanted,
              'shocks': pane.shocks_wanted,
              'wavelet': pane.wavelet_wanted,
              'pulse': pane.pulse_wanted,

@@ -1479,6 +1479,33 @@ class Project(dict):
             return active, self[active]
         return None
 
+    def channel_table_for(self, name: Any) -> tuple[str, ChannelTable] | None:
+        """(name, table) for the channel table that describes a time
+        history: the first in its group with a row naming one of its
+        channels.
+
+        A table in the group that names none of the history's channels
+        describes some other recording and is passed over, as the role
+        pairing passes it over.
+
+        Parameters
+        ----------
+        name : str or object
+            The time history.
+
+        Returns
+        -------
+        tuple of (str, ChannelTable), or None
+            The table's name and the table, or None when no linked table
+            describes the history.
+        """
+        name = self.name_of(name)
+        if not isinstance(self.get(name), TimeHistory):
+            return None
+        for other, _rows in self._role_partners(name):
+            return other, self[other]
+        return None
+
     def _group(self, name: str) -> ObjectGroup | None:
         return next((group for group in self.object_groups
                      if name in group['members']), None)
@@ -5415,24 +5442,11 @@ def _has_both_sides(history) -> bool:
 
 
 def _table_identities(table, history) -> list:
-    """Each channel-table row as the (DOF, quantity) channel it names —
-    the table's channel type is the quantity, the same word — or None
-    where it names none of `history`'s channels. A row with no channel
-    type names the history's channel at that DOF when there is exactly
-    one. With no history, each row's own (DOF, type)."""
-    dofs, types = table.dof_strings(), table.types()
-    if history is None:
-        return list(zip(dofs, types))
-    identities = history.channel_identities()
-    known = set(identities)
-    out = []
-    for dof, kind in zip(dofs, types):
-        if kind:
-            out.append((dof, kind) if (dof, kind) in known else None)
-        else:
-            at = [identity for identity in identities if identity[0] == dof]
-            out.append(at[0] if len(at) == 1 else None)
-    return out
+    """Each channel-table row as the (DOF, quantity) channel it names,
+    or None where it names none of `history`'s channels; with no
+    history, each row's own (DOF, type). `ChannelTable.identities`
+    holds the rule."""
+    return table.identities(history)
 
 
 def _is_time(project, obj):

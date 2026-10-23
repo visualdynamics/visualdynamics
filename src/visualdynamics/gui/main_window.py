@@ -997,6 +997,8 @@ class MainWindow(QMainWindow):
         self.data_pane.tone_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.tone_panel.changed.connect(self._tone_window_chosen)
+        # a channel's row clicked in the overload pane draws its trace
+        self.data_pane.overload_panel.picked.connect(self._overload_picked)
         # the acts, asked for where their settings are set (Brandon,
         # 2026-08-28): each button is a second entrance to the same
         # verb the bar's act offers, so provenance, badges and the
@@ -12581,6 +12583,7 @@ class MainWindow(QMainWindow):
             for key, render in (('fit', self._render_replication_fit),
                                 ('wavelet', self._render_wavelet),
                                 ('statistics', self._render_statistics),
+                                ('overload', self._render_overload),
                                 ('pulse', self._render_pulse),
                                 ('stroke', self._render_stroke)):
                 if self.data_pane.showing(key):
@@ -18440,6 +18443,89 @@ class MainWindow(QMainWindow):
         picked = [i for i in (records or [])
                   if history.ordinate_dim[i] == 'acceleration']
         return acceleration_channel(history, picked[0] if picked else None)
+
+    def _render_overload(self, history, name=None, records=None):
+        """Every channel of this record against the range its linked
+        channel table gives it: one channel's trace over its range, and
+        the headroom bars beside the kurtosis bars, with the table and
+        the judgement in the panel.
+
+        The ranges are the table's (`Project.channel_table_for`), read
+        by `TimeHistory.overload_check`, the call a script makes. The
+        trace is the first selected record, or the worst channel when
+        the whole record is selected; the bars are every channel either
+        way, so picking one to look at does not take the others off the
+        chart. With no linked table that describes the record there is
+        nothing to read against, and the panel says how to give it one.
+        """
+        from ..plot.overload import build_overload
+        from ..units import UNKNOWN
+
+        panel = self.data_pane.overload_panel
+        panel.set_settings(self.data_pane.overload_settings)
+        settings = panel.settings()
+        panel.show()
+        self.data_pane.offer_waterfall(False)
+        self.data_pane.show_waterfall(False)
+        self.data_pane.graphics.clear()
+        self._overload_name: str | None = name
+        found = (None if name is None
+                 else self.project.channel_table_for(name))
+        if found is None:
+            panel.show_check(None)
+            return ('no linked channel table describes this record: link '
+                    'one to read each channel against its range')
+        table_name, table = found
+        check = history.overload_check(table, **settings)
+        record = records[0] if records else None
+        band = self.data_pane.kurtosis_bounds
+        build_overload(self.data_pane.graphics, history, check, record,
+                       kurtosis_band=band, unit_system=self.unit_system,
+                       theme=self.theme_name,
+                       step_changed=self._overload_step_moved,
+                       kurtosis_changed=self._kurtosis_bounds_moved)
+        shown = (next((c for c in check.channels if c.record == record),
+                      None) if record is not None else
+                 check.worst or (check.channels[0] if check.channels
+                                 else None))
+        transform, unit = (1.0, 0.0), ''
+        if shown is not None:
+            dimension = history.ordinate_dim[shown.record]
+            transform = self.unit_system.transform(dimension)
+            unit = ('' if dimension == UNKNOWN
+                    else self.unit_system.label_text(dimension))
+        panel.show_check(check, shown, transform, unit, source=table_name)
+        given = ''.join(f', {key}={value!r}'
+                        for key, value in settings.items())
+        if band is not None:
+            given += f', kurtosis_band={tuple(band)!r}'
+        prefix = (f'visualdynamics.plot.plot_overload(project[{name!r}], '
+                  f'project[{table_name!r}]')
+        self._journal_view(
+            prefix, f'{prefix}, {record!r}{given}, '
+                    "path='overload.png', show=False)")
+        return check.describe()
+
+    def _overload_step_moved(self, low, _high):
+        """The headroom floor was dragged: it is the step to the next
+        level, so it is kept as that setting and the reading redrawn,
+        the words and the panel with it."""
+        settings = dict(self.data_pane.overload_panel.settings())
+        settings['step_db'] = float(low)
+        self.data_pane.overload_settings = settings
+        self.render_current()
+
+    def _overload_picked(self, record):
+        """A channel's row was clicked in the overload pane: select that
+        record, so the tree says what the trace is of, and draw it."""
+        name = getattr(self, '_overload_name', None)
+        if name is None:
+            return
+        item = self._item_for_object(name)
+        if item is not None:
+            item.setExpanded(True)
+        self._select_records(name, [int(record)])
+        self.render_current()
 
     def _kurtosis_bounds_moved(self, low, high):
         """Remember a dragged band, so a redraw does not put it back."""

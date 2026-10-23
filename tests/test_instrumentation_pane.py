@@ -223,7 +223,11 @@ def test_a_click_reaches_the_pane_through_a_real_interactor(bar, window, pump, m
     frame = vtk.vtkRenderWindow()
     frame.SetOffScreenRendering(1)
     frame.AddRenderer(renderer)
-    raw = vtk.vtkRenderWindowInteractor()
+    # the interactor the app's view runs on (pyvistaqt's), not the
+    # platform's: vtkRenderWindowInteractor() is the X11 one on Linux,
+    # and over a window with no X window of its own it crashed a CI
+    # worker in the press (2026-10-23, Python 3.12 on the public main)
+    raw = vtk.vtkGenericRenderWindowInteractor()
     raw.SetRenderWindow(frame)
     raw.SetInteractorStyle(vtk.vtkInteractorStyleTrackballCamera())
     raw.Initialize()

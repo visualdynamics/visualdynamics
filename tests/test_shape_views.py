@@ -254,7 +254,7 @@ def test_the_transformations_are_what_the_transform_applies():
     rng = np.random.default_rng(4)
     t = np.arange(64) / 64.0
     values = rng.standard_normal((12, 64))
-    for form, quantity in (('response', 'acceleration'), ('force', 'force')):
+    for form, quantity in (('response', 'acceleration'), ('reference', 'force')):
         view = matrix_at(shapes, references, form)
         assert view.rows == [f'M{k}' for k in range(1, 7)]
         assert view.columns == references
@@ -273,11 +273,14 @@ def test_too_few_dofs_refuse_the_response_transformation():
     project, _references, responses = _rigid_project()
     with pytest.raises(ValueError, match='resolve only 3 of 6 modes'):
         matrix_at(project['Rigid'], responses, 'response')
-    assert matrix_at(project['Rigid'], responses, 'force').values.shape == (6, 4)
+    assert matrix_at(project['Rigid'], responses, 'reference').values.shape == (6, 4)
     with pytest.raises(ValueError, match='not a form'):
         matrix_at(project['Rigid'], responses, 'inverse')
+    # 'force' was the reference transformation's name until 2026-10-23
+    with pytest.raises(ValueError, match='not a form'):
+        matrix_at(project['Rigid'], responses, 'force')
     with pytest.raises(ValueError, match='none of these'):
-        matrix_at(project['Rigid'], ['9Z+'], 'force')
+        matrix_at(project['Rigid'], ['9Z+'], 'reference')
 
 
 def test_a_tables_channels_are_chosen_by_one_rule():
@@ -295,7 +298,7 @@ def test_a_tables_channels_are_chosen_by_one_rule():
 def test_a_script_reads_a_choice_of_channels_in_a_form():
     project, references, _responses = _rigid_project()
     headers, rows = project.table('Rigid', values=True, dofs='reference',
-                                  form='force')
+                                  form='reference')
     assert headers == ['Mode'] + references
     assert rows[0][0] == 'M1' and rows[0][4] == '-1', "M1 at 2X- is -1"
     headers, rows = project.table('Rigid', values=True, dofs='monitor')
@@ -329,7 +332,9 @@ def test_the_window_offers_the_choices_and_the_forms(window, pump):
               for r in range(model.rowCount())]
     assert labels == references
     assert model.data(model.index(3, 0)) == '-1', '2X- moves against M1'
-    form.setCurrentIndex(form.findData('force'))
+    assert [form.itemText(i) for i in range(form.count())] == [
+        'Shapes Φ', 'Response transformation Φ⁺', 'Reference transformation Φᵀ']
+    form.setCurrentIndex(form.findData('reference'))
     pump()
     model = window.shape_values_table.model()
     assert (model.rowCount(), model.columnCount()) == (6, 12)
@@ -356,7 +361,7 @@ def test_a_picked_mode_is_a_row_of_a_transformation(window, pump):
     _show(window, pump, project['Rigid'], name='Again')
     _toggle(window, pump, window.shape_values_action)
     form = window.values_form_combo
-    form.setCurrentIndex(form.findData('force'))
+    form.setCurrentIndex(form.findData('reference'))
     pump()
     window._item_for_object('Again').setExpanded(True)
     pump()
@@ -365,3 +370,117 @@ def test_a_picked_mode_is_a_row_of_a_transformation(window, pump):
     pump()
     selection = window.shape_values_table.selectionModel()
     assert selection.isRowSelected(2) and not selection.isColumnSelected(2)
+
+
+# ---- a transformation's rows drawn on the geometry -------------------------------
+#
+# Brandon, 2026-10-23: the response and reference transformations drawn
+# on the geometry a row at a time, arrows scaled per DOF (per row, so a
+# rotation's lever arms read as well as a translation), labeled by DOF;
+# the geometry above the matrix, and no geometry for the shapes.
+
+
+def _arrows_drawn(plotter, prefix='values-arrows'):
+    import pyvista as pv
+
+    cells = pv.Arrow().n_cells
+    return sum(actor.GetMapper().GetInput().GetNumberOfCells()
+               for name, actor in plotter.actors.items()
+               if str(name).startswith(prefix)) // cells
+
+
+def test_a_row_is_scaled_by_its_largest_value():
+    from visualdynamics.core.transform import MatrixAt
+    from visualdynamics.viz.geometry import transformation_arrows
+
+    view = MatrixAt('reference', ['M1', 'M2'], ['1X+', '2X-', '9Z+', '3Y+'],
+                    np.array([[0.5, -2.0, np.nan, 0.25],
+                              [0.0, 0.0, np.nan, 0.0]]))
+    dofs, shares = transformation_arrows(view, 0)
+    assert dofs == ['1X+', '2X-', '9Z+', '3Y+']
+    assert shares[0] == 0.25 and shares[1] == -1.0 and shares[3] == 0.125
+    assert np.isnan(shares[2]), 'a DOF the set lacks has no arrow'
+    assert transformation_arrows(view, 1)[1][:2] == [0.0, 0.0]
+
+
+def test_each_arrow_is_its_own_length_and_sign():
+    """Node 1 at x = 0 gets a full arrow along +X; node 2 at x = 10 half
+    of one, pointing back along -X, so it ends inside the span."""
+    import pyvista as pv
+
+    from visualdynamics.viz.geometry import add_dof_arrows
+
+    geometry = visualdynamics.Geometry(node_id=[1, 2, 3],
+                                       node_xyz=[[0, 0, 0], [10, 0, 0], [5, 9, 0]])
+    plotter = pv.Plotter(off_screen=True)
+    try:
+        drawn = add_dof_arrows(plotter, geometry, ['1X+', '2X+', '3X+', '3Y+'],
+                               name='w', scales=[1.0, -0.5, 0.0, np.nan])
+        points = np.asarray(plotter.actors['w-arrows0'].GetMapper().GetInput()
+                            .GetPoints().GetData())
+    finally:
+        plotter.close()
+    assert drawn == 2, 'a zero and a NaN draw nothing'
+    first = points[points[:, 0] < 5.0, 0]
+    second = points[points[:, 0] > 5.0, 0]
+    full = first.max()
+    assert full > 0 and np.isclose(first.min(), 0.0, atol=1e-9)
+    assert np.isclose(second.max(), 10.0, atol=1e-9)
+    assert np.isclose(10.0 - second.min(), full / 2, rtol=1e-6), 'half, backwards'
+    # a full weighted arrow is longer than a marker, which is only read
+    # for where it points (`WEIGHTED_REACH`)
+    from visualdynamics.viz.geometry import WEIGHTED_REACH
+
+    plotter = pv.Plotter(off_screen=True)
+    try:
+        add_dof_arrows(plotter, geometry, ['1X+'], name='m')
+        marker = np.asarray(plotter.actors['m-arrows0'].GetMapper().GetInput()
+                            .GetPoints().GetData())[:, 0].max()
+    finally:
+        plotter.close()
+    assert np.isclose(full, WEIGHTED_REACH * marker, rtol=1e-6)
+
+
+def test_a_script_draws_a_row_on_the_geometry(tmp_path):
+    project, _references, _responses = _rigid_project()
+    first = project.plot_transformation('Rigid', dofs='reference', row=0,
+                                        screenshot=str(tmp_path / 'm1.png'))
+    sixth = project.plot_transformation('Rigid', dofs='reference', row=5,
+                                        screenshot=str(tmp_path / 'm6.png'))
+    assert not np.array_equal(np.asarray(first), np.asarray(sixth))
+    with pytest.raises(ValueError, match='no rows to draw'):
+        project.plot_transformation('Rigid', form='shapes')
+
+
+def test_the_geometry_comes_up_above_a_transformation(window, pump):
+    project, _references, _responses = _rigid_project()
+    for name in project.names:
+        window.add_object(name, project[name])
+    for other in ('Channels', 'Rigid'):
+        window.project.link('Square', other)
+    window.tree.clearSelection()
+    item = window._item_for_object('Rigid')
+    window.tree.setCurrentItem(item)
+    item.setSelected(True)
+    pump()
+    _toggle(window, pump, window.shape_values_action)
+    assert not window.scene.isVisibleTo(window), 'the shapes are a table only'
+    dofs, form = window.values_dofs_combo, window.values_form_combo
+    dofs.setCurrentIndex(dofs.findData('reference'))
+    form.setCurrentIndex(form.findData('reference'))
+    pump()
+    assert window.scene.isVisibleTo(window), 'the geometry above the matrix'
+    assert window.shape_values_table.isVisibleTo(window)
+    plotter = window.scene.plotter
+    assert window.shape_values_table.currentIndex().row() == 0
+    assert _arrows_drawn(plotter) == 4, 'M1: the four X references'
+    window.shape_values_table.selectRow(5)
+    pump()
+    assert _arrows_drawn(plotter) == 8, 'M6: X and Y at every corner'
+    window.shape_values_table.selectRow(2)
+    pump()
+    assert _arrows_drawn(plotter) == 4, 'M3: the four Z, the X and Y gone'
+    assert 'values-arrows0' not in plotter.actors
+    form.setCurrentIndex(form.findData('shapes'))
+    pump()
+    assert not window.scene.isVisibleTo(window)

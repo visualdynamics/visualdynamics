@@ -955,8 +955,11 @@ def to_physical(data: DataArray, shapes: ShapeSet,
 
 
 #: what the Shape Values table shows of a set at a choice of DOFs: the
-#: shapes, the response transformation or the force transformation
-FORMS = ('shapes', 'response', 'force')
+#: shapes, the response transformation or the reference transformation.
+#: 'reference' was 'force' until Brandon renamed it (2026-10-23): a
+#: controller's references are often drive voltages, and Rattlesnake
+#: names the two matrices response and reference.
+FORMS = ('shapes', 'response', 'reference')
 
 
 @dataclass
@@ -966,7 +969,7 @@ class MatrixAt:
     Attributes
     ----------
     form : str
-        'shapes', 'response' or 'force'.
+        'shapes', 'response' or 'reference'.
     rows, columns : list of str
         The labels: DOFs down and modes across for the shapes, modes
         down and DOFs across for the two transformations.
@@ -991,10 +994,15 @@ def matrix_at(shapes: ShapeSet, dofs: Sequence[str] | None = None,
     how each modal coordinate moves each DOF, `u = Φq`, each value as
     stored, complex where the set is. 'response' is `Φ⁺`, a row per mode
     and a column per DOF, what `to_modal` applies to motions,
-    `q = Φ⁺u`. 'force' is `Φᵀ`, what it applies to forces, `f_m = Φᵀf`.
-    The two transformations are over the real shapes, as the transform
-    takes them, and the pseudo-inverse is refused when the DOFs resolve
-    fewer modes than the set has.
+    `q = Φ⁺u`. 'reference' is `Φᵀ`, what it applies to forces,
+    `f_m = Φᵀf`, and what a controller applies to its drive signals.
+    The names are the roles a controller gives the two matrices; what
+    the transform applies follows a channel's quantity, not its role, so
+    a motion reference (a base-excitation accelerometer) transforms by
+    the response transformation and a force response by the reference
+    one. The two transformations are over the real shapes, as the
+    transform takes them, and the pseudo-inverse is refused when the
+    DOFs resolve fewer modes than the set has.
 
     A DOF is matched to the set's column as the transform matches a
     channel, its sign honored: `2X-` is the negative of the set's `2X+`.

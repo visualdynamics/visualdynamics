@@ -4588,7 +4588,7 @@ class Project(dict):
             the set when left out.
         form : str, default 'shapes'
             With `values`, what: 'shapes' (`Φ`, a row per DOF),
-            'response' (`Φ⁺`, a row per mode) or 'force' (`Φᵀ`).
+            'response' (`Φ⁺`, a row per mode) or 'reference' (`Φᵀ`).
 
         Returns
         -------
@@ -4609,6 +4609,55 @@ class Project(dict):
             raise ValueError(f'{name} is a {type(self[name]).__name__}, '
                              'which does not read as a table')
         return built
+
+    def plot_transformation(self, name: Any, *, dofs: Any = None,
+                            form: str = 'reference', row: int = 0,
+                            **kwargs: Any) -> Any:
+        """Draw one row of a shape set's transformation on its geometry,
+        as arrows scaled per DOF, as the app's Shape Values view does
+        with a transformation picked.
+
+        The row is a mode; each arrow is at one of `dofs`, along it, its
+        length the row's value there as a share of the row's largest
+        (`viz.geometry.transformation_arrows`), pointing the other way
+        for a negative value. The geometry is the one in the set's
+        object group (`geometry_for`). A set with no geometry, or the
+        'shapes' form, whose rows are DOFs rather than modes, raises
+        ValueError.
+
+        Parameters
+        ----------
+        name : str or ShapeSet
+            The shape set.
+        dofs : str or sequence of str, optional
+            Where, as for `table`: a list of DOFs or a channel choice
+            ('reference', 'response', ...) of the channel table in the
+            set's object group. Every DOF of the set when left out.
+        form : str, default 'reference'
+            'reference' (`Φᵀ`) or 'response' (`Φ⁺`).
+        row : int, default 0
+            Which mode's row, from 0.
+        **kwargs
+            Passed to `viz.geometry.plot_transformation`, such as
+            `screenshot=`.
+
+        Returns
+        -------
+        object
+            The plotter, or the image when rendered to `screenshot`.
+        """
+        from .core.transform import matrix_at
+        from .viz.geometry import plot_transformation
+
+        name = self.name_of(name)
+        if form not in ('reference', 'response'):
+            raise ValueError(f"{form!r} has no rows to draw; use 'reference' "
+                             "or 'response'")
+        found = self.geometry_for(name)
+        if found is None:
+            raise ValueError(f'{name} has no geometry to draw on')
+        view = matrix_at(self[name], self._shape_dofs(name, dofs), form)
+        return plot_transformation(found[1], view, row, **kwargs)
 
     def _channel_table_of(self, name: str) -> ChannelTable | None:
         """The channel table in `name`'s object group, the first when

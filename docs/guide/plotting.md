@@ -84,6 +84,7 @@ coherence.plot_map()                    # frequency across, channel down
 geometry.plot()                         # the 3D scene, with its bar
 geometry.plot_dofs(frf, 'force')        # labeled DOF arrows
 geometry.plot_channels(table, 'reference')  # a channel table's, by role
+project.plot_transformation('Rigid', dofs='reference', row=5)  # a row of Φᵀ as arrows
 ```
 
 The readings on a time history's bar have their own calls in

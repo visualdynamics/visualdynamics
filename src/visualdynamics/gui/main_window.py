@@ -168,10 +168,12 @@ from ..viz.geometry import (
     ENTITY_LABEL_LIMIT,
     _display_length,
     add_coordinate_system,
+    add_dof_arrows,
     add_geometry,
     annotate_scene,
     display_points,
     labels_fit,
+    transformation_arrows,
 )
 from .editors import DoubleSpinBox, SpinBox, commit_on_enter, commit_typed
 from .icons import (
@@ -1233,12 +1235,14 @@ class MainWindow(QMainWindow):
         self.values_form_combo: QComboBox = QComboBox()
         for label, form in (('Shapes Φ', 'shapes'),
                             ('Response transformation Φ⁺', 'response'),
-                            ('Force transformation Φᵀ', 'force')):
+                            ('Reference transformation Φᵀ', 'reference')):
             self.values_form_combo.addItem(label, form)
         self.values_form_combo.setToolTip(
-            'The shapes at the DOFs (u = Φq), or the transformation the '
-            'transform applies there: Φ⁺ to motions (q = Φ⁺u), Φᵀ to '
-            'forces')
+            'The shapes at the DOFs (u = Φq), or a transformation there: '
+            'the response transformation Φ⁺ (q = Φ⁺u), applied to '
+            'motions, or the reference transformation Φᵀ, applied to '
+            'forces and drive signals. A motion reference, such as a '
+            'base-excitation accelerometer, transforms as a response')
         self.values_form_combo.currentIndexChanged.connect(
             lambda _index: self.render_current())
         self.values_form_action: QAction = self.table_bar.addWidget(
@@ -1336,6 +1340,12 @@ class MainWindow(QMainWindow):
         # a lone shape set's values, between its mode table and its MAC
         self.shape_values_table: CopyPasteTableView = CopyPasteTableView()
         self.shape_values_table.hide()
+        #: a lone shape set's transformation drawn on its geometry, above
+        #: the tables (Brandon, 2026-10-23): (geometry name, geometry)
+        #: while the layout asks for it, and (geometry, the matrix) while
+        #: a row's arrows can be drawn
+        self._values_on: tuple | None = None
+        self._values_arrows: tuple | None = None
         self.tables_row.addWidget(self.shape_values_table)
         self.tables_row.addWidget(self.mac_frame)
         self.tables_row.setSizes([500, 500])
@@ -9627,7 +9637,11 @@ class MainWindow(QMainWindow):
         # gesture is on the flat plot, so the stage stands down while
         # the sheet is open and comes back when it closes
         self.data_pane.flat_only = authoring is not None
-        self._show_views(three_d=bool(geometries),
+        # a lone set's transformation is drawn on its geometry, which
+        # comes up above the tables (Brandon, 2026-10-23)
+        self._values_on = (self._values_geometry(shapes[0][0], shapes[0][1])
+                           if shape_table and len(shape_sets) == 1 else None)
+        self._show_views(three_d=bool(geometries) or self._values_on is not None,
                          plots=bool(series) or bool(picture_sets)
                          or bool(sine_specs) or bool(sine_levels)
                          or authoring is not None,
@@ -19928,6 +19942,7 @@ class MainWindow(QMainWindow):
         # a lone shape set's other views are its renderer's to put back
         self._shape_views_up = False
         self.shape_values_table.hide()
+        self._values_arrows = None
         self._hide_shape_values()
         self.mac_action.setVisible(False)
         self.mode_table_action.setEnabled(True)
@@ -20114,6 +20129,10 @@ class MainWindow(QMainWindow):
         self.values_dofs_action.setVisible(len(choices) > 1)
         choice = self.values_dofs_combo.currentData()
         form = self.values_form_combo.currentData()
+        on = self._values_on if form != 'shapes' else None
+        if on is not None:
+            self._render_geometries([(on[0], {'object': on[1], 'components': [],
+                                              'entities': []})])
         try:
             dofs = self.project._shape_dofs(name, choice) if choice else None
             model = shape_values_model(shapes, self, dofs, form)
@@ -20124,11 +20143,49 @@ class MainWindow(QMainWindow):
         table.setModel(model)
         table.show()
         self._size_choice_columns(table, model)
+        if on is not None:
+            # the row picked in the matrix is the row drawn; the first
+            # until one is picked
+            self._values_arrows = (on[1], model.obj)
+            table.selectionModel().currentChanged.connect(
+                lambda current, _previous: self._draw_values_arrows(current.row()))
+            table.selectRow(0)
         if choice is None:
             return ''
         missing = model.missing
         said = f' — {len(dofs)} {self.values_dofs_combo.currentText().lower()}'
         return said + (f', {len(missing)} not in the set' if missing else '')
+
+    def _values_geometry(self, name, shapes):
+        """(geometry name, geometry) a lone shape set's transformation is
+        drawn on: the one in its object group (`Project.geometry_for`),
+        while Shape Values is up showing the response or the reference
+        transformation. None otherwise, and for the shapes, whose rows
+        are DOFs rather than a mode's weights."""
+        if (not self.shape_values_action.isChecked()
+                or self.values_form_combo.currentData() == 'shapes'
+                or shapes.num_shapes * len(shapes.coordinate)
+                > SHAPE_VALUES_CELL_LIMIT):
+            return None
+        return self.project.geometry_for(name)
+
+    def _draw_values_arrows(self, row):
+        """Row `row` of the transformation on show, as arrows on its
+        geometry scaled per DOF (`viz.geometry.transformation_arrows`),
+        in place of the row drawn before."""
+        held, plotter = self._values_arrows, self.scene.plotter
+        if held is None or plotter is None or row < 0:
+            return
+        geometry, view = held
+        if row >= len(view.rows):
+            return
+        for actor in list(plotter.actors):
+            if str(actor).startswith('values-'):
+                plotter.remove_actor(actor, render=False)
+        dofs, shares = transformation_arrows(view, row)
+        add_dof_arrows(plotter, geometry, dofs, unit_system=self.unit_system,
+                       name='values', scales=shares)
+        plotter.render()
 
     def _shape_views(self, values_fit):
         """Which of a lone shape set's three views are up: the mode

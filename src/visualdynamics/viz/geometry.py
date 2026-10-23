@@ -505,10 +505,18 @@ def dof_arrow_length(points: ArrayLike, extent: float) -> float:
     return length
 
 
+#: how much longer a full-length weighted arrow (`add_dof_arrows`'
+#: `scales`) is than a DOF marker: 30 % of the model's size where a
+#: marker is 12 %, so the shorter ones in a row can still be compared;
+#: `dof_arrow_length` still holds it short of the nearest node
+WEIGHTED_REACH = 2.5
+
+
 def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    unit_system: UnitSystem | None = None,
                    incoming: bool | Sequence[bool] = False,
-                   name: str | None = None) -> int:
+                   name: str | None = None,
+                   scales: Sequence[float] | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
     One arrow per DOF, colored by its axis: X red, Y green, Z blue, the
@@ -519,7 +527,11 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     outward, with its label at the tip; with `incoming` (forces) the
     arrow ends on the node instead, with its label at the base;
     `incoming` is one flag for every arrow or one per DOF. All
-    arrows have one length (`dof_arrow_length`). Labels are drawn only
+    arrows have one length (`dof_arrow_length`), unless `scales` gives
+    each DOF's arrow its own: a share of that length, the arrow pointing
+    the other way when the share is negative, and no arrow for a zero or
+    NaN, so a row of a transformation reads as weights on its DOFs
+    (`transformation_arrows`). Labels are drawn only
     when there are at most `DOF_LABEL_LIMIT` arrows. A DOF at a node the
     geometry does not have, or with a direction that is not a
     translation or rotation, is skipped. Given a `name`, the actors are
@@ -538,22 +550,31 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                            .sum(axis=1).max())) or 1.0
     inward = ([bool(incoming)] * len(dofs) if isinstance(incoming, bool)
               else [bool(flag) for flag in incoming])
-    entries = [(points[found[0]], found[1], found[2], dof, into)
-               for dof, into, found in zip(dofs, inward,
-                                           dof_arrow_vectors(geometry, dofs))
-               if found is not None]
+    shares = ([1.0] * len(dofs) if scales is None
+              else [float(share) for share in scales])
+    entries = [(points[found[0]], found[1] * np.sign(share), found[2], dof,
+                into, abs(share))
+               for dof, into, share, found in zip(
+                   dofs, inward, shares, dof_arrow_vectors(geometry, dofs))
+               if found is not None and np.isfinite(share) and share != 0.0]
     if not entries:
         return 0
-    length = dof_arrow_length([entry[0] for entry in entries], extent)
+    # a weighted arrow's length is read, so its full length is longer
+    # than a marker's, still short of the nearest node
+    reach = extent * (WEIGHTED_REACH if scales is not None else 1.0)
+    length = dof_arrow_length([entry[0] for entry in entries], reach)
     label_spots = {0: [], 1: [], 2: []}
     starts = {0: [], 1: [], 2: []}
     vectors = {0: [], 1: [], 2: []}
-    for position, vector, axis, dof, into in entries:
-        start = position - vector * length if into else position
+    sizes = {0: [], 1: [], 2: []}
+    for position, vector, axis, dof, into, size in entries:
+        reach = length * size
+        start = position - vector * reach if into else position
         starts[axis].append(start)
         vectors[axis].append(vector)
-        spot = (start - vector * length * 0.25 if into
-                else position + vector * length * 1.25)
+        sizes[axis].append(size)
+        spot = (start - vector * reach * 0.25 if into
+                else position + vector * reach * 1.25)
         label_spots[axis].append((spot, dof))
     # One mesh per axis color, every arrow of that color glyphed into
     # it, added without a render. An actor per arrow — each add a
@@ -565,9 +586,11 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
             continue
         base = pv.PolyData(np.asarray(starts[axis], dtype=float))
         base['direction'] = np.asarray(vectors[axis], dtype=float)
+        base['size'] = np.asarray(sizes[axis], dtype=float)
         plotter.add_mesh(
-            base.glyph(orient='direction', scale=False, factor=length,
-                       geom=pv.Arrow()),
+            base.glyph(orient='direction',
+                       scale=False if scales is None else 'size',
+                       factor=length, geom=pv.Arrow()),
             color=AXIS_COLORS[axis], render=False,
             name=None if name is None else f'{name}-arrows{axis}')
     # labels only while they can be read: past a few dozen arrows the
@@ -1103,15 +1126,53 @@ def plot_channels(geometry: Geometry, table: Any, role: str = 'all',
                      screenshot, theme, show, size_in, dpi, kwargs)
 
 
+def transformation_arrows(view: Any, row: int) -> tuple[list[str], list[float]]:
+    """A row of a transformation (`core.transform.matrix_at`, rows the
+    modes and columns the DOFs) as arrows: its DOFs, each with its value
+    as a share of the row's largest, so that value is a full-length
+    arrow and a negative one points the other way (`add_dof_arrows`'s
+    `scales`). A row is scaled on its own, so a rotation's row, whose
+    values are lever arms, reads as well as a translation's. A DOF the
+    set lacks has a NaN and no arrow."""
+    # Brandon, 2026-10-23: a transformation drawn on the geometry a row
+    # at a time, arrows scaled per DOF, scaled per row, labeled by DOF.
+    values = np.real(np.asarray(view.values[int(row)], dtype=complex))
+    finite = values[np.isfinite(values)]
+    largest = float(np.max(np.abs(finite))) if finite.size else 0.0
+    shares = (values / largest if largest > 0.0
+              else np.zeros_like(values))
+    return [str(dof) for dof in view.columns], [float(v) for v in shares]
+
+
+def plot_transformation(geometry: Geometry, view: Any, row: int = 0,
+                        unit_system: UnitSystem | None = None,
+                        screenshot: str | None = None, theme: Any = None,
+                        show: bool = True,
+                        size_in: tuple[float, float] | None = None,
+                        dpi: float | None = None, **kwargs: Any) -> Any:
+    """The geometry with one row of a transformation drawn on it as
+    arrows (`transformation_arrows`): the app's Shape Values view with
+    a transformation picked, from a script. Shown or rendered to
+    `screenshot` as `plot_dofs` is; other keyword arguments go to
+    `geometry_scene`."""
+    us = unit_system or DEFAULT_SYSTEM
+    dofs, shares = transformation_arrows(view, row)
+    return _dof_plot(geometry, dofs, False, us,
+                     f'{view.form} transformation — {view.rows[int(row)]}',
+                     screenshot, theme, show, size_in, dpi, kwargs,
+                     scales=shares)
+
+
 def _dof_plot(geometry, dofs, incoming, us, title, screenshot, theme, show,
-              size_in, dpi, kwargs):
-    """`plot_dofs` and `plot_channels` once the DOFs are chosen: the
-    geometry and its arrows, shown or rendered to a file."""
+              size_in, dpi, kwargs, scales=None):
+    """`plot_dofs`, `plot_channels` and `plot_transformation` once the
+    DOFs are chosen: the geometry and its arrows, shown or rendered to a
+    file."""
     def draw(plotter: Any, scale: float = 1.0) -> None:
         geometry_scene(geometry, unit_system=us, plotter=plotter,
                        theme=theme, scale=scale, **kwargs)
         add_dof_arrows(plotter, geometry, dofs, unit_system=us,
-                       incoming=incoming)
+                       incoming=incoming, scales=scales)
 
     if screenshot is not None:
         import pyvista as pv

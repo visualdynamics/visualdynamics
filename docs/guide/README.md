@@ -65,6 +65,9 @@ that is not an alpha.
   each mode's frequency and amplitude shift, judged against limits
 - [Reading a dwell against time](dwell.md): a held tone's build-up,
   steady level and ring-down, in cycles
+- [A mixed-mode test as one specification](mixed-mode.md): the floor,
+  the tones and the narrowbands, and a data sheet that judges each by
+  its own rule
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

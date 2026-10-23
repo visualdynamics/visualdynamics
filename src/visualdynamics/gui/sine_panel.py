@@ -18,7 +18,10 @@ the levels have been extracted, the distortion readout checks them
 against the record read unfiltered (`gui.distortion_panel`): what the
 channel carried besides the tone the extraction tracked; and the
 frequency readout checks the tone's own frequency on the record against
-the specification's (`gui.frequency_panel`).
+the specification's (`gui.frequency_panel`). Under that, when the project also
+holds a random specification of the floor, the mixed-mode readout
+reads the record's data sheet, floor, tones and total, each by its
+own rule (`gui.mixed_panel`).
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from .distortion_panel import DistortionPanel
 from .dwell_panel import DwellPanel
 from .editors import DoubleSpinBox, commit_on_enter
 from .frequency_panel import FrequencyPanel
+from .mixed_panel import MixedPanel
 from .settings_panel import (
     PreviewPlot,
     add_derived,
@@ -207,7 +211,12 @@ class SinePanel(QWidget):
         self.frequency.hide()
         grid.addWidget(self.frequency, len(rows) + 6 + len(derived), 0, 1,
                        2)
-        grid.setRowStretch(len(rows) + 7 + len(derived), 1)
+        # and the mixed-mode data sheet, shown only when the project
+        # holds the floor's random specification beside the tones
+        self.mixed: MixedPanel = MixedPanel()
+        self.mixed.hide()
+        grid.addWidget(self.mixed, len(rows) + 7 + len(derived), 0, 1, 2)
+        grid.setRowStretch(len(rows) + 8 + len(derived), 1)
         commit_on_enter(self.cycles_box, self.target_box)
         self.mode_box.currentIndexChanged.connect(self._edited)
         self.cycles_box.valueChanged.connect(self._edited)
@@ -329,6 +338,7 @@ class SinePanel(QWidget):
         self.dwell.apply_theme(colors)
         self.distortion.apply_theme(colors)
         self.frequency.apply_theme(colors)
+        self.mixed.apply_theme(colors)
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:

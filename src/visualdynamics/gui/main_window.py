@@ -977,6 +977,8 @@ class MainWindow(QMainWindow):
             self._journal_distortion)
         self.data_pane.sine_panel.frequency.read.connect(
             self._journal_frequency)
+        # and the mixed-mode data sheet, the same way
+        self.data_pane.sine_panel.mixed.read.connect(self._journal_mixed)
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(
@@ -12710,6 +12712,43 @@ class MainWindow(QMainWindow):
         # read the same way from the same levels
         panel.frequency.show_frequency(history, specs[0], levels,
                                        stale=stale)
+        # and the record as one mixed test, when the project holds the
+        # floor's random specification at a channel the record has; the
+        # readout hides itself otherwise
+        panel.mixed.show_mixed(history, self._mixed_floor(history), specs[0],
+                               self.unit_system)
+
+    def _mixed_floor(self, history):
+        """The random specification a mixed record's floor is judged
+        against: the project's first written at a channel the record
+        holds, or None."""
+        dofs = {str(dof) for dof in history.response_dof}
+        for floor in self.project.specifications:
+            if dofs & {str(dof) for dof in floor.response_dof}:
+                return floor
+        return None
+
+    def _journal_mixed(self, history, floor, tones, reading, settings):
+        """The mixed-mode readout, journaled as the headless call that
+        draws it (`_journal_view`): `plot_mixed_mode` with the channel,
+        the width left out, the tracking band and the tone tolerance the
+        readout used."""
+        try:
+            record = self.project.name_of(history)
+            random = self.project.name_of(floor)
+            sweep = self.project.name_of(tones)
+        except (KeyError, ValueError):
+            return
+        prefix = (f"visualdynamics.plot.plot_mixed_mode(project[{record!r}], "
+                  f"project[{random!r}], project[{sweep!r}]")
+        self._journal_view(
+            prefix,
+            f"{prefix}, channel={reading.channel!r}, "
+            f"exclusion={settings['exclusion']!r}, "
+            "band=visualdynamics.core.sine_tracking.SineTracking("
+            f"fixed={settings['band']!r}), "
+            f"tone_tolerance={settings['tone_tolerance']!r}, "
+            "path='mixed_mode.png', show=False)")
 
     def _journal_dwell(self, history, specification, reading):
         """The dwell readout, journaled as the headless call that draws

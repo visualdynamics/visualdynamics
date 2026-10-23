@@ -61,6 +61,8 @@ THEORY = {
                    'force it needs of a shaker',
     'core.dwell': 'the build-up and free decay of a resonator under a '
                   'held tone',
+    'core.mixed_mode': 'the degrees of freedom of a narrow band and the '
+                       'chi-square scatter each part is judged inside',
 }
 
 #: and methods, where the theory lives on the call rather than the module

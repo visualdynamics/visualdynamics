@@ -4276,6 +4276,20 @@ class Specification(Bounded, Psd):
     #: rather than as breakpoints that happen to be evenly spaced
     LINES_AT_LEAST = 8
 
+    #: the narrow bands of random laid over this specification when it
+    #: is the floor of a mixed-mode test (`core.mixed_mode.Narrowband`,
+    #: each a center, a width, a level and a sweep); empty for a plain
+    #: random test. They travel with the specification, saved beside its
+    #: band constraints, so a mixed test needs no object of its own in a
+    #: file: `core.mixed_mode.MixedSpecification` reads them from here.
+    narrowbands: tuple = ()
+
+    #: the width, Hz, left out of this floor either side of each tone of
+    #: a mixed-mode test, or None when nothing has said
+    #: (`core.mixed_mode.EXCLUSION` is then used). The data sheet records
+    #: it, since a floor feature inside it is not judged.
+    tone_exclusion: float | None = None
+
     @staticmethod
     def reading_of(frequencies: ArrayLike) -> str:
         """How a specification written at these frequencies is read.

@@ -821,6 +821,87 @@ def dwell():
           f'{reading.describe()}')
 
 
+def mixed_mode():
+    """Two mixed tests read as one specification each. Sine on random:
+    one minute of a 1 grms floor from 5 to 500 Hz with tones of 0.12,
+    1.944, 2.5 and 1.5 g peak, the guide composite of the tone readout,
+    its sheet reading 1.00 for the floor, 2.48 for the tones and 2.67
+    for the total. Random on random: half a minute of the same floor
+    with a band of 0.02 g^2/Hz plus or minus 5 percent about 300 Hz and
+    a 16 Hz band of 0.05 g^2/Hz sweeping 150 to 250 Hz at 10 Hz/s."""
+    import numpy as np
+
+    from visualdynamics.core.data import Specification, TimeHistory
+    from visualdynamics.core.mixed_mode import (
+        MixedSpecification,
+        Narrowband,
+        Tone,
+        judge_mixed,
+    )
+    from visualdynamics.plot import plot_mixed_mode
+    from visualdynamics.units import IN_LBF_S
+
+    fs, g = 2048.0, 9.80665
+    us = IN_LBF_S.with_units(f'{IN_LBF_S.name} (g)', acceleration='g')
+    floor = Specification(np.array([5.0, 500.0]),
+                          np.array([[1.0 / 495.0] * 2]) * g ** 2,
+                          response_dof=['1Z+'],
+                          ordinate_dim=['acceleration**2/frequency'])
+
+    def noise(seconds, low, high, grms, rng):
+        n = int(fs * seconds)
+        spectrum = np.fft.rfft(rng.standard_normal(n))
+        f = np.fft.rfftfreq(n, 1.0 / fs)
+        spectrum[(f < low) | (f > high)] = 0.0
+        x = np.fft.irfft(spectrum, n)
+        return x * grms / np.sqrt(np.mean(x ** 2))
+
+    def record(x):
+        t = np.arange(len(x)) / fs
+        return TimeHistory(t, x[None] * g, response_dof=['1Z+'],
+                           ordinate_dim=['acceleration'], ordinate_unit=['g'])
+
+    # sine on random, the tone readout's composite
+    tones = ((4.86, 0.12), (19.44, 1.944), (38.88, 2.50), (58.32, 1.50))
+    x = noise(60.0, 5.0, 500.0, 1.0, np.random.default_rng(3304))
+    t = np.arange(len(x)) / fs
+    for frequency, amplitude in tones:
+        x = x + amplitude * np.sin(2.0 * np.pi * frequency * t + frequency)
+    spec = MixedSpecification(floor, [Tone(f, a * g) for f, a in tones],
+                              seconds=60.0)
+    history = record(x)
+    plot_mixed_mode(history, spec, unit_system=us, show=False,
+                    size=(1400, 620), path=str(OUT / 'mixed-mode-sheet.png'))
+    reading = judge_mixed(history, spec)
+    print(f'mixed: residual every line {reading.floor.residual / g:.3f} '
+          f'grms, tones {reading.tones_measured / g:.3f} g rms, '
+          f'{reading.describe("g", 1 / g)}')
+
+    # random on random: a fixed band and a swept one over the floor
+    rng = np.random.default_rng(3305)
+    seconds = 30.0
+    x = noise(seconds, 3.0, 520.0, np.sqrt(517.0 / 495.0), rng)
+    x = x + noise(seconds, 285.0, 315.0, np.sqrt(0.02 * 30.0), rng)
+    swept = Narrowband(150.0, 0.05 * g ** 2, width=16.0, sweep_to=250.0,
+                       rate=10.0, name='track')
+    n = len(x)
+    base = np.fft.fft(rng.standard_normal(n) + 1j * rng.standard_normal(n))
+    base[np.abs(np.fft.fftfreq(n, 1.0 / fs)) > 8.0] = 0.0
+    phase = 2.0 * np.pi * np.cumsum(swept.center_at(np.arange(n) / fs)) / fs
+    y = np.real(np.fft.ifft(base) * np.exp(1j * phase))
+    x = x + y * np.sqrt(0.05 * 16.0 / np.mean(y ** 2))
+    bands = MixedSpecification(
+        floor, None, [Narrowband.plus_minus(300.0, 5.0, 0.02 * g ** 2,
+                                            name='engine'), swept])
+    plot_mixed_mode(record(x), bands, unit_system=us, show=False,
+                    size=(1400, 620), path=str(OUT / 'mixed-mode-bands.png'))
+    for row in judge_mixed(record(x), bands).narrowbands:
+        print(f'band {row.name}: {row.measured / g:.3f} grms against '
+              f'{row.reference / g:.3f}, {row.error_db:+.2f} dB in '
+              f'{row.low_db:+.2f} to {row.high_db:+.2f} at {row.dof:.0f} '
+              f'dof ({row.slices} slices of {row.slice_dof:.1f})')
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -839,6 +920,7 @@ def main():
     replication_fit()
     stroke_readout()
     dwell()
+    mixed_mode()
     print('done')
 
 

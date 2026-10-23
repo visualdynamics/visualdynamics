@@ -171,6 +171,13 @@ Present only where they mean something:
             sine_chosen (when set)   the sine extraction setting
             scale_db                 a comparison scale set by hand only;
                                      automatic scaling is never saved
+            narrowbands              JSON, the narrow bands of random a
+                                     mixed test lays over this floor
+                                     (each a center, a width, a level and
+                                     a sweep), when it has any
+            tone_exclusion           the width, Hz, left out of this
+                                     floor either side of a mixed test's
+                                     tones, when set
             averaging_frame_length, _overlap, _window, _frames, _start,
             _detrend, _start_set, and _window_parameter when the window
             takes one

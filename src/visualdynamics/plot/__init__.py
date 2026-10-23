@@ -4237,6 +4237,102 @@ def plot_dwell(history: Any, specification: Any, *, tone: str | None = None,
                         size=size)
 
 
+def plot_mixed_mode(history: Any, specification: Any, tones: Any = None, *,
+                    channel: str | None = None,
+                    narrowbands: Sequence[Any] | None = None,
+                    exclusion: float | None = None, band: Any = None,
+                    onset: float = 0.0, settle: float | None = None,
+                    averaging: Any = None,
+                    tone_tolerance: float | None = None,
+                    floor_db: float | None = None,
+                    floor_rms: float | None = None,
+                    unit_system: UnitSystem | None = None, theme: Any = None,
+                    path: str | os.PathLike | None = None, show: bool = True,
+                    title: str | None = None,
+                    size: tuple[int, int] = (1300, 640)) -> Any:
+    """Draw a mixed-mode test's data sheet beside the spectrum it was
+    read from.
+
+        visualdynamics.plot.plot_mixed_mode(history, floor, sweep,
+                                            path='sheet.png')
+
+    The record is read by `core.mixed_mode.judge_mixed` and drawn by
+    `plot.mixed_mode.build_mixed_mode`: the averaged autospectrum of the
+    record and of its residual (the tones tracked and taken out) over
+    the reference, the lines left out of the floor for the tones hatched
+    and labeled, each narrowband's edges drawn and named, a marker on
+    each fixed tone, and beside it the sheet: the floor with the tone
+    and band lines left out, the tones together and each in amplitude,
+    each narrowband, and the total, each with its tolerance and verdict.
+    The window's sine view reads the same sheet in its Mixed Mode
+    readout.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record.
+    specification : MixedSpecification or Specification
+        The requirement, or its floor (the random specification), with
+        `tones` beside it.
+    tones : SineSweepSpecification, optional
+        The tones, when `specification` is the floor.
+    channel : str, optional
+        The control channel read; the floor's first by default.
+    narrowbands : sequence of Narrowband, optional
+        Narrowbands to lay over the floor, written onto it as
+        `MixedSpecification` writes them; the floor's own when omitted.
+    exclusion : float, optional
+        The width left out either side of each tone, Hz, written onto
+        the floor likewise; the floor's own, or
+        `core.mixed_mode.EXCLUSION`, when omitted.
+    band, onset, settle, averaging
+        As for `core.mixed_mode.judge_mixed`.
+    tone_tolerance, floor_db, floor_rms : float, optional
+        The tolerances, `judge_mixed`'s defaults when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.mixed_mode import (
+        FLOOR_DB,
+        FLOOR_RMS,
+        TONE_TOLERANCE,
+        MixedSpecification,
+        judge_mixed,
+    )
+    from .mixed_mode import build_mixed_mode
+
+    if isinstance(specification, MixedSpecification):
+        spec = specification
+        if narrowbands is not None or exclusion is not None:
+            spec = MixedSpecification(spec.floor, spec.tones, narrowbands,
+                                      exclusion)
+    else:
+        spec = MixedSpecification(specification, tones, narrowbands,
+                                  exclusion)
+    reading = judge_mixed(
+        history, spec, channel=channel, band=band, onset=onset,
+        settle=settle, averaging=averaging,
+        tone_tolerance=TONE_TOLERANCE if tone_tolerance is None
+        else tone_tolerance,
+        floor_db=FLOOR_DB if floor_db is None else floor_db,
+        floor_rms=FLOOR_RMS if floor_rms is None else floor_rms)
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        return build_mixed_mode(widget, reading, unit_system=unit_system,
+                                theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or (f'{reading.channel}: mixed-mode '
+                                        'data sheet'),
+                        size=size)
+
+
 def plot_bars(measured: Any, specification: Any, mode: str = 'error', *,
               low: float | None = None, high: float | None = None,
               theme: Any = None,

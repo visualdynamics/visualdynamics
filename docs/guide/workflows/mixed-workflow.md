@@ -180,6 +180,14 @@ rather than working up half of what was asked for;
     cursor starts on the tallest line, and the pane reads the tone under
     it](../images/mixed-tones-click.png)
 
+- The two halves can also be read as one test. The sine view's **Mixed
+  Mode** readout tracks the tones and takes them out, judges the floor
+  on what is left with the lines around each tone left out, and gives
+  the data sheet: the floor, each tone in g peak and the total, each by
+  its own rule ([A mixed-mode test as one
+  specification](../mixed-mode.md)). The two reports remain the record
+  of each half.
+
 - Each report has its own verdict. The random report's is read off the
   octave-band comparison, and the level beside it is labeled **Random
   test level**: the random half's comparison is scaled to its

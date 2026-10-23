@@ -341,6 +341,17 @@ def save_data(data: DataArray, group: h5py.Group) -> None:
     # every comparison, so only a hand-set value travels
     if getattr(data, 'scale_db', None) is not None:
         group.attrs['scale_db'] = int(data.scale_db)
+    # a mixed-mode floor's narrowbands and the width left out around its
+    # tones: attributes of the specification's own group, as its band
+    # constraints are, so a mixed test adds no group of its own to the
+    # file and an older reader opens the floor as the random
+    # specification it is
+    if getattr(data, 'narrowbands', ()):
+        from ..core.mixed_mode import narrowbands_json
+
+        group.attrs['narrowbands'] = narrowbands_json(data.narrowbands)
+    if getattr(data, 'tone_exclusion', None) is not None:
+        group.attrs['tone_exclusion'] = float(data.tone_exclusion)
     for name, values in getattr(data, 'limits', {}).items():
         group.create_dataset(f'limit_{name}', data=values)
     # how a time history is to be cut into frames, when something has
@@ -509,6 +520,13 @@ def load_data(group: h5py.Group) -> DataArray:
         data.band_constraints = json.loads(str(group.attrs['band_constraints']))
     if 'scale_db' in group.attrs:
         data.scale_db = int(group.attrs['scale_db'])
+    if 'narrowbands' in group.attrs:
+        from ..core.mixed_mode import narrowbands_from_json
+
+        data.narrowbands = narrowbands_from_json(
+            str(group.attrs['narrowbands']))
+    if 'tone_exclusion' in group.attrs:
+        data.tone_exclusion = float(group.attrs['tone_exclusion'])
     if 'statistical_dof' in group:
         data.statistical_dof = group['statistical_dof'][()]
     averaging = _load_averaging(group)

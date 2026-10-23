@@ -125,6 +125,10 @@ of shifts beside ([comparing signatures](signature-comparison.md)).
 `plot_dwell(history, specification)` draws a held tone's level against
 time, the reading the sine view's Dwell readout shows ([Reading a
 dwell against time](dwell.md)).
+`plot_mixed_mode(history, floor, sweep)` draws a mixed test's data
+sheet beside the spectrum it was read from, the reading the sine view's
+Mixed Mode readout shows ([A mixed-mode test as one
+specification](mixed-mode.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

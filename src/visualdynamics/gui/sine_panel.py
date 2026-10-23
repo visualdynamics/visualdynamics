@@ -13,7 +13,10 @@ button runs the project verb with whatever is set at that moment, the
 same split as in the filter panel, since these are also settings
 carried by the record. Under the button, when the specification holds a
 dwell, the dwell readout reads it against time (`gui.dwell_panel`); a
-held tone is one point over frequency, and its story is in time.
+held tone is one point over frequency, and its story is in time. Under
+that, when the project also holds a random specification of the floor,
+the mixed-mode readout reads the record's data sheet, floor, tones and
+total, each by its own rule (`gui.mixed_panel`).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..core.sine import CYCLES_LADDER, SineExtraction
 from .dwell_panel import DwellPanel
 from .editors import DoubleSpinBox, commit_on_enter
+from .mixed_panel import MixedPanel
 from .settings_panel import (
     PreviewPlot,
     add_derived,
@@ -188,7 +192,12 @@ class SinePanel(QWidget):
         self.dwell: DwellPanel = DwellPanel()
         self.dwell.hide()
         grid.addWidget(self.dwell, len(rows) + 4 + len(derived), 0, 1, 2)
-        grid.setRowStretch(len(rows) + 5 + len(derived), 1)
+        # and the mixed-mode data sheet, shown only when the project
+        # holds the floor's random specification beside the tones
+        self.mixed: MixedPanel = MixedPanel()
+        self.mixed.hide()
+        grid.addWidget(self.mixed, len(rows) + 5 + len(derived), 0, 1, 2)
+        grid.setRowStretch(len(rows) + 6 + len(derived), 1)
         commit_on_enter(self.cycles_box, self.target_box)
         self.mode_box.currentIndexChanged.connect(self._edited)
         self.cycles_box.valueChanged.connect(self._edited)
@@ -308,6 +317,7 @@ class SinePanel(QWidget):
         if self._sampled:
             self.preview.show_samples(self._sampled)
         self.dwell.apply_theme(colors)
+        self.mixed.apply_theme(colors)
 
 
 def with_chosen(setting: SineExtraction, chosen: float | None) -> SineExtraction:

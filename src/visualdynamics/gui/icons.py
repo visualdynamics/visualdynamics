@@ -714,6 +714,29 @@ def _draw_stroke(painter, color):
                              for i in range(53)]))
 
 
+def _draw_overload(painter, color):
+    """A wave cut flat against two dashed rails, a cross on each flat
+    top: a record that reached its range, and the samples it left there.
+
+    The overload reading's button. Rails across, not bounds up the
+    sides, so it is told from the kurtosis glyph; flat tops, not a
+    swing toward a stop, so it is told from the stroke's.
+    """
+    faint = QColor(color)
+    faint.setAlpha(150)
+    painter.setPen(QPen(faint, 3, Qt.PenStyle.DashLine))
+    for y in (14, 50):
+        painter.drawLine(QPointF(4, y), QPointF(60, y))
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve([(6 + i, 32 - max(-18.0, min(18.0, 26 * math.sin(
+        2 * math.pi * i / 26)))) for i in range(53)]))
+    painter.setPen(_pen(color, 3))
+    for x, y in ((12.5, 14), (25.5, 50), (38.5, 14), (51.5, 50)):
+        painter.drawLine(QPointF(x - 4, y - 4), QPointF(x + 4, y + 4))
+        painter.drawLine(QPointF(x - 4, y + 4), QPointF(x + 4, y - 4))
+
+
 def _draw_bars(painter, color):
     """A bar chart with one bar over a threshold.
 
@@ -2495,7 +2518,7 @@ def control_icon(name: str) -> QIcon:
      'segments': _draw_segments,
      'pulse': _draw_pulse,
      'stroke': _draw_stroke,
-     'resample': _draw_resample,
+     'resample': _draw_resample, 'overload': _draw_overload,
      'residual': _draw_residual,
      'report': _draw_report,
      'bars': _draw_bars, 'percent_bars': _draw_percent_bars,

@@ -4391,6 +4391,75 @@ def plot_time_statistics(history: Any, record: int = 0, *,
                         size=size)
 
 
+def plot_overload(history: Any, ranges: Any, record: int | None = None, *,
+                  kurtosis_band: tuple[float, float] | None = None,
+                  unit_system: UnitSystem | None = None,
+                  theme: Any = None,
+                  path: str | os.PathLike | None = None,
+                  show: bool = True, title: str | None = None,
+                  size: tuple[int, int] | None = None,
+                  **options: Any) -> Any:
+    """Draw each channel of a record against its range.
+
+        visualdynamics.plot.plot_overload(
+            project['Run'], project['Channels'], path='overload.png')
+
+    Two rows (`plot.overload`): one channel's trace with its range
+    dashed across it either way, every sample on the rail a cross, and
+    its largest peak scaled to the next level dotted; and under it, a
+    bar per channel of the headroom of its range over its peak in dB,
+    the next level's step as a floor and each flagged channel's finding
+    in words, beside the kurtosis bars. The trace is the worst channel
+    unless `record` names one. This is the script form of the Overload
+    reading on a time history's bar, and the numbers are
+    `TimeHistory.overload_check`.
+
+    Parameters
+    ----------
+    history : TimeHistory
+        The record.
+    ranges : ChannelTable, array_like or float
+        The channel table describing the record, or the ranges in SI,
+        one per channel or one for all (`core.overload.overload_check`).
+    record : int, optional
+        Which channel's trace to draw; the worst by default.
+    kurtosis_band : (float, float), optional
+        The kurtosis bars' band, 2 to 4 by default.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot. `size` defaults to a height that
+        fits the channels.
+    **options
+        `records`, `step_db`, `margin` and `rail_samples`, as
+        `core.overload.overload_check` takes them.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        As `core.overload.overload_check` raises.
+    """
+    from .bars import ROW_HEIGHT
+    from .overload import build_overload
+
+    check = history.overload_check(ranges, **options)
+    if size is None:
+        size = (1000, 520 + ROW_HEIGHT * len(check.channels))
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_overload(widget, history, check, record,
+                       kurtosis_band=kurtosis_band,
+                       unit_system=unit_system, theme=theme)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or 'Overload against each range',
+                        size=size)
+
+
 
 def plot_amplitude_spectrum(history: Any, record: int = 0, *,
                             averaging: Any = None, window: str = 'hann',

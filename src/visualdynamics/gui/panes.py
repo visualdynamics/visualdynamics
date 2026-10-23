@@ -56,6 +56,7 @@ from .mesh_solids_panel import MeshSolidsPanel
 from .modal_response_panel import ModalResponsePanel
 from .modes_panel import ModesPanel
 from .octave_panel import OctavePanel
+from .overload_panel import OverloadPanel
 from .pattern_panel import PatternPanel
 from .profile_panel import ProfilePanel
 from .pulse_panel import PulsePanel
@@ -320,6 +321,10 @@ class DataPane(QWidget):
         #: is read under kept across redraws and records
         self.amplitude_wanted: bool = False
         self.amplitude_settings: dict[str, Any] | None = None
+        #: and the overload check against each channel's range, the
+        #: same way, its step and margin kept across redraws
+        self.overload_wanted: bool = False
+        self.overload_settings: dict[str, Any] | None = None
         #: and the scalogram, the same way
         self.wavelet_wanted: bool = False
         #: what it is computed with, kept across redraws so a tuned
@@ -474,6 +479,10 @@ class DataPane(QWidget):
         # spectrum; read only, nothing to apply
         self.amplitude_panel: AmplitudePanel = AmplitudePanel()
         self.amplitude_panel.hide()
+        # every channel against the range its channel table gives it,
+        # beside the trace and the bars; read only, nothing to apply
+        self.overload_panel: OverloadPanel = OverloadPanel()
+        self.overload_panel.hide()
         # the pulse a record is judged against, beside the judgment
         self.pulse_panel: PulsePanel = PulsePanel()
         self.pulse_panel.hide()
@@ -546,6 +555,7 @@ class DataPane(QWidget):
         plot_row.addWidget(self.wavelet_panel)
         plot_row.addWidget(self.statistics_panel)
         plot_row.addWidget(self.amplitude_panel)
+        plot_row.addWidget(self.overload_panel)
         plot_row.addWidget(self.pulse_panel)
         plot_row.addWidget(self.replication_fit_panel)
         plot_row.addWidget(self.stroke_panel)
@@ -977,6 +987,19 @@ class DataPane(QWidget):
             'magnitudes averaged, the tallest line read')
         self.amplitude_action.triggered.connect(self._choose_reading)
         toolbar.addAction(self.amplitude_action)
+        # every channel against its range, from the channel table linked
+        # with the record: the samples on the rail, the headroom and the
+        # peak at the next level, the headroom bars beside the kurtosis
+        # bars, whose band passes a clipped channel
+        self.overload_action: QAction = QAction(
+            control_icon('overload'), 'Overload', self)
+        self.overload_action.setCheckable(True)
+        self.overload_action.setToolTip(
+            'Every channel against the range its linked channel table '
+            'gives it: samples on the rail, headroom over the peak and '
+            'the peak at the next level')
+        self.overload_action.triggered.connect(self._choose_reading)
+        toolbar.addAction(self.overload_action)
         # and the same for the events in a transient record: the windows
         # bracketed on the plot and listed beside it, or neither
         self.shocks_action: QAction = QAction(control_icon('shocks'), 'Shocks', self)
@@ -1334,6 +1357,10 @@ class DataPane(QWidget):
         # averaging's, and only its window is its own
         Reading('amplitude', 'amplitude_panel', 'averaging',
                 flat=True, sticky=True),
+        # offered wherever a record is, as the kurtosis bars are: a
+        # shock record is clipped by its range as readily as a random one
+        Reading('overload', 'overload_panel', 'record', flat=True,
+                sticky=True),
         Reading('shocks', 'shock_panel', 'shocks'),
         Reading('wavelet', 'wavelet_panel', 'averaging', sticky=True),
         # offered wherever the shocks are: a record that may hold a

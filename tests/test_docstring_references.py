@@ -52,6 +52,8 @@ THEORY = {
                             'rate and the expected largest peak',
     'core.amplitude_spectrum': 'the amplitude correction of a window: its '
                                'coherent gain and scalloping loss',
+    'core.overload': 'the range a channel is read against, its clipping and '
+                     'the headroom over its peak',
     'core.replication_segments': 'the averaged periodogram, the shock '
                                  'response spectrum and the tapered '
                                  'cosine window each segment is read by',

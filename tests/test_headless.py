@@ -298,6 +298,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_statistics': 'plot_time_statistics',
         '_render_amplitude': 'plot_amplitude_spectrum',
         '_render_matrix_check': 'plot_conditioning / plot_realizability',
+        '_render_overload': 'plot_overload',
         '_render_replication_fit': 'plot_replication_fit',
         '_render_stroke': 'plot_stroke',
         '_render_resample': 'plot_resample',

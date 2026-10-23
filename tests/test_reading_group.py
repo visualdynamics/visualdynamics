@@ -1,7 +1,8 @@
 """The readings of a record are one choice, and the bar says so.
 
-Averaging, filter, kurtosis, the statistics, the amplitude spectrum, shocks, the wavelet, the
-pulse check, the replication fit, the stroke and the resampling
+Averaging, filter, kurtosis, the statistics, the amplitude spectrum,
+overload, shocks, the wavelet, the pulse check, the replication fit,
+the stroke and the resampling
 are ways of reading one record, and a record is read one way at a
 time. That was always true and
 the bar did not show it: four buttons in a row, indistinguishable from
@@ -58,6 +59,7 @@ def readings(pane):
             'kurtosis': pane.kurtosis_action,
             'statistics': pane.statistics_action,
             'amplitude': pane.amplitude_action,
+            'overload': pane.overload_action,
             'shocks': pane.shocks_action,
             'wavelet': pane.wavelet_action,
             'pulse': pane.pulse_action,
@@ -99,12 +101,12 @@ def test_nothing_else_sits_inside_the_fence(pane):
 
 @pytest.mark.parametrize('standing', ['averaging', 'filter', 'truncate',
                                       'kurtosis', 'statistics', 'amplitude',
-                                      'shocks',
+                                      'overload', 'shocks',
                                       'wavelet', 'pulse', 'fit', 'stroke',
                                       'resample'])
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
                                     'kurtosis', 'statistics', 'amplitude',
-                                    'shocks',
+                                    'overload', 'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke',
                                     'resample'])
 def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
@@ -133,7 +135,7 @@ def test_choosing_one_puts_the_others_down(pane, pump, standing, chosen):
 
 
 @pytest.mark.parametrize('chosen', ['averaging', 'filter', 'truncate',
-                                    'kurtosis', 'statistics', 'amplitude',
+                                    'kurtosis', 'statistics', 'amplitude', 'overload',
                                     'shocks',
                                     'wavelet', 'pulse', 'fit', 'stroke',
                                     'resample'])
@@ -150,6 +152,7 @@ def test_the_flags_follow_the_buttons(pane, pump, chosen):
              'kurtosis': pane.kurtosis_wanted,
              'statistics': pane.statistics_wanted,
              'amplitude': pane.amplitude_wanted,
+             'overload': pane.overload_wanted,
              'shocks': pane.shocks_wanted,
              'wavelet': pane.wavelet_wanted,
              'pulse': pane.pulse_wanted,

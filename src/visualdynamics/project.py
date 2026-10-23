@@ -1704,6 +1704,146 @@ class Project(dict):
         except (TypeError, ValueError):
             return None
 
+    def caption_of(self, name: Any, records: int | Sequence[int] = 0, *,
+                   specification: Any = None, per_octave: int | None = None,
+                   unit_system: Any = None) -> Any:
+        """The caption a report plot of a spectrum carries, read off the
+        record and the project around it (`core.report_caption`).
+
+            print(project.caption_of('Time History PSDs', 2).text())
+
+        Every row comes from the project, none is typed. The run is the
+        time history the spectrum was computed from, and the stretch of
+        it averaged; the window, overlap and frames are the averaging
+        the spectrum was made with (`averaging_of`). A banded spectrum
+        reads these, and its line spacing and degrees of freedom, from
+        the narrowband spectrum it was banded from. The channel number
+        and comment come from a channel table that names the channel,
+        the one linked with the spectrum or its run first, and the
+        global axis from the geometry linked with them, or the Basis
+        geometry. An imported spectrum names itself as the run and has
+        no averaging, so its window and frames read "not recorded".
+
+        `per_octave` is for a narrowband spectrum drawn on bands without
+        being stored banded, as a report block that bands its data
+        draws it: the caption is then of the spectrum on those bands,
+        compared with the specification on the same bands, and the
+        comparison's scale is resolved on the narrowband spectrum, as
+        the report resolves it.
+
+        Parameters
+        ----------
+        name : str or object
+            The spectrum, by name or as the object itself.
+        records : int or sequence of int, default 0
+            The records the plot draws.
+        specification : str or object, optional
+            The requirement drawn with the spectrum, by name or as the
+            object itself.
+        per_octave : int, optional
+            Bands per octave the spectrum is drawn on, for one banded
+            only for the plot.
+        unit_system : UnitSystem, optional
+            The display units the rms values are written in.
+
+        Returns
+        -------
+        RecordCaption
+
+        Raises
+        ------
+        TypeError
+            If the object is not a measured spectrum (a `Psd`).
+        """
+        from .core.report import resolve_binding
+        from .core.report_caption import record_caption
+
+        name = self.name_of(name)
+        spectrum = self[name]
+        if not isinstance(spectrum, Psd) or isinstance(spectrum, Specification):
+            raise TypeError(f'{name!r} is not a measured spectrum; a caption '
+                            'reads one (a Psd)')
+        # a banded spectrum is read through the narrowband one it was
+        # banded from: the averaging, the run, the lines and the DOF
+        # are all that spectrum's
+        narrow_name, narrowband, stored_bands = name, None, None
+        made = self.provenance.get(name, {})
+        if made.get('verb') == 'compute_octave' \
+                and isinstance(self.get(made.get('source')), Psd):
+            narrow_name = made['source']
+            narrowband = self[narrow_name]
+            stored_bands = (made.get('params') or {}).get('per_octave')
+        averaging = self.averaging_of(narrow_name)
+        computed = self.provenance.get(narrow_name, {})
+        history_name = (computed.get('source')
+                        if computed.get('verb') in ('compute_psds',
+                                                    'compute_cpsds')
+                        else None)
+        history = self.get(history_name) if history_name else None
+        if not isinstance(history, TimeHistory):
+            history_name, history = None, None
+        # an imported spectrum is its own run: its name is what the
+        # import called the measurement. A block label, where the
+        # records carry one, says it better and `record_caption` reads it
+        run = history_name
+        if run is None and spectrum.block is None:
+            run = name
+        sample_rate, origin = None, 0.0
+        if history is not None and len(history.abscissa) > 1:
+            sample_rate = history.sample_rate
+            origin = float(history.abscissa[0])
+        # the channel table and the geometry linked with the spectrum,
+        # its narrowband source or its run come first: a project can
+        # hold two tests' tables
+        linked: list[str] = []
+        for member in (name, narrow_name, history_name):
+            if member:
+                linked.extend(self.object_group_of(member) or [])
+        candidates = linked + [other for other in self.names
+                               if other not in linked]
+        wanted = ([int(records)] if np.ndim(records) == 0
+                  else [int(record) for record in records])
+        dofs = {str(spectrum.response_dof[record]) for record in wanted
+                if 0 <= record < spectrum.num_records}
+        table = next((self[other] for other in candidates
+                      if isinstance(self[other], ChannelTable)
+                      and dofs & set(self[other].dof_strings())), None)
+        geometry = next((self[other] for other in linked
+                         if isinstance(self[other], Geometry)), None)
+        if geometry is None:
+            basis = resolve_binding('@basis:Geometry', self, self.object_groups)
+            geometry = self.get(basis) if basis else None
+        bound, requirement, scale_db = None, None, None
+        if specification is not None:
+            bound = (self[specification] if isinstance(specification, str)
+                     else specification)
+            requirement = next((other for other, obj in self.items()
+                                if obj is bound), None)
+        drawn = spectrum
+        if per_octave and getattr(spectrum, 'bandwidth', None) is None:
+            from .core.compliance import comparison_scale_db
+
+            # the report's rule (`report._banded_pair`): bands compare
+            # only with the same bands, so the specification is banded
+            # with the data unless it is on bands already; and the scale
+            # is the narrowband one, since detecting it again on the
+            # banded copy can round to a different decibel
+            if bound is not None:
+                scale_db = comparison_scale_db(bound, spectrum)
+                if getattr(bound, 'bandwidth', None) is None:
+                    bound = bound.to_octave(int(per_octave))
+            drawn, narrowband = spectrum.to_octave(int(per_octave)), spectrum
+            per_octave = int(per_octave)
+        else:
+            # stored banded, or narrowband and drawn so
+            per_octave = stored_bands
+        return record_caption(
+            drawn, records, averaging=averaging, run=run,
+            sample_rate=sample_rate, origin=origin, channel_table=table,
+            geometry=geometry, narrowband=narrowband, per_octave=per_octave,
+            specification=bound, requirement=requirement, scale_db=scale_db,
+            unit_system=unit_system)
+
     def compute_octave(self, source: Any, per_octave: int | None = None
                        ) -> str:
         """Integrate a spectrum onto proportional octave bands (Compute

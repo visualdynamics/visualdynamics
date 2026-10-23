@@ -485,8 +485,14 @@ def _build_block(block, objects, us, object_groups=None):
         if block.get('grid'):
             geometry = objects.get(
                 resolve_binding('@basis:Geometry', objects, object_groups) or '')
-            return _grid_block(block, source, objects, us, geometry)
-        return _plot_block(block, source, objects, us)
+            built = _grid_block(block, source, objects, us, geometry)
+            if built is not None and block.get('record_caption'):
+                _caption_figures(built, block, source, objects, us)
+            return _without_records(built)
+        built = _plot_block(block, source, objects, us)
+        if built is not None and block.get('record_caption'):
+            _caption_figures(built, block, source, objects, us)
+        return _without_records(built)
     if kind == 'scene':
         geometry = objects.get(block.get('geometry'))
         if geometry is None:
@@ -552,6 +558,155 @@ def _build_block(block, objects, us, object_groups=None):
         return _verdict_block(source, measured,
                               block.get('level_label') or 'Test level')
     return None
+
+
+def block_caption(block: Mapping[str, Any], objects: Mapping[str, Any],
+                  object_groups: Sequence[Mapping[str, Any]] | None = None,
+                  unit_system: UnitSystem | None = None) -> Any:
+    """The caption block a plot block's first figure carries, or None.
+
+    What the report editor reads out beside a plot block: the caption
+    `Project.caption_of` reads for the records the figure opens on: the
+    channel the block names, else the first channel the block's
+    specification bounds, else the records its filter keeps that the
+    first figure draws. None
+    when the block draws no measured spectrum, or the objects are not
+    a project.
+
+    Parameters
+    ----------
+    block : mapping
+        The plot block.
+    objects : Project
+        The project the report reads.
+    object_groups : sequence of mapping, optional
+        The project's object groups, for symbolic bindings.
+    unit_system : UnitSystem, optional
+        The display units.
+
+    Returns
+    -------
+    RecordCaption or None
+    """
+    from ..core.compliance import matched_records
+    from ..core.data import Bounded, Psd, Specification
+    from ..core.report import base_quantity, resolve_binding
+
+    caption_of = getattr(objects, 'caption_of', None)
+    if caption_of is None or block.get('kind') != 'plot' or block.get('grid'):
+        return None
+    name = resolve_binding(block.get('source'), objects, object_groups)
+    source = objects.get(name or '')
+    if not isinstance(source, Psd) or isinstance(source, Bounded):
+        return None
+    against = objects.get(resolve_binding(block.get('specification'), objects,
+                                          object_groups) or '')
+    if not isinstance(against, Specification):
+        against = None
+    if against is not None:
+        named = block.get('channel')
+        pairs = [mi for _label, si, mi in matched_records(against, source)
+                 if not named or _channel_label(against, si) == str(named)]
+        if not pairs:
+            return None
+        record = pairs[0]
+    else:
+        select = block.get('select', '')
+        records = list(range(source.num_records))
+        if select.startswith('dim:'):
+            records = [i for i in records
+                       if base_quantity(source.known_dim(i)) == select[4:]]
+        if not records:
+            return None
+        # the figure's own records: a block of many continues into
+        # further figures, and the first draws the first page of them
+        record = records[:MAX_REPORT_CURVES]
+    return caption_of(name, record, specification=against,
+                      per_octave=(int(block['octave']) if block.get('octave')
+                                  else None),
+                      unit_system=unit_system or DEFAULT_SYSTEM)
+
+
+def _caption_figures(built, block, source, objects, us):
+    """Give each figure of a plot block the caption block its records
+    carry (`Project.caption_of`), as `facts`: (label, text) rows the
+    page sets under the caption. A figure drawn a channel at a time
+    carries one per channel, and the page shows the one picked.
+
+    A grid says once what its cells share, under the grid (the run,
+    the estimate, the resolution, the window, the DOF), and each cell
+    says only its own channel's rows (`report_caption.CHANNEL_ROWS`),
+    so eight cells do not repeat the same five lines eight times.
+
+    Only a measured spectrum has one, and only when the objects are a
+    project, since the window and the run are read from its
+    provenance; any other figure is left as it is.
+    """
+    from ..core.data import Bounded, Psd, Specification
+    from ..core.report_caption import CHANNEL_ROWS, ROWS
+
+    caption_of = getattr(objects, 'caption_of', None)
+    if (caption_of is None or not isinstance(source, Psd)
+            or isinstance(source, Bounded)):
+        return
+    name = block.get('source')
+    against = (objects.get(block['specification'])
+               if block.get('specification') else None)
+    if not isinstance(against, Specification):
+        against = None
+    octave = int(block['octave']) if block.get('octave') else None
+
+    def rows(records, specification, only=None):
+        return [list(row) for row in caption_of(
+            name, records, specification=specification, per_octave=octave,
+            unit_system=us).rows() if only is None or row[0] in only]
+
+    def channels_of(figure):
+        return [channel for channel in figure.get('channels') or []
+                if isinstance(channel, dict)
+                and channel.get('_record') is not None]
+
+    for figure in built if isinstance(built, list) else [built]:
+        if figure.get('kind') == 'grid':
+            drawn = []
+            for row in figure.get('rows') or []:
+                for column in row.get('cells') or []:
+                    for cell in column:
+                        own = channels_of(cell)
+                        for channel in own:
+                            channel['facts'] = rows(channel['_record'],
+                                                    against, CHANNEL_ROWS)
+                            drawn.append(channel['_record'])
+                        if own:
+                            cell['facts'] = own[0]['facts']
+            if drawn:
+                figure['facts'] = rows(sorted(set(drawn)), None,
+                                       [label for label in ROWS
+                                        if label not in CHANNEL_ROWS])
+            continue
+        own = channels_of(figure)
+        for channel in own:
+            channel['facts'] = rows(channel['_record'], against)
+        if own:
+            figure['facts'] = own[0]['facts']
+        elif figure.get('_records'):
+            figure['facts'] = rows(figure['_records'], None)
+
+
+def _without_records(built):
+    """The figure with the record indices its caption was read from
+    taken out: they are the builder's bookkeeping, not the page's."""
+    for figure in (built if isinstance(built, list)
+                   else [] if built is None else [built]):
+        figure.pop('_records', None)
+        for channel in figure.get('channels') or []:
+            if isinstance(channel, dict):
+                channel.pop('_record', None)
+        for row in figure.get('rows') or []:
+            if isinstance(row, dict):
+                for cell in row.get('cells') or []:
+                    _without_records(cell)
+    return built
 
 
 def _verdict_block(specification, measured, level_label='Test level'):
@@ -1649,7 +1804,10 @@ def _plot_block(block, source, objects, us):
              'x': [_compact(v) for v in _decades(x, logx)],
              'xlabel': f'{source.abscissa_dim} '
                        f'[{us.label_text(source.abscissa_dim)}]',
-             'ylabel': ylabel, 'curves': curves}
+             'ylabel': ylabel, 'curves': curves,
+             # which records this figure draws, for its caption block;
+             # never sent to the page (`_without_records`)
+             '_records': [int(i) for i in wanted]}
     if tag == 'phase':
         # the app's phase axis: every quarter turn labeled, with room for
         # the ±180° labels at its ends (`plot.PHASE_LIMITS`, `PHASE_TICKS`)
@@ -2490,7 +2648,9 @@ def _comparison_block(block, measured, specification, us, caption,
                           'severity': severity})
         channel = {'label': _channel_label(specification, record),
                    'y': mapped(target, banded), 'response': mapped(response),
-                   'zones': zones}
+                   'zones': zones,
+                   # the measured record drawn, for the caption block
+                   '_record': measured_of.get(record)}
         for name, key in (('abort_upper', 'over'), ('abort_lower', 'under')):
             if limits.get(name) is None or record not in measured_of:
                 continue

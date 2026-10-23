@@ -21,6 +21,7 @@ from conftest import fixture_path
 import visualdynamics
 from visualdynamics.plot import (
     plot_bars,
+    plot_captioned,
     plot_comparison,
     plot_data,
     plot_mac,
@@ -99,7 +100,7 @@ def test_marks_that_are_not_a_reading_say_so(random_run, tmp_path):
                                            marks='averaging')
 
 
-# ---- the comparison, all three readings ---------------------------------
+# ---- the comparison, all three readings, and the report plot -------------
 
 
 def test_all_three_comparison_readings(random_run, tmp_path):
@@ -113,7 +114,9 @@ def test_all_three_comparison_readings(random_run, tmp_path):
             ('error', lambda p: plot_bars(narrow, spec, 'error', path=p,
                                           show=False)),
             ('lines', lambda p: plot_bars(narrow, spec, 'lines', path=p,
-                                          show=False))):
+                                          show=False)),
+            ('captioned', lambda p: plot_captioned(
+                narrow, 0, specification=spec, path=p, show=False))):
         path = tmp_path / f'{name}.png'
         call(str(path))
         assert _drawn(path), name

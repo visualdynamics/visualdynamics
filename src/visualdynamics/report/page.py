@@ -95,6 +95,9 @@ section:hover > .copy, .gridcell:hover > .copy, .photoholder:hover > .copy,
 .caption { color: var(--faint); font-size: .9rem; margin-top: .35rem; }
 .note { margin-top: .3rem; padding-left: .6rem;
         border-left: 3px solid var(--line); font-style: italic; }
+/* the caption block a spectrum's record carries: a row a line, each
+   led by its label in bold, so it reads in a monochrome copy */
+.facts { margin-top: .3rem; font-size: .85rem; line-height: 1.35; }
 .text { white-space: pre-wrap; }
 canvas { width: 100%; border: 1px solid var(--line); border-radius: 6px;
          display: block; touch-action: none; }
@@ -243,8 +246,24 @@ if (DATA.marking)
 // canvases in the new ink
 const REDRAWS = [];
 
+function factsFor(rows) {
+  /* the caption block read off the record (`core.report_caption`):
+     the channel, its location and axis, the run, the estimate, the
+     resolution, the window, the DOF and the requirement, a row each */
+  const f = document.createElement('div'); f.className = 'facts';
+  rows.forEach(([label, said]) => {
+    const row = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = label + ': ';
+    row.appendChild(strong);
+    row.appendChild(document.createTextNode(said));
+    f.appendChild(row);
+  });
+  return f;
+}
 function captionFor(block, extra) {
-  if (!block.label && !block.caption && !extra && !block.note) return null;
+  if (!block.label && !block.caption && !extra && !block.note
+      && !block.facts) return null;
   const c = document.createElement('div'); c.className = 'caption';
   if (block.label) { const strong = document.createElement('strong');
     strong.textContent = block.label + (block.caption ? ': ' : '');
@@ -261,6 +280,7 @@ function captionFor(block, extra) {
     n.textContent = block.note;
     c.appendChild(n);
   }
+  if (block.facts) c.appendChild(factsFor(block.facts));
   return c;
 }
 function section(block, extra) {
@@ -732,6 +752,9 @@ function plotBlock(block, into) {
       ch.responses.forEach(r =>
         block.curves.push({label: r.label, x: null, y: r.y}));
     }
+    /* the caption block is the picked channel's own */
+    const shown = c && ch.facts ? c.querySelector('.facts') : null;
+    if (shown) shown.replaceWith(factsFor(ch.facts));
     fillLegend();
     fillReadouts();
   }

@@ -137,6 +137,24 @@ def _listed(dofs: Sequence[str]) -> str:
     return text
 
 
+def _channel_named(table: Any, row: int) -> str:
+    """A channel as the issue lists it: its DOF, or, before it has one,
+    its number and what it still lacks ('channel 3 (no node yet)'). A
+    channel with a node and no direction is listed only when the node is
+    not on the geometry, so its node is named: 'channel 5 at node 9 (no
+    direction yet)'."""
+    # A channel added blank listed as '', so the message ended at its
+    # colon with nothing named (Brandon, 2026-10-22).
+    node, direction = str(table['node'][row]), str(table['direction'][row])
+    number = int(table['channel'][row])
+    if node and direction:
+        return table.dof_strings()[row]
+    if node:
+        return f'channel {number} at node {node} (no direction yet)'
+    lacking = 'node' if direction else 'node or direction'
+    return f'channel {number} (no {lacking} yet)'
+
+
 def modal_object(obj: Any) -> int | None:
     """The highest mode a data object's coordinates name, when every
     one of its DOFs is a modal coordinate, else None."""
@@ -283,12 +301,15 @@ def check_object(name: str, obj: Any, geometry: Geometry | None,
                    if geometry.missing_dofs([dof])]
         if not flagged:
             return None
-        missing = [dofs[i] for i in flagged]
+        named = [_channel_named(obj, i) for i in flagged]
         return Issue(
             name=name, kind='dofs-not-in-geometry',
             message=(f'{len(flagged)} of {len(dofs)} channels are not in '
-                     f'geometry {geometry_name!r}: {_listed(missing)}'),
-            missing_dofs=missing, sub_items=flagged)
+                     f'geometry {geometry_name!r}: {_listed(named)}'),
+            # only what is a DOF: a channel not yet placed names none
+            missing_dofs=[dofs[i] for i in flagged
+                          if str(obj['node'][i]) and str(obj['direction'][i])],
+            sub_items=flagged)
 
     return None
 

@@ -162,12 +162,7 @@ def _draw_geometry(painter, color):
 def _draw_new_geometry(painter, color):
     """The geometry's frame with a plus: an empty geometry to build."""
     _draw_geometry(painter, color)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QBrush(QColor('#2ca02c')))
-    painter.drawEllipse(QPointF(50, 50), 13, 13)
-    painter.setBrush(QBrush(QColor('white')))
-    painter.drawRoundedRect(QRectF(48, 42, 4, 16), 1, 1)
-    painter.drawRoundedRect(QRectF(42, 48, 16, 4), 1, 1)
+    _plus(painter, 50, 50)
 
 
 #: A pulse and its ringdown. The shape a time history wears, and the
@@ -282,6 +277,12 @@ def _draw_specification(painter, color):
         painter.setPen(_tolerance_pen(color))
         painter.drawPath(_curve([(x, y + drop) for x, y in _PSD_SPINE]))
     _psd_body(painter, color)
+
+
+def _draw_new_specification(painter, color):
+    """The specification's glyph with a plus: a specification to write."""
+    _draw_specification(painter, color)
+    _plus(painter, 50, 50)
 
 
 def _draw_srs(painter, color):
@@ -967,6 +968,65 @@ def _draw_channel_table(painter, color):
     for y in (25, 37):
         painter.drawLine(QPointF(11, y), QPointF(53, y))
     painter.drawLine(QPointF(32, 15), QPointF(32, 49))
+
+
+def _plus(painter, x, y):
+    """The green disc with a white plus that marks a control as making
+    something new, centered at `(x, y)`."""
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor('#2ca02c')))
+    painter.drawEllipse(QPointF(x, y), 13, 13)
+    painter.setBrush(QBrush(QColor('white')))
+    painter.drawRoundedRect(QRectF(x - 2, y - 8, 4, 16), 1, 1)
+    painter.drawRoundedRect(QRectF(x - 8, y - 2, 16, 4), 1, 1)
+
+
+def _draw_new_channel_table(painter, color):
+    """The channel table with a plus: an empty one to fill in."""
+    _draw_channel_table(painter, color)
+    _plus(painter, 50, 50)
+
+
+def _draw_add_channel(painter, color):
+    """A header and one row, with a plus on the row: a channel added to
+    the table."""
+    header = QColor(color)
+    header.setAlpha(110)
+    painter.fillRect(QRectF(8, 16, 48, 10), QBrush(header))
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(8, 16, 48, 22), 3, 3)
+    painter.drawLine(QPointF(8, 26), QPointF(56, 26))
+    painter.drawLine(QPointF(32, 16), QPointF(32, 38))
+    _plus(painter, 32, 50)
+
+
+def _draw_mac(painter, color):
+    """A three by three grid, its diagonal full and the rest faint: a
+    set's MAC against itself."""
+    faint = QColor(color)
+    faint.setAlpha(70)
+    painter.setPen(Qt.PenStyle.NoPen)
+    for row in range(3):
+        for column in range(3):
+            painter.setBrush(QBrush(QColor(color) if row == column else faint))
+            painter.drawRect(QRectF(10 + 15 * column, 10 + 15 * row, 13, 13))
+
+
+def _draw_shape_values(painter, color):
+    """A table headed along its top and down its left side: values with
+    a DOF for each row and a mode for each column."""
+    header = QColor(color)
+    header.setAlpha(110)
+    painter.fillRect(QRectF(11, 15, 42, 10), QBrush(header))
+    painter.fillRect(QRectF(11, 25, 12, 24), QBrush(header))
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(11, 15, 42, 34), 3, 3)
+    for y in (25, 37):
+        painter.drawLine(QPointF(11, y), QPointF(53, y))
+    for x in (23, 38):
+        painter.drawLine(QPointF(x, 15), QPointF(x, 49))
 
 
 def _draw_shape_set(painter, color):
@@ -2160,6 +2220,10 @@ def control_icon(name: str) -> QIcon:
      'faster': _draw_faster, 'slower': _draw_slower,
      'up': _draw_up, 'down': _draw_down,
      'add': _draw_add, 'new_geometry': _draw_new_geometry,
+     'new_channel_table': _draw_new_channel_table,
+     'mac': _draw_mac, 'shape_values': _draw_shape_values,
+     'new_specification': _draw_new_specification,
+     'add_channel': _draw_add_channel,
      'beam': _draw_beam, 'tri': _draw_tri, 'quad': _draw_quad,
      'edit': _draw_edit, 'edit_on': _draw_edit_on, 'trash': _draw_trash,
      'colormap': _draw_colormap,

@@ -76,6 +76,37 @@ def cell_text(value: Any, decimals: int | None) -> str:
     return str(value) if decimals is None else f'{value:.{decimals}f}'
 
 
+def mode_heading(mode: int) -> str:
+    """The column heading of mode `mode` (from 0) in a table of shape
+    values: 'M1' for the first."""
+    return f'M{mode + 1}'
+
+
+def shape_value_text(value: Any) -> str:
+    """One shape value as text, to six significant figures; a complex
+    one as its real and imaginary parts, '0.5-0.25j'."""
+    import numpy as np
+
+    if np.iscomplexobj(value):
+        return f'{value.real:.6g}{value.imag:+.6g}j'
+    return f'{float(value):.6g}'
+
+
+def shape_values(shapes: Any) -> tuple[list[str], list[list[str]]]:
+    """``(headers, rows)`` of a shape set's values: a row per DOF, the
+    DOF first, then a column per mode ('M1', 'M2', ...).
+
+    Rows are DOFs and columns modes, the way a mode shape matrix is
+    usually written, which is the transpose of `ShapeSet.shape_matrix`.
+    """
+    # Brandon, 2026-10-22, with the table of them beside the mode list.
+    headers = ['DOF'] + [mode_heading(m) for m in range(shapes.num_shapes)]
+    rows = [[str(dof)] + [shape_value_text(value)
+                          for value in shapes.shape_matrix[:, i]]
+            for i, dof in enumerate(shapes.coordinate)]
+    return headers, rows
+
+
 def table_of(obj: Any, geometry: Any = None,
              objects: Mapping[str, Any] | None = None
              ) -> tuple[list[str], list[list[str]]] | None:

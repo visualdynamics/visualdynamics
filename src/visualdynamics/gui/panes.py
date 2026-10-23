@@ -47,11 +47,11 @@ from .mate_panel import MatePanel
 from .merge_panel import MergePanel
 from .mesh_panel import MeshPanel
 from .mesh_solids_panel import MeshSolidsPanel
+from .modes_panel import ModesPanel
 from .octave_panel import OctavePanel
 from .pattern_panel import PatternPanel
 from .pulse_panel import PulsePanel
 from .replication_fit_panel import ReplicationFitPanel
-from .rigid_panel import RigidBodyPanel
 from .segments_panel import SegmentsPanel
 from .settings_panel import PANEL_WIDTH
 from .shock_panel import ShockPanel
@@ -1977,7 +1977,7 @@ class ScenePane(QWidget):
     reread = Signal()
 
     #: the rigid-body reading was asked for, or put away
-    rigid_toggled = Signal(bool)
+    modes_toggled = Signal(bool)
 
     def __init__(self, theme_name: str, offscreen: bool = False,
                  parent: QWidget | None = None) -> None:
@@ -1985,7 +1985,7 @@ class ScenePane(QWidget):
         self.theme_name: str = theme_name
         #: the wish survives the selection, the data pane's rule: pick
         #: another geometry and the reading comes back up
-        self.rigid_wanted: bool = False
+        self.modes_wanted: bool = False
         # the orientation triad is useful at a glance; the labeled box
         # around the geometry is clutter until asked for
         self.bounds_visible: bool = False
@@ -2016,8 +2016,8 @@ class ScenePane(QWidget):
         # the settings panels sit beside the view rather than under
         # it, the data pane's own arrangement: the rigid-body table is
         # read against the model it is moving, and both want the height
-        self.rigid_panel: RigidBodyPanel = RigidBodyPanel()
-        self.rigid_panel.hide()
+        self.modes_panel: ModesPanel = ModesPanel()
+        self.modes_panel.hide()
         #: Add Block's and Add Plane's fields, beside the view rather than in
         #: a window of their own (2026-10-02)
         self.mesh_panel: MeshPanel = MeshPanel()
@@ -2038,7 +2038,7 @@ class ScenePane(QWidget):
         # the user can drag (Brandon, 2026-10-20: the pane's width was
         # the panels' own and could not be changed); the column shows
         # while any panel does and keeps the width it was dragged to
-        self.side_panels: tuple = (self.rigid_panel, self.mesh_panel, self.merge_panel,
+        self.side_panels: tuple = (self.modes_panel, self.mesh_panel, self.merge_panel,
                                    self.mesh_solids_panel, self.mate_panel,
                                    self.pattern_panel, self.instrumentation_panel)
         self.side: QWidget = QWidget()
@@ -2122,18 +2122,22 @@ class ScenePane(QWidget):
 
         # a reading of the geometry, fenced from the view choices the
         # way every group on the data pane's bar is; shown only when
-        # one whole geometry is selected (`offer_rigid`)
-        self._rigid_fence = toolbar.addSeparator()
-        self.rigid_action: QAction = QAction(control_icon('rigid'),
-                                             'Rigid body modes', self)
-        self.rigid_action.setCheckable(True)
-        self.rigid_action.setToolTip(
-            'Preview the six rigid-body mode shapes of this geometry '
-            'about a reference point, and make them a shape set')
-        self.rigid_action.triggered.connect(self._choose_rigid)
-        toolbar.addAction(self.rigid_action)
-        self.rigid_action.setVisible(False)
-        self._rigid_fence.setVisible(False)
+        # one whole geometry is selected (`offer_modes`)
+        self._modes_fence = toolbar.addSeparator()
+        # one reading for both kinds of modes (Brandon, 2026-10-22): it
+        # was the rigid-body preview alone, with Solve Modes an act of
+        # its own beside it
+        self.modes_action: QAction = QAction(control_icon('solve_modes'),
+                                             'Modes', self)
+        self.modes_action.setCheckable(True)
+        self.modes_action.setToolTip(
+            "Make this geometry's mode shapes: kinematic, the six "
+            'rigid-body shapes about a point, previewed as they are set; '
+            'or finite element, once its element groups have properties')
+        self.modes_action.triggered.connect(self._choose_modes)
+        toolbar.addAction(self.modes_action)
+        self.modes_action.setVisible(False)
+        self._modes_fence.setVisible(False)
         return toolbar
 
     def copy_view(self) -> bool:
@@ -2157,30 +2161,30 @@ class ScenePane(QWidget):
         (see `offer_acts`)."""
         offer_acts(self.toolbar, self.__dict__.setdefault('_acts', {}), acts)
 
-    # ---- the rigid-body reading -------------------------------------------
+    # ---- the modes reading ------------------------------------------------
 
-    def _choose_rigid(self, checked: bool) -> None:
-        """The rigid button: remember it, then say so."""
-        self.rigid_wanted = bool(checked)
+    def _choose_modes(self, checked: bool) -> None:
+        """The Modes button: remember it, then say so."""
+        self.modes_wanted = bool(checked)
         if not checked:
-            self.rigid_panel.hide()
-        self.rigid_toggled.emit(bool(checked))
+            self.modes_panel.hide()
+        self.modes_toggled.emit(bool(checked))
 
-    def offer_rigid(self, offered: bool) -> None:
-        """Show or hide the rigid-body modes toggle. The window offers it
+    def offer_modes(self, offered: bool) -> None:
+        """Show or hide the Modes toggle. The window offers it
         only when one whole geometry is selected with nothing drawn on
         it, and it comes back checked if it was checked last time."""
         offered = bool(offered)
-        self.rigid_action.setVisible(offered)
-        self._rigid_fence.setVisible(offered)
-        self.rigid_action.setChecked(offered and self.rigid_wanted)
-        if not (offered and self.rigid_wanted):
-            self.rigid_panel.hide()
+        self.modes_action.setVisible(offered)
+        self._modes_fence.setVisible(offered)
+        self.modes_action.setChecked(offered and self.modes_wanted)
+        if not (offered and self.modes_wanted):
+            self.modes_panel.hide()
 
     @property
-    def showing_rigid(self) -> bool:
-        """Whether the rigid-body modes toggle is offered and checked."""
-        return self.rigid_action.isVisible() and self.rigid_action.isChecked()
+    def showing_modes(self) -> bool:
+        """Whether the Modes toggle is offered and checked."""
+        return self.modes_action.isVisible() and self.modes_action.isChecked()
 
     # ---- the render window ------------------------------------------------
 

@@ -32,7 +32,7 @@ PANE_VERBS = {'filter_data', 'truncate_data', 'detect_shocks',
               'compute_spectra', 'compute_psds', 'compute_cpsds',
               'compute_srs', 'compute_frfs', 'compute_multiple_coherence',
               'compute_octave', 'generate_rigid_body_modes',
-              'author_specification'}
+              'solve_modes', 'author_specification'}
 #: the comparison table's own act: two sets are matched where they
 #: are compared, pair by pair
 TABLE_VERBS = {'match_modes'}
@@ -117,8 +117,10 @@ def test_the_project_row_offers_its_report(window, pump, monkeypatch):
     # everything the project holds drawn at once (Brandon, 2026-09-09)
     assert not window.data_pane.isVisibleTo(window), 'no plot for the project row'
     assert not window.table.isVisibleTo(window)
-    # and the project's **+**, somewhere to build a model (2026-09-26)
-    assert bar_acts(window.scene) == ['Generate Report', 'New Geometry'], \
+    # and the project's **+**, somewhere to build a model (2026-09-26),
+    # and an empty channel table to fill in (2026-10-22)
+    assert bar_acts(window.scene) == ['Generate Report', 'New Geometry',
+                                      'New Channel Table'], \
         "the 3-D view's bar, holding the space"
     assert window.scene.isVisibleTo(window)
     assert 'Generate Report is on the bar' in window.statusBar().currentMessage()
@@ -240,7 +242,9 @@ def test_no_act_wears_an_edit_bar_buttons_glyph():
     borrowed = {'beam', 'tri', 'quad', 'add', 'rotate', 'reset', 'tie'}
     icons = {verb: icon for verb, _label, icon, _handler in MainWindow.ACTS}
     assert not borrowed & set(icons.values()), icons
-    assert icons['solve_modes'] == 'solve_modes'
+    # Solve Modes went into the Modes pane (2026-10-22); its glyph went
+    # with it, onto the reading's toggle
+    assert 'solve_modes' not in icons
 
 
 def test_merge_blocks_has_a_glyph_of_its_own(qt_app):

@@ -2413,6 +2413,53 @@ class Project(dict):
         return self.add(name, Geometry(node_id=[], node_xyz=np.empty((0, 3)),
                                        length_unit=unit))
 
+    def new_channel_table(self, name: str = 'Channel Table') -> str:
+        """Add an empty channel table to fill in by hand (the project's
+        New Channel Table). Channels are added with `add_channels`, and
+        their cells are typed in the app or set with `set_cell`.
+
+        Parameters
+        ----------
+        name : str, default 'Channel Table'
+            What to call it.
+
+        Returns
+        -------
+        str
+            The name the result was added under, unique within the
+            project. A name already taken gets a numbered suffix.
+        """
+        # Brandon, 2026-10-22: as an empty geometry can be made.
+        return self.add(name, ChannelTable({column: [] for column
+                                            in ChannelTable.CORE}))
+
+    def add_channels(self, source: Any, count: int = 1) -> list[int]:
+        """Add blank channels to a channel table, numbered on from its
+        highest channel.
+
+        Parameters
+        ----------
+        source : str or ChannelTable
+            The channel table, by name or as the object itself.
+        count : int, default 1
+            How many channels to add.
+
+        Returns
+        -------
+        list of int
+            The new channels' numbers.
+
+        Raises
+        ------
+        TypeError
+            If the object is not a channel table.
+        """
+        name = self.name_of(source)
+        table = self[name]
+        if not isinstance(table, ChannelTable):
+            raise TypeError(f'{name!r} is not a channel table')
+        return table.add_channels(count)
+
     def set_view(self, source: Any, view: View | None = None) -> None:
         """Set the view a geometry opens on in 3-D, in the app, the report
         and every exported figure.
@@ -4514,28 +4561,39 @@ class Project(dict):
             out.write(html)
         return path
 
-    def table(self, name: Any) -> tuple[list[str], list[list[str]]]:
+    def table(self, name: Any, *,
+              values: bool = False) -> tuple[list[str], list[list[str]]]:
         """(headers, rows) for an object that can be shown as a table.
 
         The rows are a channel table's instrumentation, a shape set's
         identified parameters, or a matched-modes object's pairs beside
         both sets' parameters. They are the same rows the report prints,
-        so a script and a report always agree. An object with no table
-        raises ValueError.
+        so a script and a report always agree. With `values`, a shape
+        set gives its shape values instead, as the app's Shape Values
+        table shows them: a row per DOF and a column per mode. An object
+        with no table raises ValueError.
 
         Parameters
         ----------
         name : str or object
             The object to tabulate.
+        values : bool, default False
+            For a shape set, its values rather than its modes.
 
         Returns
         -------
         tuple of (list of str, list of list of str)
             The column headings and the rows, both as text.
         """
-        from .core.tables import table_of
+        from .core.shapes import ShapeSet
+        from .core.tables import shape_values, table_of
 
         name = self.name_of(name)
+        if values:
+            if not isinstance(self[name], ShapeSet):
+                raise ValueError(f'{name} is a {type(self[name]).__name__}; '
+                                 'only a shape set has shape values')
+            return shape_values(self[name])
         built = table_of(self[name], objects=self)
         if built is None:
             raise ValueError(f'{name} is a {type(self[name]).__name__}, '
@@ -5403,8 +5461,13 @@ _VERB_APPLIES: tuple = (
     ('add_solid_sphere', lambda p, o: isinstance(o, Geometry)),
     ('add_solid_section', lambda p, o: isinstance(o, Geometry)),
     ('set_view', lambda p, o: isinstance(o, Geometry)),
+    # a channel table takes rows, an empty one above all (2026-10-22)
+    ('add_channels', lambda p, o: isinstance(o, ChannelTable)),
+    # a channel table's control channels, or a specification to edit;
+    # a shape set's modal coordinates came off the bar (Brandon,
+    # 2026-10-22), and a script can still write one through the verb
     ('author_specification', lambda p, o: isinstance(
-        o, (ShapeSet, Specification, ChannelTable))),
+        o, (Specification, ChannelTable))),
     ('project_onto_basis', _two_shape_sets),
     ('match_modes', _two_shape_sets),
     ('merge', lambda p, o: any(type(other) is type(o) and other is not o
@@ -5540,7 +5603,8 @@ _JOURNALED_VERBS = (
     'detect_shocks', 'filter_data', 'truncate_data', 'integrate',
     'differentiate', 'fit_modes', 'generate_rigid_body_modes', 'solve_modes',
     'plan_instrumentation',
-    'merge_coincident_nodes', 'align_meshes', 'new_geometry', 'add_plane',
+    'merge_coincident_nodes', 'align_meshes', 'new_geometry',
+    'new_channel_table', 'add_channels', 'add_plane',
     'add_block', 'add_solid_block', 'add_solid_cylinder', 'add_solid_cone',
     'add_solid_sphere', 'add_solid_section',
     'add_solid_hole', 'combine_solids',

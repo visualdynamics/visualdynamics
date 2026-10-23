@@ -203,6 +203,11 @@ MESH_PREVIEW_TETS = 5_000
 #: and the most cells of a grid fitted to a shape that is not an
 #: extrusion (`hexmesh.overlay_mesh`): the fitting takes seconds past it
 MESH_PREVIEW_FITTED = 1_500
+#: the most values (DOFs x modes) a shape set's values table shows. A
+#: table of them is rebuilt on every selection, and measured offscreen a
+#: million took 0.7 s while 23 million took 2.6 s; past it the toggle
+#: is not offered and the status line says why
+SHAPE_VALUES_CELL_LIMIT = 1_000_000
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -214,6 +219,7 @@ from .object_tables import (
     matched_modes_model,
     modal_fit_table_model,
     shape_table_model,
+    shape_values_model,
     units_table_model,
 )
 from .panes import DataPane, ScenePane
@@ -1013,9 +1019,12 @@ class MainWindow(QMainWindow):
         self.data_pane.toolbar.addAction(self.author_data_action)
         self.author_data_action.setVisible(False)
         # the scene's own reading: the rigid-body preview and its act
-        self.scene.rigid_toggled.connect(
+        self.scene.modes_toggled.connect(
             lambda _wanted: self.render_current())
-        self.scene.rigid_panel.changed.connect(self._rigid_edited)
+        self.scene.modes_panel.changed.connect(self._rigid_edited)
+        self.scene.modes_panel.kind_changed.connect(
+            lambda _kind: self.render_current())
+        self.scene.modes_panel.solve_asked.connect(self.solve_modes_act)
         self.scene.mesh_panel.changed.connect(self._mesh_edited)
         self.scene.mesh_panel.add_asked.connect(self._mesh_add)
         self.scene.mesh_panel.close_asked.connect(self.close_mesh_pane)
@@ -1074,7 +1083,7 @@ class MainWindow(QMainWindow):
         self.scene.merge_panel.none_asked.connect(self._merge_none)
         self.scene.merge_panel.merge_asked.connect(self._merge_apply)
         self.scene.merge_panel.close_asked.connect(self.close_merge_pane)
-        self.scene.rigid_panel.apply_asked.connect(
+        self.scene.modes_panel.apply_asked.connect(
             self.generate_rigid_body_modes)
         self.data_pane.shock_panel.srs_asked.connect(self.compute_srs)
         self.data_pane.averaging_panel.psds_asked.connect(
@@ -1172,8 +1181,26 @@ class MainWindow(QMainWindow):
         self.mode_table_action.setToolTip(
             'Show the table beside the MAC — the mode list for one '
             'set, the matched-modes table while comparing two')
-        self.mode_table_action.triggered.connect(
-            lambda checked: self.table.setVisible(checked))
+        self.mode_table_action.triggered.connect(self._views_toggled)
+        # a lone shape set's three views, each on or off, one always up
+        # (Brandon, 2026-10-22): the mode table above, the MAC and the
+        # shape values themselves
+        self.mac_action: QAction = QAction(control_icon('mac'), 'MAC', self)
+        self.mac_action.setCheckable(True)
+        self.mac_action.setChecked(True)
+        self.mac_action.setToolTip(
+            'Show the MAC of the set against itself: how distinct its '
+            'modes are')
+        self.mac_action.triggered.connect(self._views_toggled)
+        self.shape_values_action: QAction = QAction(
+            control_icon('shape_values'), 'Shape Values', self)
+        self.shape_values_action.setCheckable(True)
+        self.shape_values_action.setToolTip(
+            "Show the shape values: a row per DOF and a column per mode")
+        self.shape_values_action.triggered.connect(self._views_toggled)
+        #: whether a lone shape set's views are up, so a toggle redraws
+        #: them rather than only showing or hiding the table
+        self._shape_views_up = False
         # the MAC's own 3-D reading: the matrix as bars, height and
         # color both the value, and the default here too (Brandon's
         # call, made once the bars could be picked like the grid)
@@ -1191,17 +1218,25 @@ class MainWindow(QMainWindow):
         # place whichever view is up
         self.table_bar.addAction(self.mac_bars_action)
         self.table_bar.addAction(self.mode_table_action)
+        self.table_bar.addAction(self.shape_values_action)
+        self.table_bar.addAction(self.mac_action)
         self.mac_bars_action.setVisible(False)
-        # writing a specification at the set's modal coordinates: the
-        # reading of a lone shape set that makes an object (PLAN.md,
-        # "The virtual point arc"). Its pane sits beside the plot,
-        # which previews the autospectra as they are typed
-        self.author_action: QAction = QAction(control_icon('edit'),
-                                              'Specification', self)
+        self.shape_values_action.setVisible(False)
+        self.mac_action.setVisible(False)
+        # writing a specification at a channel table's control
+        # channels: the reading of a lone table that makes an object.
+        # Its pane sits beside the plot, which previews the autospectra
+        # as they are typed. It opened on a shape set too, at its modal
+        # coordinates (PLAN.md, "The virtual point arc"), and wore the
+        # pencil; Brandon, 2026-10-22: the channel table only, wearing
+        # the specification's own glyph
+        self.author_action: QAction = QAction(
+            control_icon('new_specification'), 'Specification', self)
         self.author_action.setCheckable(True)
         self.author_action.setToolTip(
-            'Write a specification at this set\'s modal coordinates — '
-            'breakpoints, every cross term, the bands — and make it')
+            "Write a specification at this channel table's control "
+            'channels — breakpoints, every cross term, the bands — and '
+            'make it')
         self.author_action.triggered.connect(self._author_toggled)
         self.table_bar.addAction(self.author_action)
         self.author_action.setVisible(False)
@@ -1230,8 +1265,7 @@ class MainWindow(QMainWindow):
         self._draft_names: dict[str, tuple[str, ...]] = {}
         #: what the reading is open on: ('shapes' | 'spec' | 'table', name)
         self._author_door: tuple[str, str] | None = None
-        #: the specification a shape-set or channel-table door made, by
-        #: door key — a render between the making and the deferred
+        #: the specification a channel-table door made, by door key — a render between the making and the deferred
         #: switch of selection must not make a second one
         self._author_made: dict[str, str] = {}
         #: the 3-D MAC surface, built on first use, and which comparison
@@ -1275,6 +1309,10 @@ class MainWindow(QMainWindow):
         self.tables_row: QSplitter = QSplitter(Qt.Orientation.Horizontal)
         self.tables_row.setChildrenCollapsible(False)
         self.tables_row.addWidget(self.table)
+        # a lone shape set's values, between its mode table and its MAC
+        self.shape_values_table: CopyPasteTableView = CopyPasteTableView()
+        self.shape_values_table.hide()
+        self.tables_row.addWidget(self.shape_values_table)
         self.tables_row.addWidget(self.mac_frame)
         self.tables_row.setSizes([500, 500])
         # the report editor borrows this pane: the rendered report
@@ -1979,6 +2017,13 @@ class MainWindow(QMainWindow):
             lambda _index: self.render_current())
         self.dofs_combo_action: QAction = toolbar.addWidget(self.dofs_combo)
         self.dofs_combo_action.setVisible(False)
+        # a channel table selected with a geometry: its DOFs are what the
+        # arrows mark, and the box picks them by role (Brandon,
+        # 2026-10-22). The arrows go on for the pair and back to as they
+        # were after it.
+        self._dof_table = None
+        self._dofs_before = False
+        self._dof_geometries = []
 
         # across geometries the comparison's second set animates on its
         # own mesh by default; this switches it to its projection on
@@ -2472,13 +2517,34 @@ class MainWindow(QMainWindow):
     def _dofs_toggled(self, _checked):
         self.render_current()
 
-    def _update_dof_controls(self, geometries, series):
+    def _update_dof_controls(self, geometries, series, channels=()):
         """The DOF-arrows toggle is an option only when a geometry and
         the data to read DOFs from are selected together; the quantity
-        drop-down offers what that selection actually measures."""
+        drop-down offers what that selection actually measures.
+
+        A channel table selected with a geometry, and no data, is read
+        instead: the arrows turn on and mark the table's DOFs, and the
+        drop-down picks the channels by role, all of them first."""
         from ..core.report import series_dof_quantities
 
         self._dof_series = list(series) if geometries and series else []
+        table = (channels[0][1] if geometries and channels
+                 and not self._dof_series else None)
+        if (table is None) != (self._dof_table is None):
+            # the arrows are what the pair is selected to see; quietly,
+            # since this runs inside the render a toggle would start
+            self.dofs_action.blockSignals(True)
+            if table is not None:
+                self._dofs_before = self.dofs_action.isChecked()
+                self.dofs_action.setChecked(True)
+            else:
+                self.dofs_action.setChecked(self._dofs_before)
+            self.dofs_action.blockSignals(False)
+        self._dof_table = table
+        if table is not None:
+            self.dofs_action.setVisible(True)
+            self._offer_channel_roles(table)
+            return
         # a geometry on its own can mark its DOFs too — every node's
         # own X, Y and Z. There is no measurement to read a quantity
         # from, so the drop-down has nothing to offer and stays away;
@@ -2502,16 +2568,51 @@ class MainWindow(QMainWindow):
             quantities = self._response_quantities(*self._dof_series[0][1:])
         else:
             quantities = []
-        previous = self.dofs_combo.currentData()
-        self.dofs_combo.blockSignals(True)
-        self.dofs_combo.clear()
-        for quantity in quantities:
-            self.dofs_combo.addItem(quantity.title(), quantity)
-        if previous in quantities:
-            self.dofs_combo.setCurrentIndex(quantities.index(previous))
-        self.dofs_combo.blockSignals(False)
+        self._fill_dofs_combo([(quantity.title(), quantity)
+                               for quantity in quantities],
+                              'Which quantity the geometry moves by and the '
+                              'plot shows, and whose DOFs the arrows mark')
         self.dofs_combo_action.setVisible(
             len(quantities) > (0 if arrows else 1))
+
+    #: the drop-down's words for a channel table's roles
+    _ROLE_CHOICES: ClassVar[dict] = {'all': 'All channels',
+                                     'control': 'Control channels',
+                                     'reference': 'References',
+                                     'response': 'Responses',
+                                     'monitor': 'Monitors'}
+
+    def _offer_channel_roles(self, table):
+        """The drop-down for a channel table on its geometry: every
+        channel, the control channels, then each role the table has a
+        channel in. A choice no channel answers is not offered, and with
+        nothing to pick the box stays away."""
+        from ..viz.geometry import CHANNEL_ROLES
+
+        held = set(table.roles()) | ({'control'} if table.controls().any()
+                                     else set())
+        roles = [role for role in CHANNEL_ROLES
+                 if role == 'all' or role in held]
+        self._fill_dofs_combo([(self._ROLE_CHOICES[role], role)
+                               for role in roles],
+                              "Which channels' DOFs the arrows mark: the "
+                              'control channels, or one role')
+        self.dofs_combo_action.setVisible(self.dofs_action.isChecked()
+                                          and len(roles) > 1)
+
+    def _fill_dofs_combo(self, choices, tooltip):
+        """Put `(label, value)` choices in the DOF drop-down, keeping the
+        current choice when it is still among them."""
+        previous = self.dofs_combo.currentData()
+        values = [value for _label, value in choices]
+        self.dofs_combo.blockSignals(True)
+        self.dofs_combo.clear()
+        for label, value in choices:
+            self.dofs_combo.addItem(label, value)
+        if previous in values:
+            self.dofs_combo.setCurrentIndex(values.index(previous))
+        self.dofs_combo.setToolTip(tooltip)
+        self.dofs_combo.blockSignals(False)
 
     @staticmethod
     def _response_quantities(data, records):
@@ -2670,9 +2771,22 @@ class MainWindow(QMainWindow):
         A project verb (a computation, a fit, a projection) puts its
         result in the project, and this adds the row for it. `source`
         and `key` go in the tooltip, as in `add_object`. With `select`,
-        the new row is selected.
+        the new row is selected. An object that has its row already
+        keeps it, brought up to date, rather than gaining a second.
         """
         obj = self.objects[name]
+        # One row per object. The specification sheet shows the object it
+        # makes a tick later, and every render before that tick asked
+        # again: five rows for one object, and deleting it left four
+        # rows naming nothing (Brandon, 2026-10-22).
+        existing = self._item_for_object(name)
+        if existing is not None:
+            self._refresh_item(existing, obj)
+            if select:
+                self.tree.setCurrentItem(existing)
+                self.tree.clearSelection()
+                existing.setSelected(True)
+            return name
         item = QTreeWidgetItem([name])
         item.setIcon(0, object_icon(obj, units_defined=_units_defined(obj)))
         self.object_sources[name] = source
@@ -4059,6 +4173,12 @@ class MainWindow(QMainWindow):
         except (KeyError, ValueError):
             return          # a working table over no project object
         self.project.journal.append(f'project[{name!r}]{suffix}')
+        if model.obj is self._dof_table and self._dof_geometries:
+            # the arrows follow the cell typed, as the grid does
+            note = self._add_channel_arrows()
+            self.scene.plotter.render()
+            if note:
+                self._show_status(note)
         if isinstance(model.obj, ChannelTable):
             item = self._item_for_object(name)
             grid = self.record_grids.get(name)
@@ -4068,6 +4188,11 @@ class MainWindow(QMainWindow):
             grid = self.record_grids.get(name)
             if picked and grid is not None:
                 grid.select_records(picked)
+            # a node or direction typed can put a channel on the geometry
+            # or take it off: the red row followed only the next unrelated
+            # check, and a table filled in by hand stayed red after every
+            # channel was placed (Brandon, 2026-10-22)
+            self.refresh_compatibility()
 
     def _deletion_line(self, name, obj, deleter, picks):
         """The journal line a deletion will deserve, computed BEFORE
@@ -4200,7 +4325,6 @@ class MainWindow(QMainWindow):
         ('project_onto_basis', 'Project onto Basis DOFs', 'project',
          'project_onto_basis'),
         ('merge', 'Merge into One', 'merge', 'merge_selected'),
-        ('solve_modes', 'Solve Modes', 'solve_modes', 'solve_modes_act'),
         ('merge_coincident_nodes', 'Merge Coincident Nodes', 'merge_nodes',
          'merge_nodes_act'),
         ('align_meshes', 'Align Meshes', 'align_meshes', 'align_meshes_act'),
@@ -4218,6 +4342,7 @@ class MainWindow(QMainWindow):
         ('add_solid_section', 'Add Section', 'solid_section',
          'add_solid_section_act'),
         ('set_view', 'Set Default View', 'set_view', 'set_view_act'),
+        ('add_channels', 'Add Channel', 'add_channel', 'add_channel_act'),
         ('read_as_specification', 'Read as Specification',
          'as_specification', 'read_as_specification_act'),
         ('read_as_psd', 'Read as PSD', 'as_psd', 'read_as_psd_act'),
@@ -4311,7 +4436,12 @@ class MainWindow(QMainWindow):
                         ('new_geometry', 'New Geometry', 'new_geometry',
                          self.new_geometry_act,
                          ('An empty geometry, in the display units, to '
-                          'add planes to'))]
+                          'add planes to')),
+                        # and a channel table to fill in by hand
+                        # (Brandon, 2026-10-22)
+                        ('new_channel_table', 'New Channel Table',
+                         'new_channel_table', self.new_channel_table_act,
+                         'An empty channel table, to add channels to')]
             solid_acts = self._solid_acts()
             if solid_acts is not None:
                 return solid_acts
@@ -9238,7 +9368,7 @@ class MainWindow(QMainWindow):
         an object no longer in the project.
         """
         self.scene.clear()
-        self.scene.offer_rigid(False)
+        self.scene.offer_modes(False)
         self.data_pane.clear()
         self.table.setModel(None)
         if self.report_editor is not None:
@@ -9432,7 +9562,7 @@ class MainWindow(QMainWindow):
                 else:
                     picture_sets.append((name, obj, None))
 
-        self._update_dof_controls(geometries, series)
+        self._update_dof_controls(geometries, series, channels)
         self._update_link_actions()
         shape_table = bool(shapes) and not geometries and not series
         shape_sets = list(dict.fromkeys(
@@ -9490,7 +9620,7 @@ class MainWindow(QMainWindow):
                 and not channels and self.editing is None
                 and not any(entry['components'] or entry['entities']
                             for entry in geometries.values()))
-        self.scene.offer_rigid(lone)
+        self.scene.offer_modes(lone)
         deflection = self._deflection_for(geometries, series, shapes)
         parts = []
         synthesis_note = ''
@@ -9556,10 +9686,14 @@ class MainWindow(QMainWindow):
                 # sheet's toggle lives there, so it comes back alone
                 self.mode_table_action.setVisible(False)
                 self.mac_bars_action.setVisible(False)
+                self.mac_action.setVisible(False)
+                self.shape_values_action.setVisible(False)
                 self.table_bar.show()
         elif self.author_action.isVisible() and channels and not shapes:
             self.mode_table_action.setVisible(False)
             self.mac_bars_action.setVisible(False)
+            self.mac_action.setVisible(False)
+            self.shape_values_action.setVisible(False)
             self.table_bar.show()
         self._offer_acts()
         refused = getattr(self, '_refused_comparison', None)
@@ -9601,7 +9735,17 @@ class MainWindow(QMainWindow):
         if entry['components'] or entry['entities']:
             return None          # a sub-selection means 'show me this part'
 
-        if not shapes and not series and self.scene.showing_rigid:
+        if not shapes and not series and self.scene.showing_modes:
+            panel = self.scene.modes_panel
+            # finite element modes once the project says the geometry can
+            # be solved, the one answer the API gives too
+            panel.offer_kinds('solve_modes' in dict(self.project.verbs(name)))
+            if panel.kind == 'fem':
+                # nothing to preview until it is solved: the model as it
+                # stands, with the pane saying what will be solved
+                panel.show_model(geometry)
+                panel.show()
+                return None
             return self._deflect_rigid(name, geometry, showing=name)
         if shapes and not series:
             sets = list(dict.fromkeys(n for n, _obj, _detail in shapes))
@@ -10353,10 +10497,8 @@ class MainWindow(QMainWindow):
         """The door a specification sheet can open on, while the
         reading is wanted; None otherwise, standing the reading down.
 
-        ('shapes', key, name, modes) for one shape set — whole, or the
-        shapes picked in it, `modes` their indices — ('table', name) for
-        one whole channel table, a geometry allowed alongside either;
-        ('spec', key, specs) for one or more specifications and
+        ('table', name) for one whole channel table, a geometry allowed
+        alongside; ('spec', key, specs) for one or more specifications and
         nothing else, `specs` a list of (name, channels) with the
         channels the picked records touch, or None for all of them
         (Brandon, 2026-09-04: a pick of records, in one specification
@@ -10366,19 +10508,7 @@ class MainWindow(QMainWindow):
         parts_picked = any(entry['components'] or entry['entities']
                            for entry in geometries.values())
         door = None
-        sets = {name for name, _obj, _detail in shapes}
-        if len(sets) == 1 and not series and not channels and not parts_picked:
-            # one set, whole or as the shapes picked in it: a virtual
-            # point's target is its three translations, the rotations
-            # left out rather than written as zero (Brandon, 2026-09-06)
-            (name,) = sets
-            picked = sorted({d for _n, _o, d in shapes if d is not None})
-            whole = any(d is None for _n, _o, d in shapes) or not picked
-            modes = None if whole else picked
-            key = name if modes is None else \
-                f'{name}[{",".join(f"M{k + 1}" for k in modes)}]'
-            door = ('shapes', key, name, modes)
-        elif (series and all(isinstance(obj, Specification)
+        if (series and all(isinstance(obj, Specification)
                              for _n, obj, _r in series)
               and not shapes and not channels and not parts_picked):
             specs = []
@@ -10442,10 +10572,7 @@ class MainWindow(QMainWindow):
         kind, key = door[0], door[1]
         draft = self._drafts.get(key)
         if draft is None:
-            if kind == 'shapes':
-                draft = SpecificationDraft.at_modal_coordinates(
-                    self.objects[door[2]], modes=door[3])
-            elif kind == 'spec':
+            if kind == 'spec':
                 specs = door[2]
                 if len(specs) == 1:
                     name, picked = specs[0]
@@ -10477,7 +10604,7 @@ class MainWindow(QMainWindow):
         """The objects a door is open on, for a message."""
         if door[0] == 'spec':
             return [name for name, _picked in door[2]]
-        return [door[2]] if door[0] == 'shapes' else [door[1]]
+        return [door[1]]
 
     def _render_author(self, door):
         """The draft's autospectra and bands on the plot, the draft
@@ -10500,11 +10627,7 @@ class MainWindow(QMainWindow):
                       + (f' — {", ".join(picked)} channels picked'
                          if picked else ''))
         else:
-            origin = (f'at the control channels of {said_names}'
-                      if kind == 'table' else
-                      f'at the modal coordinates of {said_names}'
-                      if door[3] is None else
-                      f'at {", ".join(draft.channels)} of {said_names}')
+            origin = f'at the control channels of {said_names}'
         if kind != 'spec':
             # there has to be an object for the sheet to edit, so the
             # starter is made at once beside the set or the table and
@@ -10783,7 +10906,7 @@ class MainWindow(QMainWindow):
         if not geometry.num_nodes:
             return f'{name}: no nodes to move'
         properties = self._rigid_properties(geometry)
-        panel = self.scene.rigid_panel
+        panel = self.scene.modes_panel
         panel.show_geometry(geometry, properties, self.unit_system)
         panel.show()
         shapes = rigid_body_shapes(geometry, properties)
@@ -11126,8 +11249,12 @@ class MainWindow(QMainWindow):
         Returns what the status bar should add: why a large bare
         geometry has no arrows, or ''.
         """
+        self._dof_geometries = []
         if not self.dofs_action.isChecked():
             return ''
+        if self._dof_table is not None:
+            self._dof_geometries = list(geometries)
+            return self._add_channel_arrows()
         from ..core.report import (
             EXCITATION_QUANTITIES,
             series_quantity_dofs,
@@ -11160,6 +11287,31 @@ class MainWindow(QMainWindow):
         return (f'no DOF arrows on {max(skipped):,} nodes — past '
                 f'{DOF_ARROW_NODE_LIMIT} they hide the model; select data '
                 'with it to see the DOFs it measures')
+
+    def _add_channel_arrows(self):
+        """The selected channel table's DOFs in the drop-down's role, on
+        each geometry drawn, replacing any drawn before. Returns what the
+        status bar should add: how many channels have no arrow, or ''.
+
+        Named actors, so a cell typed in the table redraws the arrows
+        without rebuilding the scene or the table being typed in."""
+        from ..viz.geometry import add_dof_arrows, channel_dofs
+
+        plotter = self.scene.plotter
+        for name in list(plotter.actors):
+            if str(name).startswith('channel-dofs-'):
+                plotter.remove_actor(name, render=False)
+        dofs, incoming = channel_dofs(self._dof_table,
+                                      self.dofs_combo.currentData() or 'all')
+        drawn = 0
+        for i, geometry in enumerate(self._dof_geometries):
+            drawn = max(drawn, add_dof_arrows(
+                plotter, geometry, dofs, unit_system=self.unit_system,
+                incoming=incoming, name=f'channel-dofs-{i}'))
+        if drawn == len(dofs):
+            return ''
+        return (f'{len(dofs) - drawn} of {len(dofs)} channels have no arrow '
+                '— no node or direction yet, or a node the geometry lacks')
 
     def _shape_summary(self, shapes, geometries=None):
         """Mode shapes have no view of their own; say what is selected, and
@@ -15244,6 +15396,32 @@ class MainWindow(QMainWindow):
         self._show_status(f'{name}: an empty geometry, lengths in {unit} — '
                           'select its Quads to Add Plane, its Hexes to Add Block')
 
+    def new_channel_table_act(self) -> None:
+        """Add an empty channel table to the project and select it. Its
+        bar offers Add Channel."""
+        name = self.project.new_channel_table()
+        self.show_object(name)
+        self._show_status(f'{name}: an empty channel table — Add Channel '
+                          'adds a row to type into')
+
+    def add_channel_act(self) -> None:
+        """Add a blank channel to the selected channel table, numbered
+        after its highest, and put the cursor on its row."""
+        acted = self._act_on(ChannelTable, 'Select a channel table to add a '
+                             'channel to', self.project.add_channels)
+        if acted is None:
+            return
+        name, table, (number,) = acted
+        self._refresh_item(self._item_for_object(name), table)
+        self.refresh_compatibility()
+        self.render_current()
+        model = self.table.model()
+        if model is not None and model.rowCount():
+            row = model.rowCount() - 1
+            self.table.selectRow(row)
+            self.table.scrollTo(model.index(row, 0))
+        self._show_status(f'{name}: added channel {number}')
+
     def add_plane_act(self) -> None:
         """Open the add pane (`MeshPanel`) beside the view for a plane of
         plates in the selected geometry: a center, widths with one of
@@ -15968,25 +16146,17 @@ class MainWindow(QMainWindow):
         element groups' properties, and add the mode set to the
         geometry's object group.
 
-        Two values are asked for: the highest frequency to solve for, in
-        Hz (2000 by default), and the damping to give every mode, in
-        percent of critical (2 by default)."""
+        The highest frequency to solve to and the damping to give every
+        mode are the Modes pane's, finite element kind."""
+        # The two numbers were asked in two dialogs until the pane took
+        # them (Brandon, 2026-10-22).
         obj = self.current_object()
         if not (isinstance(obj, Geometry) and obj.group_properties):
             self._show_status('Select a geometry whose element groups carry their '
                               'properties (the Element Groups table) to solve')
             return
-        top, ok = QInputDialog.getDouble(
-            self, 'Solve Modes', 'Highest frequency to solve for [Hz]:',
-            2000.0, 0.0, 1e9, 1)
-        if not ok:
-            return
-        percent, ok = QInputDialog.getDouble(
-            self, 'Solve Modes',
-            'Damping to give every mode [% of critical]:', 2.0, 0.0,
-            100.0, 2)
-        if not ok:
-            return
+        panel = self.scene.modes_panel
+        top, percent = panel.maximum_frequency(), panel.damping() * 100.0
         acted = self._act_on(
             Geometry, 'Select a geometry to solve',
             lambda name, **options: self._run_long(
@@ -17184,7 +17354,8 @@ class MainWindow(QMainWindow):
         # mode list is the fit's own table, not the toggle's business
         self.table_bar.show()
         for action in (self.mode_table_action, self.overlay_action,
-                       self.add_matches_action):
+                       self.add_matches_action, self.mac_action,
+                       self.shape_values_action):
             action.setVisible(False)
         self.mac_bars_action.setVisible(True)
         if self.mac_bars_action.isChecked():
@@ -19723,6 +19894,12 @@ class MainWindow(QMainWindow):
         self.table.rows_deletable = False
         self._hide_mac()
         self.table_bar.hide()
+        # a lone shape set's other views are its renderer's to put back
+        self._shape_views_up = False
+        self.shape_values_table.hide()
+        self.shape_values_action.setVisible(False)
+        self.mac_action.setVisible(False)
+        self.mode_table_action.setEnabled(True)
         if self.report_editor is not None:
             self.report_editor.hide()
         self.tables_row.show()
@@ -19842,9 +20019,15 @@ class MainWindow(QMainWindow):
         model = self._set_table_model(shape_table_model(shapes, self))
         self._arm_row_deletion(name, 'mode')
         self._mac_shown = None      # not a comparison; its zoom is gone
+        self._shape_views_up = True
+        values = shapes.num_shapes * len(shapes.coordinate)
+        fits = values <= SHAPE_VALUES_CELL_LIMIT
+        shown = self._shape_views(fits)
         self.mode_table_action.setVisible(True)
-        self.mac_bars_action.setVisible(True)
-        if self.mac_bars_action.isChecked():
+        self.mac_bars_action.setVisible(shown['mac'])
+        if not shown['mac']:
+            self._hide_mac()
+        elif self.mac_bars_action.isChecked():
             self._draw_mac_bars(shapes.frequency, shapes.auto_mac(),
                                 key=('auto', name, shapes.num_shapes))
         else:
@@ -19852,10 +20035,50 @@ class MainWindow(QMainWindow):
                       theme=self.theme_name)
             self.mac_frame.set_ratio(1.0)
             self._mac_surface(bars=False)
+        if shown['values']:
+            table = self.shape_values_table
+            table.setModel(shape_values_model(shapes, self))
+            table.show()
+            self._size_choice_columns(table, table.model())
         self.table_bar.show()
-        self.table.setVisible(self.mode_table_action.isChecked())
+        self.table.setVisible(shown['table'])
+        too_many = (not fits and self.shape_values_action.isChecked())
+        note = (f' — {values:,} shape values, too many for a table'
+                if too_many else '')
         if mode is not None:
             self.table.selectRow(mode)
             self.table.scrollTo(model.index(mode, 0))
-            return shapes.mode_label(mode)
-        return self._status_for(shapes)
+            if shown['values']:
+                self.shape_values_table.selectColumn(mode)
+            return shapes.mode_label(mode) + note
+        return self._status_for(shapes) + note
+
+    def _shape_views(self, values_fit):
+        """Which of a lone shape set's three views are up: the mode
+        table, the MAC and the shape values, as their toggles say. The
+        values are offered only when `values_fit`. One view always
+        stays up, so the toggle of the last one showing cannot be turned
+        off, and with none of those offered checked the mode table comes
+        back."""
+        offered = {'table': self.mode_table_action, 'mac': self.mac_action}
+        if values_fit:
+            offered['values'] = self.shape_values_action
+        self.mac_action.setVisible(True)
+        self.shape_values_action.setVisible(values_fit)
+        self.shape_values_action.setEnabled(True)
+        if not any(action.isChecked() for action in offered.values()):
+            self.mode_table_action.setChecked(True)
+        up = [action for action in offered.values() if action.isChecked()]
+        for action in offered.values():
+            action.setEnabled(not (len(up) == 1 and action in up))
+        return {key: key in offered and offered[key].isChecked()
+                for key in ('table', 'mac', 'values')}
+
+    def _views_toggled(self, _checked=False):
+        """A view toggle on the table bar: a lone shape set's views are
+        drawn again as the toggles now say; anywhere else the mode table
+        toggle shows or hides the table, as it always has."""
+        if self._shape_views_up:
+            self.render_current()
+        else:
+            self.table.setVisible(self.mode_table_action.isChecked())

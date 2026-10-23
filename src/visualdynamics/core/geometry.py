@@ -2700,3 +2700,37 @@ class Geometry:
         from ..viz.geometry import plot_dofs
         return plot_dofs(self, source, quantity, unit_system=unit_system,
                          **kwargs)
+
+    def plot_channels(self, table: Any, role: str = 'all',
+                      unit_system: UnitSystem | None = None,
+                      **kwargs: Any) -> Any:
+        """Draw this geometry with a labeled arrow at each channel's DOF
+        in a channel table, as the app does when the two are selected
+        together.
+
+        A channel with no node or direction yet, or at a node this
+        geometry does not have, has no arrow.
+
+        Parameters
+        ----------
+        table : ChannelTable
+            The channels to draw.
+        role : str, default 'all'
+            'reference', 'response' or 'monitor' to draw only the
+            channels in that role, 'control' for the channels with
+            Control checked, or 'all' for every channel.
+        unit_system : UnitSystem, optional
+            Units to draw in.
+        **kwargs
+            Passed through to the scene.
+
+        Returns
+        -------
+        object
+            The plotter the scene is in.
+        """
+        # Brandon, 2026-10-22: a channel table and a geometry selected
+        # together draw the table's DOFs, picked by role.
+        from ..viz.geometry import plot_channels
+        return plot_channels(self, table, role, unit_system=unit_system,
+                             **kwargs)

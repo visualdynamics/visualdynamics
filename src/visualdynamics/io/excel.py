@@ -256,8 +256,10 @@ def load(path: str | os.PathLike, **_kwargs: Any) -> ChannelTable:
     out. A `node`, `direction` or `unit` column the sheet does not have
     is created blank.
 
-    Raises ValueError when no header row is found, or the header has no
-    channels under it.
+    A header with no channels under it reads as an empty table, which is
+    what an empty table writes.
+
+    Raises ValueError when no header row is found.
     """
     from openpyxl import load_workbook
 
@@ -292,9 +294,9 @@ def load(path: str | os.PathLike, **_kwargs: Any) -> ChannelTable:
     finally:
         book.close()
 
-    if not columns.get('channel'):
-        raise ValueError(f'{os.path.basename(str(path))} has a channel '
-                         f'header but no channels under it')
+    # A header with nothing under it was refused until an empty table
+    # could be made in the app (Brandon, 2026-10-22): that table's own
+    # export must read back.
     # the object needs its four; anything the file did not say is blank,
     # which is a channel waiting to be told rather than a refusal
     for core in ('channel', 'node', 'direction', 'unit'):

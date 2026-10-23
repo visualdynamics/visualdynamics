@@ -313,12 +313,13 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_events': "plot_replication(mode='overlay')",
         '_render_replication_bars': 'plot_replication',
         '_render_replication_segments': 'plot_replication_segments',
-        '_render_geometries': 'Geometry.plot / Geometry.plot_dofs',
+        '_render_geometries': ('Geometry.plot / Geometry.plot_dofs / '
+                               'Geometry.plot_channels'),
         '_render_animation': ('Project.animate / ShapeSet.animate / '
                               'TimeHistory.animate (screenshot=, movie=)'),
         '_render_photos': 'plot_photos',
         '_render_table': 'Project.table',
-        '_render_shape_table': 'Project.table',
+        '_render_shape_table': 'Project.table / Project.table(values=True)',
         '_render_matches': 'Project.table (core.tables.matched_rows)',
         '_render_cross_mac': 'plot_mac / Project.animate_pair',
         '_render_report_builder': 'Project.export_report',

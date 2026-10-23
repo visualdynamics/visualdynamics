@@ -35,7 +35,7 @@ barc.project().save('barc.vdyn')    # the model this page builds, already built
 | Build it from planes | the geometry's **Quads** row | *Add Plane*, once per plane |
 | Tie the bolted parts | the geometry's Quads | pick the elements under each washer, *Tie* to the part below |
 | Give each part its material and thickness | the pencil on each element group's row | pick a material, type a thickness |
-| Solve | the bar | *Solve Modes* |
+| Solve | the 3-D view's bar | *Modes*, then *Solve Modes* in the pane |
 
 ## 1. The geometry, from planes
 
@@ -212,9 +212,10 @@ out, and the status bar says how many of them there are.
 ![The Element Groups table, opened by the pencil on the box's row (1),
 with 6061-T6 and 0.25 in typed](../images/fem-groups.png)
 
-Select the geometry and press *Solve Modes*. It asks for the highest
-frequency to solve for (type 2000 Hz) and the damping to give every mode
-(2 % of critical by default). The model has 5,470 nodes, 5,136 plates
+Select the geometry and turn on *Modes* on the 3-D view's bar. The
+Modes pane opens on *Finite element*, with the highest frequency to
+solve for (2000 Hz) and the damping to give every mode (2 % of
+critical) set already; press *Solve Modes*. The model has 5,470 nodes, 5,136 plates
 and 160 rigid links, and a mass of 0.820 kg; the solid model's volumes
 give 0.816 kg, the difference being that the plates have no bolt holes.
 It solves in a few seconds, and its modes go into the geometry's group:
@@ -223,8 +224,8 @@ the table above give the demo's mesh node for node, and the patches
 above are the demo's element for element, so a geometry built by hand
 solves to the same modes.
 
-![Where to click: select the geometry (1) and press Solve Modes on the
-bar (2)](../images/fem-solve-click.png)
+![Where to click: select the geometry (1), turn on Modes (2) and press
+Solve Modes in the pane (3)](../images/fem-solve-click.png)
 
 ![The first elastic mode of the plate model](../images/fem-mode.png)
 
@@ -400,7 +401,8 @@ per channel, 0.0125 lb, so each carries 0.003125 lb
 modes by 1 to 7 %.
 
 Give the box, the channels and the beam 6061-T6 in the Element Groups
-table (bricks take only a material) and press *Solve Modes*. At an
+table (bricks take only a material) and press *Solve Modes* in the
+Modes pane. At an
 eighth of an inch the assembly has 15,429 nodes and 9,440 bricks and
 solves in a few seconds. Its first ten elastic modes are within
 3.4 % of a brick model that joined each foot over its whole footprint;

@@ -442,7 +442,7 @@ def test_every_length_box_keeps_an_inch_fraction_to_the_64th(window):
     the rigid-body reference point kept four and read 1.96875 in as
     1.9688."""
     scene = window.scene
-    boxes = (*scene.rigid_panel.point_boxes, *scene.pattern_panel.spacings,
+    boxes = (*scene.modes_panel.point_boxes, *scene.pattern_panel.spacings,
              scene.mesh_solids_panel.size, scene.merge_panel.tolerance)
     for box in boxes:
         box.setValue(1.96875)

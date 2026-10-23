@@ -1166,19 +1166,20 @@ def bar_act(window, verb):
     pump(20)
 
 
-def solve(window, top):
-    """Solve Modes on the selected geometry, the two numbers it asks for
-    answered as the page says (the dialog is modal, so it is answered
-    here rather than shown)."""
-    from PySide6.QtWidgets import QInputDialog
+def open_modes(window):
+    """The Modes reading on the selected geometry, its pane up."""
+    window.scene.modes_action.setChecked(True)
+    window.scene._choose_modes(True)
+    pump(20)
+    return window.scene.modes_panel
 
-    answers = iter([(top, True), (2.0, True)])
-    real = QInputDialog.getDouble
-    QInputDialog.getDouble = staticmethod(lambda *a, **k: next(answers))
-    try:
-        window.solve_modes_act()
-    finally:
-        QInputDialog.getDouble = real
+
+def solve(window, top):
+    """Solve Modes on the selected geometry from the Modes pane, its
+    highest frequency typed as the page says."""
+    panel = open_modes(window)
+    panel.top_box.setValue(top)
+    panel.solve_button.click()
     pump(30)
 
 
@@ -1352,7 +1353,9 @@ def fem():
     item = window._item_for_object(name)
     pick(window, [item])
     show_scene(window)
-    shoot(window, 'fem-solve-click', marks=[item, act(window, 'Solve Modes')])
+    panel = open_modes(window)
+    shoot(window, 'fem-solve-click',
+          marks=[item, act(window, 'Modes'), panel.solve_button])
     solve(window, 2000.0)
     shapes = by_type(window, 'ShapeSet')
     window.project.animate(shapes, mode=6,

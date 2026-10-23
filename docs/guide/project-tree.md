@@ -78,16 +78,17 @@ recorded in the console, and anything computed under the old roles
 gets the refresh badge.
 
 Clicking the project row clears the panes on the right, and the
-bar holds the project's two acts: *Generate Report*, and **+** *New
+bar holds the project's three acts: *Generate Report*; **+** *New
 Geometry*, which adds an empty geometry in the display length unit to
-build a model in. In a geometry, the **Quads** row offers *Add Plane*
+build a model in; and *New Channel Table*, which adds an empty channel
+table to type channels into ([the channel table](channel-table.md)). In a geometry, the **Quads** row offers *Add Plane*
 and the **Hexes** row *Add Block*, since each adds elements of that
 family ([the finite element workflow](workflows/fem-workflow.md)). The
 **Solids** row offers *Add Solid Block*, *Add Cylinder*, *Add Cone*,
 *Add Sphere* and *Add Section*: shapes to combine, pattern and then mesh
 ([the solid workflow](workflows/fem-solids.md)).
 
-![The project row selected: the panes clear, and Generate Report and New Geometry are on the bar](images/tree-project.png)
+![The project row selected: the panes clear, and Generate Report, New Geometry and New Channel Table are on the bar](images/tree-project.png)
 
 ## One object at a time
 
@@ -96,9 +97,9 @@ colored by level; *3D* on the bar switches to the flat plot and back.
 
 | selected | what the right side shows |
 | --- | --- |
-| Geometry | The 3-D scene. The tree lists the nodes, the coordinate systems, the elements by family (Beams, Triangles, Quads, Tetras, Wedges, Hexes and Points, plus Pyramids when there are any), with the element groups of each family under it and each element group's elements under it, and the Solids. Picking a family, an element group or an element shows that part. The pencil on a family opens its elements' table, and the pencil on an element group opens the Element Groups table at its row, where its material and section are set. The *Rigid body modes* reading previews the six rigid-body shapes about a reference point. |
+| Geometry | The 3-D scene. The tree lists the nodes, the coordinate systems, the elements by family (Beams, Triangles, Quads, Tetras, Wedges, Hexes and Points, plus Pyramids when there are any), with the element groups of each family under it and each element group's elements under it, and the Solids. Picking a family, an element group or an element shows that part. The pencil on a family opens its elements' table, and the pencil on an element group opens the Element Groups table at its row, where its material and section are set. The *Modes* reading opens the Modes pane: *Kinematic* previews the six rigid-body shapes about a reference point, from the geometry alone, and *Finite element*, offered once the element groups have properties, solves the normal modes. |
 | Photos | Every photograph, or only the ones picked in the grid, stacked down the pane. Edit a name in the grid. |
-| Channel table | The spreadsheet, with every column typed and the drop-downs and check boxes live ([The channel table](channel-table.md)). |
+| Channel table | The spreadsheet, with every column typed and the drop-downs and check boxes live ([The channel table](channel-table.md)). *Specification* on its bar writes a specification at its control channels, on a sheet beside the plot. |
 | Time history | The records against time, with the averaging frames or the shock windows shaded when they are set. The readings a record offers are on the bar: *Averaging*, *Filter*, *Sine Levels* (when the project has a sine sweep specification), *Truncate*, *Kurtosis*, *Statistics*, *Shocks* and *Wavelet*. |
 | Spectrum | The curves, or the stage. |
 | PSD | The curves or the stage, as for a spectrum. An octave-band PSD is drawn as steps; *Octave Bands* on the bar previews the PSD on proportional bands and makes one. |
@@ -108,7 +109,7 @@ colored by level; *3D* on the bar switches to the flat plot and back.
 | SRS | Every record on log axes, on the stage or flat. |
 | Shock specification | The required SRS with its band. |
 | Sine sweep specification, sine levels | One row per control DOF, with the tone chosen in the drop-down on the bar: the requirement, the extracted level, or the level against the requirement when both are selected. |
-| Shape set | The table of modes (frequency, damping, modal mass and the shape's description) beside the set's own MAC, as 3-D bars by default. A mode picked in the grid is highlighted in the table. *Mode Table* hides the table, and *Specification* writes a specification at the set's modal coordinates. |
+| Shape set | Up to three views side by side, each with a toggle on the bar: *Mode Table*, the modes' frequency, damping, modal mass and description; *Shape Values*, the shape values themselves, a row per DOF headed by it and a column per mode (M1, M2, ...), offered for up to a million values; and *MAC*, the set's MAC against itself, as 3-D bars by default. The mode table and the MAC open; one view always stays up. A mode picked in the grid is highlighted in the mode table and its column in the values. From a script, `project.table(name, values=True)` gives the values table. |
 | Matched modes | The table of committed pairs, with both sets' parameters side by side, the frequency difference and the MAC. |
 | Report | The report editor: the page as the export will read it, with its acts on the bar ([Reports](reports.md)). |
 
@@ -152,6 +153,21 @@ Picking records in the data object's grid limits the animation to
 those records. Check *DOF arrows* on the bar to mark where each
 channel is; choosing a quantity beside it marks every DOF the selected
 data measures as that quantity.
+
+### A channel table on a geometry
+
+A channel table selected with a geometry marks where its channels are:
+an arrow at each channel's node, along its direction, colored X red,
+Y green and Z blue. A force channel's arrow points in to its node. The
+arrows come on as soon as the two are selected, and *DOF arrows* on
+the bar turns them off. The drop-down beside it picks *All channels*,
+the *Control channels* (those with Control checked, whatever their
+role), or only the *References*, *Responses* or *Monitors*; a choice no
+channel answers is not listed. A channel with no node or direction yet, or at a
+node the geometry does not have, gets no arrow, and the status line
+counts them. Typing a node or a direction into the table moves its
+arrow straight away, so a table started by hand can be laid out on the
+model as it is filled in.
 
 ### Two shape sets
 

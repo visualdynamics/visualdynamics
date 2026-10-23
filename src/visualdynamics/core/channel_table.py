@@ -359,7 +359,10 @@ class ChannelTable:
                     dtype='int64')
             else:
                 frame[name] = pd.Series(values, dtype='string').fillna('')
-        frame['channel_type'] = cls._typed_by_unit(frame)
+        # a Series of its own type, as the other text columns: a bare list
+        # with no channels in it read as an empty float column
+        frame['channel_type'] = pd.Series(cls._typed_by_unit(frame),
+                                          dtype='string')
         return frame
 
     @classmethod
@@ -558,6 +561,41 @@ class ChannelTable:
 
         declared = str(self.frame.loc[row, 'channel_type'])
         return list(ORDINATE_UNITS.get(declared, ALL_ORDINATE_UNITS))
+
+    def add_channels(self, count: int = 1) -> list[int]:
+        """Add blank channels at the end of the table, numbered on from
+        the highest channel in it (from 1 in an empty table).
+
+        Every other cell takes its column's default, so the node,
+        direction and unit are blank until they are typed in.
+
+        Parameters
+        ----------
+        count : int, default 1
+            How many channels to add.
+
+        Returns
+        -------
+        list of int
+            The new channels' numbers.
+
+        Raises
+        ------
+        ValueError
+            If `count` is less than 1.
+        """
+        import pandas as pd
+
+        count = int(count)
+        if count < 1:
+            raise ValueError(f'cannot add {count} channels; add at least one')
+        start = int(self.frame['channel'].max()) + 1 if self.num_channels else 1
+        numbers = list(range(start, start + count))
+        added = self._typed(pd.DataFrame(
+            {name: numbers if name == 'channel' else [spec.default] * count
+             for name, spec in self.COLUMNS.items()}))
+        self.frame = pd.concat([self.frame, added], ignore_index=True)
+        return numbers
 
     def delete_channels(self, indices: Sequence[int]) -> None:
         """Remove the given rows in place. At least one row must remain.

@@ -43,7 +43,7 @@ per click.
 | Mesh | parts picked in the tree | *Mesh Solids* |
 | Bolt a wing on | element groups picked in the tree | *Mate Surfaces* |
 | Give each part its material | the pencil on an element group's row | the Element Groups table |
-| Solve | the geometry's bar | *Solve Modes* |
+| Solve | the geometry's 3-D view bar | *Modes*, then *Solve Modes* in the pane |
 
 ## 1. The frame, as solids
 
@@ -166,7 +166,8 @@ typed](../images/fem-solids-groups.png)
 The inserts' numbers are the shared model's: a stiffness tuned to the
 tested frames and a density that gives the frame its measured mass,
 spread from the insert's annulus over its whole hole. Select the
-geometry and press *Solve Modes*. It solves in about half a minute,
+geometry, turn on *Modes* and press *Solve Modes* in the pane. It
+solves in about half a minute,
 with six rigid-body modes at 0 Hz followed by the elastic modes.
 
 ![The frame's first elastic mode](../images/fem-solids-mode.png)
@@ -273,7 +274,7 @@ the wing's top nearest each screw. Name the group *screw heads* and give
 it a mass of 1.9986e-5 lbf·s²/in (3.5 g) in the Element Groups table.
 Give *screws* and *washers* 1018 steel.
 
-Select the geometry and press *Solve Modes*. The thick wing on the frame
+Select the geometry and press *Solve Modes* in the Modes pane. The thick wing on the frame
 has 65,585 nodes and solves in under a minute.
 
 ## Sections, tubes and holes

@@ -36,8 +36,8 @@ def _plate(window, pump, unit='m'):
 
 def _toggle(window, pump):
     scene = window.scene
-    scene.rigid_action.setChecked(True)
-    scene._choose_rigid(True)
+    scene.modes_action.setChecked(True)
+    scene._choose_modes(True)
     pump()
     return scene
 
@@ -52,22 +52,22 @@ def _marker_up(window):
 def test_the_toggle_is_offered_to_a_lone_geometry_only(window, pump):
     _plate(window, pump)
     scene = window.scene
-    assert scene.rigid_action.isVisible()
-    assert not scene.rigid_action.isChecked(), 'off until asked for'
-    assert not scene.rigid_panel.isVisible()
+    assert scene.modes_action.isVisible()
+    assert not scene.modes_action.isChecked(), 'off until asked for'
+    assert not scene.modes_panel.isVisible()
 
     t = np.arange(2048) / 2048.0
     window.add_object('Record', visualdynamics.TimeHistory(
         t, np.zeros((1, len(t))), response_dof=['101Z+'],
         ordinate_dim=['acceleration']))
     _select(window, pump, 'Plate', 'Record')
-    assert not scene.rigid_action.isVisible(), \
+    assert not scene.modes_action.isVisible(), \
         'data riding the geometry is another reading of the scene'
     _select(window, pump, 'Record')
-    assert not scene.rigid_action.isVisible()
+    assert not scene.modes_action.isVisible()
     window.tree.clearSelection()
     pump()
-    assert not scene.rigid_action.isVisible(), 'nothing selected, nothing offered'
+    assert not scene.modes_action.isVisible(), 'nothing selected, nothing offered'
 
 
 def test_the_wish_survives_the_selection(window, pump):
@@ -75,12 +75,12 @@ def test_the_wish_survives_the_selection(window, pump):
     scene = _toggle(window, pump)
     window.add_object('Other', _geometry())
     _select(window, pump, 'Other')
-    assert scene.rigid_action.isChecked(), \
+    assert scene.modes_action.isChecked(), \
         'the reading comes back up on the next geometry, the data pane\'s rule'
     assert window._rigid_preview[0] == 'Other'
     _select(window, pump, 'Plate', 'Other')
-    assert not scene.rigid_action.isVisible()
-    assert not scene.rigid_panel.isVisible()
+    assert not scene.modes_action.isVisible()
+    assert not scene.modes_panel.isVisible()
     assert window._rigid_preview is None
 
 
@@ -90,7 +90,7 @@ def test_the_wish_survives_the_selection(window, pump):
 def test_the_pane_seeds_the_centroid_in_display_units(window, pump):
     geometry = _plate(window, pump)
     scene = _toggle(window, pump)
-    panel = scene.rigid_panel
+    panel = scene.modes_panel
     assert panel.isVisible()
     centroid = window.unit_system.from_si(geometry.node_xyz.mean(axis=0),
                                           'length')
@@ -127,7 +127,7 @@ def test_the_scene_previews_the_six_modes_with_the_point_marked(window, pump):
     assert _marker_up(window), 'stepping modes clears the scene; the marker returns'
     turned = window.animator.deflection.offsets(0.0)
     assert not np.allclose(turned, turned[0]), 'a rotation moves nodes differently'
-    assert scene.rigid_action.isChecked()
+    assert scene.modes_action.isChecked()
 
 
 def test_an_edit_lands_on_the_geometry_and_moves_the_preview(window, pump):
@@ -136,7 +136,7 @@ def test_an_edit_lands_on_the_geometry_and_moves_the_preview(window, pump):
     window.mode_box.setValue(6)                 # rotation about Z
     pump()
     before = window.animator.deflection.offsets(0.0).copy()
-    scene.rigid_panel.point_boxes[0].setValue(20.0)
+    scene.modes_panel.point_boxes[0].setValue(20.0)
     pump()
     stored = geometry.mass_properties
     assert stored is not None
@@ -155,7 +155,7 @@ def test_mass_normalizing_reveals_the_terms_and_refuses_a_bad_tensor(
         window, pump):
     geometry = _plate(window, pump)
     scene = _toggle(window, pump)
-    panel = scene.rigid_panel
+    panel = scene.modes_panel
     assert panel.scale_check.text() == 'Mass properties', \
         'named for what it reveals, not for the result'
     panel.scale_check.setChecked(True)
@@ -185,7 +185,7 @@ def test_mass_normalizing_reveals_the_terms_and_refuses_a_bad_tensor(
 def test_undeclared_units_cannot_mass_normalize(window, pump):
     _plate(window, pump, unit=None)
     scene = _toggle(window, pump)
-    panel = scene.rigid_panel
+    panel = scene.modes_panel
     assert not panel.scale_check.isVisible()
     assert panel.scale_note.isVisible()
     assert panel.point_boxes[0].suffix() == ''
@@ -196,7 +196,7 @@ def test_undeclared_units_cannot_mass_normalize(window, pump):
 def test_a_unit_system_change_restates_the_pane(window, pump):
     geometry = _plate(window, pump)
     scene = _toggle(window, pump)
-    panel = scene.rigid_panel
+    panel = scene.modes_panel
     window.unit_combo.setCurrentText('m-kg-N-s')
     pump()
     assert panel.point_boxes[0].suffix().strip() == 'm'
@@ -210,9 +210,9 @@ def test_a_unit_system_change_restates_the_pane(window, pump):
 def test_generate_makes_the_set_in_the_group(window, pump):
     geometry = _plate(window, pump)
     scene = _toggle(window, pump)
-    scene.rigid_panel.point_boxes[2].setValue(3.0)
+    scene.modes_panel.point_boxes[2].setValue(3.0)
     pump()
-    scene.rigid_panel.apply_button.click()
+    scene.modes_panel.apply_button.click()
     pump()
     assert 'Plate Rigid Body Modes' in window.project
     assert window.project.object_groups == [
@@ -229,13 +229,13 @@ def test_generate_makes_the_set_in_the_group(window, pump):
     # the result is shown, as every act shows what it made; the
     # reading stands down with it and comes back on the geometry
     assert window.current_object() is made
-    assert not scene.rigid_action.isVisible()
+    assert not scene.modes_action.isVisible()
     _select(window, pump, 'Plate')
-    assert scene.rigid_action.isChecked()
+    assert scene.modes_action.isChecked()
     assert geometry.mass_properties.point[2] == pytest.approx(
         float(window.unit_system.to_si(3.0, 'length')))
     # and the badge: moving the point after the act marks the set
-    scene.rigid_panel.point_boxes[2].setValue(4.0)
+    scene.modes_panel.point_boxes[2].setValue(4.0)
     pump()
     assert 'Plate Rigid Body Modes' in window.project.stale()
 
@@ -264,7 +264,7 @@ def test_the_properties_object_is_what_the_pane_hands_over(window, pump):
     _plate(window, pump)
     scene = _toggle(window, pump)
     handed = []
-    scene.rigid_panel.changed.connect(handed.append)
-    scene.rigid_panel.point_boxes[1].setValue(-2.0)
+    scene.modes_panel.changed.connect(handed.append)
+    scene.modes_panel.point_boxes[1].setValue(-2.0)
     pump()
     assert len(handed) == 1 and isinstance(handed[0], MassProperties)

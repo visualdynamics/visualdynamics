@@ -15,6 +15,20 @@ calendar.
 from the run, the control check boxes, and the units the channels were
 imported with](images/channel-table.png)
 
+## Starting one by hand
+
+A table usually arrives with a run or from a spreadsheet, but it can
+also be typed in. *New Channel Table*, on the project row's bar, adds
+an empty one. *Add Channel*, on the table's own bar, adds a blank row
+numbered after the highest channel in the table, and puts the cursor
+on it to fill in. From a script, `project.new_channel_table()` and
+`project.add_channels(name, count)` do the same.
+
+Selected together with a geometry, the table is drawn on it as arrows,
+one per channel, picked by role from a drop-down on the 3-D view's bar
+([the project tree](project-tree.md#a-channel-table-on-a-geometry));
+`geometry.plot_channels(table, role)` draws the same from a script.
+
 ## The columns
 
 | column | holds |
@@ -149,6 +163,10 @@ cell with "number stored as text", and a blank node stays blank instead
 of becoming a zero.
 
 ```python
+name = project.new_channel_table()       # an empty table
+project.add_channels(name, 4)            # channels 1 to 4, blank
+project[name].set_cell('node', 0, '101') # what typing in a cell does
+
 project.channel_table.dof_strings()      # ['101Z+', '107Z+', ...]
 project.channel_table.roles()            # ['response', 'reference', ...]
 project.channel_table.controls()         # a boolean per channel

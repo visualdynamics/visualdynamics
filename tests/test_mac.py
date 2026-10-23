@@ -358,12 +358,14 @@ def test_the_table_and_the_mac_have_a_divider_to_drag(window, pump):
     shapes = visualdynamics.import_file(fixture_path('plate', 'shapes.npy'))
     show_shapes(window, pump, shapes)
     assert window.tables_row.orientation() == Qt.Orientation.Horizontal
-    assert window.tables_row.count() == 2
-    assert window.tables_row.handle(1) is not None, 'something to drag'
+    # the mode table, the shape values (2026-10-22, off until asked
+    # for) and the MAC
+    assert window.tables_row.count() == 3
+    assert window.tables_row.handle(2) is not None, 'something to drag'
 
-    window.tables_row.setSizes([700, 300])
+    window.tables_row.setSizes([700, 0, 300])
     pump()
-    table_width, mac_width = window.tables_row.sizes()
+    table_width, _values, mac_width = window.tables_row.sizes()
     assert table_width > mac_width, (table_width, mac_width)
 
 

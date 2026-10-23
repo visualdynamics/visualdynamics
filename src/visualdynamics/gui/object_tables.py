@@ -68,6 +68,42 @@ def _set_description(shapes, row, text):
     shapes.description[row] = text.strip()
 
 
+class _ShapeValuesModel(TableModel):
+    """A shape set's values with each row headed by its DOF and each
+    mode's column header telling its frequency on hover."""
+
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+        if orientation == Qt.Orientation.Vertical:
+            if role == Qt.ItemDataRole.DisplayRole:
+                return str(self.obj.coordinate[section])
+            return None
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return f'{float(self.obj.frequency[section]):.4f} Hz'
+        return super().headerData(section, orientation, role)
+
+
+def shape_values_model(shapes: ShapeSet,
+                       parent: QObject | None = None) -> TableModel:
+    """A mode set's shape values as a table: a row per DOF, headed by
+    the DOF, and a column per mode (M1, M2, ...), read-only. A complex
+    mode's value shows its real and imaginary parts. The headings and
+    the text are `core.tables`', which a script's `Project.table(...,
+    values=True)` reads too."""
+    # Brandon, 2026-10-22: the numbers themselves, beside the mode list
+    # and the MAC, rows the DOFs and columns the modes as they are
+    # usually written.
+    from ..core.tables import mode_heading, shape_value_text
+
+    columns = [Column(mode_heading(k),
+                      lambda s, r, k=k: s.shape_matrix[k, r],
+                      format=shape_value_text)
+               for k in range(shapes.num_shapes)]
+    return _ShapeValuesModel(shapes, columns,
+                             lambda s: len(s.coordinate), parent)
+
+
+
 def matched_modes_model(matched: MatchedModes, objects: Mapping[str, Any],
                         parent: QObject | None = None) -> TableModel:
     """A MatchedModes object as a table, in the mode table's format.

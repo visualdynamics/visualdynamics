@@ -350,7 +350,9 @@ def test_the_verb_links_journals_and_refreshes(tmp_path):
         'Modes', SpecificationDraft.at_modal_coordinates(project['Modes']))
     assert project[starter].num_records == 6, 'autospectra alone'
     project.remove(starter)
-    assert 'author_specification' in dict(project.verbs('Modes'))
+    # off the bar for a shape set (2026-10-22); the verb above still
+    # wrote one from a script
+    assert 'author_specification' not in dict(project.verbs('Modes'))
     assert 'author_specification' in dict(project.verbs(name))
     assert 'author_specification' not in dict(project.verbs('Plate'))
 

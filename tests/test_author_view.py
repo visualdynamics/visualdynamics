@@ -1,9 +1,10 @@
-"""The specification sheet in the window: one reading, three doors.
+"""The specification sheet in the window: one reading, two doors.
 
-On a shape set the toggle on the table bar makes a specification at
-the modal coordinates and opens the sheet on it; on a channel table,
-the same at the control channels; on a specification, Edit on the
-plot bar opens the sheet on the object. There is no button: every
+On a channel table the toggle on the table bar makes a specification
+at its control channels and opens the sheet on it; on a specification,
+Edit on the plot bar opens the sheet on the object. A shape set's door,
+at its modal coordinates, came off the bar (Brandon, 2026-10-22); a
+script still writes one through `author_specification`. There is no button: every
 edit lands on the specification as it is made (Brandon, 2026-09-06).
 The sheet sits beside the plot, which previews the autospectra.
 """
@@ -20,18 +21,25 @@ import visualdynamics
 from visualdynamics.core.author import SpecificationDraft
 from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
 
+#: the control channels the sheet opens at: two tri-axial points
+CONTROLS = ['101X+', '101Y+', '101Z+', '102X+', '102Y+', '102Z+']
+
 
 def _populate(window, pump):
     rng = np.random.default_rng(1)
     geometry = visualdynamics.Geometry(np.arange(101, 106),
                                        rng.uniform(-1.0, 1.0, (5, 3)),
                                        length_unit='m')
-    rigid = rigid_body_shapes(geometry, MassProperties((0, 0, 0)))
+    table = visualdynamics.ChannelTable({
+        'channel': list(range(1, 7)),
+        'node': [dof[:3] for dof in CONTROLS],
+        'direction': [dof[3:] for dof in CONTROLS],
+        'unit': ['g'] * 6, 'control': ['True'] * 6})
     window.add_object('Plate', geometry)
-    window.add_object('Modes', rigid)
-    window.project.link('Plate', 'Modes')
+    window.add_object('Channels', table)
+    window.project.link('Plate', 'Channels')
     pump()
-    return rigid
+    return table
 
 
 def _rows(view):
@@ -60,8 +68,8 @@ def _type(view, row, column, text):
 
 
 def _open(window, pump, on_plot=False):
-    """Open the sheet. On a shape set or a channel table the object is
-    made and selected first, one event-loop tick later."""
+    """Open the sheet. On a channel table the object is made and
+    selected first, one event-loop tick later."""
     action = window.author_data_action if on_plot else window.author_action
     action.setChecked(True)
     window._author_toggled(True)
@@ -70,73 +78,116 @@ def _open(window, pump, on_plot=False):
     return window.data_pane.author_panel
 
 
-# ---- the shape set door -----------------------------------------------------
+# ---- the channel table door's opening -----------------------------------------
 
 
-def test_the_reading_is_offered_to_a_lone_shape_set(window, pump):
+def _rows_named(window, name):
+    """Every tree row naming `name`: one per object."""
+    from PySide6.QtWidgets import QTreeWidgetItemIterator
+
+    found, rows = 0, QTreeWidgetItemIterator(window.tree)
+    while rows.value():
+        found += rows.value().text(0) == name
+        rows += 1
+    return found
+
+
+def test_the_reading_is_offered_to_a_lone_channel_table(window, pump):
+    """Brandon, 2026-10-22: written from a channel table's control
+    channels; a shape set no longer offers it, and the button wears the
+    specification's glyph, not the pencil."""
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     assert window.author_action.isVisible()
     assert not window.author_action.isChecked()
     assert not window.data_pane.isVisibleTo(window), 'no plot until asked'
+    said = window.author_action.toolTip()
+    assert 'control channels' in said and 'modal' not in said
+    from PySide6.QtCore import QSize
+
+    from visualdynamics.gui.icons import control_icon
+
+    def pixels(icon):
+        return bytes(icon.pixmap(QSize(32, 32)).toImage().constBits())
+
+    assert pixels(window.author_action.icon()) == \
+        pixels(control_icon('new_specification')), 'the glyph, not the pencil'
     _select(window, pump, 'Plate')
     assert not window.author_action.isVisible()
-    _select(window, pump, 'Modes', 'Plate')
+    _select(window, pump, 'Channels', 'Plate')
     assert window.author_action.isVisible(), 'the geometry may come along'
-    window.add_object('Other', window.project['Modes'])
-    _select(window, pump, 'Modes', 'Other')
-    assert not window.author_action.isVisible(), \
-        'two sets are a comparison, not a sheet'
+    rigid = rigid_body_shapes(window.project['Plate'], MassProperties((0, 0, 0)))
+    window.add_object('Modes', rigid)
+    _select(window, pump, 'Modes')
+    assert not window.author_action.isVisible(), 'not on a shape set'
+    assert 'author_specification' not in dict(window.project.verbs('Modes'))
 
 
-def test_the_shapes_picked_in_the_tree_are_the_channels_written(window, pump):
-    """Brandon, 2026-09-06: a virtual point's target is its three
-    translations; the rotations are left out, not written as zero — a
-    shape with no channel contributes nothing when the specification is
-    expanded through the set, and a sheet holds positive levels."""
+def test_the_button_wears_the_specifications_glyph(qt_app):
+    from PySide6.QtCore import QSize
+
+    from visualdynamics.gui.icons import control_icon
+
+    def image(name):
+        return bytes(control_icon(name).pixmap(QSize(64, 64)).toImage()
+                     .constBits())
+
+    assert image('new_specification') != image('edit'), 'not the pencil'
+    drawn = control_icon('new_specification').pixmap(QSize(64, 64)).toImage()
+    green = drawn.pixelColor(42, 42)          # the plus, as New Geometry's
+    assert green.green() > 120 and green.red() < 100
+
+
+def test_opening_on_a_table_makes_one_object_in_its_group(window, pump):
+    """It made the object, then showed it a tick later; every render
+    before that tick showed it again, and the tree held five rows for
+    one object, one inside its group and the rest outside, which named
+    nothing once it was deleted (Brandon, 2026-10-22)."""
     _populate(window, pump)
-    window.tree.setCurrentItem(window._item_for_object('Modes'))
+    _select(window, pump, 'Channels')
+    window.author_action.setChecked(True)
+    window._author_toggled(True)
+    window.render_current()
+    window.render_current()
+    pump()
+    pump()
+    assert _rows_named(window, 'Channels Specification') == 1
+    assert 'Channels Specification (2)' not in window.project
+    made = window.project['Channels Specification']
+    assert 'Channels Specification' in window.project.object_groups[0]['members']
+    # the table selected again carries on at the object it made, not a
+    # second one
+    _select(window, pump, 'Channels')
+    pump()
+    assert window._author_door[:2] == ('spec', 'Channels Specification')
+    assert _rows_named(window, 'Channels Specification') == 1
     window.tree.clearSelection()
-    grid = window.record_grids['Modes']
-    for row in (0, 1, 2):
-        grid.item(row, 0).setSelected(True)
+    item = window._item_for_object('Channels Specification')
+    window.tree.setCurrentItem(item)
+    item.setSelected(True)
     pump()
-    assert window.author_action.isVisible(), 'a pick of shapes is a door'
-    panel = _open(window, pump)
-    assert window._author_door[1] == 'Modes Specification', \
-        'the sheet carries on at the object it made'
-    made = window.project['Modes Specification']
-    assert made.num_records == 3
-    assert list(made.response_dof) == ['M1', 'M2', 'M3']
-    assert 'specification sheet on 3 channels (M1, M2, M3)' in \
-        window.statusBar().currentMessage()
-    assert _columns(panel.points) == 4 and _rows(panel.pairs) == 3
-    assert '3 pairs unstated' in panel.problem.text()
-    # the set selected again carries on at the object it made, whole or
-    # picked — the same object, not a second one
-    _select(window, pump, 'Modes')
+    window.delete_selected()
     pump()
-    assert window._author_door[:2] == ('spec', 'Modes Specification')
-    assert 'Modes Specification (2)' not in window.project
+    assert window.project.names.count('Channels Specification') == 0
+    assert _rows_named(window, 'Channels Specification') == 0
+    assert made is not None
 
 
-def test_opening_on_a_set_makes_the_object_and_edits_it(window, pump):
+def test_opening_on_a_table_makes_the_object_and_edits_it(window, pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
-    assert 'Modes Specification' in window.project, 'made on opening'
-    made = window.project['Modes Specification']
+    assert 'Channels Specification' in window.project, 'made on opening'
+    made = window.project['Channels Specification']
     assert made.num_records == 6, 'autospectra alone; nothing assumed'
-    assert 'Modes Specification' in window.project.object_groups[0]['members']
     assert window.current_object() is made, 'and the sheet carries on there'
     assert panel.isVisible()
     assert window.author_data_action.isChecked(), 'Edit, on the plot bar'
     assert window.data_pane.isVisibleTo(window), 'the preview needs the plot'
-    assert panel.origin.text().startswith('opened from Modes Specification')
+    assert panel.origin.text().startswith('opened from Channels Specification')
     assert _rows(panel.points) == 2 and _columns(panel.points) == 7
-    assert _header(panel.points, 1) == 'M1\ng²/Hz'
-    assert _header(panel.points, 4) == 'M4\n(rad/s²)²/Hz', \
-        'a rotation per radian, in the display system'
+    assert _header(panel.points, 1) == '101X+\ng²/Hz'
+    assert _header(panel.points, 4) == '102X+\ng²/Hz'
     assert _rows(panel.pairs) == 15
     assert _text(panel.pairs, 0, 1) == '', 'unstated, not zero'
     assert '15 pairs unstated' in panel.problem.text()
@@ -146,7 +197,7 @@ def test_opening_on_a_set_makes_the_object_and_edits_it(window, pump):
 
 def test_stating_every_pair_lands_on_the_object_at_once(window, pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     panel.all_coherence.setValue(1.0)
     panel.all_phase.setValue(0.0)
@@ -157,10 +208,10 @@ def test_stating_every_pair_lands_on_the_object_at_once(window, pump):
     draft = window._drafts[key]
     assert draft.unset_pairs() == []
     assert draft.pairs[(0, 5)] == (1.0, 0.0)
-    made = window.project['Modes Specification']
+    made = window.project['Channels Specification']
     assert made.num_records == 36, 'every cross term, the moment it was stated'
     assert window.project.journal[-1].startswith(
-        "project.author_specification('Modes Specification', SpecificationDraft(")
+        "project.author_specification('Channels Specification', SpecificationDraft(")
     assert window.project.journal[-1].endswith(', replace=True)')
     lines = len(window.project.journal)
     panel.scale_box.setValue(3.0)
@@ -173,7 +224,7 @@ def test_stating_every_pair_lands_on_the_object_at_once(window, pump):
 def test_a_typed_level_lands_in_si_and_an_untouched_one_stays_exact(window,
                                                                     pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     key = window._author_door[1]
     before = window._drafts[key].levels[1][0]
@@ -184,19 +235,19 @@ def test_a_typed_level_lands_in_si_and_an_untouched_one_stays_exact(window,
         float(window.unit_system.to_si(0.04, 'acceleration**2/frequency')))
     assert draft.levels[1][0] == before, \
         'a cell nobody touched reads back exactly, not through six digits'
-    made = window.project['Modes Specification']
+    made = window.project['Channels Specification']
     assert np.real(made.ordinate[0][0]) == pytest.approx(draft.levels[0][0]), \
         'the typed level is in the object already'
     _select(window, pump, 'Plate')
     assert not panel.isVisible()
-    _select(window, pump, 'Modes Specification')
+    _select(window, pump, 'Channels Specification')
     assert window.author_data_action.isChecked() and panel.isVisible()
     assert _text(panel.points, 0, 1) == '0.04'
 
 
 def test_breakpoints_are_added_removed_and_scaled(window, pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     panel.points.setCurrentIndex(panel.points.model().index(0, 0))
     panel.add_button.click()
@@ -205,7 +256,7 @@ def test_breakpoints_are_added_removed_and_scaled(window, pump):
     key = window._author_door[1]
     assert window._drafts[key].frequencies == pytest.approx(
         [20.0, 200.0, 2000.0]), 'halfway in log frequency'
-    assert list(window.project['Modes Specification'].abscissa) == \
+    assert list(window.project['Channels Specification'].abscissa) == \
         pytest.approx([20.0, 200.0, 2000.0]), 'and so is the object'
     panel.points.setCurrentIndex(panel.points.model().index(1, 0))
     panel.remove_button.click()
@@ -219,33 +270,33 @@ def test_breakpoints_are_added_removed_and_scaled(window, pump):
 
 def test_a_bad_cell_is_named_and_lands_nowhere(window, pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     panel.all_coherence.setValue(0.0)
     panel.all_button.click()
     pump()
     assert panel.problem.text() == ''
-    before = window.project['Modes Specification']
+    before = window.project['Channels Specification']
     assert not _type(panel.points, 1, 2, 'lots')
     pump()
     assert 'lots' in panel.problem.text()
-    assert window.project['Modes Specification'] is before, \
+    assert window.project['Channels Specification'] is before, \
         'a cell that is not a number changes nothing'
     assert not _type(panel.pairs, 3, 1, '1.5')
     pump()
     assert 'coherence' in panel.problem.text()
-    assert window.project['Modes Specification'] is before
+    assert window.project['Channels Specification'] is before
 
 
-def test_a_set_with_no_mass_unit_says_what_to_declare(window, pump):
-    window.import_paths([fixture_path('plate', 'shapes.npy')])
-    pump()
-    name = next(n for n, obj in window.objects.items()
-                if isinstance(obj, visualdynamics.ShapeSet))
-    _select(window, pump, name)
+def test_control_channels_with_no_type_say_what_to_declare(window, pump):
+    window.add_object('Bare', visualdynamics.ChannelTable({
+        'channel': [1], 'node': [101], 'direction': ['X+'], 'unit': [''],
+        'control': ['True']}))
+    _select(window, pump, 'Bare')
     _open(window, pump)
-    assert 'no mass unit' in window.statusBar().currentMessage()
+    assert 'declare their types' in window.statusBar().currentMessage()
     assert not window.data_pane.author_panel.isVisible()
+    assert 'Bare Specification' not in window.project
 
 
 # ---- the specification door -------------------------------------------------
@@ -398,7 +449,7 @@ def test_the_sheet_can_be_dragged_wider(window, pump):
     from visualdynamics.gui.author_panel import PANEL_WIDTH
 
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     split = window.data_pane.author_split
     assert split.indexOf(panel) == split.count() - 1, 'the sheet is last'
@@ -473,7 +524,7 @@ def test_a_new_sheet_takes_its_spacing_from_a_time_history(window, pump):
 
 def test_without_a_history_the_sheet_asks_for_the_spacing(window, pump):
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     assert panel.spacing_box.value() == 0.0
     assert panel.spacing_box.text() == 'spacing?'
@@ -500,7 +551,7 @@ def test_the_sheets_grids_are_the_applications_tables(window, pump):
     from visualdynamics.gui.tables import CopyPasteTableView
 
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     assert isinstance(panel.points, CopyPasteTableView)
     assert isinstance(panel.pairs, CopyPasteTableView)
@@ -535,7 +586,7 @@ def test_the_sheets_grids_are_the_applications_tables(window, pump):
     assert (applied, rejected) == (1, 0)
     draft = window._drafts[key]
     assert draft.levels[0][1] == pytest.approx(draft.levels[0][0])
-    assert np.real(window.project['Modes Specification'].ordinate[0][1]) == \
+    assert np.real(window.project['Channels Specification'].ordinate[0][1]) == \
         pytest.approx(draft.levels[0][0]), 'and it landed on the object'
     # Delete on a stated pair leaves it unstated
     assert _type(panel.pairs, 0, 1, '1')
@@ -552,7 +603,7 @@ def test_scale_selected_scales_what_is_selected(window, pump):
     from PySide6.QtCore import QItemSelectionModel
 
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     key = window._author_door[1]
     before = [list(row) for row in window._drafts[key].levels]
@@ -561,7 +612,7 @@ def test_scale_selected_scales_what_is_selected(window, pump):
     pump()
     assert 'select the levels' in panel.problem.text()
     assert window._drafts[key].levels == before, 'nothing selected, nothing scaled'
-    panel.points.selectColumn(2)                   # channel M2
+    panel.points.selectColumn(2)                   # channel 101Y+
     panel.scale_button.click()
     pump()
     after = window._drafts[key].levels
@@ -577,7 +628,7 @@ def test_scale_selected_scales_what_is_selected(window, pump):
     assert window._drafts[key].levels[0][1] == pytest.approx(
         before[0][1] * 10 ** -0.3)
     assert window._drafts[key].levels[0][0] == before[0][0]
-    made = window.project['Modes Specification']
+    made = window.project['Channels Specification']
     assert np.real(made.ordinate[0][1]) == pytest.approx(before[0][1] * 10 ** -0.3)
 
 
@@ -585,7 +636,7 @@ def test_a_frequency_typed_out_of_order_is_sorted_into_place(window, pump):
     """Brandon, 2026-09-06: a breakpoint added and given a frequency
     between two others stalled the sheet — the rows were never re-sorted."""
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     panel = _open(window, pump)
     key = window._author_door[1]
     panel.points.setCurrentIndex(panel.points.model().index(1, 0))
@@ -597,7 +648,7 @@ def test_a_frequency_typed_out_of_order_is_sorted_into_place(window, pump):
     assert window._drafts[key].frequencies == [20.0, 100.0, 2000.0], \
         're-sorted, with its levels along'
     assert [_text(panel.points, r, 0) for r in range(3)] == ['20', '100', '2000']
-    assert list(window.project['Modes Specification'].abscissa) == \
+    assert list(window.project['Channels Specification'].abscissa) == \
         pytest.approx([20.0, 100.0, 2000.0])
     assert panel.problem.text().startswith('15 pairs unstated')
     assert not _type(panel.points, 1, 0, '2000')
@@ -618,7 +669,7 @@ def test_the_bands_are_dragged_on_the_plot_for_every_selected_channel(window,
     else; a drag lands when it stops, on every selected channel in that
     frequency range."""
     _populate(window, pump)
-    _select(window, pump, 'Modes')
+    _select(window, pump, 'Channels')
     window.data_pane.waterfall_action.setChecked(False)   # the flat plot edits
     panel = _open(window, pump)
     assert not hasattr(panel, 'band_boxes'), 'no band boxes on the sheet'
@@ -629,13 +680,13 @@ def test_the_bands_are_dragged_on_the_plot_for_every_selected_channel(window,
     assert all(h.segments == [0] for h in handles), 'one segment, one run'
     upper = next(h for h in handles if (h.kind, h.side) == ('abort', 'upper'))
     key = window._author_door[1]
-    before = window.project['Modes Specification']
+    before = window.project['Channels Specification']
     upper.release(0.3)               # three tenths of a decade: 3 dB
     pump()
     draft = window._drafts[key]
     assert all(entry['abort'] == [(-9.0, 9.0)] for entry in draft.bands), \
         'every channel of the sheet, symmetric'
-    made = window.project['Modes Specification']
+    made = window.project['Channels Specification']
     assert made is not before
     autos = [i for i in range(made.num_records)
              if made.response_dof[i] == made.reference_dof[i]]
@@ -653,7 +704,7 @@ def test_the_bands_are_dragged_on_the_plot_for_every_selected_channel(window,
     assert lower.label.textItem.toPlainText() == '−9 dB'
     upper.release(0.0)
     pump()
-    assert window.project['Modes Specification'] is made, 'no drag, no edit'
+    assert window.project['Channels Specification'] is made, 'no drag, no edit'
     # the drag snaps to quarter decibels (a whole one was too coarse,
     # Brandon, 2026-09-18): seven tenths of a decibel (seven hundredths
     # of a decade) lands on nine and three quarters
@@ -664,7 +715,7 @@ def test_the_bands_are_dragged_on_the_plot_for_every_selected_channel(window,
     assert upper.snapped(0.01) == 9.0, 'and a tenth of a decibel is none at all'
     upper.release(0.01)
     pump()
-    assert window.project['Modes Specification'] is not made
+    assert window.project['Channels Specification'] is not made
     assert all(entry['abort'] == [(-9.75, 9.75)]
                for entry in window._drafts[key].bands), 'nothing moved'
 

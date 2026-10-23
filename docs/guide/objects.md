@@ -55,7 +55,7 @@ when it is read.
 A geometry comes from universal files, Exodus files, Nastran bulk data
 and Femap neutral files, STEP and IGES, 3MF and STL meshes, sdynpy
 geometry files, MATLAB files in the project layout, ESCDF files, and
-`.vdyn` files. Its methods: `plot` and `plot_dofs`; `add_node`,
+`.vdyn` files. Its methods: `plot`, `plot_dofs` and `plot_channels`; `add_node`,
 `add_nodes`, `add_element`, `add_elements`, `add_beams`, `add_group`
 and `add_coordinate_system`; `delete_nodes`, `delete_elements`,
 `delete_groups` and `delete_coordinate_systems`; `renumber_node`,
@@ -71,9 +71,9 @@ rigid-body modes pivot on and, when the set is to be mass-normalized,
 the mass and inertia tensor about that point
 ([`core.rigid.MassProperties`](../api/visualdynamics.core.rigid.md)).
 They are stored on the geometry the same way averaging is stored on a
-time history. They are set in the rigid-body view (the *Rigid body
-modes* toggle on the 3-D view's bar, offered when one geometry is
-selected) and saved with the geometry, and `suggest_mass_properties`
+time history. They are set in the Modes pane (the *Modes* toggle on
+the 3-D view's bar, offered when one geometry is selected, with
+*Kinematic* chosen in the pane) and saved with the geometry, and `suggest_mass_properties`
 starts the reference point at the centroid with no mass. *Generate
 Rigid Body Mode Shapes* (`project.generate_rigid_body_modes`) makes
 the six-mode shape set in the geometry's group, and the modes are
@@ -236,9 +236,13 @@ The properties are stored in `geometry.group_properties` as
 [`fem.GroupProperties`](../api/visualdynamics.core.fem.md) and are
 saved in the `.vdyn` file. *Solve Modes* (`project.solve_modes`) then
 builds the model from the element groups (`fem.Model.from_geometry`)
-and adds its normal modes to the geometry's group. It asks for the
-highest frequency wanted and the damping to give every mode (a script
-can ask for a number of modes instead). The model is free-free unless
+and adds its normal modes to the geometry's group. It is in the Modes
+pane: turn on *Modes* on the 3-D view's bar, choose *Finite element*
+(offered once the element groups have properties), and set the highest
+frequency wanted and the damping to give every mode (a script can ask
+for a number of modes instead). The pane counts the nodes, elements and
+DOFs to be solved, and names any element group still without
+properties. The model is free-free unless
 ground groups hold it, and a free-free solution has its six rigid-body
 modes at 0 Hz first. An element group with no properties, or
 properties of the wrong kind for its elements, is refused by name.
@@ -622,18 +626,22 @@ on the time history is not corrected on the table, or the reverse.
 ### Writing and editing a specification
 
 A specification can also be written in the app, on a sheet that opens
-three ways. *Specification* on the table bar of a single shape set
-starts one at its modal coordinates, using every shape or only the
-shapes picked in the tree; a virtual point's target can then be its
-three translations, and the rotations, left out, contribute nothing
-when it is expanded. The same button on a single channel table starts
-one at the table's control channels. *Edit* on the plot bar of a
+two ways. *Specification* on the table bar of a single channel table
+starts one at the table's control channels: the channels with Control
+checked, or every motion channel when none is. *Edit* on the plot bar of a
 specification opens the specification itself, with all of its channels
 or only the ones whose records are picked in the tree. Several
 specifications opened at once share one sheet, with a column per
 channel under its specification's name and cross terms within each.
-Opened on a shape set or a channel table, the sheet first makes the
-specification beside it and edits that.
+Opened on a channel table, the sheet first makes the specification
+beside it, in the table's object group, and edits that.
+
+A specification at a shape set's modal coordinates, such as a virtual
+point's target, is written from a script:
+`core.author.SpecificationDraft.at_modal_coordinates(shapes, modes=...)` starts the
+sheet, using every shape or only the ones named (a virtual point's
+three translations, with the rotations left out), and
+`project.author_specification(name, draft)` makes it.
 
 The sheet sits beside the plot. It holds the breakpoints and a level
 per channel, each pair's coherence and phase (a pair left unstated is
@@ -808,7 +816,8 @@ and linked to its source in one call:
 | --- | --- |
 | a time history | `filter_data`, `truncate_data`, `detect_shocks`, `compute_spectra`, `compute_psds`, `compute_cpsds`, `compute_srs`; `compute_frfs` and `compute_multiple_coherence` when it has both reference and response channels; `extract_sine` when the project holds a sine sweep specification; `integrate` and `differentiate` when the quantity allows; `transform` through a shape set whose DOFs it is measured on, and `expand` back when it holds that set's modal responses |
 | a geometry | `generate_rigid_body_modes`; `set_view`; `add_plane`, a meshed rectangle of plates joined to what is there; `add_block`, a meshed box of solid bricks, likewise; `add_solid_block`, `add_solid_cylinder`, `add_solid_section` and `add_solid_hole`, then `combine_solids`, `pattern_solids` and `mesh_solids`; `tie_elements`, a patch of elements tied rigidly to an element group or a second patch; `merge_coincident_nodes` and `align_meshes` once it has elements, for the whole geometry or the element groups named by `groups=`; `merge_groups`, element groups of one element type and the same properties made one; `solve_modes` once its element groups carry their properties (a material and a thickness or a section per group in the Element Groups table, a material alone for a group of solids), which builds the finite element model and solves it |
-| the project itself | `new_geometry`, an empty geometry to build in; `generate_report` |
+| the project itself | `new_geometry`, an empty geometry to build in; `new_channel_table`, an empty channel table to fill in; `generate_report` |
+| a channel table | `add_channels`, blank channels numbered on from its highest |
 | a PSD, CPSD or specification | `compute_octave`, with a specification's warning and abort limits banded along with it; `read_as_specification` for a PSD that is a requirement, and `read_as_psd` for a specification without limits |
 | a shape set, specification or channel table | `author_specification` |
 | an FRF | `fit_modes` |

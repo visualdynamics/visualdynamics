@@ -83,6 +83,7 @@ picks it, as in the examples above.
 coherence.plot_map()                    # frequency across, channel down
 geometry.plot()                         # the 3D scene, with its bar
 geometry.plot_dofs(frf, 'force')        # labeled DOF arrows
+geometry.plot_channels(table, 'reference')  # a channel table's, by role
 ```
 
 The readings on a time history's bar have their own calls in

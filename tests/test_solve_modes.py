@@ -187,51 +187,82 @@ def test_property_edits_journal_the_whole_set_and_replay(window, pump,
     _replay(window)
 
 
-def test_the_act_is_on_the_bar_for_a_geometry_with_properties(window, pump):
+def _modes(window, pump):
+    """The Modes reading on the selected geometry, its pane up."""
+    scene = window.scene
+    scene.modes_action.setChecked(True)
+    scene._choose_modes(True)
+    pump()
+    return scene.modes_panel
+
+
+def test_solve_modes_is_the_modes_panes_other_kind(window, pump):
+    """One reading for both kinds of modes (Brandon, 2026-10-22): Solve
+    Modes is off the bar, and the Modes pane offers Finite element only
+    for a geometry whose element groups have properties."""
     window.add_object('Bare', _plate_geometry(properties=False))
     window.add_object('Skin', _plate_geometry())
-    select_objects(window, pump, 'Bare')
-    assert 'Solve Modes' not in _bar(window.data_pane) + _bar(window.scene)
     select_objects(window, pump, 'Skin')
-    assert 'Solve Modes' in _bar(window.data_pane) + _bar(window.scene)
+    assert 'Solve Modes' not in _bar(window.data_pane) + _bar(window.scene)
+    assert window.scene.modes_action.isVisible()
+    panel = _modes(window, pump)
+    assert panel.kind_box.isVisibleTo(panel)
+    # named for how each is made: a solve has rigid-body modes too
+    assert [panel.kind_box.itemText(i) for i in range(panel.kind_box.count())] \
+        == ['Kinematic', 'Finite element']
+    assert panel.kind == 'fem', 'a model opens on its solve'
+    assert panel.fem_section.isVisibleTo(panel)
+    assert not panel.rigid_section.isVisibleTo(panel)
+    assert window._rigid_preview is None, 'nothing animates before a solve'
+    assert panel.fem_derived['dofs'].text() == \
+        f"6 × {window.objects['Skin'].num_nodes:,}"
+    select_objects(window, pump, 'Bare')
+    assert not panel.kind_box.isVisibleTo(panel), 'one kind, no choice'
+    assert panel.kind == 'rigid' and panel.rigid_section.isVisibleTo(panel)
+    assert window._rigid_preview[0] == 'Bare'
+    select_objects(window, pump, 'Skin')
+    panel.kind_box.setCurrentIndex(panel.kind_box.findData('rigid'))
+    pump()
+    assert panel.rigid_section.isVisibleTo(panel)
+    assert window._rigid_preview[0] == 'Skin', 'the choice redraws the view'
 
 
-def test_the_act_asks_two_numbers_and_shows_the_modes(window, pump,
-                                                     monkeypatch):
-    from visualdynamics.gui import main_window as window_module
-
+def test_the_panes_two_numbers_solve_and_show_the_modes(window, pump):
     window.add_object('Skin', _plate_geometry())
     select_objects(window, pump, 'Skin')
-    asked = []
-    answers = iter([(800.0, True), (1.5, True)])
-
-    def get_double(parent, title, label, *rest):
-        asked.append(label)
-        return next(answers)
-
-    monkeypatch.setattr(window_module.QInputDialog, 'getDouble', get_double)
-    window.solve_modes_act()
+    panel = _modes(window, pump)
+    panel.top_box.setValue(800.0)
+    panel.damping_box.setValue(1.5)
+    panel.solve_button.click()
     pump()
-    assert [a.split(' [')[0] for a in asked] == [
-        'Highest frequency to solve for', 'Damping to give every mode']
     shapes = window.project['Skin Modes']
     assert shapes.frequency.max() <= 800.0
     assert np.allclose(shapes.damping, 0.015), 'percent in, fraction stored'
     assert window.current_object() is shapes
     message = window.statusBar().currentMessage()
     assert message.startswith('Skin Modes: ') and '6 rigid' in message
+    assert ("project.solve_modes('Skin', maximum_frequency=800.0, "
+            'damping=0.015)') in window.project.journal
 
 
-def test_declining_the_dialog_solves_nothing(window, pump, monkeypatch):
-    from visualdynamics.gui import main_window as window_module
+def test_a_group_without_properties_is_named_before_the_solve(window, pump):
+    from visualdynamics.core.fem import GroupProperties
 
-    window.add_object('Skin', _plate_geometry())
+    geometry = _plate_geometry()
+    group = geometry.add_group('loose')
+    geometry.elem_group[:2] = group      # two plates in a group of their own
+    window.add_object('Skin', geometry)
     select_objects(window, pump, 'Skin')
-    monkeypatch.setattr(window_module.QInputDialog, 'getDouble',
-                        lambda *args, **kwargs: (0.0, False))
-    window.solve_modes_act()
+    panel = _modes(window, pump)
+    assert f'Element group {group} has no properties' in panel.fem_problem.text()
+    assert not panel.solve_button.isEnabled()
+    assert panel.fem_derived['groups'].text() == '1 of 2 with properties'
+    geometry.group_properties[group] = next(
+        iter(geometry.group_properties.values()))
+    assert isinstance(geometry.group_properties[group], GroupProperties)
+    window.render_current()
     pump()
-    assert 'Skin Modes' not in window.project
+    assert panel.fem_problem.text() == '' and panel.solve_button.isEnabled()
 
 
 def test_a_saved_geometry_solves_to_the_same_modes(tmp_path):
@@ -717,13 +748,10 @@ def test_sparse_frequencies_are_unchanged_by_the_shared_factor():
 
 
 def test_the_act_moves_the_strip_bar_and_puts_it_away(window, pump, monkeypatch):
-    from visualdynamics.gui import main_window as window_module
 
     window.add_object('Skin', _plate_geometry())
     select_objects(window, pump, 'Skin')
-    answers = iter([(800.0, True), (1.5, True)])
-    monkeypatch.setattr(window_module.QInputDialog, 'getDouble',
-                        lambda *a: next(answers))
+    _modes(window, pump).top_box.setValue(800.0)
     seen = []
     real = window._strip_tick
 

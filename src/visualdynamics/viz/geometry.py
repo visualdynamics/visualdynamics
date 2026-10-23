@@ -506,7 +506,7 @@ def dof_arrow_length(points: ArrayLike, extent: float) -> float:
 
 def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
                    unit_system: UnitSystem | None = None,
-                   incoming: bool = False,
+                   incoming: bool | Sequence[bool] = False,
                    name: str | None = None) -> int:
     """Labeled arrows marking DOFs on the geometry.
 
@@ -516,7 +516,8 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     arrows of one color are built into one mesh, so ten thousand arrows
     are three actors. A response arrow starts at the node and points
     outward, with its label at the tip; with `incoming` (forces) the
-    arrow ends on the node instead, with its label at the base. All
+    arrow ends on the node instead, with its label at the base;
+    `incoming` is one flag for every arrow or one per DOF. All
     arrows have one length (`dof_arrow_length`). Labels are drawn only
     when there are at most `DOF_LABEL_LIMIT` arrows. A DOF at a node the
     geometry does not have, or with a direction that is not a
@@ -534,8 +535,11 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     center = points.mean(axis=0)
     extent = float(np.sqrt(((points - center) ** 2)
                            .sum(axis=1).max())) or 1.0
-    entries = [(points[found[0]], found[1], found[2], dof)
-               for dof, found in zip(dofs, dof_arrow_vectors(geometry, dofs))
+    inward = ([bool(incoming)] * len(dofs) if isinstance(incoming, bool)
+              else [bool(flag) for flag in incoming])
+    entries = [(points[found[0]], found[1], found[2], dof, into)
+               for dof, into, found in zip(dofs, inward,
+                                           dof_arrow_vectors(geometry, dofs))
                if found is not None]
     if not entries:
         return 0
@@ -543,11 +547,11 @@ def add_dof_arrows(plotter: Any, geometry: Geometry, dofs: Sequence[str],
     label_spots = {0: [], 1: [], 2: []}
     starts = {0: [], 1: [], 2: []}
     vectors = {0: [], 1: [], 2: []}
-    for position, vector, axis, dof in entries:
-        start = position - vector * length if incoming else position
+    for position, vector, axis, dof, into in entries:
+        start = position - vector * length if into else position
         starts[axis].append(start)
         vectors[axis].append(vector)
-        spot = (start - vector * length * 0.25 if incoming
+        spot = (start - vector * length * 0.25 if into
                 else position + vector * length * 1.25)
         label_spots[axis].append((spot, dof))
     # One mesh per axis color, every arrow of that color glyphed into
@@ -1047,11 +1051,70 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
     series = ([('', source, None)] if not isinstance(source, (list, tuple))
               else [('', obj, None) for obj in source])
     dofs = series_quantity_dofs(series, quantity)
+    return _dof_plot(geometry, dofs, quantity in EXCITATION_QUANTITIES, us,
+                     f'DOFs — {quantity}', screenshot, theme, show, size_in,
+                     dpi, kwargs)
+
+
+#: what a channel table's arrows can be limited to, in the order the
+#: app's drop-down lists them; 'all' is every channel
+CHANNEL_ROLES = ('all', 'control', 'reference', 'response', 'monitor')
+
+
+def channel_dofs(table: Any, role: str = 'all') -> tuple[list[str], list[bool]]:
+    """The DOFs of a channel table's channels in `role`, each with
+    whether its arrow points in.
+
+    `role` is one of `CHANNEL_ROLES`: 'control' is the channels with
+    Control checked, whatever their role. A channel measuring an excitation
+    (a force or a drive voltage) points in, as a force record's arrows
+    do. Channels are kept even when they cannot be drawn yet (no node,
+    no direction, or a node the geometry lacks), so the count of what
+    was asked for is still known; `add_dof_arrows` skips them.
+    """
+    from ..core.report import EXCITATION_QUANTITIES
+
+    if role not in CHANNEL_ROLES:
+        raise ValueError(f'{role!r} is not a role; use one of {CHANNEL_ROLES}')
+    dofs, types = table.dof_strings(), table.types()
+    # the control channels by their flag, which any role can carry
+    # (Brandon, 2026-10-22)
+    controls = table.controls()
+    rows = [i for i, own in enumerate(table.roles())
+            if role == 'all' or own == role
+            or (role == 'control' and controls[i])]
+    return ([dofs[i] for i in rows],
+            [types[i] in EXCITATION_QUANTITIES for i in rows])
+
+
+def plot_channels(geometry: Geometry, table: Any, role: str = 'all',
+                  unit_system: UnitSystem | None = None,
+                  screenshot: str | None = None, theme: Any = None,
+                  show: bool = True, size_in: tuple[float, float] | None = None,
+                  dpi: float | None = None, **kwargs: Any) -> Any:
+    """The geometry with labeled arrows at a channel table's DOFs: the
+    app's view of a channel table selected with a geometry, from a
+    script.
+
+    `role` limits the arrows to the references, responses or monitors
+    (`channel_dofs`). Shown or rendered to `screenshot` as `plot_dofs`
+    is; other keyword arguments go to `geometry_scene`.
+    """
+    us = unit_system or DEFAULT_SYSTEM
+    dofs, incoming = channel_dofs(table, role)
+    return _dof_plot(geometry, dofs, incoming, us, f'Channels — {role}',
+                     screenshot, theme, show, size_in, dpi, kwargs)
+
+
+def _dof_plot(geometry, dofs, incoming, us, title, screenshot, theme, show,
+              size_in, dpi, kwargs):
+    """`plot_dofs` and `plot_channels` once the DOFs are chosen: the
+    geometry and its arrows, shown or rendered to a file."""
     def draw(plotter: Any, scale: float = 1.0) -> None:
         geometry_scene(geometry, unit_system=us, plotter=plotter,
                        theme=theme, scale=scale, **kwargs)
         add_dof_arrows(plotter, geometry, dofs, unit_system=us,
-                       incoming=quantity in EXCITATION_QUANTITIES)
+                       incoming=incoming)
 
     if screenshot is not None:
         import pyvista as pv
@@ -1069,5 +1132,5 @@ def plot_dofs(geometry: Geometry, source: Any, quantity: str,
 
     return scene_window(draw, theme=theme,
                         axis_unit=axis_unit_text(geometry, us),
-                        title=f'DOFs — {quantity}', show=show,
+                        title=title, show=show,
                         view=geometry.opening_view)

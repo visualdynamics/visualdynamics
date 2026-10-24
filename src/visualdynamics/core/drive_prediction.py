@@ -54,8 +54,11 @@ Every quantity is a Gaussian random signal with a predicted
 autospectrum, so its rms is the root of the area under it
 (`compliance.rms`) and its expected largest peak over a run of
 `duration` seconds is the rms times the Gaussian peak factor
-sqrt(2 ln(nu0 T)), with nu0 its own crossing rate by Rice's formula
-(`time_statistics.rice_rate` and `expected_largest_peak`). A stated
+sqrt(2 ln(2 nu0 T)), with nu0 its own crossing rate by Rice's formula
+(`time_statistics.rice_rate` and `expected_largest_peak`), counted both
+ways: a rating is reached by a peak of either sign, the drive's limit
+and the travel each way alike, so the largest of either sign is the
+one judged. A stated
 `peak_factor` replaces that, for a controller that clips its drive at
 a set multiple of the rms. Each quantity is judged on its peak:
 
@@ -102,12 +105,13 @@ regularized inverse is Tikhonov's, in the form Hansen sets out.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from .progress import Ticker
 from .shaker import ShakerRating
 
 if TYPE_CHECKING:                                    # pragma: no cover
@@ -130,8 +134,8 @@ TIKHONOV = 1e-3
 
 #: how long the run lasts, in seconds, for the expected largest peak:
 #: a minute, a common duration for a random test at full level. The
-#: peak grows slowly with it (about 4.7 standard deviations over a
-#: minute at a thousand crossings a second, 5.5 over an hour)
+#: peak grows slowly with it (about 4.9 standard deviations over a
+#: minute at a thousand crossings a second either way, 5.7 over an hour)
 DURATION = 60.0
 
 #: how far the control channels' predicted autospectrum may sit from
@@ -142,11 +146,12 @@ UNMET_DB = 1.0
 #: the share of a quantity's mean square its dominant band holds
 DOMINANT_SHARE = 0.5
 
-# Made on 2026-10-24 for the drive and response prediction, the open-loop
-# kernel the limit, notch and multi-input report work build on. The
-# matrix assembly below mirrors the shape of the FRF and spectral matrix
-# builders proposed beside the conditioning check; when those land on
-# main, `_plant` and the channel keys here become calls to them.
+# The matrix assembly below (`_labels`, `_plant`, `runs`) mirrors the
+# FRF matrix builder, the channel labels and the flagged runs proposed
+# beside the conditioning check (`matrix_checks.frf_matrix`, `_labels`,
+# `flagged_runs`). They stay here until those land: `_plant` keys a
+# channel by its declared dimension and refuses one that is not, and
+# `runs` gives line indices where `flagged_runs` gives frequencies.
 
 
 # ---- the inverse ------------------------------------------------------------
@@ -456,7 +461,11 @@ def _gaussian(frequency: np.ndarray, density: np.ndarray, duration: float,
         return 0.0, 0.0, 0.0
     if peak_factor is None:
         usable = np.where(np.isfinite(density), density, 0.0)
-        factor = expected_largest_peak(rice_rate(frequency, usable), duration)
+        # both ways: the largest peak of either sign, which is what a
+        # limit or a stroke each way is reached by. Counted one way, the
+        # peak read about 3 percent under what simulated noise reaches
+        factor = expected_largest_peak(2.0 * rice_rate(frequency, usable),
+                                       duration)
     else:
         factor = float(peak_factor)
     return level, level * factor, factor
@@ -774,7 +783,9 @@ def predict_drives(frf: Frf, specification: Psd, *,
                    tables: Mapping[str, str] | None = None,
                    limits: Mapping[str, float] | None = None,
                    duration: float = DURATION,
-                   peak_factor: float | None = None) -> DrivePrediction:
+                   peak_factor: float | None = None,
+                   progress: Callable[[int, int], None] | None = None
+                   ) -> DrivePrediction:
     """The drives that would make the specification at its control
     channels through this FRF, the responses they would make at every
     channel the FRF holds, and what they ask of the amplifiers and the
@@ -831,6 +842,10 @@ def predict_drives(frf: Frf, specification: Psd, *,
     peak_factor : float, optional
         A stated peak over rms for every quantity, in place of the
         expected largest peak.
+    progress : callable, optional
+        Told ``(done, total)`` as the stages finish (the plant read, its
+        inverse, the drives and responses, the demands); what it raises
+        stops the prediction. The app's progress bar uses it.
 
     Returns
     -------
@@ -875,6 +890,8 @@ def predict_drives(frf: Frf, specification: Psd, *,
     regularized_inverse(np.zeros((0, 1, 1)), method=method,
                         tolerance=tolerance, weight=weight)
 
+    ticker = Ticker(progress)
+    ticker.add(4)
     rows, columns, matrix, filled = _plant(frf)
     row_labels = _labels(rows)
     drive_labels = _labels(columns)
@@ -905,16 +922,33 @@ def predict_drives(frf: Frf, specification: Psd, *,
         raise ValueError('the specification and the FRF share no line '
                          'where both are written')
     nan_lines = int((written & (f > 0.0) & ~finite).sum())
+    where = _not_a_number(frf)
     if not judged.any():
         raise ValueError('the FRF is not a number at every line the '
-                         'specification is written over')
+                         f'specification is written over, first at {where}')
     if nan_lines:
         notes.append(f'{nan_lines} line{"s" * (nan_lines != 1)} where the '
-                     'FRF is not a number not predicted')
+                     f'FRF is not a number not predicted, first at {where}')
+    ticker.tick()
+    ticker.busy()
     gains = np.linalg.svd(plant[judged], compute_uv=False)
     if not gains.max() > 0.0:
         raise ValueError('the FRF is zero at every line the specification '
                          'is written over: the drives reach nothing')
+    # a drive that reaches no control channel, or a control channel no
+    # drive reaches, is a dead channel: named, since the inverse sets
+    # its direction aside without a word otherwise
+    reached = np.abs(plant[judged]).max(axis=0)
+    for c in range(len(columns)):
+        if not reached[:, c].any():
+            notes.append(f'the drive {drive_labels[c]} reaches no control '
+                         'channel at any line: it is predicted to do '
+                         'nothing')
+    for k, r in enumerate(control_index):
+        if not reached[k].any():
+            notes.append(f'no drive reaches the control channel '
+                         f'{row_labels[r]} at any line: its target cannot '
+                         'be met')
     with np.errstate(divide='ignore', invalid='ignore'):
         condition = np.full(len(f), np.nan)
         condition[judged] = gains[:, 0] / gains[:, -1]
@@ -928,6 +962,7 @@ def predict_drives(frf: Frf, specification: Psd, *,
     kept = np.zeros(len(f), dtype=int)
     inverse[judged], kept[judged] = regularized_inverse(
         plant[judged], method=method, tolerance=tolerance, weight=weight)
+    ticker.tick()
     drive_csd = np.full((len(f), len(columns), len(columns)), np.nan,
                         dtype=np.complex128)
     drive_csd[judged] = through(inverse[judged], target[judged])
@@ -938,6 +973,7 @@ def predict_drives(frf: Frf, specification: Psd, *,
     asd[:, ~complete] = np.nan
     control = responses[:, control_index][:, :, control_index]
     target = np.where(judged[:, None, None], target, np.nan)
+    ticker.tick()
 
     if len(columns) > len(controls):
         notes.append('more drives than control channels: of the drives '
@@ -965,7 +1001,17 @@ def predict_drives(frf: Frf, specification: Psd, *,
     demands = _demands(prediction, rows, columns, drive_limit, shakers,
                        tables, limits)
     prediction.demands.extend(demands)
+    ticker.tick()
     return prediction
+
+
+def _not_a_number(data: Any) -> str | None:
+    """Where a spectrum first holds a value that is not a number, as the
+    record's label, or None when it holds none."""
+    bad = ~np.isfinite(np.asarray(data.ordinate)).all(axis=1)
+    if not bad.any():
+        return None
+    return str(data.record_label(int(np.flatnonzero(bad)[0])))
 
 
 def _demands(prediction: DrivePrediction, rows: list[tuple[str, str]],

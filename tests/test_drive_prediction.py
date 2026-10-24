@@ -224,15 +224,16 @@ def test_the_drive_rms_and_peak_are_worked_by_hand():
 
 def test_the_expected_peak_follows_the_crossing_rate_and_the_duration():
     """A flat band from 20 to 2000 Hz crosses its mean about
-    sqrt((f2^3 - f1^3) / (3 (f2 - f1))) = 1,156 times a second; over a
-    minute the expected largest peak is sqrt(2 ln(1156 x 60)) = 4.72
-    standard deviations, over an hour 5.55."""
+    sqrt((f2^3 - f1^3) / (3 (f2 - f1))) = 1,156 times a second each
+    way; over a minute the expected largest peak of either sign is
+    sqrt(2 ln(2 x 1156 x 60)) = 4.87 standard deviations, over an hour
+    5.68."""
     rate = math.sqrt((2000.0 ** 3 - 20.0 ** 3) / (3 * 1980.0))
     for duration in (DURATION, 3600.0):
         prediction = predict_drives(siso_frf(f=lines(0.5)), flat_spec(),
                                     duration=duration)
         drive = prediction.demands[0]
-        factor = math.sqrt(2.0 * math.log(rate * duration))
+        factor = math.sqrt(2.0 * math.log(2.0 * rate * duration))
         assert drive.peak / drive.rms == pytest.approx(factor, rel=2e-3)
 
 
@@ -306,7 +307,7 @@ def test_a_line_where_the_frf_is_not_a_number_is_left_out_and_said():
     k = at(prediction, 100.0)
     assert not prediction.judged[k]
     assert np.isnan(prediction.drive_asd(0)[k])
-    assert '1 line where the FRF is not a number not predicted' in \
+    assert '1 line where the FRF is not a number not predicted, first at 1Z+/1Z+' in \
         prediction.notes
     # the line adds nothing to the rms: 396 lines of 5 Hz
     assert prediction.demands[0].rms == pytest.approx(
@@ -880,3 +881,123 @@ def test_a_dof_holding_two_channels_has_to_be_named_in_full():
               ordinate_dim=['acceleration/voltage', 'force/voltage'])
     _refused('a limit is given at 1Z\\+, which is not a channel', frf=frf,
              limits={'1Z+': 10.0})
+
+
+# ---- dead channels, a measured FRF at the edges, the peaks against noise -----
+
+
+def test_a_dead_drive_and_a_dead_control_channel_are_named():
+    dead_drive = predict_drives(matrix_frf([[1.0, 0.0], [0.5, 0.0]]),
+                                matrix_spec(TARGET))
+    assert ('the drive 2Z+ reaches no control channel at any line: it is '
+            'predicted to do nothing') in dead_drive.notes
+    dead_control = predict_drives(matrix_frf([[1.0, 0.5], [0.0, 0.0]]),
+                                  matrix_spec(TARGET))
+    assert ('no drive reaches the control channel 2Z+ at any line: its '
+            'target cannot be met') in dead_control.notes
+    assert dead_control.unmet.any()
+
+
+def test_an_frf_from_a_record_with_one_nan_sample_is_refused_by_name():
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rng = np.random.default_rng(31)
+    fs, n = 4096.0, 2 ** 15
+    drive = rng.standard_normal(n)
+    response = 2.0 * G * drive
+    response[400] = np.nan
+    history = TimeHistory(np.arange(n) / fs, np.vstack([drive, response]),
+                          response_dof=['1Z+', '2Z+'],
+                          ordinate_dim=['voltage', 'acceleration'])
+    history.averaging = Averaging(frame_length=1024, overlap=0.5).filled(
+        n, fs)
+    frf = history.compute_frfs(references=['1Z+'])
+    with pytest.raises(ValueError, match=r'not a number at every line the '
+                                         r'specification is written over, '
+                                         r'first at 2Z\+/1Z\+'):
+        predict_drives(frf, flat_spec(dof='2Z+'))
+
+
+def test_a_measured_frf_under_hann_predicts_the_drive_to_the_edges():
+    """A plant estimated from records with noise on the drive and on the
+    response, under the default Hann window, from a record that starts
+    40 s in: the drive predicted for a flat target is the target over
+    the true plant squared at every line of the band, its first and its
+    last included, to the estimate's own scatter."""
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+
+    rng = np.random.default_rng(32)
+    fs, n = 4096.0, 2 ** 18
+    drive = rng.standard_normal(n)
+    # a plant of 2 g/V with a one-sample delay: a phase that turns
+    # across the band, the magnitude flat
+    response = 2.0 * G * np.roll(drive, 1)
+    measured_drive = drive + 0.05 * rng.standard_normal(n)
+    measured_response = response + 0.05 * 2.0 * G * rng.standard_normal(n)
+    history = TimeHistory(40.0 + np.arange(n) / fs,
+                          np.vstack([measured_drive, measured_response]),
+                          response_dof=['1Z+', '2Z+'],
+                          ordinate_dim=['voltage', 'acceleration'])
+    history.averaging = Averaging(frame_length=1024, overlap=0.5).filled(
+        n, fs)
+    assert history.averaging.window == 'hann'
+    frf = history.compute_frfs(references=['1Z+'])
+    response_row = [i for i in range(frf.num_records)
+                    if frf.response_dof[i] == '2Z+']
+    plant = Frf(frf.abscissa, frf.ordinate[response_row],
+                response_dof=['2Z+'], reference_dof=['1Z+'],
+                ordinate_dim=['acceleration/voltage'])
+    prediction = predict_drives(plant, flat_spec(dof='2Z+'))
+    f = prediction.frequency
+    band = (f >= BAND[0]) & (f <= BAND[1])
+    assert prediction.judged[band].all() and not prediction.judged[~band].any()
+    drive_asd = prediction.drive_asd(0)
+    edges = [int(np.flatnonzero(band)[0]), int(np.flatnonzero(band)[-1])]
+    assert f[edges[0]] == 20.0 and f[edges[1]] == 2000.0
+    expected = LEVEL / 2.0 ** 2
+    np.testing.assert_allclose(drive_asd[band], expected, rtol=0.03)
+    np.testing.assert_allclose(drive_asd[edges], expected, rtol=0.03)
+    assert not prediction.unmet.any()
+
+
+def test_the_expected_largest_peak_holds_against_simulated_noise():
+    """The peak a drive is judged on, checked against what Gaussian
+    noise does: twenty runs of the predicted drive, band-limited white
+    noise of the predicted rms over the default duration, and the mean
+    of their largest peaks of either sign against the expected largest
+    peak. Counted one way, the expected peak sat 3 percent under the
+    runs' mean; counted both ways it sits on it."""
+    prediction = predict_drives(siso_frf(), flat_spec())
+    drive = next(d for d in prediction.demands if d.kind == 'drive')
+    fs = 8192.0
+    n = int(fs * DURATION)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    band = (f >= BAND[0]) & (f <= BAND[1])
+    peaks = []
+    for seed in range(20):
+        rng = np.random.default_rng(400 + seed)
+        z = np.fft.rfft(rng.standard_normal(n))
+        z[~band] = 0.0
+        x = np.fft.irfft(z, n)
+        x *= drive.rms / np.std(x)
+        peaks.append(np.max(np.abs(x)))
+    assert np.mean(peaks) == pytest.approx(drive.peak, rel=0.03)
+    assert max(peaks) < 1.25 * drive.peak
+
+
+def test_progress_is_told_and_a_raise_in_it_stops_the_prediction():
+    told = []
+    predict_drives(siso_frf(), flat_spec(),
+                   progress=lambda done, total: told.append((done, total)))
+    assert told[-1] == (4, 4)
+
+    class Stop(Exception):
+        pass
+
+    def stop(_done, _total):
+        raise Stop
+
+    with pytest.raises(Stop):
+        predict_drives(siso_frf(), flat_spec(), progress=stop)

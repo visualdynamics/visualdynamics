@@ -67,8 +67,10 @@ channels.
 Each quantity is Gaussian random with a predicted autospectrum, so its
 rms is the root of the area under it and its expected largest peak over
 a run of `duration` seconds (a minute by default) is the rms times
-`sqrt(2 ln(ν₀ T))`, with ν₀ its own crossing rate by Rice's formula,
-from [the time statistics](time-statistics.md). A stated `peak_factor`
+`sqrt(2 ln(2 ν₀ T))`, with ν₀ its own crossing rate by Rice's formula,
+from [the time statistics](time-statistics.md): the largest peak of
+either sign, since a limit or a stroke each way is reached by either.
+A stated `peak_factor`
 replaces that, for a controller that clips its drive at a set multiple
 of the rms. Each quantity is judged on its peak:
 
@@ -133,8 +135,8 @@ against each other through a stiff fixture. The default inverse sets
 that direction aside up to 40 Hz, where the autospectra come out
 1.2 to 1.3 dB under the target (the reading names 20 to 40 Hz), and keeps it just
 above, where it costs dearly: the drives peak at 42 Hz, the second at
-7.29 V rms and 31.7 V expected, 317 % of its limit. Everything else is
-easy. The force is 951 lbf expected, 48 % of its rating, most of it at
+7.29 V rms and 32.9 V expected, 329 % of its limit. Everything else is
+easy. The force is 980 lbf expected, 49 % of its rating, most of it at
 the fixture mode; the velocity is 6 % and the travel 3 % of theirs.
 
 ![Two drives on one fixture: the drive spectra jumping up above 40 Hz,
@@ -146,8 +148,8 @@ and travel small](images/drive-prediction.png)
 
 At a tolerance of 0.1 (a condition number of 10) the weak direction is
 set aside up to 122 Hz and through the fixture mode at 386 to 418 Hz,
-where the other direction is the weak one. The drives come down to 77 %
-and 94 % of their limit, and the target is short through those bands.
+where the other direction is the weak one. The drives come down to 79 %
+and 97 % of their limit, and the target is short through those bands.
 That is the choice the reading puts in front of the engineer: ask the
 fixture for less difference between the two points at low frequency, or
 pay for it in drive, or accept the shortfall; none of it is a setting

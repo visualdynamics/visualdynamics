@@ -3307,6 +3307,77 @@ def plot_signature(before: Any, after: Any, modes: Any, *,
                         title=title or f'{dof} before and after',
                         size=size)
 
+
+def plot_matrix_comparison(specification: Any, measured: Any, *,
+                           coherence_tolerance: float | None = None,
+                           phase_tolerance: float | None = None,
+                           coherence_floor: float | None = None,
+                           scale_db: float | None = None,
+                           unit_system: UnitSystem | None = None,
+                           theme: Any = None,
+                           path: str | os.PathLike | None = None,
+                           show: bool = True, title: str | None = None,
+                           size: tuple[int, int] = (1400, 900)) -> Any:
+    """A measured cross-spectral matrix against its specification, drawn
+    as the matrix: each channel's level on the diagonal, each pair's
+    coherence above it and phase below it, every cell titled with its
+    verdict, the per-line summary under the grid and the table beside.
+
+        visualdynamics.plot.plot_matrix_comparison(
+            specification, cpsd, path='matrix.png')
+
+    The comparison is `core.matrix_comparison.compare_matrix`'s: the
+    levels by the single-channel comparison, the coherence and phase of
+    each specified cross term line by line against their tolerances. A
+    cell that is out has a heavy frame and OUT in its title, one that
+    is in a thin frame, one not judged or not specified a dotted frame.
+
+    Parameters
+    ----------
+    specification : Specification
+        What the run was controlled to.
+    measured : Psd
+        The run's cross-spectral matrix.
+    coherence_tolerance, phase_tolerance, coherence_floor : float, optional
+        The tolerances and the floor; `COHERENCE_TOLERANCE`,
+        `PHASE_TOLERANCE` and `COHERENCE_FLOOR` when omitted.
+    scale_db : float, optional
+        The comparison's scale in dB; resolved as the comparison
+        resolves it when omitted.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+    """
+    from ..core.matrix_comparison import (
+        COHERENCE_FLOOR,
+        COHERENCE_TOLERANCE,
+        PHASE_TOLERANCE,
+    )
+    from .matrix_comparison import build_matrix_comparison
+
+    settings = {
+        'coherence_tolerance': (COHERENCE_TOLERANCE
+                                if coherence_tolerance is None
+                                else coherence_tolerance),
+        'phase_tolerance': (PHASE_TOLERANCE if phase_tolerance is None
+                            else phase_tolerance),
+        'coherence_floor': (COHERENCE_FLOOR if coherence_floor is None
+                            else coherence_floor)}
+
+    def build(widget: Any) -> Any:
+        widget.clear()
+        build_matrix_comparison(widget, specification, measured,
+                                scale_db=scale_db, unit_system=unit_system,
+                                theme=theme, **settings)
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or 'Matrix comparison', size=size)
+
+
 def plot_comparison(measured: Any, specification: Any, *,
                     pair: tuple[str, str] | None = None,
                     unit_system: UnitSystem | None = None,

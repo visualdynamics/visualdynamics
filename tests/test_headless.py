@@ -306,6 +306,7 @@ def test_the_inventory_covers_what_the_window_renders():
         '_render_ratio': 'plot.plot_ratio',
         '_render_snr': 'plot.plot_snr',
         '_render_signature': 'plot.plot_signature',
+        '_render_matrix': 'plot.plot_matrix_comparison',
         '_render_pair_stage': 'viz.paired.plot_paired_stage',
         '_render_sine': ('core.sine.extract_sine + compliance.sine_errors'
                          ' / viz.sinespec.plot_sine_specification'

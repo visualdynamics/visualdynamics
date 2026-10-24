@@ -71,6 +71,9 @@ that is not an alpha.
 - [Checking a sine record for distortion](sine-distortion.md): the
   record less the tracked tones against the tones, along the sweep,
   against a limit
+- [Judging a cross-spectral matrix against its
+  specification](matrix-comparison.md): the levels on the diagonal and
+  each cross term's coherence and phase, as a grid
 - [The system identification workflow](workflows/sysid-workflow.md):
   measuring a plant, and how well it was measured
 - [The finite element workflow: the BARC](workflows/fem-workflow.md):

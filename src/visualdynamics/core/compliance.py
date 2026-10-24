@@ -423,6 +423,24 @@ def cells(specification: Specification, measured: DataArray,
     return out
 
 
+def cell_lines(cell: dict[str, Any], left: np.ndarray,
+               right: np.ndarray) -> slice | None:
+    """The measured lines one cell of `cells` reaches, as a slice of
+    the bins whose edges are `left` and `right` (sorted), or None when
+    it reaches none.
+
+    Found by where the cell's ends fall among the bins: a bin that ends
+    where the cell begins shares an edge and no width, and is not in
+    it. `judge` marks the lines of an out cell by this, and a reading
+    that spreads a cell's result over its lines uses the same rule.
+    """
+    first = int(np.searchsorted(right, cell['low'] * (1.0 + 1e-12),
+                                side='right'))
+    last = int(np.searchsorted(left, cell['high'] * (1.0 - 1e-12),
+                               side='left'))
+    return slice(first, last) if last > first else None
+
+
 def judge(specification: Specification, measured: DataArray,
           spec_record: int = 0, measured_record: int = 0,
           limit: str | None = 'abort_upper', over: bool = True,
@@ -494,16 +512,11 @@ def judge(specification: Specification, measured: DataArray,
     lines = np.zeros(left.shape, dtype=bool)
     level = np.full(left.shape, np.nan)
     start, stop = left.copy(), right.copy()
-    # the lines each out cell reaches, found by where the cell's ends
-    # fall among the sorted bins: a bin that ends where the cell
-    # begins shares an edge and no width, and is not in it
     for k in np.flatnonzero(out):
         cell = found[k]
-        first = int(np.searchsorted(right, cell['low'] * (1.0 + 1e-12), side='right'))
-        last = int(np.searchsorted(left, cell['high'] * (1.0 - 1e-12), side='left'))
-        if last <= first:
+        inside = cell_lines(cell, left, right)
+        if inside is None:
             continue
-        inside = slice(first, last)
         lines[inside] = True
         level[inside] = asked[k] / cell['width']
         start[inside] = np.maximum(left[inside], cell['low'])
@@ -806,6 +819,7 @@ def detect_scale_db(specification: Specification, measured: DataArray,
     # the same bands. `significant_band` is there because a waveform's
     # spectrum ending at 2 kHz left half a transient's bands 40 dB apart,
     # saying nothing about level.
+    from .data import autospectrum
     from .octave import PER_OCTAVE
 
     if comparable(specification, measured) is not None:
@@ -822,6 +836,10 @@ def detect_scale_db(specification: Specification, measured: DataArray,
             specification, measured, spec_records, measured_records):
         if wanted is not None and label not in wanted and str(
                 specification.response_dof[spec_index]) not in wanted:
+            continue
+        # a cross term has no level to read a scale from: its real part
+        # moves with its phase
+        if not autospectrum(specification, spec_index):
             continue
         # a pair the comparison refuses has no level to read a scale from
         if units_check(specification.ordinate_dim[spec_index],
@@ -963,6 +981,16 @@ def exceedances(specification: Specification, measured: DataArray,
     return marks[0], marks[1]
 
 
+#: why `compare` does not read a cross term. A cross spectrum is complex,
+#: and its real part is not the power of either channel: read as a
+#: level, a cross term held at its specified magnitude but 60 degrees
+#: off its phase came out 3 dB low, and one 120 degrees off had no
+#: level at all. Its coherence and phase are what is judged
+#: (`core.matrix_comparison`).
+CROSS_TERM_REFUSAL = ('a cross term is judged by its coherence and phase '
+                      '(the matrix comparison), not by its level')
+
+
 def compare(specification: Specification, measured: DataArray,
             spec_record: int = 0,
             measured_record: int = 0,
@@ -982,17 +1010,20 @@ def compare(specification: Specification, measured: DataArray,
     fraction of its bin that was judged, so a band at the top of the
     range counts the same as one at the bottom.
 
-    A pair of objects that cannot be compared (`comparable`), or a pair
+    A pair of objects that cannot be compared (`comparable`), a pair
     of records of different quantities or with only one side's units
-    declared (`units_check`), returns {'lines': 0, 'refused': reason},
-    and one with nothing to compare returns {'lines': 0}. With neither
-    side's units declared the pair is compared and the result carries
-    'note' (`RAW_NOTE`).
+    declared (`units_check`), or a specification record that is a cross
+    term (`CROSS_TERM_REFUSAL`), returns {'lines': 0, 'refused':
+    reason}, and one with nothing to compare returns {'lines': 0}. With
+    neither side's units declared the pair is compared and the result
+    carries 'note' (`RAW_NOTE`).
 
     Every number is of the scaled measurement: `scale_db` is resolved
     through `comparison_scale_db` unless given, and is returned so a
     table can say what was compared.
     """
+    from .data import autospectrum
+
     if scale_db is None:
         scale_db = comparison_scale_db(specification, measured)
     # the level, cell by cell: both integrated over the very same
@@ -1003,6 +1034,8 @@ def compare(specification: Specification, measured: DataArray,
     refused = comparable(specification, measured)
     if refused is not None:
         return {'lines': 0, 'refused': refused}
+    if not autospectrum(specification, spec_record):
+        return {'lines': 0, 'refused': CROSS_TERM_REFUSAL}
     refused, note = units_check(specification.ordinate_dim[spec_record],
                                 measured.ordinate_dim[measured_record],
                                 wanted_name='the specification')
@@ -1274,10 +1307,11 @@ def compare_all(specification: Specification, measured: DataArray,
     result from `compare`.
 
     A specification bounds the control channels, and a measurement
-    usually holds those and many more. Channels are paired by DOF, the
-    response and the reference where there is one (`matched_records`),
-    so a cross spectrum is compared with the specification's cross term
-    if it has one and is left out if it does not.
+    usually holds those and many more. Channels are paired by DOF and
+    quantity (`matched_records`). Only the specification's autospectra
+    are compared here: a cross term is not a level, and its coherence
+    and phase are judged by `core.matrix_comparison.compare_matrix`,
+    which compares the autospectra through this same function.
 
     Rows are in the specification's order, the order a control room
     reads its channels in. The scale is resolved once for the whole set,
@@ -1291,24 +1325,46 @@ def compare_all(specification: Specification, measured: DataArray,
     'scale_db', but `channel_errors` and the charts built from it do
     not. Pass `scale_db=0` to compare as measured.
     """
-    # the warning is there because a whole campaign was once scored on
-    # shifted numbers without a word (2026-09-26)
-    if scale_db is None:
-        scale_db = comparison_scale_db(specification, measured,
-                                       spec_records, measured_records)
-        if scale_db and getattr(measured, 'scale_db', None) is None:
-            import warnings
+    from .data import autospectrum
 
-            warnings.warn(
-                f'the measurement was scaled by {scale_db:+g} dB, detected '
-                f'from the data as a run at {-scale_db:+g} dB; pass '
-                'scale_db=0 to compare it as measured, or set '
-                'measured.scale_db to the level it was run at',
-                ScaleWarning, stacklevel=2)
+    scale_db = resolved_scale_db(specification, measured, spec_records,
+                                 measured_records, scale_db, stacklevel=3)
+    # cross terms out since 2026-10-24: `compare` read one by its real
+    # part, which moves with its phase
     return [(label, compare(specification, measured, spec_index,
                             measured_index, scale_db=scale_db))
             for label, spec_index, measured_index in matched_records(
-                specification, measured, spec_records, measured_records)]
+                specification, measured, spec_records, measured_records)
+            if autospectrum(specification, spec_index)]
+
+
+def resolved_scale_db(specification: Specification, measured: DataArray,
+                      spec_records: Sequence[int] | None = None,
+                      measured_records: Sequence[int] | None = None,
+                      scale_db: float | None = None,
+                      stacklevel: int = 2) -> float:
+    """The one scale a whole set of comparisons is made at: `scale_db`
+    when given, else `comparison_scale_db`'s, with a `ScaleWarning`
+    when that scale was detected from the data rather than set on the
+    measurement. `compare_all` and the matrix comparison resolve their
+    scale here, so both warn alike. `stacklevel` points the warning at
+    the caller's caller."""
+    # the warning is there because a whole campaign was once scored on
+    # shifted numbers without a word (2026-09-26)
+    if scale_db is not None:
+        return scale_db
+    scale_db = comparison_scale_db(specification, measured,
+                                   spec_records, measured_records)
+    if scale_db and getattr(measured, 'scale_db', None) is None:
+        import warnings
+
+        warnings.warn(
+            f'the measurement was scaled by {scale_db:+g} dB, detected '
+            f'from the data as a run at {-scale_db:+g} dB; pass '
+            'scale_db=0 to compare it as measured, or set '
+            'measured.scale_db to the level it was run at',
+            ScaleWarning, stacklevel=stacklevel)
+    return scale_db
 
 
 #: The RMS dB deviation an SRS comparison is shaded past, either side.

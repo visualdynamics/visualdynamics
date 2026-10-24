@@ -342,3 +342,9 @@ project.save('random.vdyn')
 - What the run was allowed to do. The warning and abort lines come
   from the specification. Whether a brush against the warning line
   matters is for the test engineer to write in the conclusions.
+- A run controlled to a matrix, several drives and a specification
+  with cross terms, is judged as one: select the specification with the
+  run's CPSD and choose **Matrix** for the levels on the diagonal and
+  each cross term's coherence and phase against their tolerances
+  ([Judging a cross-spectral matrix](../matrix-comparison.md)). The
+  channel comparison above judges the autospectra alone.

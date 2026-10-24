@@ -87,6 +87,12 @@ the step is set where the next level is. `flagged`, `describe()` and
 `worst` (the most samples on the rail, then the least headroom at the
 next level) read the whole check.
 
+A channel that is zero throughout, or holds fewer than two finite
+samples, is not read: its infinite headroom would otherwise read as a
+channel well inside its range. It says why, in its row and in the
+check's words. Samples that are not finite are left out, as the time
+statistics leave them out, and each channel holding one says how many.
+
 ## An example
 
 Twelve seconds of Gaussian random, flat at 0.04 g²/Hz from 20 to
@@ -145,11 +151,12 @@ from that table. The panel names the table the ranges came from and
 holds the step to the next level and the margin; under them is a row a
 channel, its headroom and its samples on the rail, with each flagged
 channel in bold, then the numbers for the channel the trace draws, and
-the judgement in words. A range taken from the column's default reads
+the judgment in words. A range taken from the column's default reads
 "the default" beside it, and its row and value say why in their tips.
 Clicking a channel's row draws its trace.
-Dragging the floor on the headroom bars moves the step. Every edit
-redraws at once, and the reading is journaled as its `plot_overload`
+Dragging the floor on the headroom bars moves the step. A record of
+more than 300,000 samples, every channel counted, is read with the
+progress bar up. Every edit redraws at once, and the reading is journaled as its `plot_overload`
 call.
 
 ## Where judgment lives

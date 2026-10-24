@@ -299,7 +299,7 @@ def test_minus_12_db_holds_the_next_level_too(run, channels):
         '3Z+: 8.6 dB of headroom, 2.6 dB at +6 dB.')
 
 
-def test_the_judgement_names_each_channel_for_what_it_is(run, channels):
+def test_the_judgment_names_each_channel_for_what_it_is(run, channels):
     check = run.overload_check(channels)
     assert check.describe() == ('Of 3 channels: 1 on the rail (2Z+); '
                                 '1 reaches its range at +6 dB (1Z+).')
@@ -633,3 +633,79 @@ def test_a_row_clicked_draws_that_channels_trace(window, pump, run,
     trace = _plots(pane.graphics)[0]
     assert '1Z+: 2.6 dB of headroom' in trace.titleLabel.text
     assert "project['Channels'], 0, step_db" in window.project.journal[-1]
+
+
+# ---- dead, not finite, empty, a late clock and the worker -----------------
+
+def test_a_channel_of_zeros_is_not_read_and_never_passes(clean):
+    """Zero throughout has infinite headroom, which would read as a
+    channel well inside its range: it is not read, and says why."""
+    check = history(clean / 4.0, np.zeros(clean.size)).overload_check(
+        25.0 * G)
+    dead = check.channels[1]
+    assert dead.statistics is None and not dead.has_range
+    assert dead.flagged == [] and dead.reason.startswith('zero throughout')
+    assert dead.describe() == ('2Z+: not read (zero throughout: a dead '
+                               'channel has no peak to read against its '
+                               'range).')
+    assert check.describe() == (
+        'All 1 channel inside their ranges, at +6 dB as well. Not read: '
+        '2Z+, zero throughout: a dead channel has no peak to read against '
+        'its range.')
+    assert notes_for(check) == {1: 'not read: zero throughout: a dead '
+                                   'channel has no peak to read against its '
+                                   'range'}
+    alone = channel_overload(np.zeros(64), RATE, 25.0)
+    assert alone.statistics is None and alone.flags() == {}
+
+
+def test_one_sample_not_finite_is_said_and_left_out(clean):
+    holed = clean / 4.0
+    holed[1000] = np.nan
+    check = history(holed).overload_check(25.0 * G)
+    channel, = check.channels
+    assert channel.statistics.nonfinite == 1 and channel.has_range
+    assert '1 sample is not finite and left out' in channel.cautions()
+    assert channel.describe().endswith(' 1 sample is not finite and left '
+                                       'out.')
+    assert check.describe().endswith(
+        'Samples not finite, left out: 1Z+ 1.')
+
+
+def test_an_empty_selection_is_refused(run):
+    with pytest.raises(ValueError, match='no channel asked for'):
+        run.overload_check(25.0 * G, records=[])
+
+
+def test_a_record_whose_clock_starts_late_reads_the_same(run):
+    late = TimeHistory(np.asarray(run.abscissa) + 3.25, run.ordinate,
+                       response_dof=list(run.response_dof),
+                       ordinate_dim=list(run.ordinate_dim),
+                       ordinate_unit=['g'] * 3)
+    early, later = run.overload_check(25.0 * G), late.overload_check(25.0 * G)
+    assert later.describe() == early.describe()
+    assert [c.headroom_db for c in later.channels] == pytest.approx(
+        [c.headroom_db for c in early.channels])
+    assert later.channels[1].rail == early.channels[1].rail == 287
+
+
+def test_a_long_record_is_read_on_the_worker(window, pump, run, channels,
+                                             monkeypatch):
+    """Past `OVERLOAD_INLINE_SAMPLES` the reading runs through
+    `_run_long` with the bar up, and is shown as an inline one is."""
+    from visualdynamics.gui import main_window as module
+
+    ran = []
+    original = window._run_long
+
+    def spy(status, verb, *args, **kwargs):
+        ran.append(status)
+        return original(status, verb, *args, **kwargs)
+
+    monkeypatch.setattr(window, '_run_long', spy)
+    monkeypatch.setattr(module, 'OVERLOAD_INLINE_SAMPLES', 1000)
+    pane = _overload(window, pump, run, channels)
+    assert ran and ran[-1] == 'Reading Run against its ranges…'
+    assert pane.overload_panel.verdict.text() == (
+        'Of 3 channels: 1 on the rail (2Z+); 1 reaches its range at +6 dB '
+        '(1Z+).')

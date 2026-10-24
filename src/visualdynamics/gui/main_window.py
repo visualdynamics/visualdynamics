@@ -215,6 +215,12 @@ MESH_PREVIEW_FITTED = 1_500
 #: million took 0.7 s while 23 million took 2.6 s; past it the toggle
 #: is not offered and the status line says why
 SHAPE_VALUES_CELL_LIMIT = 1_000_000
+#: the most samples (every channel) the Overload reading reads on the
+#: window's own thread. Its time statistics take about 0.3 s a million
+#: samples (8 channels of 120 s at 5,120 a second in 1.5 s), so past
+#: this it runs on the worker with the bar up (`_run_long`), as a long
+#: verb does
+OVERLOAD_INLINE_SAMPLES = 300_000
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -20257,7 +20263,7 @@ class MainWindow(QMainWindow):
         """Every channel of this record against the range its linked
         channel table gives it: one channel's trace over its range, and
         the headroom bars beside the kurtosis bars, with the table and
-        the judgement in the panel.
+        the judgment in the panel.
 
         The ranges are the table's (`Project.channel_table_for`), read
         by `TimeHistory.overload_check`, the call a script makes. The
@@ -20285,7 +20291,26 @@ class MainWindow(QMainWindow):
             return ('no linked channel table describes this record: link '
                     'one to read each channel against its range')
         table_name, table = found
-        check = history.overload_check(table, **settings)
+        self._overload_serial = serial = getattr(
+            self, '_overload_serial', 0) + 1
+        samples = history.num_records * len(history.abscissa)
+        if samples > OVERLOAD_INLINE_SAMPLES:
+            from ..core.progress import Cancelled
+
+            try:
+                check = self._run_long(
+                    f'Reading {name} against its ranges…',
+                    lambda progress=None: history.overload_check(
+                        table, **settings))
+            except Cancelled:
+                panel.show_check(None)
+                return 'The overload reading was cancelled'
+            if serial != self._overload_serial:
+                # the plot was redrawn while the worker read: that
+                # drawing read its own, and this one belongs to nothing
+                return None
+        else:
+            check = history.overload_check(table, **settings)
         record = records[0] if records else None
         band = self.data_pane.kurtosis_bounds
         build_overload(self.data_pane.graphics, history, check, record,

@@ -6,7 +6,7 @@ across it either way as dashed lines, every sample on the rail marked
 with a cross, the largest peak with a diamond, and, where the range has
 held, that peak scaled to the next level drawn either way as dotted
 lines, so a range that will not hold the next step is seen against the
-peak that says so. The row is titled with the channel's judgement in
+peak that says so. The row is titled with the channel's judgment in
 words.
 
 Under it, two bar charts on one row, a bar per channel and the channels

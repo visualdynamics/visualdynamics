@@ -2001,7 +2001,7 @@ class TimeHistory(DataArray):
         -------
         OverloadCheck
             Every channel's numbers, in SI as the record is stored, its
-            flags and the judgement.
+            flags and the judgment.
         """
         from .overload import overload_check
         return overload_check(self, ranges, **options)

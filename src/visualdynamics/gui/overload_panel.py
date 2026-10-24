@@ -10,7 +10,7 @@ that no linked table describes the record, and holds what the reading
 is made with above the rule: the step to the next level in dB and how
 close to the range a sample counts as on it. Under the rule is a row a
 channel, its headroom in dB and its samples on the rail, then the
-numbers for the channel the trace draws, and under them the judgement
+numbers for the channel the trace draws, and under them the judgment
 in words.
 
 A channel that is flagged is set in bold in the table and named in the
@@ -111,7 +111,7 @@ class OverloadPanel(QWidget):
             key: value for key, (_name, value) in made.items()}
         self.row_names: dict[str, QLabel] = {
             key: name for key, (name, _value) in made.items()}
-        # the judgement in words: which channels, for what
+        # the judgment in words: which channels, for what
         self.verdict: QLabel = QLabel('')
         self.verdict.setWordWrap(True)
         grid.addWidget(self.verdict, 6 + len(ROWS), 0, 1, 2)
@@ -156,7 +156,7 @@ class OverloadPanel(QWidget):
         channel, the numbers for `channel` (the one the trace draws)
         put into the display units by `transform`'s scale (SI = value
         * scale + offset; a range and a peak are sizes, so the offset
-        does not apply) and labeled `unit`, and the judgement in words.
+        does not apply) and labeled `unit`, and the judgment in words.
         None clears it and says no linked table describes the record."""
         self.table.setRowCount(0)
         self._records = []
@@ -175,11 +175,13 @@ class OverloadPanel(QWidget):
                 headroom = f'{item.headroom_db:.1f} dB'
                 rail = f'{item.rail}'
             else:
-                headroom, rail = 'no range', '—'
+                headroom = 'not read' if item.statistics is None else 'no range'
+                rail = '—'
             cells = (item.label, headroom, rail)
             loud = bool(item.flagged)
+            missing = 'Not read' if item.statistics is None else 'No range'
             tip = (finding(item) if loud
-                   else item.reason and f'No range: {item.reason}')
+                   else item.reason and f'{missing}: {item.reason}')
             if item.has_range and item.cautions():
                 # what to doubt about the range itself, on its row
                 tip = '\n'.join([tip] * bool(tip) + [
@@ -230,11 +232,14 @@ class OverloadPanel(QWidget):
                 'next_headroom': f'{channel.next_headroom_db:.2f} dB',
             })
         else:
-            text['range'] = 'none'
+            text['range'] = 'none' if channel.statistics is not None \
+                else 'not read'
         self.row_names['next_peak'].setText(
             f'Peak at +{channel.step_db:g} dB')
         for key, value in text.items():
             self.values[key].setText(value)
         self.values['range'].setToolTip(
             '\n'.join(f'{c[0].upper()}{c[1:]}.' for c in channel.cautions())
-            if channel.has_range else f'No range: {channel.reason}')
+            if channel.has_range else
+            f'{"Not read" if channel.statistics is None else "No range"}: '
+            f'{channel.reason}')

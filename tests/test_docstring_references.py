@@ -67,6 +67,9 @@ THEORY = {
                    'force it needs of a shaker',
     'core.drive_prediction': 'the drives a specification asks for through '
                              'an FRF, the regularized inverse and the peaks',
+    'core.limit_prediction': 'the output autospectrum of a single-input '
+                             'linear system, through which the notch is '
+                             'predicted',
     'core.dwell': 'the build-up and free decay of a resonator under a '
                   'held tone',
     'core.transmissibility': 'the H1 estimate, the coherence and the '

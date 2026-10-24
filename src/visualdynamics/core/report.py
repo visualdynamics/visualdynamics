@@ -51,8 +51,10 @@ class Report:
         on; 'grid', to lay every control channel out on a grid;
         'tone', one tone of a sine level set; 'floor', the ambient
         density for 'pair' and 'ratio'; 'shapes'; 'octave', to band
-        the data for the comparison; and 'averaging': False to leave
-        the averaging frames off a time plot)
+        the data for the comparison; 'averaging': False to leave
+        the averaging frames off a time plot; and 'record_caption':
+        True to draw, under a figure of a measured spectrum, the
+        caption block read off its record, `Project.caption_of`)
       {'kind': 'scene', 'geometry': name, 'shapes': name-or-'',
                         'dofs': quantity, 'dofs_source': name,
                         'caption': str}

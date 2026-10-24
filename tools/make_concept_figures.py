@@ -821,6 +821,71 @@ def dwell():
           f'{reading.describe()}')
 
 
+def report_caption():
+    """A report plot to convention: one control channel's ASD against
+    its profile, the warning band and the abort limits shaded, and the
+    caption block under it read off the record by the project."""
+    import numpy as np
+
+    import visualdynamics
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.channel_table import ChannelTable
+    from visualdynamics.plot import plot_captioned
+
+    g, fs, seconds = 9.80665, 4096.0, 40.0
+    # the profile: +3 dB/octave to 80 Hz, 0.04 g²/Hz to 1000 Hz,
+    # -6 dB/octave to 2000 Hz; warning at 3 dB and abort at 6 dB
+    corners = np.array([20.0, 80.0, 1000.0, 2000.0])
+    level = np.array([0.01, 0.04, 0.04, 0.01]) * g ** 2
+    profile = visualdynamics.Specification(
+        corners, level[None], response_dof=['1Z+'],
+        ordinate_dim=['acceleration**2/frequency'],
+        warning_upper=level[None] * 10 ** 0.3,
+        warning_lower=level[None] / 10 ** 0.3,
+        abort_upper=level[None] * 10 ** 0.6,
+        abort_lower=level[None] / 10 ** 0.6)
+    profile.interpolation = 'log_log'
+    n = int(fs * seconds)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    inside = (f >= corners[0]) & (f <= corners[-1])
+    # a floor 30 dB under the profile outside its band, as a shaker's
+    # is, rather than nothing: the window's leakage into an empty band
+    # would otherwise open the plot on a dozen decades
+    shape = np.full_like(f, level.min() * 1e-3)
+    shape[inside] = np.exp(np.interp(np.log(f[inside]), np.log(corners),
+                                     np.log(level)))
+    rng = np.random.default_rng(1705)
+    channels = []
+    for gain in (1.0, 2.5):
+        # unit noise has |X|² of n per line, and a one-sided density S
+        # is 2 |X|² / (fs n): so each line is scaled by sqrt(S fs / 2)
+        lines = (np.fft.rfft(rng.standard_normal(n))
+                 * np.sqrt(shape * gain * fs / 2.0))
+        channels.append(np.fft.irfft(lines, n))
+    run = visualdynamics.TimeHistory(
+        np.arange(n) / fs, np.array(channels), response_dof=['1Z+', '20X+'],
+        ordinate_dim=['acceleration'] * 2, ordinate_unit=['g'] * 2)
+    run.averaging = Averaging(frame_length=4096, overlap=0.5, window='hann',
+                              frames=72, start=2.0)
+    project = visualdynamics.Project('Caption')
+    project.add('Run 6', run)
+    project.add('Profile', profile)
+    project.add('Channel Table', ChannelTable({
+        'channel': [1, 2], 'node': [1, 20], 'direction': ['Z+', 'X+'],
+        'unit': ['g', 'g'], 'channel_type': ['acceleration'] * 2,
+        'comment': ['fixture, control', 'bracket']}))
+    name = project.compute_psds('Run 6')
+    asd = project[name]
+    # log frequency, as the profile is written: both objects say so,
+    # or they are drawn on two axes
+    asd.log_abscissa = profile.log_abscissa = True
+    caption = project.caption_of(name, 0, specification='Profile')
+    plot_captioned(asd, 0, caption=caption, specification=profile,
+                   show=False, size=(1000, 760),
+                   path=str(OUT / 'report-caption.png'))
+    print(caption.text())
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -839,6 +904,7 @@ def main():
     replication_fit()
     stroke_readout()
     dwell()
+    report_caption()
     print('done')
 
 

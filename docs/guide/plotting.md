@@ -154,6 +154,11 @@ PSD's own average is worth, read from the degrees of freedom it carries
 ([What an average is worth](averaging-confidence.md)), and it is drawn
 flat only.
 
+A spectrum saved for a report can carry its caption block under it,
+read off the record: `plot_captioned(psd, record, caption=...,
+specification=...)` with the caption `Project.caption_of` gives
+([A report plot's caption](report-captions.md)).
+
 ## Copying what is shown
 
 Whenever something is drawn, the plot bar or the 3-D view's bar ends

@@ -466,6 +466,38 @@ class Averaging:
         return statistical_dof(self.frames, self.shape(), self.hop,
                                records=records)
 
+    def overlap_text(self) -> str:
+        """The overlap as every summary writes it, a percentage of a
+        frame to three significant figures: '50%', '66.7%', '0%'."""
+        return f'{self.overlap * 100.0:.3g}%'
+
+    def window_text(self) -> str:
+        """The window as every summary writes it, with its parameter
+        where it takes one: 'hann', 'tukey (alpha 0.5)'."""
+        settings = WINDOW_PARAMETERS.get(self.window)
+        if settings is None or self.window_parameter is None:
+            return self.window
+        return f'{self.window} ({settings[0]} {self.window_parameter:g})'
+
+    def describe(self) -> str:
+        """The settings in one phrase, the one statement of them a
+        caption, a label or a summary uses, so no two say the same
+        averaging two ways: 'hann, 50% overlap, frames of 1024
+        samples', with the window's parameter and the detrend when
+        there are ('tukey (alpha 0.5), 66.7% overlap, frames of 2048
+        samples, mean removed from each frame').
+
+        Returns
+        -------
+        str
+        """
+        said = (f'{self.window_text()}, {self.overlap_text()} overlap, '
+                f'frames of {self.frame_length} samples')
+        if self.detrend != 'none':
+            removed = 'mean' if self.detrend == 'mean' else 'linear trend'
+            said += f', {removed} removed from each frame'
+        return said
+
     def filled(self, samples: int, sample_rate: float) -> Averaging:
         """This averaging with as many frames as fit in a record of
         `samples` samples, at least one."""

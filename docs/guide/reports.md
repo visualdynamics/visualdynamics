@@ -108,6 +108,14 @@ at {{@basis:TimeHistory.sample_rate}}, averaged over
 {{@basis:TimeHistory.num_averages}} frames. See {{figure:CMIF}}.
 ```
 
+A plot block of a measured spectrum can also carry the caption block
+its record gives: the channel with its location and axis, the run, the
+estimate, the resolution, the window and overlap, the degrees of
+freedom and the requirement, each read from the project. Set
+`'record_caption': True` on the block, or check **Caption from the
+record** in the editor's pane; see [A report plot's
+caption](report-captions.md).
+
 ## Editing a report
 
 The editor shows the report exactly as the export will read, with the

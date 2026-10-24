@@ -3307,6 +3307,92 @@ def plot_comparison(measured: Any, specification: Any, *,
                         size=size)
 
 
+def plot_captioned(data: Any, record: int = 0, *,
+                   caption: Any = None, specification: Any = None,
+                   unit_system: UnitSystem | None = None,
+                   theme: Any = None,
+                   path: str | os.PathLike | None = None,
+                   show: bool = True, title: str | None = None,
+                   size: tuple[int, int] = (1000, 820)) -> Any:
+    """Draw one record of a spectrum as a report plot: the record, the
+    requirement drawn on it when one is given, and the caption under it.
+
+        caption = project.caption_of('Run 6 PSDs', 2,
+                                     specification='Specification')
+        visualdynamics.plot.plot_captioned(
+            project['Run 6 PSDs'], 2, caption=caption,
+            specification=project['Specification'], path='run6_ch3.png')
+
+    With a `specification` the record is drawn against it the way
+    `plot_comparison` draws a channel: the reference, the warning band
+    shaded and the regions past the abort limits shaded and named in
+    the legend. Under the plot, the caption block
+    (`plot.report_caption.add_caption`): the channel with its location
+    and axis, the run, the estimate, the resolution, the window and
+    overlap, the degrees of freedom and the requirement, a row each.
+    Without a `caption` it is read off the record alone
+    (`core.report_caption.record_caption`), where the window, the run
+    and the averaging read "not recorded"; `Project.caption_of` reads
+    them from the project.
+
+    Parameters
+    ----------
+    data : Psd
+        The measured spectrum.
+    record : int, default 0
+        Which record.
+    caption : RecordCaption, optional
+        The caption to draw; read off the record when omitted.
+    specification : Specification, optional
+        The requirement to draw the record against.
+    unit_system, theme, path, show, title, size
+        As for every standalone plot.
+
+    Returns
+    -------
+    object
+        The pane, or the path written.
+
+    Raises
+    ------
+    ValueError
+        If `specification` does not bound the record's channel.
+    """
+    from ..core.report_caption import record_caption
+    from .report_caption import add_caption
+
+    if caption is None:
+        caption = record_caption(data, record, specification=specification,
+                                 unit_system=unit_system)
+    if specification is not None:
+        from ..core.compliance import matched_records
+
+        # the record and the specification's record of the same DOF
+        # pair *and* quantity: a drive point's force record shares its
+        # pair with the acceleration channel the specification bounds
+        own = data.known_dim(record)
+        bounding = [si for _label, si, _mi in matched_records(
+                        specification, data, measured_records=[record])
+                    if 'unknown' in (own, specification.known_dim(si))
+                    or own == specification.known_dim(si)]
+        if not bounding:
+            raise ValueError(
+                'the specification does not bound '
+                f'{pair_label(data.record_pair(record))} {own}')
+        drawn, _dropped = bounded_by_specification(
+            [(None, data, [record]), (None, specification, bounding[:1])])
+    else:
+        drawn = [(None, data, [record])]
+
+    def build(widget: Any) -> Any:
+        build_plots(widget, drawn, unit_system=unit_system, theme=theme)
+        add_caption(widget, caption,
+                    color=resolve_theme(theme)['plot_foreground'])
+
+    return _plot_window(build, theme=theme, path=path, show=show,
+                        title=title or caption.channels[0].name(), size=size)
+
+
 def plot_srs_tolerance(measured: Any, specification: Any, *,
                        channel: str | None = None,
                        event: str | None = None,

@@ -50,6 +50,7 @@ from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QLabel,
@@ -242,6 +243,10 @@ class ReportEditor(QWidget):
         # while the selection has no such field
         self.text_editor: QPlainTextEdit | None = None
         self.caption_edit: QLineEdit | None = None
+        # a plot block of a measured spectrum: whether its figure draws
+        # the record's caption block, and that caption read out
+        self.record_caption_check: QCheckBox | None = None
+        self.record_caption_label: QLabel | None = None
         self.title_edit: QLineEdit | None = None
         self.marking_edit: QLineEdit | None = None
         self.color_box: QComboBox | None = None
@@ -435,6 +440,7 @@ class ReportEditor(QWidget):
 
         self._text_timer.stop()
         self.text_editor = self.caption_edit = None
+        self.record_caption_check = self.record_caption_label = None
         self.title_edit = self.marking_edit = self.color_box = None
         self.field_boxes = {}
         body = QWidget()
@@ -537,10 +543,43 @@ class ReportEditor(QWidget):
                          'value': self.caption_edit.text()},
                         block.get('caption', '') != self.caption_edit.text()))
                 form.addRow('Caption', self.caption_edit)
+                self._record_caption_rows(form, block, objects, object_groups)
         finally:
             self._loading_pane = False
         self.pane.setWidget(body)
         self._offer()
+
+    def _record_caption_rows(self, form, block, objects, object_groups):
+        """The record's caption block, for a plot block of a measured
+        spectrum: a check to draw it under the figure, and the caption
+        itself read out beneath, as the page will show it
+        (`report.block_caption`). Nothing for any other block."""
+        from ..report import block_caption
+
+        caption = block_caption(block, objects, object_groups,
+                                self.unit_system)
+        if caption is None:
+            return
+        self.record_caption_check = QCheckBox('Caption from the record')
+        self.record_caption_check.setChecked(bool(block.get('record_caption')))
+        self.record_caption_check.setToolTip(
+            'Draw the caption block under the figure: the channel, its '
+            'location and axis, the run, the estimate, the resolution, the '
+            'window and overlap, the DOF and the requirement, each read '
+            'from the record')
+        self.record_caption_check.toggled.connect(
+            lambda checked: self._field_edited(
+                {'op': 'field', 'at': self.selected,
+                 'field': 'record_caption', 'value': bool(checked)},
+                bool(block.get('record_caption')) != bool(checked)))
+        form.addRow(self.record_caption_check)
+        self.record_caption_label = QLabel('<br>'.join(
+            f'<b>{html_escape.escape(label)}:</b> {html_escape.escape(said)}'
+            for label, said in caption.rows()))
+        self.record_caption_label.setWordWrap(True)
+        self.record_caption_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow(self.record_caption_label)
 
     def _combo(self, form, field, label, current, options):
         box = QComboBox()
@@ -846,7 +885,13 @@ class ReportEditor(QWidget):
                 block = report.blocks[index]
                 field = operation.get('field')
                 value = str(operation.get('value', ''))
-                if field == 'source':
+                if field == 'record_caption':
+                    # a flag, stored only while it is set
+                    if operation.get('value'):
+                        block['record_caption'] = True
+                    else:
+                        block.pop('record_caption', None)
+                elif field == 'source':
                     key = ('geometry' if block.get('kind') == 'scene'
                            else 'source')
                     block[key] = value

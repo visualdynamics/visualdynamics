@@ -73,14 +73,15 @@ is.
 
 References
 ----------
-Range, clipping and the way an average hides it are covered in the
-texts on vibration data acquisition; these are where they are set out.
+What a channel is ranged against and what clipping costs are set out
+in the test standard this check follows.
 
-1. Piersol, A. G., & Paez, T. L. (Eds.) (2010). *Harris' Shock and
-   Vibration Handbook*, 6th ed. McGraw-Hill. The setting of each
-   channel's range from its expected peak, the crest factor of random
-   and sinusoidal signals, and the overload of a transducer ahead of
-   the input.
+1. Department of Defense (2019). *MIL-STD-810H, Environmental
+   Engineering Considerations and Laboratory Tests*. Method 517.3,
+   paragraph 4.4.1.1c: a channel ranged for the peak it is expected to
+   see, and a clipped signal from which no data can be recovered.
+   Method 516.8, paragraph 4.5: clipping found in a record, and a
+   record that shows it set aside.
 """
 
 from __future__ import annotations

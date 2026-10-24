@@ -33,6 +33,8 @@
     - [Checking the matrices of a multi-input test](mimo-matrix-checks.md)
     - [Predicting the notch before the test](limit-prediction.md)
     - [Predicting the drives before the test](drive-prediction.md)
+    - [Which drive explains a response](partial-coherence.md)
+    - [The transformation to a point, and where the rigid body holds](transformation.md)
 - Reading a record:
     - [Reading a record's time statistics](time-statistics.md)
     - [Checking each channel against its range](overload.md)

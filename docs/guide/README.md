@@ -121,6 +121,11 @@ that is not an alpha.
 - [Predicting the drives before the test](drive-prediction.md): the
   drives a specification asks for through an FRF, one drive or several,
   against the amplifier and shaker limits
+- [Which drive explains a response](partial-coherence.md): partial,
+  reference and virtual coherence of a test with several drives
+- [The transformation to a point, and where the rigid body
+  holds](transformation.md): the matrix from channels to six motions,
+  its conditioning, and the residual it leaves against frequency
 
 ## Reading a record
 

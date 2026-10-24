@@ -90,6 +90,10 @@ the lines where the drives reach the responses in nearly the same
 proportions, the lines a controller's inverse will be mostly noise at
 ([Checking the matrices of a multi-input
 test](../mimo-matrix-checks.md)).
+With several drives, the multiple coherence's **Partial Coherence**
+toggle says which drive explains each response once the others are
+removed, and whether the drives were independent enough to be told
+apart ([Which drive explains a response](../partial-coherence.md)).
 
 ![Where to click: with Excitation Time History selected (1), press
 Multiple Coherence in the Averaging view (2)](../images/sysid-coherence-click.png)

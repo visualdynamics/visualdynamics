@@ -199,6 +199,15 @@ cross-spectral matrix against its specification as a grid, the levels
 on the diagonal, the coherence above and the phase below, each cell
 with its verdict, the reading the Matrix toggle shows ([Judging a
 cross-spectral matrix](matrix-comparison.md)).
+`plot_partial_coherence(reading, response)` draws a response's multiple
+coherence over each drive's partial coherence, the coherence between
+the drives and the principal drives' powers, the reading the multiple
+coherence's Partial Coherence toggle shows ([Which drive explains a
+response](partial-coherence.md)). `plot_transformation_residual(reading)`
+draws the measured power at a transformation's channels, the part its
+outputs explain and the residual, the reading a transformed density's
+Rigid-Body Residual toggle shows ([The transformation to a
+point](transformation.md)).
 The 3-D forms are in
 `visualdynamics.viz`: `scalogram.plot_scalogram_stage(history)` is the
 surface the wavelet reading opens in, and

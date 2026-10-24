@@ -1820,6 +1820,114 @@ def multi_point():
                       for c in reading.channels))
 
 
+def _resonance(f, fn, q):
+    """A base-driven single resonance's transmissibility at `f`."""
+    r, z = f / fn, 1.0 / (2.0 * q)
+    return (1.0 + 2j * z * r) / (1.0 - r ** 2 + 2j * z * r)
+
+
+def partial_coherence():
+    """Two drives that are nearly one below 100 Hz and independent
+    above, and a response with a 150 Hz path from the first and a
+    300 Hz path from the second, with a little noise: 64 s at 1024 Hz,
+    Hann frames of 512 at half overlap. Below 100 Hz the reference
+    coherence is near one and neither partial coherence can be read;
+    above it each drive's partial coherence rises through its own
+    resonance."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.plot import plot_partial_coherence
+
+    fs, n = 1024.0, 1 << 16
+    rng = np.random.default_rng(2207)
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    x1 = rng.standard_normal(n)
+    own = np.fft.rfft(rng.standard_normal(n))
+    shared = np.fft.rfft(x1)
+    low = f < 100.0
+    x2 = np.fft.irfft(np.where(low, shared + 0.05 * own, own), n)
+    y = np.fft.irfft(np.fft.rfft(x1) * _resonance(f, 150.0, 8.0)
+                     + np.fft.rfft(x2) * _resonance(f, 300.0, 8.0), n)
+    y += 0.3 * rng.standard_normal(n)
+    history = TimeHistory(np.arange(n) / fs, np.vstack([x1, x2, y]),
+                          response_dof=['1Z+', '2Z+', '101Z+'],
+                          ordinate_dim=['force', 'force', 'acceleration'])
+    history.averaging = Averaging(frame_length=512, overlap=0.5,
+                                  window='hann').filled(n, fs)
+    reading = history.read_partial_coherence()
+    plot_partial_coherence(reading, '101Z+', show=False, size=(1000, 900),
+                           path=str(OUT / 'partial-coherence.png'))
+    for frequency in (50.0, 150.0, 300.0):
+        point = reading.at(frequency)
+        print(f'{point.frequency:.0f} Hz: multiple {point.multiple:.3f}, '
+              f'ordinary {np.round(point.ordinary, 3)}, partial '
+              f'{np.round(point.partial, 3)}, reference '
+              f'{reading.reference[0, 1, np.argmin(abs(reading.frequency - frequency))]:.3f}')
+    print(reading.describe(), reading.averages, reading.notes)
+
+
+def transformation_residual():
+    """A plate measured triaxially at five points, moving as a rigid
+    body under white noise, with a flexible mode at 400 Hz (Q 10) that
+    moves the points in a shape no rigid motion has, and a small noise
+    floor on every channel: 32 s at 2048 Hz, 1024-sample Hann frames at
+    half overlap. The rigid-body residual is a small share of the power
+    until the mode and grows through it."""
+    import numpy as np
+
+    from visualdynamics.core.averaging import Averaging
+    from visualdynamics.core.data import TimeHistory
+    from visualdynamics.core.geometry import Geometry
+    from visualdynamics.core.rigid import MassProperties, rigid_body_shapes
+    from visualdynamics.core.transformation import Transformation
+    from visualdynamics.plot import plot_transformation_residual
+
+    fs, n = 2048.0, 1 << 16
+    rng = np.random.default_rng(2208)
+    xyz = np.array([[0.3, 0.2, 0.0], [-0.3, 0.2, 0.0], [-0.3, -0.2, 0.0],
+                    [0.3, -0.2, 0.0], [0.0, 0.0, 0.05]])
+    geometry = Geometry(np.arange(101, 106), xyz, length_unit='m')
+    rigid = rigid_body_shapes(geometry, MassProperties((0.0, 0.0, 0.0)))
+    f = np.fft.rfftfreq(n, 1.0 / fs)
+    q = rng.standard_normal((6, n)) * np.array(
+        [1.0, 1.0, 1.0, 2.0, 2.0, 2.0])[:, None]
+    # a plate's first bending shape: the corners up in Z, the middle down
+    bend = np.zeros(15)
+    bend[[2, 5, 8, 11]] = 1.0
+    bend[14] = -2.0
+    # the deformation relative to the rigid motion, which a base-driven
+    # resonance gives as r²/(1 − r² + 2jζr): nothing at low frequency,
+    # the full mode at and past it
+    r = f / 400.0
+    relative = r ** 2 / (1.0 - r ** 2 + 2j * r / 20.0)
+    modal = np.fft.irfft(np.fft.rfft(rng.standard_normal(n)) * relative, n)
+    u = (rigid.shape_matrix.T @ q + np.outer(bend, modal)
+         + 0.01 * rng.standard_normal((15, n)))
+    history = TimeHistory(np.arange(n) / fs, u,
+                          response_dof=list(rigid.coordinate),
+                          ordinate_dim='acceleration')
+    history.averaging = Averaging(frame_length=1024, overlap=0.5,
+                                  window='hann').filled(n, fs)
+    transformation = Transformation.from_geometry(
+        geometry, (0.0, 0.0, 0.0), rigid.coordinate)
+    reading = transformation.read_residual(history.compute_cpsds())
+    plot_transformation_residual(reading, show=False, size=(1000, 760),
+                                 path=str(OUT / 'transformation.png'))
+    print(f'{transformation.describe()}; singular values '
+          f'{np.round(transformation.singular_values, 3)}; length scale '
+          f'{transformation.length_scale:.4f} m')
+    print(f'{reading.describe()}; worst {reading.worst_channel} '
+          f'{np.nanmax(reading.channel_fractions):.3f}')
+    for frequency in (100.0, 300.0, 400.0):
+        line = int(np.argmin(abs(reading.frequency - frequency)))
+        print(f'{reading.frequency[line]:.0f} Hz residual share '
+              f'{reading.fraction[line]:.4f}')
+    headings, rows = transformation.table('mm')
+    print(headings[:4], rows[3][:4], rows[3][-1])
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     psd_reading()
@@ -1858,6 +1966,8 @@ def main():
     matrix_comparison()
     limit_prediction()
     multi_point()
+    partial_coherence()
+    transformation_residual()
     print('done')
 
 

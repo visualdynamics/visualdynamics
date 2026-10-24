@@ -236,6 +236,13 @@ MATRIX_SLICE = 0.08
 #: 51,200 a second) and 0.8 s for six times that, so past this it runs
 #: on the worker with the bar up (`_run_long`), as a long verb does
 RESAMPLE_INLINE_SAMPLES = 400_000
+
+#: the most samples of a channel (every capture) the rms check reads on
+#: the window's own thread. It reads about 25 million samples a second
+#: once its imports are warm (a 120 s channel at 5120 samples a second,
+#: 614,400 samples, in 0.04 s), so past a million it runs on the
+#: worker with the bar up (`_run_long`), as a long verb does
+RMS_CHECK_INLINE_SAMPLES = 1_000_000
 from ..core.report import OTHER_SIDE
 from ..names import display_name
 from ..project import TYPE_ORDER, Project, describe, type_rank
@@ -14330,7 +14337,7 @@ class MainWindow(QMainWindow):
         return name, data, record, histories
 
     def _draw_rms_check(self, name, psd, record, histories):
-        """The rms check of the flat spectrum: the judgement and the gap
+        """The rms check of the flat spectrum: the judgment and the gap
         in the plot's corner (`plot.rms_check.RmsCheckLabel`), the whole
         check in the pane. One record is checked, the first on the plot:
         pick a sub-item in the tree to check another. Returns the status
@@ -14369,17 +14376,38 @@ class MainWindow(QMainWindow):
         if state is None:
             return None
         panel = self.data_pane.rms_check_panel
-        try:
-            check = self.project.rms_check(
+        from ..core.progress import Cancelled
+
+        def checked(progress=None):
+            return self.project.rms_check(
                 state['name'], state['record'], history=state['history'],
                 threshold_db=state['threshold_db'])
+
+        try:
+            if self._rms_check_samples(state) > RMS_CHECK_INLINE_SAMPLES:
+                check = self._run_long(
+                    f'Checking the rms of {state["name"]}…', checked)
+            else:
+                check = checked()
+        except Cancelled:
+            if self._rms_check is not state:
+                return None
+            state['label'].clear()
+            panel.show_check(None, refusal='the rms check was cancelled')
+            return 'The rms check was cancelled'
         except ValueError as refusal:
+            if self._rms_check is not state:
+                return None
             state['check'] = None
             state['label'].clear()
             panel.show_check(None, refusal=str(refusal))
             message = f'No rms check: {refusal}'
             self._show_status(message)
             return message
+        if self._rms_check is not state:
+            # the plot was redrawn while the worker read: that drawing
+            # made its own check, and this one belongs to nothing
+            return None
         state['check'] = check
         state['label'].show(check, unit=state['unit'], scale=state['scale'])
         panel.show_check(check, unit=state['unit'], scale=state['scale'])
@@ -14388,6 +14416,20 @@ class MainWindow(QMainWindow):
                                                     state['scale'])
         self._show_status(message)
         return message
+
+    def _rms_check_samples(self, state):
+        """How many samples of its channel the check in `state` reads,
+        every capture counted: the channel's rows of the time history
+        times its length."""
+        from ..core.rms_check import matching_records
+
+        psd = self.project[state['name']]
+        history = self.project[state['history']]
+        record = state['record']
+        rows = matching_records(history, str(psd.response_dof[record]),
+                                str(psd.ordinate_dim[record]),
+                                psd.dimension_hint[record])
+        return len(rows) * len(history.abscissa)
 
     def _rms_check_chosen(self, settings):
         """A time history or a threshold chosen in the rms check's pane:

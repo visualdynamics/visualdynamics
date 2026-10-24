@@ -665,3 +665,188 @@ def test_a_negative_record_is_refused(hann, record):
         psd.rms_check(record, -1, averaging=averaging)
     assert 'record 5' in refusal(psd, 5)
     assert f'record {psd.num_records}' in refusal(psd, psd.num_records)
+
+
+# ---- dead, not finite, empty and late records -------------------------------
+
+def _one_channel(x, start=0.0):
+    """`x`, in g, as a one-channel record at 1Z+ whose clock starts at
+    `start`."""
+    t = start + np.arange(len(x)) / FS
+    return TimeHistory(t, np.asarray(x, dtype=float)[None] * G,
+                       response_dof=['1Z+'], ordinate_dim=['acceleration'],
+                       ordinate_unit=['g'])
+
+
+def test_a_dead_channel_is_not_judged_and_says_why():
+    history = _one_channel(np.zeros(int(8 * FS)))
+    averaging = _frames(history)
+    check = history.compute_psds(averaging).rms_check(history,
+                                                      averaging=averaging)
+    assert not check.passed and check.cause is None
+    assert check.verdict == ('no gap to judge: the record is zero over the '
+                             'span read')
+    from visualdynamics.plot.rms_check import heading
+    assert heading(check) == 'rms check: not judged'
+
+
+def test_one_sample_not_finite_is_named_as_the_cause(record):
+    x = record.ordinate[0] / G
+    x[1000] = np.nan
+    history = _one_channel(x)
+    averaging = _frames(history)
+    check = history.compute_psds(averaging).rms_check(history,
+                                                      averaging=averaging)
+    assert not check.passed and not check.explained and check.cause is None
+    assert check.verdict.startswith(
+        "no gap to judge: none of the spectrum's lines is a finite number")
+    assert '1 sample of the record is not finite' in ' '.join(check.notes)
+
+
+def test_a_spectrum_of_zeros_and_a_record_of_nans_are_each_named():
+    f = np.arange(0.0, 11.0)
+    assert rms_check(f, np.zeros(11), np.ones(32)).verdict == (
+        "no gap to judge: the spectrum's lines are all zero")
+    assert rms_check(f, np.ones(11), np.full(32, np.nan)).verdict == (
+        "no gap to judge: none of the record's samples is a finite number")
+
+
+def test_an_empty_record_and_an_empty_spectrum_are_refused():
+    with pytest.raises(ValueError, match='no samples'):
+        rms_check(np.arange(0.0, 11.0), np.ones(11), np.array([]))
+    with pytest.raises(ValueError, match='two lines or more'):
+        rms_check(np.array([1.0]), np.ones(1), np.ones(32))
+
+
+def test_a_record_whose_clock_starts_late_reads_the_same(record):
+    x = record.ordinate[0] / G
+    early, late = _one_channel(x), _one_channel(x, start=3.25)
+    averaging = Averaging(frame_length=1024, frames=20, start=1.0)
+    first = early.compute_psds(averaging).rms_check(early,
+                                                    averaging=averaging)
+    second = late.compute_psds(averaging).rms_check(late,
+                                                    averaging=averaging)
+    assert second.span == pytest.approx((3.25 + 1.0, 3.25 + 11.0))
+    assert first.span == pytest.approx((1.0, 11.0))
+    assert second.gap_db == pytest.approx(first.gap_db, abs=1e-12)
+    assert second.time_rms == pytest.approx(first.time_rms, rel=1e-12)
+
+
+def test_only_the_checked_channel_is_framed(monkeypatch, record):
+    """The other channels of a many-channel record are not read, so they
+    are not framed: on a long record framing them was most of the time."""
+    x = record.ordinate[0] / G
+    two = TimeHistory(record.abscissa, np.vstack([x, 2.0 * x]) * G,
+                      response_dof=['1Z+', '2Z+'],
+                      ordinate_dim=['acceleration'] * 2,
+                      ordinate_unit=['g'] * 2)
+    averaging = _frames(two)
+    psd = two.compute_psds(averaging)
+    framed = []
+    original = TimeHistory._spectral_frame
+
+    def spy(self, *args, **kwargs):
+        out = original(self, *args, **kwargs)
+        framed.append(set(out[2]))
+        return out
+
+    monkeypatch.setattr(TimeHistory, '_spectral_frame', spy)
+    check = psd.rms_check(two, 1, averaging=averaging)
+    assert framed == [{two.channel_key(1)}]
+    assert check.passed and check.dof == '2Z+'
+
+
+def test_white_noise_at_the_defaults_is_never_called_a_scaling_error():
+    """Correctly scaled spectra of white noise under the default window
+    (Hann, frames end to end): the gap scatters with the window's
+    weighting, and over 0.05 dB it is said to be the window's, never
+    flagged and never given a cause."""
+    flagged, windows = 0, 0
+    for seed in range(40):
+        rng = np.random.default_rng(seed)
+        history = _one_channel(rng.standard_normal(int(8 * FS)))
+        averaging = Averaging(frame_length=1024).filled(
+            len(history.abscissa), FS)
+        check = history.compute_psds(averaging).rms_check(
+            history, averaging=averaging)
+        assert check.window == 'hann'
+        assert check.cause is None
+        flagged += not (check.passed or check.explained)
+        windows += check.explained
+    assert flagged == 0
+    assert windows > 0, 'the default threshold is reached by the window alone'
+
+
+# ---- the survivors of tools/mutate.py, each pinned -------------------------
+
+def test_a_boxcar_names_no_amplitude_correction():
+    """A rectangle's noise bandwidth is one line, so its amplitude
+    correction is no correction and is never the cause of a gap."""
+    f = np.arange(0.0, 11.0)
+    values = np.full(11, 1.0 / 10.5)
+    # the record read 0.05 dB under the spectrum's own rms
+    carried = rms_check(f, values, np.ones(8)).spectrum_rms
+    record = np.ones(64) * carried / 10.0 ** (0.05 / 20.0)
+    check = rms_check(f, values, record, threshold_db=0.01, window='boxcar')
+    assert check.gap_db == pytest.approx(0.05, abs=1e-9)
+    assert not check.passed and check.noise_bandwidth == pytest.approx(1.0)
+    assert check.cause is None
+
+
+def test_one_finite_sample_has_an_rms_and_a_zero_threshold_is_allowed():
+    assert time_rms(np.array([np.nan, -3.0, np.inf])) == pytest.approx(3.0)
+    f = np.arange(0.0, 11.0)
+    assert rms_check(f, np.ones(11), np.ones(8),
+                     threshold_db=0.0).threshold_db == 0.0
+
+
+def test_two_lines_are_enough_for_an_area():
+    check = rms_check([0.0, 1.0], [1.0, 1.0], np.ones(8))
+    assert check.lines == 2 and np.isfinite(check.gap_db)
+    two = Psd(np.array([0.0, 1.0]), np.ones((1, 2)), response_dof=['1Z+'],
+              ordinate_dim=['acceleration**2/frequency'])
+    assert refusal(two) is None
+
+
+def test_one_line_left_out_is_said_in_the_singular():
+    f = np.arange(0.0, 11.0)
+    values = np.ones(11)
+    values[3] = np.nan
+    check = rms_check(f, values, np.ones(8))
+    assert check.notes == (('1 line of the spectrum is not finite or below '
+                            'zero, and left out of its area'),)
+
+
+def test_a_declared_spectrum_names_its_own_quantity_in_the_refusal():
+    t = np.arange(64) / 64.0
+    history = TimeHistory(t, np.ones((1, 64)), response_dof=['1Z+'],
+                          ordinate_dim=['acceleration'], ordinate_unit=['g'])
+    f = np.arange(0.0, 33.0)
+    force = Psd(f, np.ones((1, f.size)), response_dof=['1Z+'],
+                ordinate_dim=['force**2/frequency'])
+    with pytest.raises(ValueError, match=r'what force\*\*2/frequency is'):
+        force.rms_check(history)
+
+
+def test_the_ambiguity_names_each_channel_s_hint():
+    history = _undeclared_pair()
+    psd = history.compute_psds(_frames(history, window='boxcar',
+                                       overlap=0.0))
+    bare = Psd(psd.abscissa, psd.ordinate[:1], response_dof=['1Z+'])
+    with pytest.raises(ValueError, match=r'\(acceleration, force\)'):
+        bare.rms_check(history)
+
+
+def test_the_first_record_is_checked_when_none_is_named(hann, record):
+    from visualdynamics.core.rms_check import check_record
+
+    psd, averaging = hann
+    assert check_record(psd, record, averaging=averaging) == psd.rms_check(
+        record, 0, averaging=averaging)
+
+
+def test_a_fine_spectrum_a_line_short_at_the_bottom_is_said_to_be():
+    """At half-hertz lines the first line at 0.5 Hz is one short of DC."""
+    assert _coverage(np.arange(1.0, 2049.0) * 0.5, 2048.0) == (
+        'its lines run 0.5 to 1024 Hz of the 0 to 1024 Hz the record holds')
+    assert _coverage(np.arange(0.0, 2049.0) * 0.5, 2048.0) is None

@@ -1,5 +1,5 @@
 """The rms check in the window: a toggle on a plain autospectrum's bar,
-the judgement and the gap in the plot's corner, the whole check in the
+the judgment and the gap in the plot's corner, the whole check in the
 pane beside it.
 
 A reading of a spectrum that exists, so a toggle on the bar with no act
@@ -231,3 +231,28 @@ def test_two_undeclared_channels_are_each_checked_against_their_own(window,
         assert check.time_rms == pytest.approx(np.sqrt(np.mean(samples ** 2)))
         assert check.gap_db == pytest.approx(0.0, abs=1e-9)
         assert check.passed
+
+
+def test_a_long_channel_is_checked_on_the_worker(window, pump, monkeypatch):
+    """Past `RMS_CHECK_INLINE_SAMPLES` the check runs through `_run_long`
+    with the bar up, and its result is written as an inline one is; under
+    it the window's thread reads it directly."""
+    from visualdynamics.gui import main_window as module
+
+    ran = []
+    original = window._run_long
+
+    def spy(status, verb, *args, **kwargs):
+        ran.append(status)
+        return original(status, verb, *args, **kwargs)
+
+    monkeypatch.setattr(window, '_run_long', spy)
+    name, _spectrum, pane = _checked(window, pump)
+    assert ran == [] and window._rms_check['check'].passed
+    monkeypatch.setattr(module, 'RMS_CHECK_INLINE_SAMPLES', 1000)
+    pane.rms_check_panel.threshold_box.setValue(0.2)
+    pump()
+    assert ran == [f'Checking the rms of {name}…']
+    check = window._rms_check['check']
+    assert check.passed and check.threshold_db == pytest.approx(0.2)
+    assert pane.rms_check_panel.verdict.text().startswith('Agree within 0.2')

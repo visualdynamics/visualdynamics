@@ -115,9 +115,20 @@ controller's 10 to 1000 Hz, holds only part of the record's power:
 `coverage` says which part, the verdict says the gap is not a test of
 the scaling, and no cause is named.
 
+A record that is zero over the span, one with no finite sample, a
+spectrum whose lines are all zero, and one with no finite line (a
+single sample that is not finite in a frame makes every line of that
+frame's spectrum so) leave no gap to judge: `passed` is False, the
+verdict says which of the four it is, and the plot's heading reads
+"not judged". A correctly scaled spectrum is never given a cause. On
+white noise under the default window (Hann, frames end to end), 8 s at
+2048 samples a second, about a quarter of correct spectra read over
+0.05 dB and are said to be the window's gap; at 60 s about one in a
+hundred do.
+
 `plot_rms_check` draws the spectrum with the check written in its
-corner: the judgement in bold ("agree", "the window's gap" or
-"flagged"), both rms in the display unit, the gap against its
+corner: the judgment in bold ("agree", "the window's gap", "flagged"
+or "not judged"), both rms in the display unit, the gap against its
 threshold, the window's share when it bears on the verdict, and the
 verdict in words.
 
@@ -138,7 +149,7 @@ Hann amplitude correction applied to a density, it reads 10.89 g rms,
 Select a PSD and press **RMS Check** on the bar. It is offered for an
 autospectrum on evenly spaced lines when the project holds a time
 history with its channel; not for octave bands, a cross spectrum or a
-record. The plot's corner carries the judgement and the gap, and the
+record. The plot's corner carries the judgment and the gap, and the
 pane beside the plot shows the rest: the channel, the rms from the
 spectrum and from the time history, the gap, the frames' rms and the
 window's share, the lines, the span read and the window, with the
@@ -152,6 +163,8 @@ holding the same channel can be chosen instead, which is how an
 imported spectrum is checked against its run. The threshold is set in
 the pane. Both choices are kept for that PSD. The check is of one
 record, the first on the plot: pick a channel in the tree to check
-another. While the check is up the plot stays flat.
+another. While the check is up the plot stays flat. A channel of more
+than a million samples is checked with the progress bar up, as a long
+computation is.
 
 The check is journaled as the `plot_rms_check` call that draws it.

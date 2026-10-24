@@ -46,10 +46,7 @@ the window's noise bandwidth is what names the commonest error.
    [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
    The averaged, windowed periodogram, scaled by the sum of the
    window's squares, whose area is the frames' mean square.
-2. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
-   Measurement Procedures*, 4th ed. Wiley. The one-sided autospectral
-   density and its integral, the mean square value.
-3. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
+2. Harris, F. J. (1978). "On the Use of Windows for Harmonic Analysis
    with the Discrete Fourier Transform." *Proceedings of the IEEE*,
    66(1), 51-83.
    [doi:10.1109/PROC.1978.10837](https://doi.org/10.1109/PROC.1978.10837)
@@ -237,14 +234,33 @@ class RmsCheck:
         return None
 
     @property
+    def unjudged(self) -> str | None:
+        """Why there is no gap to judge, in words, or None when there is
+        one: the record or the spectrum carries no finite mean square,
+        or carries zero."""
+        if not np.isfinite(self.time_rms):
+            return "none of the record's samples is a finite number"
+        if not np.isfinite(self.spectrum_rms):
+            # one sample that is not finite spreads over every line of
+            # its frame's transform, and the average carries it on
+            return ("none of the spectrum's lines is a finite number (a "
+                    'sample that is not finite in a frame makes every line '
+                    "of that frame's spectrum so)")
+        if self.time_rms <= 0.0:
+            return 'the record is zero over the span read'
+        if self.spectrum_rms <= 0.0:
+            return "the spectrum's lines are all zero"
+        return None
+
+    @property
     def verdict(self) -> str:
-        """The judgement in words: agree, the window's gap, a named
-        scaling error, or a gap to look for one behind."""
+        """The judgment in words: agree, the window's gap, a named
+        scaling error, a gap to look for one behind, or no gap to judge
+        and why."""
         gap = self.gap_db
         within = f'{self.threshold_db:g} dB'
         if not np.isfinite(gap):
-            return ('no gap to judge: the record or the spectrum carries '
-                    'no mean square')
+            return f'no gap to judge: {self.unjudged}'
         if self.passed:
             return (f'agree within {within}: the spectrum carries the '
                     "record's mean square")
@@ -404,12 +420,14 @@ def rms_check(frequencies: ArrayLike, values: ArrayLike,
     with np.errstate(invalid='ignore'):
         unused = int(np.sum(~(np.isfinite(density) & (density >= 0.0))))
     if unused:
-        notes.append(f'{unused} lines of the spectrum are not finite or '
-                     'are below zero, and are left out of its area')
+        notes.append(f'{_count(unused, "line")} of the spectrum '
+                     f'{"is" if unused == 1 else "are"} not finite or below '
+                     'zero, and left out of its area')
     _kept, dropped = _finite(pooled)
     if dropped:
-        notes.append(f'{dropped} samples of the record are not finite, and '
-                     'are left out of its rms')
+        notes.append(f'{_count(dropped, "sample")} of the record '
+                     f'{"is" if dropped == 1 else "are"} not finite, and '
+                     'left out of its rms')
     return RmsCheck(
         dof=str(dof), spectrum_rms=area_rms(f, values),
         time_rms=time_rms(pooled), framed_rms=(
@@ -417,6 +435,11 @@ def rms_check(frequencies: ArrayLike, values: ArrayLike,
         threshold_db=float(threshold_db), lines=int(f.size),
         spacing=float(spacing), samples=count, window=name,
         noise_bandwidth=bandwidth, notes=tuple(notes))
+
+
+def _count(n: int, noun: str) -> str:
+    """`n` and `noun`, the noun plural unless `n` is one."""
+    return f'{n} {noun}' if n == 1 else f'{n} {noun}s'
 
 
 def _level(frame: np.ndarray, detrend: str) -> np.ndarray:
@@ -619,7 +642,9 @@ def check_record(spectrum: Psd, history: TimeHistory, record: int = 0, *,
     key, rows = _channel(history, dof, str(spectrum.ordinate_dim[record]),
                          spectrum.dimension_hint[record])
     used = history._resolved_averaging(averaging)
-    grid, _scale, groups = history._spectral_frame(used)
+    # that channel's frames alone: the others of a long, many-channel
+    # record are not read, and framing them is most of the time
+    grid, _scale, groups = history._spectral_frame(used, channels={key})
     rate = history.sample_rate
     first = used.start_sample(rate)
     stop = first + used.span

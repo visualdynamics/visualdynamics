@@ -1641,7 +1641,7 @@ class TimeHistory(DataArray):
             averaging = Averaging.for_records(len(self.abscissa))
         return averaging
 
-    def _spectral_frame(self, averaging=None):
+    def _spectral_frame(self, averaging=None, channels=None):
         """(frequencies, one-sided scale, channel -> windowed frames).
 
         The framing a PSD and a CPSD share: the same rfft grid, the same
@@ -1658,6 +1658,10 @@ class TimeHistory(DataArray):
         The window comes into the scaling as the sum of its squares,
         which is `n` for a rectangle — so the two paths agree exactly
         where they overlap.
+
+        `channels`, a collection of `channel_key`s, frames those
+        channels alone, for a reading of one channel of a long,
+        many-channel record; every channel when None.
         """
         step = _even_steps(self.abscissa, 'Computing PSDs')
         fs = 1.0 / step
@@ -1677,6 +1681,8 @@ class TimeHistory(DataArray):
         first = averaging.start_sample(fs)
         groups = {}
         for key, indices in rows.items():
+            if channels is not None and key not in channels:
+                continue
             frames = []
             for i in indices:
                 for f in range(averaging.frames):

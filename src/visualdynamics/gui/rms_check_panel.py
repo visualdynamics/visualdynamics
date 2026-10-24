@@ -7,7 +7,7 @@ the display unit, the gap between them in dB, the frames' own rms and
 the window's share of the gap when the averaging is known, the lines
 summed and the span the record was read over, then the verdict in
 words and anything the reader should know under it. The plot carries
-the judgement and the gap in its corner (`plot.rms_check`).
+the judgment and the gap in its corner (`plot.rms_check`).
 
 Two settings are made here. The time history defaults to the one the
 spectrum was computed from (`Project.rms_source`), and any other record

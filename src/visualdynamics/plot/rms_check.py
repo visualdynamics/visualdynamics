@@ -15,7 +15,7 @@ is the numbers themselves, in words, in the corner of the spectrum:
   such;
 - the verdict in words: agree, the window's gap, a scaling error named,
   or a gap to look for one behind, under a heading in bold that says
-  'agree', 'the window's gap' or 'flagged'.
+  'agree', 'the window's gap', 'flagged' or 'not judged'.
 
 The words go in one label pinned to the plot's top-right corner, in
 the plot's foreground color unless the caller passes another. It is
@@ -44,12 +44,12 @@ OFFSET = (-10, 8)
 
 
 def heading(check: Any) -> str:
-    """The judgement in a word or two, the label's first line: 'agree'
+    """The judgment in a word or two, the label's first line: 'agree'
     within the threshold, 'the window's gap' outside it when the window
-    is the whole of the gap, 'flagged' outside it otherwise, and 'no
-    gap' when there is nothing to judge."""
+    is the whole of the gap, 'flagged' outside it otherwise, and 'not
+    judged' when there is no gap to judge (`RmsCheck.unjudged`)."""
     if not np.isfinite(check.gap_db):
-        return 'rms check: no gap'
+        return 'rms check: not judged'
     if check.passed:
         return 'rms check: agree'
     return 'rms check: ' + ("the window's gap" if check.explained
@@ -85,7 +85,7 @@ def label_html(check: Any, unit: str = '', scale: float = 1.0, *,
                brief: bool = False) -> str:
     """The label as rich text for a pyqtgraph `LabelItem`: the lines of
     `label_lines` (`brief` as there), the heading in bold so the
-    judgement reads first."""
+    judgment reads first."""
     from html import escape
 
     lines = [escape(line, quote=False)

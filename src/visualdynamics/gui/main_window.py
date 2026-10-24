@@ -977,8 +977,11 @@ class MainWindow(QMainWindow):
             self._journal_distortion)
         self.data_pane.sine_panel.frequency.read.connect(
             self._journal_frequency)
-        # and the mixed-mode data sheet, the same way
+        # and the mixed-mode data sheet, the same way, read on the
+        # worker with the bar up, since tracking the tones of a long
+        # record takes seconds
         self.data_pane.sine_panel.mixed.read.connect(self._journal_mixed)
+        self.data_pane.sine_panel.mixed.runner = self._run_long
         self.data_pane.truncate_toggled.connect(
             lambda _wanted: self.render_current())
         self.data_pane.truncate_panel.changed.connect(

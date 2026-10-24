@@ -1549,7 +1549,7 @@ def mixed_mode():
     history = record(x)
     # the tones run from the record's first sample
     plot_mixed_mode(history, spec, onset=0.0, unit_system=us, show=False,
-                    size=(1400, 620), path=str(OUT / 'mixed-mode-sheet.png'))
+                    size=(1600, 620), path=str(OUT / 'mixed-mode-sheet.png'))
     reading = judge_mixed(history, spec, onset=0.0)
     print(f'mixed: residual every line {reading.floor.residual / g:.3f} '
           f'grms, tones {reading.tones_measured / g:.3f} g rms, '
@@ -1579,7 +1579,7 @@ def mixed_mode():
         floor, None, [Narrowband.plus_minus(300.0, 5.0, 0.02 * g ** 2,
                                             name='engine'), swept])
     plot_mixed_mode(record(x), bands, unit_system=us, show=False,
-                    size=(1400, 620), path=str(OUT / 'mixed-mode-bands.png'))
+                    size=(1600, 620), path=str(OUT / 'mixed-mode-bands.png'))
     for row in judge_mixed(record(x), bands).narrowbands:
         print(f'band {row.name}: {row.measured / g:.3f} grms against '
               f'{row.reference / g:.3f}, {row.error_db:+.2f} dB in '

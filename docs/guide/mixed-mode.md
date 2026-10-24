@@ -123,14 +123,19 @@ part by part:
    number allowed. A floor with no line left to judge is not judged, and
    the reading says so.
 4. Each narrowband is judged at the degrees of freedom of a narrow
-   band. A fixed band's level is the mean of its lines, worth the
-   per-line degrees of freedom times its lines over the window's noise
-   bandwidth. A swept band stays over any one frequency only as long
+   band. A fixed band's level is the mean of its lines. Under a window
+   adjacent lines vary together (by 0.44 under Hann), so the mean of
+   its lines is worth fewer degrees of freedom than their count times
+   a line's, about the count over 1.94 under Hann; the band is worth
+   what the averaging's own line correlation leaves it, the rule the
+   Chance reading counts combined lines by. A swept band stays over any one frequency only as long
    as it takes to move its own width, so it is read in slices half that
    long, each worth only the few frames it holds, and its level is the
    slices pooled. Its tolerance is the stated one, or the floor's,
-   widened to the chi-square scatter at those degrees of freedom, so
-   it is never failed for scatter its statistics cannot avoid.
+   widened to the chi-square scatter at those degrees of freedom (90
+   percent by default), so a band of few degrees of freedom is not
+   failed for scatter wider than its tolerance. A band with no line
+   under it, or a swept band with no slice, is not judged.
 5. The total is every line of the record's spectrum. It has no
    tolerance of its own: it is the figure the amplifier, the coil and
    the fixture see, and the first one another lab computes.
@@ -173,7 +178,7 @@ for the tones, 2.67 for the total](images/mixed-mode-sheet.png)
 16 Hz band sweeping 150 to 250 Hz, each judged at its own degrees of
 freedom](images/mixed-mode-bands.png)
 
-In the second figure the swept band is read in 37 slices of about 10
+In the second figure the swept band is read in 37 slices of about 9
 degrees of freedom each, where a floor line has 112; one slice's
 scatter alone is wider than 3 dB either way, and the band's level
 pooled over the slices reads 0.2 dB over its written level. Its edges
@@ -189,7 +194,10 @@ specification at a channel the record has, a **Mixed Mode** readout
 sits under the extraction's settings: the channel, the width left out
 either side of a tone, the tracking band and the tones' tolerance.
 Reading a long record takes seconds, so the first reading waits for
-**Read Data Sheet**; once the sheet is up, an edit reads again at once.
+**Read Data Sheet**, and runs with the progress bar up; once the sheet
+is up, an edit reads again at once. A refusal (a dead channel, a sample
+that is not finite, a record of another quantity) is shown in place of
+the sheet.
 The sheet shows the same rows as the plot, the settings under them,
 and a small spectrum of the residual over the reference with the
 left-out lines hatched. The narrowbands are the floor's own
@@ -209,7 +217,14 @@ left-out lines hatched. The narrowbands are the floor's own
 - A steady tone has nothing in time for the matched filter to lock onto
   but where it starts, so with no `onset` given it is placed somewhere
   it plays, never before it, and the floor is read from there. Give
-  `onset` when the tones' start is known.
+  `onset` when the tones' start is known. A swept narrowband needs it:
+  where the band is at a moment is counted from the start, so with
+  steady tones and no `onset` it is not judged, and a note says why.
+- A channel holding a sample that is not finite, or zero throughout, is
+  refused, naming the cause: one such sample spreads over every line of
+  its frame's spectrum. A part with nothing left to judge reads "not
+  judged", never "passes", and a sheet that judged nothing has not
+  passed.
 - A record of another quantity than the floor or the tones (velocity
   against an acceleration floor) is refused, by the rule every
   comparison uses.

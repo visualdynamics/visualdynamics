@@ -122,7 +122,7 @@ def sheet_rows(reading: Any, unit_system: Any = None
                      f'{band.reference * scale:.3g} {rms}',
                      f'{band.measured * scale:.3g} {rms}',
                      _signed(band.error_db, 'dB'), tolerance,
-                     _verdict(band.passed if band.slices else None)))
+                     _verdict(band.passed)))
     total = reading.total
     rows.append(('Total, the whole drive', '—',
                  f'{total.reference * scale:.3g} {rms}',

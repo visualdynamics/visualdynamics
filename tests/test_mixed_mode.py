@@ -329,9 +329,15 @@ def test_a_fixed_band_is_judged_at_the_degrees_of_freedom_of_its_lines():
     assert (row.low, row.high) == pytest.approx((285.0, 315.0))
     assert row.reference / G == pytest.approx(np.sqrt(0.6))
     assert row.measured / G == pytest.approx(np.sqrt(0.6), rel=0.05)
-    # 31 lines under Hann's 1.5-line noise bandwidth, at the floor's
-    # per-line count
-    assert row.dof == pytest.approx(reading.floor.dof * 31 / 1.5, rel=1e-6)
+    # 31 lines at the floor's per-line count, adjacent lines varying
+    # together as Hann leaves them (`chance._sum_dof`): about 31/1.94
+    # lines' worth, not 31 over the window's 1.5-line noise bandwidth
+    from visualdynamics.core.chance import _sum_dof
+
+    assert row.dof == pytest.approx(_sum_dof(
+        np.ones(31), reading.floor.dof,
+        reading.averaging.line_correlation()), rel=1e-9)
+    assert row.dof == pytest.approx(reading.floor.dof * 31 / 1.944, rel=0.03)
     assert (row.low_db, row.high_db) == (-3.0, 3.0)
     assert row.passed and reading.passed
     # its lines are the band's, not the floor's
@@ -372,7 +378,9 @@ def test_a_swept_band_is_read_in_slices_at_its_own_scatter():
     narrow = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
                         rate=10.0, name='track')
     history = _record(extra=_swept(level, 16.0, 150.0, 250.0, 10.0))
-    reading = judge_mixed(history, _spec(narrowbands=[narrow]))
+    # the environment, band and tones, starts with the record; steady
+    # tones cannot show that, so it is given
+    reading = judge_mixed(history, _spec(narrowbands=[narrow]), onset=0.0)
     row, = reading.narrowbands
     assert row.swept and row.span == pytest.approx((142.0, 258.0))
     assert row.slices >= 20
@@ -386,7 +394,7 @@ def test_a_swept_band_is_read_in_slices_at_its_own_scatter():
     assert row.dof == pytest.approx(row.slices * row.slice_dof, rel=0.2)
     assert abs(row.error_db) < 1.0
     assert row.passed and row.inside > 0.6
-    # the floor is not judged where the band travelled
+    # the floor is not judged where the band traveled
     f = reading.frequencies
     assert reading.band_lines[(f > 142.0) & (f < 258.0)].all()
 
@@ -396,8 +404,9 @@ def test_a_swept_band_run_at_a_quarter_of_its_level_fails():
     narrow = Narrowband(150.0, 4 * level * G ** 2, width=16.0,
                         sweep_to=250.0, rate=10.0, tolerance_db=3.0)
     history = _record(extra=_swept(level, 16.0, 150.0, 250.0, 10.0))
-    row, = judge_mixed(history, _spec(narrowbands=[narrow])).narrowbands
-    assert row.error_db < -4.0 and not row.passed
+    row, = judge_mixed(history, _spec(narrowbands=[narrow]),
+                       onset=0.0).narrowbands
+    assert row.error_db < -4.0 and row.passed is False
 
 
 def test_a_swept_tone_is_tracked_along_its_sweep():
@@ -724,7 +733,128 @@ def test_an_edit_reads_the_sheet_again(window, pump):
         'reading never changes the project\'s floor'
 
 
+def test_the_sheet_is_read_on_the_worker(window, pump):
+    """The window runs the reading through `_run_long`, the worker with
+    the bar up, and shows what it returns."""
+    panel = _shown(window, pump)
+    ran, original = [], panel.runner
+    assert original == window._run_long
+
+    def spy(status, work, *args, **kwargs):
+        ran.append(status)
+        return original(status, work, *args, **kwargs)
+
+    panel.runner = spy
+    panel.read_button.click()
+    pump()
+    assert ran == ['Reading the data sheet of 1Z+…']
+    assert panel.reading is not None and panel.reading.passed
+
+
+def test_a_refusal_is_shown_in_place_of_the_sheet(window, pump):
+    panel = _shown(window, pump)
+    record = window.project['Record']
+    record.ordinate[0, 5000] = np.nan
+    panel.read_button.click()
+    pump()
+    assert panel.reading is None
+    assert 'holds 1 sample that is not finite' in panel.sheet.text()
+    assert not panel.preview.isVisible()
+
+
 def test_the_readout_stays_away_without_a_floor(window, pump):
     panel = _shown(window, pump, floor=False)
     assert window.data_pane.sine_panel.isVisible()
     assert not panel.isVisible(), 'no floor, no mixed test (principle 3)'
+
+
+# ---- dead, not finite, empty, and what is not judged ----------------------
+
+def _channel_of(x):
+    """`x`, in m/s², as the record's one channel."""
+    history = _record()
+    return TimeHistory(history.abscissa, np.asarray(x, dtype=float)[None],
+                       response_dof=[CHANNEL], ordinate_dim=['acceleration'],
+                       ordinate_unit=['g'])
+
+
+def test_a_dead_channel_is_refused_by_its_cause():
+    x = np.zeros(int(SECONDS * FS))
+    with pytest.raises(ValueError, match='zero throughout: a dead channel'):
+        judge_mixed(_channel_of(x), _spec(), onset=0.0)
+
+
+def test_one_sample_not_finite_is_refused_by_its_cause():
+    x = _record().ordinate[0].copy()
+    x[5000] = np.nan
+    with pytest.raises(ValueError, match='holds 1 sample that is not finite'):
+        judge_mixed(_channel_of(x), _spec())
+
+
+def test_an_empty_record_is_refused():
+    with pytest.raises(ValueError, match='two time samples'):
+        judge_mixed(TimeHistory(np.zeros(0), np.zeros((1, 0)),
+                                response_dof=[CHANNEL],
+                                ordinate_dim=['acceleration']), _spec(),
+                    onset=0.0)
+
+
+def test_a_swept_band_is_not_judged_when_steady_tones_cannot_time_it():
+    """Steady tones show where they play, not where the environment
+    starts, so a swept band timed from where the matched filter found
+    them would be read where it is not: it is not judged, never failed
+    and never passed, and the sheet says why."""
+    level = 0.05
+    narrow = Narrowband(150.0, level * G ** 2, width=16.0, sweep_to=250.0,
+                        rate=10.0, name='track')
+    history = _record(extra=_swept(level, 16.0, 150.0, 250.0, 10.0))
+    reading = judge_mixed(history, _spec(narrowbands=[narrow]))
+    row, = reading.narrowbands
+    assert row.passed is None and row.slices == 0
+    assert any(note.startswith('track: the tones are all steady')
+               for note in reading.notes)
+    assert reading.passed is not None, 'the floor and tones are judged'
+    assert 'some not judged' in reading.describe('g', 1.0 / G)
+    given = judge_mixed(history, _spec(narrowbands=[narrow]), onset=0.0)
+    assert given.narrowbands[0].passed
+
+
+def test_a_sheet_that_judged_nothing_has_not_passed(composite):
+    """No floor line, no tone reading and no band slice left to judge:
+    nothing was judged, so the sheet has not passed, and says so."""
+    from dataclasses import replace
+
+    reading = composite[2]
+    empty = replace(reading, floor=replace(reading.floor, judged=0),
+                    tones=tuple(replace(t, readings=0) for t in reading.tones),
+                    narrowbands=())
+    assert empty.floor.passed is None
+    assert all(t.passed is None for t in empty.tones)
+    assert empty.passed is None
+    assert empty.describe().endswith('nothing judged')
+
+
+def test_correctly_controlled_narrowbands_pass_on_white_noise():
+    """Ten seeds of a fixed band and ten of a swept one, each at its
+    written level on a 10 s record under the default Hann frames: the
+    tolerance, widened to the scatter at the degrees of freedom the
+    band's correlated lines carry, fails none of them."""
+    def fixed(t, rng):
+        return _noise(285.0, 315.0, np.sqrt(0.02 * 30.0), rng, len(t))
+
+    level, failed = 0.05, []
+    for seed in range(10):
+        narrow = Narrowband.plus_minus(300.0, 5.0, 0.02 * G ** 2)
+        row, = judge_mixed(_record(extra=fixed, seed=200 + seed,
+                                   seconds=10.0),
+                           _spec(narrowbands=[narrow]),
+                           onset=0.0).narrowbands
+        failed += [('fixed', seed)] * (row.passed is not True)
+        narrow = Narrowband(150.0, level * G ** 2, width=16.0,
+                            sweep_to=250.0, rate=10.0)
+        row, = judge_mixed(_record(extra=_swept(level, 16.0, 150.0, 250.0,
+                                                10.0), seed=300 + seed),
+                           _spec(narrowbands=[narrow]),
+                           onset=0.0).narrowbands
+        failed += [('swept', seed)] * (row.passed is not True)
+    assert failed == []

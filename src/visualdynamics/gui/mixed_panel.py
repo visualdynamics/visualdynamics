@@ -146,6 +146,12 @@ class MixedPanel(QWidget):
             'each tone, each narrowband and the total, each by its own '
             'rule')
         self.read_button.clicked.connect(self._read)
+        #: how a reading is run, `runner(status, work)`: the window sets
+        #: its `_run_long`, so the tracking and the averaging (seconds on
+        #: a long record) run on the worker with the bar up and the
+        #: window alive; called directly when None, as a script's panel
+        #: is
+        self.runner: Any = None
         grid.addWidget(self.read_button, 6, 0, 1, 2)
         #: the data sheet, as rich text
         self.sheet: QLabel = QLabel('')
@@ -243,6 +249,7 @@ class MixedPanel(QWidget):
         """Read the sheet with the settings shown, unless the same
         reading is already held, and show it."""
         from ..core.mixed_mode import MixedSpecification, judge_mixed
+        from ..core.progress import Cancelled
         from ..core.sine_tracking import SineTracking
 
         if self._history is None:
@@ -250,18 +257,35 @@ class MixedPanel(QWidget):
         settings = self.settings()
         key = self._key_now()
         if key != self._key or self.reading is None:
+            history = self._history
             try:
                 spec = MixedSpecification(self._floor, self._tones,
                                           exclusion=settings['exclusion'])
-                self.reading = judge_mixed(
-                    self._history, spec, channel=settings['channel'],
-                    band=SineTracking(fixed=settings['band']),
-                    tone_tolerance=settings['tone_tolerance'])
+
+                def work(progress=None):
+                    return judge_mixed(
+                        history, spec, channel=settings['channel'],
+                        band=SineTracking(fixed=settings['band']),
+                        tone_tolerance=settings['tone_tolerance'])
+
+                reading = (work() if self.runner is None else self.runner(
+                    f'Reading the data sheet of {settings["channel"]}…',
+                    work))
+            except Cancelled:
+                self.reading = None
+                self._key = None
+                self._show(None, 'The reading was cancelled.')
+                return
             except ValueError as refusal:
                 self.reading = None
                 self._key = None
                 self._show(None, str(refusal))
                 return
+            if self._key_now() != key:
+                # the record or a setting moved while the worker read:
+                # this sheet is of inputs no longer shown
+                return
+            self.reading = reading
             self._key = key
         self._show(self.reading)
         self.read.emit(self._history, self._floor, self._tones,

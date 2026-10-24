@@ -54,8 +54,10 @@ with it the way its band constraints are.
    and the reading says so.
 4. Each narrowband is judged at the degrees of freedom a narrow band
    has, which are fewer than the floor's. A fixed band's level is the
-   mean of the residual's lines between its edges, worth the per-line
-   degrees of freedom times the lines over the window's noise bandwidth.
+   mean of the residual's lines between its edges, worth what those
+   lines are worth together: adjacent lines vary together under a
+   window, so the degrees of freedom are `chance`'s count for combined
+   lines with the averaging's own line correlation.
    A swept band is read in slices of the run, each half as long as the
    band takes to move its own width, over the lines within a quarter of
    its width of its center at the slice's middle, which the band covered
@@ -67,7 +69,11 @@ with it the way its band constraints are.
    tolerance is the one the plan states (`tolerance_db`), or the floor's
    line tolerance, widened in either case to the chi-square scatter of
    an estimate at those degrees of freedom (90 percent by default), so
-   a band is never failed for scatter its statistics cannot avoid.
+   a band of few degrees of freedom is not failed for scatter wider than
+   its tolerance. A band with no line under it, or a swept band with no
+   slice, is not judged; so is a swept band when the onset was found
+   from steady tones alone, which place where they play but not where
+   the environment, and the band's sweep with it, begins.
 5. The total is the rms of the whole record over the span read, every
    line of the composite's autospectrum. It has no tolerance: it is the
    figure the amplifier, the coil and the fixture see.
@@ -84,11 +90,7 @@ its degrees of freedom and the chi-square scatter of an estimate are
 worth about 2BT degrees of freedom is the band-limited estimate's
 normalized random error.
 
-1. Bendat, J. S., & Piersol, A. G. (2010). *Random Data: Analysis and
-   Measurement Procedures*, 4th ed. Wiley. The autospectrum's random
-   error, 1/sqrt(B T) for a band B wide averaged over T, and the
-   chi-square distribution of an averaged autospectrum.
-2. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
+1. Welch, P. D. (1967). "The Use of Fast Fourier Transform for the
    Estimation of Power Spectra." *IEEE Transactions on Audio and
    Electroacoustics*, 15(2), 70-73.
    [doi:10.1109/TAU.1967.1161901](https://doi.org/10.1109/TAU.1967.1161901)
@@ -869,9 +871,12 @@ class ToneRow:
             if self.reference > 0.0 else float('nan')
 
     @property
-    def passed(self) -> bool:
-        """Whether the tone's level is within its tolerance."""
-        return bool(self.readings > 0 and abs(self.error) <= self.tolerance)
+    def passed(self) -> bool | None:
+        """Whether the tone's level is within its tolerance; None when no
+        reading was left to judge it on."""
+        if not self.readings:
+            return None
+        return bool(abs(self.error) <= self.tolerance)
 
 
 @dataclass(frozen=True)
@@ -911,10 +916,12 @@ class BandRow:
     inside: float
 
     @property
-    def passed(self) -> bool:
-        """Whether the band's level is within its tolerance."""
-        return bool(self.slices
-                    and self.low_db <= self.error_db <= self.high_db)
+    def passed(self) -> bool | None:
+        """Whether the band's level is within its tolerance; None when it
+        was not judged (no line under it, or no slice of its sweep)."""
+        if not self.slices:
+            return None
+        return bool(self.low_db <= self.error_db <= self.high_db)
 
 
 @dataclass(frozen=True)
@@ -970,13 +977,17 @@ class MixedReading:
     notes: tuple[str, ...] = field(default=())
 
     @property
-    def passed(self) -> bool:
-        """Whether every judged part passes: the floor when any line was
-        left to judge it on, each tone and each narrowband. The total is
+    def passed(self) -> bool | None:
+        """Whether every judged part passes: the floor, each tone and
+        each narrowband, each where it was judged. None when no part was
+        judged: a sheet that judged nothing has not passed. The total is
         not judged."""
-        return bool(self.floor.passed is not False
-                    and all(t.passed for t in self.tones)
-                    and all(b.passed for b in self.narrowbands))
+        verdicts = [self.floor.passed, *(t.passed for t in self.tones),
+                    *(b.passed for b in self.narrowbands)]
+        judged = [verdict for verdict in verdicts if verdict is not None]
+        if not judged:
+            return None
+        return all(judged)
 
     def describe(self, unit: str = '', scale: float = 1.0) -> str:
         """The reading in one line: the floor, the tones and the total,
@@ -995,10 +1006,17 @@ class MixedReading:
                          f'{"" if len(self.narrowbands) == 1 else "s"}')
         parts.append(f'total {self.total.measured * scale:.3g} {rms}')
         failed = ([] if self.floor.passed is not False else ['the floor']) \
-            + [t.name for t in self.tones if not t.passed] \
-            + [b.name for b in self.narrowbands if not b.passed]
-        verdict = ('every part passes' if not failed
-                   else 'outside: ' + ', '.join(failed))
+            + [t.name for t in self.tones if t.passed is False] \
+            + [b.name for b in self.narrowbands if b.passed is False]
+        if failed:
+            verdict = 'outside: ' + ', '.join(failed)
+        elif self.passed is None:
+            verdict = 'nothing judged'
+        elif None in (self.floor.passed, *(t.passed for t in self.tones),
+                      *(b.passed for b in self.narrowbands)):
+            verdict = 'every judged part passes, some not judged'
+        else:
+            verdict = 'every part passes'
         return f'{self.channel}: ' + ', '.join(parts) + f'; {verdict}'
 
 
@@ -1145,7 +1163,26 @@ def _judge_tone(history, spec, tone, column, band, onset, start, tolerance,
     return row, wave
 
 
-def _fixed_band(band, f, residual, floor, dof_line, bandwidth, db,
+def _steady(tone: Any) -> bool:
+    """Whether a tone stands at one frequency for its whole run, the
+    rule `ToneRow.fixed` reads a row by."""
+    low, high = tone_span(tone)
+    return high - low <= DWELL_SPAN * high
+
+
+def _lines_dof(averaging: Any, dof_line: float, k: int) -> float:
+    """The degrees of freedom of the mean of `k` adjacent lines, each
+    worth `dof_line`: `chance._sum_dof` with the averaging's own line
+    correlation (`Averaging.line_correlation`). Under Hann adjacent lines
+    vary together by 0.44, so `k` lines are worth about `k`/1.94 lines'
+    count, not `k` over the window's noise bandwidth of 1.5 lines."""
+    from .chance import _sum_dof
+
+    return max(_sum_dof(np.ones(int(k)), float(dof_line),
+                        averaging.line_correlation()), float(dof_line))
+
+
+def _fixed_band(band, f, residual, floor, dof_line, averaging, db,
                 confidence, notes):
     """A fixed narrowband's row, read off the residual's lines between
     its edges."""
@@ -1163,7 +1200,7 @@ def _fixed_band(band, f, residual, floor, dof_line, bandwidth, db,
     got = float(np.mean(residual[lines]))
     wanted = float(np.mean(floor[lines])) + band.level
     above = float(np.sum(residual[lines] - floor[lines])) * spacing
-    dof = dof_line * max(1.0, k / bandwidth)
+    dof = _lines_dof(averaging, dof_line, k)
     low_db, high_db = _scatter_band(tolerance, dof, confidence)
     error = _db(got / wanted)
     return BandRow(band.label, low, high, False, band.span(), band.rms,
@@ -1172,12 +1209,24 @@ def _fixed_band(band, f, residual, floor, dof_line, bandwidth, db,
 
 
 def _swept_band(band, residual_history, spec, channel, rate, onset, start,
-                db, confidence, notes):
+                db, confidence, notes, timed=True):
     """A swept narrowband's row, read in slices of the run half as long
-    as the band takes to move its own width."""
+    as the band takes to move its own width. With `timed` False the
+    environment's start is not known, so where the band is at any moment
+    is not known either, and the band is not judged."""
     from .averaging import Averaging
-    from .tone_readout import noise_bandwidth
 
+    if not timed:
+        low, high = band.edges()
+        tolerance = band.tolerance_db if band.tolerance_db is not None else db
+        notes.append(f'{band.label}: the tones are all steady, so the record '
+                     'does not show where the environment starts, and a '
+                     'swept band read from where they were found playing '
+                     'would be read where it is not; give the onset to '
+                     'judge it')
+        return BandRow(band.label, low, high, True, band.span(), band.rms,
+                       float('nan'), float('nan'), -tolerance, tolerance,
+                       0.0, 0, 0.0, 0.0)
     c_low, c_high = sorted((band.center, float(band.sweep_to)))
     centers = np.geomspace(c_low, c_high, 32)
     slice_seconds = 0.5 * min(band.crossing_seconds(c) for c in centers)
@@ -1199,7 +1248,6 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
     begin = int(np.ceil(start * rate))
     errors, dofs, inside, levels = [], [], [], []
     got_all, wanted_all = [], []
-    bandwidth = noise_bandwidth('hann', frame)
     step = max(slice_samples, frame)
     for first in range(begin, samples - step + 1, step):
         frames = 1 + (step - frame) // hop
@@ -1219,7 +1267,7 @@ def _swept_band(band, residual_history, spec, channel, rate, onset, start,
             continue
         got = float(np.mean(g[lines]))
         wanted = float(np.mean(floor[lines])) + band.level
-        dof = averaging.statistical_dof().equivalent * max(1.0, k / bandwidth)
+        dof = _lines_dof(averaging, averaging.statistical_dof().equivalent, k)
         low_db, high_db = _scatter_band(tolerance, dof, confidence)
         error = _db(got / wanted)
         errors.append(error)
@@ -1318,7 +1366,6 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
     from .compliance import rms, units_check
     from .sine import find_environment
     from .sine_tracking import SineTracking
-    from .tone_readout import noise_bandwidth
 
     spec = mixed(specification, tones)
     channel = spec.channels[0] if channel is None else str(channel)
@@ -1353,9 +1400,28 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
         raise ValueError(refused)
     if note is not None:
         notes.append(note)
+    # a sample that is not finite spreads over every line of its frame's
+    # spectrum and every reading of a tone's band, and a dead channel
+    # has nothing to judge: each is refused by its cause rather than
+    # read as a floor or tones that fail
+    bad = int(np.sum(~np.isfinite(x)))
+    if bad:
+        raise ValueError(f'{channel} holds {bad} sample'
+                         f'{"" if bad == 1 else "s"} that '
+                         f'{"is" if bad == 1 else "are"} not finite; the '
+                         'data sheet reads a channel whose every sample is')
+    if not np.any(x):
+        raise ValueError(f'{channel} is zero throughout: a dead channel '
+                         'has no floor or tones to judge')
+    found = onset is None
     if onset is None:
         onset = (find_environment([x], 1.0 / rate, tone_list) if tone_list
                  else 0.0)
+    # a steady tone gives the matched filter nothing to place except
+    # somewhere it plays, which is enough to read the tones and the
+    # floor from, but not to say where a swept band is at a moment
+    timed = not (found and tone_list
+                 and all(_steady(tone) for tone in tone_list))
     if settle is None:
         # nothing to settle when there is no tone to track
         settle = settling_seconds(band, tone_list) if tone_list else 0.0
@@ -1417,18 +1483,15 @@ def judge_mixed(history: Any, specification: Any, tones: Any = None, *,
                          'of it')
 
     # 4: each narrowband at its own degrees of freedom
-    bandwidth = noise_bandwidth(used, used.frame_length) \
-        if hasattr(used, 'window') else 1.5
     band_rows = []
     for narrow in spec.narrowbands:
         if narrow.swept:
             band_rows.append(_swept_band(narrow, left, spec, channel, rate,
                                          float(onset), start, floor_db,
-                                         confidence, notes))
+                                         confidence, notes, timed))
         else:
             band_rows.append(_fixed_band(narrow, f, g_res, floor, dof_line,
-                                         bandwidth, floor_db, confidence,
-                                         notes))
+                                         used, floor_db, confidence, notes))
 
     # 5: the total, unjudged; and the tones together
     written_rms = spec.reference_rms(channel)

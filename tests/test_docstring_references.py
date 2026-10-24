@@ -39,6 +39,8 @@ THEORY = {
     'core.fem': 'the beam, plate and solid elements and their eigensolution',
     'core.modal_fit': 'the single-degree-of-freedom residue fit',
     'core.signature': 'the half-power reading of each mode compared',
+    'core.matrix_comparison': 'the coherence and phase of each cross term '
+                              'and their random errors',
     'core.filters': 'filtering, integration and the drift it invents',
     'core.sine_tracking': 'the tracking filter: complex demodulation '
                           'through a Butterworth low-pass',

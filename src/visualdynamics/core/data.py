@@ -257,6 +257,33 @@ def channel_quantities(dim: str) -> tuple[str, str]:
     return numerator, denominator or numerator
 
 
+def autospectrum(data: Any, record: int) -> bool:
+    """Whether one record of a spectrum is an autospectrum: a channel
+    against itself, one DOF and one quantity on both sides.
+
+    A drive point's force against its acceleration names one DOF twice
+    and is still a cross term, so the quantities are read too, from the
+    record's dimension (`channel_quantities`). What is not an
+    autospectrum is judged by its coherence and phase, never by its
+    level: its real part is not the power of either channel.
+
+    Parameters
+    ----------
+    data : DataArray
+        The spectrum.
+    record : int
+        Which record.
+
+    Returns
+    -------
+    bool
+        True for an autospectrum.
+    """
+    response, reference = data.record_pair(record)
+    first, second = channel_quantities(data.known_dim(record))
+    return response == reference and first == second
+
+
 def ordinary_coherence(gpp: ArrayLike, gqq: ArrayLike,
                        gpq: ArrayLike) -> np.ndarray:
     """The ordinary coherence of one pair of channels at every line,
@@ -3509,9 +3536,7 @@ class Psd(_Bands, DataArray):
         from .averaging import chi_square_factors
 
         for i in range(self.num_records):
-            response, reference = self.record_pair(i)
-            first, second = channel_quantities(self.ordinate_dim[i])
-            if response != reference or first != second:
+            if not autospectrum(self, i):
                 raise ValueError('a chi-square band is on an '
                                  'autospectrum; this PSD holds cross '
                                  f'terms ({self.record_label(i)})')
@@ -3793,7 +3818,13 @@ class Psd(_Bands, DataArray):
         limits, which is written the same way."""
         from .compliance import log_log_area
 
-        values = np.real(np.asarray(values, dtype=float))
+        # the real part, taken before the cast: an autospectrum held in
+        # a complex CPSD carries round-off in its imaginary part, which
+        # the cast would discard with a warning on every call. A cross
+        # term's real part is not an area of anything, and the
+        # comparison refuses one before it gets here
+        # (`compliance.CROSS_TERM_REFUSAL`)
+        values = np.asarray(np.real(values), dtype=float)
         if self.interpolation == 'log_log':
             return log_log_area(self.abscissa, values, low, high)
         left, right = self.bin_bounds()
@@ -3833,7 +3864,8 @@ class Psd(_Bands, DataArray):
                   highs: ArrayLike) -> np.ndarray:
         from .compliance import log_log_areas
 
-        values = np.real(np.asarray(values, dtype=float))
+        # the real part before the cast, as `_area_of` takes it
+        values = np.asarray(np.real(values), dtype=float)
         lows = np.atleast_1d(np.asarray(lows, dtype=float))
         highs = np.atleast_1d(np.asarray(highs, dtype=float))
         if self.interpolation == 'log_log':

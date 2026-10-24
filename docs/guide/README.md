@@ -135,6 +135,8 @@ that is not an alpha.
 - [A report plot's caption](report-captions.md): the channel, run,
   resolution, window, DOF and requirement a spectrum's plot carries,
   read off its record
+- [Report features](report-features.md): optional additions to a
+  report, turned on in a panel or by preset, and the plot conventions
 
 For signatures, see the API reference in the site navigation. For the
 layers of the package and the conventions behind them, see

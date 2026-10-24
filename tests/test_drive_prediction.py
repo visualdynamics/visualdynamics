@@ -1002,3 +1002,39 @@ def test_progress_is_told_and_a_raise_in_it_stops_the_prediction():
 
     with pytest.raises(Stop):
         predict_drives(siso_frf(), flat_spec(), progress=stop)
+
+
+# ---- what a mutation run found untested ----------------------------------------
+
+
+def test_tikhonov_keeps_a_direction_whose_square_is_exactly_lambda():
+    """A largest gain of 2 at a weight of a quarter puts lambda at 1: a
+    gain of 1 reaches it exactly and is kept."""
+    plant = np.array([2.0, 1.0], dtype=complex)[:, None, None]
+    _inverse, kept = regularized_inverse(plant, method='tikhonov',
+                                         weight=0.25)
+    assert kept.tolist() == [1, 1]
+
+
+def test_the_last_bin_of_a_specification_on_lines_is_its_own():
+    """The FRF's line at 1000 Hz lies in the last 10 Hz bin, written at
+    twice the level of the rest: the drive there is that level over the
+    plant squared."""
+    f10 = np.arange(20.0, 1001.0, 10.0)
+    level = np.full((1, len(f10)), 0.04 * G ** 2)
+    level[0, -1] *= 2.0
+    spec = Specification(f10, level, response_dof=['1Z+'],
+                         ordinate_dim='acceleration**2/frequency')
+    spec.interpolation = 'bin'
+    prediction = predict_drives(siso_frf(), spec)
+    drive = prediction.drive_asd(0)
+    assert drive[at(prediction, 1000.0)] == pytest.approx(0.02)
+    assert drive[at(prediction, 990.0)] == pytest.approx(0.01)
+
+
+def test_a_line_s_share_of_the_mean_square_is_its_density_times_its_width():
+    """On lines spaced evenly in log frequency a flat drive's widest
+    bin is the last, so the line contributing most is the top one."""
+    f = np.geomspace(20.0, 2000.0, 200)
+    prediction = predict_drives(siso_frf(f=f), flat_spec())
+    assert prediction.demands[0].frequency == pytest.approx(2000.0)

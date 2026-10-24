@@ -376,3 +376,84 @@ def test_a_complex_plot_reads_as_the_component_asked_for(tmp_path):
     with pytest.raises(ValueError, match='one of magnitude, phase'):
         visualdynamics.export_figure(tmp_path / 'x.json', frf,
                                      component='angle')
+
+
+def _workmanship():
+    """The workmanship profile written at its four breakpoints (20 Hz
+    0.01, 80 to 500 Hz 0.04, 2000 Hz 0.01 g²/Hz, stored in SI) with the
+    default bands: a specification on its own, nothing measured."""
+    from visualdynamics.core.author import SpecificationDraft
+
+    levels = [0.01, 0.04, 0.04, 0.01]
+    draft = SpecificationDraft(['1Z+'], ['acceleration'],
+                               [20.0, 80.0, 500.0, 2000.0],
+                               [[g * 9.80665 ** 2 for g in levels]])
+    return draft.make('Workmanship')
+
+
+@pytest.mark.parametrize('max_points', [None, 100])
+def test_a_specification_alone_is_drawn_on_the_grid_its_channels_are(
+        tmp_path, max_points):
+    """A specification with limits and nothing measured beside it drew
+    an empty plot. Its target was filled in as a power law on a grid of
+    its own (the curve's `x`, 800 points), while the channels the page
+    draws from, the target and its zones, stayed on the four
+    breakpoints; the page puts the picked channel's values on the first
+    curve and draws them against that curve's grid, so four values were
+    drawn at the first four of 800 frequencies, 20 to 20.3 Hz, and the
+    zones with them. Every array the page draws for a channel now has
+    the length of the grid it is drawn on, and spans the band."""
+    from visualdynamics.units import SYSTEMS
+
+    data = visualdynamics.export_figure(
+        tmp_path / 'spec.json', _workmanship(), max_points=max_points,
+        unit_system=SYSTEMS['in-slinch-lbf-s (g)'])
+    [block] = json.loads(pathlib.Path(data).read_text())['blocks']
+    target = block['curves'][0]
+    drawn = target['x'] or block['x']
+    [channel] = block['channels']
+    assert len(channel['y']) == len(drawn)
+    assert channel['zones']
+    for zone in channel['zones']:
+        for edge in (zone['lower'], zone['upper']):
+            assert edge is None or len(edge) == len(drawn)
+    written = [f for f, v in zip(drawn, channel['y']) if v is not None]
+    assert min(written) == pytest.approx(20.0)
+    assert max(written) == pytest.approx(2000.0)
+    # the power law, not a straight line between breakpoints: at 1 kHz,
+    # halfway down the falling segment in decades, -3 dB/oct from 0.04
+    k = int(np.argmin([abs(f - 1000.0) for f in drawn]))
+    expected = np.log10(0.04 * (drawn[k] / 500.0) ** (np.log10(0.25) / np.log10(4.0)))
+    assert channel['y'][k] == pytest.approx(expected, abs=2e-3)
+
+
+def test_a_specification_alone_draws_across_its_band(qt_app, tmp_path):
+    """In a browser the figure of a specification on its own is drawn
+    across its band, where it was an empty frame: nearly every column of
+    the plot carries the target, opaque, where the grid and the zones
+    are faint."""
+    pytest.importorskip('PySide6.QtWebEngineWidgets')
+    from PySide6.QtCore import QUrl
+
+    path = visualdynamics.export_html(tmp_path / 'spec.html', _workmanship(),
+                                      theme='light')
+    view = web_view()
+    view.resize(800, 500)
+    view.load(QUrl.fromLocalFile(str(path)))
+    view.show()
+    probe = ("(() => { const c = document.querySelector('section canvas');"
+             "if (!c || !c.height || !c.dataset.view) return null;"
+             "const r = c.width / c.clientWidth;"
+             "const left = Math.ceil(64 * r) + 2, right = c.width - Math.ceil(12 * r) - 2;"
+             "const top = Math.ceil(10 * r) + 2, bottom = c.height - Math.ceil(40 * r) - 2;"
+             "const px = c.getContext('2d').getImageData(left, top, right - left,"
+             "                                          bottom - top);"
+             "const w = right - left, h = bottom - top; let inked = 0;"
+             "for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) {"
+             "  if (px.data[4 * (y * w + x) + 3] > 128) { inked++; break; } } }"
+             "return JSON.stringify(inked / w); })()")
+    try:
+        inked = json.loads(web_read(view, probe))
+    finally:
+        web_close(view)
+    assert inked > 0.9, f'{inked:.0%} of the plot columns carry ink'

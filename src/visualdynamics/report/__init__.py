@@ -1699,8 +1699,26 @@ def _plot_block(block, source, objects, us):
             source, 'bandwidth', None) is not None else None
         built['edges'] = _finite(_decades(bin_edges(x, widths), logx))
     if bounded:
+        # a target filled in as a power law is drawn on a grid of its
+        # own, and the page draws the picked channel's values against
+        # the first curve's grid: so the channels, target and zones, are
+        # filled on one grid, and it becomes the block's. Left on the
+        # breakpoints, a specification on its own drew its four values
+        # at the first four of 800 frequencies, an empty plot
+        # (2026-10-24)
+        grid = None
+        if shape == 'law' and built['curves'][0]['x'] is not None:
+            grid = _law_grid(x, np.real(np.asarray(
+                source.display_ordinate(us, channels))))
         built['channels'] = _specification_channels(source, channels, x,
-                                                    logy, us)
+                                                    logy, us, grid=grid)
+        if grid is not None:
+            keep = _shared_grid(grid)
+            drawn = grid if keep is None else grid[keep]
+            built['x'] = [_compact(v) for v in _decades(drawn, logx)]
+            shown = channels.index(wanted[0]) if wanted[0] in channels else 0
+            built['curves'][0].update(
+                x=None, y=list(built['channels'][shown]['y']))
         built['curves'][0]['ink'] = True
         # and the figure opens on the band the target is written on,
         # as the comparison does: a controller's target sits on every
@@ -2185,7 +2203,30 @@ def _shared_grid(x, cap=MAX_POINTS_PER_CURVE):
     return np.linspace(0, len(x) - 1, cap).astype(int)
 
 
-def _specification_channels(source, records, x, logy, us, measured=None):
+def _law_grid(x, rows):
+    """One grid for every channel of a specification written at
+    breakpoints: `as_power_law`'s fill over the band any channel is
+    written on, with the breakpoints themselves kept, so each channel's
+    target and limits are drawn on one abscissa and a corner is drawn
+    where it is written. None when no two points can be drawn."""
+    from ..plot import POWER_LAW_POINTS
+
+    x = np.asarray(x, dtype=float)
+    rows = np.atleast_2d(np.asarray(rows, dtype=float))
+    good = (np.isfinite(x) & (x > 0.0)
+            & np.any(np.isfinite(rows) & (rows > 0.0), axis=0))
+    if good.sum() < 2:
+        return None
+    said = np.flatnonzero(good)
+    own = x[said[0]:said[-1] + 1]
+    wanted = int(np.log10(own[-1] / own[0]) * POWER_LAW_POINTS)
+    if wanted <= len(own):
+        return own
+    return np.union1d(np.geomspace(own[0], own[-1], wanted), own)
+
+
+def _specification_channels(source, records, x, logy, us, measured=None,
+                            grid=None):
     """Every control channel, with the zones shaded around each.
 
     All of them travel in the payload and one is drawn: the figure is
@@ -2200,13 +2241,20 @@ def _specification_channels(source, records, x, logy, us, measured=None):
 
     `measured` adds the response that answered each channel, matched by
     DOF, which is what turns the figure into the comparison.
+
+    `grid`, frequencies, puts the target and its limits on that grid,
+    interpolated log-log from `x`, for a specification drawn as a power
+    law (`_law_grid`); it is not given with `measured`.
     """
+    from ..core.compliance import log_interpolate
     from ..core.data import Specification
 
-    keep = _shared_grid(x)
+    keep = _shared_grid(x if grid is None else grid)
 
     def mapped(values: ArrayLike) -> np.ndarray:
         y = np.asarray(values, dtype=float)
+        if grid is not None:
+            y = log_interpolate(grid, x, y)
         if keep is not None:
             y = y[keep]
         if not logy:

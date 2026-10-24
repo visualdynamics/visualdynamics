@@ -1843,6 +1843,52 @@ class Project(dict):
             response_channel, reference_channel,
             averaging=self.averaging_of(name))
 
+    def read_partial_coherence(self, name: Any) -> Any:
+        """Which drive explains each response, and whether the drives
+        were independent: the partial, reference and virtual coherence
+        (`core.partial_coherence`).
+
+        `name` is a time history, read against its reference channels
+        with its own averaging, or a multiple coherence computed in this
+        project (Compute Multiple Coherence), read from its history with
+        the averaging it was computed with (`averaging_of`), so the
+        reading's multiple coherence is that object's.
+
+        Parameters
+        ----------
+        name : str or object
+            The time history or the multiple coherence, by name or as
+            the object itself.
+
+        Returns
+        -------
+        PartialCoherence
+            Every response against every reference, at every line.
+
+        Raises
+        ------
+        ValueError
+            If the object is neither, or the history has no reference or
+            no response channels, or no more averages than references.
+        """
+        from .core.data import MultipleCoherence
+
+        name = self.name_of(name)
+        data = self[name]
+        if isinstance(data, TimeHistory):
+            return data.read_partial_coherence()
+        provenance = self.provenance.get(name, {})
+        source = self.get(provenance.get('source'))
+        if (not isinstance(data, MultipleCoherence)
+                or provenance.get('verb') != 'compute_multiple_coherence'
+                or not isinstance(source, TimeHistory)):
+            raise ValueError(
+                f'{name!r} is neither a time history nor a multiple '
+                'coherence computed from one in this project, so there are '
+                'no spectra behind it to condition')
+        return source.read_partial_coherence(
+            averaging=self.averaging_of(name))
+
     def compute_multiple_coherence(self, source: Any) -> str:
         """Compute the multiple coherence from a time history (Compute
         Multiple Coherence): how much of each response the drives

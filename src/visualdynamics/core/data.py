@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from ..units import UnitSystem
     from .averaging import Averaging
     from .half_power import HalfPower
+    from .partial_coherence import PartialCoherence
     from .time_statistics import TimeStatistics
     from .tone_readout import ToneReading
     from .transmissibility import TransmissibilityReading
@@ -2787,29 +2788,85 @@ class TimeHistory(DataArray):
             self._cross_spectral_frame('multiple coherence', references,
                                        averaging)
 
+        from .partial_coherence import multiple_coherence
+
         # (lines, drives, drives), Hermitian and positive semi-definite
         grr = np.stack([np.stack([cross(i, j) for j in drives], axis=-1)
                         for i in drives], axis=-2)
-        inverse = np.linalg.pinv(grr)
-
-        rows = []
-        for i in responses:
-            grx = np.stack([cross(k, i) for k in drives], axis=-1)[..., None]
-            explained = np.real(
-                np.conj(np.swapaxes(grx, -1, -2)) @ inverse @ grx)[..., 0, 0]
-            measured = np.real(cross(i, i))
-            with np.errstate(divide='ignore', invalid='ignore'):
-                value = np.where(measured > 0.0, explained / measured, 0.0)
-            # a ratio of powers cannot exceed one; a few parts in 1e12
-            # over is the arithmetic, and a real overshoot means too few
-            # averages for the number of references, which is a property
-            # of the analysis and not of the article
-            rows.append(np.clip(value, 0.0, 1.0))
+        gry = np.stack([np.stack([cross(k, i) for i in responses], axis=-1)
+                        for k in drives], axis=-2)
+        measured = np.asarray([np.real(cross(i, i)) for i in responses])
+        # one statement of the ratio (`partial_coherence`), limited to 0
+        # to 1: a few parts in 1e12 over is the arithmetic, and a real
+        # overshoot means too few averages for the number of references,
+        # which is a property of the analysis and not of the article. A
+        # response that measured nothing reads zero here, as it always
+        # has; the partial coherence reading says it is undefined
+        value = multiple_coherence(grr, gry, measured)
+        rows = np.where(measured > 0.0, value, 0.0)
         return MultipleCoherence(
             frequencies, np.asarray(rows, dtype=np.float64),
             response_dof=[keys[i][0] for i in responses],
             comment=f'multiple coherence against {len(drives)} references, '
                     f'{averages} averages')
+
+    def read_partial_coherence(
+            self, references: Sequence[str] | None = None,
+            averaging: Averaging | None = None) -> PartialCoherence:
+        """Which reference explains each response, and whether the
+        references were independent: the partial, reference and virtual
+        coherence (`core.partial_coherence`).
+
+        Read from the frames `compute_multiple_coherence` and
+        `compute_frfs` use, against the same references, so the
+        multiple coherence in the reading is that method's, and the
+        partial coherences are of the FRFs computed beside it.
+
+        Parameters
+        ----------
+        references : sequence of str or (str, str), optional
+            The reference channels, as for `compute_multiple_coherence`.
+            When omitted, the channels whose role is 'reference'.
+        averaging : Averaging, optional
+            How to cut the record into frames. Defaults to the record's
+            own `averaging`, or one frame per record.
+
+        Returns
+        -------
+        PartialCoherence
+            Every response against every reference, at every line.
+
+        Raises
+        ------
+        ValueError
+            If there are no reference or no response channels, no more
+            averages than references, or a channel holds a sample that
+            is not a finite number in the frames read.
+        """
+        from .partial_coherence import _labels, read_partial_coherence
+
+        frequencies, keys, drives, responses, cross, averages = \
+            self._cross_spectral_frame('partial coherence', references,
+                                       averaging)
+        order = [*drives, *responses]
+        for i in order:
+            # one sample that is not a number spreads to every line of
+            # its channel, and through the conditioning to every other
+            # channel's partial coherence: refused by name, as the
+            # transmissibility refuses it
+            if not np.isfinite(cross(i, i)).all():
+                role = 'reference' if i in drives else 'response'
+                raise ValueError(
+                    f'the {role} channel {keys[i][0]} holds samples that '
+                    'are not finite numbers in the frames read, so its '
+                    'spectrum is not a number at any line; trim the '
+                    'record or move the frames past them')
+        matrix = np.stack([np.stack([cross(i, j) for j in order], axis=-1)
+                           for i in order], axis=-2)
+        names = _labels([keys[i][:2] for i in order])
+        return read_partial_coherence(
+            frequencies, matrix, names[:len(drives)], names[len(drives):],
+            averages=averages)
 
     def read_transmissibility(self, response: Any,
                               reference: Any = None,

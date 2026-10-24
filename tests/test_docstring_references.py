@@ -65,6 +65,8 @@ THEORY = {
                              'random error of a gain factor',
     'core.sine_distortion': 'the distortion of a sinusoidal vibration and '
                             'the tracked tone it is read against',
+    'core.partial_coherence': 'the conditioned spectra, the partial and '
+                              'the multiple coherence',
 }
 
 #: and methods, where the theory lives on the call rather than the module

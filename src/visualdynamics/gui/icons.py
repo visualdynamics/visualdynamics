@@ -486,6 +486,25 @@ def _draw_realizability(painter, color):
                              (42, 40), (50, 22), (58, 18)]))
 
 
+def _draw_drive_prediction(painter, color):
+    """A drive spectrum with a dip where the plant resonates, rising to
+    a dashed limit line at the right.
+
+    What the button puts on the plot, in miniature: the drive is the
+    target over the plant, so it dips at the resonance and climbs
+    where the plant falls away, and the first place it meets its limit
+    is the reading's answer.
+    """
+    limit = _pen(color, 3)
+    limit.setStyle(Qt.PenStyle.DashLine)
+    painter.setPen(limit)
+    painter.drawLine(QPointF(6, 12), QPointF(58, 12))
+    painter.setPen(_pen(color, 4))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(_curve([(6, 40), (16, 38), (24, 40), (28, 54),
+                             (32, 40), (42, 30), (52, 20), (58, 14)]))
+
+
 def _draw_tone(painter, color):
     """A spike standing on a flat floor, a triangle on its top.
 
@@ -2489,6 +2508,7 @@ def control_icon(name: str) -> QIcon:
      'amplitude': _draw_amplitude, 'rms_check': _draw_rms_check,
      'conditioning': _draw_conditioning,
      'realizability': _draw_realizability,
+     'drive_prediction': _draw_drive_prediction,
      'log_axis': _draw_log_axis,
      'wavelet': _draw_wavelet, 'sine_levels': _draw_sine_levels,
      'sweep_rate': _draw_sweep_rate,

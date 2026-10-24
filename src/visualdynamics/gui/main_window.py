@@ -1390,6 +1390,11 @@ class MainWindow(QMainWindow):
         #: a limit moved does not move them, and finding them again was
         #: a tenth of a second on every tick of a limit's box
         self._held_modes: tuple | None = None
+        #: and the drive prediction last made, as (FRF, its ordinate,
+        #: specification, its ordinate, the arguments, the prediction):
+        #: made on the worker, and drawn again from here when nothing it
+        #: was made of has changed. Let go when the reading is not up
+        self._held_prediction: tuple | None = None
         #: why the sheet just asked for could not be opened, said once
         #: on the status line of the render that stood it down
         self._author_refusal: str | None = None
@@ -13489,9 +13494,13 @@ class MainWindow(QMainWindow):
         against its target or limit (the response of the first record
         picked in the FRF, or the first control channel), and every
         quantity against its rating. A prediction refused says why, in
-        the panel and the status line, and draws nothing.
+        the panel and the status line, and draws nothing. The
+        prediction is made on the worker with the strip's bar and Cancel
+        (`_run_long`), and held until the objects or the settings
+        change.
         """
         from ..core.drive_prediction import predict_drives
+        from ..core.progress import Cancelled
         from ..plot.drive_prediction import build_drive_prediction, summary
         from .drive_prediction_panel import prediction_arguments
 
@@ -13504,8 +13513,26 @@ class MainWindow(QMainWindow):
         self.data_pane.graphics.clear()
         settings = panel.settings()
         arguments = prediction_arguments(settings)
+        held = self._held_prediction
         try:
-            prediction = predict_drives(frf, spec, **arguments)
+            if (held is not None and held[0] is frf
+                    and held[1] is frf.ordinate and held[2] is spec
+                    and held[3] is spec.ordinate and held[4] == arguments):
+                prediction = held[5]
+            else:
+                self._held_prediction = None
+                # an eight-by-four plant on 4096 lines is over a tenth of
+                # a second of inverses, and ratings add their peaks
+                prediction = self._run_long(
+                    f'Predicting the drives for {spec_name}…',
+                    lambda progress=None: predict_drives(
+                        frf, spec, progress=progress, **arguments))
+                self._held_prediction = (frf, frf.ordinate, spec,
+                                         spec.ordinate, arguments,
+                                         prediction)
+        except Cancelled:
+            panel.show_prediction(None, 'Not predicted: cancelled.')
+            return 'No drive prediction: cancelled'
         except ValueError as refusal:
             panel.show_prediction(None, f'Not predicted: {refusal}.')
             return f'No drive prediction: {refusal}'
@@ -14109,6 +14136,7 @@ class MainWindow(QMainWindow):
                      and self._prediction_source(series))
         if predicted:
             return self._render_prediction(*predicted)
+        self._held_prediction = None
         if history is not None and self.data_pane.showing('kurtosis'):
             return self._render_kurtosis(history, series)
         if history is not None:

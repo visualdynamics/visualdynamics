@@ -89,7 +89,7 @@ def test_the_toggle_draws_three_rows_and_the_verdict(window, pump):
 
 
 def test_a_limit_typed_in_the_panel_is_read_against_at_once(window, pump):
-    """10 V against a drive of 4.46 V rms: about 21 V expected over a
+    """10 V against a drive of 4.46 V rms: about 22 V expected over a
     minute, over its limit, said in the verdict and kept on the pane in
     SI. A moving mass typed in the window's units is kept in SI too."""
     pane = _predicted(window, pump)
@@ -165,3 +165,51 @@ def test_the_settings_survive_clicking_away_and_back(window, pump):
     assert pane.prediction_action.isChecked()
     assert pane.prediction_panel.editors['drive_limit'].value() == \
         pytest.approx(7.5)
+
+
+def test_the_prediction_is_made_off_the_window_thread_and_held(window, pump,
+                                                               monkeypatch):
+    """Inverting a large plant is over a tenth of a second: the
+    prediction is made on the worker, drawn again from the one held
+    while nothing it was made of changes, and made again when a setting
+    or an object does."""
+    import threading
+
+    from visualdynamics.core import drive_prediction as module
+
+    threads = []
+    real = module.predict_drives
+
+    def recorded(*args, **kwargs):
+        threads.append(threading.current_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, 'predict_drives', recorded)
+    pane = _predicted(window, pump)
+    assert len(threads) == 1
+    assert threads[0] is not threading.main_thread()
+    window.render_current()
+    pump()
+    assert len(threads) == 1, 'the prediction held is drawn again'
+    pane.prediction_panel.editors['drive_limit'].setValue(10.0)
+    pump()
+    assert len(threads) == 2, 'a setting changed makes it again'
+    assert 'against 10 V' in pane.prediction_panel.readout.text()
+    window.project['Plant'].ordinate = _frf(gain=4.0).ordinate
+    window.render_current()
+    pump()
+    assert len(threads) == 3, 'the FRF changed makes it again'
+    assert all(thread is not threading.main_thread() for thread in threads)
+
+
+def test_a_cancelled_prediction_says_so(window, pump, monkeypatch):
+    from visualdynamics.core import drive_prediction as module
+    from visualdynamics.core.progress import Cancelled
+
+    def cancelled(*args, **kwargs):
+        raise Cancelled('Predicting the drives')
+
+    monkeypatch.setattr(module, 'predict_drives', cancelled)
+    pane = _predicted(window, pump)
+    assert pane.prediction_panel.verdict.text() == 'Not predicted: cancelled.'
+    assert _plots(pane) == []

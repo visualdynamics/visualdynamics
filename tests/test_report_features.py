@@ -543,6 +543,34 @@ def test_a_grid_and_its_mode_marks_go_into_decades():
     assert payload['end_labels'] == 8
 
 
+def test_dead_nan_and_empty_inputs_under_the_conventions():
+    """An all-zero channel has nothing to draw on a log axis, so its
+    figure goes to log frequency and takes no part in the shared
+    window; a channel with one NaN line still opens on the shared
+    decades; an empty report and an empty request change nothing."""
+    frequencies = np.linspace(10.0, 2000.0, 200)
+    nan = np.full((1, 200), 0.01)
+    nan[0, 50] = np.nan
+    objects = {
+        'Dead': Psd(abscissa=frequencies, ordinate=np.zeros((1, 200)),
+                    response_dof=['1X+'],
+                    ordinate_dim=['acceleration**2/frequency']),
+        'Gap': Psd(abscissa=frequencies, ordinate=nan, response_dof=['1Y+'],
+                   ordinate_dim=['acceleration**2/frequency'])}
+    report = Report('R', [{'kind': 'plot', 'source': 'Dead'},
+                          {'kind': 'plot', 'source': 'Gap'}],
+                    features=list(LIVE))
+    dead, gap = _payload(render_html(report, objects,
+                                     unit_system=visualdynamics.SI))['blocks']
+    assert dead['logx'] is True and gap['logx'] is True
+    assert all(v is None for v in dead['curves'][0]['y'])
+    assert gap['home'] == {'x0': 1.0, 'x1': 4.0, 'y0': -2.0, 'y1': -1.0}
+    assert dead['home'] == gap['home'], 'it opens where its kind opens'
+    empty = Report('R', features=list(LIVE))
+    assert _payload(render_html(empty, {}))['blocks'] == []
+    assert rf.configure(empty, enable=[]) == rf.FeatureSelection(LIVE, ())
+
+
 def test_the_random_report_shares_its_decades(run):
     project, name = run
     try:

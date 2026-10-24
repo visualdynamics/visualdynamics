@@ -4,7 +4,7 @@ Shown in the report editor's pane when no block is selected, under the
 report's title and marking. A preset drop-down sets a starting point; a
 check box per feature, grouped as the registry groups them
 (`report.features.GROUPS`), turns one feature on or off. A feature that
-cannot be enabled is greyed out with the reason beneath it: not yet
+cannot be enabled is grayed out with the reason beneath it: not yet
 available, or the feature or capability it needs. The description of
 each feature is its tooltip.
 
@@ -88,7 +88,7 @@ class ReportFeaturesPanel(QWidget):
                 layout.addWidget(box)
                 why = QLabel()
                 why.setWordWrap(True)
-                why.setEnabled(False)            # greyed, as the box is
+                why.setEnabled(False)            # grayed, as the box is
                 why.setContentsMargins(22, 0, 0, 0)
                 layout.addWidget(why)
                 self.boxes[feature.key] = box
@@ -103,7 +103,7 @@ class ReportFeaturesPanel(QWidget):
     def show_state(self, features: Sequence[str],
                    notes: Sequence[str] = ()) -> None:
         """Show `features` as the report's enabled features, with each
-        box greyed or live by what it needs, and `notes` beneath."""
+        box grayed or live by what it needs, and `notes` beneath."""
         self._loading = True
         try:
             on = [key for key in features if key in FEATURES]

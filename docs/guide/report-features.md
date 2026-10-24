@@ -16,7 +16,7 @@ With no block selected, the report editor's pane holds the report's
 title and marking and, under them, the **Report Features** panel. Each
 feature has a check box, grouped by what it adds to the report:
 Structure, Results, Records, Issue control and Figures. Its tooltip
-says what it does. A feature that cannot be turned on is greyed out,
+says what it does. A feature that cannot be turned on is grayed out,
 with the reason beneath it: *not yet available*, or the feature it
 needs (Shared decades needs Plot conventions). Turning a feature off
 also turns off any feature that needs it, and the panel says so.
@@ -80,7 +80,7 @@ acceleration ASD and a force ASD, are scaled apart.
 ## What is planned
 
 The other features are registered so the panel shows what is coming,
-and are greyed out until each is built:
+and are grayed out until each is built:
 
 | Feature | Group | What it will add |
 |---|---|---|
